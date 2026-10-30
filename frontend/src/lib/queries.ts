@@ -52,8 +52,15 @@ export function usePatchSettings() {
   });
 }
 
+const ACCOUNTS_REFRESH_MS = 10_000;
+
+/** Refetched every 10 seconds while mounted, so windows that reset and usage from runs show without a reload. */
 export function useAgentAccounts() {
-  return useQuery({ queryKey: queryKeys.accounts, queryFn: () => apiGet('/agent-accounts', accountListSchema) });
+  return useQuery({
+    queryKey: queryKeys.accounts,
+    queryFn: () => apiGet('/agent-accounts', accountListSchema),
+    refetchInterval: ACCOUNTS_REFRESH_MS,
+  });
 }
 
 const accountResponse = z.object({ data: claudeAccountSchema });
@@ -62,8 +69,7 @@ const accountResponse = z.object({ data: claudeAccountSchema });
 export function useAddAccount() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (label: string) =>
-      apiSend('POST', '/agent-accounts', { label }, z.object({ data: addedAccountSchema })),
+    mutationFn: () => apiSend('POST', '/agent-accounts', undefined, z.object({ data: addedAccountSchema })),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.accounts }),
   });
 }
@@ -71,6 +77,40 @@ export function useAddAccount() {
 export function useCheckAccount() {
   return useMutation({
     mutationFn: (id: string) => apiSend('POST', `/agent-accounts/${id}/checks`, undefined, accountResponse),
+  });
+}
+
+/** Opens Anthropic's sign-in in the browser; `account.updated` arrives over `/ws` when the account is checked. */
+export function useStartLogin() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiSend('POST', `/agent-accounts/${id}/logins`, undefined, accountResponse),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.accounts }),
+  });
+}
+
+export function useCancelLogin() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiSend('DELETE', `/agent-accounts/${id}/logins`, undefined, z.undefined()),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.accounts }),
+  });
+}
+
+/** Signs the account out; the response is the account after the check, and `account.updated` follows over `/ws`. */
+export function useLogout() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiSend('POST', `/agent-accounts/${id}/logout`, undefined, accountResponse),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.accounts }),
+  });
+}
+
+export function useRemoveAccount() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiSend('DELETE', `/agent-accounts/${id}`, undefined, z.undefined()),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.accounts }),
   });
 }
 

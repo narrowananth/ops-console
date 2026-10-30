@@ -190,6 +190,7 @@ export const claudeAccountSchema = z.object({
   label: z.string(),
   position: z.number().int(),
   signed_in: z.boolean(),
+  signing_in: z.boolean(),
   email: z.string().nullable(),
   plan: z.string().nullable(),
   five_hour_pct: z.number().nullable(),
@@ -213,12 +214,10 @@ export const accountListSchema = z.object({
   data: z.array(claudeAccountSchema),
   meta: z.object({
     next_cursor: z.null(),
-    active_account_id: z.string(),
+    active_account_id: z.string().nullable(),
     smart_pick: smartPickSchema.nullable(),
   }),
 });
-
-export const addAccountSchema = z.object({ label: z.string().trim().min(1).max(60) });
 
 export const addedAccountSchema = z.object({ account: claudeAccountSchema, sign_in_command: z.string() });
 
@@ -239,7 +238,7 @@ export const SESSION_DEFAULTS: SessionDefaults = {
 
 /** `PATCH /settings` key `agent_accounts`. */
 export const agentAccountsSettingSchema = z.object({
-  active_account_id: z.string().min(1),
+  active_account_id: z.string().min(1).nullable(),
   auto_switch: z.boolean(),
   threshold: z.number().min(50).max(100),
   smart_usage: z.boolean(),

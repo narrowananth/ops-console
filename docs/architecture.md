@@ -93,17 +93,17 @@ Claude account.
 
 A Session's run is a Claude Agent SDK `query()` in the working directory its kind supplies,
 resuming the stored SDK session. Each Claude account has its own `CLAUDE_CONFIG_DIR` under the data
-folder; the seeded one uses the operator's own Claude Code setup. A `PreToolUse` hook writes the
+folder; the console never uses the operator's own Claude Code login. A `PreToolUse` hook writes the
 Action Log row before every Bash and MCP call and holds a PROD write for an Approval in every
 access mode. A `disallowedTools` rule denies merging. Permission prompts in `supervised` mode, and
 the agent's questions, reach `canUseTool` and wait for the operator. Runs live in the daemon's
 memory; a restart fails them and expires their Approvals.
 
-Auto-switch and Smart usage move work to another signed-in Claude account, as the design shows.
+Smart usage moves work to the best-ranked signed-in Claude account on its own, and Auto-switch does it at a usage threshold when Smart usage is off, as the design shows.
 Anthropic's terms may read this as getting around usage limits; the operator accepted that risk
-(`docs/specs/02-settings-agents.md`, Safety), and both toggles can be turned off. The console never
+(`docs/specs/02-settings-agents.md`, Safety), and both toggles can be turned off. An account's name is its email, each is added once, and usage is also read for idle accounts every 5 minutes. The console never
 reads a Claude token: sign-in runs in Anthropic's own flow, and usage comes from the SDK's
-rate-limit events.
+rate-limit events and its usage request.
 
 ## Design departures
 

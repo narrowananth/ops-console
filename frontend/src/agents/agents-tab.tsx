@@ -14,8 +14,11 @@ import {
   useAddAccount,
   useAgentAccounts,
   useAgentSettings,
-  useCheckAccount,
+  useCancelLogin,
+  useLogout,
   usePatchSettings,
+  useRemoveAccount,
+  useStartLogin,
 } from '../lib/queries';
 import { ACCESS_MODES, EFFORTS, MODELS } from './options';
 
@@ -46,45 +49,58 @@ function UsageBar({
   accentAt,
 }: {
   label: string;
-  pct: number;
+  pct: number | null;
   resetsAt: string | null;
   accentAt: number;
 }) {
-  const hot = pct >= accentAt;
+  const hot = pct !== null && pct >= accentAt;
   return (
     <div className="grid grid-cols-[48px_minmax(0,1fr)_160px] items-center gap-2.5">
       <span className="text-[11px] text-neutral-700">{label}</span>
       <span className="block h-1.5 bg-neutral-300" aria-hidden>
-        <span className={`block h-1.5 ${hot ? 'bg-accent' : 'bg-text'}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+        <span
+          className={`block h-1.5 ${hot ? 'bg-accent' : 'bg-text'}`}
+          style={{ width: `${Math.min(pct ?? 0, 100)}%` }}
+        />
       </span>
       <span className={`font-mono text-[11px] ${hot ? 'text-accent-700' : 'text-neutral-800'}`}>
-        {Math.round(pct)}% · {resetsIn(resetsAt)}
+        {pct === null ? 'no usage yet' : `${Math.round(pct)}% · ${resetsIn(resetsAt)}`}
       </span>
     </div>
   );
 }
 
-function AccountRow({ account, isPick, onUse }: { account: ClaudeAccount; isPick: boolean; onUse: () => void }) {
-  const check = useCheckAccount();
-  const known = account.five_hour_pct !== null || account.weekly_pct !== null;
+function AccountRow({
+  account,
+  number,
+  isPick,
+  onUse,
+}: {
+  account: ClaudeAccount;
+  number: number;
+  isPick: boolean;
+  onUse: () => void;
+}) {
+  const login = useStartLogin();
+  const cancel = useCancelLogin();
+  const logout = useLogout();
+  const remove = useRemoveAccount();
+  const error = login.error ?? cancel.error ?? logout.error ?? remove.error;
+  const startLogin = () => login.mutate(account.id);
+  const current = account.is_active && account.signed_in;
   return (
     <li
       aria-label={account.label}
       className={`grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2.5 border-t border-divider px-5 py-3 ${
-        account.is_active ? 'bg-neutral-200' : ''
+        current ? 'bg-neutral-200' : ''
       }`}
     >
-      <span className="font-mono text-[11px] text-neutral-700">{String(account.position).padStart(2, '0')}</span>
+      <span className="font-mono text-[11px] text-neutral-700">{String(number).padStart(2, '0')}</span>
       <div className="flex min-w-0 flex-col gap-1.25">
         <div className="flex flex-wrap items-center gap-2">
           <strong className="font-mono text-[13px]">{account.label}</strong>
-          {account.email && (
-            <span className="text-xs text-neutral-700">
-              {account.email}
-              {account.plan ? ` · ${account.plan}` : ''}
-            </span>
-          )}
-          {account.is_active && <span className="bg-text px-1.5 py-px text-[10px] font-extrabold text-bg">ACTIVE</span>}
+          {account.plan && <span className="text-xs text-neutral-700">{account.plan}</span>}
+          {current && <span className="bg-text px-1.5 py-px text-[10px] font-extrabold text-bg">ACTIVE</span>}
           {isPick && (
             <span className="border-[1.5px] border-accent px-1.5 py-px text-[10px] font-extrabold text-accent-700">
               SMART PICK
@@ -92,124 +108,107 @@ function AccountRow({ account, isPick, onUse }: { account: ClaudeAccount; isPick
           )}
         </div>
         {!account.signed_in ? (
-          <div className="text-xs text-neutral-700">Not signed in.</div>
-        ) : known ? (
-          <>
-            <UsageBar
-              label="5-hour"
-              pct={account.five_hour_pct ?? 0}
-              resetsAt={account.five_hour_resets_at}
-              accentAt={90}
-            />
-            <UsageBar label="Weekly" pct={account.weekly_pct ?? 0} resetsAt={account.weekly_resets_at} accentAt={80} />
-          </>
+          <div className="text-xs text-neutral-700">
+            {account.signing_in ? 'Finish signing in with Anthropic in your browser.' : 'Not signed in.'}
+          </div>
         ) : (
-          <div className="text-xs text-neutral-700">no usage yet</div>
+          <>
+            <UsageBar label="5-hour" pct={account.five_hour_pct} resetsAt={account.five_hour_resets_at} accentAt={90} />
+            <UsageBar label="Weekly" pct={account.weekly_pct} resetsAt={account.weekly_resets_at} accentAt={80} />
+          </>
         )}
-        {check.isError && (
+        {error && (
           <div role="alert" className="text-xs text-accent-700">
-            {check.error.message}
+            {error.message}
           </div>
         )}
-        <div className="text-[11px] text-neutral-700">
-          {[account.smart_note, account.usage_seen_at && `usage seen ${ago(account.usage_seen_at)}`]
-            .filter(Boolean)
-            .join(' · ')}
-        </div>
+        {account.signed_in && (
+          <div className="text-[11px] text-neutral-700">
+            {[account.smart_note, account.usage_seen_at && `usage seen ${ago(account.usage_seen_at)}`]
+              .filter(Boolean)
+              .join(' · ')}
+          </div>
+        )}
       </div>
-      {!account.signed_in ? (
-        <Button
-          className="px-2.5 py-1 text-xs"
-          disabled={check.isPending}
-          title="Run the sign-in command first; this checks the sign-in."
-          onClick={() => check.mutate(account.id)}
-        >
-          Sign in
-        </Button>
-      ) : account.is_active ? (
-        <span className="w-17.5" />
-      ) : (
-        <Button className="px-2.5 py-1 text-xs" onClick={onUse}>
-          Use
-        </Button>
-      )}
+      <div className="flex items-center gap-1.5">
+        {account.signing_in ? (
+          <>
+            <Button className="px-2.5 py-1 text-xs" disabled={login.isPending} onClick={startLogin}>
+              Re-login
+            </Button>
+            <Button
+              className="px-2.5 py-1 text-xs"
+              disabled={cancel.isPending}
+              onClick={() => cancel.mutate(account.id)}
+            >
+              Cancel
+            </Button>
+          </>
+        ) : !account.signed_in ? (
+          <Button variant="primary" className="px-2.5 py-1 text-xs" disabled={login.isPending} onClick={startLogin}>
+            Sign in
+          </Button>
+        ) : (
+          <>
+            {!current && (
+              <Button className="px-2.5 py-1 text-xs" onClick={onUse}>
+                Use
+              </Button>
+            )}
+            <Button className="px-2.5 py-1 text-xs" disabled={login.isPending} onClick={startLogin}>
+              Re-login
+            </Button>
+            <Button
+              className="px-2.5 py-1 text-xs"
+              disabled={logout.isPending}
+              onClick={() => logout.mutate(account.id)}
+            >
+              Log out
+            </Button>
+          </>
+        )}
+        {!account.signing_in && (
+          <Button
+            icon
+            className="size-7 text-neutral-700 hover:text-accent-700"
+            aria-label={`Remove ${account.label}`}
+            title="Remove account"
+            disabled={remove.isPending}
+            onClick={() => remove.mutate(account.id)}
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden
+            >
+              <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v6M14 10v6" />
+            </svg>
+          </Button>
+        )}
+      </div>
     </li>
   );
 }
 
-function AddAccount() {
+/** Adds an account and starts its sign-in; the account is labelled with its email once it signs in. */
+function AddAccount({ primary = false }: { primary?: boolean }) {
   const add = useAddAccount();
-  const check = useCheckAccount();
-  const [label, setLabel] = useState('');
-  const [open, setOpen] = useState(false);
-  const added = add.data?.data;
-
-  if (!open) {
-    return (
-      <Button variant="ghost" onClick={() => setOpen(true)}>
+  const login = useStartLogin();
+  return (
+    <div className="flex items-center gap-2">
+      <Button
+        variant={primary ? 'primary' : 'ghost'}
+        disabled={add.isPending}
+        onClick={() => add.mutate(undefined, { onSuccess: ({ data }) => login.mutate(data.account.id) })}
+      >
         + Add Claude account
       </Button>
-    );
-  }
-  if (added) {
-    return (
-      <div className="flex flex-col gap-2 text-xs">
-        <span>Run this in a terminal and sign in with Anthropic, then check:</span>
-        <div className="flex items-center gap-2">
-          <code className="flex-1 border border-divider bg-surface px-2 py-1.5 font-mono">{added.sign_in_command}</code>
-          <Button
-            className="px-2.5 py-1 text-xs"
-            onClick={() => void navigator.clipboard.writeText(added.sign_in_command)}
-          >
-            Copy
-          </Button>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="primary"
-            className="px-2.5 py-1 text-xs"
-            disabled={check.isPending}
-            onClick={() => check.mutate(added.account.id)}
-          >
-            Check sign-in
-          </Button>
-          <Button
-            className="px-2.5 py-1 text-xs"
-            onClick={() => {
-              add.reset();
-              setLabel('');
-              setOpen(false);
-            }}
-          >
-            Done
-          </Button>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <form
-      className="flex items-center gap-2"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (label.trim()) add.mutate(label.trim());
-      }}
-    >
-      <input
-        aria-label="Account label"
-        placeholder="Label, for example personal"
-        value={label}
-        onChange={(event) => setLabel(event.target.value)}
-        className="flex-1 border-[1.5px] border-text bg-bg px-2.5 py-1.5 text-[13px] text-text"
-      />
-      <Button variant="primary" type="submit" className="px-2.5 py-1.5 text-xs" disabled={add.isPending}>
-        Add
-      </Button>
-      <Button className="px-2.5 py-1.5 text-xs" onClick={() => setOpen(false)}>
-        Cancel
-      </Button>
       {add.isError && <span className="text-xs text-accent-700">Could not add the account.</span>}
-    </form>
+    </div>
   );
 }
 
@@ -320,61 +319,87 @@ export function AgentsTab() {
   const defaults = settings.data.data.session_defaults;
   const pick = list.length > 1 ? meta.smart_pick : null;
   const pickLabel = list.find((account) => account.id === pick?.account_id)?.label;
+  // Nothing below the account list means anything until one Claude account is signed in.
+  const ready = list.some((account) => account.signed_in);
+
+  if (list.length === 0) {
+    return (
+      <div className="flex flex-col items-start gap-3 px-5 py-8 text-sm">
+        <div className="font-extrabold">No Claude account yet</div>
+        <div className="text-xs text-neutral-700">
+          Add a Claude account to run agents. Signing in opens Anthropic in your browser. The usage and session settings
+          appear once an account is signed in.
+        </div>
+        <AddAccount primary />
+      </div>
+    );
+  }
 
   return (
     <div className="text-sm">
-      <div className="flex flex-col gap-3 border-b border-divider px-5 py-4">
-        <Switches
-          key={setting.threshold}
-          setting={setting}
-          onChange={(next) => patch.mutate({ agent_accounts: next })}
-        />
-        {(patch.isError || activate.isError) && (
-          <div role="alert" className="text-xs text-accent-700">
-            {(patch.error ?? activate.error)?.message}
+      {!ready && (
+        <div className="border-b border-divider bg-accent-100 px-5 py-4 text-accent-900">
+          <div className="font-extrabold">Sign in to a Claude account</div>
+          <div className="text-xs">
+            The agent runs under a Claude account. Sign in below; the settings appear once one account is signed in.
           </div>
-        )}
-        {pick && (
-          <div className="flex items-center gap-3 bg-accent-100 px-3 py-2.5 text-xs text-accent-900">
-            <span className="flex-1">
-              <strong className="font-mono">{pickLabel}</strong> is the smart pick: {pick.reason}.
-            </span>
-            <Button variant="primary" className="px-2.5 py-1 text-xs" onClick={() => activate.mutate(pick.account_id)}>
-              Use
-            </Button>
-          </div>
-        )}
-      </div>
-
-      <div className="px-5 pt-4 pb-1 font-extrabold">Defaults for new sessions</div>
-      <div className="px-5 pb-2 text-xs text-neutral-700">
-        Every new Workspace session starts with these. You can still change them per session from the composer.
-      </div>
-      {DEFAULTS.map((row) => (
-        <div key={row.key} className="flex items-center gap-3 border-t border-neutral-300 px-5 py-2.5">
-          <div className="min-w-0 flex-1">
-            <div className="font-bold">{row.label}</div>
-            <div className="text-xs text-neutral-700">{row.description}</div>
-          </div>
-          <Dropdown
-            label={row.label}
-            value={defaults[row.key]}
-            options={row.options as { value: string; label: string; description: string }[]}
-            onChange={(value) =>
-              patch.mutate({ session_defaults: { ...defaults, [row.key]: value } as SessionDefaults })
-            }
-            className="w-48"
-          />
         </div>
-      ))}
+      )}
+      {ready && (
+        <>
+          <div className="flex flex-col gap-3 border-b border-divider px-5 py-4">
+            <Switches
+              key={setting.threshold}
+              setting={setting}
+              onChange={(next) => patch.mutate({ agent_accounts: next })}
+            />
+            {(patch.isError || activate.isError) && (
+              <div role="alert" className="text-xs text-accent-700">
+                {(patch.error ?? activate.error)?.message}
+              </div>
+            )}
+            {pick && (
+              <div className="bg-accent-100 px-3 py-2.5 text-xs text-accent-900">
+                <strong className="font-mono">{pickLabel}</strong> is the smart pick: {pick.reason}. It is used
+                automatically; turn Smart usage off to stop that.
+              </div>
+            )}
+          </div>
 
-      <div className="mt-2 border-t-2 border-divider px-5 pt-4 pb-1.5 text-[11px] tracking-[0.08em] text-neutral-700 uppercase">
+          <div className="px-5 pt-4 pb-1 font-extrabold">Defaults for new sessions</div>
+          <div className="px-5 pb-2 text-xs text-neutral-700">
+            Every new Workspace session starts with these. You can still change them per session from the composer.
+          </div>
+          {DEFAULTS.map((row) => (
+            <div key={row.key} className="flex items-center gap-3 border-t border-neutral-300 px-5 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="font-bold">{row.label}</div>
+                <div className="text-xs text-neutral-700">{row.description}</div>
+              </div>
+              <Dropdown
+                label={row.label}
+                value={defaults[row.key]}
+                options={row.options as { value: string; label: string; description: string }[]}
+                onChange={(value) =>
+                  patch.mutate({ session_defaults: { ...defaults, [row.key]: value } as SessionDefaults })
+                }
+                className="w-48"
+              />
+            </div>
+          ))}
+        </>
+      )}
+
+      <div
+        className={`${ready ? 'mt-2 border-t-2' : ''} border-divider px-5 pt-4 pb-1.5 text-[11px] tracking-[0.08em] text-neutral-700 uppercase`}
+      >
         Claude Code accounts
       </div>
       <ul aria-label="Claude Code accounts" className="m-0 list-none p-0">
-        {list.map((account) => (
+        {list.map((account, index) => (
           <AccountRow
             key={account.id}
+            number={index + 1}
             account={account}
             isPick={account.id === pick?.account_id}
             onUse={() => activate.mutate(account.id)}
@@ -383,17 +408,6 @@ export function AgentsTab() {
       </ul>
       <div className="border-t border-divider px-5 py-3">
         <AddAccount />
-      </div>
-
-      <div className="border-t-2 border-divider px-5 pt-3 pb-1.5 text-[11px] tracking-[0.08em] text-neutral-700 uppercase">
-        Other agents
-      </div>
-      <div className="flex items-center gap-3 border-t border-divider px-5 py-3 opacity-60">
-        <div className="flex-1">
-          <strong>OpenAI · Codex CLI</strong>
-          <div className="text-xs text-neutral-700">Same MCP servers and dev tools, separate usage pool.</div>
-        </div>
-        <span className="border border-divider px-2 py-0.5 text-[11px] font-semibold">Coming later</span>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { AccountsController } from '../accounts/accounts.controller';
 import { AccountsService } from '../accounts/accounts.service';
+import { USAGE_SOURCE } from '../accounts/usage-source';
 import { ActionLogController, ApprovalsController } from '../action-log/action-log.controller';
 import { ActionLogService } from '../action-log/action-log.service';
 import { ApprovalsService } from '../action-log/approvals.service';
@@ -26,6 +27,7 @@ export class AgentModule {
       controllers: [SessionsController, ActionLogController, ApprovalsController, AccountsController],
       providers: [
         { provide: AGENT_CONFIG, useValue: config },
+        { provide: USAGE_SOURCE, useValue: config.usage },
         RunRegistry,
         SessionKinds,
         ProdWriteRule,

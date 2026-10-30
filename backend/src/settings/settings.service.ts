@@ -43,6 +43,7 @@ export class SettingsService {
       for (const { key, value } of values) writeSetting(tx, key, value);
       emit('settings.updated', { keys: values.map((value) => value.key) });
     });
+    for (const { key } of values) this.registry.get(key)?.onChange?.();
     return this.read();
   }
 

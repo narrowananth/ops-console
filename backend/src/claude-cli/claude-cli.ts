@@ -45,6 +45,22 @@ export type AuthStatus = { signedIn: boolean; email: string | null; plan: string
 /** `null` runs `claude` with the operator's own Claude Code setup; a path sets `CLAUDE_CONFIG_DIR`. */
 export type ConfigDir = string | null;
 
+export const LOGIN_TIMEOUT_MS = 5 * 60_000;
+
+/** Credentials the shell can hand `claude`; each beats the config dir's own sign-in. */
+const ENV_CREDENTIALS = ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+
+/**
+ * The environment for `claude` under a config dir. An added account signs in through its own dir, so shell
+ * credentials are dropped: left in, every account reads as signed in and runs bill the shell's login.
+ */
+export function claudeEnv(configDir: ConfigDir): NodeJS.ProcessEnv {
+  if (configDir === null) return process.env;
+  const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CONFIG_DIR: configDir };
+  for (const name of ENV_CREDENTIALS) delete env[name];
+  return env;
+}
+
 /** `claude mcp get` joins args with spaces, so an arg holding a space comes back split. */
 export class ClaudeCli {
   constructor(private readonly bin = 'claude') {}
@@ -115,6 +131,17 @@ export class ClaudeCli {
     return { signedIn: status.loggedIn, email: status.email ?? null, plan: status.subscriptionType ?? null };
   }
 
+  /** Opens the browser and ends when the operator finishes Anthropic's sign-in, or on `signal` or the timeout. */
+  async authLogin(configDir: ConfigDir, signal: AbortSignal): Promise<void> {
+    const login = run(this.bin, ['auth', 'login', '--claudeai'], {
+      env: claudeEnv(configDir),
+      signal,
+      timeout: LOGIN_TIMEOUT_MS,
+    });
+    login.child.stdin?.end();
+    await login;
+  }
+
   async authLogout(configDir: ConfigDir): Promise<void> {
     await this.exec(['auth', 'logout'], 'auth logout', configDir);
   }
@@ -127,8 +154,7 @@ export class ClaudeCli {
     exitCodes = [0],
   ): Promise<string> {
     try {
-      const env = configDir === null ? process.env : { ...process.env, CLAUDE_CONFIG_DIR: configDir };
-      const { stdout } = await run(this.bin, args, { maxBuffer: 10 * 1024 * 1024, env });
+      const { stdout } = await run(this.bin, args, { maxBuffer: 10 * 1024 * 1024, env: claudeEnv(configDir) });
       return stdout;
     } catch (error) {
       const { code, stdout } = error as { code?: unknown; stdout?: unknown };

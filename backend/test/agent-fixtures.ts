@@ -9,6 +9,7 @@ import { ProdWriteRule } from '../src/agent/prod-write-rule';
 import { SessionKinds } from '../src/agent/session-kinds';
 import { type NewSession, SessionsService } from '../src/agent/sessions.service';
 import { FakeAgentSdk } from './fakes/agent-sdk';
+import { FakeUsageSource } from './fakes/usage-source';
 import { startTestDaemon, type TestDaemon, tempDir } from './helpers';
 
 /** Every agent test daemon runs its Sessions here. */
@@ -36,9 +37,10 @@ class KindsFixtureModule {}
 
 export type AgentDaemon = TestDaemon & {
   sdk: FakeAgentSdk;
+  usage: FakeUsageSource;
   sockets: Set<WebSocket>;
   dataDir: string;
-  /** The operator's own Claude Code config dir. */
+  /** The config dir of the first account, `default`; empty with `signedIn: false`. */
   home: string;
   auth: { Authorization: string };
   createSession(input?: Partial<NewSession>): string;
@@ -50,19 +52,29 @@ export async function signIn(configDir: string, email: string, plan = 'max'): Pr
   await writeFile(path.join(configDir, 'fake-auth.json'), JSON.stringify({ email, subscriptionType: plan }));
 }
 
-export async function startAgentDaemon(
-  options: { dataDir?: string; home?: string; signedIn?: boolean } = {},
-): Promise<AgentDaemon> {
+/**
+ * A daemon with no Claude account, or with `signedIn` (the default) one signed-in account, `default`, that the
+ * first sign-in made active. A daemon started again on the same `dataDir` keeps its accounts.
+ */
+export async function startAgentDaemon(options: { dataDir?: string; signedIn?: boolean } = {}): Promise<AgentDaemon> {
   const dataDir = options.dataDir ?? (await tempDir());
-  const home = options.home ?? (await tempDir('ops-console-claude-'));
   WORKING_DIR ||= await tempDir('ops-console-repo-');
-  if (options.signedIn ?? true) await signIn(home, 'operator@example.com');
-  process.env.FAKE_CLAUDE_HOME = home;
-  const sdk = new FakeAgentSdk(home);
+  const sdk = new FakeAgentSdk(dataDir);
+  const usage = new FakeUsageSource();
   const daemon = await startTestDaemon({
     dataDir,
-    modules: [AgentModule.forRoot({ sdk, claudeHome: home }), { module: KindsFixtureModule }],
+    modules: [AgentModule.forRoot({ sdk, usage }), { module: KindsFixtureModule }],
   });
+  const auth = { Authorization: `Bearer ${daemon.token}` };
+  const listed = await request(daemon.url).get('/api/agent-accounts').set(auth);
+  let first: { id: string } | undefined = listed.body.data[0];
+  if (!first && (options.signedIn ?? true)) {
+    const added = await request(daemon.url).post('/api/agent-accounts').set(auth).send();
+    first = added.body.data.account;
+    await signIn(path.join(dataDir, 'accounts', String(first?.id)), 'operator@example.com');
+    await request(daemon.url).post(`/api/agent-accounts/${first?.id}/checks`).set(auth);
+  }
+  const home = first ? path.join(dataDir, 'accounts', first.id) : '';
   const sockets = new Set<WebSocket>();
   const stop = daemon.stop;
   return Object.assign(daemon, {
@@ -73,9 +85,10 @@ export async function startAgentDaemon(
       await stop();
     },
     sdk,
+    usage,
     dataDir,
     home,
-    auth: { Authorization: `Bearer ${daemon.token}` },
+    auth,
     createSession: (input: Partial<NewSession> = {}) =>
       daemon.app.get(SessionsService).create({ kind: SessionKind.Repo, ...input }).id,
   });

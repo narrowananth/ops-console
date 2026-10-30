@@ -33,7 +33,7 @@ export const claudeAccounts = sqliteTable(
   {
     id: text().primaryKey().notNull(),
     label: text().notNull(),
-    /** `CLAUDE_CONFIG_DIR`; null: the operator's own Claude Code setup. */
+    /** `CLAUDE_CONFIG_DIR`: one folder per account under the data directory. Every row has one. */
     configDir: text('config_dir'),
     position: integer().notNull(),
     signedIn: bool('signed_in').notNull().default(false),
