@@ -2,6 +2,7 @@ import { AgentsTab } from '../agents/agents-tab';
 import { Empty } from '../components/ui/empty';
 import { Sheet } from '../components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { McpTab } from '../mcp/mcp-tab';
 import { type SettingsTab, useUi } from './ui-store';
 
 const TABS: { id: SettingsTab; label: string }[] = [
@@ -30,7 +31,7 @@ export function SettingsDrawer() {
         </TabsList>
         {TABS.map((tab) => (
           <TabsContent key={tab.id} value={tab.id} className="flex-1 overflow-auto">
-            {tab.id === 'agents' ? <AgentsTab /> : <Empty>Nothing here yet.</Empty>}
+            {tab.id === 'agents' ? <AgentsTab /> : tab.id === 'mcp' ? <McpTab /> : <Empty>Nothing here yet.</Empty>}
           </TabsContent>
         ))}
       </Tabs>

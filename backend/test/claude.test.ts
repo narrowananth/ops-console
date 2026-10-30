@@ -19,15 +19,6 @@ afterAll(async () => {
 });
 
 describe('claude CLI wrapper', () => {
-  it('lists registered MCP servers with their status', async () => {
-    const servers = await daemon.app.get<ClaudeCli>(CLAUDE_CLI).mcpList();
-    expect(servers.map(({ name, status }) => ({ name, status }))).toEqual([
-      { name: 'fake-stdio', status: 'connected' },
-      { name: 'sentry', status: 'needs_auth' },
-      { name: 'pg-prod', status: 'failed' },
-    ]);
-  });
-
   it('reads an HTTP server config', async () => {
     expect(await daemon.app.get<ClaudeCli>(CLAUDE_CLI).mcpGet('sentry')).toEqual({
       name: 'sentry',
@@ -43,42 +34,47 @@ describe('claude CLI wrapper', () => {
     });
   });
 
-  it('registers and removes servers with an argument array', async () => {
+  it('registers and removes servers with an argument array, secrets off the command line', async () => {
     const claude = daemon.app.get<ClaudeCli>(CLAUDE_CLI);
-    await claude.mcpAdd({
-      scope: 'user',
-      name: 'pg-staging',
-      transport: 'stdio',
-      command: 'npx',
-      args: ['-y', '@example/pg-mcp', '--read-only'],
-      env: { PGPASSWORD: 'p@ss word; rm -rf ~' },
-    });
-    await claude.mcpAdd({
-      scope: 'local',
-      name: 'sentry',
-      transport: 'http',
-      url: 'https://mcp.sentry.dev/mcp',
-      headers: { Authorization: 'Bearer abc' },
-    });
-    await claude.mcpRemove('pg-staging', 'user');
+    const target = { configDir: await tempDir() };
+    await claude.mcpAdd(
+      {
+        scope: 'user',
+        name: 'pg-staging',
+        transport: 'stdio',
+        command: 'npx',
+        args: ['-y', '@example/pg-mcp', '--read-only', 'a b; rm -rf ~'],
+      },
+      target,
+    );
+    await claude.mcpAdd(
+      {
+        scope: 'local',
+        name: 'sentry',
+        transport: 'http',
+        url: 'https://mcp.sentry.dev/mcp',
+        headers: { Authorization: 'Bearer abc' },
+      },
+      target,
+    );
+    await claude.mcpRemove('pg-staging', 'user', target);
 
     const calls = (await readFile(record, 'utf8'))
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line));
-    // `claude` sees its argv; a shell string would have split or run the password.
+    // `claude` sees its argv; a shell string would have split or run the argument.
     expect(calls).toContainEqual([
       'add',
       '--scope',
       'user',
-      '-e',
-      'PGPASSWORD=p@ss word; rm -rf ~',
       'pg-staging',
       '--',
       'npx',
       '-y',
       '@example/pg-mcp',
       '--read-only',
+      'a b; rm -rf ~',
     ]);
     expect(calls).toContainEqual([
       'add',

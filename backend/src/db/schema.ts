@@ -6,6 +6,8 @@ import {
   type ApprovalKind,
   ApprovalStatus,
   type Effort,
+  type McpScope,
+  type McpTransport,
   type Model,
   type SessionKind,
   SessionState,
@@ -113,3 +115,19 @@ export const approvals = sqliteTable(
   },
   (table) => [index('approvals_pending_idx').on(table.requestedAt).where(sql`${table.status} = 'pending'`)],
 );
+
+/** Servers the operator removed. Their config is gone from every account; the row keeps them listed to sign in again. */
+export const removedMcpServers = sqliteTable('removed_mcp_servers', {
+  name: text().primaryKey().notNull(),
+  scope: text().$type<McpScope>().notNull(),
+  transport: text().$type<McpTransport>().notNull(),
+  /** Command or URL. Env vars and headers are not kept. */
+  target: text().notNull(),
+  removedAt: text('removed_at').notNull().default(nowIso),
+});
+
+/** Servers left out of every session the console starts. */
+export const disabledMcpServers = sqliteTable('disabled_mcp_servers', {
+  name: text().primaryKey().notNull(),
+  disabledAt: text('disabled_at').notNull().default(nowIso),
+});

@@ -6,11 +6,19 @@ import { SdkUsageSource } from './accounts/usage-source';
 import { AgentModule } from './agent/agent.module';
 import { ClaudeAgentSdk } from './agent/agent-sdk';
 import { startDaemon } from './daemon';
+import { LoginKeychain } from './keychain/keychain';
+import { runMcpExec } from './mcp/launcher';
+import { McpServersModule } from './mcp/mcp-servers.module';
+import { SdkProbe } from './mcp/probe';
+
+// `ops-console mcp-exec <name> -- <command>`: the launcher for a stdio server whose env vars the console holds.
+if (process.argv[2] === 'mcp-exec') process.exit(await runMcpExec(process.argv.slice(3), new LoginKeychain()));
 
 const env = z
   .object({
     OPS_CONSOLE_APP_DIR: z.string().optional(),
     OPS_CONSOLE_DATA_DIR: z.string().optional(),
+    OPS_CONSOLE_LAUNCHER: z.string().optional(),
     OPS_CONSOLE_PORT: z.coerce.number().int().min(0).max(65535).default(4545),
   })
   .parse(process.env);
@@ -27,7 +35,13 @@ const daemon = await startDaemon({
   uiDir: existsSync(uiDir) ? uiDir : null,
   migrationsDir: path.join(appDir, 'drizzle'),
   writeLog: (line) => process.stdout.write(`${line}\n`),
-  modules: [AgentModule.forRoot({ sdk: new ClaudeAgentSdk(), usage: new SdkUsageSource() })],
+  modules: [
+    AgentModule.forRoot({ sdk: new ClaudeAgentSdk(), usage: new SdkUsageSource() }),
+    McpServersModule.forRoot({
+      probe: new SdkProbe(),
+      launcher: env.OPS_CONSOLE_LAUNCHER ?? path.join(homedir(), '.ops-console', 'current', 'bin', 'ops-console'),
+    }),
+  ],
 }).catch(() => process.exit(1));
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {

@@ -68,7 +68,7 @@ Judgment work (Verification, Fix, Agent Review) runs as an agent session.
 | `keychain` | `set`, `get`, `delete` in the login Keychain |
 | `claude-cli` | `claude mcp add`, `remove`, `list`, `get`, parsed with Zod |
 | `mcp-client` | Calls a tool on a server registered with Claude Code |
-| `mcp` | Reads `claude mcp list`; reconnect, disable, remove |
+| `mcp` | Servers registered in every Claude account (`.claude.json`), Probe, add, edit, reconnect, disable, remove, and the `mcp-exec` launcher |
 | `monitor` | Services, Routes, Scans, Alerts; Datadog queries through `pup` |
 | `verification` | Runs a Verification with the agent, stores the Report |
 | `review` | Operator's Review; on confirm, starts the fix Session |
@@ -79,7 +79,7 @@ Judgment work (Verification, Fix, Agent Review) runs as an agent session.
 | `connections` | Connections, Access Levels, PROD tags; secrets via Keychain |
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
 
-The first eight, plus `agent`, `accounts` and `action-log`, exist now; the rest arrive with their
+The first eight, plus `agent`, `accounts`, `action-log` and `mcp`, exist now; the rest arrive with their
 specs.
 
 ## `state.db` holds

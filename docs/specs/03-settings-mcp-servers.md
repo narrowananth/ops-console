@@ -1,6 +1,6 @@
 # Settings: MCP servers
 
-**Status:** ready
+**Status:** shipped
 **Design:** Settings › MCP servers, its detail drawer (Details, Tools, Reconnect, Disconnect, Remove) and the add and edit form
 
 ## Problem
@@ -14,7 +14,7 @@ This spec gives the operator one list across every account, and add, edit, authe
 1. Listing MCP Servers reads every Claude account's config (user and local scope), merged by name. Project-scoped servers from each Repo's `.mcp.json` join the list once `06-settings-repos` lands. Each entry shows transport, command or URL, scope, status, tool count, and the Connector using it (`used_by`) when one matches.
 2. Servers that back a Connection are left out. `meta.connection_server_count` says how many there are, and the tab links to Settings › Dev tools.
 3. Status comes from a Probe per account. A server's status is the worst across accounts (`fail`, then `auth`, then `ok`); `status_detail` names the account and the error. A disabled server reads `off`. Probe results are kept in memory for 60 seconds.
-4. Adding a server takes name, transport, command or URL, scope, and env vars (stdio) or headers (http, sse). Env vars go to the Keychain adapter under `mcp:<name>`. A stdio server is registered as `ops-console mcp-exec <name> -- <command>`; at launch that wrapper reads the env vars from the Keychain and starts the command with them. The console runs `claude mcp add` in every account's config dir (user and local scope) or writes the Repo's `.mcp.json` once (project scope, once `06-settings-repos` lands), then checks the server.
+4. Adding a server takes name, transport, command or URL, scope, and env vars (stdio) or headers (http, sse). Env vars go to the Keychain adapter under `mcp:<name>`. A stdio server with env vars is registered as `ops-console mcp-exec <name> -- <command>`; at launch that wrapper reads the env vars from the Keychain and starts the command with them. A stdio server with none is registered as its own command. The console runs `claude mcp add` in every account's config dir (user scope, or local scope in the folder `mcp-local` of the data folder) or writes the Repo's `.mcp.json` once (project scope, once `06-settings-repos` lands), then checks the server.
 5. If registering fails in any account, the accounts already done are rolled back, the Keychain entry is deleted, and the response is `upstream_failed`.
 6. Headers for http and sse servers are passed to `claude mcp add --header`. Claude Code sends them itself, so it keeps them in its own config file in plain text. The form says so and suggests OAuth instead: leave headers empty and Authenticate.
 7. A name already used by a server, a removed server or a Connection is refused with `duplicate`.
@@ -30,10 +30,12 @@ This spec gives the operator one list across every account, and add, edit, authe
 
 ## Settled
 
-- **Probe**: an Agent SDK session started with one account's config dir. It reads the init message, which lists each MCP Server's state and tools, and stops before any model turn. No tokens are spent.
-- **Launcher**: `ops-console mcp-exec <name> -- <command>` is the stdio launch command for every server whose secrets the console holds, Connections included (`05-settings-dev-tools`). It reads the Keychain at launch, so secrets reach the server process and nothing else.
+- **Probe**: an Agent SDK session started with one account's config dir. It asks Claude Code for each MCP Server's state, error and tools once none is pending, and stops before any model turn. No tokens are spent.
+- **Listing**: the servers an account registers are read from its `.claude.json`; `claude mcp list` starts every server, so it is never used. Signed-out accounts get registrations but no Probe.
+- **Launcher**: `ops-console mcp-exec <name> -- <command>` is the stdio launch command for every server whose secrets the console holds, Connections included (`05-settings-dev-tools`). It reads the Keychain at launch, so secrets reach the server process and nothing else. Its path comes from `OPS_CONSOLE_LAUNCHER`, and defaults to the installed `~/.ops-console/current/bin/ops-console`.
+- **Env var storage**: all of a server's env vars are one JSON object under the Keychain key `mcp:<name>`.
 - **Accounts**: every account in `02-settings-agents` gets the same registrations. Adding an account copies them (`02-settings-agents`).
-- **Disable**: a console flag. Claude Code's own switch is per project, and the console wants one switch for all of its sessions.
+- **Disable**: a console flag. Claude Code's own switch is per project, and the console wants one switch for all of its sessions. Agent runs pass it as `deniedMcpServers`.
 - **Remove**: keeps the entry listed so the operator can Authenticate it again, as the design shows.
 - **Status order**: `fail` is worse than `auth`, which is worse than `ok`. `off` only means disabled.
 - **Design departure**: the design stores secrets in `~/.ops-console/secrets`; the Keychain holds them instead (ADR 0004).
@@ -115,7 +117,7 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`.
 | `POST /mcp-servers/:name/auth` | | 202; `connection.checked` reports the result |
 | `DELETE /mcp-servers/:name/credentials` | | `McpServer` with `registered: false`, `status: auth` (Remove) |
 
-`env` is `{ "KEY": "value" }`; `headers` is `{ "Name": "value" }`. Neither is ever returned.
+`env` is `{ "KEY": "value" }`; `headers` is `{ "Name": "value" }`. Neither is ever returned. Item responses are `{ "data": McpServer }`, as in the other specs; `DELETE …/credentials` answers 200 with the row.
 
 ### WebSocket `connection.checked`
 
@@ -166,4 +168,5 @@ Settings › MCP servers, as designed: one row per server with name, scope and t
 - Servers that back a Connection: `05-settings-dev-tools`.
 - Connector sign-in screens, which call these endpoints: `04-settings-connectors`.
 - Copying registrations to a newly added account: `02-settings-agents`.
+- Project scope, `used_by`, Connection-backed servers (`connection_server_count` reads 0) and terminals leaving out disabled servers: each waits for the spec that adds the thing it needs. A project scope request is refused with `validation_failed`.
 - Claude Code's approval prompt for project `.mcp.json` servers: shown as `auth` with the detail "pending approval in Claude Code"; approving stays in Claude Code.

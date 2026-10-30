@@ -8,6 +8,7 @@ import {
   SessionState,
   SwitchReason,
 } from './agents';
+import { CheckTarget, HealthStatus } from './mcp';
 
 /** First WebSocket subprotocol; the session token is the second. */
 export const WS_PROTOCOL = 'ops-console';
@@ -79,6 +80,16 @@ export const wsEventSchema = z.discriminatedUnion('event', [
     }),
   ),
   event('account.removed', z.object({ account_id: z.string() })),
+  event(
+    'connection.checked',
+    z.object({
+      target: z.enum(CheckTarget),
+      id: z.string(),
+      status: z.enum(HealthStatus),
+      detail: z.string().nullable(),
+      latency_ms: z.number().nullable(),
+    }),
+  ),
   event(
     'account.switched',
     z.object({

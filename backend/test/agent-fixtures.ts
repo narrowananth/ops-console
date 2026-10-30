@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { Inject, Injectable, Module } from '@nestjs/common';
+import { type DynamicModule, Inject, Injectable, Module } from '@nestjs/common';
 import { SessionKind, WS_PROTOCOL, type WsEvent } from '@ops-console/shared';
 import request from 'supertest';
 import WebSocket from 'ws';
@@ -56,14 +56,16 @@ export async function signIn(configDir: string, email: string, plan = 'max'): Pr
  * A daemon with no Claude account, or with `signedIn` (the default) one signed-in account, `default`, that the
  * first sign-in made active. A daemon started again on the same `dataDir` keeps its accounts.
  */
-export async function startAgentDaemon(options: { dataDir?: string; signedIn?: boolean } = {}): Promise<AgentDaemon> {
+export async function startAgentDaemon(
+  options: { dataDir?: string; signedIn?: boolean; modules?: DynamicModule[] } = {},
+): Promise<AgentDaemon> {
   const dataDir = options.dataDir ?? (await tempDir());
   WORKING_DIR ||= await tempDir('ops-console-repo-');
   const sdk = new FakeAgentSdk(dataDir);
   const usage = new FakeUsageSource();
   const daemon = await startTestDaemon({
     dataDir,
-    modules: [AgentModule.forRoot({ sdk, usage }), { module: KindsFixtureModule }],
+    modules: [AgentModule.forRoot({ sdk, usage }), { module: KindsFixtureModule }, ...(options.modules ?? [])],
   });
   const auth = { Authorization: `Bearer ${daemon.token}` };
   const listed = await request(daemon.url).get('/api/agent-accounts').set(auth);

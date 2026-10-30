@@ -5,12 +5,16 @@ import {
   addedAccountSchema,
   agentAccountsSettingSchema,
   approvalSchema,
+  type CreateMcpServer,
   claudeAccountSchema,
   healthSchema,
+  mcpServerListSchema,
+  mcpServerSchema,
   type SessionDefaults,
   type SessionPatch,
   sessionDefaultsSchema,
   sessionSchema,
+  type UpdateMcpServer,
 } from '@ops-console/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
@@ -22,6 +26,7 @@ export const queryKeys = {
   settings: ['settings'] as const,
   accounts: ['agent-accounts'] as const,
   approvals: ['approvals'] as const,
+  mcpServers: ['mcp-servers'] as const,
   session: (id: string) => ['sessions', id] as const,
 };
 
@@ -142,4 +147,52 @@ export function useDecideApproval() {
     mutationFn: ({ id, decision }: { id: string; decision: ApprovalStatus.Approved | ApprovalStatus.Denied }) =>
       apiSend('POST', `/approvals/${id}/decision`, { decision }, z.object({ data: approvalSchema })),
   });
+}
+
+/** The list across every Claude account; `connection.checked` over `/ws` refreshes it after each check. */
+export function useMcpServers() {
+  return useQuery({
+    queryKey: queryKeys.mcpServers,
+    queryFn: () => apiGet('/mcp-servers', mcpServerListSchema),
+  });
+}
+
+const mcpServerResponse = z.object({ data: mcpServerSchema });
+
+function useMcpMutation<V>(send: (variables: V) => Promise<unknown>) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: send,
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.mcpServers }),
+  });
+}
+
+export function useCreateMcpServer() {
+  return useMcpMutation((body: CreateMcpServer) => apiSend('POST', '/mcp-servers', body, mcpServerResponse));
+}
+
+export function useUpdateMcpServer() {
+  return useMcpMutation(({ name, body }: { name: string; body: UpdateMcpServer }) =>
+    apiSend('PATCH', `/mcp-servers/${encodeURIComponent(name)}`, body, mcpServerResponse),
+  );
+}
+
+/** Reconnect: a new Probe in every account. */
+export function useReconnectMcpServer() {
+  return useMcpMutation((name: string) =>
+    apiSend('POST', `/mcp-servers/${encodeURIComponent(name)}/checks`, undefined, mcpServerResponse),
+  );
+}
+
+/** Opens the server's sign-in in the browser; the result arrives as `connection.checked`. */
+export function useAuthenticateMcpServer() {
+  return useMcpMutation((name: string) =>
+    apiSend('POST', `/mcp-servers/${encodeURIComponent(name)}/auth`, undefined, z.undefined()),
+  );
+}
+
+export function useRemoveMcpServer() {
+  return useMcpMutation((name: string) =>
+    apiSend('DELETE', `/mcp-servers/${encodeURIComponent(name)}/credentials`, undefined, mcpServerResponse),
+  );
 }

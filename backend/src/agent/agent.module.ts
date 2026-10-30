@@ -38,7 +38,7 @@ export class AgentModule {
         SessionsService,
         AgentRuntime,
       ],
-      exports: [SessionKinds, ProdWriteRule, SessionsService, ActionLogService, AgentRuntime],
+      exports: [SessionKinds, ProdWriteRule, SessionsService, ActionLogService, AgentRuntime, AccountsService],
     };
   }
 }
