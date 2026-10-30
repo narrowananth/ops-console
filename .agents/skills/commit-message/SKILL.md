@@ -26,7 +26,7 @@ mapping isn't obvious, pick a short descriptive label and say why so the user ca
 
 ```
 Frontend: add mcp status bar
-Backend: store verification reports in postgres
+Backend: store verification reports in sqlite
 Chore: pin node 24 in mise
 ```
 
