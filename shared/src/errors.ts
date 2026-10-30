@@ -12,6 +12,7 @@ export enum ErrorCode {
   SessionBusy = 'session_busy',
   ConnectorNotConnected = 'connector_not_connected',
   NotARepo = 'not_a_repo',
+  RepoHasSessions = 'repo_has_sessions',
 }
 
 export const errorBodySchema = z.object({

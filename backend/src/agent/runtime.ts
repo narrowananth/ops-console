@@ -34,7 +34,7 @@ import { STORE, type Store } from '../db/store';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
 import { blockParts, contentSchema, EDIT_TOOLS, questionInputSchema, stepText, toMessages } from './parts';
 import { ProdWriteRule } from './prod-write-rule';
-import { type Run, RunRegistry } from './runs';
+import { type Run, RunRegistry, type RunSummary } from './runs';
 import { SessionKinds } from './session-kinds';
 import { emitSessionUpdated, NEW_SESSION_TITLE, SessionsService } from './sessions.service';
 import { Transcripts } from './transcripts';
@@ -67,6 +67,10 @@ type RunResult = 'done' | ErrorCode.RateLimited | ErrorCode.UpstreamFailed;
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
+/** The text of a part with its fences restored; steps and diffs have none. */
+const partText = (part: Part): string =>
+  part.kind === 'text' ? part.text : part.kind === 'code' ? `\`\`\`${part.lang}\n${part.text}\n\`\`\`` : '';
 
 const firstLine = (text: string, max: number) => (text.trim().split('\n')[0] ?? '').slice(0, max);
 
@@ -120,8 +124,27 @@ export class AgentRuntime {
       current.answer(text);
       return { message_id: current.messageId };
     }
-    if (current) throw new ApiError(409, ErrorCode.SessionBusy, "the session's run is still going");
+    return { message_id: this.begin(sessionId, text, null).messageId };
+  }
 
+  /**
+   * Starts a run the console asks for itself, in a Session that takes no operator messages. Throws `session_busy`
+   * while the Session's run is going; `finished` settles when the run ends.
+   */
+  runFor(sessionId: string, text: string): { finished: Promise<RunSummary> } {
+    let settle: (summary: RunSummary) => void = () => {};
+    const finished = new Promise<RunSummary>((resolve) => {
+      settle = resolve;
+    });
+    this.begin(sessionId, text, settle);
+    return { finished };
+  }
+
+  private begin(sessionId: string, text: string, onFinish: ((summary: RunSummary) => void) | null): Run {
+    const session = this.sessions.get(sessionId);
+    const kind = this.kinds.get(session.kind);
+    if (!kind) throw new ApiError(409, ErrorCode.InvalidState, `a ${session.kind} session cannot run`);
+    if (this.runs.get(sessionId)) throw new ApiError(409, ErrorCode.SessionBusy, "the session's run is still going");
     const run: Run = {
       sessionId,
       messageId: crypto.randomUUID(),
@@ -134,6 +157,7 @@ export class AgentRuntime {
       answer: null,
       waits: 0,
       createdAt: new Date().toISOString(),
+      onFinish,
     };
     this.runs.add(run);
     const isFirst = session.title === NEW_SESSION_TITLE && session.sdkSessionId === null;
@@ -143,7 +167,7 @@ export class AgentRuntime {
       lastActiveAt: new Date().toISOString(),
     });
     void this.execute(run, text);
-    return { message_id: run.messageId };
+    return run;
   }
 
   /** The transcript, oldest first, with the in-flight message last while a run streams. */
@@ -329,6 +353,10 @@ export class AgentRuntime {
         state: failed ? SessionState.Failed : SessionState.Idle,
         error_code: failed ? result : null,
       });
+    });
+    run.onFinish?.({
+      ok: !failed,
+      text: run.parts.map(partText).join('\n'),
     });
   }
 

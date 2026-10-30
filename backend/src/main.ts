@@ -17,6 +17,7 @@ import { SdkProbe } from './mcp/probe';
 import { ReposModule } from './repos/repos.module';
 import { runSetupMcp } from './terminals/setup-mcp';
 import { TerminalsModule } from './terminals/terminals.module';
+import { WorkspaceModule } from './workspace/workspace.module';
 
 // `ops-console mcp-exec <name> -- <command>`: the launcher for a stdio server whose env vars the console holds.
 if (process.argv[2] === 'mcp-exec') process.exit(await runMcpExec(process.argv.slice(3), new LoginKeychain()));
@@ -52,6 +53,7 @@ const daemon = await startDaemon({
   modules: [
     AgentModule.forRoot({ sdk: new ClaudeAgentSdk(), usage: new SdkUsageSource() }),
     ReposModule.forRoot(),
+    WorkspaceModule.forRoot(),
     TerminalsModule.forRoot(),
     ConnectionsModule.forRoot({ tester: new McpConnectionTester(version) }),
     ConnectorsModule.forRoot({ tools: new CliConnectorTools() }),

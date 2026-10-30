@@ -35,6 +35,17 @@ export function useLiveEvents(): void {
       }
       if (event.event === 'session.updated') {
         void client.invalidateQueries({ queryKey: queryKeys.session(event.data.session_id) });
+        void client.invalidateQueries({ queryKey: queryKeys.sessions });
+      }
+      if (event.event === 'session.output' || event.event === 'session.finished') {
+        void client.invalidateQueries({ queryKey: queryKeys.messages(event.data.session_id) });
+      }
+      if (
+        event.event === 'pull_request.refreshed' ||
+        event.event === 'pull_request.commented' ||
+        event.event === 'pull_request.reviewed'
+      ) {
+        void client.invalidateQueries({ queryKey: queryKeys.pulls });
       }
     });
     return () => socket.close();

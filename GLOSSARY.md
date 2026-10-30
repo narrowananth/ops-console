@@ -72,9 +72,18 @@ _Avoid_: approval
 **Repo**:
 A local git repository imported into the console, identified by its top folder, where Sessions run.
 
+**Git host**:
+The service holding a Repo's remote: GitHub, GitLab or Bitbucket.
+
 **Session**:
-One conversation between the operator and the agent in one Repo, on one branch.
+One conversation between the operator and the agent. It runs in one Repo on one branch, except a
+dev-tools Session, which has no Repo. A pull request has its own Session for the agent's replies,
+with no composer.
 _Avoid_: chat, thread
+
+**Agent Review**:
+The agent's written review of a pull request: findings, a PROD readiness checklist and a verdict,
+tied to the commit it read. Each finding is also posted to the Git host as a comment.
 
 ### Dev tools
 

@@ -31,6 +31,11 @@ export const importRepoSchema = z.object({ path: z.string().trim().min(1) });
 
 export const renameRepoSchema = z.object({ name: z.string().trim().min(1) });
 
-export const branchSchema = z.object({ name: z.string(), current: z.boolean() });
+export const branchSchema = z.object({
+  name: z.string(),
+  current: z.boolean(),
+  /** Whether the Git host lists an open pull request from this branch. */
+  has_open_pr: z.boolean(),
+});
 
 export type Branch = z.infer<typeof branchSchema>;

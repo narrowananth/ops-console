@@ -4,6 +4,7 @@ import {
   type ActionActor,
   type ActionKind,
   ActionOutcome,
+  type AgentReviewStatus,
   type ApprovalKind,
   ApprovalStatus,
   type ConnectionEnv,
@@ -24,6 +25,7 @@ import {
   check,
   index,
   integer,
+  primaryKey,
   real,
   sqliteTable,
   text,
@@ -82,12 +84,20 @@ export const sessions = sqliteTable(
     /** Holds the transcript; null before the first run. */
     accountId: text('account_id').references(() => claudeAccounts.id, { onDelete: 'restrict' }),
     sdkSessionId: text('sdk_session_id'),
+    /** `repo` and `pr_review` Sessions run in a Repo; the service enforces which kind has which column. */
+    repoId: text('repo_id').references((): AnySQLiteColumn => repos.id, { onDelete: 'restrict' }),
+    branch: text(),
+    prNumber: integer('pr_number'),
     state: text().$type<SessionState>().notNull().default(SessionState.Idle),
     lastMessagePreview: text('last_message_preview'),
     createdAt: text('created_at').notNull().default(nowIso),
     lastActiveAt: text('last_active_at').notNull().default(nowIso),
   },
-  (table) => [index('sessions_active_idx').on(sql`${table.lastActiveAt} DESC`)],
+  (table) => [
+    index('sessions_active_idx').on(sql`${table.lastActiveAt} DESC`),
+    index('sessions_repo_idx').on(table.repoId, sql`${table.lastActiveAt} DESC`),
+    uniqueIndex('sessions_one_pr_review_idx').on(table.repoId, table.prNumber).where(sql`${table.kind} = 'pr_review'`),
+  ],
 );
 
 export const actionLog = sqliteTable(
@@ -205,3 +215,48 @@ export const repos = sqliteTable('repos', {
   defaultBranch: text('default_branch').notNull(),
   createdAt: text('created_at').notNull().default(nowIso),
 });
+
+/** The agent's written review of a pull request, tied to the commit it read. */
+export const prAgentReviews = sqliteTable(
+  'pr_agent_reviews',
+  {
+    id: text().primaryKey().notNull(),
+    repoId: text('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    prNumber: integer('pr_number').notNull(),
+    headSha: text('head_sha').notNull(),
+    status: text()
+      .$type<AgentReviewStatus>()
+      .notNull()
+      .default('running' as AgentReviewStatus),
+    verdict: text(),
+    findings: text().notNull().default('[]'),
+    checklist: text().notNull().default('[]'),
+    tools: text().notNull().default('[]'),
+    createdAt: text('created_at').notNull().default(nowIso),
+  },
+  (table) => [
+    index('pr_agent_reviews_pr_idx').on(table.repoId, table.prNumber, sql`${table.createdAt} DESC`),
+    check('pr_agent_reviews_findings_json', sql`json_valid(${table.findings})`),
+    check('pr_agent_reviews_checklist_json', sql`json_valid(${table.checklist})`),
+    check('pr_agent_reviews_tools_json', sql`json_valid(${table.tools})`),
+  ],
+);
+
+/** Comments the agent posted on the Git host. Everything else about a pull request's comments comes from the host. */
+export const agentComments = sqliteTable(
+  'agent_comments',
+  {
+    repoId: text('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    prNumber: integer('pr_number').notNull(),
+    /** The host's comment id. */
+    commentId: text('comment_id').notNull(),
+    /** Null for a thread reply. */
+    agentReviewId: text('agent_review_id').references(() => prAgentReviews.id, { onDelete: 'set null' }),
+    postedAt: text('posted_at').notNull().default(nowIso),
+  },
+  (table) => [primaryKey({ columns: [table.repoId, table.prNumber, table.commentId] })],
+);

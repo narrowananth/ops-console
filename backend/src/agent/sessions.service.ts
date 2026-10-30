@@ -7,7 +7,7 @@ import {
   type Page,
   SESSION_DEFAULTS,
   type Session,
-  type SessionKind,
+  SessionKind,
   type SessionPatch,
   type SessionState,
   sessionDefaultsSchema,
@@ -15,7 +15,7 @@ import {
 } from '@ops-console/shared';
 import { and, desc, eq, lt, or, type SQL, sql } from 'drizzle-orm';
 import type { z } from 'zod';
-import { ApiError } from '../common/errors';
+import { ApiError, validationFailed } from '../common/errors';
 import { afterCursor, toPage } from '../common/pagination';
 import { sessions } from '../db/schema';
 import { type Emit, STORE, type Store } from '../db/store';
@@ -28,7 +28,15 @@ export const NEW_SESSION_TITLE = 'New session';
 
 export type SessionRow = typeof sessions.$inferSelect;
 
-export type NewSession = { kind: SessionKind; model?: Model; effort?: Effort; access_mode?: AccessMode };
+export type NewSession = {
+  kind: SessionKind;
+  model?: Model;
+  effort?: Effort;
+  access_mode?: AccessMode;
+  repoId?: string;
+  branch?: string;
+  prNumber?: number;
+};
 
 export function toSession(row: SessionRow): Session {
   return {
@@ -39,6 +47,9 @@ export function toSession(row: SessionRow): Session {
     effort: row.effort,
     access_mode: row.accessMode,
     account_id: row.accountId,
+    repo_id: row.repoId,
+    branch: row.branch,
+    pr_number: row.prNumber,
     state: row.state,
     last_message_preview: row.lastMessagePreview,
     created_at: row.createdAt,
@@ -47,7 +58,13 @@ export function toSession(row: SessionRow): Session {
 }
 
 export function emitSessionUpdated(emit: Emit, row: SessionRow): void {
-  emit('session.updated', { session_id: row.id, title: row.title, state: row.state, account_id: row.accountId });
+  emit('session.updated', {
+    session_id: row.id,
+    title: row.title,
+    state: row.state,
+    account_id: row.accountId,
+    branch: row.branch,
+  });
 }
 
 @Injectable()
@@ -63,6 +80,7 @@ export class SessionsService {
 
   /** The creation step each kind's `POST /sessions` calls: settings the request leaves out come from the defaults. */
   create(input: NewSession): SessionRow {
+    checkKindFields(input);
     const defaults = this.settings.get(SESSION_DEFAULTS_KEY, sessionDefaultsSchema);
     return this.store.write((tx) =>
       tx
@@ -74,6 +92,9 @@ export class SessionsService {
           model: input.model ?? defaults.model,
           effort: input.effort ?? defaults.effort,
           accessMode: input.access_mode ?? defaults.access_mode,
+          repoId: input.repoId ?? null,
+          branch: input.branch ?? null,
+          prNumber: input.prNumber ?? null,
         })
         .returning()
         .get(),
@@ -136,4 +157,18 @@ export class SessionsService {
     if (this.runs.get(id)) throw new ApiError(409, ErrorCode.SessionBusy, "the session's run is still going");
     this.store.write((tx) => tx.delete(sessions).where(eq(sessions.id, id)).run());
   }
+}
+
+/** A `repo` Session has a Repo and a branch; a `pr_review` Session a Repo and a pull request; others neither. */
+function checkKindFields(input: NewSession): void {
+  const hasRepo = input.repoId !== undefined;
+  const hasBranch = input.branch !== undefined;
+  const hasPr = input.prNumber !== undefined;
+  const ok =
+    input.kind === SessionKind.Repo
+      ? hasRepo && hasBranch && !hasPr
+      : input.kind === SessionKind.PrReview
+        ? hasRepo && hasPr && !hasBranch
+        : !hasRepo && !hasBranch && !hasPr;
+  if (!ok) throw validationFailed(`invalid fields for a ${input.kind} session`);
 }
