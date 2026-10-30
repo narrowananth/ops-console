@@ -1,6 +1,6 @@
 # Monitor: Scans, Alerts, Verification, Review and Fix
 
-**Status:** ready
+**Status:** shipped
 **Design:** Monitor in `design/ops-console.html`: services and routes, the Alert card, Report, Review, and the Fix progress
 
 ## Problem
@@ -57,12 +57,26 @@ History and restarts
 - **Report storage**: the database holds the Report body; `markdown_path` records where the Report file was written in the Connector's reports folder.
 - **Review undo**: only a dismissal can be undone by the operator. A closed-unmerged PR undoes a confirmed Review.
 - **Fix Session**: the Fix's `repo` Session carries `alert_id`, so the Workspace shows it next to the Alert.
+- **Route identity**: ids in a path fold into `:id` (`/orders/1042` and `/orders/1043` are one Route) before a Route is stored or fingerprinted.
+- **Datadog reads**: a Scan reads `pup logs aggregate` on indexed storage (Flex is not on every account). It lists the env's Services with HTTP logs, then reads each Service's top 100 method and path groups by traffic and by errors, because Datadog refuses more than 10000 groups across all dimensions. A Route beyond a Service's top 100 is not seen.
+- **Healthy Route**: a known Route absent from a Scan's logs counts as healthy, with an `ok` result and zero errors. Regression needs an `ok` result newer than the Alert's last sighting.
+- **Fingerprint signature**: the most common masked message among a Route's Samples; the newest wins a tie.
+- **Severity**: `sev2` when one 10-minute bucket reaches `rapid_errors_per_10m`; `sev3` when errors per hour reach `failing_errors_per_hour` and a Sample has status `error`; else `warn`.
+- **Schedule slots**: the daily time and every 6 hours after it are the grid. Each distinct interval runs once per slot of its own length, as one Scan of every Service on that interval. A slot that passed while Datadog is not connected is skipped.
+- **Scan on demand**: `POST /scans` needs the Datadog Connector connected, and answers `connector_not_connected` otherwise.
+- **Alert Session**: the first Verification makes one `repo` Session on the Repo's current branch, linked by `alert_id`, and every later Verification and Fix stage runs in it. `Alert` carries its id as `session_id`.
+- **Verification steps**: each tool step and text block of the run is stored, redacted, and sent as `verification.stepped`.
+- **Report file**: written to `reports_folder`, relative to the data folder. A failed write leaves `markdown_path` null and the Report ready.
+- **Fix runs**: each stage is its own run in the Alert Session and ends with a JSON block (`ticket`: key and URL; `code`: summary; `tests`: passed; `pr`: number and URL). Any other answer fails the stage. The `branch` stage is the console's own checkout, with stash, from `07-workspace`.
+- **`go` confirm**: the message starts no run. It answers 202 as an ordinary send would.
+- **Merged PR**: a merged PR resolves the Alert with `resolved_at` set. A merged PR whose Fix is not `pr_open` is not looked at.
 
 ## Not required
 
 - **Exact counts under overlap**: two Scans of one Service at once can both add their counts.
 - **Datadog retention**: Samples are kept and not refreshed.
 - **Jira after abandon**: the issue is left as it is.
+- **Routes past the top 100**: a Service with more than 100 Routes in the window shows its busiest 100 and its 100 with most errors.
 
 ## Safety
 

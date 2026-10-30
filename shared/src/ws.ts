@@ -9,6 +9,7 @@ import {
   SwitchReason,
 } from './agents';
 import { CheckTarget, HealthStatus } from './mcp';
+import { FixStage, FixStatus, ReviewDecision, ScanStatus, Severity } from './monitor';
 import { prRefreshStatus } from './workspace';
 
 /** First WebSocket subprotocol; the session token is the second. */
@@ -115,6 +116,52 @@ export const wsEventSchema = z.discriminatedUnion('event', [
       post_failed: z.number().int(),
     }),
   ),
+  event('scan.started', z.object({ scan_id: z.string(), service_id: z.string().nullable() })),
+  event(
+    'scan.finished',
+    z.object({ scan_id: z.string(), status: z.enum(ScanStatus), error_code: z.string().nullable() }),
+  ),
+  event(
+    'alert.detected',
+    z.object({
+      alert_id: z.string(),
+      severity: z.enum(Severity),
+      route: z.object({ id: z.string(), method: z.string(), path: z.string() }),
+    }),
+  ),
+  event('alert.updated', z.object({ alert_id: z.string(), event_count: z.number().int(), last_seen_at: z.string() })),
+  event('alert.regressed', z.object({ alert_id: z.string(), regression_count: z.number().int() })),
+  event(
+    'verification.stepped',
+    z.object({
+      report_id: z.string(),
+      index: z.number().int(),
+      step: z.object({ kind: z.string(), text: z.string() }),
+    }),
+  ),
+  event(
+    'alert.verified',
+    z.object({ alert_id: z.string(), report_id: z.string(), status: z.enum(['ready', 'failed']) }),
+  ),
+  event(
+    'alert.reviewed',
+    z.object({
+      alert_id: z.string(),
+      decision: z.enum([ReviewDecision.Confirmed, ReviewDecision.Dismissed, 'undone']),
+    }),
+  ),
+  event(
+    'fix.advanced',
+    z.object({
+      fix_id: z.string(),
+      alert_id: z.string(),
+      stage: z.enum(FixStage),
+      status: z.enum(FixStatus),
+      jira_key: z.string().nullable(),
+      pr_number: z.number().int().nullable(),
+    }),
+  ),
+  event('alert.resolved', z.object({ alert_id: z.string() })),
   event(
     'account.switched',
     z.object({

@@ -70,17 +70,13 @@ Judgment work (Verification, Fix, Agent Review) runs as an agent session.
 | `mcp-client` | Calls a tool on a server registered with Claude Code |
 | `mcp` | Servers registered in every Claude account (`.claude.json`), Probe, add, edit, reconnect, disable, remove, and the `mcp-exec` launcher |
 | `connectors` | The seven Connectors: sign-in through `pup`, `gh`, `glab`, a token or an MCP Server; checks; config |
-| `monitor` | Services, Routes, Scans, Alerts; Datadog queries through `pup` |
-| `verification` | Runs a Verification with the agent, stores the Report |
-| `review` | Operator's Review; on confirm, starts the fix Session |
+| `monitor` | Services, Routes, Scans, Alerts through `pup`; Verification and Reports; the operator's Review; the Fix from ticket to merged PR |
 | `workspace` | Sessions in a Repo, branch checkout with stash, pull requests and Agent Reviews through the Git host adapter (`gh`) |
 | `agent` | Sessions, Claude Agent SDK runs, permission hooks, streaming output, transcripts |
 | `accounts` | Claude accounts, their usage, Auto-switch and Smart usage |
 | `terminal` | node-pty processes behind an authenticated WebSocket |
 | `connections` | Connections, Access Levels, PROD tags; secrets via Keychain |
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
-
-`monitor`, `verification` and `review` arrive with their specs; every other module exists.
 
 ## `state.db` holds
 

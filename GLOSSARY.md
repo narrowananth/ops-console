@@ -50,6 +50,15 @@ _Avoid_: endpoint, API
 A scheduled pass over every Service's Routes in Datadog that marks each one failing or healthy.
 _Avoid_: check, sweep
 
+**Fingerprint**:
+The identity of an Alert: Service, Route and the error signature with ids, numbers, timestamps and addresses masked. Two failures with the same Fingerprint belong to one Alert.
+
+**Regression**:
+A resolved or dismissed Alert that fails again after a healthy Scan. It reopens the same Alert.
+
+**Sample**:
+One Datadog log event kept on an Alert, with secret values and request body values redacted.
+
 **Alert**:
 A failing Route raised by a Scan, Datadog, Sentry or a Slack message, waiting to be verified.
 _Avoid_: incident, issue
@@ -66,6 +75,12 @@ proposed fix.
 **Review**:
 The operator's decision on a Report: confirm as a bug or improvement, or dismiss.
 _Avoid_: approval
+
+**Ticket**:
+The Jira issue the agent creates when the operator confirms a Report. Its key starts the fix branch name.
+
+**Fix**:
+The work that follows a confirmed Review: ticket, branch, code change, tests and PR, run by the agent in one Session.
 
 ### Workspace
 

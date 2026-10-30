@@ -21,6 +21,8 @@ export type Run = {
   createdAt: string;
   /** Set when the console started the run itself, with no operator message. */
   onFinish: ((summary: RunSummary) => void) | null;
+  /** Called with each whole part the agent finishes, in order; set by the code that started the run. */
+  onPart: ((part: Part) => void) | null;
 };
 
 /** How a run ended, for the code that started it. */

@@ -13,6 +13,7 @@ export enum ErrorCode {
   ConnectorNotConnected = 'connector_not_connected',
   NotARepo = 'not_a_repo',
   RepoHasSessions = 'repo_has_sessions',
+  ServiceUnlinked = 'service_unlinked',
 }
 
 export const errorBodySchema = z.object({

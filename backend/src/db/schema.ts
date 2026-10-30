@@ -5,19 +5,33 @@ import {
   type ActionKind,
   ActionOutcome,
   type AgentReviewStatus,
+  type AlertActor,
+  type AlertEventKind,
+  type AlertSource,
+  type AlertStatus,
   type ApprovalKind,
   ApprovalStatus,
+  type CheckInterval,
   type ConnectionEnv,
   type ConnectionType,
   type ConnectorId,
   type Effort,
+  type FixStage,
+  type FixStatus,
   type GitHost,
   type HealthStatus,
   type McpScope,
   type McpTransport,
   type Model,
+  type ReportKind,
+  type ReviewDecision,
+  type RouteState,
+  type RunStatus,
+  type ScanStatus,
+  type ScanTrigger,
   type SessionKind,
   SessionState,
+  type Severity,
 } from '@ops-console/shared';
 import { sql } from 'drizzle-orm';
 import {
@@ -29,6 +43,7 @@ import {
   real,
   sqliteTable,
   text,
+  unique,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 
@@ -88,6 +103,8 @@ export const sessions = sqliteTable(
     repoId: text('repo_id').references((): AnySQLiteColumn => repos.id, { onDelete: 'restrict' }),
     branch: text(),
     prNumber: integer('pr_number'),
+    /** The Alert a Verification or Fix runs for. */
+    alertId: text('alert_id').references((): AnySQLiteColumn => alerts.id, { onDelete: 'set null' }),
     state: text().$type<SessionState>().notNull().default(SessionState.Idle),
     lastMessagePreview: text('last_message_preview'),
     createdAt: text('created_at').notNull().default(nowIso),
@@ -117,6 +134,7 @@ export const actionLog = sqliteTable(
     finishedAt: text('finished_at'),
     /** The Connection a database query was for. */
     connectionId: text('connection_id').references((): AnySQLiteColumn => connections.id, { onDelete: 'set null' }),
+    alertId: text('alert_id').references((): AnySQLiteColumn => alerts.id, { onDelete: 'set null' }),
   },
   (table) => [
     index('action_log_at_idx').on(sql`${table.at} DESC`),
@@ -260,3 +278,225 @@ export const agentComments = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.repoId, table.prNumber, table.commentId] })],
 );
+
+/** A Datadog service in one env. Found by a Scan; the operator links it to a Repo. */
+export const services = sqliteTable(
+  'services',
+  {
+    id: text().primaryKey().notNull(),
+    /** Datadog service name. */
+    name: text().notNull(),
+    /** Datadog env tag. */
+    env: text().notNull(),
+    repoId: text('repo_id').references(() => repos.id, { onDelete: 'set null' }),
+    /** Null: the Datadog Connector's default. */
+    checkInterval: text('check_interval').$type<CheckInterval>(),
+    createdAt: text('created_at').notNull().default(nowIso),
+  },
+  (table) => [unique('services_name_env').on(table.name, table.env)],
+);
+
+export const routes = sqliteTable(
+  'routes',
+  {
+    id: text().primaryKey().notNull(),
+    serviceId: text('service_id')
+      .notNull()
+      .references(() => services.id, { onDelete: 'cascade' }),
+    method: text().notNull(),
+    path: text().notNull(),
+    ignored: bool('ignored').notNull().default(false),
+    /** Why it is ignored or expected to fail. */
+    note: text(),
+  },
+  (table) => [
+    unique('routes_service_method_path').on(table.serviceId, table.method, table.path),
+    check('routes_ignored_bool', sql`${table.ignored} IN (0, 1)`),
+  ],
+);
+
+export const scans = sqliteTable(
+  'scans',
+  {
+    id: text().primaryKey().notNull(),
+    triggeredBy: text('triggered_by').$type<ScanTrigger>().notNull(),
+    /** Null: every Service. */
+    serviceId: text('service_id').references(() => services.id, { onDelete: 'cascade' }),
+    windowSize: text('window_size').$type<CheckInterval>().notNull(),
+    status: text()
+      .$type<ScanStatus>()
+      .notNull()
+      .default('running' as ScanStatus),
+    /** `interrupted` when the daemon stopped mid-Scan. */
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    startedAt: text('started_at').notNull().default(nowIso),
+    finishedAt: text('finished_at'),
+  },
+  (table) => [
+    index('scans_started_idx').on(sql`${table.startedAt} DESC`),
+    index('scans_service_idx').on(table.serviceId, sql`${table.startedAt} DESC`),
+  ],
+);
+
+export const scanRouteResults = sqliteTable(
+  'scan_route_results',
+  {
+    scanId: text('scan_id')
+      .notNull()
+      .references(() => scans.id, { onDelete: 'cascade' }),
+    routeId: text('route_id')
+      .notNull()
+      .references(() => routes.id, { onDelete: 'cascade' }),
+    scannedAt: text('scanned_at').notNull(),
+    errorCount: integer('error_count').notNull(),
+    state: text().$type<RouteState>().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.scanId, table.routeId] }),
+    index('scan_route_results_route_idx').on(table.routeId, sql`${table.scannedAt} DESC`),
+  ],
+);
+
+/** One per Fingerprint. Its status moves only through the Verification, Review and Fix flows. */
+export const alerts = sqliteTable(
+  'alerts',
+  {
+    id: text().primaryKey().notNull(),
+    routeId: text('route_id')
+      .notNull()
+      .references(() => routes.id, { onDelete: 'cascade' }),
+    fingerprint: text().notNull().unique(),
+    source: text()
+      .$type<AlertSource>()
+      .notNull()
+      .default('scan' as AlertSource),
+    severity: text().$type<Severity>().notNull(),
+    status: text()
+      .$type<AlertStatus>()
+      .notNull()
+      .default('open' as AlertStatus),
+    title: text().notNull(),
+    /** Message of the newest Sample. */
+    logLine: text('log_line').notNull(),
+    eventCount: integer('event_count').notNull(),
+    firstSeenAt: text('first_seen_at').notNull(),
+    lastSeenAt: text('last_seen_at').notNull(),
+    resolvedAt: text('resolved_at'),
+    regressionCount: integer('regression_count').notNull().default(0),
+    samples: text().notNull().default('[]'),
+    datadogQuery: text('datadog_query').notNull(),
+    createdAt: text('created_at').notNull().default(nowIso),
+    updatedAt: text('updated_at').notNull().default(nowIso),
+  },
+  (table) => [
+    index('alerts_status_idx').on(table.status, sql`${table.lastSeenAt} DESC`),
+    index('alerts_route_idx').on(table.routeId),
+    check(
+      'alerts_samples_json',
+      sql`json_valid(${table.samples}) AND json_type(${table.samples}) = 'array' AND json_array_length(${table.samples}) <= 25`,
+    ),
+  ],
+);
+
+export const alertEvents = sqliteTable(
+  'alert_events',
+  {
+    id: text().primaryKey().notNull(),
+    alertId: text('alert_id')
+      .notNull()
+      .references(() => alerts.id, { onDelete: 'cascade' }),
+    kind: text().$type<AlertEventKind>().notNull(),
+    actor: text().$type<AlertActor>().notNull(),
+    data: text().notNull().default('{}'),
+    at: text().notNull().default(nowIso),
+  },
+  (table) => [
+    index('alert_events_alert_idx').on(table.alertId, table.at),
+    check('alert_events_data_json', sql`json_valid(${table.data})`),
+  ],
+);
+
+export const reports = sqliteTable(
+  'reports',
+  {
+    id: text().primaryKey().notNull(),
+    alertId: text('alert_id')
+      .notNull()
+      .references(() => alerts.id, { onDelete: 'cascade' }),
+    version: integer().notNull(),
+    status: text()
+      .$type<RunStatus>()
+      .notNull()
+      .default('running' as RunStatus),
+    /** The agent's recommendation. */
+    kind: text().$type<ReportKind>(),
+    /** Short name; ends the fix branch. */
+    slug: text(),
+    /** The Verification's agent run. */
+    sdkSessionId: text('sdk_session_id'),
+    steps: text().notNull().default('[]'),
+    replay: text(),
+    rootCause: text('root_cause'),
+    proposedFix: text('proposed_fix'),
+    diff: text(),
+    markdown: text(),
+    /** Set once the Report file is written. */
+    markdownPath: text('markdown_path'),
+    errorMessage: text('error_message'),
+    createdAt: text('created_at').notNull().default(nowIso),
+    finishedAt: text('finished_at'),
+  },
+  (table) => [
+    unique('reports_alert_version').on(table.alertId, table.version),
+    uniqueIndex('reports_one_running_idx').on(table.alertId).where(sql`${table.status} = 'running'`),
+    check('reports_steps_json', sql`json_valid(${table.steps})`),
+    check('reports_replay_json', sql`${table.replay} IS NULL OR json_valid(${table.replay})`),
+    check('reports_diff_json', sql`${table.diff} IS NULL OR json_valid(${table.diff})`),
+  ],
+);
+
+export const reviews = sqliteTable(
+  'reviews',
+  {
+    id: text().primaryKey().notNull(),
+    reportId: text('report_id')
+      .notNull()
+      .references(() => reports.id, { onDelete: 'cascade' }),
+    decision: text().$type<ReviewDecision>().notNull(),
+    /** Set when confirmed. */
+    kind: text().$type<ReportKind>(),
+    decidedAt: text('decided_at').notNull().default(nowIso),
+    undoneAt: text('undone_at'),
+  },
+  (table) => [
+    uniqueIndex('reviews_one_active_idx').on(table.reportId).where(sql`${table.undoneAt} IS NULL`),
+    check('reviews_kind_with_decision', sql`(${table.decision} = 'confirmed') = (${table.kind} IS NOT NULL)`),
+  ],
+);
+
+export const fixes = sqliteTable('fixes', {
+  id: text().primaryKey().notNull(),
+  reviewId: text('review_id')
+    .notNull()
+    .unique()
+    .references(() => reviews.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id').references(() => sessions.id, { onDelete: 'set null' }),
+  stage: text()
+    .$type<FixStage>()
+    .notNull()
+    .default('ticket' as FixStage),
+  status: text()
+    .$type<FixStatus>()
+    .notNull()
+    .default('running' as FixStatus),
+  jiraKey: text('jira_key'),
+  jiraUrl: text('jira_url'),
+  /** `<jira_key>-<slug>`, set with the key. */
+  branch: text(),
+  prNumber: integer('pr_number'),
+  prUrl: text('pr_url'),
+  errorMessage: text('error_message'),
+  startedAt: text('started_at').notNull().default(nowIso),
+  finishedAt: text('finished_at'),
+});

@@ -14,6 +14,7 @@ import { LoginKeychain } from './keychain/keychain';
 import { runMcpExec } from './mcp/launcher';
 import { McpServersModule } from './mcp/mcp-servers.module';
 import { SdkProbe } from './mcp/probe';
+import { MonitorModule } from './monitor/monitor.module';
 import { ReposModule } from './repos/repos.module';
 import { runSetupMcp } from './terminals/setup-mcp';
 import { TerminalsModule } from './terminals/terminals.module';
@@ -54,6 +55,7 @@ const daemon = await startDaemon({
     AgentModule.forRoot({ sdk: new ClaudeAgentSdk(), usage: new SdkUsageSource() }),
     ReposModule.forRoot(),
     WorkspaceModule.forRoot(),
+    MonitorModule.forRoot(),
     TerminalsModule.forRoot(),
     ConnectionsModule.forRoot({ tester: new McpConnectionTester(version) }),
     ConnectorsModule.forRoot({ tools: new CliConnectorTools() }),

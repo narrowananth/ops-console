@@ -4,6 +4,9 @@ import {
   accountListSchema,
   addedAccountSchema,
   agentAccountsSettingSchema,
+  alertDetailSchema,
+  alertEventSchema,
+  alertSchema,
   approvalSchema,
   branchSchema,
   type ConnectionTestResult,
@@ -20,6 +23,7 @@ import {
   connectorCheckSchema,
   connectorListSchema,
   connectorSchema,
+  fixSchema,
   healthSchema,
   mcpServerListSchema,
   mcpServerSchema,
@@ -29,10 +33,16 @@ import {
   prCommentSchema,
   pullRequestDetailSchema,
   pullRequestListSchema,
+  type ReviewAlert,
   repoListSchema,
+  reportSchema,
   repoSchema,
+  reviewSchema,
+  routeViewSchema,
   type SessionDefaults,
   type SessionPatch,
+  scanSchema,
+  serviceSchema,
   sessionDefaultsSchema,
   sessionSchema,
   type UpdateConnection,
@@ -55,6 +65,8 @@ export const queryKeys = {
   sessions: ['sessions'] as const,
   branches: (repoId: string) => ['branches', repoId] as const,
   pulls: ['pull-requests'] as const,
+  monitor: ['monitor'] as const,
+  alert: (id: string) => ['monitor', 'alert', id] as const,
   session: (id: string) => ['sessions', id] as const,
   messages: (id: string) => ['messages', id] as const,
 };
@@ -497,5 +509,121 @@ export function useStartAgentReview(repoId: string, number: number) {
         z.object({ data: prAgentReviewSchema }),
       ),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
+  });
+}
+
+const listOf = <T extends z.ZodType>(item: T) => z.object({ data: z.array(item) });
+
+export function useServices() {
+  return useQuery({
+    queryKey: [...queryKeys.monitor, 'services'],
+    queryFn: () => apiGet('/services', listOf(serviceSchema)).then((b) => b.data),
+  });
+}
+
+export function useScans() {
+  return useQuery({
+    queryKey: [...queryKeys.monitor, 'scans'],
+    queryFn: () => apiGet('/scans', listOf(scanSchema)).then((b) => b.data),
+  });
+}
+
+export function useAlerts() {
+  return useQuery({
+    queryKey: [...queryKeys.monitor, 'alerts'],
+    queryFn: () => apiGet('/alerts', listOf(alertSchema)).then((b) => b.data),
+  });
+}
+
+export function useAlert(id: string) {
+  return useQuery({
+    queryKey: queryKeys.alert(id),
+    queryFn: () => apiGet(`/alerts/${id}`, z.object({ data: alertDetailSchema })).then((b) => b.data),
+  });
+}
+
+export function useAlertEvents(id: string) {
+  return useQuery({
+    queryKey: [...queryKeys.alert(id), 'events'],
+    queryFn: () => apiGet(`/alerts/${id}/events`, listOf(alertEventSchema)).then((b) => b.data),
+  });
+}
+
+export function useAlertReports(id: string) {
+  return useQuery({
+    queryKey: [...queryKeys.alert(id), 'reports'],
+    queryFn: () => apiGet(`/alerts/${id}/reports`, listOf(reportSchema)).then((b) => b.data),
+  });
+}
+
+const refreshMonitor = (client: ReturnType<typeof useQueryClient>) =>
+  client.invalidateQueries({ queryKey: queryKeys.monitor });
+
+export function useStartScan() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (serviceId: string | null) =>
+      apiSend('POST', '/scans', { service_id: serviceId }, z.object({ data: scanSchema })),
+    onSuccess: () => refreshMonitor(client),
+  });
+}
+
+export function usePatchService() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; repo_id?: string | null; check_interval?: string | null }) => {
+      const { id, ...body } = input;
+      return apiSend('PATCH', `/services/${id}`, body, z.object({ data: serviceSchema }));
+    },
+    onSuccess: () => refreshMonitor(client),
+  });
+}
+
+export function usePatchRoute() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; ignored?: boolean; note?: string | null }) => {
+      const { id, ...body } = input;
+      return apiSend('PATCH', `/routes/${id}`, body, z.object({ data: routeViewSchema }));
+    },
+    onSuccess: () => refreshMonitor(client),
+  });
+}
+
+export function useVerifyAlert(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('POST', `/alerts/${id}/verifications`, undefined, z.object({ data: reportSchema })),
+    onSuccess: () => refreshMonitor(client),
+  });
+}
+
+export function useReviewAlert(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ReviewAlert) =>
+      apiSend(
+        'POST',
+        `/alerts/${id}/review`,
+        input,
+        z.object({ data: reviewSchema.extend({ fix: fixSchema.nullable() }) }),
+      ),
+    onSuccess: () => refreshMonitor(client),
+  });
+}
+
+export function useUndoDismissal(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('DELETE', `/alerts/${id}/review`, undefined, z.undefined()),
+    onSuccess: () => refreshMonitor(client),
+  });
+}
+
+export function useRetryFix(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('POST', `/fixes/${id}/retry`, undefined, z.object({ data: fixSchema })),
+    onSuccess: () => refreshMonitor(client),
   });
 }
