@@ -11,6 +11,7 @@ export enum ErrorCode {
   Internal = 'internal',
   SessionBusy = 'session_busy',
   ConnectorNotConnected = 'connector_not_connected',
+  NotARepo = 'not_a_repo',
 }
 
 export const errorBodySchema = z.object({

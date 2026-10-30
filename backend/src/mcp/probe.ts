@@ -12,7 +12,7 @@ export type ProbedServer = {
 
 /** Asks Claude Code which MCP servers one account's config connects. Tests replace it with a scripted fake. */
 export interface Probe {
-  /** `cwd` is the folder `local` scope servers belong to. Throws when Claude Code does not answer. */
+  /** `cwd` is the folder `local` and `project` scope servers belong to. Throws when Claude Code does not answer. */
   run(configDir: string, cwd: string): Promise<ProbedServer[]>;
 }
 
@@ -37,7 +37,7 @@ export class SdkProbe implements Probe {
         cwd,
         env: claudeEnv(configDir),
         persistSession: false,
-        settingSources: ['user', 'local'],
+        settingSources: ['user', 'local', 'project'],
         settings: { disableAllHooks: true },
         allowedTools: [],
         stderr: () => {},

@@ -21,6 +21,8 @@ import {
   healthSchema,
   mcpServerListSchema,
   mcpServerSchema,
+  repoListSchema,
+  repoSchema,
   type SessionDefaults,
   type SessionPatch,
   sessionDefaultsSchema,
@@ -41,6 +43,7 @@ export const queryKeys = {
   mcpServers: ['mcp-servers'] as const,
   connectors: ['connectors'] as const,
   connections: ['connections'] as const,
+  repos: ['repos'] as const,
   session: (id: string) => ['sessions', id] as const,
 };
 
@@ -307,5 +310,26 @@ export function useAnswerSecret() {
   return useMutation({
     mutationFn: ({ terminalId, requestId, value }: { terminalId: string; requestId: string; value: string }) =>
       apiSend('POST', `/terminals/${terminalId}/secrets`, { request_id: requestId, value }, z.undefined()),
+  });
+}
+
+/** Branch and dirty state are read from git on every fetch. */
+export function useRepos() {
+  return useQuery({ queryKey: queryKeys.repos, queryFn: () => apiGet('/repos', repoListSchema) });
+}
+
+export function useImportRepo() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (path: string) => apiSend('POST', '/repos', { path }, z.object({ data: repoSchema })),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.repos }),
+  });
+}
+
+export function useRemoveRepo() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiSend('DELETE', `/repos/${id}`, undefined, z.undefined()),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.repos }),
   });
 }

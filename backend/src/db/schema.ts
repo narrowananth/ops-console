@@ -10,6 +10,7 @@ import {
   type ConnectionType,
   type ConnectorId,
   type Effort,
+  type GitHost,
   type HealthStatus,
   type McpScope,
   type McpTransport,
@@ -192,3 +193,15 @@ export const connections = sqliteTable(
   },
   (table) => [check('connections_config_json', sql`json_valid(${table.config})`)],
 );
+
+/** A local git repository, identified by its top folder. Branch and dirty state are read from git, never stored. */
+export const repos = sqliteTable('repos', {
+  id: text().primaryKey().notNull(),
+  name: text().notNull(),
+  path: text().notNull().unique(),
+  host: text().$type<GitHost>().notNull(),
+  /** `owner/name` on the host; null for local. */
+  remoteSlug: text('remote_slug'),
+  defaultBranch: text('default_branch').notNull(),
+  createdAt: text('created_at').notNull().default(nowIso),
+});
