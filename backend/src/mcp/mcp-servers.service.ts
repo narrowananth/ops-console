@@ -1,6 +1,6 @@
 import { mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnModuleDestroy, Optional } from '@nestjs/common';
 import {
   CheckTarget,
   CONNECTOR_SERVERS,
@@ -22,7 +22,8 @@ import { ApiError } from '../common/errors';
 import { disabledMcpServers, removedMcpServers } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { KEYCHAIN, type Keychain } from '../keychain/keychain';
-import { configFile, type RegisteredScope, type RegisteredServer, readRegistered } from './claude-config';
+import { ReposService } from '../repos/repos.service';
+import { configFile, type RegisteredServer, readProject, readRegistered } from './claude-config';
 import { launcherArgv, parseEnv, secretsKey, unwrapLauncher } from './launcher';
 import { PROBE, type Probe, type ProbedServer } from './probe';
 
@@ -80,6 +81,7 @@ export class McpServersService implements OnModuleDestroy {
     @Inject(MCP_CONFIG) private readonly config: McpConfig,
     @Inject(DATA_DIR) private readonly dataDir: string,
     @Inject(ConnectionServers) private readonly connectionServers: ConnectionServers,
+    @Optional() @Inject(ReposService) private readonly repos?: ReposService,
   ) {}
 
   onModuleDestroy(): void {
@@ -100,12 +102,21 @@ export class McpServersService implements OnModuleDestroy {
   }
 
   async create(body: CreateMcpServer): Promise<McpServer> {
-    refuseProjectScope(body.scope);
+    const repo = this.repoFor(body.scope, body.repo_id);
     const existing = await this.servers();
     if (existing.some((server) => server.name === body.name) || this.connectionNames().has(body.name)) {
       throw new ApiError(409, ErrorCode.Duplicate, `${body.name} is already used`);
     }
-    await this.register(body.name, body.scope, body.transport, body.target, body.env ?? {}, body.headers ?? {}, null);
+    await this.register(
+      body.name,
+      body.scope,
+      body.transport,
+      body.target,
+      body.env ?? {},
+      body.headers ?? {},
+      null,
+      repo,
+    );
     return this.checked(body.name);
   }
 
@@ -121,14 +132,31 @@ export class McpServersService implements OnModuleDestroy {
     if (body.transport !== undefined && body.transport !== current.transport && body.target === undefined) {
       throw new ApiError(400, ErrorCode.ValidationFailed, 'a new transport needs a new command or URL');
     }
+    const moves = body.scope !== undefined && body.scope !== current.scope;
+    if (moves && (body.scope === McpScope.Project || current.scope === McpScope.Project)) {
+      throw new ApiError(
+        400,
+        ErrorCode.ValidationFailed,
+        'a server cannot move to or from project scope; add it again',
+      );
+    }
     const scope = body.scope ?? current.scope;
-    refuseProjectScope(scope);
+    const repo = this.repoFor(scope, current.repo_id ?? undefined);
     const previous = await this.registrations(name);
     const first = previous[0]?.entry;
     const target = body.target ?? current.target;
     const env = transport === McpTransport.Stdio ? await this.mergedEnv(name, body.env ?? {}) : {};
     const headers = { ...(first?.headers ?? {}), ...nonBlank(body.headers ?? {}) };
-    await this.register(name, scope, transport, target, env, transport === McpTransport.Stdio ? {} : headers, previous);
+    await this.register(
+      name,
+      scope,
+      transport,
+      target,
+      env,
+      transport === McpTransport.Stdio ? {} : headers,
+      previous,
+      repo,
+    );
     return this.checked(name);
   }
 
@@ -168,8 +196,8 @@ export class McpServersService implements OnModuleDestroy {
     if (current.transport === McpTransport.Stdio) {
       throw new ApiError(409, ErrorCode.InvalidState, `${name} has no sign-in; add it again with its env vars`);
     }
-    refuseProjectScope(current.scope);
-    await this.register(name, current.scope, current.transport, current.target, {}, {}, null);
+    const repo = this.repoFor(current.scope, current.repo_id ?? undefined);
+    await this.register(name, current.scope, current.transport, current.target, {}, {}, null, repo);
   }
 
   /** Authenticate, waiting for the sign-ins and the check. Connectors follow the result. */
@@ -222,13 +250,18 @@ export class McpServersService implements OnModuleDestroy {
   async remove(name: string): Promise<McpServer> {
     const current = this.require(await this.servers(), name);
     if (!current.registered) return current;
-    for (const { account } of await this.registrations(name)) {
+    const repo = this.repoFor(current.scope, current.repo_id ?? undefined);
+    const registered = await this.registrations(name);
+    for (const { account } of repo ? this.accounts.all().map((account) => ({ account })) : registered) {
       try {
         await this.claude.mcpLogout(name, account.configDir);
       } catch {
         // Servers without a sign-in have nothing to clear.
       }
-      await this.claude.mcpRemove(name, current.scope, await this.target(account));
+    }
+    // Project scope is one file in the Repo, so one `claude mcp remove` removes it for every account.
+    for (const { account } of repo ? registered.slice(0, 1) : registered) {
+      await this.claude.mcpRemove(name, current.scope, await this.target(account, repo));
     }
     this.probes.clear();
     await this.keychain.delete(secretsKey(name));
@@ -244,12 +277,13 @@ export class McpServersService implements OnModuleDestroy {
   /** Adds (or, when `previous` is given, replaces) the server in every account; a failure undoes the accounts done. */
   private async register(
     name: string,
-    scope: RegisteredScope,
+    scope: McpScope,
     transport: McpTransport,
     target: string,
     env: Record<string, string>,
     headers: Record<string, string>,
     previous: { account: Account; entry: RegisteredServer }[] | null,
+    repo: { id: string; path: string } | null = null,
   ): Promise<void> {
     if (transport === McpTransport.Stdio && Object.keys(headers).length > 0) {
       throw new ApiError(400, ErrorCode.ValidationFailed, 'headers are for http and sse servers');
@@ -262,9 +296,10 @@ export class McpServersService implements OnModuleDestroy {
     try {
       if (Object.keys(env).length > 0) await this.keychain.set(secretsKey(name), JSON.stringify(env));
       else await this.keychain.delete(secretsKey(name));
-      for (const account of this.accounts.all()) {
-        const where = await this.target(account);
-        const old = previous?.find((item) => item.account.id === account.id);
+      // Project scope is one `.mcp.json` in the Repo, written once; the others register in every account.
+      for (const account of repo ? this.accounts.all().slice(0, 1) : this.accounts.all()) {
+        const where = await this.target(account, repo);
+        const old = previous?.find((item) => item.account.id === account.id) ?? (repo ? previous?.[0] : undefined);
         if (old) await this.claude.mcpRemove(name, old.entry.scope, where);
         await this.claude.mcpAdd(spec, where);
         touched.push(account);
@@ -273,7 +308,7 @@ export class McpServersService implements OnModuleDestroy {
       // A new server leaves no trace (Behavior 5); an edit that fails part way is for the operator to retry.
       if (previous === null) {
         for (const account of touched) {
-          await this.claude.mcpRemove(name, spec.scope, await this.target(account)).catch(() => {});
+          await this.claude.mcpRemove(name, spec.scope, await this.target(account, repo)).catch(() => {});
         }
         await this.keychain.delete(secretsKey(name));
       }
@@ -285,7 +320,7 @@ export class McpServersService implements OnModuleDestroy {
 
   private async specOf(
     name: string,
-    scope: RegisteredScope,
+    scope: McpScope,
     transport: McpTransport,
     target: string,
     env: Record<string, string>,
@@ -368,11 +403,22 @@ export class McpServersService implements OnModuleDestroy {
     return realpath(dir);
   }
 
-  private async target(account: Account): Promise<McpTarget> {
-    return { configDir: account.configDir, cwd: await this.localDir() };
+  private async target(account: Account, repo: { path: string } | null = null): Promise<McpTarget> {
+    return { configDir: account.configDir, cwd: repo?.path ?? (await this.localDir()) };
+  }
+
+  /** The Repo a project scope server belongs to; other scopes have none. */
+  private repoFor(scope: McpScope, repoId: string | undefined): { id: string; path: string } | null {
+    if (scope !== McpScope.Project) return null;
+    const repo = repoId === undefined ? undefined : this.repos?.folders().find((item) => item.id === repoId);
+    if (!repo) throw new ApiError(400, ErrorCode.ValidationFailed, 'project scope needs a Repo: invalid body: repo_id');
+    return repo;
   }
 
   private async registrations(name: string): Promise<{ account: Account; entry: RegisteredServer }[]> {
+    const project = (await this.projectItems(false)).find((item) => item.name === name);
+    const first = this.accounts.all()[0];
+    if (project && first) return [{ account: first, entry: project.entry }];
     const views = await this.views(false);
     return views.flatMap((view) => {
       const entry = view.entries.get(name);
@@ -396,24 +442,9 @@ export class McpServersService implements OnModuleDestroy {
           entries,
           probed,
           /** This account's reading of one server; `null` when the account does not register it or is signed out. */
-          state(name: string): { status: HealthStatus; detail: string | null; tools: string[] } | null {
+          state(name: string): Reading | null {
             if (!entries.has(name) || probed === null) return null;
-            if (probed.servers === null) {
-              return { status: HealthStatus.Fail, detail: `${account.label}: Claude did not answer`, tools: [] };
-            }
-            const server = probed.servers.get(name);
-            if (!server || server.status === 'disabled') {
-              return { status: HealthStatus.Fail, detail: `${account.label}: Claude Code did not load it`, tools: [] };
-            }
-            if (server.status === 'connected') return { status: HealthStatus.Ok, detail: null, tools: server.tools };
-            if (server.status === 'needs-auth') {
-              return { status: HealthStatus.Auth, detail: `${account.label}: needs authentication`, tools: [] };
-            }
-            return {
-              status: HealthStatus.Fail,
-              detail: `${account.label}: ${server.error ?? 'did not finish starting'}`,
-              tools: [],
-            };
+            return readServer(account, probed, name);
           },
         };
       }),
@@ -421,7 +452,8 @@ export class McpServersService implements OnModuleDestroy {
   }
 
   private async probeOf(account: Account, local: string, force: boolean): Promise<Probed> {
-    const kept = this.probes.get(account.configDir);
+    const key = `${account.configDir}\n${local}`;
+    const kept = this.probes.get(key);
     if (!force && kept && Date.now() - kept.at < PROBE_TTL_MS) return kept;
     let result: Probed;
     try {
@@ -430,8 +462,29 @@ export class McpServersService implements OnModuleDestroy {
     } catch {
       result = { servers: null, at: Date.now() };
     }
-    this.probes.set(account.configDir, result);
+    this.probes.set(key, result);
     return result;
+  }
+
+  /** The servers in each Repo's `.mcp.json`, with each signed-in account's reading. A name a user or local server holds wins. */
+  private async projectItems(force: boolean) {
+    const accounts = this.accounts.all();
+    const items: { name: string; entry: RegisteredServer; repoId: string; file: string; states: Reading[] }[] = [];
+    for (const repo of this.repos?.folders() ?? []) {
+      for (const entry of await readProject(repo.path)) {
+        const states: Reading[] = [];
+        for (const account of accounts.filter((item) => item.signedIn)) {
+          const probed = await this.probeOf(account, repo.path, force);
+          states.push(
+            probed.servers !== null && !probed.servers.has(entry.name)
+              ? { status: HealthStatus.Auth, detail: `${account.label}: pending approval in Claude Code`, tools: [] }
+              : readServer(account, probed, entry.name),
+          );
+        }
+        items.push({ name: entry.name, entry, repoId: repo.id, file: path.join(repo.path, '.mcp.json'), states });
+      }
+    }
+    return items;
   }
 
   private async servers(force = false): Promise<McpServer[]> {
@@ -444,22 +497,27 @@ export class McpServersService implements OnModuleDestroy {
         .map((row) => row.name),
     );
     const removed = this.store.db.select().from(removedMcpServers).all();
-    const names = [...new Set(views.flatMap((view) => [...view.entries.keys()]))];
+    const userNames = [...new Set(views.flatMap((view) => [...view.entries.keys()]))];
+    const project = (await this.projectItems(force)).filter((item) => !userNames.includes(item.name));
+    const names = [...userNames, ...project.map((item) => item.name)];
     const out: McpServer[] = [];
 
     for (const name of names) {
       const owner = views.find((view) => view.entries.has(name));
-      const entry = owner?.entries.get(name);
-      if (!owner || !entry) continue;
+      const projectItem = project.find((item) => item.name === name);
+      const entry = owner?.entries.get(name) ?? projectItem?.entry;
+      if (!entry) continue;
       const unwrapped = unwrapLauncher(this.config.launcher, entry.command, entry.args);
       const own = unwrapped ?? entry;
       const target =
         entry.transport === McpTransport.Stdio ? joinCommand([own.command, ...own.args]) : (entry.url ?? '');
       const envKeys = unwrapped ? Object.keys(await this.storedEnv(name)).sort() : [];
-      const states = views.flatMap((view) => {
-        const state = view.state(name);
-        return state ? [state] : [];
-      });
+      const states =
+        projectItem?.states ??
+        views.flatMap((view) => {
+          const state = view.state(name);
+          return state ? [state] : [];
+        });
       const worst =
         states.find((s) => s.status === HealthStatus.Fail) ?? states.find((s) => s.status === HealthStatus.Auth);
       const reading = worst ??
@@ -468,11 +526,13 @@ export class McpServersService implements OnModuleDestroy {
       const secrets = [...Object.values(entry.headers), ...Object.values(unwrapped ? await this.storedEnv(name) : {})];
       out.push({
         name,
-        scope: entry.scope,
-        repo_id: null,
+        scope: projectItem ? McpScope.Project : entry.scope,
+        repo_id: projectItem?.repoId ?? null,
         transport: entry.transport,
         target: scrub(target, secrets),
-        config_file: configFile(owner.account.configDir),
+        config_file: projectItem
+          ? projectItem.file
+          : configFile((owner as NonNullable<typeof owner>).account.configDir),
         auth:
           Object.keys(entry.headers).length > 0
             ? McpAuth.Headers
@@ -550,15 +610,26 @@ function usedBy(name: string): ConnectorId | null {
   return (found?.[0] as ConnectorId | undefined) ?? null;
 }
 
-/** Project scope waits for Settings › Repos. */
-function refuseProjectScope(scope: McpScope): asserts scope is RegisteredScope {
-  if (scope === McpScope.Project) {
-    throw new ApiError(
-      400,
-      ErrorCode.ValidationFailed,
-      'project scope needs a Repo; Repos arrive with Settings › Repos',
-    );
+type Reading = { status: HealthStatus; detail: string | null; tools: string[] };
+
+/** One account's reading of a server from its Probe. */
+function readServer(account: Account, probed: Probed, name: string): Reading {
+  if (probed.servers === null) {
+    return { status: HealthStatus.Fail, detail: `${account.label}: Claude did not answer`, tools: [] };
   }
+  const server = probed.servers.get(name);
+  if (!server || server.status === 'disabled') {
+    return { status: HealthStatus.Fail, detail: `${account.label}: Claude Code did not load it`, tools: [] };
+  }
+  if (server.status === 'connected') return { status: HealthStatus.Ok, detail: null, tools: server.tools };
+  if (server.status === 'needs-auth') {
+    return { status: HealthStatus.Auth, detail: `${account.label}: needs authentication`, tools: [] };
+  }
+  return {
+    status: HealthStatus.Fail,
+    detail: `${account.label}: ${server.error ?? 'did not finish starting'}`,
+    tools: [],
+  };
 }
 
 function toAdd(entry: RegisteredServer): McpServerToAdd {

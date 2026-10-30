@@ -113,7 +113,11 @@ To remove this server, run: claude mcp remove "sentry" -s local
     const scope = scopeAt === -1 ? 'local' : rest[scopeAt + 1];
     config.projects ??= {};
     config.projects[process.cwd()] ??= {};
-    const holder = scope === 'user' ? config : config.projects[process.cwd()];
+    // Project scope is a `.mcp.json` in the working directory, shared by every account.
+    const projectFile = path.join(process.cwd(), '.mcp.json');
+    const project =
+      scope === 'project' ? (existsSync(projectFile) ? JSON.parse(readFileSync(projectFile, 'utf8')) : {}) : null;
+    const holder = project ?? (scope === 'user' ? config : config.projects[process.cwd()]);
     holder.mcpServers ??= {};
     if (command === 'remove') {
       delete holder.mcpServers[rest[0]];
@@ -140,6 +144,7 @@ To remove this server, run: claude mcp remove "sentry" -s local
           ? { type: flag('--transport'), url: positional[1], headers }
           : { type: 'stdio', command: rest[dash + 1], args: rest.slice(dash + 2), env: {} };
     }
+    if (project) writeFileSync(projectFile, JSON.stringify(project, null, 2));
     mkdirSync(dir, { recursive: true });
     writeFileSync(file, JSON.stringify(config, null, 2));
   }

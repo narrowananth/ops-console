@@ -1,10 +1,10 @@
 import { AgentsTab } from '../agents/agents-tab';
-import { Empty } from '../components/ui/empty';
 import { Sheet } from '../components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { ConnectorsTab } from '../connectors/connectors-tab';
 import { DevToolsTab } from '../devtools/devtools-tab';
 import { McpTab } from '../mcp/mcp-tab';
+import { ReposTab } from '../repos/repos-tab';
 import { type SettingsTab, useUi } from './ui-store';
 
 const TABS: { id: SettingsTab; label: string }[] = [
@@ -42,7 +42,7 @@ export function SettingsDrawer() {
             ) : tab.id === 'dev' ? (
               <DevToolsTab />
             ) : (
-              <Empty>Nothing here yet.</Empty>
+              <ReposTab />
             )}
           </TabsContent>
         ))}

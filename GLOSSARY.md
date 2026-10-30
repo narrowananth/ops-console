@@ -70,7 +70,7 @@ _Avoid_: approval
 ### Workspace
 
 **Repo**:
-A local git repository imported into the console, where Sessions run.
+A local git repository imported into the console, identified by its top folder, where Sessions run.
 
 **Session**:
 One conversation between the operator and the agent in one Repo, on one branch.

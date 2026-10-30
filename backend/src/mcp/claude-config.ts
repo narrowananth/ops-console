@@ -22,7 +22,7 @@ const fileSchema = z
   })
   .loose();
 
-export type RegisteredScope = McpScope.User | McpScope.Local;
+export type RegisteredScope = McpScope;
 
 /** One server as an account's `.claude.json` holds it. Header values stay inside the backend. */
 export type RegisteredServer = {
@@ -79,4 +79,25 @@ export async function readRegistered(configDir: string, localDir: string): Promi
     url: entry.url ?? null,
     headers: entry.headers ?? {},
   }));
+}
+
+const projectFileSchema = z.object({ mcpServers: z.record(z.string(), entrySchema).optional() }).loose();
+
+/** The servers a Repo's `.mcp.json` holds. A missing or half-written file reads as none. */
+export async function readProject(repoPath: string): Promise<RegisteredServer[]> {
+  try {
+    const parsed = projectFileSchema.safeParse(JSON.parse(await readFile(path.join(repoPath, '.mcp.json'), 'utf8')));
+    if (!parsed.success) return [];
+    return Object.entries(parsed.data.mcpServers ?? {}).map(([name, entry]) => ({
+      name,
+      scope: McpScope.Project,
+      transport: entry.type === 'http' || entry.type === 'sse' ? (entry.type as McpTransport) : McpTransport.Stdio,
+      command: entry.command ?? '',
+      args: entry.args ?? [],
+      url: entry.url ?? null,
+      headers: entry.headers ?? {},
+    }));
+  } catch {
+    return [];
+  }
 }

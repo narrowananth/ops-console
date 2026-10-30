@@ -11,7 +11,7 @@ This spec gives the operator one list across every account, and add, edit, authe
 
 ## Behavior
 
-1. Listing MCP Servers reads every Claude account's config (user and local scope), merged by name. Project-scoped servers from each Repo's `.mcp.json` join the list once `06-settings-repos` lands. Each entry shows transport, command or URL, scope, status, tool count, and the Connector using it (`used_by`) when one matches.
+1. Listing MCP Servers reads every Claude account's config (user and local scope), merged by name. Project-scoped servers from each Repo's `.mcp.json` join the list. Each entry shows transport, command or URL, scope, status, tool count, and the Connector using it (`used_by`) when one matches.
 2. Servers that back a Connection are left out. `meta.connection_server_count` says how many there are, and the tab links to Settings › Dev tools.
 3. Status comes from a Probe per account. A server's status is the worst across accounts (`fail`, then `auth`, then `ok`); `status_detail` names the account and the error. A disabled server reads `off`. Probe results are kept in memory for 60 seconds.
 4. Adding a server takes name, transport, command or URL, scope, and env vars (stdio) or headers (http, sse). Env vars go to the Keychain adapter under `mcp:<name>`. A stdio server with env vars is registered as `ops-console mcp-exec <name> -- <command>`; at launch that wrapper reads the env vars from the Keychain and starts the command with them. A stdio server with none is registered as its own command. The console runs `claude mcp add` in every account's config dir (user scope, or local scope in the folder `mcp-local` of the data folder) or writes the Repo's `.mcp.json` once (project scope, once `06-settings-repos` lands), then checks the server.
@@ -168,5 +168,5 @@ Settings › MCP servers, as designed: one row per server with name, scope and t
 - Servers that back a Connection: `05-settings-dev-tools`.
 - Connector sign-in screens, which call these endpoints: `04-settings-connectors`.
 - Copying registrations to a newly added account: `02-settings-agents`.
-- Project scope, `used_by`, Connection-backed servers (`connection_server_count` reads 0) and terminals leaving out disabled servers: each waits for the spec that adds the thing it needs. A project scope request is refused with `validation_failed`.
+- Terminals leaving out disabled servers: waits for the spec that adds Repo terminals (`07-workspace`).
 - Claude Code's approval prompt for project `.mcp.json` servers: shown as `auth` with the detail "pending approval in Claude Code"; approving stays in Claude Code.

@@ -1,6 +1,6 @@
 # Settings: Repos
 
-**Status:** ready
+**Status:** shipped
 **Design:** Settings › Repos: Import a local repo, Imported repos list, Remove with confirm
 
 ## Problem
@@ -17,13 +17,15 @@ Sessions, Verifications and Fixes run inside a local git repository, and Monitor
 6. Renaming a Repo changes only its display name.
 7. Removing a Repo deletes its row and leaves the folder untouched. Once `07-workspace` adds Sessions, removing a Repo that has Sessions is refused with `repo_has_sessions`.
 8. Listing a Repo's branches reads git each time: local branches by most recent commit, the current one marked. A missing folder returns `not_found`.
-9. A Repo's `.mcp.json` servers appear in Settings › MCP servers with scope `project` and this Repo (`03-settings-mcp-servers`).
+9. A Repo's `.mcp.json` servers appear in Settings › MCP servers with scope `project` and this Repo (`03-settings-mcp-servers`). A server Claude Code has not approved yet reads `auth` with "pending approval in Claude Code".
+10. Adding a MCP server with scope `project` takes a `repo_id` and writes the Repo's `.mcp.json` once, with one `claude mcp add`; removing it removes it from that file. A project server cannot move to another scope.
 
 ## Settled
 
 - **Identity**: a Repo is its top folder. Two Repos may share a name; the path tells them apart.
 - **Live, not stored**: branch, dirty state and the branch list.
 - **Groups**: not in this spec. Repos are one flat list.
+- **Project servers**: a name a user or local server already holds wins over the same name in a `.mcp.json`. A removed project server keeps no Repo, so Authenticate on its row is refused with `validation_failed`; it is added again from the form.
 
 ## Not required
 
@@ -96,7 +98,7 @@ Settings › Repos, as designed: the path field with Import (Enter also imports)
 ## Seams
 
 - **Backend + SQLite, over HTTP** (real git in temporary folders): 1 to 8. Builds repositories with and without remotes, imports them, moves and deletes folders, and reads the responses.
-- **Backend + SQLite, over HTTP, with `03-settings-mcp-servers`**: 9. A Repo with a `.mcp.json` shows its server in the MCP list.
+- **Backend + SQLite, over HTTP, with `03-settings-mcp-servers`**: 9, 10. A Repo with a `.mcp.json` shows its server in the MCP list.
 
 ## Out of scope
 
