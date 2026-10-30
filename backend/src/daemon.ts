@@ -11,6 +11,7 @@ import { API_PREFIX, WS_PATH } from '@ops-console/shared';
 import type Database from 'better-sqlite3';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { AppModule } from './app.module';
+import { DaemonAddress } from './common/daemon-address';
 import { lockDataDir, writeRuntimeFile } from './common/data-dir';
 import { DaemonLogger, type WriteLog } from './common/logger';
 import { StartupRecovery } from './common/recovery';
@@ -66,10 +67,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 
     const session = new Session(options.version);
     const hub = new WsHub(session);
+    const address = new DaemonAddress();
     cleanups.push(() => hub.close());
     const app = await NestFactory.create(
       AppModule.forRoot({
         dataDir: options.dataDir,
+        address,
         session,
         store: new Store(sqlite, hub),
         hub,
@@ -90,6 +93,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     const server = app.getHttpServer() as Server;
     await listen(server, options.port);
     const port = (server.address() as AddressInfo).port;
+    address.port = port;
     hub.attach(server);
 
     const scheduler = app.get(Scheduler);

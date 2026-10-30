@@ -24,6 +24,8 @@ export type ActionToLog = {
   target: string;
   command: string;
   isProd: boolean;
+  /** The Connection a database query was for. */
+  connectionId?: string;
 };
 
 export function toActionLogRow(row: ActionLogDbRow): ActionLogRow {
@@ -60,6 +62,7 @@ export class ActionLogService {
           target: action.target,
           command: redact(action.command),
           isProd: action.isProd,
+          connectionId: action.connectionId ?? null,
         })
         .returning()
         .get();

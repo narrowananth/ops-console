@@ -26,6 +26,20 @@ import { configFile, type RegisteredScope, type RegisteredServer, readRegistered
 import { launcherArgv, parseEnv, secretsKey, unwrapLauncher } from './launcher';
 import { PROBE, type Probe, type ProbedServer } from './probe';
 
+/** Names of the servers that back a Connection. Settings › Connections owns them; the MCP list leaves them out. */
+@Injectable()
+export class ConnectionServers {
+  private source: () => string[] = () => [];
+
+  use(source: () => string[]): void {
+    this.source = source;
+  }
+
+  names(): Set<string> {
+    return new Set(this.source());
+  }
+}
+
 export const MCP_CONFIG = Symbol('MCP_CONFIG');
 
 export type McpConfig = {
@@ -65,6 +79,7 @@ export class McpServersService implements OnModuleDestroy {
     @Inject(PROBE) private readonly probe: Probe,
     @Inject(MCP_CONFIG) private readonly config: McpConfig,
     @Inject(DATA_DIR) private readonly dataDir: string,
+    @Inject(ConnectionServers) private readonly connectionServers: ConnectionServers,
   ) {}
 
   onModuleDestroy(): void {
@@ -72,7 +87,12 @@ export class McpServersService implements OnModuleDestroy {
   }
 
   async list(): Promise<{ data: McpServer[]; meta: { next_cursor: null; connection_server_count: number } }> {
-    return { data: await this.servers(), meta: { next_cursor: null, connection_server_count: 0 } };
+    const hidden = this.connectionServers.names();
+    const all = await this.servers();
+    return {
+      data: all.filter((server) => !hidden.has(server.name)),
+      meta: { next_cursor: null, connection_server_count: all.filter((server) => hidden.has(server.name)).length },
+    };
   }
 
   async get(name: string): Promise<McpServer> {
@@ -309,9 +329,37 @@ export class McpServersService implements OnModuleDestroy {
     });
   }
 
-  /** Names a Connection's MCP server uses; Connections arrive with Settings › Dev tools. */
   private connectionNames(): Set<string> {
-    return new Set();
+    return this.connectionServers.names();
+  }
+
+  /** Whether any account registers a server of this name, hidden or not. */
+  async exists(name: string): Promise<boolean> {
+    const views = await this.views(false);
+    return views.some((view) => view.entries.has(name));
+  }
+
+  /** Registers a Connection's server in every account, replacing the one there. The env vars go to the Keychain. */
+  async registerConnectionServer(name: string, target: string, env: Record<string, string>): Promise<void> {
+    const previous = await this.registrations(name);
+    await this.register(
+      name,
+      McpScope.User,
+      McpTransport.Stdio,
+      target,
+      env,
+      {},
+      previous.length > 0 ? previous : null,
+    );
+  }
+
+  /** Removes a Connection's server from every account and the Keychain; no row is kept. */
+  async unregisterConnectionServer(name: string): Promise<void> {
+    for (const { account, entry } of await this.registrations(name)) {
+      await this.claude.mcpRemove(name, entry.scope, await this.target(account));
+    }
+    await this.keychain.delete(secretsKey(name));
+    this.probes.clear();
   }
 
   private async localDir(): Promise<string> {

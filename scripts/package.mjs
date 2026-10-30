@@ -37,6 +37,7 @@ const nativeVersion = async (pkg) =>
 const natives = {
   'better-sqlite3': await nativeVersion('better-sqlite3'),
   '@napi-rs/keyring': await nativeVersion('@napi-rs/keyring'),
+  'node-pty': await nativeVersion('node-pty'),
   '@anthropic-ai/claude-agent-sdk': await nativeVersion('@anthropic-ai/claude-agent-sdk'),
 };
 await writeFile(

@@ -5,9 +5,16 @@ import {
   addedAccountSchema,
   agentAccountsSettingSchema,
   approvalSchema,
+  type ConnectionTestResult,
+  type ConnectionType,
   type ConnectorId,
+  type CreateConnection,
   type CreateMcpServer,
   claudeAccountSchema,
+  connectionCheckSchema,
+  connectionListSchema,
+  connectionSchema,
+  connectionTestResultSchema,
   connectorCheckSchema,
   connectorListSchema,
   connectorSchema,
@@ -18,6 +25,7 @@ import {
   type SessionPatch,
   sessionDefaultsSchema,
   sessionSchema,
+  type UpdateConnection,
   type UpdateMcpServer,
 } from '@ops-console/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -32,6 +40,7 @@ export const queryKeys = {
   approvals: ['approvals'] as const,
   mcpServers: ['mcp-servers'] as const,
   connectors: ['connectors'] as const,
+  connections: ['connections'] as const,
   session: (id: string) => ['sessions', id] as const,
 };
 
@@ -238,4 +247,65 @@ export function useDisconnectConnector() {
   return useConnectorMutation((id: ConnectorId) =>
     apiSend('DELETE', `/connectors/${id}/credentials`, undefined, z.object({ data: connectorSchema })),
   );
+}
+
+/** Refreshed by `connection.checked` over `/ws`. */
+export function useConnections() {
+  return useQuery({ queryKey: queryKeys.connections, queryFn: () => apiGet('/connections', connectionListSchema) });
+}
+
+function useConnectionMutation<V, R = unknown>(send: (variables: V) => Promise<R>) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: send,
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.connections }),
+  });
+}
+
+export function useCreateConnection() {
+  return useConnectionMutation((body: CreateConnection) =>
+    apiSend('POST', '/connections', body, z.object({ data: connectionSchema })),
+  );
+}
+
+export function useUpdateConnection() {
+  return useConnectionMutation(({ id, body }: { id: string; body: UpdateConnection }) =>
+    apiSend('PATCH', `/connections/${id}`, body, z.object({ data: connectionSchema })),
+  );
+}
+
+export function useDeleteConnection() {
+  return useConnectionMutation((id: string) => apiSend('DELETE', `/connections/${id}`, undefined, z.undefined()));
+}
+
+export function useCheckConnection() {
+  return useConnectionMutation((id: string) =>
+    apiSend('POST', `/connections/${id}/checks`, undefined, z.object({ data: connectionCheckSchema })),
+  );
+}
+
+/** Tests an unsaved Connection; nothing is stored. */
+export function useTestConnection() {
+  return useMutation({
+    mutationFn: (body: { type: ConnectionType; config: Record<string, unknown>; secret?: string }) =>
+      apiSend('POST', '/connections/tests', body, z.object({ data: connectionTestResultSchema })).then(
+        (response): ConnectionTestResult => response.data,
+      ),
+  });
+}
+
+export function useStartSetupTerminal() {
+  return useMutation({
+    mutationFn: () =>
+      apiSend('POST', '/terminals', { kind: 'setup' }, z.object({ data: z.object({ id: z.string() }) })).then(
+        (response) => response.data.id,
+      ),
+  });
+}
+
+export function useAnswerSecret() {
+  return useMutation({
+    mutationFn: ({ terminalId, requestId, value }: { terminalId: string; requestId: string; value: string }) =>
+      apiSend('POST', `/terminals/${terminalId}/secrets`, { request_id: requestId, value }, z.undefined()),
+  });
 }
