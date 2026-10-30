@@ -1,6 +1,6 @@
 # Settings: Dev tools connections
 
-**Status:** ready
+**Status:** shipped
 **Design:** Settings › Dev tools: the Connections list, Add with Claude (setup terminal), the type picker and the connection form (fields, Environment, Claude access, Test, Delete)
 
 ## Problem
@@ -41,10 +41,22 @@ The agent checks a failing Route against real data: a Postgres table, a Mongo co
   | `firebase` | `project_id`, `services` | service account JSON |
   | `kafka` | `bootstrap_servers`, `sasl_mechanism`, `schema_registry_url`, `kafbat_url` | SASL password, optional |
 
-- **Read-only enforcement**: `/ship` picks, per type, an MCP Server that enforces read-only at launch (a flag or a read-only transaction). A type with no such server cannot be set to `read` until it has one. The Access Level is never only a label (GLOSSARY).
+- **Read-only enforcement**: `/ship` picks, per type, an MCP Server that enforces read-only at launch (a flag or a read-only transaction). A type with no such server cannot be set to `read` until it has one. The Access Level is never only a label (GLOSSARY). The picks:
+
+  | Type | MCP Server | Read-only |
+  | ---- | ---------- | --------- |
+  | `postgres` | `@bytebase/dbhub`, `DSN` in env | `--readonly` flag |
+  | `mongodb` | `mongodb-mcp-server`, `MDB_MCP_CONNECTION_STRING` in env | `--readOnly` flag |
+  | `clickhouse` | `mcp-clickhouse` | read-only unless `CLICKHOUSE_ALLOW_WRITE_ACCESS=true` |
+  | `redis` | `redis-mcp-server` | none: `read` is refused, the default is `none` |
+  | `firebase`, `kafka` | none picked yet | saved with Access Level `none` only |
+
+- **Keychain keys**: the Connection's own secret is `connection:<id>`. The env vars its server reads at launch (the Postgres DSN, for one) are derived from it and sit under `mcp:<name>` for the launcher.
 - **Launch**: every Connection server starts through `ops-console mcp-exec <name> -- <command>`, which reads the secret at launch.
 - **Setup agent**: a Claude Code agent definition the console ships, with one extra MCP Server, `ops-console`. Its tools are `test_connection`, `save_connection`, `connect_connector`, `authenticate_mcp_server` and `request_secret`. The REST endpoints and these tools run the same code.
-- **Terminal**: node-pty behind its own WebSocket, `/terminals/:id`. `07-workspace` reuses it for Repo shells and Claude terminals.
+- **Terminal**: node-pty behind its own WebSocket, `/terminals/:id`. `07-workspace` reuses it for Repo shells and Claude terminals. The macOS helper in `node-pty` ships without the execute bit, so the daemon sets it before the first spawn.
+- **Setup terminal folder**: each terminal runs in its own folder under the data folder, which holds the agent definition and the MCP config. The console marks the folder trusted, and the account onboarded, in the account's `.claude.json`, because Claude Code's folder prompt defaults to "No, exit". A `line` writes the text, then Enter 80 ms later, because Claude Code's prompt reads both together as a paste.
+- **Setup tools**: `ops-console mcp-setup` is the stdio MCP Server the agent runs. It posts each tool call to `POST /terminals/:id/tools/:tool` on the daemon, which resolves placeholders and runs the same code as the REST endpoints.
 - **PROD writes**: on a PROD Connection with `write`, every write the agent proposes needs the operator's typed confirm, through Approvals (`02-settings-agents`).
 - **Design departure**: secrets go to the Keychain, not `~/.ops-console/secrets` (ADR 0004).
 

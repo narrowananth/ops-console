@@ -28,6 +28,7 @@ export function useLiveEvents(): void {
       if (event.event === 'connection.checked') {
         void client.invalidateQueries({ queryKey: queryKeys.mcpServers });
         void client.invalidateQueries({ queryKey: queryKeys.connectors });
+        void client.invalidateQueries({ queryKey: queryKeys.connections });
       }
       if (event.event === 'approval.requested' || event.event === 'approval.decided') {
         void client.invalidateQueries({ queryKey: queryKeys.approvals });

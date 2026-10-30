@@ -14,8 +14,8 @@ import {
   TOKEN_CONNECTORS,
 } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
-import { z } from 'zod';
 import { ApiError, validationFailed } from '../common/errors';
+import { mergeConfig } from '../common/merge-config';
 import { connectors } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { KEYCHAIN, type Keychain } from '../keychain/keychain';
@@ -287,20 +287,4 @@ function isStale(lastCheckedAt: string | null): boolean {
 function unreachable(error: unknown): Reading {
   const detail = error instanceof ApiError ? error.message : 'the check did not finish';
   return { status: HealthStatus.Fail, detail, accountLabel: null, login: null };
-}
-
-const blank = z.union([z.literal(''), z.null()]);
-
-/** Blank strings keep the stored value; objects merge field by field. */
-function mergeConfig(stored: Record<string, unknown>, changes: Record<string, unknown>): Record<string, unknown> {
-  const out = { ...stored };
-  for (const [key, value] of Object.entries(changes)) {
-    if (blank.safeParse(value).success && value === '') continue;
-    const current = out[key];
-    out[key] =
-      value && typeof value === 'object' && !Array.isArray(value) && current && typeof current === 'object'
-        ? mergeConfig(current as Record<string, unknown>, value as Record<string, unknown>)
-        : value;
-  }
-  return out;
 }

@@ -3,6 +3,7 @@ import { Empty } from '../components/ui/empty';
 import { Sheet } from '../components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { ConnectorsTab } from '../connectors/connectors-tab';
+import { DevToolsTab } from '../devtools/devtools-tab';
 import { McpTab } from '../mcp/mcp-tab';
 import { type SettingsTab, useUi } from './ui-store';
 
@@ -38,6 +39,8 @@ export function SettingsDrawer() {
               <McpTab />
             ) : tab.id === 'connectors' ? (
               <ConnectorsTab />
+            ) : tab.id === 'dev' ? (
+              <DevToolsTab />
             ) : (
               <Empty>Nothing here yet.</Empty>
             )}

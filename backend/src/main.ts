@@ -5,6 +5,8 @@ import { z } from 'zod';
 import { SdkUsageSource } from './accounts/usage-source';
 import { AgentModule } from './agent/agent.module';
 import { ClaudeAgentSdk } from './agent/agent-sdk';
+import { McpConnectionTester } from './connections/connection-tester';
+import { ConnectionsModule } from './connections/connections.module';
 import { CliConnectorTools } from './connectors/connector-tools';
 import { ConnectorsModule } from './connectors/connectors.module';
 import { startDaemon } from './daemon';
@@ -12,9 +14,17 @@ import { LoginKeychain } from './keychain/keychain';
 import { runMcpExec } from './mcp/launcher';
 import { McpServersModule } from './mcp/mcp-servers.module';
 import { SdkProbe } from './mcp/probe';
+import { runSetupMcp } from './terminals/setup-mcp';
+import { TerminalsModule } from './terminals/terminals.module';
 
 // `ops-console mcp-exec <name> -- <command>`: the launcher for a stdio server whose env vars the console holds.
 if (process.argv[2] === 'mcp-exec') process.exit(await runMcpExec(process.argv.slice(3), new LoginKeychain()));
+
+// `ops-console mcp-setup`: the MCP Server of the Dev tools setup agent.
+if (process.argv[2] === 'mcp-setup') {
+  await runSetupMcp(process.env);
+  await new Promise(() => {});
+}
 
 const env = z
   .object({
@@ -27,18 +37,21 @@ const env = z
 const appDir = path.resolve(env.OPS_CONSOLE_APP_DIR ?? path.dirname(process.argv[1] ?? '.'));
 const versionFile = path.join(appDir, '..', 'VERSION');
 const uiDir = path.join(appDir, 'public');
+const version = existsSync(versionFile) ? readFileSync(versionFile, 'utf8').trim() : 'dev';
 
 const daemon = await startDaemon({
   dataDir: path.resolve(
     env.OPS_CONSOLE_DATA_DIR ?? path.join(homedir(), 'Library', 'Application Support', 'ops-console'),
   ),
   port: env.OPS_CONSOLE_PORT,
-  version: existsSync(versionFile) ? readFileSync(versionFile, 'utf8').trim() : 'dev',
+  version,
   uiDir: existsSync(uiDir) ? uiDir : null,
   migrationsDir: path.join(appDir, 'drizzle'),
   writeLog: (line) => process.stdout.write(`${line}\n`),
   modules: [
     AgentModule.forRoot({ sdk: new ClaudeAgentSdk(), usage: new SdkUsageSource() }),
+    TerminalsModule.forRoot(),
+    ConnectionsModule.forRoot({ tester: new McpConnectionTester(version) }),
     ConnectorsModule.forRoot({ tools: new CliConnectorTools() }),
     McpServersModule.forRoot({
       probe: new SdkProbe(),

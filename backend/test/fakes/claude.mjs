@@ -5,11 +5,32 @@
 // the server in `fake-mcp-auth.json`; `mcp-fail-add` in the dir makes `mcp add` fail, `FAKE_MCP_LOGIN=fail` makes login fail.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { createInterface } from 'node:readline';
 
 const [, , group, command, ...rest] = process.argv;
 const here = path.dirname(new URL(import.meta.url).pathname);
 const warning =
   '⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set · Unset it to load them';
+
+if (group === '--agent') {
+  // The Dev tools setup agent: prints each line it hears, and `tool <name> <json>` calls the console's tool endpoint.
+  const { OPS_CONSOLE_URL: url, OPS_CONSOLE_TOKEN: token, OPS_CONSOLE_TERMINAL: terminal } = process.env;
+  console.log('setup agent ready');
+  createInterface({ input: process.stdin }).on('line', async (line) => {
+    const call = /^tool (\w+) (.*)$/.exec(line);
+    if (!call) {
+      console.log(`heard: ${line}`);
+      return;
+    }
+    const response = await fetch(`${url}/api/terminals/${terminal}/tools/${call[1]}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: call[2],
+    });
+    console.log(`result: ${response.status} ${JSON.stringify(await response.json())}`);
+  });
+  await new Promise(() => {});
+}
 
 if (group === 'auth') {
   const auth = path.join(process.env.CLAUDE_CONFIG_DIR ?? process.env.FAKE_CLAUDE_HOME, 'fake-auth.json');

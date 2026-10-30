@@ -1,10 +1,13 @@
 import {
+  type AccessLevel,
   type AccessMode,
   type ActionActor,
   type ActionKind,
   ActionOutcome,
   type ApprovalKind,
   ApprovalStatus,
+  type ConnectionEnv,
+  type ConnectionType,
   type ConnectorId,
   type Effort,
   type HealthStatus,
@@ -15,7 +18,16 @@ import {
   SessionState,
 } from '@ops-console/shared';
 import { sql } from 'drizzle-orm';
-import { check, index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  type AnySQLiteColumn,
+  check,
+  index,
+  integer,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 
 export const nowIso = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
@@ -92,6 +104,8 @@ export const actionLog = sqliteTable(
     outcome: text().$type<ActionOutcome>().notNull().default(ActionOutcome.Pending),
     errorMessage: text('error_message'),
     finishedAt: text('finished_at'),
+    /** The Connection a database query was for. */
+    connectionId: text('connection_id').references((): AnySQLiteColumn => connections.id, { onDelete: 'set null' }),
   },
   (table) => [
     index('action_log_at_idx').on(sql`${table.at} DESC`),
@@ -152,4 +166,29 @@ export const connectors = sqliteTable(
     lastCheckedAt: text('last_checked_at'),
   },
   (table) => [check('connectors_config_json', sql`json_valid(${table.config})`)],
+);
+
+/** A database the agent can reach. The server is registered under the same name; `config` never holds a secret. */
+export const connections = sqliteTable(
+  'connections',
+  {
+    id: text().primaryKey().notNull(),
+    name: text().notNull().unique(),
+    type: text().$type<ConnectionType>().notNull(),
+    env: text().$type<ConnectionEnv>().notNull(),
+    access: text()
+      .$type<AccessLevel>()
+      .notNull()
+      .default('read' as AccessLevel),
+    config: text().notNull().default('{}'),
+    status: text()
+      .$type<HealthStatus>()
+      .notNull()
+      .default('off' as HealthStatus),
+    statusDetail: text('status_detail'),
+    latencyMs: integer('latency_ms'),
+    lastCheckedAt: text('last_checked_at'),
+    createdAt: text('created_at').notNull().default(nowIso),
+  },
+  (table) => [check('connections_config_json', sql`json_valid(${table.config})`)],
 );

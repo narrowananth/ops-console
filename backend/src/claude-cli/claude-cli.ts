@@ -64,7 +64,7 @@ export function claudeEnv(configDir: ConfigDir): NodeJS.ProcessEnv {
 
 /** `claude mcp get` joins args with spaces, so an arg holding a space comes back split. */
 export class ClaudeCli {
-  constructor(private readonly bin = 'claude') {}
+  constructor(readonly bin = 'claude') {}
 
   async mcpGet(name: string): Promise<McpServerConfig> {
     const output = await this.exec(['mcp', 'get', name], 'mcp get', { configDir: null });
