@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm check*)",
+      "Bash(pnpm test*)",
+      "Bash(pnpm lint*)",
+      "Bash(pnpm typecheck*)",
+      "Bash(pnpm --filter * check*)",
+      "Bash(pnpm --filter * test*)",
+      "Bash(docker compose ps*)",
+      "Bash(docker compose logs*)",
+      "Bash(gh pr view*)",
+      "Bash(gh pr list*)",
+      "Bash(gh pr diff*)",
+      "Bash(gh pr checks*)"
+    ],
+    "ask": [
+      "Bash(gh pr create*)",
+      "Bash(gh pr comment*)",
+      "Bash(git push*)",
+      "Bash(pnpm add*)",
+      "Bash(pnpm db:migrate*)",
+      "Bash(docker compose down*)"
+    ],
+    "deny": [
+      "Bash(gh pr merge*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Read(~/.ops-console/secrets/**)"
+    ]
+  }
+}
