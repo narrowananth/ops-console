@@ -16,6 +16,26 @@ Claude running through the Claude Agent SDK on the operator's machine, with the 
 connections the console grants it.
 _Avoid_: bot, AI
 
+**Claude account**:
+One Claude subscription signed in on this machine, with its own 5-hour and weekly usage windows.
+The agent runs under the active one.
+
+**Auto-switch**:
+Moving the active Claude account when its 5-hour usage reaches the threshold, carrying each
+Session's conversation over.
+
+**Smart usage**:
+Ranking Claude accounts by weekly quota left per day until the weekly reset, so quota that would go
+unused is used first.
+
+**Access mode**:
+What the agent may do in a Session without asking: supervised, accept edits, auto or full. A PROD
+write asks in every mode.
+
+**Approval**:
+The operator's yes or no on one agent action that needs it: a PROD write, or an edit or command in
+a mode that asks.
+
 ### Monitor
 
 **Service**:

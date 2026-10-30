@@ -16,13 +16,39 @@ export class ApiError extends Error {
 /** Nothing answered, or something other than the daemon did (a dev proxy with no backend). */
 export class DaemonUnreachableError extends Error {}
 
-export async function apiGet<T extends z.ZodType>(path: string, schema: T): Promise<z.infer<T>> {
+export function apiGet<T extends z.ZodType>(path: string, schema: T): Promise<z.infer<T>> {
+  return request('GET', path, undefined, schema);
+}
+
+export function apiSend<T extends z.ZodType>(
+  method: 'POST' | 'PATCH' | 'DELETE',
+  path: string,
+  body: unknown,
+  schema: T,
+): Promise<z.infer<T>> {
+  return request(method, path, body, schema);
+}
+
+async function request<T extends z.ZodType>(
+  method: string,
+  path: string,
+  json: unknown,
+  schema: T,
+): Promise<z.infer<T>> {
   let response: Response;
   try {
-    response = await fetch(`/api${path}`, { headers: { Authorization: `Bearer ${sessionToken() ?? ''}` } });
+    response = await fetch(`/api${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${sessionToken() ?? ''}`,
+        ...(json === undefined ? {} : { 'Content-Type': 'application/json' }),
+      },
+      body: json === undefined ? undefined : JSON.stringify(json),
+    });
   } catch {
     throw new DaemonUnreachableError('no answer from the daemon');
   }
+  if (response.status === 204) return schema.parse(undefined);
   const body: unknown = await response.json().catch(() => undefined);
   if (response.ok) return schema.parse(body);
   const error = errorBodySchema.safeParse(body);

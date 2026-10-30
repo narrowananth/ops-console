@@ -69,6 +69,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     cleanups.push(() => hub.close());
     const app = await NestFactory.create(
       AppModule.forRoot({
+        dataDir: options.dataDir,
         session,
         store: new Store(sqlite, hub),
         hub,

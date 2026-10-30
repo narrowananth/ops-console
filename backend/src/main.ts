@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
+import { AgentModule } from './agent/agent.module';
+import { ClaudeAgentSdk } from './agent/agent-sdk';
 import { startDaemon } from './daemon';
 
 const env = z
@@ -9,6 +11,7 @@ const env = z
     OPS_CONSOLE_APP_DIR: z.string().optional(),
     OPS_CONSOLE_DATA_DIR: z.string().optional(),
     OPS_CONSOLE_PORT: z.coerce.number().int().min(0).max(65535).default(4545),
+    CLAUDE_CONFIG_DIR: z.string().optional(),
   })
   .parse(process.env);
 const appDir = path.resolve(env.OPS_CONSOLE_APP_DIR ?? path.dirname(process.argv[1] ?? '.'));
@@ -22,6 +25,12 @@ const daemon = await startDaemon({
   uiDir: existsSync(uiDir) ? uiDir : null,
   migrationsDir: path.join(appDir, 'drizzle'),
   writeLog: (line) => process.stdout.write(`${line}\n`),
+  modules: [
+    AgentModule.forRoot({
+      sdk: new ClaudeAgentSdk(),
+      claudeHome: env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), '.claude'),
+    }),
+  ],
 }).catch(() => process.exit(1));
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {

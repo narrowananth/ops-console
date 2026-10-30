@@ -9,6 +9,7 @@ export enum ErrorCode {
   RateLimited = 'rate_limited',
   UpstreamFailed = 'upstream_failed',
   Internal = 'internal',
+  SessionBusy = 'session_busy',
 }
 
 export const errorBodySchema = z.object({

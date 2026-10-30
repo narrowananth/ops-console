@@ -1,12 +1,31 @@
 #!/usr/bin/env node
 // Stands in for the `claude` CLI: prints output in its format and records add/remove calls.
-import { appendFileSync } from 'node:fs';
+// Sign-in state lives in `fake-auth.json` in the config dir: `CLAUDE_CONFIG_DIR`, or `FAKE_CLAUDE_HOME` for the
+// operator's own setup.
+import { appendFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 
 const [, , group, command, ...rest] = process.argv;
 const here = path.dirname(new URL(import.meta.url).pathname);
 const warning =
   '⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set · Unset it to load them';
+
+if (group === 'auth') {
+  const auth = path.join(process.env.CLAUDE_CONFIG_DIR ?? process.env.FAKE_CLAUDE_HOME, 'fake-auth.json');
+  if (command === 'status') {
+    const signedIn = existsSync(auth);
+    const account = signedIn ? JSON.parse(readFileSync(auth, 'utf8')) : {};
+    console.log(
+      JSON.stringify({ loggedIn: signedIn, authMethod: signedIn ? 'claude.ai' : 'none', ...account }, null, 2),
+    );
+    process.exit(signedIn ? 0 : 1);
+  }
+  if (command === 'logout') {
+    rmSync(auth, { force: true });
+    process.exit(0);
+  }
+  process.exit(2);
+}
 
 if (group !== 'mcp') process.exit(2);
 

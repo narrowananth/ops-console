@@ -31,12 +31,13 @@ await writeFile(path.join(stage, 'cli/package.json'), '{ "type": "module" }\n');
 await cp(path.join(repo, 'backend/dist'), path.join(stage, 'app'), { recursive: true });
 await cp(path.join(repo, 'frontend/dist'), path.join(stage, 'app/public'), { recursive: true });
 
-// Native modules, at the versions the backend was tested with.
+// Native modules and the Agent SDK with its platform binary, at the versions the backend was tested with.
 const nativeVersion = async (pkg) =>
   JSON.parse(await readFile(path.join(repo, 'backend/node_modules', pkg, 'package.json'), 'utf8')).version;
 const natives = {
   'better-sqlite3': await nativeVersion('better-sqlite3'),
   '@napi-rs/keyring': await nativeVersion('@napi-rs/keyring'),
+  '@anthropic-ai/claude-agent-sdk': await nativeVersion('@anthropic-ai/claude-agent-sdk'),
 };
 await writeFile(
   path.join(stage, 'app/package.json'),

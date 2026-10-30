@@ -25,8 +25,9 @@ to the backend on 4546.
 
 `install.sh` puts a release tarball in `~/.ops-console/versions/<version>`, points
 `~/.ops-console/current` at it and links `~/.local/bin/ops-console`. The tarball carries its own
-Node 24, the bundled daemon, the built UI, the CLI and the native modules (`better-sqlite3`,
-`@napi-rs/keyring`) built for that Node. The system Node is never used.
+Node 24, the bundled daemon, the built UI, the CLI, the native modules (`better-sqlite3`,
+`@napi-rs/keyring`) built for that Node, and the Claude Agent SDK with its platform's Claude Code
+binary. The system Node is never used.
 
 `ops-console start` writes a LaunchAgent plist that runs `current/bin/ops-console daemon`. The data
 folder is `~/Library/Application Support/ops-console` (`OPS_CONSOLE_DATA_DIR` overrides it) and
@@ -71,19 +72,38 @@ Judgment work (Verification, Fix, Agent Review) runs as an agent session.
 | `monitor` | Services, Routes, Scans, Alerts; Datadog queries through `pup` |
 | `verification` | Runs a Verification with the agent, stores the Report |
 | `review` | Operator's Review; on confirm, starts the fix Session |
-| `workspace` | Repos, Sessions, branches, PRs through `gh` |
-| `agent` | Claude Agent SDK runs, permission rules, streaming output |
+| `workspace` | Repos, branches, PRs through `gh` |
+| `agent` | Sessions, Claude Agent SDK runs, permission hooks, streaming output, transcripts |
+| `accounts` | Claude accounts, their usage, Auto-switch and Smart usage |
 | `terminal` | node-pty processes behind an authenticated WebSocket |
 | `connections` | Connections, Access Levels, PROD tags; secrets via Keychain |
-| `action-log` | Writes a row before any outside action |
+| `action-log` | Writes a row before any outside action; Approvals; redaction |
 
-The first eight exist now; the rest arrive with their specs.
+The first eight, plus `agent`, `accounts` and `action-log`, exist now; the rest arrive with their
+specs.
 
 ## `state.db` holds
 
-Settings the operator changed, and, as their specs land, Repos, Services, Routes, Scans, Alerts,
-Reports, Reviews, Connections (no secrets) and the Action Log. Session messages stay in the Claude
-Code transcript.
+Settings the operator changed, Claude accounts, Sessions, the Action Log and Approvals, and, as
+their specs land, Repos, Services, Routes, Scans, Alerts, Reports, Reviews and Connections (no
+secrets). Session messages stay in the Claude Code transcript, in the config dir of the Session's
+Claude account.
+
+## Agent runs
+
+A Session's run is a Claude Agent SDK `query()` in the working directory its kind supplies,
+resuming the stored SDK session. Each Claude account has its own `CLAUDE_CONFIG_DIR` under the data
+folder; the seeded one uses the operator's own Claude Code setup. A `PreToolUse` hook writes the
+Action Log row before every Bash and MCP call and holds a PROD write for an Approval in every
+access mode. A `disallowedTools` rule denies merging. Permission prompts in `supervised` mode, and
+the agent's questions, reach `canUseTool` and wait for the operator. Runs live in the daemon's
+memory; a restart fails them and expires their Approvals.
+
+Auto-switch and Smart usage move work to another signed-in Claude account, as the design shows.
+Anthropic's terms may read this as getting around usage limits; the operator accepted that risk
+(`docs/specs/02-settings-agents.md`, Safety), and both toggles can be turned off. The console never
+reads a Claude token: sign-in runs in Anthropic's own flow, and usage comes from the SDK's
+rate-limit events.
 
 ## Design departures
 
@@ -94,7 +114,5 @@ Where the build departs from `design/ops-console.html` on purpose:
   bodies.
 - **Access Level** changes how a Connection's MCP server launches (read-only flag or read-only
   user), not only the badge.
-- **Claude accounts.** One signed-in account per machine. The design's account rotation to stretch
-  usage limits is out, pending a check of Anthropic's terms.
 - **Merge** is a button for the operator only; the agent has no merge tool.
 - **Connectors** add Sentry and drop Kafka.

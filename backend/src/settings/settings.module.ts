@@ -7,6 +7,6 @@ import { SettingsService } from './settings.service';
 @Module({
   controllers: [SettingsController],
   providers: [SettingsRegistry, SettingsService],
-  exports: [SettingsRegistry],
+  exports: [SettingsRegistry, SettingsService],
 })
 export class SettingsModule {}

@@ -2,6 +2,8 @@ import { chmod, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Runtime } from '@ops-console/shared';
 
+export const DATA_DIR = Symbol('DATA_DIR');
+
 /**
  * Takes `daemon.lock` in the data folder for this process. A lock whose pid still runs means another daemon
  * owns the folder; a lock whose pid is gone is left from a crash and is taken over.
