@@ -9,6 +9,7 @@ import {
   SwitchReason,
 } from './agents';
 import { CheckTarget, HealthStatus } from './mcp';
+import { prRefreshStatus } from './workspace';
 
 /** First WebSocket subprotocol; the session token is the second. */
 export const WS_PROTOCOL = 'ops-console';
@@ -40,6 +41,7 @@ export const wsEventSchema = z.discriminatedUnion('event', [
       title: z.string(),
       state: z.enum(SessionState),
       account_id: z.string().nullable(),
+      branch: z.string().nullable(),
     }),
   ),
   event(
@@ -88,6 +90,29 @@ export const wsEventSchema = z.discriminatedUnion('event', [
       status: z.enum(HealthStatus),
       detail: z.string().nullable(),
       latency_ms: z.number().nullable(),
+    }),
+  ),
+  event(
+    'pull_request.refreshed',
+    z.object({
+      repo_id: z.string().nullable(),
+      status: prRefreshStatus,
+      changed: z.array(z.object({ repo_id: z.string(), number: z.number().int() })),
+    }),
+  ),
+  event(
+    'pull_request.commented',
+    z.object({ repo_id: z.string(), number: z.number().int(), comment_id: z.string(), by_agent: z.boolean() }),
+  ),
+  event(
+    'pull_request.reviewed',
+    z.object({
+      repo_id: z.string(),
+      number: z.number().int(),
+      agent_review_id: z.string(),
+      status: z.enum(['ready', 'failed']),
+      posted: z.number().int(),
+      post_failed: z.number().int(),
     }),
   ),
   event(

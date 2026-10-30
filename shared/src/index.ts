@@ -6,4 +6,5 @@ export * from './errors';
 export * from './mcp';
 export * from './repos';
 export * from './settings';
+export * from './workspace';
 export * from './ws';

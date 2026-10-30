@@ -7,6 +7,8 @@ const run = promisify(execFile);
 
 export const GIT = Symbol('GIT');
 
+export class GitFailed extends Error {}
+
 /** Reads from a local git repository. Tests use real repositories in temporary folders. */
 export class Git {
   constructor(private readonly bin = 'git') {}
@@ -57,6 +59,26 @@ export class Git {
         const [head = '', name = ''] = line.split('\t');
         return { name, current: head === '*' };
       });
+  }
+
+  /** Puts uncommitted changes, untracked files included, on the stash. Throws when git refuses. */
+  async stash(dir: string, message: string): Promise<void> {
+    await this.must(dir, ['stash', 'push', '--include-untracked', '-m', message]);
+  }
+
+  /** Checks out an existing branch, or makes `branch` from the current one first. Throws when git refuses. */
+  async checkout(dir: string, branch: string, create: boolean): Promise<void> {
+    await this.must(dir, create ? ['checkout', '-b', branch] : ['checkout', branch]);
+  }
+
+  /** The first line of git's own message; it names the problem and holds no secrets. */
+  private async must(dir: string, args: string[]): Promise<void> {
+    try {
+      await run(this.bin, ['-C', dir, ...args], { maxBuffer: 10 * 1024 * 1024 });
+    } catch (error) {
+      const { stderr } = error as { stderr?: unknown };
+      throw new GitFailed(typeof stderr === 'string' ? (stderr.trim().split('\n')[0] ?? '') : '');
+    }
   }
 
   private async try(dir: string, args: string[]): Promise<string | null> {

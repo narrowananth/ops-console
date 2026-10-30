@@ -73,21 +73,21 @@ Judgment work (Verification, Fix, Agent Review) runs as an agent session.
 | `monitor` | Services, Routes, Scans, Alerts; Datadog queries through `pup` |
 | `verification` | Runs a Verification with the agent, stores the Report |
 | `review` | Operator's Review; on confirm, starts the fix Session |
-| `workspace` | Repos, branches, PRs through `gh` |
+| `workspace` | Sessions in a Repo, branch checkout with stash, pull requests and Agent Reviews through the Git host adapter (`gh`) |
 | `agent` | Sessions, Claude Agent SDK runs, permission hooks, streaming output, transcripts |
 | `accounts` | Claude accounts, their usage, Auto-switch and Smart usage |
 | `terminal` | node-pty processes behind an authenticated WebSocket |
 | `connections` | Connections, Access Levels, PROD tags; secrets via Keychain |
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
 
-The first eight, plus `agent`, `accounts`, `action-log` and `mcp`, exist now; the rest arrive with their
-specs.
+`monitor`, `verification` and `review` arrive with their specs; every other module exists.
 
 ## `state.db` holds
 
 Settings the operator changed, Claude accounts, Sessions, the Action Log and Approvals, and, as
-their specs land, Repos, Services, Routes, Scans, Alerts, Reports, Reviews and Connections (no
-secrets). Session messages stay in the Claude Code transcript, in the config dir of the Session's
+their specs land, Repos, Agent Reviews, the ids of comments the agent posted, Services, Routes,
+Scans, Alerts, Reports, Reviews and Connections (no secrets). Pull requests stay on the Git host;
+the daemon keeps their lists in memory for 60 seconds. Session messages stay in the Claude Code transcript, in the config dir of the Session's
 Claude account.
 
 ## Agent runs

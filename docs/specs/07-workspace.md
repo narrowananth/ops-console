@@ -1,6 +1,6 @@
 # Workspace: repo Sessions, branches and pull requests
 
-**Status:** ready
+**Status:** shipped
 **Design:** Workspace in `design/ops-console.html`: Session list per Repo, the Session view with its branch switcher, the pull request list and the pull request view with comments and Agent Review
 
 ## Problem
@@ -43,7 +43,12 @@ Agent Review and the agent's voice on a PR
 
 ## Settled
 
-- **Git host adapter**: one interface over `github`, `gitlab`, `bitbucket` and `local`, reached through the hosts' CLIs (`gh`, `glab`) or MCP servers, per ADR 0005. Listing and reading PRs is a fixed read with no model turn. `local` has no pull requests. Tests use a fake.
+- **Git host adapter**: one interface over `github`, `gitlab`, `bitbucket` and `local`, reached through the hosts' CLIs (`gh`, `glab`) or MCP servers, per ADR 0005. Listing and reading PRs is a fixed read with no model turn. `local` has no pull requests. Tests use a fake. Only the GitHub adapter exists (`gh api`); a GitLab or Bitbucket Repo answers `upstream_failed` until theirs lands.
+- **`by_agent` on a pull request**: a `repo` Session works on the PR's branch. The console keeps no record of who ran `gh pr create`, so the Session is the evidence.
+- **Agent Review output**: the agent ends with one JSON block holding `verdict`, `findings`, `checklist` and `tools`. Anything else marks the review `failed` and posts nothing.
+- **Starting runs**: the console starts the `pr_review` Session's runs itself. An Agent Review or a thread answer while that Session's run is going is refused with `session_busy`; a thread answer then goes unanswered.
+- **Pull request cache**: per Repo and state, in the daemon's memory. Posting, resolving, reviewing, merging and an Agent Review drop the Repo's entries. The branch list reads the open list through the same cache.
+- **Aggregate list**: with no `repo_id`, a Repo whose host Connector is not connected is skipped. With a `repo_id` it answers `connector_not_connected`.
 - **Pull request identity**: Repo and number. No `pull_requests` or `pr_comments` table.
 - **Stored here**: Agent Reviews and the ids of comments the agent posted. Everything else about a PR comes from the host.
 - **Session rules in code**: a `repo` Session has a Repo and a branch; a `pr_review` Session has a Repo and a PR number; other kinds have neither. SQLite cannot add these as `CHECK`s to an existing table, so the session service enforces them.
@@ -55,6 +60,7 @@ Agent Review and the agent's voice on a PR
 - **Fresh PR data**: a list can be up to 60 seconds old, or older with `meta.stale` while the host fails.
 - **PRs offline**: with the host unreachable after a restart, the PR list is an error until the host answers.
 - **Thread answers while the daemon is down**: a reply posted on the host directly, not through the console, does not wake the agent.
+- **Thread answers during a run**: a reply to an agent thread while the pull request's Session is running gets no answer.
 
 ## Safety
 
@@ -135,7 +141,7 @@ Each branch adds `has_open_pr: boolean`.
 { "branch": "string", "create": false }
 ```
 
-Returns `{ "data": { "session": "Session", "stashed": false } }`. Errors: `invalid_state` (Behavior 7), `upstream_failed` when git refuses.
+Answers 200 with `{ "data": { "session": "Session", "stashed": false } }`. Errors: `invalid_state` (Behavior 7), `upstream_failed` when git refuses.
 
 ### Pull requests
 
@@ -144,7 +150,7 @@ Returns `{ "data": { "session": "Session", "stashed": false } }`. Errors: `inval
 | Method and path | Body | Returns |
 | --------------- | ---- | ------- |
 | `GET /pull-requests` | query `repo_id?`, `state?` (default `open`), `mine?`, `q?` | `PullRequest[]` without detail fields. `meta` adds `synced_at` and `stale` |
-| `POST /pull-requests/refresh` | `{ repo_id? }` | 202; drops the cache. The outcome comes on `pull_request.refreshed` |
+| `POST /pull-requests/refresh` | `{ repo_id? }` | 202 `{ "data": { "accepted": true } }`; drops the cache. The outcome comes on `pull_request.refreshed` |
 | `GET /repos/:repo/pull-requests/:number` | | `PullRequest` with `files` and `comments` |
 | `POST /repos/:repo/pull-requests/:number/comments` | `{ body, file_path?, line?, parent_id? }` | 201 `PrComment` as the host returned it; `upstream_failed` |
 | `PATCH /repos/:repo/pull-requests/:number/comments/:comment_id` | `{ resolved }` | `PrComment`; thread roots only |
@@ -212,4 +218,5 @@ Adds `branch: string | null`.
 - Repo import and the branch list itself: `06-settings-repos`.
 - The Git host `login` and sign-in: `04-settings-connectors`.
 - Fix branches and PRs opened from an Alert: `08-monitor-dashboard`, through the adapter here.
+- GitLab and Bitbucket adapters: the interface is ready; each needs its own spec or amendment.
 - The terminal panel: `05-settings-dev-tools` owns the terminal WebSocket.

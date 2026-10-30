@@ -26,6 +26,8 @@ export type ActionToLog = {
   isProd: boolean;
   /** The Connection a database query was for. */
   connectionId?: string;
+  /** Who acted; the agent unless the operator did it through the console. */
+  actor?: ActionActor;
 };
 
 export function toActionLogRow(row: ActionLogDbRow): ActionLogRow {
@@ -56,7 +58,7 @@ export class ActionLogService {
         .insert(actionLog)
         .values({
           id: crypto.randomUUID(),
-          actor: ActionActor.Agent,
+          actor: action.actor ?? ActionActor.Agent,
           kind: action.kind,
           sessionId: action.sessionId,
           target: action.target,

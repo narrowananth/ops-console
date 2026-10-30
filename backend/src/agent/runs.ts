@@ -19,7 +19,12 @@ export type Run = {
   /** Approvals the run waits on. */
   waits: number;
   createdAt: string;
+  /** Set when the console started the run itself, with no operator message. */
+  onFinish: ((summary: RunSummary) => void) | null;
 };
+
+/** How a run ended, for the code that started it. */
+export type RunSummary = { ok: boolean; text: string };
 
 export class RunRegistry {
   private readonly runs = new Map<string, Run>();

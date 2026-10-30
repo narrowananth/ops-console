@@ -111,6 +111,12 @@ export const sessionSchema = z.object({
   effort: z.enum(Effort),
   access_mode: z.enum(AccessMode),
   account_id: z.string().nullable(),
+  /** `repo` and `pr_review` Sessions run in a Repo. */
+  repo_id: z.string().nullable(),
+  /** `repo` Sessions: the checked-out branch. */
+  branch: z.string().nullable(),
+  /** `pr_review` Sessions: the pull request in `repo_id`. */
+  pr_number: z.number().int().nullable(),
   state: z.enum(SessionState),
   last_message_preview: z.string().nullable(),
   created_at: z.string(),

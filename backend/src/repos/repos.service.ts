@@ -1,10 +1,10 @@
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
-import { type Branch, ErrorCode, type Repo } from '@ops-console/shared';
+import { ErrorCode, type Repo } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { ApiError } from '../common/errors';
-import { repos } from '../db/schema';
+import { repos, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { GIT, Git, parseRemote } from './git';
 
@@ -58,15 +58,18 @@ export class ReposService {
     return this.get(id);
   }
 
-  /** Deletes the row and leaves the folder alone. */
+  /** Deletes the row and leaves the folder alone. A Repo with Sessions stays. */
   remove(id: string): void {
     this.row(id);
+    if (this.store.db.select({ id: sessions.id }).from(sessions).where(eq(sessions.repoId, id)).get()) {
+      throw new ApiError(409, ErrorCode.RepoHasSessions, 'Delete the Sessions in this Repo first');
+    }
     this.store.write((tx) => {
       tx.delete(repos).where(eq(repos.id, id)).run();
     });
   }
 
-  async branches(id: string): Promise<Branch[]> {
+  async branches(id: string): Promise<{ name: string; current: boolean }[]> {
     const row = this.row(id);
     if ((await this.git.topFolder(row.path)) === null) {
       throw new ApiError(404, ErrorCode.NotFound, `${row.name} is not on this machine any more`);

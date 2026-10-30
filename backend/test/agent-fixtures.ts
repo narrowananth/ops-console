@@ -1,13 +1,15 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { type DynamicModule, Inject, Injectable, Module } from '@nestjs/common';
-import { SessionKind, WS_PROTOCOL, type WsEvent } from '@ops-console/shared';
+import { GitHost, SessionKind, WS_PROTOCOL, type WsEvent } from '@ops-console/shared';
 import request from 'supertest';
 import WebSocket from 'ws';
 import { AgentModule } from '../src/agent/agent.module';
 import { ProdWriteRule } from '../src/agent/prod-write-rule';
 import { SessionKinds } from '../src/agent/session-kinds';
 import { type NewSession, SessionsService } from '../src/agent/sessions.service';
+import { repos } from '../src/db/schema';
+import { STORE, type Store } from '../src/db/store';
 import { FakeAgentSdk } from './fakes/agent-sdk';
 import { FakeUsageSource } from './fakes/usage-source';
 import { startTestDaemon, type TestDaemon, tempDir } from './helpers';
@@ -16,7 +18,7 @@ import { startTestDaemon, type TestDaemon, tempDir } from './helpers';
 export let WORKING_DIR = '';
 
 /**
- * Registers the kinds the way `07-workspace` will, and a PROD-write rule the way `05-settings-dev-tools` will:
+ * Registers the kinds the way `07-workspace` does, and a PROD-write rule the way `05-settings-dev-tools` will:
  * a Bash command that writes through `psql-prod`.
  */
 @Injectable()
@@ -56,8 +58,24 @@ export async function signIn(configDir: string, email: string, plan = 'max'): Pr
  * A daemon with no Claude account, or with `signedIn` (the default) one signed-in account, `default`, that the
  * first sign-in made active. A daemon started again on the same `dataDir` keeps its accounts.
  */
+let prNumbers = 0;
+
+/** The Repo row every fixture Session runs in. */
+function fixtureRepo(daemon: TestDaemon): string {
+  const store = daemon.app.get<Store>(STORE);
+  const existing = store.db.select({ id: repos.id }).from(repos).get();
+  if (existing) return existing.id;
+  const id = crypto.randomUUID();
+  store.write((tx) => {
+    tx.insert(repos)
+      .values({ id, name: 'fixture', path: WORKING_DIR, host: GitHost.Local, remoteSlug: null, defaultBranch: 'main' })
+      .run();
+  });
+  return id;
+}
+
 export async function startAgentDaemon(
-  options: { dataDir?: string; signedIn?: boolean; modules?: DynamicModule[] } = {},
+  options: { dataDir?: string; signedIn?: boolean; modules?: DynamicModule[]; fixtureKinds?: boolean } = {},
 ): Promise<AgentDaemon> {
   const dataDir = options.dataDir ?? (await tempDir());
   WORKING_DIR ||= await tempDir('ops-console-repo-');
@@ -65,7 +83,11 @@ export async function startAgentDaemon(
   const usage = new FakeUsageSource();
   const daemon = await startTestDaemon({
     dataDir,
-    modules: [AgentModule.forRoot({ sdk, usage }), { module: KindsFixtureModule }, ...(options.modules ?? [])],
+    modules: [
+      AgentModule.forRoot({ sdk, usage }),
+      ...(options.fixtureKinds === false ? [] : [{ module: KindsFixtureModule }]),
+      ...(options.modules ?? []),
+    ],
   });
   const auth = { Authorization: `Bearer ${daemon.token}` };
   const listed = await request(daemon.url).get('/api/agent-accounts').set(auth);
@@ -91,8 +113,17 @@ export async function startAgentDaemon(
     dataDir,
     home,
     auth,
-    createSession: (input: Partial<NewSession> = {}) =>
-      daemon.app.get(SessionsService).create({ kind: SessionKind.Repo, ...input }).id,
+    createSession: (input: Partial<NewSession> = {}) => {
+      const kind = input.kind ?? SessionKind.Repo;
+      const repoId = fixtureRepo(daemon);
+      const fields =
+        kind === SessionKind.Repo
+          ? { repoId, branch: 'main' }
+          : kind === SessionKind.PrReview
+            ? { repoId, prNumber: ++prNumbers }
+            : {};
+      return daemon.app.get(SessionsService).create({ kind, ...fields, ...input }).id;
+    },
   });
 }
 

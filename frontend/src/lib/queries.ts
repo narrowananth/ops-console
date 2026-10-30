@@ -5,11 +5,13 @@ import {
   addedAccountSchema,
   agentAccountsSettingSchema,
   approvalSchema,
+  branchSchema,
   type ConnectionTestResult,
   type ConnectionType,
   type ConnectorId,
   type CreateConnection,
   type CreateMcpServer,
+  checkoutResultSchema,
   claudeAccountSchema,
   connectionCheckSchema,
   connectionListSchema,
@@ -21,6 +23,12 @@ import {
   healthSchema,
   mcpServerListSchema,
   mcpServerSchema,
+  messageSchema,
+  type PrReviewEvent,
+  prAgentReviewSchema,
+  prCommentSchema,
+  pullRequestDetailSchema,
+  pullRequestListSchema,
   repoListSchema,
   repoSchema,
   type SessionDefaults,
@@ -44,7 +52,11 @@ export const queryKeys = {
   connectors: ['connectors'] as const,
   connections: ['connections'] as const,
   repos: ['repos'] as const,
+  sessions: ['sessions'] as const,
+  branches: (repoId: string) => ['branches', repoId] as const,
+  pulls: ['pull-requests'] as const,
   session: (id: string) => ['sessions', id] as const,
+  messages: (id: string) => ['messages', id] as const,
 };
 
 export function useHealth() {
@@ -331,5 +343,159 @@ export function useRemoveRepo() {
   return useMutation({
     mutationFn: (id: string) => apiSend('DELETE', `/repos/${id}`, undefined, z.undefined()),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.repos }),
+  });
+}
+
+/** Every `repo` Session, newest first. `session.updated` over `/ws` keeps it fresh. */
+export function useRepoSessions() {
+  return useQuery({
+    queryKey: queryKeys.sessions,
+    queryFn: () =>
+      apiGet('/sessions?kind=repo&limit=100', z.object({ data: z.array(sessionSchema) })).then((b) => b.data),
+  });
+}
+
+export function useCreateRepoSession() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { repo_id: string; branch: string }) =>
+      apiSend('POST', '/sessions', input, z.object({ data: sessionSchema })).then((body) => body.data),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.sessions }),
+  });
+}
+
+export function useDeleteSession() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiSend('DELETE', `/sessions/${id}`, undefined, z.undefined()),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.sessions }),
+  });
+}
+
+export function useMessages(sessionId: string) {
+  return useQuery({
+    queryKey: queryKeys.messages(sessionId),
+    queryFn: () =>
+      apiGet(`/sessions/${sessionId}/messages`, z.object({ data: z.array(messageSchema) })).then((b) => b.data),
+  });
+}
+
+export function useSendMessage(sessionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (text: string) =>
+      apiSend(
+        'POST',
+        `/sessions/${sessionId}/messages`,
+        { text },
+        z.object({ data: z.object({ message_id: z.string() }) }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) }),
+  });
+}
+
+export function useBranches(repoId: string) {
+  return useQuery({
+    queryKey: queryKeys.branches(repoId),
+    queryFn: () => apiGet(`/repos/${repoId}/branches`, z.object({ data: z.array(branchSchema) })).then((b) => b.data),
+  });
+}
+
+export function useCheckout(sessionId: string, repoId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { branch: string; create: boolean }) =>
+      apiSend('POST', `/sessions/${sessionId}/checkout`, input, z.object({ data: checkoutResultSchema })).then(
+        (body) => body.data,
+      ),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.sessions });
+      void client.invalidateQueries({ queryKey: queryKeys.branches(repoId) });
+      void client.invalidateQueries({ queryKey: queryKeys.repos });
+    },
+  });
+}
+
+export type PullRequestFilter = { mine: boolean; q: string };
+
+/** The Git host's open pull requests across every Repo, kept 60 seconds in the daemon. */
+export function usePullRequests(filter: PullRequestFilter) {
+  const params = new URLSearchParams();
+  if (filter.mine) params.set('mine', 'true');
+  if (filter.q) params.set('q', filter.q);
+  return useQuery({
+    queryKey: [...queryKeys.pulls, 'list', filter],
+    queryFn: () => apiGet(`/pull-requests?${params}`, pullRequestListSchema),
+  });
+}
+
+export function useRefreshPullRequests() {
+  return useMutation({ mutationFn: () => apiSend('POST', '/pull-requests/refresh', {}, z.unknown()) });
+}
+
+export function usePullRequest(repoId: string, number: number) {
+  return useQuery({
+    queryKey: [...queryKeys.pulls, 'detail', repoId, number],
+    queryFn: () =>
+      apiGet(`/repos/${repoId}/pull-requests/${number}`, z.object({ data: pullRequestDetailSchema })).then(
+        (b) => b.data,
+      ),
+  });
+}
+
+export function usePostComment(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { body: string; parent_id?: string }) =>
+      apiSend('POST', `/repos/${repoId}/pull-requests/${number}/comments`, input, z.object({ data: prCommentSchema })),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
+  });
+}
+
+export function useResolveComment(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { comment_id: string; resolved: boolean }) =>
+      apiSend(
+        'PATCH',
+        `/repos/${repoId}/pull-requests/${number}/comments/${input.comment_id}`,
+        { resolved: input.resolved },
+        z.object({ data: prCommentSchema }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
+  });
+}
+
+export function useReviewPullRequest(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { event: PrReviewEvent; body?: string }) =>
+      apiSend('POST', `/repos/${repoId}/pull-requests/${number}/reviews`, input, z.unknown()),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
+  });
+}
+
+export function useMergePullRequest(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('POST', `/repos/${repoId}/pull-requests/${number}/merge`, undefined, z.unknown()),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.pulls });
+      void client.invalidateQueries({ queryKey: ['branches'] });
+    },
+  });
+}
+
+export function useStartAgentReview(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiSend(
+        'POST',
+        `/repos/${repoId}/pull-requests/${number}/agent-reviews`,
+        undefined,
+        z.object({ data: prAgentReviewSchema }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
   });
 }

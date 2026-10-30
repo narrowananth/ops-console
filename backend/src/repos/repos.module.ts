@@ -12,7 +12,7 @@ export class ReposModule {
       global: true,
       controllers: [ReposController],
       providers: [{ provide: GIT, useValue: new Git() }, ReposService],
-      exports: [ReposService],
+      exports: [ReposService, GIT],
     };
   }
 }
