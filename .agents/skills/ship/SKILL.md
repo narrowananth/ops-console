@@ -23,7 +23,7 @@ root.
 3. **Build.** Write the spec's Glossary and ADR sections into `GLOSSARY.md` and `docs/adr/`, then
    `tdd` at the seams in the spec. Wide exploration goes to an `Explore` subagent pointed at the
    spec. Done when the docs hold every Glossary and ADR entry and `pnpm check` passes.
-4. **Verify.** Run the change the way the operator does: `docker compose up -d`, `pnpm dev`, then
+4. **Verify.** Run the change the way the operator does: `pnpm dev`, then
    drive the changed screen or endpoint. A browser change gets a screenshot; an API or WebSocket
    change gets the `curl` or client output. Use the project's verification skill once
    `create-verification-skill` has made one. Done when the evidence shows the Behavior items on the

@@ -33,7 +33,7 @@ Blast radius counts as large here, whatever the diff size:
 - Connections and secrets: the Keychain adapter, connection strings, MCP server config writes.
 - Server binding, the session token and CORS. The server listens on `127.0.0.1` only.
 - PROD connections.
-- `compose.yaml`, GitHub Actions workflows, and dependency bumps.
+- GitHub Actions workflows and dependency bumps.
 
 Flag anything that widens the agent's reach, lets it act without the operator's approval, exposes
 the server beyond `127.0.0.1`, or logs a secret.

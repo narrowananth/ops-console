@@ -41,13 +41,13 @@ start-up recovery, opens the port, starts the scheduler and writes the runtime f
 
 | Layer | Pick |
 |---|---|
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS + shadcn/ui, TanStack Query, Zustand, React Router, xterm.js, CodeMirror 6 (diffs), Recharts |
-| Backend | NestJS on Node 24, Claude Agent SDK (TypeScript), node-pty over WebSocket, MCP TypeScript SDK, Slack Bolt (Socket Mode), GitHub via `gh`, simple-git, `pup` for Datadog, Zod at boundaries |
+| Frontend | React 18, TypeScript, Vite, Tailwind CSS, Radix UI (dialog, tabs), TanStack Query, Zustand, React Router, Zod |
+| Backend | NestJS on Node 24, Claude Agent SDK (TypeScript), `ws` WebSocket, MCP TypeScript SDK, the `claude` CLI, Zod at boundaries |
 | Database | SQLite through `better-sqlite3`, Drizzle ORM and Drizzle Kit migrations |
 | Jobs | In-process scheduler, no queue |
 | Secrets | macOS Keychain through `@napi-rs/keyring` |
-| Tests | Vitest, Testing Library, Playwright, Supertest |
-| Tooling | pnpm workspaces, Node 24 via mise, Biome for lint and format, esbuild for the daemon and CLI bundles |
+| Tests | Vitest, Playwright, Supertest |
+| Tooling | pnpm workspaces, Node 24 via mise, Biome for lint and format, esbuild for the daemon and CLI bundles, tsx for development |
 
 ## Integration layer
 

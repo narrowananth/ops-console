@@ -8,8 +8,3 @@ Claude Code transcript, pull requests on the Git host, MCP servers in the `claud
 
 There is no offline pull request list, and no message history apart from Claude Code's. Only the
 daemon opens `state.db`.
-
-## Considered Options
-
-- **Postgres through Drizzle**: fits a console shared by a team, but needs Docker or a database
-  server next to a one-line install. A shared team server is a separate deployment under ADR 0003.

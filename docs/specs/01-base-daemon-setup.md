@@ -5,7 +5,7 @@
 
 ## Problem
 
-The operator wants the console the way T3 Code and Monocode arrive: one `curl … | sh` line, then `ops-console start`, then `ops-console open`. Nothing should need Docker, a database server or sudo. Today the repo has only docs, and those still describe Postgres, Redis and two ports.
+The operator wants the console the way T3 Code and Monocode arrive: one `curl … | sh` line, then `ops-console start`, then `ops-console open`. Nothing should need a database server or sudo.
 
 Every later spec needs the same footing: a daemon that launchd keeps running, a local SQLite file it migrates on start, one API and WebSocket convention, a session token, settings, a scheduler, and one way to reach outside systems. That way is Claude Code: forms collect config, secrets go to the Keychain, the console registers an MCP server with Claude Code, and Claude connects to it. This spec builds that footing and nothing a screen shows.
 
@@ -54,7 +54,7 @@ App shell
 Release and checks
 
 29. Pushing a `v*` tag builds the arm64 and x64 tarballs on macOS runners, installs each with `install.sh` from the built files, runs `start`, `status` and `stop` against it, and only then attaches the tarballs and `checksums.txt` to the GitHub Release.
-30. `pnpm check` runs lint, typecheck and tests in every package without Docker.
+30. `pnpm check` runs lint, typecheck and tests in every package.
 
 ## Settled
 
@@ -80,7 +80,7 @@ Release and checks
 - **Claude CLI wrapper**: runs `claude` with an argument array, never a shell string, and parses each output with Zod. It covers `claude mcp add`, `remove`, `list` and `get`. Tests use a fake.
 - **MCP client**: connects to a server registered with Claude Code, using the config `claude mcp get` returns, to call a tool directly for a fixed read with no model turn. Tests use a fake MCP server.
 - **Integration layer** (ADR 0005): every outside system the console reaches is an MCP server or a CLI that Claude Code also uses. A form collects config, the secret goes to the Keychain adapter, and the console registers the server with `claude mcp add`. Fixed reads (PR lists, Scan counts, health checks) go through the MCP client or the CLI. Judgment work (Verification, Fix, Agent Review, Add with Claude, dev-tools queries) runs as an agent session; see `02-settings-agents`.
-- **Docs**: `/ship` rewrites ADR 0001, adds ADR 0005, and updates `docs/architecture.md` (SQLite, no Redis or BullMQ, one port, the integration layer), `README.md` and `AGENTS.md` (install, `ops-console` commands, development without Docker, `pnpm check` with no Testcontainers note), `CODING_STANDARDS.md` (tests use a temporary SQLite file; lists return `{ data, meta }`), and the `backend/` and `frontend/` READMEs (ports, test folder). It removes `compose.yaml`.
+- **Docs**: `/ship` rewrites ADR 0001, adds ADR 0005, and updates `docs/architecture.md` (SQLite, one port, the integration layer), `README.md` and `AGENTS.md` (install, `ops-console` commands, development, `pnpm check`), `CODING_STANDARDS.md` (tests use a temporary SQLite file; lists return `{ data, meta }`), and the `backend/` and `frontend/` READMEs (ports, test folder).
 
 ## Not required
 
@@ -193,9 +193,7 @@ Server to client, after a `PATCH /api/settings` commits.
 ## Rejected
 
 - **Homebrew**: needs a tap repo and a formula to maintain, and the operator asked for a single `curl` line.
-- **One compiled binary (Bun or Node SEA)**: `node-pty` and `better-sqlite3` are native modules, and `node-pty` under Bun is unproven. A tarball with a bundled Node works now.
 - **The system Node**: its version would vary per machine, and native modules are built for one Node ABI.
-- **Postgres and Redis**: a one-line install cannot depend on Docker or two servers. T3 Code and Monocode each keep one local SQLite file.
 - **`node:sqlite`**: still experimental in Node 24. The tarball already ships native modules.
 - **Two ports in production**: one origin removes CORS and makes `ops-console open` a single URL.
 - **Token in the WebSocket query string**: query strings end up in logs. The subprotocol carries it instead.
@@ -204,7 +202,7 @@ Server to client, after a `PATCH /api/settings` commits.
 
 ## ADR
 
-- **0001, rewritten: SQLite file for console state**: the console runs as a daemon on one Mac and keeps the state only it knows in one SQLite file in its data folder. Messages stay in the Claude Code transcript, pull requests on the Git host, and MCP servers in the `claude` CLI. Postgres moves to Considered Options: it needs Docker or a server next to a one-line install, and the shared team server it was chosen for is a separate deployment under ADR 0003. The trade-off: no offline pull request list, and no message history apart from Claude Code's.
+- **0001, rewritten: SQLite file for console state**: the console runs as a daemon on one Mac and keeps the state only it knows in one SQLite file in its data folder. Messages stay in the Claude Code transcript, pull requests on the Git host, and MCP servers in the `claude` CLI. The trade-off: no offline pull request list, and no message history apart from Claude Code's.
 - **0005, new: Claude Code is the integration layer**: every outside system is an MCP server or CLI registered with Claude Code. The console's forms collect config, secrets go to the Keychain, and the console registers the server with `claude mcp add`. Fixed reads call the same servers and CLIs directly, with no model turn. Judgment work runs as agent sessions. Considered: per-service API clients, which duplicate auth and config Claude Code already holds; and the agent running everything, which makes every refresh cost tokens and seconds, with results that can vary. The trade-off: the console depends on each MCP server's tools and the `claude` CLI's output format, and a server Claude Code cannot run is a server the console cannot use.
 
 ## Seams
@@ -215,7 +213,7 @@ Server to client, after a `PATCH /api/settings` commits.
 - **Unit**: 20, the scheduler with a fake clock.
 - **Browser** (Playwright against the built daemon): 27, 28.
 - **Release job on macOS runners**: 29, with real `launchctl`. It also runs the CLI checks for 5 to 8 once per tag.
-- **CI**: 30, `pnpm check` on a runner with no Docker.
+- **CI**: 30, `pnpm check` on a runner.
 
 ## Out of scope
 

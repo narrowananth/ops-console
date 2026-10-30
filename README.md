@@ -45,7 +45,7 @@ ops-console open
 
 ## Develop
 
-Needs Node 24 and pnpm (`mise install`). No Docker.
+Needs Node 24 and pnpm (`mise install`).
 
 ```
 pnpm install
