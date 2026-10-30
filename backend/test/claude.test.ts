@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CLAUDE_CLI, type ClaudeCli } from '../src/claude-cli/claude-cli';
+import { CLAUDE_CLI, type ClaudeCli, claudeEnv } from '../src/claude-cli/claude-cli';
 import { MCP_CLIENT, type McpClient } from '../src/mcp-client/mcp-client';
 import { startTestDaemon, type TestDaemon, tempDir } from './helpers';
 
@@ -108,5 +108,22 @@ describe('MCP client', () => {
       code: 'upstream_failed',
       message: expect.stringContaining('fake-stdio'),
     });
+  });
+});
+
+describe('claudeEnv', () => {
+  it('drops shell credentials for an added account and keeps them for the operator’s own setup', () => {
+    process.env.ANTHROPIC_AUTH_TOKEN = 'shell-token';
+    process.env.ANTHROPIC_API_KEY = 'shell-key';
+    try {
+      const added = claudeEnv('/data/accounts/a');
+      expect(added.CLAUDE_CONFIG_DIR).toBe('/data/accounts/a');
+      expect(added.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+      expect(added.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(claudeEnv(null).ANTHROPIC_AUTH_TOKEN).toBe('shell-token');
+    } finally {
+      delete process.env.ANTHROPIC_AUTH_TOKEN;
+      delete process.env.ANTHROPIC_API_KEY;
+    }
   });
 });

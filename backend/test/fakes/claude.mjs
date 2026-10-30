@@ -2,7 +2,7 @@
 // Stands in for the `claude` CLI: prints output in its format and records add/remove calls.
 // Sign-in state lives in `fake-auth.json` in the config dir: `CLAUDE_CONFIG_DIR`, or `FAKE_CLAUDE_HOME` for the
 // operator's own setup.
-import { appendFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const [, , group, command, ...rest] = process.argv;
@@ -20,14 +20,29 @@ if (group === 'auth') {
     );
     process.exit(signedIn ? 0 : 1);
   }
-  if (command === 'logout') {
-    rmSync(auth, { force: true });
-    process.exit(0);
+  if (command === 'login') {
+    // `FAKE_LOGIN` is `fail`, `hang`, or the email to sign in as.
+    const mode = process.env.FAKE_LOGIN ?? 'login@example.com';
+    if (mode === 'fail') process.exit(1);
+    if (mode === 'hang') {
+      setInterval(() => {}, 1000);
+      process.on('SIGTERM', () => process.exit(143));
+      // Waits like the real CLI, instead of falling through to the exit below.
+      await new Promise(() => {});
+    } else {
+      writeFileSync(auth, JSON.stringify({ email: mode, subscriptionType: 'pro' }));
+      process.exit(0);
+    }
+  } else {
+    if (command === 'logout') {
+      rmSync(auth, { force: true });
+      process.exit(0);
+    }
+    process.exit(2);
   }
+} else if (group !== 'mcp') {
   process.exit(2);
 }
-
-if (group !== 'mcp') process.exit(2);
 
 if (command === 'list') {
   console.log(`${warning}

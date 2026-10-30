@@ -20,6 +20,7 @@ export function useLiveEvents(): void {
       if (
         event.event === 'account.updated' ||
         event.event === 'account.switched' ||
+        event.event === 'account.removed' ||
         event.event === 'settings.updated'
       ) {
         void client.invalidateQueries({ queryKey: queryKeys.accounts });

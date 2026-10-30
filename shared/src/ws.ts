@@ -78,6 +78,7 @@ export const wsEventSchema = z.discriminatedUnion('event', [
       usage_seen_at: z.string().nullable(),
     }),
   ),
+  event('account.removed', z.object({ account_id: z.string() })),
   event(
     'account.switched',
     z.object({

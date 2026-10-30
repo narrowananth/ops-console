@@ -70,7 +70,7 @@ and files as one.
 
 ## Commands
 
-pnpm workspace. Run from repo root. No Docker.
+pnpm workspace. Run from repo root.
 
 ```
 pnpm install

@@ -302,7 +302,7 @@ describe('daemon restart', () => {
     );
     await running.pop()?.stop();
 
-    const again = await start({ dataDir, home: daemon.home });
+    const again = await start({ dataDir });
     expect((await api(again).get(`/sessions/${id}`)).body.data.state).toBe('failed');
     const approvals = await api(again).get('/approvals');
     expect(approvals.body.data).toEqual([expect.objectContaining({ kind: 'command', status: 'expired' })]);

@@ -26,6 +26,7 @@ import { ActionLogService } from '../action-log/action-log.service';
 import { type ApprovalRequest, ApprovalsService, type Decision } from '../action-log/approvals.service';
 import { classifyCall } from '../action-log/classify';
 import { redact } from '../action-log/redact';
+import { claudeEnv } from '../claude-cli/claude-cli';
 import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
 import { nowIso, sessions } from '../db/schema';
@@ -213,7 +214,7 @@ export class AgentRuntime {
       permissionMode: PERMISSION_MODES[session.accessMode],
       allowDangerouslySkipPermissions: session.accessMode === AccessMode.Full,
       ...(resume === null ? {} : { resume }),
-      ...(account.configDir === null ? {} : { env: { ...process.env, CLAUDE_CONFIG_DIR: account.configDir } }),
+      env: claudeEnv(configDir),
       includePartialMessages: true,
       disallowedTools: MERGE_DENIALS,
       hooks: {

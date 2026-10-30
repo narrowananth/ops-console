@@ -15,6 +15,13 @@
       "when": 1793376347248,
       "tag": "0001_agents",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793384491286,
+      "tag": "0002_no_seeded_account",
+      "breakpoints": true
     }
   ]
 }

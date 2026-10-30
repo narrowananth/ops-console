@@ -17,16 +17,16 @@ connections the console grants it.
 _Avoid_: bot, AI
 
 **Claude account**:
-One Claude subscription signed in on this machine, with its own 5-hour and weekly usage windows.
-The agent runs under the active one.
+One Claude subscription signed in on this machine, named by its email, with its own 5-hour and
+weekly usage windows. Each is added once. The agent runs under the active one.
 
 **Auto-switch**:
-Moving the active Claude account when its 5-hour usage reaches the threshold, carrying each
-Session's conversation over.
+With Smart usage off, moving the active Claude account when its 5-hour usage reaches the
+threshold, carrying each Session's conversation over.
 
 **Smart usage**:
 Ranking Claude accounts by weekly quota left per day until the weekly reset, so quota that would go
-unused is used first.
+unused is used first, and moving to the top pick on its own while it is on.
 
 **Access mode**:
 What the agent may do in a Session without asking: supervised, accept edits, auto or full. A PROD

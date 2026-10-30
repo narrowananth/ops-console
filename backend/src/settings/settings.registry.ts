@@ -1,6 +1,12 @@
 import type { z } from 'zod';
 
-export type SettingDefinition<T = unknown> = { key: string; schema: z.ZodType<T>; default: T };
+export type SettingDefinition<T = unknown> = {
+  key: string;
+  schema: z.ZodType<T>;
+  default: T;
+  /** Runs after a `PATCH /settings` stored this key, once the new value is readable. */
+  onChange?: () => void;
+};
 
 /** Each spec registers the keys it owns, with a schema and a default. */
 export class SettingsRegistry {

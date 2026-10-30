@@ -78,7 +78,7 @@ same as before.
 
 ## Database
 
-Postgres DDL in one `sql` block: `CREATE TABLE` or `ALTER TABLE` per table touched, with keys,
+SQLite DDL in one `sql` block: `CREATE TABLE` or `ALTER TABLE` per table touched, with keys,
 constraints and indexes, and a `--` comment on any column whose meaning the name leaves open.
 Below it, the migration of existing rows.
 
@@ -120,7 +120,7 @@ screen it follows and any departure from it.
 
 ## Seams
 
-- **Seam** (unit, backend + Postgres, frontend component, browser): the Behavior numbers it pins.
+- **Seam** (unit, backend + SQLite, frontend component, browser): the Behavior numbers it pins.
   Every number appears under some seam.
 
 ## Out of scope
