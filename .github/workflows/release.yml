@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Package
+        run: node scripts/package.mjs "${GITHUB_REF_NAME#v}"
+      - name: Install the built tarball and run it under launchd
+        run: |
+          set -eu
+          mkdir release
+          cp "out/ops-console-darwin-${{ matrix.arch }}.tar.gz" release/
+          (cd release && shasum -a 256 ops-console-darwin-*.tar.gz > checksums.txt)
+          OPS_CONSOLE_RELEASE_URL="file://$PWD/release" sh install.sh
+          export PATH="$HOME/.local/bin:$PATH"
+          test "$(ops-console --version)" = "${GITHUB_REF_NAME#v}"
+          ops-console start
+          ops-console status
+          ops-console open
+          ops-console stop
+          code=0; ops-console status || code=$?
+          test "$code" = 3
+      - name: Daemon log
+        if: failure()
+        run: cat "$HOME/Library/Logs/ops-console/daemon.log" || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ops-console-darwin-${{ matrix.arch }}
+          path: out/ops-console-darwin-${{ matrix.arch }}.tar.gz
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Attach tarballs and checksums to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd release
+          sha256sum ops-console-darwin-*.tar.gz > checksums.txt
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes \
+            ops-console-darwin-arm64.tar.gz ops-console-darwin-x64.tar.gz checksums.txt

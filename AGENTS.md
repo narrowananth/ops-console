@@ -12,8 +12,10 @@ come from `design/ops-console.html`.
 ## Layout
 
 - `frontend/`: React 18 + Vite web UI.
-- `backend/`: NestJS API, agent runtime, terminal, scheduled jobs.
+- `backend/`: NestJS daemon: API, WebSocket, agent runtime, terminal, scheduled jobs. SQLite store.
+- `cli/`: `ops-console` command (start, stop, status, open, logs, update, uninstall).
 - `shared/`: TypeScript types both sides import: REST bodies, WebSocket events.
+- `install.sh`: `curl … | sh` installer. Release tarballs from `.github/workflows/release.yml`.
 - `design/`: Claude Design export. Source of truth for screens; open the HTML in a browser.
 - `docs/specs/`: one spec per change, written by `/spec`, built by `/ship`.
 - `docs/adr/`, `docs/architecture.md`, `GLOSSARY.md`: domain docs.
@@ -68,19 +70,17 @@ and files as one.
 
 ## Commands
 
-pnpm workspace. Run from repo root:
+pnpm workspace. Run from repo root. No Docker.
 
 ```
-docker compose up -d   # Postgres on :55432, Redis on :56379
 pnpm install
-pnpm dev               # backend :4546, frontend :4545
+pnpm dev               # backend :4546, frontend :4545, data in backend/.data
+pnpm dev:open          # open UI signed in to dev backend
 pnpm check             # lint + typecheck + test, every package
-pnpm db:migrate        # apply Drizzle migrations
+pnpm db:generate       # Drizzle migration from backend/src/db/schema.ts
 ```
 
-Backend tests reach Docker (Testcontainers Postgres): run `pnpm check` with
-`dangerouslyDisableSandbox: true`. Standing answer: run without asking. Keep everything else
-sandboxed.
+Installed app: `ops-console start | stop | status | open | logs | update | uninstall`.
 
 ## Public repo
 
