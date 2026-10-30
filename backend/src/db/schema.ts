@@ -1,5 +1,17 @@
+import {
+  type AccessMode,
+  type ActionActor,
+  type ActionKind,
+  ActionOutcome,
+  type ApprovalKind,
+  ApprovalStatus,
+  type Effort,
+  type Model,
+  type SessionKind,
+  SessionState,
+} from '@ops-console/shared';
 import { sql } from 'drizzle-orm';
-import { check, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { check, index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const nowIso = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
@@ -12,4 +24,92 @@ export const settings = sqliteTable(
     updatedAt: text('updated_at').notNull().default(nowIso),
   },
   (table) => [check('settings_value_json', sql`json_valid(${table.value})`)],
+);
+
+const bool = (name: string) => integer(name, { mode: 'boolean' });
+
+export const claudeAccounts = sqliteTable(
+  'claude_accounts',
+  {
+    id: text().primaryKey().notNull(),
+    label: text().notNull(),
+    /** `CLAUDE_CONFIG_DIR`; null: the operator's own Claude Code setup. */
+    configDir: text('config_dir'),
+    position: integer().notNull(),
+    signedIn: bool('signed_in').notNull().default(false),
+    email: text(),
+    plan: text(),
+    fiveHourPct: real('five_hour_pct'),
+    fiveHourResetsAt: text('five_hour_resets_at'),
+    weeklyPct: real('weekly_pct'),
+    weeklyResetsAt: text('weekly_resets_at'),
+    usageSeenAt: text('usage_seen_at'),
+    lastCheckedAt: text('last_checked_at'),
+    createdAt: text('created_at').notNull().default(nowIso),
+  },
+  (table) => [
+    uniqueIndex('claude_accounts_config_dir_idx').on(sql`ifnull(${table.configDir}, '')`),
+    check('claude_accounts_signed_in_bool', sql`${table.signedIn} IN (0, 1)`),
+  ],
+);
+
+export const sessions = sqliteTable(
+  'sessions',
+  {
+    id: text().primaryKey().notNull(),
+    kind: text().$type<SessionKind>().notNull(),
+    title: text().notNull(),
+    model: text().$type<Model>().notNull(),
+    effort: text().$type<Effort>().notNull(),
+    accessMode: text('access_mode').$type<AccessMode>().notNull(),
+    /** Holds the transcript; null before the first run. */
+    accountId: text('account_id').references(() => claudeAccounts.id, { onDelete: 'restrict' }),
+    sdkSessionId: text('sdk_session_id'),
+    state: text().$type<SessionState>().notNull().default(SessionState.Idle),
+    lastMessagePreview: text('last_message_preview'),
+    createdAt: text('created_at').notNull().default(nowIso),
+    lastActiveAt: text('last_active_at').notNull().default(nowIso),
+  },
+  (table) => [index('sessions_active_idx').on(sql`${table.lastActiveAt} DESC`)],
+);
+
+export const actionLog = sqliteTable(
+  'action_log',
+  {
+    id: text().primaryKey().notNull(),
+    at: text().notNull().default(nowIso),
+    actor: text().$type<ActionActor>().notNull(),
+    kind: text().$type<ActionKind>().notNull(),
+    sessionId: text('session_id').references(() => sessions.id, { onDelete: 'set null' }),
+    target: text().notNull(),
+    /** Redacted. */
+    command: text().notNull(),
+    isProd: bool('is_prod').notNull().default(false),
+    outcome: text().$type<ActionOutcome>().notNull().default(ActionOutcome.Pending),
+    errorMessage: text('error_message'),
+    finishedAt: text('finished_at'),
+  },
+  (table) => [
+    index('action_log_at_idx').on(sql`${table.at} DESC`),
+    index('action_log_session_idx').on(table.sessionId, table.at),
+    check('action_log_is_prod_bool', sql`${table.isProd} IN (0, 1)`),
+  ],
+);
+
+export const approvals = sqliteTable(
+  'approvals',
+  {
+    id: text().primaryKey().notNull(),
+    /** Null for an edit: the Action Log does not record edits. */
+    actionLogId: text('action_log_id')
+      .unique()
+      .references(() => actionLog.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').references(() => sessions.id, { onDelete: 'set null' }),
+    kind: text().$type<ApprovalKind>().notNull(),
+    summary: text().notNull(),
+    status: text().$type<ApprovalStatus>().notNull().default(ApprovalStatus.Pending),
+    requestedAt: text('requested_at').notNull().default(nowIso),
+    decidedAt: text('decided_at'),
+  },
+  (table) => [index('approvals_pending_idx').on(table.requestedAt).where(sql`${table.status} = 'pending'`)],
 );

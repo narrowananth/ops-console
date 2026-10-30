@@ -1,3 +1,4 @@
+export * from './agents';
 export * from './api';
 export * from './errors';
 export * from './settings';

@@ -1,9 +1,10 @@
-// Bundles the daemon into dist/main.js. Native modules and Nest's unused optional packages stay external;
-// the release tarball installs the native ones next to it.
+// Bundles the daemon into dist/main.js. Native modules, the Agent SDK (it spawns the Claude Code binary from its
+// platform package) and Nest's unused optional packages stay external; the release tarball installs the first two
+// next to it.
 import { cp, rm } from 'node:fs/promises';
 import { build } from 'esbuild';
 
-const NATIVE = ['better-sqlite3', '@napi-rs/keyring'];
+const NATIVE = ['better-sqlite3', '@napi-rs/keyring', '@anthropic-ai/claude-agent-sdk'];
 
 await rm('dist', { recursive: true, force: true });
 await build({

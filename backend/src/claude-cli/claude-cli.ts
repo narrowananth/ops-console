@@ -34,12 +34,23 @@ export type McpServerConfig = z.infer<typeof serverConfigSchema>;
 
 export type McpServerToAdd = McpServerConfig & { scope: McpScope };
 
+const authStatusSchema = z.object({
+  loggedIn: z.boolean(),
+  email: z.string().nullish(),
+  subscriptionType: z.string().nullish(),
+});
+
+export type AuthStatus = { signedIn: boolean; email: string | null; plan: string | null };
+
+/** `null` runs `claude` with the operator's own Claude Code setup; a path sets `CLAUDE_CONFIG_DIR`. */
+export type ConfigDir = string | null;
+
 /** `claude mcp get` joins args with spaces, so an arg holding a space comes back split. */
 export class ClaudeCli {
   constructor(private readonly bin = 'claude') {}
 
   async mcpList(): Promise<ListedMcpServer[]> {
-    const output = await this.exec(['mcp', 'list'], 'list');
+    const output = await this.exec(['mcp', 'list'], 'mcp list');
     const servers: ListedMcpServer[] = [];
     for (const line of output.split('\n')) {
       const match = /^([A-Za-z0-9_.-]+): (.+) - (.+)$/.exec(line.trim());
@@ -50,7 +61,7 @@ export class ClaudeCli {
   }
 
   async mcpGet(name: string): Promise<McpServerConfig> {
-    const output = await this.exec(['mcp', 'get', name], 'get');
+    const output = await this.exec(['mcp', 'get', name], 'mcp get');
     const fields = new Map<string, string>();
     const block: Record<string, string> = {};
     let inBlock = false;
@@ -90,21 +101,39 @@ export class ClaudeCli {
             server.name,
             server.url,
           ];
-    await this.exec(['mcp', 'add', '--scope', server.scope, ...args], 'add');
+    await this.exec(['mcp', 'add', '--scope', server.scope, ...args], 'mcp add');
   }
 
   async mcpRemove(name: string, scope: McpScope): Promise<void> {
-    await this.exec(['mcp', 'remove', name, '--scope', scope], 'remove');
+    await this.exec(['mcp', 'remove', name, '--scope', scope], 'mcp remove');
+  }
+
+  async authStatus(configDir: ConfigDir): Promise<AuthStatus> {
+    // Signed out exits 1, with the same JSON on stdout.
+    const output = await this.exec(['auth', 'status', '--json'], 'auth status', configDir, [0, 1]);
+    const status = authStatusSchema.parse(JSON.parse(output));
+    return { signedIn: status.loggedIn, email: status.email ?? null, plan: status.subscriptionType ?? null };
+  }
+
+  async authLogout(configDir: ConfigDir): Promise<void> {
+    await this.exec(['auth', 'logout'], 'auth logout', configDir);
   }
 
   /** Errors name the subcommand only: arguments and output may hold secrets. */
-  private async exec(args: string[], subcommand: string): Promise<string> {
+  private async exec(
+    args: string[],
+    subcommand: string,
+    configDir: ConfigDir = null,
+    exitCodes = [0],
+  ): Promise<string> {
     try {
-      const { stdout } = await run(this.bin, args, { maxBuffer: 10 * 1024 * 1024 });
+      const env = configDir === null ? process.env : { ...process.env, CLAUDE_CONFIG_DIR: configDir };
+      const { stdout } = await run(this.bin, args, { maxBuffer: 10 * 1024 * 1024, env });
       return stdout;
     } catch (error) {
-      const code = (error as { code?: unknown }).code;
-      throw new ApiError(502, ErrorCode.UpstreamFailed, `\`claude mcp ${subcommand}\` failed (${String(code)})`);
+      const { code, stdout } = error as { code?: unknown; stdout?: unknown };
+      if (typeof code === 'number' && exitCodes.includes(code) && typeof stdout === 'string') return stdout;
+      throw new ApiError(502, ErrorCode.UpstreamFailed, `\`claude ${subcommand}\` failed (${String(code)})`);
     }
   }
 }

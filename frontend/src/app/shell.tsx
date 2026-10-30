@@ -1,9 +1,11 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Empty } from '../components/ui/empty';
+import { useLiveEvents } from '../lib/live';
 import { SettingsDrawer } from './settings-drawer';
 import { TopBar, VIEWS } from './top-bar';
 
 export function Shell() {
+  useLiveEvents();
   return (
     <>
       <TopBar />
