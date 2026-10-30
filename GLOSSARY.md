@@ -99,7 +99,7 @@ A short Agent SDK session that reads which MCP Servers connect and which tools t
 stops before the model runs.
 
 **Connector**:
-An outside service the console itself calls: Datadog, GitHub, Slack, Sentry.
+An outside service the console itself calls: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry. Each is reached through a CLI or an MCP Server and is connected, checked and disconnected in Settings.
 
 **Action Log**:
 The record of every action the agent took outside its own process: query, shell command, message,

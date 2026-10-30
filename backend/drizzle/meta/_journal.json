@@ -29,6 +29,13 @@
       "when": 1793394037147,
       "tag": "0003_mcp_servers",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793398220957,
+      "tag": "0004_connectors",
+      "breakpoints": true
     }
   ]
 }

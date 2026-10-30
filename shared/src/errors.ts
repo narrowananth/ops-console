@@ -10,6 +10,7 @@ export enum ErrorCode {
   UpstreamFailed = 'upstream_failed',
   Internal = 'internal',
   SessionBusy = 'session_busy',
+  ConnectorNotConnected = 'connector_not_connected',
 }
 
 export const errorBodySchema = z.object({

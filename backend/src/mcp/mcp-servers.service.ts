@@ -3,6 +3,8 @@ import path from 'node:path';
 import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import {
   CheckTarget,
+  CONNECTOR_SERVERS,
+  type ConnectorId,
   type CreateMcpServer,
   ErrorCode,
   HealthStatus,
@@ -128,35 +130,72 @@ export class McpServersService implements OnModuleDestroy {
 
   /** Starts the browser sign-in in each account whose Probe reads `auth`. `connection.checked` reports the result. */
   async authenticate(name: string): Promise<void> {
-    const servers = await this.servers();
-    const current = this.require(servers, name);
-    if (!current.registered) {
-      if (current.transport === McpTransport.Stdio) {
-        throw new ApiError(409, ErrorCode.InvalidState, `${name} has no sign-in; add it again with its env vars`);
-      }
-      refuseProjectScope(current.scope);
-      await this.register(name, current.scope, current.transport, current.target, {}, {}, null);
-    }
+    await this.authenticatePrepare(name);
     const views = await this.views(true);
     const waiting = views.filter((view) => view.state(name)?.status === HealthStatus.Auth);
+    void this.signIn(
+      name,
+      waiting.map((view) => view.account),
+    ).catch((error) => {
+      this.logger.error(`checking ${name} after sign-in failed: ${String(error)}`);
+    });
+  }
+
+  /** A removed http or sse server is registered again from its row; a stdio one needs its env vars first. */
+  private async authenticatePrepare(name: string): Promise<void> {
+    const current = this.require(await this.servers(), name);
+    if (current.registered) return;
+    if (current.transport === McpTransport.Stdio) {
+      throw new ApiError(409, ErrorCode.InvalidState, `${name} has no sign-in; add it again with its env vars`);
+    }
+    refuseProjectScope(current.scope);
+    await this.register(name, current.scope, current.transport, current.target, {}, {}, null);
+  }
+
+  /** Authenticate, waiting for the sign-ins and the check. Connectors follow the result. */
+  async authenticateAndCheck(name: string): Promise<McpServer> {
+    await this.authenticatePrepare(name);
+    const views = await this.views(true);
+    const waiting = views.filter((view) => view.state(name)?.status === HealthStatus.Auth);
+    return this.signIn(
+      name,
+      waiting.map((view) => view.account),
+    );
+  }
+
+  /** Registers a server a Connector rides on when it is missing or was removed. */
+  async ensureRegistered(spec: { name: string; transport: McpTransport; target: string }): Promise<void> {
+    const found = (await this.servers()).find((server) => server.name === spec.name);
+    if (found?.registered) return;
+    await this.register(spec.name, McpScope.User, spec.transport, spec.target, {}, {}, null);
+    this.dropRemoved(spec.name);
+  }
+
+  /** The server as it reads now, without a new Probe; `null` when it is unknown. */
+  async find(name: string): Promise<McpServer | null> {
+    return (await this.servers()).find((server) => server.name === name) ?? null;
+  }
+
+  /** Probes again and sends `connection.checked`. */
+  recheck(name: string): Promise<McpServer> {
+    return this.checked(name);
+  }
+
+  private async signIn(name: string, accounts: Account[]): Promise<McpServer> {
     const abort = new AbortController();
     this.logins.add(abort);
-    void (async () => {
-      try {
-        for (const view of waiting) {
-          try {
-            await this.claude.mcpLogin(name, view.account.configDir, abort.signal);
-          } catch {
-            this.logger.warn(`sign-in to ${name} did not finish in account ${view.account.label}`);
-          }
+    try {
+      for (const account of accounts) {
+        try {
+          await this.claude.mcpLogin(name, account.configDir, abort.signal);
+        } catch {
+          this.logger.warn(`sign-in to ${name} did not finish in account ${account.label}`);
         }
-        await this.checked(name);
-      } catch (error) {
-        this.logger.error(`checking ${name} after sign-in failed: ${String(error)}`);
-      } finally {
-        this.logins.delete(abort);
       }
-    })();
+      return await this.checked(name);
+    } finally {
+      this.logins.delete(abort);
+    }
   }
 
   /** Remove: signs out and unregisters the server in every account, and keeps it listed. */
@@ -400,7 +439,7 @@ export class McpServersService implements OnModuleDestroy {
         has_headers: Object.keys(entry.headers).length > 0,
         enabled,
         registered: true,
-        used_by: null,
+        used_by: usedBy(name),
       });
     }
 
@@ -426,7 +465,7 @@ export class McpServersService implements OnModuleDestroy {
         has_headers: false,
         enabled: true,
         registered: false,
-        used_by: null,
+        used_by: usedBy(row.name),
       });
     }
     return out;
@@ -455,6 +494,12 @@ export class McpServersService implements OnModuleDestroy {
     if (!server) throw new ApiError(404, ErrorCode.NotFound, `no MCP server named ${name}`);
     return server;
   }
+}
+
+/** The Connector whose server this is. */
+function usedBy(name: string): ConnectorId | null {
+  const found = Object.entries(CONNECTOR_SERVERS).find(([, server]) => server?.name === name);
+  return (found?.[0] as ConnectorId | undefined) ?? null;
 }
 
 /** Project scope waits for Settings › Repos. */

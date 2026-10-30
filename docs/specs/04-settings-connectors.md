@@ -1,6 +1,6 @@
 # Settings: Connectors
 
-**Status:** ready
+**Status:** shipped
 **Design:** Settings › Connectors and the Connector drawer (fields, Test, Save changes, Disconnect)
 
 ## Problem
@@ -11,7 +11,7 @@ Monitor needs Datadog to scan, the fix flow needs Jira and a Git host, and revie
 
 1. Listing Connectors returns all seven in a fixed order, each with how it is reached (`via`), status, account label and config. The first start seeds every Connector with status `off`.
 2. Connecting a Connector that rides an MCP Server (Jira, Slack, Sentry) registers that server in every account if it is missing (`03-settings-mcp-servers`), then runs its Authenticate. The Connector's status follows the server's.
-3. Connecting Datadog or GitHub runs the CLI's own browser sign-in (`pup auth login`, `gh auth login --web`). Connecting Datadog also registers the `datadog-pup` MCP Server (`pup mcp serve`) so the agent can query it.
+3. Connecting Datadog or GitHub runs the CLI's own browser sign-in (`pup auth login`, `gh auth login --web`). Connecting Datadog also registers the `datadog-pup` MCP Server (`pup mcp serve`) so the agent can query it, when the installed `pup` has an `mcp` command; `pup` 2.3.5 has none, and then nothing is registered.
 4. Connecting GitLab or Bitbucket takes a token as `secret`. It goes to the Keychain adapter under `connector:<id>`. GitLab then signs `glab` in with it, reading the token from stdin. Bitbucket uses it for API calls, and git uses the operator's SSH key.
 5. After a sign-in, the console runs a check. A check records status, account label and, for a Git host, the signed-in `login`. `07-workspace` uses `login` to tell the operator's own pull requests apart.
 6. A sign-in that fails or is cancelled leaves the status `auth` with the reason in `status_detail`.
@@ -44,6 +44,9 @@ Monitor needs Datadog to scan, the fix flow needs Jira and a Git host, and revie
 - **Order**: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry.
 - **Sentry**: kept as a Connector, as the architecture doc says, though the design shows "No Sentry connector yet".
 - **Reports folder**: defaults to `reports` inside the data directory (`01-base-daemon-setup`), not the design's `~/.ops-console/reports`.
+- **Check**: a check reads the CLI or API for a signed-in user (`pup auth status`, `gh api user`, `glab api user`, the Bitbucket user endpoint) or, for an MCP-backed Connector, a new Probe of its server. A tool that fails to answer reads `fail`; a tool that is signed out reads `auth`.
+- **GitHub sign-in**: `gh auth login --web --git-protocol ssh --clipboard`; the one-time code lands on the clipboard because no terminal is attached.
+- **MCP servers**: Jira is `atlassian` (sse), Slack is `slack` (http), Sentry is `sentry` (http), Datadog is `datadog-pup`. `03-settings-mcp-servers` shows the Connector in `used_by`.
 - **Design departure**: secrets go to the Keychain, not `~/.ops-console/secrets` (ADR 0004).
 
 ## Not required

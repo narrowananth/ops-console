@@ -5,8 +5,12 @@ import {
   addedAccountSchema,
   agentAccountsSettingSchema,
   approvalSchema,
+  type ConnectorId,
   type CreateMcpServer,
   claudeAccountSchema,
+  connectorCheckSchema,
+  connectorListSchema,
+  connectorSchema,
   healthSchema,
   mcpServerListSchema,
   mcpServerSchema,
@@ -27,6 +31,7 @@ export const queryKeys = {
   accounts: ['agent-accounts'] as const,
   approvals: ['approvals'] as const,
   mcpServers: ['mcp-servers'] as const,
+  connectors: ['connectors'] as const,
   session: (id: string) => ['sessions', id] as const,
 };
 
@@ -194,5 +199,43 @@ export function useAuthenticateMcpServer() {
 export function useRemoveMcpServer() {
   return useMcpMutation((name: string) =>
     apiSend('DELETE', `/mcp-servers/${encodeURIComponent(name)}/credentials`, undefined, mcpServerResponse),
+  );
+}
+
+/** Refreshed by `connection.checked` over `/ws`; the list also re-checks connected Connectors that are 10 minutes stale. */
+export function useConnectors() {
+  return useQuery({ queryKey: queryKeys.connectors, queryFn: () => apiGet('/connectors', connectorListSchema) });
+}
+
+function useConnectorMutation<V>(send: (variables: V) => Promise<unknown>) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: send,
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.connectors }),
+  });
+}
+
+export function useSaveConnector() {
+  return useConnectorMutation(({ id, config }: { id: ConnectorId; config: Record<string, unknown> }) =>
+    apiSend('PATCH', `/connectors/${id}`, { config }, z.object({ data: connectorSchema })),
+  );
+}
+
+/** Starts the sign-in; the result arrives as `connection.checked`. */
+export function useConnectConnector() {
+  return useConnectorMutation(({ id, secret }: { id: ConnectorId; secret?: string }) =>
+    apiSend('POST', `/connectors/${id}/connect`, secret ? { secret } : {}, z.undefined()),
+  );
+}
+
+export function useTestConnector() {
+  return useConnectorMutation((id: ConnectorId) =>
+    apiSend('POST', `/connectors/${id}/checks`, undefined, z.object({ data: connectorCheckSchema })),
+  );
+}
+
+export function useDisconnectConnector() {
+  return useConnectorMutation((id: ConnectorId) =>
+    apiSend('DELETE', `/connectors/${id}/credentials`, undefined, z.object({ data: connectorSchema })),
   );
 }

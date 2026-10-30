@@ -69,6 +69,7 @@ Judgment work (Verification, Fix, Agent Review) runs as an agent session.
 | `claude-cli` | `claude mcp add`, `remove`, `list`, `get`, parsed with Zod |
 | `mcp-client` | Calls a tool on a server registered with Claude Code |
 | `mcp` | Servers registered in every Claude account (`.claude.json`), Probe, add, edit, reconnect, disable, remove, and the `mcp-exec` launcher |
+| `connectors` | The seven Connectors: sign-in through `pup`, `gh`, `glab`, a token or an MCP Server; checks; config |
 | `monitor` | Services, Routes, Scans, Alerts; Datadog queries through `pup` |
 | `verification` | Runs a Verification with the agent, stores the Report |
 | `review` | Operator's Review; on confirm, starts the fix Session |

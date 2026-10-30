@@ -5,6 +5,8 @@ import { z } from 'zod';
 import { SdkUsageSource } from './accounts/usage-source';
 import { AgentModule } from './agent/agent.module';
 import { ClaudeAgentSdk } from './agent/agent-sdk';
+import { CliConnectorTools } from './connectors/connector-tools';
+import { ConnectorsModule } from './connectors/connectors.module';
 import { startDaemon } from './daemon';
 import { LoginKeychain } from './keychain/keychain';
 import { runMcpExec } from './mcp/launcher';
@@ -37,6 +39,7 @@ const daemon = await startDaemon({
   writeLog: (line) => process.stdout.write(`${line}\n`),
   modules: [
     AgentModule.forRoot({ sdk: new ClaudeAgentSdk(), usage: new SdkUsageSource() }),
+    ConnectorsModule.forRoot({ tools: new CliConnectorTools() }),
     McpServersModule.forRoot({
       probe: new SdkProbe(),
       launcher: env.OPS_CONSOLE_LAUNCHER ?? path.join(homedir(), '.ops-console', 'current', 'bin', 'ops-console'),

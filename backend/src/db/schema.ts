@@ -5,7 +5,9 @@ import {
   ActionOutcome,
   type ApprovalKind,
   ApprovalStatus,
+  type ConnectorId,
   type Effort,
+  type HealthStatus,
   type McpScope,
   type McpTransport,
   type Model,
@@ -131,3 +133,23 @@ export const disabledMcpServers = sqliteTable('disabled_mcp_servers', {
   name: text().primaryKey().notNull(),
   disabledAt: text('disabled_at').notNull().default(nowIso),
 });
+
+/** One row per Connector, seeded by the migration. `config` never holds a secret. */
+export const connectors = sqliteTable(
+  'connectors',
+  {
+    id: text().$type<ConnectorId>().primaryKey().notNull(),
+    status: text()
+      .$type<HealthStatus>()
+      .notNull()
+      .default('off' as HealthStatus),
+    statusDetail: text('status_detail'),
+    /** Site, workspace or org shown in the list. */
+    accountLabel: text('account_label'),
+    /** Signed-in user on a Git host. */
+    login: text(),
+    config: text().notNull().default('{}'),
+    lastCheckedAt: text('last_checked_at'),
+  },
+  (table) => [check('connectors_config_json', sql`json_valid(${table.config})`)],
+);

@@ -9,12 +9,14 @@ export class McpServersModule {
   static forRoot(config: McpConfig): DynamicModule {
     return {
       module: McpServersModule,
+      global: true,
       controllers: [McpServersController],
       providers: [
         { provide: MCP_CONFIG, useValue: config },
         { provide: PROBE, useValue: config.probe },
         McpServersService,
       ],
+      exports: [McpServersService],
     };
   }
 }
