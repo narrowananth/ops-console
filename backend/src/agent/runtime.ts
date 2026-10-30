@@ -29,7 +29,7 @@ import { redact } from '../action-log/redact';
 import { claudeEnv } from '../claude-cli/claude-cli';
 import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
-import { nowIso, sessions } from '../db/schema';
+import { disabledMcpServers, nowIso, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
 import { blockParts, contentSchema, EDIT_TOOLS, questionInputSchema, stepText, toMessages } from './parts';
@@ -217,6 +217,14 @@ export class AgentRuntime {
       env: claudeEnv(configDir),
       includePartialMessages: true,
       disallowedTools: MERGE_DENIALS,
+      // Servers the operator disabled stay out of the run.
+      settings: {
+        deniedMcpServers: this.store.db
+          .select()
+          .from(disabledMcpServers)
+          .all()
+          .map(({ name }) => ({ serverName: name })),
+      },
       hooks: {
         PreToolUse: [{ hooks: [this.beforeTool(run)] }],
         PostToolUse: [{ hooks: [this.afterTool(run)] }],

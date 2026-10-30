@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Stands in for the `claude` CLI: prints output in its format and records add/remove calls.
 // Sign-in state lives in `fake-auth.json` in the config dir: `CLAUDE_CONFIG_DIR`, or `FAKE_CLAUDE_HOME` for the
-// operator's own setup.
-import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+// operator's own setup. `mcp add` and `remove` edit `.claude.json` there, in Claude Code's shape. `mcp login` records
+// the server in `fake-mcp-auth.json`; `mcp-fail-add` in the dir makes `mcp add` fail, `FAKE_MCP_LOGIN=fail` makes login fail.
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const [, , group, command, ...rest] = process.argv;
@@ -80,7 +81,56 @@ To remove this server, run: claude mcp remove "sentry" -s local
   console.error(`No MCP server found with name: ${rest[0]}`);
   process.exit(1);
 } else if (command === 'add' || command === 'remove') {
-  appendFileSync(process.env.FAKE_CLAUDE_RECORD, `${JSON.stringify([command, ...rest])}\n`);
+  if (process.env.FAKE_CLAUDE_RECORD)
+    appendFileSync(process.env.FAKE_CLAUDE_RECORD, `${JSON.stringify([command, ...rest])}\n`);
+  const dir = process.env.CLAUDE_CONFIG_DIR;
+  if (dir) {
+    if (command === 'add' && existsSync(path.join(dir, 'mcp-fail-add'))) process.exit(1);
+    const file = path.join(dir, '.claude.json');
+    const config = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+    const scopeAt = rest.indexOf('--scope');
+    const scope = scopeAt === -1 ? 'local' : rest[scopeAt + 1];
+    config.projects ??= {};
+    config.projects[process.cwd()] ??= {};
+    const holder = scope === 'user' ? config : config.projects[process.cwd()];
+    holder.mcpServers ??= {};
+    if (command === 'remove') {
+      delete holder.mcpServers[rest[0]];
+    } else {
+      const dash = rest.indexOf('--');
+      const options = dash === -1 ? rest : rest.slice(0, dash);
+      const flag = (name) => {
+        const at = options.indexOf(name);
+        return at === -1 ? undefined : options[at + 1];
+      };
+      const headers = {};
+      options.forEach((arg, at) => {
+        if (arg === '--header') {
+          const [key, ...value] = options[at + 1].split(': ');
+          headers[key] = value.join(': ');
+        }
+      });
+      const positional = options.filter(
+        (arg, at) => !arg.startsWith('-') && !['--scope', '--transport', '--header'].includes(options[at - 1]),
+      );
+      const name = positional[0];
+      holder.mcpServers[name] =
+        dash === -1
+          ? { type: flag('--transport'), url: positional[1], headers }
+          : { type: 'stdio', command: rest[dash + 1], args: rest.slice(dash + 2), env: {} };
+    }
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, JSON.stringify(config, null, 2));
+  }
+} else if (command === 'login' || command === 'logout') {
+  const file = path.join(process.env.CLAUDE_CONFIG_DIR, 'fake-mcp-auth.json');
+  const names = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : [];
+  if (command === 'login') {
+    if (process.env.FAKE_MCP_LOGIN === 'fail') process.exit(1);
+    writeFileSync(file, JSON.stringify([...names, rest[0]]));
+  } else {
+    writeFileSync(file, JSON.stringify(names.filter((name) => name !== rest[0])));
+  }
 } else {
   process.exit(2);
 }

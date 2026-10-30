@@ -91,7 +91,12 @@ The Environment tag on a Connection that reaches production data. Always visible
 asks the operator first.
 
 **MCP Server**:
-A server listed by `claude mcp list` that gives the agent tools (Slack, Atlassian, a database).
+A server registered in Claude Code that gives the agent tools (Slack, Atlassian, a database). The
+console registers it in every Claude account.
+
+**Probe**:
+A short Agent SDK session that reads which MCP Servers connect and which tools they give, then
+stops before the model runs.
 
 **Connector**:
 An outside service the console itself calls: Datadog, GitHub, Slack, Sentry.

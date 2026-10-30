@@ -134,6 +134,16 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
     return row;
   }
 
+  /** Every account with its config dir, in list order. */
+  all(): { id: string; label: string; configDir: string; signedIn: boolean }[] {
+    return this.rows().map((row) => ({
+      id: row.id,
+      label: row.label,
+      configDir: this.configDir(row),
+      signedIn: row.signedIn,
+    }));
+  }
+
   /** The account's `CLAUDE_CONFIG_DIR`. */
   configDir(account: AccountRow): string {
     if (account.configDir === null) throw new Error(`Claude account ${account.id} has no config dir`);

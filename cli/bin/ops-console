@@ -10,7 +10,9 @@ while [ -L "$self" ]; do
   esac
 done
 root=$(cd "$(dirname "$self")/.." && pwd -P)
-if [ "${1:-}" = daemon ]; then
-  exec "$root/node/bin/node" "$root/app/main.js"
-fi
+case ${1:-} in
+  daemon) exec "$root/node/bin/node" "$root/app/main.js" ;;
+  # The daemon bundle carries the Keychain module; the CLI bundle does not.
+  mcp-exec) exec "$root/node/bin/node" "$root/app/main.js" "$@" ;;
+esac
 exec "$root/node/bin/node" "$root/cli/ops-console.js" "$@"
