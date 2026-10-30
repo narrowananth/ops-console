@@ -655,10 +655,17 @@ describe('removing an account', () => {
     const [primary] = (await accounts(daemon)).data;
     const hold = gate();
     daemon.sdk.script({ wait: hold.promise });
-    await api(daemon).post(`/sessions/${daemon.createSession()}/messages`, { text: 'long job' });
+    const sessionId = daemon.createSession();
+    await api(daemon).post(`/sessions/${sessionId}/messages`, { text: 'long job' });
     const response = await api(daemon).delete(`/agent-accounts/${primary?.id}`);
     expect([response.status, response.body.error?.code]).toEqual([409, 'invalid_state']);
     hold.open();
+    // The run writes its end to the store; the daemon must not stop first.
+    await until(
+      async () => (await api(daemon).get(`/sessions/${sessionId}`)).body.data.state,
+      (state) => state === 'idle',
+      'the run to end',
+    );
   });
 });
 
