@@ -4,6 +4,7 @@ export * from './connections';
 export * from './connectors';
 export * from './errors';
 export * from './mcp';
+export * from './monitor';
 export * from './repos';
 export * from './settings';
 export * from './workspace';

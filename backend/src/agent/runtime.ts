@@ -32,6 +32,7 @@ import { StartupRecovery } from '../common/recovery';
 import { disabledMcpServers, nowIso, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
+import { MessageInterceptors } from './message-interceptors';
 import { blockParts, contentSchema, EDIT_TOOLS, questionInputSchema, stepText, toMessages } from './parts';
 import { ProdWriteRule } from './prod-write-rule';
 import { type Run, RunRegistry, type RunSummary } from './runs';
@@ -90,6 +91,7 @@ export class AgentRuntime {
     @Inject(SessionKinds) private readonly kinds: SessionKinds,
     @Inject(ProdWriteRule) private readonly prodWrites: ProdWriteRule,
     @Inject(Transcripts) private readonly transcripts: Transcripts,
+    @Inject(MessageInterceptors) private readonly interceptors: MessageInterceptors,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
     recovery.register('agent sessions and approvals', () => this.recover());
@@ -124,6 +126,7 @@ export class AgentRuntime {
       current.answer(text);
       return { message_id: current.messageId };
     }
+    if (this.interceptors.handle(session, text)) return { message_id: crypto.randomUUID() };
     return { message_id: this.begin(sessionId, text, null).messageId };
   }
 
@@ -131,16 +134,25 @@ export class AgentRuntime {
    * Starts a run the console asks for itself, in a Session that takes no operator messages. Throws `session_busy`
    * while the Session's run is going; `finished` settles when the run ends.
    */
-  runFor(sessionId: string, text: string): { finished: Promise<RunSummary> } {
+  runFor(
+    sessionId: string,
+    text: string,
+    onPart: ((part: Part) => void) | null = null,
+  ): { finished: Promise<RunSummary> } {
     let settle: (summary: RunSummary) => void = () => {};
     const finished = new Promise<RunSummary>((resolve) => {
       settle = resolve;
     });
-    this.begin(sessionId, text, settle);
+    this.begin(sessionId, text, settle, onPart);
     return { finished };
   }
 
-  private begin(sessionId: string, text: string, onFinish: ((summary: RunSummary) => void) | null): Run {
+  private begin(
+    sessionId: string,
+    text: string,
+    onFinish: ((summary: RunSummary) => void) | null,
+    onPart: ((part: Part) => void) | null = null,
+  ): Run {
     const session = this.sessions.get(sessionId);
     const kind = this.kinds.get(session.kind);
     if (!kind) throw new ApiError(409, ErrorCode.InvalidState, `a ${session.kind} session cannot run`);
@@ -158,6 +170,7 @@ export class AgentRuntime {
       waits: 0,
       createdAt: new Date().toISOString(),
       onFinish,
+      onPart,
     };
     this.runs.add(run);
     const isFirst = session.title === NEW_SESSION_TITLE && session.sdkSessionId === null;
@@ -318,6 +331,7 @@ export class AgentRuntime {
       run.parts.splice(from, run.growing === null ? 0 : 1, ...parts);
       run.growing = null;
       for (let index = from; index < from + parts.length; index++) this.output(run, index);
+      for (const part of parts) run.onPart?.(part);
     }
   }
 

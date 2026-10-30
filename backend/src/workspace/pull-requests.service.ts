@@ -66,6 +66,7 @@ const signature = (pr: HostPullRequest) =>
 export class PullRequestsService implements OpenPrBranches {
   private readonly logger = new Logger('pull-requests');
   private readonly cache = new Map<string, Entry>();
+  private readonly refreshListeners: (() => void)[] = [];
 
   constructor(
     @Inject(STORE) private readonly store: Store,
@@ -322,6 +323,12 @@ export class PullRequestsService implements OpenPrBranches {
       }
     }
     this.store.write((_tx, emit) => emit('pull_request.refreshed', { repo_id: repoId, status, changed }));
+    for (const listener of this.refreshListeners) listener();
+  }
+
+  /** Runs after every PR refresh, once `pull_request.refreshed` has gone out. */
+  onRefreshed(listener: () => void): void {
+    this.refreshListeners.push(listener);
   }
 
   /** Adds what only the console knows: whose it is, which Session and which Agent Review belong to it. */

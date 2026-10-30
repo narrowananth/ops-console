@@ -47,6 +47,20 @@ export function useLiveEvents(): void {
       ) {
         void client.invalidateQueries({ queryKey: queryKeys.pulls });
       }
+      if (
+        event.event === 'scan.started' ||
+        event.event === 'scan.finished' ||
+        event.event === 'alert.detected' ||
+        event.event === 'alert.updated' ||
+        event.event === 'alert.regressed' ||
+        event.event === 'verification.stepped' ||
+        event.event === 'alert.verified' ||
+        event.event === 'alert.reviewed' ||
+        event.event === 'fix.advanced' ||
+        event.event === 'alert.resolved'
+      ) {
+        void client.invalidateQueries({ queryKey: queryKeys.monitor });
+      }
     });
     return () => socket.close();
   }, [client]);

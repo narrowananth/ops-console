@@ -6,6 +6,7 @@ import { ActionLogController, ApprovalsController } from '../action-log/action-l
 import { ActionLogService } from '../action-log/action-log.service';
 import { ApprovalsService } from '../action-log/approvals.service';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
+import { MessageInterceptors } from './message-interceptors';
 import { ProdWriteRule } from './prod-write-rule';
 import { RunRegistry } from './runs';
 import { AgentRuntime } from './runtime';
@@ -30,6 +31,7 @@ export class AgentModule {
         { provide: USAGE_SOURCE, useValue: config.usage },
         RunRegistry,
         SessionKinds,
+        MessageInterceptors,
         ProdWriteRule,
         Transcripts,
         ActionLogService,
@@ -38,7 +40,15 @@ export class AgentModule {
         SessionsService,
         AgentRuntime,
       ],
-      exports: [SessionKinds, ProdWriteRule, SessionsService, ActionLogService, AgentRuntime, AccountsService],
+      exports: [
+        SessionKinds,
+        MessageInterceptors,
+        ProdWriteRule,
+        SessionsService,
+        ActionLogService,
+        AgentRuntime,
+        AccountsService,
+      ],
     };
   }
 }
