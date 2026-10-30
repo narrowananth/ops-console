@@ -1,0 +1,16 @@
+#!/bin/sh
+# Runs the bundled Node from this version's folder; the system Node is never used.
+set -eu
+self=$0
+while [ -L "$self" ]; do
+  target=$(readlink "$self")
+  case $target in
+    /*) self=$target ;;
+    *) self=$(dirname "$self")/$target ;;
+  esac
+done
+root=$(cd "$(dirname "$self")/.." && pwd -P)
+if [ "${1:-}" = daemon ]; then
+  exec "$root/node/bin/node" "$root/app/main.js"
+fi
+exec "$root/node/bin/node" "$root/cli/ops-console.js" "$@"

@@ -14,9 +14,9 @@ migration names, asserting a fake's call order.
 Flag a test bent to pass instead of code fixed: assertion loosened, `.skip` or `.only` added, the
 unit under test mocked.
 
-Tests run real code against real stores. Backend tests use Postgres in Testcontainers. A fake
-stands in only for what lives outside the process: Claude, Datadog, GitHub, Slack, an MCP server,
-the shell.
+Tests run real code against real stores. Backend tests start the daemon on a temporary data folder
+with its own SQLite file. A fake stands in only for what lives outside the process: Claude, the
+`claude` CLI, the Keychain, Datadog, GitHub, Slack, an MCP server, launchd, the shell.
 
 Tooling: Vitest in both packages, Testing Library for React components, Playwright for browser
 flows, `@nestjs/testing` with Supertest for HTTP.
@@ -72,7 +72,7 @@ Keychain adapter at the moment of use.
 
 ## API responses
 
-REST returns `{ data }` or `{ data, page }`, or nothing for 204. Errors return
+REST returns `{ data }` or, for lists, `{ data, meta }` with `meta.next_cursor`, or nothing for 204. Errors return
 `{ error: { code, message } }`. `message` is specific and safe to show: no secret, no customer
 data. The client branches on `code`, never `message`.
 

@@ -1,0 +1,65 @@
+#!/usr/bin/env node
+// Stands in for launchctl: bootstrap runs the plist's program in the background with its env and log
+// paths, bootout stops it. State lives in $FAKE_LAUNCHCTL_STATE; every call is appended to calls.log.
+import { spawn } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+
+const state = process.env.FAKE_LAUNCHCTL_STATE;
+mkdirSync(state, { recursive: true });
+const args = process.argv.slice(2);
+appendFileSync(path.join(state, 'calls.log'), `${args.join(' ')}\n`);
+const pidFile = path.join(state, 'pid');
+
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const loadedPid = () => (existsSync(pidFile) ? Number(readFileSync(pidFile, 'utf8')) : null);
+
+const [command, target, plistPath] = args;
+if (command === 'bootstrap') {
+  if (loadedPid() !== null) {
+    console.error('Bootstrap failed: 5: Input/output error');
+    process.exit(5);
+  }
+  const plist = readFileSync(plistPath, 'utf8');
+  const strings = (block) => [...block.matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1]);
+  const program = strings(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(plist)[1]);
+  const envBlock = /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(plist)?.[1] ?? '';
+  const env = {};
+  for (const m of envBlock.matchAll(/<key>([^<]*)<\/key>\s*<string>([^<]*)<\/string>/g)) env[m[1]] = m[2];
+  const log = /<key>StandardOutPath<\/key>\s*<string>([^<]*)<\/string>/.exec(plist)[1];
+  const out = openSync(log, 'a');
+  const child = spawn(program[0], program.slice(1), {
+    // Like launchd: the plist's variables and a HOME that is not the caller's.
+    env: { HOME: path.join(state, 'launchd-home'), ...env },
+    stdio: ['ignore', out, out],
+    detached: true,
+  });
+  writeFileSync(pidFile, String(child.pid));
+  child.unref();
+  process.exit(0);
+} else if (command === 'bootout') {
+  const pid = loadedPid();
+  if (pid === null) {
+    console.error('Boot-out failed: 3: No such process');
+    process.exit(3);
+  }
+  if (alive(pid)) process.kill(pid, 'SIGTERM');
+  const deadline = Date.now() + 5000;
+  while (alive(pid) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  rmSync(pidFile, { force: true });
+  process.exit(0);
+} else if (command === 'enable' || command === 'disable') {
+  process.exit(0);
+} else if (command === 'print') {
+  process.exit(loadedPid() === null ? 113 : 0);
+} else {
+  console.error(`fake launchctl: unsupported ${args.join(' ')}`);
+  process.exit(64);
+}

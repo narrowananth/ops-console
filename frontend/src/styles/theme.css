@@ -1,0 +1,155 @@
+/* Theme tokens ported from design/ops-console.html. Light values live in @theme; dark overrides the ramps. */
+@import "tailwindcss";
+@import "@fontsource/archivo/400.css";
+@import "@fontsource/archivo/600.css";
+@import "@fontsource/archivo/800.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/600.css";
+
+@theme {
+  --color-*: initial;
+  --color-bg: #f3f2f2;
+  --color-surface: #eae9e9;
+  --color-text: #201e1d;
+  --color-accent: #ec3013;
+  --color-accent-2: #e15b47;
+  --color-divider: color-mix(in srgb, #201e1d 40%, transparent);
+  --color-neutral-100: #f8f4f4;
+  --color-neutral-200: #eae7e7;
+  --color-neutral-300: #d7d3d3;
+  --color-neutral-400: #bab6b6;
+  --color-neutral-500: #9b9797;
+  --color-neutral-600: #7d7979;
+  --color-neutral-700: #605d5d;
+  --color-neutral-800: #444141;
+  --color-neutral-900: #2d2b2b;
+  --color-accent-100: #fff2ef;
+  --color-accent-200: #ffe0d9;
+  --color-accent-300: #ffc4b8;
+  --color-accent-400: #ff9783;
+  --color-accent-500: #ff563c;
+  --color-accent-600: #dd2b0f;
+  --color-accent-700: #ae1800;
+  --color-accent-800: #7c1405;
+  --color-accent-900: #4d170e;
+  --color-accent-2-100: #fff2ef;
+  --color-accent-2-200: #ffe0da;
+  --color-accent-2-300: #ffc4b9;
+  --color-accent-2-400: #ff9784;
+  --color-accent-2-500: #ef6853;
+  --color-accent-2-600: #c94b39;
+  --color-accent-2-700: #9e3526;
+  --color-accent-2-800: #71261b;
+  --color-accent-2-900: #471d16;
+  --color-white: #fff;
+
+  --font-*: initial;
+  --font-heading: "Archivo", system-ui, sans-serif;
+  --font-body: "Archivo", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius-*: initial;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #2d2b2b 14%, transparent);
+  --shadow-md: 0 3px 10px color-mix(in srgb, #2d2b2b 16%, transparent);
+  --shadow-lg: 0 12px 32px color-mix(in srgb, #2d2b2b 22%, transparent);
+}
+
+:root {
+  --font-heading-weight: 800;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #181716;
+  --color-surface: #211f1e;
+  --color-text: #ecebea;
+  --color-divider: color-mix(in srgb, #ecebea 30%, transparent);
+  --color-neutral-100: #232120;
+  --color-neutral-200: #2d2b2a;
+  --color-neutral-300: #3b3837;
+  --color-neutral-400: #55514f;
+  --color-neutral-500: #76726f;
+  --color-neutral-600: #969290;
+  --color-neutral-700: #b4b0ae;
+  --color-neutral-800: #d1cdcb;
+  --color-neutral-900: #efebea;
+  --color-accent-100: #3a140d;
+  --color-accent-200: #561b10;
+  --color-accent-300: #7a2213;
+  --color-accent-400: #a82a14;
+  --color-accent-500: #ff563c;
+  --color-accent-600: #ff6c55;
+  --color-accent-700: #ff8c77;
+  --color-accent-800: #ffc4b8;
+  --color-accent-900: #ffe3dc;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 3px 10px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 0 0 1px color-mix(in srgb, #ecebea 18%, transparent), 0 12px 32px rgba(0, 0, 0, 0.6);
+}
+
+@layer base {
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading);
+    font-weight: var(--font-heading-weight);
+    line-height: 1.12;
+    letter-spacing: -0.015em;
+  }
+
+  h4 {
+    font-size: 20px;
+  }
+
+  a {
+    color: var(--color-accent-700);
+  }
+
+  a:hover {
+    color: var(--color-accent-600);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  }
+
+  code {
+    font-family: var(--font-mono);
+  }
+}
+
+.theme-anim,
+.theme-anim * {
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-anim,
+  .theme-anim * {
+    transition: none;
+  }
+}

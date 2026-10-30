@@ -1,0 +1,21 @@
+import { z } from 'zod';
+
+export enum ErrorCode {
+  ValidationFailed = 'validation_failed',
+  Unauthorized = 'unauthorized',
+  NotFound = 'not_found',
+  InvalidState = 'invalid_state',
+  Duplicate = 'duplicate',
+  RateLimited = 'rate_limited',
+  UpstreamFailed = 'upstream_failed',
+  Internal = 'internal',
+}
+
+export const errorBodySchema = z.object({
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+  }),
+});
+
+export type ErrorBody = z.infer<typeof errorBodySchema>;
