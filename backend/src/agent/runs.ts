@@ -23,6 +23,8 @@ export type Run = {
   onFinish: ((summary: RunSummary) => void) | null;
   /** Called with each whole part the agent finishes, in order; set by the code that started the run. */
   onPart: ((part: Part) => void) | null;
+  /** How steps name an MCP server, from the Session's kind. */
+  serverLabel: ((server: string) => string | null) | null;
 };
 
 /** How a run ended, for the code that started it. */

@@ -4,6 +4,7 @@ import {
   ActionKind,
   ActionOutcome,
   type CreateRepoSession,
+  createRepoSessionSchema,
   ErrorCode,
   type Session,
   SessionKind,
@@ -13,7 +14,7 @@ import { eq } from 'drizzle-orm';
 import { ActionLogService } from '../action-log/action-log.service';
 import { SessionKinds } from '../agent/session-kinds';
 import { SessionsService, toSession } from '../agent/sessions.service';
-import { ApiError, validationFailed } from '../common/errors';
+import { ApiError, parseInput, validationFailed } from '../common/errors';
 import { repos, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { GIT, Git, GitFailed } from '../repos/git';
@@ -28,7 +29,11 @@ export class WorkspaceSessionsService {
     @Inject(ActionLogService) private readonly actionLog: ActionLogService,
     @Inject(SessionKinds) kinds: SessionKinds,
   ) {
-    kinds.register(SessionKind.Repo, { workingDir: (session) => this.folder(session.repoId), acceptsMessages: true });
+    kinds.register(SessionKind.Repo, {
+      workingDir: (session) => this.folder(session.repoId),
+      acceptsMessages: true,
+      create: (body) => this.create(parseInput(createRepoSessionSchema, body, 'body')),
+    });
     kinds.register(SessionKind.PrReview, {
       workingDir: (session) => this.folder(session.repoId),
       acceptsMessages: false,

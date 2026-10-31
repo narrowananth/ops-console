@@ -117,6 +117,8 @@ export const sessionSchema = z.object({
   branch: z.string().nullable(),
   /** `pr_review` Sessions: the pull request in `repo_id`. */
   pr_number: z.number().int().nullable(),
+  /** `devtools` Sessions: the Connections the agent may reach; empty means every Connection with access. Null for other kinds. */
+  connection_ids: z.array(z.string()).nullable(),
   state: z.enum(SessionState),
   last_message_preview: z.string().nullable(),
   created_at: z.string(),
@@ -136,6 +138,8 @@ export const sessionPatchSchema = z
     model: z.enum(Model).optional(),
     effort: z.enum(Effort).optional(),
     access_mode: z.enum(AccessMode).optional(),
+    /** `devtools` Sessions only. */
+    connection_ids: z.array(z.string().min(1)).optional(),
   })
   .strict();
 

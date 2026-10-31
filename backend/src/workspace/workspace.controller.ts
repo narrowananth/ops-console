@@ -1,7 +1,6 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Query } from '@nestjs/common';
 import {
   checkoutSchema,
-  createRepoSessionSchema,
   type PrAgentReview,
   type PrComment,
   type PullRequest,
@@ -23,15 +22,10 @@ const sessionParams = z.object({ id: z.string().min(1) });
 const pullParams = z.object({ repo: z.string().min(1), number: z.coerce.number().int().min(1) });
 const commentParams = pullParams.extend({ comment_id: z.string().min(1) });
 
-/** `POST /sessions` for the `repo` kind, and moving a Session's branch. */
+/** Moving a `repo` Session's branch. */
 @Controller('sessions')
 export class WorkspaceSessionsController {
   constructor(@Inject(WorkspaceSessionsService) private readonly workspace: WorkspaceSessionsService) {}
-
-  @Post()
-  async create(@Body() body: unknown): Promise<{ data: Session }> {
-    return { data: await this.workspace.create(parseInput(createRepoSessionSchema, body, 'body')) };
-  }
 
   @Post(':id/checkout')
   @HttpCode(200)

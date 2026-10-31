@@ -16,7 +16,7 @@ import {
 import { eq } from 'drizzle-orm';
 import { ApiError, validationFailed } from '../common/errors';
 import { mergeConfig } from '../common/merge-config';
-import { connections } from '../db/schema';
+import { connections, sessionConnections } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { KEYCHAIN, type Keychain } from '../keychain/keychain';
 import { ConnectionServers, McpServersService } from '../mcp/mcp-servers.service';
@@ -100,6 +100,9 @@ export class ConnectionsService implements OnModuleInit {
         .set({ name, env: body.env ?? row.env, access, config: JSON.stringify(config) })
         .where(eq(connections.id, id))
         .run();
+      // A Connection with no access leaves every Dev tools scope.
+      if (access === AccessLevel.None)
+        tx.delete(sessionConnections).where(eq(sessionConnections.connectionId, id)).run();
     });
     return this.get(id);
   }

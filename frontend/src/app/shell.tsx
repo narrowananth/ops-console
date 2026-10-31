@@ -1,10 +1,10 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { Empty } from '../components/ui/empty';
+import { DevToolsView } from '../devtools/terminal-view';
 import { useLiveEvents } from '../lib/live';
 import { MonitorView } from '../monitor/monitor-view';
 import { WorkspaceView } from '../workspace/workspace-view';
 import { SettingsDrawer } from './settings-drawer';
-import { TopBar, VIEWS } from './top-bar';
+import { TopBar } from './top-bar';
 
 export function Shell() {
   useLiveEvents();
@@ -15,9 +15,7 @@ export function Shell() {
         <Routes>
           <Route path="/monitor" element={<MonitorView />} />
           <Route path="/workspace" element={<WorkspaceView />} />
-          {VIEWS.filter((view) => view.path !== '/workspace' && view.path !== '/monitor').map((view) => (
-            <Route key={view.path} path={view.path} element={<Empty>{view.label}: nothing here yet.</Empty>} />
-          ))}
+          <Route path="/devtools" element={<DevToolsView />} />
           <Route path="*" element={<Navigate to="/monitor" replace />} />
         </Routes>
       </main>

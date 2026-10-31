@@ -24,7 +24,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { type AccountRow, AccountsService, rateLimitInfoSchema } from '../accounts/accounts.service';
 import { ActionLogService } from '../action-log/action-log.service';
 import { type ApprovalRequest, ApprovalsService, type Decision } from '../action-log/approvals.service';
-import { classifyCall } from '../action-log/classify';
+import { classifyCall, mcpTool } from '../action-log/classify';
 import { redact } from '../action-log/redact';
 import { claudeEnv } from '../claude-cli/claude-cli';
 import { ApiError } from '../common/errors';
@@ -32,12 +32,13 @@ import { StartupRecovery } from '../common/recovery';
 import { disabledMcpServers, nowIso, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
+import { ConnectionLookup } from './connection-lookup';
 import { MessageInterceptors } from './message-interceptors';
 import { blockParts, contentSchema, EDIT_TOOLS, questionInputSchema, stepText, toMessages } from './parts';
 import { ProdWriteRule } from './prod-write-rule';
 import { type Run, RunRegistry, type RunSummary } from './runs';
 import { SessionKinds } from './session-kinds';
-import { emitSessionUpdated, NEW_SESSION_TITLE, SessionsService } from './sessions.service';
+import { emitSessionUpdated, NEW_SESSION_TITLE, type SessionRow, SessionsService } from './sessions.service';
 import { Transcripts } from './transcripts';
 
 const PERMISSION_MODES: Record<AccessMode, PermissionMode> = {
@@ -92,6 +93,7 @@ export class AgentRuntime {
     @Inject(ProdWriteRule) private readonly prodWrites: ProdWriteRule,
     @Inject(Transcripts) private readonly transcripts: Transcripts,
     @Inject(MessageInterceptors) private readonly interceptors: MessageInterceptors,
+    @Inject(ConnectionLookup) private readonly connections: ConnectionLookup,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
     recovery.register('agent sessions and approvals', () => this.recover());
@@ -171,6 +173,7 @@ export class AgentRuntime {
       createdAt: new Date().toISOString(),
       onFinish,
       onPart,
+      serverLabel: kind.serverLabel ?? null,
     };
     this.runs.add(run);
     const isFirst = session.title === NEW_SESSION_TITLE && session.sdkSessionId === null;
@@ -192,7 +195,7 @@ export class AgentRuntime {
     if (session.sdkSessionId !== null && session.accountId !== null && kind) {
       const configDir = this.accounts.configDir(this.accounts.get(session.accountId));
       const entries = await this.transcripts.read(session.sdkSessionId, kind.workingDir(session), configDir);
-      messages = toMessages(entries, run?.sdkUuids);
+      messages = toMessages(entries, run?.sdkUuids, kind.serverLabel);
     }
     const last = messages.at(-1);
     if (!run && session.state === SessionState.Failed && last?.role === 'agent') last.status = 'failed';
@@ -256,11 +259,14 @@ export class AgentRuntime {
       disallowedTools: MERGE_DENIALS,
       // Servers the operator disabled stay out of the run.
       settings: {
-        deniedMcpServers: this.store.db
-          .select()
-          .from(disabledMcpServers)
-          .all()
-          .map(({ name }) => ({ serverName: name })),
+        deniedMcpServers: [
+          ...this.store.db
+            .select()
+            .from(disabledMcpServers)
+            .all()
+            .map(({ name }) => name),
+          ...(this.kinds.get(session.kind)?.deniedServers?.(session) ?? []),
+        ].map((name) => ({ serverName: name })),
       },
       hooks: {
         PreToolUse: [{ hooks: [this.beforeTool(run)] }],
@@ -307,6 +313,7 @@ export class AgentRuntime {
       if (session.sdkSessionId !== message.session_id) {
         this.sessions.write(run.sessionId, { sdkSessionId: message.session_id });
       }
+      this.reportServers(run, session, message.mcp_servers);
       return;
     }
     if (message.type === 'stream_event' && message.parent_tool_use_id === null) {
@@ -326,13 +333,34 @@ export class AgentRuntime {
       run.sdkUuids.add(message.uuid);
       const content = contentSchema.parse(message.message.content);
       const parts =
-        typeof content === 'string' ? blockParts({ type: 'text', text: content }) : content.flatMap(blockParts);
+        typeof content === 'string'
+          ? blockParts({ type: 'text', text: content })
+          : content.flatMap((block) => blockParts(block, run.serverLabel));
       const from = run.growing ?? run.parts.length;
       run.parts.splice(from, run.growing === null ? 0 : 1, ...parts);
       run.growing = null;
       for (let index = from; index < from + parts.length; index++) this.output(run, index);
       for (const part of parts) run.onPart?.(part);
     }
+  }
+
+  /**
+   * A Connection's server that is down or needs a login is named in a step and skipped; the run goes on with the
+   * others. Servers left out of this run are not reported.
+   */
+  private reportServers(run: Run, session: SessionRow, servers: { name: string; status: string }[]): void {
+    const denied = new Set(this.kinds.get(session.kind)?.deniedServers?.(session) ?? []);
+    const from = run.parts.length;
+    for (const { name, status } of servers) {
+      if ((status !== 'failed' && status !== 'needs-auth') || denied.has(name) || !this.connections.find(name))
+        continue;
+      const label = run.serverLabel?.(name) ?? name;
+      run.parts.push({
+        kind: 'step',
+        text: `${label}: ${status === 'needs-auth' ? 'needs a login' : 'is down'}, skipped`,
+      });
+    }
+    for (let index = from; index < run.parts.length; index++) this.output(run, index);
   }
 
   private output(run: Run, index: number): void {
@@ -389,12 +417,16 @@ export class AgentRuntime {
       });
       const call = classifyCall(input.tool_name, toolInput, run.workingDir);
       if (!call && !prodWrite) return {};
+      const server = mcpTool(input.tool_name)?.server;
+      const connection = server ? this.connections.find(server) : null;
       const row = this.actionLog.start({
         sessionId: run.sessionId,
         kind: call?.kind ?? ActionKind.Query,
         target: call?.target ?? run.workingDir,
         command: call?.command ?? stepText(input.tool_name, toolInput),
-        isProd: prodWrite !== null,
+        // A query on a PROD Connection is PROD whether or not it writes.
+        isProd: prodWrite !== null || connection?.isProd === true,
+        ...(connection ? { connectionId: connection.id } : {}),
       });
       run.toolRows.set(input.tool_use_id, row);
       if (!prodWrite) return {};
