@@ -627,3 +627,26 @@ export function useRetryFix(id: string) {
     onSuccess: () => refreshMonitor(client),
   });
 }
+
+/** Every `devtools` Session, newest first. */
+export function useDevtoolsSessions() {
+  return useQuery({
+    queryKey: [...queryKeys.sessions, 'devtools'],
+    queryFn: () =>
+      apiGet('/sessions?kind=devtools&limit=100', z.object({ data: z.array(sessionSchema) })).then((b) => b.data),
+  });
+}
+
+export function useCreateDevtoolsSession() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (connectionIds: string[]) =>
+      apiSend(
+        'POST',
+        '/sessions',
+        { kind: 'devtools', connection_ids: connectionIds },
+        z.object({ data: sessionSchema }),
+      ).then((body) => body.data),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.sessions }),
+  });
+}

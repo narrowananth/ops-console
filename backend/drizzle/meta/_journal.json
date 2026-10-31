@@ -64,6 +64,13 @@
       "when": 1793403009323,
       "tag": "0008_monitor",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793404490261,
+      "tag": "0009_devtools",
+      "breakpoints": true
     }
   ]
 }

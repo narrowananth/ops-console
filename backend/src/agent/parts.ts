@@ -49,15 +49,18 @@ function textParts(text: string): Part[] {
 const lines = (text: unknown, sign: '+' | '-') =>
   typeof text === 'string' && text ? text.split('\n').map((line) => ({ sign, text: line })) : [];
 
-export function stepText(name: string, input: Record<string, unknown>): string {
+/** What a step calls an MCP server: by default its name; a kind may add the Connection's Access Level. */
+export type ServerLabel = (server: string) => string | null;
+
+export function stepText(name: string, input: Record<string, unknown>, label?: ServerLabel | null): string {
   if (name === 'Bash') return `$ ${redact(String(input.command ?? ''))}`;
   const mcp = mcpTool(name);
-  if (mcp) return `${mcp.server}: ${mcp.tool}`;
+  if (mcp) return `${label?.(mcp.server) ?? mcp.server}: ${mcp.tool}`;
   const subject = input.file_path ?? input.pattern ?? input.url ?? input.query ?? input.description;
   return typeof subject === 'string' ? `${name} ${subject}` : name;
 }
 
-function toolParts(name: string, input: Record<string, unknown>): Part[] {
+function toolParts(name: string, input: Record<string, unknown>, label?: ServerLabel | null): Part[] {
   if (name === 'AskUserQuestion') {
     const parsed = questionInputSchema.safeParse(input);
     if (parsed.success) {
@@ -77,13 +80,13 @@ function toolParts(name: string, input: Record<string, unknown>): Part[] {
         : edits.flatMap((edit) => [...lines(edit.old_string, '-'), ...lines(edit.new_string, '+')]);
     return [{ kind: 'diff', file, lines: diff }];
   }
-  return [{ kind: 'step', text: stepText(name, input) }];
+  return [{ kind: 'step', text: stepText(name, input, label) }];
 }
 
 /** Parts for one assistant content block: text, tool calls, file edits, code blocks and questions. */
-export function blockParts(block: ContentBlock): Part[] {
+export function blockParts(block: ContentBlock, label?: ServerLabel | null): Part[] {
   if (block.type === 'text' && 'text' in block) return textParts(block.text);
-  if (block.type === 'tool_use' && 'name' in block) return toolParts(block.name, block.input);
+  if (block.type === 'tool_use' && 'name' in block) return toolParts(block.name, block.input, label);
   return [];
 }
 
@@ -104,7 +107,11 @@ function operatorText(entry: z.infer<typeof entrySchema>): string | null {
  * entries after it, with their tool calls, are one agent message. Subagent entries and the uuids in `skip` (the
  * run in progress, served from memory) are left out.
  */
-export function toMessages(raw: unknown[], skip: ReadonlySet<string> = new Set()): Message[] {
+export function toMessages(
+  raw: unknown[],
+  skip: ReadonlySet<string> = new Set(),
+  label?: ServerLabel | null,
+): Message[] {
   const messages: Message[] = [];
   for (const value of raw) {
     const parsed = entrySchema.safeParse(value);
@@ -126,7 +133,8 @@ export function toMessages(raw: unknown[], skip: ReadonlySet<string> = new Set()
       continue;
     }
     const content = entry.message.content;
-    const parts = typeof content === 'string' ? textParts(content) : content.flatMap(blockParts);
+    const parts =
+      typeof content === 'string' ? textParts(content) : content.flatMap((block) => blockParts(block, label));
     const last = messages.at(-1);
     if (last?.role === 'agent') last.parts.push(...parts);
     else messages.push({ id: entry.uuid, role: 'agent', status: 'done', parts, created_at: createdAt });

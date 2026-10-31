@@ -51,6 +51,8 @@ export class FakeAgentSdk implements AgentSdk {
   /** Tool calls that ran, with the input they ran with. */
   readonly ran: { tool: string; input: Record<string, unknown> }[] = [];
   private readonly scripts: Step[][] = [];
+  /** What the next runs' `init` message says about MCP servers. */
+  mcpServers: { name: string; status: string }[] = [];
 
   constructor(private readonly home: string) {}
 
@@ -110,7 +112,13 @@ export class FakeAgentSdk implements AgentSdk {
       return outputs;
     };
 
-    yield sdk({ type: 'system', subtype: 'init', session_id: sessionId, uuid: crypto.randomUUID() });
+    yield sdk({
+      type: 'system',
+      subtype: 'init',
+      session_id: sessionId,
+      mcp_servers: this.mcpServers,
+      uuid: crypto.randomUUID(),
+    });
     await write('user', prompt);
     const denials: SDKPermissionDenial[] = [];
 

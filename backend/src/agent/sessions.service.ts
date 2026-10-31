@@ -22,6 +22,7 @@ import { type Emit, STORE, type Store } from '../db/store';
 import { SettingsRegistry } from '../settings/settings.registry';
 import { SettingsService } from '../settings/settings.service';
 import { RunRegistry } from './runs';
+import { SessionKinds } from './session-kinds';
 
 export const SESSION_DEFAULTS_KEY = 'session_defaults';
 export const NEW_SESSION_TITLE = 'New session';
@@ -50,6 +51,7 @@ export function toSession(row: SessionRow): Session {
     repo_id: row.repoId,
     branch: row.branch,
     pr_number: row.prNumber,
+    connection_ids: null,
     state: row.state,
     last_message_preview: row.lastMessagePreview,
     created_at: row.createdAt,
@@ -73,6 +75,7 @@ export class SessionsService {
     @Inject(STORE) private readonly store: Store,
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(RunRegistry) private readonly runs: RunRegistry,
+    @Inject(SessionKinds) private readonly kinds: SessionKinds,
     @Inject(SettingsRegistry) registry: SettingsRegistry,
   ) {
     registry.register({ key: SESSION_DEFAULTS_KEY, schema: sessionDefaultsSchema, default: SESSION_DEFAULTS });
@@ -124,17 +127,31 @@ export class SessionsService {
       .orderBy(desc(sessions.lastActiveAt), desc(sessions.id))
       .limit(query.limit + 1)
       .all();
-    return toPage(rows.map(toSession), query.limit, (row) => `${row.last_active_at}|${row.id}`);
+    return toPage(
+      rows.map((row) => this.view(row)),
+      query.limit,
+      (row) => `${row.last_active_at}|${row.id}`,
+    );
+  }
+
+  /** The Session with the fields its kind adds. */
+  view(row: SessionRow): Session {
+    return { ...toSession(row), ...this.kinds.get(row.kind)?.view?.(row) };
   }
 
   /** Model, effort and access mode apply from the Session's next run. */
   update(id: string, patch: SessionPatch): SessionRow {
-    return this.write(id, {
+    const row = this.get(id);
+    const own = this.kinds.get(row.kind)?.patch;
+    if (patch.connection_ids !== undefined && !own) throw validationFailed('invalid body: connection_ids');
+    own?.(row, patch);
+    const values = {
       ...(patch.title === undefined ? {} : { title: patch.title }),
       ...(patch.model === undefined ? {} : { model: patch.model }),
       ...(patch.effort === undefined ? {} : { effort: patch.effort }),
       ...(patch.access_mode === undefined ? {} : { accessMode: patch.access_mode }),
-    });
+    };
+    return Object.keys(values).length === 0 ? row : this.write(id, values);
   }
 
   setState(id: string, state: SessionState): SessionRow {

@@ -3,24 +3,38 @@ import {
   type Message,
   type Page,
   type Session,
+  SessionKind,
   sendMessageSchema,
   sessionListQuerySchema,
   sessionPatchSchema,
 } from '@ops-console/shared';
 import { z } from 'zod';
-import { parseInput } from '../common/errors';
+import { parseInput, validationFailed } from '../common/errors';
 import { AgentRuntime } from './runtime';
-import { SessionsService, toSession } from './sessions.service';
+import { SessionKinds } from './session-kinds';
+import { SessionsService } from './sessions.service';
 
 const idParams = z.object({ id: z.string().min(1) });
 
-/** `POST /sessions` belongs to each kind's spec; these routes are shared by every kind. */
+/** Routes shared by every kind; each kind's own fields come from its handler in `SessionKinds`. */
 @Controller('sessions')
 export class SessionsController {
   constructor(
     @Inject(SessionsService) private readonly sessions: SessionsService,
     @Inject(AgentRuntime) private readonly runtime: AgentRuntime,
+    @Inject(SessionKinds) private readonly kinds: SessionKinds,
   ) {}
+
+  /** Each kind's spec makes its own Sessions; a body without a `kind` is a `repo` Session. */
+  @Post()
+  async create(@Body() body: unknown): Promise<{ data: Session }> {
+    const named = typeof body === 'object' && body !== null && 'kind' in body ? body.kind : SessionKind.Repo;
+    const create = Object.values(SessionKind).includes(named as SessionKind)
+      ? this.kinds.get(named as SessionKind)?.create
+      : undefined;
+    if (!create) throw validationFailed('invalid body: kind');
+    return { data: await create(body) };
+  }
 
   @Get()
   list(@Query() query: unknown): Page<Session> {
@@ -29,13 +43,13 @@ export class SessionsController {
 
   @Get(':id')
   get(@Param() params: unknown): { data: Session } {
-    return { data: toSession(this.sessions.get(parseInput(idParams, params, 'params').id)) };
+    return { data: this.sessions.view(this.sessions.get(parseInput(idParams, params, 'params').id)) };
   }
 
   @Patch(':id')
   update(@Param() params: unknown, @Body() body: unknown): { data: Session } {
     const { id } = parseInput(idParams, params, 'params');
-    return { data: toSession(this.sessions.update(id, parseInput(sessionPatchSchema, body, 'body'))) };
+    return { data: this.sessions.view(this.sessions.update(id, parseInput(sessionPatchSchema, body, 'body'))) };
   }
 
   @Delete(':id')

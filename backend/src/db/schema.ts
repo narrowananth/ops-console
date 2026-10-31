@@ -500,3 +500,17 @@ export const fixes = sqliteTable('fixes', {
   startedAt: text('started_at').notNull().default(nowIso),
   finishedAt: text('finished_at'),
 });
+
+/** The Connections a `devtools` Session may reach. No rows: every Connection with access. */
+export const sessionConnections = sqliteTable(
+  'session_connections',
+  {
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => connections.id, { onDelete: 'cascade' }),
+  },
+  (table) => [primaryKey({ columns: [table.sessionId, table.connectionId] })],
+);

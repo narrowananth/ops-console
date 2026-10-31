@@ -6,6 +6,7 @@ import { ActionLogController, ApprovalsController } from '../action-log/action-l
 import { ActionLogService } from '../action-log/action-log.service';
 import { ApprovalsService } from '../action-log/approvals.service';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
+import { ConnectionLookup } from './connection-lookup';
 import { MessageInterceptors } from './message-interceptors';
 import { ProdWriteRule } from './prod-write-rule';
 import { RunRegistry } from './runs';
@@ -32,6 +33,7 @@ export class AgentModule {
         RunRegistry,
         SessionKinds,
         MessageInterceptors,
+        ConnectionLookup,
         ProdWriteRule,
         Transcripts,
         ActionLogService,
@@ -43,6 +45,8 @@ export class AgentModule {
       exports: [
         SessionKinds,
         MessageInterceptors,
+        ConnectionLookup,
+        ConnectionLookup,
         ProdWriteRule,
         SessionsService,
         ActionLogService,

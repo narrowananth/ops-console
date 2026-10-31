@@ -10,6 +10,7 @@ import { ConnectionsModule } from './connections/connections.module';
 import { CliConnectorTools } from './connectors/connector-tools';
 import { ConnectorsModule } from './connectors/connectors.module';
 import { startDaemon } from './daemon';
+import { DevtoolsModule } from './devtools/devtools.module';
 import { LoginKeychain } from './keychain/keychain';
 import { runMcpExec } from './mcp/launcher';
 import { McpServersModule } from './mcp/mcp-servers.module';
@@ -56,6 +57,7 @@ const daemon = await startDaemon({
     ReposModule.forRoot(),
     WorkspaceModule.forRoot(),
     MonitorModule.forRoot(),
+    DevtoolsModule.forRoot(),
     TerminalsModule.forRoot(),
     ConnectionsModule.forRoot({ tester: new McpConnectionTester(version) }),
     ConnectorsModule.forRoot({ tools: new CliConnectorTools() }),

@@ -1,6 +1,6 @@
 # Dev tools agent
 
-**Status:** ready
+**Status:** shipped
 **Design:** Dev tools in `design/ops-console.html`: the `ops-agent · dev tools` terminal panel with its Connection scope picker
 
 ## Problem
@@ -26,6 +26,13 @@ The operator wants to ask questions of their databases and queues in plain words
 - **Scope**: stored in `session_connections`. Empty means every Connection with access.
 - **Agent work** (ADR 0005): every dev-tools question is an agent run. The console runs no query itself.
 - **Read by default**: a new Connection's Access Level is `read`; `write` takes an explicit change (`05-settings-dev-tools`).
+- **PROD-write rule**: this spec supplies it (`05-settings-dev-tools` left it). A tool call on a PROD Connection with Access Level `write` that the classifier does not know to be a read waits for an Approval. SQL (`execute_sql`, `run_query`) is a read only when every statement starts with `select`, `show`, `explain`, `describe`, `values`, `table` or `with` and holds no write keyword; Mongo reads by tool name, with `aggregate` a write when it holds `$out` or `$merge`; Redis reads by tool name; any tool not known to read counts as a write. A `read` Connection asks nothing: its server is launched read-only and refuses the write.
+- **`is_prod` on a query**: true for every call on a PROD Connection, read or write. The Action Log row also stores the Connection's id.
+- **Step label**: `<name> (read-only)` for Access Level `read`, `<name> (read-write)` for `write`, on the live message and on the transcript read back.
+- **Unreachable server**: a Connection in scope whose server reports `failed` or `needs-auth` when the run starts gets a `step` part, `<name> (read-only): is down, skipped` or `needs a login, skipped`. The part lives on the streamed message; the finished transcript is Claude Code's own and does not keep it.
+- **Working folder**: a `devtools` run has no Repo and runs in `devtools/` under the data folder.
+- **Leaving a scope**: setting a Connection to `none` removes its rows from every scope. A Session scoped to that one Connection then has an empty scope, which means every Connection with access.
+- **Create dispatch**: `POST /sessions` picks the handler by `kind`; a body with no `kind` is a `repo` Session. A kind with no creator (`pr_review`) or an unknown kind answers `validation_failed`.
 - **Panel**: the Dev tools screen shows one Session as a terminal-styled transcript with a composer and a scope picker. Its messages come from the transcript (`02-settings-agents`).
 
 ## Not required
