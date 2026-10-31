@@ -73,6 +73,7 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 | Method and path | Body | Returns |
 | --------------- | ---- | ------- |
 | `GET /repos` | | `Repo[]` by name |
+| `POST /repos/pick-folder` | | 200 `{ path }`, `null` when the dialog is closed. Opens the folder dialog on this machine (macOS); `invalid_state` elsewhere |
 | `POST /repos` | `{ path }` | 201 `Repo`; `not_a_repo`, `duplicate`, `validation_failed` |
 | `PATCH /repos/:id` | `{ name }` | `Repo` |
 | `DELETE /repos/:id` | | 204; `repo_has_sessions` |
@@ -80,7 +81,7 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 
 ## UI
 
-Settings › Repos, as designed: the path field with Import (Enter also imports) and the result message below it, then "Imported repos" with a count, one row per Repo (name, path, branch, host), and Remove with an inline "Remove from the list?" confirm.
+Settings › Repos: a Local folder button that opens the Finder folder dialog and imports the chosen folder, with the result message below it, then "Imported repos" with a count, one row per Repo (name, path, branch, host), and Remove with an inline "Remove from the list?" confirm.
 
 - Empty: "No repos yet. Import one above."
 - Error: the refusal message under the field ("`<name>` is already imported", "Not a git repository").

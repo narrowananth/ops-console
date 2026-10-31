@@ -7,6 +7,7 @@ import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { parseRemote } from '../src/repos/git';
 import { ReposModule } from '../src/repos/repos.module';
 import { type AgentDaemon, api, signIn, startAgentDaemon } from './agent-fixtures';
+import { FakeFolderPicker } from './fakes/folder-picker';
 import { FakeProbe } from './fakes/probe';
 import { tempDir } from './helpers';
 
@@ -32,14 +33,28 @@ async function makeRepo(name: string, origin?: string): Promise<string> {
 
 async function start() {
   const probe = new FakeProbe();
+  const picker = new FakeFolderPicker();
   const daemon = await startAgentDaemon({
-    modules: [McpServersModule.forRoot({ probe, launcher: '/opt/ops-console' }), ReposModule.forRoot()],
+    modules: [McpServersModule.forRoot({ probe, launcher: '/opt/ops-console' }), ReposModule.forRoot({ picker })],
   });
   running.push(daemon);
-  return { daemon, probe };
+  return { daemon, probe, picker };
 }
 
 type Repo = Record<string, unknown> & { id: string; name: string };
+
+describe('the folder dialog', () => {
+  it('answers the chosen folder without importing it, and null when the dialog is closed', async () => {
+    const { daemon, picker } = await start();
+    const dir = await makeRepo('orders-api', 'git@github.com:acme/orders-api.git');
+    picker.next = dir;
+    const chosen = await api(daemon).post('/repos/pick-folder');
+    expect([chosen.status, chosen.body.data]).toEqual([200, { path: dir }]);
+    expect((await api(daemon).get('/repos')).body.data).toEqual([]);
+    picker.next = null;
+    expect((await api(daemon).post('/repos/pick-folder')).body.data).toEqual({ path: null });
+  });
+});
 
 describe('importing', () => {
   it('stores the top folder, names it after the folder and reads host, slug and branch from git', async () => {

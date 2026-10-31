@@ -2,7 +2,7 @@ import type { Repo } from '@ops-console/shared';
 import { useState } from 'react';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
-import { useImportRepo, useRemoveRepo, useRepos } from '../lib/queries';
+import { useImportRepo, usePickFolder, useRemoveRepo, useRepos } from '../lib/queries';
 
 function RepoRow({ repo }: { repo: Repo }) {
   const remove = useRemoveRepo();
@@ -52,31 +52,34 @@ function RepoRow({ repo }: { repo: Repo }) {
 export function ReposTab() {
   const repos = useRepos();
   const importRepo = useImportRepo();
-  const [path, setPath] = useState('');
-  const submit = () => {
-    if (path.trim() === '') return;
-    importRepo.mutate(path, { onSuccess: () => setPath('') });
-  };
+  const pick = usePickFolder();
+  const browse = () =>
+    pick.mutate(undefined, {
+      onSuccess: (chosen) => {
+        if (chosen !== null) importRepo.mutate(chosen);
+      },
+    });
 
   return (
     <div>
       <div className="flex flex-col gap-2 border-b-2 border-divider px-5 py-4">
-        <label htmlFor="repo-path" className="text-xs font-extrabold">
-          Import a local repo
-        </label>
-        <div className="flex gap-2">
-          <input
-            id="repo-path"
-            value={path}
-            placeholder="~/code/orders-api"
-            onChange={(event) => setPath(event.target.value)}
-            onKeyDown={(event) => event.key === 'Enter' && submit()}
-            className="flex-1 border-[1.5px] border-text bg-bg px-2 py-1.5 font-mono text-[13px] text-text"
-          />
-          <Button variant="primary" disabled={importRepo.isPending} onClick={submit}>
-            Import
-          </Button>
-        </div>
+        <div className="text-xs font-extrabold">Import a local repo</div>
+        <button
+          type="button"
+          disabled={pick.isPending || importRepo.isPending}
+          onClick={browse}
+          className="flex cursor-pointer flex-col items-start gap-0.5 border-[1.5px] border-text bg-bg px-3 py-2.5 text-left text-text hover:bg-neutral-200 disabled:cursor-wait"
+        >
+          <span className="text-[13px] font-extrabold">Local folder</span>
+          <span className="text-[11px] text-neutral-700">
+            {pick.isPending ? 'Waiting for the folder dialog…' : 'Browse a folder on disk'}
+          </span>
+        </button>
+        {pick.isError && (
+          <div role="alert" className="text-xs text-accent-700">
+            {pick.error.message}
+          </div>
+        )}
         {importRepo.isSuccess && (
           <div role="status" className="text-xs">
             Imported {importRepo.data.data.name} · branch {importRepo.data.data.branch}

@@ -89,12 +89,35 @@ export function useAgentSettings() {
   return useQuery({ queryKey: queryKeys.settings, queryFn: () => apiGet('/settings', agentSettingsSchema) });
 }
 
+const PATCH_SETTINGS = ['patch-settings'] as const;
+
+/**
+ * A change shows at once and saves in order, one request at a time. Each request carries a whole setting, so a
+ * second click built from the state before the first save returned would write the first click away.
+ */
 export function usePatchSettings() {
   const client = useQueryClient();
+  type Cached = z.infer<typeof agentSettingsSchema>;
   return useMutation({
+    mutationKey: PATCH_SETTINGS,
+    scope: { id: 'patch-settings' },
     mutationFn: (patch: { session_defaults?: SessionDefaults; agent_accounts?: AgentAccountsSetting }) =>
       apiSend('PATCH', '/settings', patch, agentSettingsSchema),
-    onSuccess: (settings) => client.setQueryData(queryKeys.settings, settings),
+    onMutate: async (patch) => {
+      await client.cancelQueries({ queryKey: queryKeys.settings });
+      const previous = client.getQueryData<Cached>(queryKeys.settings);
+      if (previous) {
+        client.setQueryData<Cached>(queryKeys.settings, { data: { ...previous.data, ...patch } });
+      }
+      return { previous };
+    },
+    onError: (_error, _patch, context) => {
+      if (context?.previous) client.setQueryData(queryKeys.settings, context.previous);
+    },
+    onSuccess: (settings) => {
+      // A later click is still waiting to save: its own answer will carry the whole state.
+      if (client.isMutating({ mutationKey: PATCH_SETTINGS }) <= 1) client.setQueryData(queryKeys.settings, settings);
+    },
   });
 }
 
@@ -347,6 +370,19 @@ export function useImportRepo() {
   return useMutation({
     mutationFn: (path: string) => apiSend('POST', '/repos', { path }, z.object({ data: repoSchema })),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.repos }),
+  });
+}
+
+/** Opens the Finder folder dialog on this machine; the path is `null` when the operator closes it. */
+export function usePickFolder() {
+  return useMutation({
+    mutationFn: () =>
+      apiSend(
+        'POST',
+        '/repos/pick-folder',
+        undefined,
+        z.object({ data: z.object({ path: z.string().nullable() }) }),
+      ).then((body) => body.data.path),
   });
 }
 

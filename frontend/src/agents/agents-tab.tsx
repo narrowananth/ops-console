@@ -4,7 +4,7 @@ import {
   type ClaudeAccount,
   type SessionDefaults,
 } from '@ops-console/shared';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '../components/ui/button';
 import { Dropdown } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
@@ -220,9 +220,16 @@ function Switches({
   onChange: (next: AgentAccountsSetting) => void;
 }) {
   const [threshold, setThreshold] = useState(String(setting.threshold));
+  // Blur on the threshold and a click on a switch land before React re-renders; the click must not send the old threshold.
+  const latest = useRef(setting);
+  latest.current = setting;
+  const save = (change: Partial<AgentAccountsSetting>) => {
+    latest.current = { ...latest.current, ...change };
+    onChange(latest.current);
+  };
   const commitThreshold = () => {
     const value = agentAccountsSettingSchema.shape.threshold.safeParse(Number(threshold));
-    if (value.success) onChange({ ...setting, threshold: value.data });
+    if (value.success) save({ threshold: value.data });
     else setThreshold(String(setting.threshold));
   };
   return (
@@ -235,24 +242,26 @@ function Switches({
             account with headroom. Context carries over.
           </div>
         </div>
-        <label className="flex items-center gap-1 font-mono text-xs">
-          <input
-            aria-label="Auto-switch threshold"
-            type="number"
-            min={50}
-            max={100}
-            value={threshold}
-            onChange={(event) => setThreshold(event.target.value)}
-            onBlur={commitThreshold}
-            onKeyDown={(event) => event.key === 'Enter' && commitThreshold()}
-            className="w-14 border-[1.5px] border-text bg-bg px-1.5 py-1 text-right text-text"
-          />
-          %
-        </label>
+        {setting.auto_switch && (
+          <label className="flex items-center gap-1 font-mono text-xs">
+            <input
+              aria-label="Auto-switch threshold"
+              type="number"
+              min={50}
+              max={100}
+              value={threshold}
+              onChange={(event) => setThreshold(event.target.value)}
+              onBlur={commitThreshold}
+              onKeyDown={(event) => event.key === 'Enter' && commitThreshold()}
+              className="w-14 border-[1.5px] border-text bg-bg px-1.5 py-1 text-right text-text"
+            />
+            %
+          </label>
+        )}
         <Toggle
           label="Auto-switch accounts"
           checked={setting.auto_switch}
-          onChange={(auto_switch) => onChange({ ...setting, auto_switch })}
+          onChange={(auto_switch) => save({ auto_switch })}
         />
       </div>
       <div className="flex items-center gap-3 border-t border-neutral-300 pt-3">
@@ -263,11 +272,7 @@ function Switches({
             reset. Accounts with a full 5-hour window are skipped.
           </div>
         </div>
-        <Toggle
-          label="Smart usage"
-          checked={setting.smart_usage}
-          onChange={(smart_usage) => onChange({ ...setting, smart_usage })}
-        />
+        <Toggle label="Smart usage" checked={setting.smart_usage} onChange={(smart_usage) => save({ smart_usage })} />
       </div>
     </>
   );
