@@ -1,18 +1,18 @@
 import { AgentsTab } from '../agents/agents-tab';
 import { Sheet } from '../components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { ConnectorsTab } from '../connectors/connectors-tab';
 import { DevToolsTab } from '../devtools/devtools-tab';
-import { McpTab } from '../mcp/mcp-tab';
+import { IntegrationsTab } from '../integrations/integrations-tab';
 import { ReposTab } from '../repos/repos-tab';
+import { SetupAgentTab } from '../setup/setup-agent-tab';
 import { type SettingsTab, useUi } from './ui-store';
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: 'agents', label: 'Agents' },
-  { id: 'mcp', label: 'MCP servers' },
-  { id: 'connectors', label: 'Connectors' },
+  { id: 'integrations', label: 'Integrations' },
   { id: 'dev', label: 'Dev tools' },
   { id: 'repos', label: 'Repos' },
+  { id: 'setup', label: 'Setup agent' },
 ];
 
 export function SettingsDrawer() {
@@ -35,14 +35,14 @@ export function SettingsDrawer() {
           <TabsContent key={tab.id} value={tab.id} className="flex-1 overflow-auto">
             {tab.id === 'agents' ? (
               <AgentsTab />
-            ) : tab.id === 'mcp' ? (
-              <McpTab />
-            ) : tab.id === 'connectors' ? (
-              <ConnectorsTab />
+            ) : tab.id === 'integrations' ? (
+              <IntegrationsTab />
             ) : tab.id === 'dev' ? (
               <DevToolsTab />
-            ) : (
+            ) : tab.id === 'repos' ? (
               <ReposTab />
+            ) : (
+              <SetupAgentTab />
             )}
           </TabsContent>
         ))}

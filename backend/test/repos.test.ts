@@ -4,9 +4,10 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
+import { McpServersService } from '../src/mcp/mcp-servers.service';
 import { parseRemote } from '../src/repos/git';
 import { ReposModule } from '../src/repos/repos.module';
-import { type AgentDaemon, api, signIn, startAgentDaemon } from './agent-fixtures';
+import { type AgentDaemon, api, signIn, startAgentDaemon, until } from './agent-fixtures';
 import { FakeFolderPicker } from './fakes/folder-picker';
 import { FakeProbe } from './fakes/probe';
 import { tempDir } from './helpers';
@@ -234,7 +235,9 @@ describe('project scope MCP servers', () => {
       JSON.stringify({ mcpServers: { docs: { type: 'stdio', command: 'node', args: ['docs.js'], env: {} } } }),
     );
     const repo = (await api(daemon).post('/repos', { path: dir })).body.data;
-    const listed = (await api(daemon).get('/mcp-servers')).body.data.find((server: Repo) => server.name === 'docs');
+    const docs = async () =>
+      (await api(daemon).get('/mcp-servers')).body.data.find((server: Repo) => server.name === 'docs');
+    const listed = await until(docs, (server) => server?.status !== 'checking', 'the Probe');
     expect(listed).toMatchObject({
       scope: 'project',
       repo_id: repo.id,
@@ -244,11 +247,7 @@ describe('project scope MCP servers', () => {
     });
     probe.approve(daemon.home, 'docs');
     await api(daemon).post('/mcp-servers/docs/checks');
-    expect(
-      (await api(daemon).get('/mcp-servers')).body.data.find((server: Repo) => server.name === 'docs'),
-    ).toMatchObject({
-      status: 'ok',
-    });
+    await until(docs, (server) => server?.status === 'ok', 'the approval');
   });
 
   it('adds a project server to the Repo .mcp.json once, and removes it', async () => {
@@ -280,6 +279,7 @@ describe('project scope MCP servers', () => {
     expect(file.mcpServers.docs).toMatchObject({ command: 'node', args: ['docs.js'] });
 
     await api(daemon).delete('/mcp-servers/docs/credentials');
+    await daemon.app.get(McpServersService).settled();
     const after = JSON.parse((await import('node:fs')).readFileSync(path.join(repo.path, '.mcp.json'), 'utf8'));
     expect(after.mcpServers.docs).toBeUndefined();
   });

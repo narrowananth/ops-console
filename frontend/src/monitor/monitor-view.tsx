@@ -14,7 +14,7 @@ export function MonitorView() {
 
   if (connectors.isPending || services.isPending) return <Empty>Reading the Monitor…</Empty>;
   if (!connected && (services.data?.length ?? 0) === 0) {
-    return <Empty>Connect Datadog in Settings › Connectors.</Empty>;
+    return <Empty>Connect Datadog in Settings › Integrations.</Empty>;
   }
   return (
     <>

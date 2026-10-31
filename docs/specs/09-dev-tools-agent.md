@@ -33,11 +33,11 @@ The operator wants to ask questions of their databases and queues in plain words
 - **Working folder**: a `devtools` run has no Repo and runs in `devtools/` under the data folder.
 - **Leaving a scope**: setting a Connection to `none` removes its rows from every scope. A Session scoped to that one Connection then has an empty scope, which means every Connection with access.
 - **Create dispatch**: `POST /sessions` picks the handler by `kind`; a body with no `kind` is a `repo` Session. A kind with no creator (`pr_review`) or an unknown kind answers `validation_failed`.
-- **Panel**: the Dev tools screen shows one Session as a terminal-styled transcript with a composer and a scope picker. Its messages come from the transcript (`02-settings-agents`).
+- **Panel**: the Dev tools screen shows one Session as a terminal-styled transcript with the Synced dev tools list as its scope picker (`10-dev-tools-compare`). Its messages come from the transcript (`02-settings-agents`).
 
 ## Not required
 
-- **Cross-Connection joins**: the agent can combine results in its answer; the console does not join data.
+- **Cross-Connection joins**: the console runs none. The agent matches rows across Connections and the console shows its Comparison (`10-dev-tools-compare`).
 - **Result export**: Copy JSON is UI-only; no download endpoint.
 
 ## Safety
@@ -86,8 +86,8 @@ Messages, `session.output`, `session.finished`, `approval.requested` and `action
 
 ## UI
 
-- Dev tools screen: "Open terminal" starts or reopens the dev-tools Session. Header shows `scope:` with the chosen Connections or "all".
-- Scope picker: Connections with their env and Access Level; `none` ones are shown disabled; PROD ones tagged.
+- Dev tools screen: opens ready to ask; the first question starts the dev-tools Session (`10-dev-tools-compare`). Header shows `scope:` with the chosen Connections or "all connected".
+- Scope picker: the Synced dev tools list, Connections with their type; `none` ones are shown disabled; PROD ones tagged.
 - Empty: no Connections yet, with a link to Settings › Dev tools.
 - An Approval for a PROD write shows inline with approve and deny.
 

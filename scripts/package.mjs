@@ -4,8 +4,9 @@
 // for that Node, so the version running here must be the version shipped.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { buildAppBundle } from './app-bundle.mjs';
 
 const repo = path.resolve(import.meta.dirname, '..');
 const version = process.argv[2] ?? JSON.parse(await readFile(path.join(repo, 'package.json'), 'utf8')).version;
@@ -70,6 +71,10 @@ sh('tar', [
   `${nodeName}/bin/node`,
   `${nodeName}/LICENSE`,
 ]);
+// The daemon runs as Ops Console.app; the CLI and the MCP helpers reach the same binary through node/bin/node.
+const executable = await buildAppBundle({ node: path.join(stage, 'node/bin/node'), dir: stage, version });
+await rm(path.join(stage, 'node/bin/node'));
+await symlink(path.relative(path.join(stage, 'node/bin'), executable), path.join(stage, 'node/bin/node'));
 
 const tarball = path.join(out, `${name}.tar.gz`);
 sh('tar', ['-czf', tarball, '-C', stage, '.']);

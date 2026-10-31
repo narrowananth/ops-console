@@ -147,9 +147,41 @@ export const createTerminalSchema = z.object({ kind: z.enum(TerminalKind) });
 
 export const terminalSecretSchema = z.object({ request_id: z.string().min(1), value: z.string().min(1) });
 
+/** `GET /terminals`: the running ones. A terminal runs until Close, its exit or the daemon's stop. */
+export const terminalListSchema = z.object({
+  data: z.array(z.object({ id: z.string(), kind: z.enum(TerminalKind) })),
+});
+
+/**
+ * Whether the daemon has macOS Full Disk Access, so the Setup agent can read every folder on the machine.
+ * `granted` is null off macOS. `app_path` is the `Ops Console.app` the daemon runs as, which the operator adds in
+ * System Settings; null when it runs any other way, as under `pnpm dev`.
+ */
+export const diskAccessSchema = z.object({ granted: z.boolean().nullable(), app_path: z.string().nullable() });
+
+export type DiskAccess = z.infer<typeof diskAccessSchema>;
+
+/** The longest line the setup terminal passes to Claude. */
+export const SETUP_LINE_MAX = 2000;
+
+/**
+ * Why a setup terminal line may not reach Claude, or null when it may. Only plain requests go through: a symbol
+ * first (`/login`, `!cmd`, `#`), an `@path` word or a control character would drive Claude Code itself.
+ * A line longer than `SETUP_LINE_MAX` is refused too. An empty line passes: Enter alone confirms a prompt.
+ */
+export function refuseSetupLine(text: string): string | null {
+  if (text.length > SETUP_LINE_MAX) return `Keep a request under ${SETUP_LINE_MAX} characters.`;
+  if (/\p{Cc}/u.test(text)) return 'Type plain text: control keys and line breaks do not reach Claude.';
+  const first = text.trimStart()[0];
+  if (first !== undefined && !/[\p{L}\p{N}]/u.test(first)) {
+    return 'Start with a word. A line starting with / ! # or another symbol runs a Claude Code command.';
+  }
+  if (/(^|\s)@/.test(text)) return 'Write file paths without @: Claude Code would read the file into the chat.';
+  return null;
+}
+
 /** Client to server on `/terminals/:id`. */
 export const terminalClientMessageSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('input'), data: z.string() }),
   z.object({ type: z.literal('line'), text: z.string() }),
   z.object({
     type: z.literal('resize'),
@@ -167,6 +199,8 @@ export const terminalServerMessageSchema = z.discriminatedUnion('type', [
     id: z.string(),
   }),
   z.object({ type: z.literal('exit'), code: z.number().nullable() }),
+  /** The line broke `refuseSetupLine` and was not written. */
+  z.object({ type: z.literal('refused'), reason: z.string() }),
 ]);
 
 export type TerminalServerMessage = z.infer<typeof terminalServerMessageSchema>;

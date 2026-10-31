@@ -1,4 +1,4 @@
-import type { Repo } from '@ops-console/shared';
+import { RemovedRepoSessions, type Repo } from '@ops-console/shared';
 import { useState } from 'react';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
@@ -25,19 +25,46 @@ function RepoRow({ repo }: { repo: Repo }) {
           </div>
         )}
       </div>
-      {confirming ? (
+      {confirming && repo.session_count > 0 ? (
+        <div className="flex max-w-80 flex-col items-end gap-1.5 text-xs">
+          <span className="text-right">
+            Remove from the list? It has {repo.session_count} {repo.session_count === 1 ? 'Session' : 'Sessions'}. Kept
+            ones come back when you import this folder again.
+          </span>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="primary"
+              className="px-2.5 py-1 text-xs"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate({ id: repo.id, sessions: RemovedRepoSessions.Keep })}
+            >
+              Keep Sessions
+            </Button>
+            <Button
+              className="px-2.5 py-1 text-xs"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate({ id: repo.id, sessions: RemovedRepoSessions.Delete })}
+            >
+              Delete Sessions
+            </Button>
+            <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : confirming ? (
         <div className="flex items-center gap-1.5 text-xs">
           <span>Remove from the list?</span>
           <Button
             variant="primary"
             className="px-2.5 py-1 text-xs"
             disabled={remove.isPending}
-            onClick={() => remove.mutate(repo.id)}
+            onClick={() => remove.mutate({ id: repo.id })}
           >
             Remove
           </Button>
           <Button className="px-2.5 py-1 text-xs" onClick={() => setConfirming(false)}>
-            Keep
+            Cancel
           </Button>
         </div>
       ) : (

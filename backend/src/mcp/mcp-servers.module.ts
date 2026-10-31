@@ -3,7 +3,7 @@ import { McpServersController } from './mcp-servers.controller';
 import { ConnectionServers, MCP_CONFIG, type McpConfig, McpServersService } from './mcp-servers.service';
 import { PROBE } from './probe';
 
-/** Settings › MCP servers: the list across every Claude account, and add, edit, authenticate, disable and remove. */
+/** The MCP Servers in Settings › Integrations: the list across every Claude account, and add, edit, authenticate, disable and remove. */
 @Module({})
 export class McpServersModule {
   static forRoot(config: McpConfig): DynamicModule {

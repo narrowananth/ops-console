@@ -7,7 +7,7 @@ import {
   SECRET_REQUIRED,
   SERVER_TYPES,
 } from '@ops-console/shared';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '../components/ui/button';
 import { useCreateConnection, useDeleteConnection, useTestConnection, useUpdateConnection } from '../lib/queries';
 import { FIELDS, SECRET_LABELS, TYPE_LABELS, toConfig } from './fields';
@@ -87,6 +87,14 @@ export function ConnectionForm({
   const hasServer = SERVER_TYPES.includes(type);
   const config = toConfig(type, drafts);
   const error = create.error ?? update.error ?? remove.error ?? test.error;
+  // An error shows for 3 s, so a refused save does not sit under the next Test's result.
+  const [expired, setExpired] = useState<Error | null>(null);
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setExpired(error), 3000);
+    return () => clearTimeout(timer);
+  }, [error]);
+  const shownError = error && error !== expired ? error : null;
   const needsSecret = !connection && SECRET_REQUIRED.includes(type);
 
   const save = () => {
@@ -214,9 +222,9 @@ export function ConnectionForm({
             {connection.status_detail}
           </div>
         )}
-        {error && (
+        {shownError && (
           <div role="alert" className="text-xs text-accent-700">
-            {error.message}
+            {shownError.message}
           </div>
         )}
       </div>
@@ -240,7 +248,12 @@ export function ConnectionForm({
           ))}
         <Button
           disabled={test.isPending || (needsSecret && secret === '')}
-          onClick={() => test.mutate({ type, config, ...(secret ? { secret } : {}) })}
+          onClick={() => {
+            create.reset();
+            update.reset();
+            remove.reset();
+            test.mutate({ type, config, ...(secret ? { secret } : {}) });
+          }}
         >
           Test
         </Button>

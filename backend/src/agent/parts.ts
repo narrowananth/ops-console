@@ -1,4 +1,4 @@
-import type { Message, Part } from '@ops-console/shared';
+import type { Cell, Message, Part } from '@ops-console/shared';
 import { z } from 'zod';
 import { mcpTool } from '../action-log/classify';
 import { redact } from '../action-log/redact';
@@ -30,7 +30,75 @@ export const questionInputSchema = z.object({
   questions: z.array(z.object({ question: z.string(), options: z.array(z.object({ label: z.string() })) })),
 });
 
-/** Splits ``` fences out of agent text into `code` parts. */
+/** Rows and characters per cell a Result shows (`10-dev-tools-compare`). */
+export const MAX_ROWS = 50;
+const MAX_CELL = 200;
+
+const resultBlockSchema = z.object({
+  connection: z.string(),
+  query: z.string().nullish(),
+  columns: z.array(z.string()),
+  rows: z.array(z.array(z.unknown())),
+  total: z.number().nullish(),
+  ms: z.number().nullish(),
+});
+
+const compareBlockSchema = z.object({
+  key: z.string(),
+  value: z.union([z.string(), z.number()]),
+  connections: z.array(z.string()).min(2),
+  rows: z.array(z.object({ field: z.string(), values: z.array(z.unknown()) })),
+});
+
+function cell(value: unknown): Cell {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  return (typeof value === 'string' ? value : JSON.stringify(value)).slice(0, MAX_CELL);
+}
+
+function nonEmpty(value: unknown): string | null {
+  const shown = cell(value);
+  return shown === null || shown === '' ? null : String(shown);
+}
+
+/** An `ops-result` or `ops-compare` fence as its part; null when the block does not read. */
+function tablePart(lang: string, body: string): Part | null {
+  let json: unknown;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  if (lang === 'ops-result') {
+    const block = resultBlockSchema.safeParse(json);
+    if (!block.success) return null;
+    return {
+      kind: 'result',
+      connection: block.data.connection,
+      query: block.data.query ?? null,
+      columns: block.data.columns,
+      rows: block.data.rows.slice(0, MAX_ROWS).map((row) => row.map(cell)),
+      total: block.data.total ?? null,
+      ms: block.data.ms ?? null,
+    };
+  }
+  const block = compareBlockSchema.safeParse(json);
+  if (!block.success) return null;
+  const { connections } = block.data;
+  return {
+    kind: 'comparison',
+    key: block.data.key,
+    value: String(block.data.value),
+    connections,
+    rows: block.data.rows.map((row) => {
+      const values = connections.map((_, index) => nonEmpty(row.values[index]));
+      const distinct = new Set(values.flatMap((value) => (value === null ? [] : [value.trim()])));
+      return { field: row.field, values, differs: distinct.size > 1 };
+    }),
+  };
+}
+
+/** Splits ``` fences out of agent text into `code` parts, and Dev tools tables into `result` and `comparison` parts. */
 function textParts(text: string): Part[] {
   const parts: Part[] = [];
   const fence = /```([\w+-]*)[^\n]*\n([\s\S]*?)```/g;
@@ -38,7 +106,10 @@ function textParts(text: string): Part[] {
   for (let match = fence.exec(text); match !== null; match = fence.exec(text)) {
     const before = text.slice(last, match.index).trim();
     if (before) parts.push({ kind: 'text', text: before });
-    parts.push({ kind: 'code', lang: match[1] ?? '', text: (match[2] ?? '').replace(/\n$/, '') });
+    const lang = match[1] ?? '';
+    const body = (match[2] ?? '').replace(/\n$/, '');
+    const table = lang === 'ops-result' || lang === 'ops-compare' ? tablePart(lang, body) : null;
+    parts.push(table ?? { kind: 'code', lang, text: body });
     last = match.index + match[0].length;
   }
   const rest = text.slice(last).trim();

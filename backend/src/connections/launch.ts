@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { AccessLevel, ConnectionType, READ_ONLY_TYPES, SERVER_TYPES } from '@ops-console/shared';
 
 /** How a Connection's MCP Server starts: a command line, and the env vars the launcher reads from the Keychain. */
@@ -8,6 +9,8 @@ export type LaunchInput = {
   config: Record<string, unknown>;
   secret: string | null;
   access: AccessLevel;
+  /** The folder of config files shipped with the app (`backend/launch`). */
+  launchDir: string;
 };
 
 type Recipe = {
@@ -25,12 +28,11 @@ const str = (config: Record<string, unknown>, key: string): string => String(con
 const RECIPES: Partial<Record<ConnectionType, Recipe>> = {
   [ConnectionType.Postgres]: {
     ping: { tool: 'execute_sql', args: { sql: 'select 1' } },
-    build({ config, secret, access }) {
+    // dbhub dropped its `--readonly` flag; read-only now lives in a TOML file, which fills its DSN from the env.
+    build({ config, secret, access, launchDir }) {
       const dsn = `postgres://${encodeURIComponent(str(config, 'user'))}:${encodeURIComponent(secret ?? '')}@${str(config, 'host')}:${str(config, 'port')}/${encodeURIComponent(str(config, 'database'))}?sslmode=disable`;
-      return {
-        target: `npx -y @bytebase/dbhub@latest --transport stdio${access === AccessLevel.Write ? '' : ' --readonly'}`,
-        env: { DSN: dsn },
-      };
+      const readOnly = access === AccessLevel.Write ? '' : ` --config ${path.join(launchDir, 'dbhub-readonly.toml')}`;
+      return { target: `npx -y @bytebase/dbhub@latest --transport stdio${readOnly}`, env: { DSN: dsn } };
     },
   },
   [ConnectionType.Mongodb]: {

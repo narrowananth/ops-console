@@ -15,6 +15,9 @@ const warning =
 if (group === '--agent') {
   // The Dev tools setup agent: prints each line it hears, and `tool <name> <json>` calls the console's tool endpoint.
   const { OPS_CONSOLE_URL: url, OPS_CONSOLE_TOKEN: token, OPS_CONSOLE_TERMINAL: terminal } = process.env;
+  const flag = (name) => process.argv[process.argv.indexOf(name) + 1];
+  console.log(`setup agent on ${flag('--model')} at ${flag('--effort')} effort`);
+  console.log(`setup agent allows ${flag('--allowedTools')}`);
   console.log('setup agent ready');
   createInterface({ input: process.stdin }).on('line', async (line) => {
     const call = /^tool (\w+) (.*)$/.exec(line);

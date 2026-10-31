@@ -8,11 +8,11 @@ export const VIEWS = [
   { path: '/devtools', label: 'Dev tools' },
 ] as const;
 
-function Logo() {
+export function Logo({ size = 28 }: { size?: number }) {
   return (
     <svg
-      width="28"
-      height="28"
+      width={size}
+      height={size}
       viewBox="0 0 32 32"
       role="img"
       aria-label="Ops Console logo"

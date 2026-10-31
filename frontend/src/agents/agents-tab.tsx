@@ -373,7 +373,8 @@ export function AgentsTab() {
 
           <div className="px-5 pt-4 pb-1 font-extrabold">Defaults for new sessions</div>
           <div className="px-5 pb-2 text-xs text-neutral-700">
-            Every new Workspace session starts with these. You can still change them per session from the composer.
+            Every agent the console starts begins with these: Workspace and Dev tools terminals, Monitor Verify and Fix,
+            Agent Review, and the Setup agent. Change them for one session from its Model, Effort and Access chips.
           </div>
           {DEFAULTS.map((row) => (
             <div key={row.key} className="flex items-center gap-3 border-t border-neutral-300 px-5 py-2.5">

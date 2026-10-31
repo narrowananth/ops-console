@@ -48,12 +48,15 @@ export type ConfigDir = string | null;
 
 export const LOGIN_TIMEOUT_MS = 5 * 60_000;
 
-/** Credentials the shell can hand `claude`; each beats the config dir's own sign-in. */
-const ENV_CREDENTIALS = ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+/**
+ * What the shell can hand `claude` that beats the config dir's own sign-in: three credentials, and an API host
+ * that answers the account's token with 401 (a gateway expects its own token).
+ */
+const ENV_CREDENTIALS = ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_BASE_URL'];
 
 /**
  * The environment for `claude` under a config dir. An added account signs in through its own dir, so shell
- * credentials are dropped: left in, every account reads as signed in and runs bill the shell's login.
+ * credentials are dropped: left in, every account reads as signed in and runs bill the shell's login, or fail.
  */
 export function claudeEnv(configDir: ConfigDir): NodeJS.ProcessEnv {
   if (configDir === null) return process.env;

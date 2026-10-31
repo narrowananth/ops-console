@@ -59,5 +59,7 @@ export interface GitHostAdapter {
 }
 
 export interface GitHosts {
+  /** False for a host whose adapter has not landed: lists across Repos leave it out. */
+  supports(host: GitHost): boolean;
   for(host: GitHost): GitHostAdapter;
 }

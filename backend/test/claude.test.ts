@@ -122,4 +122,14 @@ describe('claudeEnv', () => {
       delete process.env.ANTHROPIC_API_KEY;
     }
   });
+
+  it('drops a shell API host for an added account, so its own sign-in goes to Anthropic', () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://gateway.example.com';
+    try {
+      expect(claudeEnv('/data/accounts/a').ANTHROPIC_BASE_URL).toBeUndefined();
+      expect(claudeEnv(null).ANTHROPIC_BASE_URL).toBe('https://gateway.example.com');
+    } finally {
+      delete process.env.ANTHROPIC_BASE_URL;
+    }
+  });
 });

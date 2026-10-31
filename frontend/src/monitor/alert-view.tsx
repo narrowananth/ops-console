@@ -10,6 +10,7 @@ import {
 } from '@ops-console/shared';
 import { useState } from 'react';
 import { Button } from '../components/ui/button';
+import { Dropdown } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
 import {
   useAlert,
@@ -65,18 +66,17 @@ function ReportPanel({ alertId, report }: { alertId: string; report: Report }) {
       <header className="flex items-center gap-2 border-b border-divider bg-surface px-3 py-2 text-xs">
         <strong>Report v{shown.version}</strong>
         {versions.length > 1 && (
-          <select
-            aria-label="Report version"
+          <Dropdown
+            label="Report version"
+            caption=""
             value={shown.id}
-            onChange={(event) => setPicked(event.target.value)}
-            className="border border-divider bg-bg px-1 text-xs text-text"
-          >
-            {versions.map((row) => (
-              <option key={row.id} value={row.id}>
-                v{row.version} · {row.status}
-              </option>
-            ))}
-          </select>
+            options={versions.map((row) => ({ value: row.id, label: `v${row.version} · ${row.status}` }))}
+            onChange={setPicked}
+            variant="chip"
+            opens="down"
+            align="left"
+            listClassName="w-48"
+          />
         )}
         <span className="ml-auto text-neutral-700">{shown.status}</span>
       </header>
@@ -210,7 +210,7 @@ export function AlertView({ id }: { id: string }) {
             Dismiss
           </Button>
           {!jiraUp && (
-            <span className="text-xs text-accent-700">Connect Jira in Settings › Connectors to confirm.</span>
+            <span className="text-xs text-accent-700">Connect Jira in Settings › Integrations to confirm.</span>
           )}
         </section>
       )}

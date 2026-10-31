@@ -6,7 +6,9 @@ const home = homedir();
 
 export const LABEL = 'dev.ops-console';
 export const INSTALL_DIR = path.join(home, '.ops-console');
-export const CURRENT_LAUNCHER = path.join(INSTALL_DIR, 'current', 'bin', 'ops-console');
+/** The daemon runs as this app, so macOS lists it as Ops Console when the operator grants it access. */
+export const CURRENT_APP = path.join(INSTALL_DIR, 'current', 'Ops Console.app', 'Contents', 'MacOS', 'Ops Console');
+export const CURRENT_DAEMON = path.join(INSTALL_DIR, 'current', 'app', 'main.js');
 export const BIN_LINK = path.join(home, '.local', 'bin', 'ops-console');
 export const PLIST = path.join(home, 'Library', 'LaunchAgents', `${LABEL}.plist`);
 export const DATA_DIR =

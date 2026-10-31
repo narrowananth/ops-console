@@ -16,6 +16,8 @@ export type SessionKindHandler = {
   deniedServers?: (session: SessionRow) => string[];
   /** What a step shows for an MCP server: its Connection and Access Level. */
   serverLabel?: (server: string) => string | null;
+  /** Appended to Claude Code's system prompt on this kind's runs. */
+  instructions?: string;
 };
 
 /** Each kind's spec registers its handler; a kind with none cannot run. */

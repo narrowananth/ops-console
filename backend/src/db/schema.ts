@@ -232,6 +232,8 @@ export const repos = sqliteTable('repos', {
   remoteSlug: text('remote_slug'),
   defaultBranch: text('default_branch').notNull(),
   createdAt: text('created_at').notNull().default(nowIso),
+  /** Set when the operator removed it and kept its Sessions; importing the folder again clears it. */
+  removedAt: text('removed_at'),
 });
 
 /** The agent's written review of a pull request, tied to the commit it read. */

@@ -9,6 +9,8 @@ import type { Probe, ProbedServer } from '../../src/mcp/probe';
  */
 export class FakeProbe implements Probe {
   runs = 0;
+  /** How long each Probe takes, as Claude Code starting its servers does. */
+  delayMs = 0;
   private readonly scripted = new Map<string, Partial<ProbedServer>>();
   private readonly broken = new Set<string>();
   private readonly approved = new Set<string>();
@@ -28,6 +30,7 @@ export class FakeProbe implements Probe {
 
   async run(configDir: string, cwd: string): Promise<ProbedServer[]> {
     this.runs += 1;
+    if (this.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.delayMs));
     if (this.broken.has(configDir)) throw new Error('Claude did not answer');
     const authFile = path.join(configDir, 'fake-mcp-auth.json');
     const signedIn: string[] = existsSync(authFile) ? JSON.parse(readFileSync(authFile, 'utf8')) : [];

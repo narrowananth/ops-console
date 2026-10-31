@@ -15,9 +15,9 @@ Sessions, Verifications and Fixes run inside a local git repository, and Monitor
 4. The host comes from the `origin` remote URL: `github`, `gitlab` or `bitbucket`, with `remote_slug` set to `owner/name`. A Repo with no `origin`, or one on another host, is `local`. The default branch comes from `origin/HEAD`, else the current branch.
 5. Listing Repos returns them by name with the current branch and dirty state read from git each time. A Repo whose folder is gone shows `missing: true` and no branch.
 6. Renaming a Repo changes only its display name.
-7. Removing a Repo deletes its row and leaves the folder untouched. Once `07-workspace` adds Sessions, removing a Repo that has Sessions is refused with `repo_has_sessions`.
+7. Removing a Repo takes it off the list and leaves the folder untouched. A Repo with Sessions needs the operator's choice for them (`07-workspace` Behavior 3).
 8. Listing a Repo's branches reads git each time: local branches by most recent commit, the current one marked. A missing folder returns `not_found`.
-9. A Repo's `.mcp.json` servers appear in Settings › MCP servers with scope `project` and this Repo (`03-settings-mcp-servers`). A server Claude Code has not approved yet reads `auth` with "pending approval in Claude Code".
+9. A Repo's `.mcp.json` servers appear in Settings › Integrations with scope `project` and this Repo (`03-settings-mcp-servers`). A server Claude Code has not approved yet reads `auth` with "pending approval in Claude Code".
 10. Adding a MCP server with scope `project` takes a `repo_id` and writes the Repo's `.mcp.json` once, with one `claude mcp add`; removing it removes it from that file. A project server cannot move to another scope.
 
 ## Settled
@@ -46,7 +46,8 @@ CREATE TABLE repos (
   host            TEXT NOT NULL,                 -- GitHost
   remote_slug     TEXT,                          -- 'owner/name' on the host; null for local
   default_branch  TEXT NOT NULL,
-  created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  removed_at      TEXT                           -- removed with its Sessions kept; hidden until imported again
 ) STRICT;
 ```
 
@@ -62,13 +63,13 @@ Migration of existing rows: none; the table is new.
 
 ### Common
 
-Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This spec adds one code. `07-workspace` adds `repo_has_sessions` for removing a Repo that still has Sessions.
+Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This spec adds one code. `07-workspace` adds `repo_has_sessions` for removing a Repo with Sessions without saying what happens to them.
 
 | Status | Error code | When |
 | ------ | ---------- | ---- |
 | 400 | `not_a_repo` | The path does not exist or is not inside a git repository |
 
-`Repo`: all `repos` columns, plus `branch`, `dirty` and `missing`, read from git.
+`Repo`: all `repos` columns but `removed_at`, plus `branch`, `dirty` and `missing`, read from git, and `session_count`.
 
 | Method and path | Body | Returns |
 | --------------- | ---- | ------- |
@@ -76,7 +77,7 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 | `POST /repos/pick-folder` | | 200 `{ path }`, `null` when the dialog is closed. Opens the folder dialog on this machine (macOS); `invalid_state` elsewhere |
 | `POST /repos` | `{ path }` | 201 `Repo`; `not_a_repo`, `duplicate`, `validation_failed` |
 | `PATCH /repos/:id` | `{ name }` | `Repo` |
-| `DELETE /repos/:id` | | 204; `repo_has_sessions` |
+| `DELETE /repos/:id?sessions=keep\|delete` | | 204; `sessions` needed when it has Sessions, else `repo_has_sessions`; `session_busy` for `delete` while one runs |
 | `GET /repos/:id/branches` | | `{ name, current }[]`; `not_found` when the folder is gone |
 
 ## UI

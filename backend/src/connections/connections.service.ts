@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import {
   AccessLevel,
   CheckTarget,
@@ -28,9 +28,19 @@ type Row = typeof connections.$inferSelect;
 /** The Connection's own secret. The launch env vars the server reads sit under the MCP server's Keychain key. */
 const secretKey = (id: string) => `connection:${id}`;
 
+/** The folder of launch config files shipped with the app. */
+export const LAUNCH_DIR = Symbol('LAUNCH_DIR');
+
 @Injectable()
-export class ConnectionsService implements OnModuleInit {
+export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger('connections');
+  /**
+   * Claude Code registrations, one at a time and in order. Each runs `claude mcp` once per account, near a second
+   * apiece, so a create, edit or delete answers before it and the work goes on here.
+   */
+  private queue: Promise<void> = Promise.resolve();
+  /** Names whose server is queued to go, so a Connection can take one again at once. */
+  private readonly leaving = new Set<string>();
 
   constructor(
     @Inject(STORE) private readonly store: Store,
@@ -38,10 +48,20 @@ export class ConnectionsService implements OnModuleInit {
     @Inject(CONNECTION_TESTER) private readonly tester: ConnectionTester,
     @Inject(McpServersService) private readonly mcp: McpServersService,
     @Inject(ConnectionServers) private readonly servers: ConnectionServers,
+    @Inject(LAUNCH_DIR) private readonly launchDir: string,
   ) {}
 
   onModuleInit(): void {
     this.servers.use(() => this.rows().map((row) => row.name));
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    await this.settled();
+  }
+
+  /** Resolves once every queued registration has run. */
+  async settled(): Promise<void> {
+    await this.queue;
   }
 
   async list(): Promise<{ data: Connection[]; meta: { next_cursor: null } }> {
@@ -55,24 +75,20 @@ export class ConnectionsService implements OnModuleInit {
   async create(body: CreateConnection): Promise<Connection> {
     const config = this.validConfig(body.type, body.config);
     if (SECRET_REQUIRED.includes(body.type) && !body.secret) throw validationFailed('invalid body: secret');
-    if (this.rows().some((row) => row.name === body.name) || (await this.mcp.exists(body.name))) {
-      throw new ApiError(409, ErrorCode.Duplicate, `${body.name} is already used`);
-    }
+    if (await this.taken(body.name)) throw new ApiError(409, ErrorCode.Duplicate, `${body.name} is already used`);
     const access = this.accessFor(body.type, body.access);
     const id = crypto.randomUUID();
-    try {
-      if (body.secret) await this.keychain.set(secretKey(id), body.secret);
-      await this.register(body.name, { type: body.type, config, secret: body.secret ?? null, access });
-    } catch (error) {
-      await this.keychain.delete(secretKey(id));
-      throw error;
-    }
+    if (body.secret) await this.keychain.set(secretKey(id), body.secret);
     this.store.write((tx) => {
       tx.insert(connections)
         .values({ id, name: body.name, type: body.type, env: body.env, access, config: JSON.stringify(config) })
         .run();
     });
-    void this.check(id).catch((error) => this.logger.warn(`checking ${body.name} failed: ${String(error)}`));
+    const secret = body.secret ?? null;
+    this.sync(id, body.name, async () => {
+      await this.register(body.name, { type: body.type, config, secret, access });
+      void this.check(id).catch((error) => this.logger.warn(`checking ${body.name} failed: ${String(error)}`));
+    });
     return this.get(id);
   }
 
@@ -85,15 +101,14 @@ export class ConnectionsService implements OnModuleInit {
     const access = body.access ?? row.access;
     if (body.access !== undefined) this.accessFor(row.type, body.access);
     const name = body.name ?? row.name;
-    if (name !== row.name && (this.rows().some((other) => other.name === name) || (await this.mcp.exists(name)))) {
+    if (name !== row.name && (await this.taken(name)))
       throw new ApiError(409, ErrorCode.Duplicate, `${name} is already used`);
-    }
     const secret = body.secret ?? (await this.keychain.get(secretKey(id)));
     const changed = [body.name, body.access, body.config, body.secret].some((value) => value !== undefined);
+    if (body.secret) await this.keychain.set(secretKey(id), body.secret);
     if (changed) {
-      if (name !== row.name) await this.mcp.unregisterConnectionServer(row.name);
-      await this.register(name, { type: row.type, config, secret, access });
-      if (body.secret) await this.keychain.set(secretKey(id), body.secret);
+      if (name !== row.name) this.leave(row.name);
+      this.sync(id, name, () => this.register(name, { type: row.type, config, secret, access }));
     }
     this.store.write((tx) => {
       tx.update(connections)
@@ -109,10 +124,47 @@ export class ConnectionsService implements OnModuleInit {
 
   async remove(id: string): Promise<void> {
     const row = this.row(id);
-    await this.mcp.unregisterConnectionServer(row.name);
     await this.keychain.delete(secretKey(id));
     this.store.write((tx) => {
       tx.delete(connections).where(eq(connections.id, id)).run();
+    });
+    this.leave(row.name);
+  }
+
+  /** Used by a Connection, or by an MCP Server that is not on its way out. */
+  private async taken(name: string): Promise<boolean> {
+    if (this.rows().some((row) => row.name === name)) return true;
+    return !this.leaving.has(name) && (await this.mcp.exists(name));
+  }
+
+  private leave(name: string): void {
+    this.leaving.add(name);
+    this.sync(null, name, async () => {
+      // A Connection that took the name again while this waited has registered it already.
+      if (!this.rows().some((row) => row.name === name)) await this.mcp.unregisterConnectionServer(name);
+      this.leaving.delete(name);
+    });
+  }
+
+  /** Queues a registration. A failure shows on the Connection as a failed check, with what Claude Code said. */
+  private sync(id: string | null, name: string, work: () => Promise<void>): void {
+    this.queue = this.queue.then(work).catch((error) => {
+      this.logger.warn(`registering ${name} with Claude Code failed: ${String(error)}`);
+      if (id === null || !this.store.db.select().from(connections).where(eq(connections.id, id)).get()) return;
+      const detail = `not added to Claude Code: ${error instanceof Error ? error.message : String(error)}`;
+      this.store.write((tx, emit) => {
+        tx.update(connections)
+          .set({ status: HealthStatus.Fail, statusDetail: detail, lastCheckedAt: new Date().toISOString() })
+          .where(eq(connections.id, id))
+          .run();
+        emit('connection.checked', {
+          target: CheckTarget.Connection,
+          id,
+          status: HealthStatus.Fail,
+          detail,
+          latency_ms: null,
+        });
+      });
     });
   }
 
@@ -123,7 +175,7 @@ export class ConnectionsService implements OnModuleInit {
     secret: string | null,
   ): Promise<ConnectionTestResult> {
     const config = this.validConfig(type, rawConfig);
-    const launch = launchFor({ type, config, secret, access: AccessLevel.Read });
+    const launch = launchFor({ type, config, secret, access: AccessLevel.Read, launchDir: this.launchDir });
     if (!launch) return { status: HealthStatus.Fail, latency_ms: null, detail: `no MCP server for ${type}` };
     return this.tester.run(type, launch);
   }
@@ -155,7 +207,8 @@ export class ConnectionsService implements OnModuleInit {
     name: string,
     input: { type: ConnectionType; config: Record<string, unknown>; secret: string | null; access: AccessLevel },
   ): Promise<void> {
-    const launch: Launch | null = input.access === AccessLevel.None ? null : launchFor(input);
+    const launch: Launch | null =
+      input.access === AccessLevel.None ? null : launchFor({ ...input, launchDir: this.launchDir });
     if (launch === null) await this.mcp.unregisterConnectionServer(name);
     else await this.mcp.registerConnectionServer(name, launch.target, launch.env);
   }

@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { CURRENT_LAUNCHER, DATA_DIR, LABEL, LOG_DIR, LOG_FILE, PLIST } from './paths';
+import { CURRENT_APP, CURRENT_DAEMON, DATA_DIR, LABEL, LOG_DIR, LOG_FILE, PLIST } from './paths';
 
 const domain = `gui/${process.getuid?.() ?? 0}`;
 const service = `${domain}/${LABEL}`;
@@ -33,8 +33,8 @@ function plist(): string {
     <string>${LABEL}</string>
     <key>ProgramArguments</key>
     <array>
-      <string>${xmlEscape(CURRENT_LAUNCHER)}</string>
-      <string>daemon</string>
+      <string>${xmlEscape(CURRENT_APP)}</string>
+      <string>${xmlEscape(CURRENT_DAEMON)}</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>

@@ -53,7 +53,7 @@ export function ServicesPane({
         <Button
           className="ml-auto px-2.5 py-1 text-xs"
           disabled={!connected || scan.isPending}
-          title={connected ? undefined : 'Connect Datadog in Settings › Connectors'}
+          title={connected ? undefined : 'Connect Datadog in Settings › Integrations'}
           onClick={() => scan.mutate(null)}
         >
           Scan now

@@ -13,7 +13,11 @@ Sessions in a Repo
 
 1. Creating a `repo` Session needs a Repo and a branch. Model, effort and access mode come from the session defaults unless the request sets them (`02-settings-agents`).
 2. Sessions in different Repos run side by side. A second message to a Session whose run is still going is refused with `session_busy` (`02-settings-agents`).
-3. Removing a Repo that has Sessions is refused with `repo_has_sessions`.
+3. Removing a Repo that has Sessions asks the operator, in the Repo's row, to keep or delete them. Kept, the Repo
+   and its Sessions leave every list, a run still going finishes unseen, and importing the same folder again brings
+   back the Repo, its Sessions, Agent Reviews and agent comments. Deleted, they go with the Repo; that waits until no
+   Session in it is running (`session_busy`). Either way, Services linked to it lose the link. Without a choice the
+   daemon refuses with `repo_has_sessions`.
 4. Deleting a Session keeps its branch, its Agent Reviews and the comments the agent posted.
 
 Branches
@@ -119,7 +123,7 @@ Errors added here:
 
 | Status | Error code | When |
 | ------ | ---------- | ---- |
-| 409 | `repo_has_sessions` | Removing a Repo that still has Sessions |
+| 409 | `repo_has_sessions` | Removing a Repo with Sessions without `sessions=keep` or `delete` |
 
 `PullRequest`, read from the host: `repo_id`, `number`, `url`, `title`, `author`, `branch`, `base_branch`, `head_sha`, `state`, `review_state`, `checks`, `additions`, `deletions`, `body`, `opened_at`, `merged_at`, plus `is_mine`, `by_agent`, `comment_count`, `resolved_count`, `agent_session_id` (the `pr_review` Session, or null), `latest_agent_review` (`PrAgentReview | null`, with `stale: boolean`). The detail response adds `files` (`[{ name, additions, deletions, lines: [{ sign, text }] }]`) and `comments: PrComment[]`.
 
@@ -189,7 +193,11 @@ Adds `branch: string | null`.
 
 ## UI
 
-- Workspace Session list grouped by Repo, each with branch and state. Empty: "Import a Repo in Settings › Repos".
+- Workspace Session list grouped by Repo. A Repo's header shows its branch, how many Sessions are running, its
+  Session count and `+`, and folds the group open or shut; the browser remembers folded Repos. An open Repo lists its
+  3 most recently active Sessions, plus any running or picked one, then "Show N more". A row shows title and state on
+  one line, with the branch under it when it differs from the Repo's. `+` shows the branch picker and Start; a Repo
+  with no Sessions shows them at once. Empty: "Import a Repo in Settings › Repos".
 - Branch switcher: lists branches with an open-PR mark; disabled with the reason while Behavior 7 blocks it; a toast when changes were stashed.
 - Pull request list: mine and all, with a stale banner showing `synced_at` when `meta.stale` is true. Error state when the host fails with nothing cached.
 - Pull request view: files, comment threads with resolve, agent comments marked, the latest Agent Review with a stale badge. Approve and request changes are hidden on your own PR. Merge is enabled only when approved. No composer outside threads.

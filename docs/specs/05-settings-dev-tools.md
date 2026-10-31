@@ -1,7 +1,7 @@
 # Settings: Dev tools connections
 
 **Status:** shipped
-**Design:** Settings › Dev tools: the Connections list, Add with Claude (setup terminal), the type picker and the connection form (fields, Environment, Claude access, Test, Delete)
+**Design:** Settings › Dev tools: the Connections list, the type picker and the connection form (fields, Environment, Claude access, Test, Delete)
 
 ## Problem
 
@@ -9,7 +9,7 @@ The agent checks a failing Route against real data: a Postgres table, a Mongo co
 
 ## Behavior
 
-1. Creating a Connection stores its non-secret fields, puts its secret in the Keychain adapter under the Connection id, and registers an MCP Server of the same name in every account through the launcher (`03-settings-mcp-servers`). The launch arguments come from the type and the Access Level. If registering fails, no Connection row exists and the secret is deleted.
+1. Creating a Connection stores its non-secret fields, puts its secret in the Keychain adapter under the Connection id, and registers an MCP Server of the same name in every account through the launcher (`03-settings-mcp-servers`). The launch arguments come from the type and the Access Level. Create, edit and delete answer within 200 ms: the row and the Keychain change first, and the `claude mcp` calls, near a second per account, run after the response in one queue, in order. A registration that fails marks the Connection's check failed, "not added to Claude Code: …". The first check runs once the server is registered. A deleted Connection's name is free at once, before its server is gone.
 2. Access Level `read` launches the server in read-only mode. `write` launches it with writes allowed. `none` registers no MCP Server, so the agent never sees it; the operator can still query it from Dev tools (`09-dev-tools-agent`).
 3. Changing the Access Level registers the server again in every account with the new launch arguments, or removes it for `none`.
 4. A Connection with env `prod` reports `is_prod: true` on every read. A new PROD Connection gets Access Level `read` unless the request sets `write`.
@@ -19,14 +19,27 @@ The agent checks a failing Route against real data: a Postgres table, a Mongo co
 8. Deleting a Connection removes its MCP Server from every account, its Keychain entry and its row.
 9. A name already used by a Connection or an MCP Server is refused with `duplicate`.
 10. No response, log row or event carries a secret. Reads show `secret_stored`.
-11. Opening Add with Claude starts a setup terminal: `claude --agent dev-tools-setup` in node-pty, with the active account's config dir, streamed over an authenticated WebSocket.
-12. A line the operator types into the setup terminal goes through the daemon first. Values after `password`, `pass`, `pwd`, `token`, `secret` or `key`, and the password in a `user:password@` URI, are kept as pending secrets in the daemon's memory. Claude sees `{{secret:<n>}}` in their place, and the echo shows them masked.
+11. The Setup agent has its own tab, Settings › Setup agent, after Repos. Dev tools, MCP servers and Connectors each
+    show "Open Setup agent →", which opens it. Start setup agent starts a setup terminal: `claude --agent dev-tools-setup --model <model> --effort <effort> --allowedTools <its setup tools> --tools "" --disable-slash-commands` in node-pty, with the active account's config dir and the model and effort from `session_defaults` (`ultrathink` runs as `max`, the CLI's top level), streamed over an authenticated WebSocket. The agent has no built-in tool and no slash command; it reaches the machine only through the console's setup tools. Those tools are allowed up front: the daemon already masks secrets and only adds, and in auto mode Claude Code would otherwise turn down a read of a credential file such as `~/.my.cnf`. It runs with `CLAUDE_CODE_NO_FLICKER=0`, Claude Code's classic renderer, so the page's terminal keeps scrollback; the full-screen renderer draws on the alternate screen, which has none.
+12. A line the operator types into the setup terminal goes through the daemon first. Values after `password`, `pass`, `pwd`, `token`, `secret` or `key`, and the password in a `user:password@` URI, are kept as pending secrets in the daemon's memory. Claude sees `{{secret:<n>}}` in their place, and the echo shows them masked. Only plain requests reach Claude. The page and the daemon both refuse a line that starts with a symbol (`/login`, `!cmd`, `#`), holds an `@path` word or a control character, or runs past 2,000 characters, and the daemon never writes it to the pty. The page shows why. An empty line passes, since Enter alone confirms a prompt. The socket takes no raw keystrokes.
 13. The setup agent works out the type, host, env and Access Level from the line, tests the connection and saves it through the console's tools. The tools take `{{secret:<n>}}` and resolve it inside the daemon. The secret never reaches Claude's transcript.
 14. When the setup agent needs a secret the operator did not give, it asks through the console's tools, and the drawer shows a masked field. The value becomes a pending secret, and the agent gets only its placeholder.
-15. The setup agent can also connect a Connector and authenticate an MCP Server, through the same code as those endpoints. After each save, the terminal lists what was added, linked to its tab.
+15. The setup agent can also connect a Connector, add a remote MCP Server by URL and authenticate an MCP Server, through the same code as those endpoints. The daemon refuses a `stdio` MCP Server from it: that would be a command the daemon runs. The agent turns down any request that is not setting one of these up. It can also import connections from files on the machine, from URLs and from the Keychain (`11-dev-tools-import`).
 16. Each test the setup agent runs writes an Action Log row of kind `query` first (`02-settings-agents`).
-17. Closing the drawer or reloading the page ends the setup terminal. Pending secrets end with it.
+17. The setup terminal runs until the operator presses Close, Claude exits or the daemon stops. Switching tabs, closing the drawer or reloading the page leaves it running, and the Setup agent tab attaches to it again with what it printed so far. One runs at a time: Start setup agent while one runs opens that one. Pending secrets end with it.
 18. Every check sends `connection.checked` with target `connection`.
+19. On macOS the Setup agent tab lists the permissions macOS asks for before the agent reads the machine, one row
+    each with its status. Full Disk Access lets it read folders macOS protects: on, off, or off · dev build. The
+    daemon tells by opening the TCC database, which only Full Disk Access allows. The installed daemon runs as
+    `Ops Console.app`, a bundle around its Node with the Ops Console name, logo and an ad-hoc signature, started by
+    launchd, so System Settings lists it as Ops Console. While it is off, Start setup agent is disabled.
+    "Open System Settings" opens the Full Disk Access pane and shows the app in Finder to drag into the list; the
+    daemon takes the permission on its next start. A new bundled Node means a new signature, and macOS asks again.
+    Under `pnpm dev` the daemon is no app of its own: the row reads off · dev build, offers no System Settings, and
+    Start stays enabled. Keychain reads "asks each time": macOS asks before each saved password, and no setting
+    grants them ahead. Passwords another app keeps in its own Keychain access group stay out of reach either way.
+    The rows name no other product. The tab checks again when the page regains focus, and on "Check again". When a
+    read fails with `no permission`, the agent asks the operator to turn the permission on.
 
 ## Settled
 
@@ -41,11 +54,11 @@ The agent checks a failing Route against real data: a Postgres table, a Mongo co
   | `firebase` | `project_id`, `services` | service account JSON |
   | `kafka` | `bootstrap_servers`, `sasl_mechanism`, `schema_registry_url`, `kafbat_url` | SASL password, optional |
 
-- **Read-only enforcement**: `/ship` picks, per type, an MCP Server that enforces read-only at launch (a flag or a read-only transaction). A type with no such server cannot be set to `read` until it has one. The Access Level is never only a label (GLOSSARY). The picks:
+- **Read-only enforcement**: `/ship` picks, per type, an MCP Server that enforces read-only at launch (a flag, a config file or a read-only transaction). A type with no such server cannot be set to `read` until it has one. The Access Level is never only a label (GLOSSARY). The picks:
 
   | Type | MCP Server | Read-only |
   | ---- | ---------- | --------- |
-  | `postgres` | `@bytebase/dbhub`, `DSN` in env | `--readonly` flag |
+  | `postgres` | `@bytebase/dbhub`, `DSN` in env | `--config` with the app's `launch/dbhub-readonly.toml`, which reads `${DSN}` and marks `execute_sql` read-only |
   | `mongodb` | `mongodb-mcp-server`, `MDB_MCP_CONNECTION_STRING` in env | `--readOnly` flag |
   | `clickhouse` | `mcp-clickhouse` | read-only unless `CLICKHOUSE_ALLOW_WRITE_ACCESS=true` |
   | `redis` | `redis-mcp-server` | none: `read` is refused, the default is `none` |
@@ -63,7 +76,7 @@ The agent checks a failing Route against real data: a Postgres table, a Mongo co
 ## Not required
 
 - **Secret detection**: a password in a shape the masking rule does not know reaches Claude's transcript. The terminal's intro asks the operator to give passwords when asked, not in the line.
-- **Setup terminal across reloads**: a reload ends it; the operator opens it again.
+- **Setup terminal left running**: one the operator never closes runs until the daemon stops. A masked-field request waits until the operator comes back to the tab.
 
 ## Safety
 
@@ -115,13 +128,17 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`.
 | Method and path | Body | Returns |
 | --------------- | ---- | ------- |
 | `GET /connections` | | `Connection[]` |
-| `POST /connections` | `{ name, type, env, access?, config, secret? }` | 201 `Connection`; `duplicate`; `upstream_failed` if registering fails |
+| `POST /connections` | `{ name, type, env, access?, config, secret? }` | 201 `Connection`; `duplicate` |
 | `PATCH /connections/:id` | `{ name?, env?, access?, config?, secret? }` | `Connection` |
 | `DELETE /connections/:id` | | 204 |
 | `POST /connections/tests` | `{ type, config, secret? }` | `{ status, latency_ms, detail }`; nothing stored |
 | `POST /connections/:id/checks` | | `{ status, status_detail, latency_ms, last_checked_at }` |
-| `POST /terminals` | `{ kind: "setup" }` | 201 `{ id }` |
+| `GET /terminals` | | `{ data: [{ id, kind }] }`; the running terminals |
+| `POST /terminals` | `{ kind: "setup" }` | 201 `{ id }`; the running setup terminal's id when one runs |
+| `DELETE /terminals/:id` | | 204; Close: ends the terminal and its pending secrets |
 | `POST /terminals/:id/secrets` | `{ request_id, value }` | 204; answers the setup agent's `request_secret` |
+| `GET /terminals/disk-access` | | `{ granted, app_path }`; `app_path` null unless it runs as `Ops Console.app`, both null off macOS (Behavior 19) |
+| `POST /terminals/disk-access/settings` | | 204; opens the Full Disk Access pane, and the app in Finder |
 
 ### WebSocket `/terminals/:id`
 
@@ -130,7 +147,6 @@ Needs the session token (ADR 0003). A raw stream, outside the event envelope of 
 Client to server:
 
 ```json
-{ "type": "input", "data": "string" }            // keystrokes, written as is
 { "type": "line", "text": "string" }             // a full line; secrets swapped first (Behavior 12)
 { "type": "resize", "cols": 120, "rows": 30 }
 ```
@@ -142,15 +158,21 @@ Server to client:
 { "type": "secret_requested", "request_id": "string", "label": "string" }
 { "type": "saved", "target": "connection | connector | mcp_server", "id": "string" }
 { "type": "exit", "code": 0 }
+{ "type": "refused", "reason": "string" }        // the line broke Behavior 12 and was not written
 ```
 
 `connection.checked` (target `connection`) is defined in `03-settings-mcp-servers`.
 
 ## UI
 
-Settings › Dev tools, as designed: Add with Claude with the setup terminal and its "Try" examples, then the Connections list (name, PROD badge, type and host, "Claude: read-only"), + Add connection opening the type picker, and the form with the type's fields, Environment, Claude access (Off, Read-only, Read / write) and its hint, Test, Save and Delete.
+Settings › Dev tools, as designed, without Add with Claude: "Open Setup agent →", then the Connections list (name, PROD badge, type and host, "Claude: read-only"), + Add connection opening the type picker, and the form with the type's fields, Environment, Claude access (Off, Read-only, Read / write) and its hint, Test, Save and Delete.
 
 - Empty: "No connections yet" with both ways to add one.
+- Settings › Setup agent: Permissions under the Ops Console logo, a Full Disk Access row (status, Open System
+  Settings when installed and off, Check again) and a Keychain row; then Start setup agent; then the terminal with
+  its "Try" examples and Close.
+- Departure from the design: Add with Claude moves from Dev tools to its own tab, since it also sets up MCP servers
+  and Connectors.
 - Error: a failed test shows its error under the form; a failed Connection shows it in the row.
 - PROD: the PROD badge on the row and the form; with Read / write, the hint says every write needs a typed confirm.
 
@@ -163,6 +185,8 @@ Settings › Dev tools, as designed: Add with Claude with the setup terminal and
 ## Seams
 
 - **Backend + SQLite, over HTTP** (fakes for the `claude` CLI wrapper, the Probe, the Keychain adapter and the MCP Server processes): 1 to 10, 16.
+- **Backend over HTTP** (a fake Full Disk Access gate): 19's report and the System Settings call.
+- **Browser** (Playwright, the Full Disk Access endpoints answered by the test): 19's step, off then on.
 - **Backend + SQLite, over WebSocket**: 11 to 15, 17, 18. Drives a fake setup agent through the terminal socket and asserts what Claude received, what the tools stored, and the events.
 
 ## Out of scope

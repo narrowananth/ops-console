@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { ConnectorId } from '@ops-console/shared';
 import { z } from 'zod';
 
 const connectionFields = {
@@ -63,10 +64,7 @@ export async function runSetupMcp(env: NodeJS.ProcessEnv): Promise<void> {
     'connect_connector',
     {
       description: 'Starts the sign-in of a Connector. The operator finishes it in the browser.',
-      inputSchema: {
-        id: z.enum(['datadog', 'jira', 'github', 'gitlab', 'bitbucket', 'slack', 'sentry']),
-        secret: z.string().optional(),
-      },
+      inputSchema: { id: z.enum(ConnectorId) },
     },
     (args) => call('connect_connector', args),
   );
@@ -82,6 +80,90 @@ export async function runSetupMcp(env: NodeJS.ProcessEnv): Promise<void> {
       inputSchema: { label: z.string().describe('What the secret is, such as "Postgres password for orders"') },
     },
     (args) => call('request_secret', args),
+  );
+  server.registerTool(
+    'list_connections',
+    { description: 'The Connections the console has: name, type, env, access and non-secret config.', inputSchema: {} },
+    () => call('list_connections', {}),
+  );
+  server.registerTool(
+    'list_mcp_servers',
+    {
+      description:
+        'The MCP Servers the console has, from every account and Repo: name, scope, transport and URL. No headers.',
+      inputSchema: {},
+    },
+    () => call('list_mcp_servers', {}),
+  );
+  server.registerTool(
+    'read_local_file',
+    {
+      description:
+        "Reads a text file on the operator's machine, up to 512 KB. Secrets in it come back as `{{secret:<n>}}`. " +
+        'For a big JSON file, `pick` returns one part of it, from a file of any size.',
+      inputSchema: {
+        path: z.string().describe('Absolute, or starting at the home folder: `~/.pgpass`'),
+        pick: z
+          .array(z.string())
+          .optional()
+          .describe('Keys down to the part of a JSON file to return: `["mcpServers"]` from `~/.claude.json`'),
+      },
+    },
+    (args) => call('read_local_file', args),
+  );
+  server.registerTool(
+    'list_local_folder',
+    {
+      description: "Lists a folder on the operator's machine: each entry's name, kind and size.",
+      inputSchema: { path: z.string().describe('Absolute, or starting at the home folder: `~/Library`') },
+    },
+    (args) => call('list_local_folder', args),
+  );
+  server.registerTool(
+    'fetch_url',
+    {
+      description: 'Fetches an http or https page as text, up to 1 MB. Secrets in it come back as `{{secret:<n>}}`.',
+      inputSchema: { url: z.string() },
+    },
+    (args) => call('fetch_url', args),
+  );
+  server.registerTool(
+    'list_keychain_items',
+    {
+      description: "Finds the operator's macOS Keychain items by service, account or label. Never returns a secret.",
+      inputSchema: { filter: z.string().describe('Part of the name, such as "TablePlus" or a host') },
+    },
+    (args) => call('list_keychain_items', args),
+  );
+  server.registerTool(
+    'read_keychain_secret',
+    {
+      description:
+        "Reads one Keychain item's secret, after macOS asks the operator to allow it. Returns its `{{secret:<n>}}`.",
+      inputSchema: {
+        kind: z.enum(['generic', 'internet']).optional(),
+        service: z.string(),
+        account: z.string().optional(),
+      },
+    },
+    (args) => call('read_keychain_secret', args),
+  );
+  server.registerTool(
+    'add_mcp_server',
+    {
+      description:
+        'Registers a remote MCP Server by URL for every account. Start its sign-in with authenticate_mcp_server.',
+      inputSchema: {
+        name: z.string(),
+        url: z.string(),
+        transport: z.enum(['http', 'sse']).optional(),
+        headers: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe('Such as Authorization; a secret goes in as its `{{secret:<n>}}`'),
+      },
+    },
+    (args) => call('add_mcp_server', args),
   );
   await server.connect(new StdioServerTransport());
 }

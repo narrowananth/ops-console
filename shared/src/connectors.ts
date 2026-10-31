@@ -10,6 +10,7 @@ export enum ConnectorId {
   Bitbucket = 'bitbucket',
   Slack = 'slack',
   Sentry = 'sentry',
+  Shopify = 'shopify',
 }
 
 export const CONNECTOR_ORDER: ConnectorId[] = Object.values(ConnectorId);
@@ -22,31 +23,40 @@ export const CONNECTOR_NAMES: Record<ConnectorId, string> = {
   [ConnectorId.Bitbucket]: 'Bitbucket',
   [ConnectorId.Slack]: 'Slack',
   [ConnectorId.Sentry]: 'Sentry',
+  [ConnectorId.Shopify]: 'Shopify',
 };
 
 /** How the console reaches the service (ADR 0005). */
 export const CONNECTOR_VIA: Record<ConnectorId, string> = {
   [ConnectorId.Datadog]: 'pup CLI + datadog-pup MCP',
   [ConnectorId.Jira]: 'Atlassian MCP',
-  [ConnectorId.Github]: 'gh CLI',
+  [ConnectorId.Github]: 'gh CLI + GitHub MCP',
   [ConnectorId.Gitlab]: 'glab CLI',
-  [ConnectorId.Bitbucket]: 'git over SSH + Bitbucket API',
+  [ConnectorId.Bitbucket]: 'Atlassian MCP',
   [ConnectorId.Slack]: 'Slack MCP',
   [ConnectorId.Sentry]: 'Sentry MCP',
+  [ConnectorId.Shopify]: 'Shopify Dev MCP',
 };
 
-/** The MCP Server each Connector rides on or registers. */
+/**
+ * The MCP Server each Connector registers when it connects. Jira and Bitbucket share Atlassian's; Disconnect removes a
+ * server once no connected Connector rides it.
+ */
 export const CONNECTOR_SERVERS: Partial<
   Record<ConnectorId, { name: string; transport: McpTransport; target: string }>
 > = {
   [ConnectorId.Datadog]: { name: 'datadog-pup', transport: McpTransport.Stdio, target: 'pup mcp serve' },
-  [ConnectorId.Jira]: { name: 'atlassian', transport: McpTransport.Sse, target: 'https://mcp.atlassian.com/v1/sse' },
+  [ConnectorId.Github]: { name: 'github', transport: McpTransport.Stdio, target: 'github-mcp-server stdio' },
+  [ConnectorId.Jira]: { name: 'atlassian', transport: McpTransport.Http, target: 'https://mcp.atlassian.com/v1/mcp' },
+  [ConnectorId.Bitbucket]: {
+    name: 'atlassian',
+    transport: McpTransport.Http,
+    target: 'https://mcp.atlassian.com/v1/mcp',
+  },
   [ConnectorId.Slack]: { name: 'slack', transport: McpTransport.Http, target: 'https://mcp.slack.com/mcp' },
   [ConnectorId.Sentry]: { name: 'sentry', transport: McpTransport.Http, target: 'https://mcp.sentry.dev/mcp' },
+  [ConnectorId.Shopify]: { name: 'shopify', transport: McpTransport.Stdio, target: 'npx -y @shopify/dev-mcp@latest' },
 };
-
-/** Connectors that sign in through a token the console keeps in the Keychain. */
-export const TOKEN_CONNECTORS: ConnectorId[] = [ConnectorId.Gitlab, ConnectorId.Bitbucket];
 
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:MM');
 const count = z.number().int().min(1);
@@ -78,6 +88,7 @@ export const connectorConfigSchemas = {
   }),
   [ConnectorId.Slack]: z.strictObject({ workspace: z.string(), alert_channel: z.string(), review_dm_to: z.string() }),
   [ConnectorId.Sentry]: z.strictObject({ org: z.string().nullable() }),
+  [ConnectorId.Shopify]: z.strictObject({}),
 } satisfies Record<ConnectorId, z.ZodType>;
 
 export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknown>> = {
@@ -103,6 +114,7 @@ export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknow
   [ConnectorId.Bitbucket]: { workspace: '', ssh_key_path: '~/.ssh/id_ed25519', pr_target_branch: 'main' },
   [ConnectorId.Slack]: { workspace: '', alert_channel: '', review_dm_to: '' },
   [ConnectorId.Sentry]: { org: null },
+  [ConnectorId.Shopify]: {},
 };
 
 export const connectorSchema = z.object({
@@ -115,7 +127,8 @@ export const connectorSchema = z.object({
   login: z.string().nullable(),
   config: z.record(z.string(), z.unknown()),
   last_checked_at: z.string().nullable(),
-  secret_stored: z.boolean(),
+  /** Set while a sign-in waits on the operator; `code` is the one-time code GitHub asks for, else `null`. */
+  sign_in: z.object({ code: z.string().nullable(), url: z.string().nullable() }).nullable(),
 });
 
 export type Connector = z.infer<typeof connectorSchema>;
@@ -126,8 +139,6 @@ export const connectorListSchema = z.object({
 });
 
 export const updateConnectorSchema = z.object({ config: z.record(z.string(), z.unknown()) });
-
-export const connectConnectorSchema = z.object({ secret: z.string().min(1).optional() });
 
 export const connectorCheckSchema = z.object({
   status: z.enum(HealthStatus),

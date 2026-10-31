@@ -3,7 +3,7 @@ import { CONNECTOR_TOOLS, type ConnectorTools } from './connector-tools';
 import { ConnectorsController } from './connectors.controller';
 import { ConnectorsService } from './connectors.service';
 
-/** Settings › Connectors. Other specs call `ConnectorsService.require` before an action that needs a Connector. */
+/** The Connectors in Settings › Integrations. Other specs call `ConnectorsService.require` before an action that needs a Connector. */
 @Module({})
 export class ConnectorsModule {
   static forRoot(config: { tools: ConnectorTools }): DynamicModule {

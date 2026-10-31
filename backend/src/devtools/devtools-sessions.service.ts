@@ -18,6 +18,20 @@ import { ApiError, parseInput } from '../common/errors';
 import { connections, sessionConnections } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 
+/** How a Dev tools run answers, so the console can draw Results and a Comparison (`10-dev-tools-compare`). */
+export const INSTRUCTIONS = `You answer questions about the operator's databases and queues through the MCP servers you have; each server is one Connection.
+
+- A question that names no Connection or database type goes to every Connection you can reach. One that names a Connection or a type ("in mongo", "pg-tenant") goes only to those. Before the first query, say in one line which Connections you picked.
+- Only read unless the operator asks for a change.
+- After each Connection answers, write one fenced block with the language ops-result holding one JSON object:
+  {"connection": "<MCP server name>", "query": "<the query you ran>", "columns": ["..."], "rows": [["..."]], "total": <rows matched or null>, "ms": <milliseconds or null>}
+  At most 50 rows. A Connection with no matching rows still gets a block with "rows": [].
+- When Results from two or more Connections describe the same thing, write one fenced block with the language ops-compare:
+  {"key": "<field you matched on>", "value": "<its value>", "connections": ["<name>", "<name>"], "rows": [{"field": "<field>", "values": ["<value per connection, null when missing>"]}]}
+  Match fields that mean the same thing even when their names differ. Put the fields that disagree first.
+- End with one line: "<rows> rows across <answered> of <queried> Connections", then one sentence on what differs, or that nothing was shared.
+- Write blocks as plain JSON, no comments.`;
+
 /** Sessions that query the operator's databases and queues through the Connections' MCP servers. */
 @Injectable()
 export class DevtoolsSessionsService {
@@ -35,6 +49,7 @@ export class DevtoolsSessionsService {
       patch: (session, patch) => this.patch(session, patch),
       deniedServers: (session) => this.denied(session.id),
       serverLabel: (server) => this.label(server),
+      instructions: INSTRUCTIONS,
     });
   }
 

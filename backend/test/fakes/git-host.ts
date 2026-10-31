@@ -56,8 +56,18 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
   beforePost: (comment: NewHostComment) => void = () => {};
   private nextId = 100;
 
+  /** Hosts that answer like one whose adapter has not landed. */
+  readonly unsupported = new Set<GitHost>();
+
+  supports(host: GitHost): boolean {
+    return host !== GitHost.Local && !this.unsupported.has(host);
+  }
+
   for(host: GitHost): GitHostAdapter {
     if (host === GitHost.Local) throw new ApiError(409, ErrorCode.InvalidState, 'a local Repo has no pull requests');
+    if (this.unsupported.has(host)) {
+      throw new ApiError(502, ErrorCode.UpstreamFailed, `${host} pull requests are not supported yet`);
+    }
     return this;
   }
 

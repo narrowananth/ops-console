@@ -1,6 +1,13 @@
 import { mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import { Inject, Injectable, Logger, type OnModuleDestroy, Optional } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  type OnApplicationBootstrap,
+  type OnModuleDestroy,
+  Optional,
+} from '@nestjs/common';
 import {
   CheckTarget,
   CONNECTOR_SERVERS,
@@ -54,7 +61,8 @@ export const PROBE_TTL_MS = 60_000;
 
 type Account = ReturnType<AccountsService['all']>[number];
 /** `servers` is `null` when Claude Code did not answer. */
-type Probed = { servers: Map<string, ProbedServer> | null; at: number };
+/** `asked` holds the names the config registered when the Probe ran, so a name Claude Code leaves out is not asked about again. */
+type Probed = { servers: Map<string, ProbedServer> | null; at: number; asked: Set<string> };
 
 /** Words back into one line, quoting those `splitCommand` would split. */
 export function joinCommand(words: string[]): string {
@@ -67,9 +75,19 @@ export function splitCommand(text: string): string[] {
 }
 
 @Injectable()
-export class McpServersService implements OnModuleDestroy {
+export class McpServersService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger('mcp');
   private readonly probes = new Map<string, Probed>();
+  /** Probes under way, by account and folder. */
+  private readonly probing = new Map<string, Promise<Probed>>();
+  /** Env vars of launcher servers as the Keychain holds them, by server. */
+  private readonly envs = new Map<string, Record<string, string>>();
+  /** Servers a background Remove is taking out; they list as removed while their config still holds them. */
+  private readonly leaving = new Set<string>();
+  /** Background Removes, one after another. */
+  private queue: Promise<void> = Promise.resolve();
+  /** Bumped when the config changes, so a Probe started before then is not kept. */
+  private generation = 0;
   private readonly logins = new Set<AbortController>();
 
   constructor(
@@ -84,8 +102,14 @@ export class McpServersService implements OnModuleDestroy {
     @Optional() @Inject(ReposService) private readonly repos?: ReposService,
   ) {}
 
-  onModuleDestroy(): void {
+  /** Starts the first Probes, so the list has readings before Settings opens. */
+  onApplicationBootstrap(): void {
+    void this.servers().catch((error) => this.logger.warn(`first Probe failed: ${String(error)}`));
+  }
+
+  async onModuleDestroy(): Promise<void> {
     for (const login of this.logins) login.abort();
+    await this.settled();
   }
 
   async list(): Promise<{ data: McpServer[]; meta: { next_cursor: null; connection_server_count: number } }> {
@@ -117,7 +141,7 @@ export class McpServersService implements OnModuleDestroy {
       null,
       repo,
     );
-    return this.checked(body.name);
+    return this.checkLater(body.name);
   }
 
   async update(name: string, body: UpdateMcpServer): Promise<McpServer> {
@@ -157,7 +181,7 @@ export class McpServersService implements OnModuleDestroy {
       previous,
       repo,
     );
-    return this.checked(name);
+    return this.checkLater(name);
   }
 
   /** Reconnect: registers the server where it is missing, then asks every account again. */
@@ -173,7 +197,7 @@ export class McpServersService implements OnModuleDestroy {
         await this.claude.mcpAdd(toAdd(have), await this.target(view.account));
       }
     }
-    return this.checked(name);
+    return this.checkLater(name);
   }
 
   /** Starts the browser sign-in in each account whose Probe reads `auth`. `connection.checked` reports the result. */
@@ -211,11 +235,26 @@ export class McpServersService implements OnModuleDestroy {
     );
   }
 
-  /** Registers a server a Connector rides on when it is missing or was removed. */
-  async ensureRegistered(spec: { name: string; transport: McpTransport; target: string }): Promise<void> {
+  /**
+   * Registers the server a Connector rides on when it is missing or was removed. With `env`, a
+   * registered one is registered again, so a new token takes its place.
+   */
+  async ensureRegistered(
+    spec: { name: string; transport: McpTransport; target: string },
+    env?: Record<string, string>,
+  ): Promise<void> {
     const found = (await this.servers()).find((server) => server.name === spec.name);
-    if (found?.registered) return;
-    await this.register(spec.name, McpScope.User, spec.transport, spec.target, {}, {}, null);
+    if (found?.registered && !env) return;
+    const previous = found?.registered ? await this.registrations(spec.name) : [];
+    await this.register(
+      spec.name,
+      McpScope.User,
+      spec.transport,
+      spec.target,
+      env ?? {},
+      {},
+      previous.length > 0 ? previous : null,
+    );
     this.dropRemoved(spec.name);
   }
 
@@ -246,32 +285,69 @@ export class McpServersService implements OnModuleDestroy {
     }
   }
 
-  /** Remove: signs out and unregisters the server in every account, and keeps it listed. */
+  /**
+   * Remove: keeps it listed as removed and answers at once; signing out and unregistering in every account runs in
+   * the background, and `connection.checked` follows. A failure lists it as registered again with why.
+   */
   async remove(name: string): Promise<McpServer> {
     const current = this.require(await this.servers(), name);
     if (!current.registered) return current;
     const repo = this.repoFor(current.scope, current.repo_id ?? undefined);
     const registered = await this.registrations(name);
-    for (const { account } of repo ? this.accounts.all().map((account) => ({ account })) : registered) {
-      try {
-        await this.claude.mcpLogout(name, account.configDir);
-      } catch {
-        // Servers without a sign-in have nothing to clear.
-      }
-    }
-    // Project scope is one file in the Repo, so one `claude mcp remove` removes it for every account.
-    for (const { account } of repo ? registered.slice(0, 1) : registered) {
-      await this.claude.mcpRemove(name, current.scope, await this.target(account, repo));
-    }
-    this.probes.clear();
-    await this.keychain.delete(secretsKey(name));
+    this.leaving.add(name);
     this.store.write((tx) => {
       tx.insert(removedMcpServers)
         .values({ name, scope: current.scope, transport: current.transport, target: current.target })
         .onConflictDoNothing()
         .run();
     });
+    this.queue = this.queue.then(() => this.unregister(name, current.scope, registered, repo));
     return this.get(name);
+  }
+
+  /** Resolves once every background Remove has finished. */
+  settled(): Promise<void> {
+    return this.queue;
+  }
+
+  private async unregister(
+    name: string,
+    scope: McpScope,
+    registered: { account: Account; entry: RegisteredServer }[],
+    repo: { id: string; path: string } | null,
+  ): Promise<void> {
+    const signedOut = repo ? this.accounts.all() : registered.map(({ account }) => account);
+    // Project scope is one file in the Repo, so one `claude mcp remove` removes it for every account.
+    const removeIn = repo ? registered.slice(0, 1) : registered;
+    let failure: string | null = null;
+    try {
+      await Promise.all(
+        signedOut.map((account) =>
+          this.claude.mcpLogout(name, account.configDir).catch(() => {
+            // Servers without a sign-in have nothing to clear.
+          }),
+        ),
+      );
+      await Promise.all(
+        removeIn.map(async ({ account }) => this.claude.mcpRemove(name, scope, await this.target(account, repo))),
+      );
+      await this.dropEnv(name);
+    } catch (error) {
+      failure = error instanceof ApiError ? error.message : 'claude mcp remove failed';
+      this.dropRemoved(name);
+    } finally {
+      this.leaving.delete(name);
+      this.invalidate();
+    }
+    this.store.write((_tx, emit) =>
+      emit('connection.checked', {
+        target: CheckTarget.McpServer,
+        id: name,
+        status: failure ? HealthStatus.Fail : HealthStatus.Auth,
+        detail: failure ? `not removed: ${failure}` : null,
+        latency_ms: null,
+      }),
+    );
   }
 
   /** Adds (or, when `previous` is given, replaces) the server in every account; a failure undoes the accounts done. */
@@ -294,27 +370,31 @@ export class McpServersService implements OnModuleDestroy {
     const spec = await this.specOf(name, scope, transport, target, env, headers);
     const touched: Account[] = [];
     try {
-      if (Object.keys(env).length > 0) await this.keychain.set(secretsKey(name), JSON.stringify(env));
-      else await this.keychain.delete(secretsKey(name));
-      // Project scope is one `.mcp.json` in the Repo, written once; the others register in every account.
-      for (const account of repo ? this.accounts.all().slice(0, 1) : this.accounts.all()) {
-        const where = await this.target(account, repo);
-        const old = previous?.find((item) => item.account.id === account.id) ?? (repo ? previous?.[0] : undefined);
-        if (old) await this.claude.mcpRemove(name, old.entry.scope, where);
-        await this.claude.mcpAdd(spec, where);
-        touched.push(account);
-      }
+      if (Object.keys(env).length > 0) await this.saveEnv(name, env);
+      else await this.dropEnv(name);
+      // Project scope is one `.mcp.json` in the Repo, written once; the others register in every account at once.
+      const results = await Promise.allSettled(
+        (repo ? this.accounts.all().slice(0, 1) : this.accounts.all()).map(async (account) => {
+          const where = await this.target(account, repo);
+          const old = previous?.find((item) => item.account.id === account.id) ?? (repo ? previous?.[0] : undefined);
+          if (old) await this.claude.mcpRemove(name, old.entry.scope, where);
+          await this.claude.mcpAdd(spec, where);
+          touched.push(account);
+        }),
+      );
+      const failed = results.find((result) => result.status === 'rejected');
+      if (failed) throw failed.reason;
     } catch (error) {
       // A new server leaves no trace (Behavior 5); an edit that fails part way is for the operator to retry.
       if (previous === null) {
         for (const account of touched) {
           await this.claude.mcpRemove(name, spec.scope, await this.target(account, repo)).catch(() => {});
         }
-        await this.keychain.delete(secretsKey(name));
+        await this.dropEnv(name);
       }
       throw error;
     } finally {
-      this.probes.clear();
+      this.invalidate();
     }
   }
 
@@ -345,7 +425,26 @@ export class McpServersService implements OnModuleDestroy {
     return { ...(await this.storedEnv(name)), ...nonBlank(changes) };
   }
 
+  private async saveEnv(name: string, env: Record<string, string>): Promise<void> {
+    await this.keychain.set(secretsKey(name), JSON.stringify(env));
+    this.envs.set(name, env);
+  }
+
+  private async dropEnv(name: string): Promise<void> {
+    await this.keychain.delete(secretsKey(name));
+    this.envs.set(name, {});
+  }
+
+  /** Read once from the Keychain, then from memory: every write to `mcp:<name>` goes through this service. */
   private async storedEnv(name: string): Promise<Record<string, string>> {
+    const kept = this.envs.get(name);
+    if (kept) return kept;
+    const env = await this.readEnv(name);
+    this.envs.set(name, env);
+    return env;
+  }
+
+  private async readEnv(name: string): Promise<Record<string, string>> {
     const stored = await this.keychain.get(secretsKey(name));
     if (stored === null) return {};
     return parseEnv(stored);
@@ -370,8 +469,24 @@ export class McpServersService implements OnModuleDestroy {
 
   /** Whether any account registers a server of this name, hidden or not. */
   async exists(name: string): Promise<boolean> {
-    const views = await this.views(false);
-    return views.some((view) => view.entries.has(name));
+    return (await this.registered()).some((entry) => entry.name === name);
+  }
+
+  /**
+   * What the accounts and Repos register, from the config files alone: name, scope, transport and URL. Headers and
+   * env stay out. The Setup agent reads it to skip a server the console has.
+   */
+  async registeredServers(): Promise<{ name: string; scope: string; transport: McpTransport; url: string | null }[]> {
+    const project = (await Promise.all((this.repos?.folders() ?? []).map((repo) => readProject(repo.path)))).flat();
+    const seen = new Map<string, RegisteredServer>();
+    for (const entry of [...(await this.registered()), ...project])
+      if (!seen.has(entry.name)) seen.set(entry.name, entry);
+    return [...seen.values()].map(({ name, scope, transport, url }) => ({ name, scope, transport, url }));
+  }
+
+  private async registered(): Promise<RegisteredServer[]> {
+    const local = await this.localDir();
+    return (await Promise.all(this.accounts.all().map((account) => readRegistered(account.configDir, local)))).flat();
   }
 
   /** Registers a Connection's server in every account, replacing the one there. The env vars go to the Keychain. */
@@ -390,11 +505,14 @@ export class McpServersService implements OnModuleDestroy {
 
   /** Removes a Connection's server from every account and the Keychain; no row is kept. */
   async unregisterConnectionServer(name: string): Promise<void> {
-    for (const { account, entry } of await this.registrations(name)) {
-      await this.claude.mcpRemove(name, entry.scope, await this.target(account));
-    }
-    await this.keychain.delete(secretsKey(name));
-    this.probes.clear();
+    // Each account has its own config file, so the removals cannot clash.
+    await Promise.all(
+      (await this.registrations(name)).map(async ({ account, entry }) =>
+        this.claude.mcpRemove(name, entry.scope, await this.target(account)),
+      ),
+    );
+    await this.dropEnv(name);
+    this.invalidate();
   }
 
   private async localDir(): Promise<string> {
@@ -415,28 +533,33 @@ export class McpServersService implements OnModuleDestroy {
     return repo;
   }
 
+  /** Reads the config files only: the Probe takes seconds and says nothing about where a server is registered. */
   private async registrations(name: string): Promise<{ account: Account; entry: RegisteredServer }[]> {
-    const project = (await this.projectItems(false)).find((item) => item.name === name);
-    const first = this.accounts.all()[0];
-    if (project && first) return [{ account: first, entry: project.entry }];
-    const views = await this.views(false);
-    return views.flatMap((view) => {
-      const entry = view.entries.get(name);
-      return entry ? [{ account: view.account, entry }] : [];
-    });
+    const accounts = this.accounts.all();
+    for (const repo of this.repos?.folders() ?? []) {
+      const entry = (await readProject(repo.path)).find((item) => item.name === name);
+      if (entry && accounts[0]) return [{ account: accounts[0], entry }];
+    }
+    const local = await this.localDir();
+    const found = await Promise.all(
+      accounts.map(async (account) => {
+        const entry = (await readRegistered(account.configDir, local)).find((item) => item.name === name);
+        return entry ? [{ account, entry }] : [];
+      }),
+    );
+    return found.flat();
   }
 
-  /** Every account with what its config registers and what the Probe reports. */
-  private async views(force: boolean) {
+  /**
+   * Every account with what its config registers and what the Probe reports. `fresh` waits for a new Probe;
+   * otherwise the last one is used as it is and a stale or missing one is asked again in the background.
+   */
+  private async views(fresh: boolean) {
     const local = await this.localDir();
     return Promise.all(
       this.accounts.all().map(async (account) => {
         const entries = new Map((await readRegistered(account.configDir, local)).map((entry) => [entry.name, entry]));
-        let probed = account.signedIn ? await this.probeOf(account, local, force) : null;
-        // A server added outside the console after the Probe was kept is not in it: ask again (Behavior 14).
-        if (!force && probed?.servers && [...entries.keys()].some((name) => !probed?.servers?.has(name))) {
-          probed = await this.probeOf(account, local, true);
-        }
+        const probed = account.signedIn ? await this.probeOf(account, local, [...entries.keys()], fresh) : null;
         return {
           account,
           entries,
@@ -444,6 +567,9 @@ export class McpServersService implements OnModuleDestroy {
           /** This account's reading of one server; `null` when the account does not register it or is signed out. */
           state(name: string): Reading | null {
             if (!entries.has(name) || probed === null) return null;
+            if (probed === undefined || !probed.asked.has(name)) {
+              return { status: HealthStatus.Checking, detail: null, tools: [] };
+            }
             return readServer(account, probed, name);
           },
         };
@@ -451,34 +577,96 @@ export class McpServersService implements OnModuleDestroy {
     );
   }
 
-  private async probeOf(account: Account, local: string, force: boolean): Promise<Probed> {
-    const key = `${account.configDir}\n${local}`;
+  /** The kept Probe, or with `fresh` a new one; `undefined` when none has run yet and one is on its way. */
+  private async probeOf(account: Account, cwd: string, names: string[], fresh: true): Promise<Probed>;
+  private async probeOf(account: Account, cwd: string, names: string[], fresh: boolean): Promise<Probed | undefined>;
+  private async probeOf(account: Account, cwd: string, names: string[], fresh: boolean): Promise<Probed | undefined> {
+    const key = `${account.configDir}\n${cwd}`;
+    if (fresh) return this.runProbe(key, account, cwd, names);
     const kept = this.probes.get(key);
-    if (!force && kept && Date.now() - kept.at < PROBE_TTL_MS) return kept;
-    let result: Probed;
-    try {
-      const servers = await this.probe.run(account.configDir, local);
-      result = { servers: new Map(servers.map((server) => [server.name, server])), at: Date.now() };
-    } catch {
-      result = { servers: null, at: Date.now() };
+    // A server added outside the console after the Probe ran is not in it: ask again (Behavior 14).
+    const added = kept && names.some((name) => !kept.asked.has(name));
+    if (!kept || added || Date.now() - kept.at >= PROBE_TTL_MS) {
+      void this.runProbe(key, account, cwd, names).catch(() => {});
     }
-    this.probes.set(key, result);
-    return result;
+    return kept;
+  }
+
+  /** The config changed: a Probe under way is not kept, and the kept ones stay shown until new ones answer. */
+  private invalidate(): void {
+    this.generation += 1;
+    this.probing.clear();
+    for (const [key, probed] of this.probes) this.probes.set(key, { ...probed, at: 0 });
+  }
+
+  /** One Probe per account and folder at a time; a changed reading sends `connection.checked`. */
+  private runProbe(key: string, account: Account, cwd: string, names: string[]): Promise<Probed> {
+    const running = this.probing.get(key);
+    if (running) return running;
+    const generation = this.generation;
+    const run = (async () => {
+      let result: Probed;
+      try {
+        const servers = await this.probe.run(account.configDir, cwd);
+        result = {
+          servers: new Map(servers.map((server) => [server.name, server])),
+          at: Date.now(),
+          asked: new Set(names),
+        };
+      } catch {
+        result = { servers: null, at: Date.now(), asked: new Set(names) };
+      }
+      if (generation !== this.generation) return result;
+      const before = this.probes.get(key);
+      this.probes.set(key, result);
+      this.announce(before, result, names);
+      return result;
+    })().finally(() => {
+      if (this.probing.get(key) === run) this.probing.delete(key);
+    });
+    this.probing.set(key, run);
+    return run;
+  }
+
+  /** `connection.checked` for each server whose reading moved, so an open list reads again. */
+  private announce(before: Probed | undefined, after: Probed, names: string[]): void {
+    const read = (probed: Probed | undefined, name: string) => {
+      const server = probed?.servers?.get(name);
+      return probed === undefined ? 'unread' : `${probed.servers === null}|${server?.status}|${server?.tools.length}`;
+    };
+    const moved = names.filter((name) => read(before, name) !== read(after, name));
+    if (moved.length === 0) return;
+    this.store.write((_tx, emit) => {
+      for (const name of moved) {
+        const server = after.servers?.get(name);
+        emit('connection.checked', {
+          target: CheckTarget.McpServer,
+          id: name,
+          status: server?.status === 'connected' ? HealthStatus.Ok : server ? HealthStatus.Auth : HealthStatus.Fail,
+          detail: server?.error ?? null,
+          latency_ms: null,
+        });
+      }
+    });
   }
 
   /** The servers in each Repo's `.mcp.json`, with each signed-in account's reading. A name a user or local server holds wins. */
-  private async projectItems(force: boolean) {
+  private async projectItems(fresh: boolean) {
     const accounts = this.accounts.all();
     const items: { name: string; entry: RegisteredServer; repoId: string; file: string; states: Reading[] }[] = [];
     for (const repo of this.repos?.folders() ?? []) {
-      for (const entry of await readProject(repo.path)) {
+      const entries = await readProject(repo.path);
+      const names = entries.map((entry) => entry.name);
+      for (const entry of entries) {
         const states: Reading[] = [];
         for (const account of accounts.filter((item) => item.signedIn)) {
-          const probed = await this.probeOf(account, repo.path, force);
+          const probed = await this.probeOf(account, repo.path, names, fresh);
           states.push(
-            probed.servers !== null && !probed.servers.has(entry.name)
-              ? { status: HealthStatus.Auth, detail: `${account.label}: pending approval in Claude Code`, tools: [] }
-              : readServer(account, probed, entry.name),
+            probed === undefined || !probed.asked.has(entry.name)
+              ? { status: HealthStatus.Checking, detail: null, tools: [] }
+              : probed.servers !== null && !probed.servers.has(entry.name)
+                ? { status: HealthStatus.Auth, detail: `${account.label}: pending approval in Claude Code`, tools: [] }
+                : readServer(account, probed, entry.name),
           );
         }
         items.push({ name: entry.name, entry, repoId: repo.id, file: path.join(repo.path, '.mcp.json'), states });
@@ -487,8 +675,9 @@ export class McpServersService implements OnModuleDestroy {
     return items;
   }
 
-  private async servers(force = false): Promise<McpServer[]> {
-    const views = await this.views(force);
+  /** Every server as the kept Probes read it; `fresh` waits for new ones. */
+  private async servers(fresh = false): Promise<McpServer[]> {
+    const views = await this.views(fresh);
     const disabled = new Set(
       this.store.db
         .select()
@@ -497,8 +686,12 @@ export class McpServersService implements OnModuleDestroy {
         .map((row) => row.name),
     );
     const removed = this.store.db.select().from(removedMcpServers).all();
-    const userNames = [...new Set(views.flatMap((view) => [...view.entries.keys()]))];
-    const project = (await this.projectItems(force)).filter((item) => !userNames.includes(item.name));
+    const userNames = [...new Set(views.flatMap((view) => [...view.entries.keys()]))].filter(
+      (name) => !this.leaving.has(name),
+    );
+    const project = (await this.projectItems(fresh)).filter(
+      (item) => !userNames.includes(item.name) && !this.leaving.has(item.name),
+    );
     const names = [...userNames, ...project.map((item) => item.name)];
     const out: McpServer[] = [];
 
@@ -579,10 +772,17 @@ export class McpServersService implements OnModuleDestroy {
     return out;
   }
 
+  /** The server as it reads now, with a new Probe in the background; `connection.checked` reports it. */
+  private async checkLater(name: string): Promise<McpServer> {
+    this.invalidate();
+    void this.checked(name).catch((error) => this.logger.warn(`checking ${name} failed: ${String(error)}`));
+    return this.get(name);
+  }
+
   /** A new Probe in every account, `connection.checked`, and the server as it reads now. */
   private async checked(name: string): Promise<McpServer> {
     const started = Date.now();
-    this.probes.clear();
+    this.invalidate();
     const servers = await this.servers(true);
     const server = this.require(servers, name);
     this.store.write((_tx, emit) =>

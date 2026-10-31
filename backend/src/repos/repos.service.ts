@@ -1,14 +1,17 @@
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
-import { ErrorCode, type Repo } from '@ops-console/shared';
-import { eq } from 'drizzle-orm';
+import { ErrorCode, RemovedRepoSessions, type Repo, SessionState } from '@ops-console/shared';
+import { and, count, eq, isNull } from 'drizzle-orm';
 import { ApiError } from '../common/errors';
-import { repos, sessions } from '../db/schema';
+import { repos, services, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { GIT, Git, parseRemote } from './git';
 
 type Row = typeof repos.$inferSelect;
+
+/** A Session in one of these has a run going; a daemon restart fails it (`02-settings-agents` Behavior 18). */
+const RUNNING = [SessionState.Working, SessionState.WaitingInput, SessionState.WaitingApproval];
 
 @Injectable()
 export class ReposService {
@@ -18,14 +21,14 @@ export class ReposService {
   ) {}
 
   async list(): Promise<{ data: Repo[]; meta: { next_cursor: null } }> {
-    const rows = this.store.db.select().from(repos).all();
+    const rows = this.store.db.select().from(repos).where(isNull(repos.removedAt)).all();
     rows.sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
     return { data: await Promise.all(rows.map((row) => this.view(row))), meta: { next_cursor: null } };
   }
 
   /** Id and folder of every Repo, for readers that only need where to look. */
   folders(): { id: string; path: string }[] {
-    return this.store.db.select({ id: repos.id, path: repos.path }).from(repos).all();
+    return this.store.db.select({ id: repos.id, path: repos.path }).from(repos).where(isNull(repos.removedAt)).all();
   }
 
   async get(id: string): Promise<Repo> {
@@ -37,14 +40,21 @@ export class ReposService {
     const folder = await this.git.topFolder(expandHome(rawPath));
     if (folder === null) throw new ApiError(400, ErrorCode.NotARepo, 'Not a git repository');
     const existing = this.store.db.select().from(repos).where(eq(repos.path, folder)).get();
-    if (existing) throw new ApiError(409, ErrorCode.Duplicate, `${existing.name} is already imported`);
+    if (existing && existing.removedAt === null) {
+      throw new ApiError(409, ErrorCode.Duplicate, `${existing.name} is already imported`);
+    }
     const { host, slug } = parseRemote(await this.git.originUrl(folder));
     const defaultBranch = (await this.git.defaultBranch(folder)) ?? 'main';
-    const id = crypto.randomUUID();
+    // A Repo removed with its Sessions kept comes back under its old id, so they come back with it.
+    const id = existing?.id ?? crypto.randomUUID();
     this.store.write((tx) => {
-      tx.insert(repos)
-        .values({ id, name: path.basename(folder), path: folder, host, remoteSlug: slug, defaultBranch })
-        .run();
+      if (existing) {
+        tx.update(repos).set({ host, remoteSlug: slug, defaultBranch, removedAt: null }).where(eq(repos.id, id)).run();
+      } else {
+        tx.insert(repos)
+          .values({ id, name: path.basename(folder), path: folder, host, remoteSlug: slug, defaultBranch })
+          .run();
+      }
     });
     return this.get(id);
   }
@@ -58,13 +68,39 @@ export class ReposService {
     return this.get(id);
   }
 
-  /** Deletes the row and leaves the folder alone. A Repo with Sessions stays. */
-  remove(id: string): void {
-    this.row(id);
-    if (this.store.db.select({ id: sessions.id }).from(sessions).where(eq(sessions.repoId, id)).get()) {
-      throw new ApiError(409, ErrorCode.RepoHasSessions, 'Delete the Sessions in this Repo first');
+  /**
+   * Takes the Repo off the list and leaves the folder alone. With Sessions, the operator says what happens to them:
+   * kept, they hide with the Repo and a running one finishes unseen; deleted, they go with it, once none is running.
+   * Either way its Services lose the link.
+   */
+  remove(id: string, kept?: RemovedRepoSessions): void {
+    const row = this.row(id);
+    const inRepo = this.store.db
+      .select({ id: sessions.id, state: sessions.state })
+      .from(sessions)
+      .where(eq(sessions.repoId, id))
+      .all();
+    if (inRepo.length > 0 && kept === undefined) {
+      throw new ApiError(
+        409,
+        ErrorCode.RepoHasSessions,
+        `${row.name} has ${inRepo.length} Sessions: say whether to keep or delete them`,
+      );
+    }
+    if (kept === RemovedRepoSessions.Delete && inRepo.some((session) => RUNNING.includes(session.state))) {
+      throw new ApiError(
+        409,
+        ErrorCode.SessionBusy,
+        `A Session in ${row.name} is still running: keep the Sessions, or wait for it to end`,
+      );
     }
     this.store.write((tx) => {
+      tx.update(services).set({ repoId: null }).where(eq(services.repoId, id)).run();
+      if (inRepo.length > 0 && kept === RemovedRepoSessions.Keep) {
+        tx.update(repos).set({ removedAt: new Date().toISOString() }).where(eq(repos.id, id)).run();
+        return;
+      }
+      tx.delete(sessions).where(eq(sessions.repoId, id)).run();
       tx.delete(repos).where(eq(repos.id, id)).run();
     });
   }
@@ -90,11 +126,17 @@ export class ReposService {
       branch: missing ? null : await this.git.currentBranch(row.path),
       dirty: missing ? false : await this.git.isDirty(row.path),
       missing,
+      session_count:
+        this.store.db.select({ n: count() }).from(sessions).where(eq(sessions.repoId, row.id)).get()?.n ?? 0,
     };
   }
 
   private row(id: string): Row {
-    const row = this.store.db.select().from(repos).where(eq(repos.id, id)).get();
+    const row = this.store.db
+      .select()
+      .from(repos)
+      .where(and(eq(repos.id, id), isNull(repos.removedAt)))
+      .get();
     if (!row) throw new ApiError(404, ErrorCode.NotFound, 'no such Repo');
     return row;
   }

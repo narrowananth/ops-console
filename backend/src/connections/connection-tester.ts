@@ -22,24 +22,29 @@ export class McpConnectionTester implements ConnectionTester {
     const client = new Client({ name: 'ops-console', version: this.version });
     const started = Date.now();
     const timer = setTimeout(() => void client.close(), TIMEOUT_MS);
+    const transport = new StdioClientTransport({
+      command,
+      args,
+      env: { ...getDefaultEnvironment(), ...launch.env },
+      stderr: 'pipe',
+    });
+    let stderr = '';
+    transport.stderr?.on('data', (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString()).slice(-20_000);
+    });
     try {
-      await client.connect(
-        new StdioClientTransport({
-          command,
-          args,
-          env: { ...getDefaultEnvironment(), ...launch.env },
-          stderr: 'ignore',
-        }),
-      );
+      await client.connect(transport);
       const result = await client.callTool({ name: ping.tool, arguments: ping.args });
       if (result.isError)
         return { status: HealthStatus.Fail, latency_ms: null, detail: scrub(firstText(result), launch) };
       return { status: HealthStatus.Ok, latency_ms: Date.now() - started, detail: null };
     } catch (error) {
+      // A server that exits at start only tells the client the connection closed; its stderr says why.
+      const reason = stderr.split('\n').findLast((line) => /\berror\b/i.test(line) && !/^\s/.test(line));
       return {
         status: HealthStatus.Fail,
         latency_ms: null,
-        detail: scrub(String((error as Error).message ?? error), launch),
+        detail: scrub(reason ?? String((error as Error).message ?? error), launch),
       };
     } finally {
       clearTimeout(timer);

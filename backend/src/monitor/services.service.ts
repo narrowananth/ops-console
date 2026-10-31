@@ -7,7 +7,7 @@ import {
   type RouteView,
   type Service,
 } from '@ops-console/shared';
-import { and, asc, desc, eq, inArray, max, notInArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, max, notInArray } from 'drizzle-orm';
 import type { z } from 'zod';
 import { ApiError } from '../common/errors';
 import { alerts, repos, routes, scanRouteResults, scans, services } from '../db/schema';
@@ -34,7 +34,11 @@ export class ServicesService {
   patch(id: string, body: z.infer<typeof patchServiceSchema>): Service {
     this.row(id);
     if (body.repo_id) {
-      const repo = this.store.db.select({ id: repos.id }).from(repos).where(eq(repos.id, body.repo_id)).get();
+      const repo = this.store.db
+        .select({ id: repos.id })
+        .from(repos)
+        .where(and(eq(repos.id, body.repo_id), isNull(repos.removedAt)))
+        .get();
       if (!repo) throw new ApiError(404, ErrorCode.NotFound, 'no such Repo');
     }
     const values: Partial<typeof services.$inferInsert> = {

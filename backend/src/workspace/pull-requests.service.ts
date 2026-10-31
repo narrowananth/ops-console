@@ -18,7 +18,7 @@ import {
   type PullRequestDetail,
   SessionKind,
 } from '@ops-console/shared';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { ActionLogService } from '../action-log/action-log.service';
 import { ApiError, validationFailed } from '../common/errors';
 import { ConnectorsService } from '../connectors/connectors.service';
@@ -230,7 +230,11 @@ export class PullRequestsService implements OpenPrBranches {
   }
 
   repoRow(id: string): RepoRow {
-    const row = this.store.db.select().from(repos).where(eq(repos.id, id)).get();
+    const row = this.store.db
+      .select()
+      .from(repos)
+      .where(and(eq(repos.id, id), isNull(repos.removedAt)))
+      .get();
     if (!row) throw new ApiError(404, ErrorCode.NotFound, 'no such Repo');
     return row;
   }
@@ -274,12 +278,14 @@ export class PullRequestsService implements OpenPrBranches {
     return `${repoId}:${state}`;
   }
 
+  /** Repos a list across Repos reads: a host with no adapter yet would fail the whole list. */
   private hostedRepos(): RepoRow[] {
     return this.store.db
       .select()
       .from(repos)
+      .where(isNull(repos.removedAt))
       .all()
-      .filter((repo) => PR_HOSTS.includes(repo.host) && repo.remoteSlug !== null);
+      .filter((repo) => PR_HOSTS.includes(repo.host) && repo.remoteSlug !== null && this.hosts.supports(repo.host));
   }
 
   private connected(host: GitHost): boolean {

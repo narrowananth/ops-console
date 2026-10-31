@@ -1,33 +1,46 @@
-import { type TerminalServerMessage, terminalServerMessageSchema, WS_PROTOCOL } from '@ops-console/shared';
+import {
+  refuseSetupLine,
+  SETUP_LINE_MAX,
+  type TerminalServerMessage,
+  terminalServerMessageSchema,
+  WS_PROTOCOL,
+} from '@ops-console/shared';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { useEffect, useRef, useState } from 'react';
-import { useUi } from '../app/ui-store';
 import { Button } from '../components/ui/button';
 import { useAnswerSecret } from '../lib/queries';
 import { sessionToken } from '../lib/session';
 
-const EXAMPLES = [
-  'connect our staging Postgres at db.example.com, database orders, user reader',
-  'add a read-only ClickHouse for local development on localhost',
-  'connect the Datadog connector',
-];
+/**
+ * The unsent line per terminal, so it survives a tab switch. Memory only: a typed line may hold a password the daemon
+ * has not masked yet, so it never reaches browser storage.
+ */
+const drafts = new Map<string, string>();
+
+const EXAMPLES = ['import my local databases'];
 
 /**
- * The Add with Claude terminal. Keystrokes are not sent as typed: a line goes to the daemon whole, so it can swap
- * passwords for placeholders before Claude sees them. Closing it, or reloading the page, ends the terminal.
+ * The Setup agent's terminal. Keystrokes are not sent as typed: a line goes to the daemon whole, so it can swap
+ * passwords for placeholders before Claude sees them. Only plain requests go: the daemon refuses a line that would
+ * drive Claude Code itself, such as `/login` or `!cmd`. It runs on while the
+ * operator is elsewhere or reloads, and the page attaches to it again; only Close ends it.
  */
 export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onClose: () => void }) {
   const host = useRef<HTMLDivElement>(null);
   const socket = useRef<WebSocket | null>(null);
-  const [line, setLine] = useState('');
-  const [saved, setSaved] = useState<{ target: string; id: string }[]>([]);
+  const [line, setLineState] = useState(() => drafts.get(terminalId) ?? '');
+  const setLine = (text: string) => {
+    if (text) drafts.set(terminalId, text);
+    else drafts.delete(terminalId);
+    setLineState(text);
+  };
   const [request, setRequest] = useState<{ request_id: string; label: string } | null>(null);
   const [secret, setSecret] = useState('');
   const [ended, setEnded] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
   const answer = useAnswerSecret();
-  const { openSettings } = useUi();
 
   useEffect(() => {
     const token = sessionToken();
@@ -50,8 +63,8 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
       if (message.type === 'output') terminal.write(message.data);
       else if (message.type === 'secret_requested')
         setRequest({ request_id: message.request_id, label: message.label });
-      else if (message.type === 'saved') setSaved((all) => [...all, { target: message.target, id: message.id }]);
-      else setEnded(true);
+      else if (message.type === 'refused') setRefused(message.reason);
+      else if (message.type === 'exit') setEnded(true);
     });
     return () => {
       ws.close();
@@ -60,6 +73,9 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
   }, [terminalId]);
 
   const submit = () => {
+    const reason = refuseSetupLine(line);
+    setRefused(reason);
+    if (reason !== null) return;
     socket.current?.send(JSON.stringify({ type: 'line', text: line }));
     setLine('');
   };
@@ -67,11 +83,15 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
   return (
     <div className="flex flex-col gap-2.5 border-b-2 border-divider px-5 py-4">
       <div className="flex items-center gap-2">
-        <strong className="text-[13px]">Add with Claude</strong>
-        <span className="text-xs text-neutral-700">
-          Say what to connect. When Claude needs a password it asks in a masked field.
-        </span>
-        <Button className="ml-auto px-2.5 py-1 text-xs" onClick={onClose}>
+        <strong className="text-[13px]">Setup agent running</strong>
+        <span className="text-xs text-neutral-700">When Claude needs a password it asks in a masked field.</span>
+        <Button
+          className="ml-auto px-2.5 py-1 text-xs"
+          onClick={() => {
+            drafts.delete(terminalId);
+            onClose();
+          }}
+        >
           Close
         </Button>
       </div>
@@ -107,37 +127,23 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
           </Button>
         </form>
       )}
-      {saved.length > 0 && (
-        <ul className="m-0 list-none p-0 text-xs">
-          {saved.map((item) => (
-            <li key={`${item.target}:${item.id}`}>
-              Added {item.target.replace('_', ' ')}{' '}
-              <button
-                type="button"
-                className="cursor-pointer border-0 bg-transparent p-0 text-accent-700 underline"
-                onClick={() =>
-                  openSettings(
-                    item.target === 'connector' ? 'connectors' : item.target === 'mcp_server' ? 'mcp' : 'dev',
-                  )
-                }
-              >
-                {item.target === 'connector' ? item.id : 'open'}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
       <div className="flex gap-2">
         <input
           aria-label="Message to Claude"
           disabled={ended}
           value={line}
+          maxLength={SETUP_LINE_MAX}
           placeholder={
             ended
               ? 'The terminal ended. Close it and open it again.'
               : 'Type a line and press Enter (Enter alone confirms a prompt)'
           }
-          onChange={(event) => setLine(event.target.value)}
+          aria-invalid={refused !== null}
+          aria-describedby={refused === null ? undefined : 'setup-line-refused'}
+          onChange={(event) => {
+            setLine(event.target.value);
+            setRefused(null);
+          }}
           onKeyDown={(event) => event.key === 'Enter' && submit()}
           className="flex-1 border-[1.5px] border-text bg-bg px-2 py-1.5 font-mono text-[13px] text-text"
         />
@@ -145,6 +151,11 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
           Send
         </Button>
       </div>
+      {refused && (
+        <div id="setup-line-refused" role="alert" className="text-xs text-accent-700">
+          {refused}
+        </div>
+      )}
       <div className="flex flex-wrap gap-1.5 text-[11px] text-neutral-700">
         Try:
         {EXAMPLES.map((example) => (

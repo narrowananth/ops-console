@@ -29,8 +29,7 @@ export class TerminalGateway implements OnModuleInit {
         client.on('message', (raw) => {
           try {
             const message = terminalClientMessageSchema.parse(JSON.parse(String(raw)));
-            if (message.type === 'input') this.terminals.input(id, message.data);
-            else if (message.type === 'line') this.terminals.line(id, message.text);
+            if (message.type === 'line') this.terminals.line(id, message.text);
             else this.terminals.resize(id, message.cols, message.rows);
           } catch {
             // A message that is not valid, or for a terminal that ended, is dropped.

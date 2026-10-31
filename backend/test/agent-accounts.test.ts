@@ -360,6 +360,27 @@ describe('usage read from Anthropic', () => {
     await daemon.app.get(AccountsService).pollUsage();
     expect((await accounts(daemon)).meta.active_account_id).toBe(other.id);
   });
+
+  it('drops a reading taken as another added account: that folder is signed out and the active account moves', async () => {
+    const daemon = await start();
+    const [primary] = (await accounts(daemon)).data;
+    const other = await addSignedIn(daemon, 'other');
+    const primaryDir = path.join(daemon.dataDir, 'accounts', String(primary?.id));
+    await reportUsage(daemon, 100, 61);
+    // A sign-in run under the primary's folder, such as `/login`, replaced its login with the other account's.
+    await signIn(primaryDir, 'other@example.com', 'pro');
+    daemon.usage.set(primaryDir, {
+      email: 'other@example.com',
+      fiveHour: { pct: 100, resetsAt: hoursFromNow(1) },
+      weekly: { pct: 61, resetsAt: hoursFromNow(48) },
+    });
+    await daemon.app.get(AccountsService).pollUsage();
+
+    const after = await accounts(daemon);
+    expect(after.data.find((row) => row.id === primary?.id)).toMatchObject({ signed_in: false, five_hour_pct: null });
+    expect(after.meta.active_account_id).toBe(other.id);
+    expect(existsSync(path.join(primaryDir, 'fake-auth.json'))).toBe(false);
+  });
 });
 
 describe('usage', () => {

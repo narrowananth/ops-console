@@ -24,6 +24,10 @@ export class CliGitHosts implements GitHosts {
   private readonly gitlab = new UnsupportedHost('GitLab');
   private readonly bitbucket = new UnsupportedHost('Bitbucket');
 
+  supports(host: GitHost): boolean {
+    return host === GitHost.Github;
+  }
+
   for(host: GitHost): GitHostAdapter {
     if (host === GitHost.Github) return this.github;
     if (host === GitHost.Gitlab) return this.gitlab;

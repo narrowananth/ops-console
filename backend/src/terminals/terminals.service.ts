@@ -7,29 +7,41 @@ import {
   ActionOutcome,
   type Connection,
   type CreateConnection,
+  createMcpServerSchema,
+  Effort,
   ErrorCode,
-  type TerminalKind,
+  refuseSetupLine,
+  sessionDefaultsSchema,
+  TerminalKind,
   type TerminalServerMessage,
 } from '@ops-console/shared';
 import type { IPty } from 'node-pty';
 import type { WebSocket } from 'ws';
+import { z } from 'zod';
 import { AccountsService } from '../accounts/accounts.service';
 import { ActionLogService } from '../action-log/action-log.service';
+import { SESSION_DEFAULTS_KEY } from '../agent/sessions.service';
 import { CLAUDE_CLI, type ClaudeCli, claudeEnv } from '../claude-cli/claude-cli';
 import { DAEMON_ADDRESS, type DaemonAddress } from '../common/daemon-address';
 import { DATA_DIR } from '../common/data-dir';
-import { ApiError, validationFailed } from '../common/errors';
+import { ApiError, parseInput, validationFailed } from '../common/errors';
 import { SESSION, type Session } from '../common/session';
 import { ConnectionsService } from '../connections/connections.service';
 import { ConnectorsService } from '../connectors/connectors.service';
 import { MCP_CONFIG, type McpConfig, McpServersService } from '../mcp/mcp-servers.service';
+import { SettingsService } from '../settings/settings.service';
+import { fetchUrl, LOCAL_KEYCHAIN, type LocalKeychain, listLocalDir, readLocalFile } from './local-sources';
 import { maskLine, PLACEHOLDER } from './secret-masking';
-import { SETUP_AGENT, writeSetupFiles } from './setup-agent';
+import { SETUP_AGENT, SETUP_SERVER, SETUP_TOOLS, writeSetupFiles } from './setup-agent';
 
-/** A terminal nobody connected to is ended after this. */
-export const UNATTACHED_MS = 30_000;
 const ENTER_DELAY_MS = 80;
 const REPLAY_BYTES = 64 * 1024;
+
+const keychainItemSchema = z.object({
+  kind: z.enum(['generic', 'internet']).default('generic'),
+  service: z.string().min(1),
+  account: z.string().optional(),
+});
 
 type SecretRequest = { label: string; resolve(placeholder: string): void; reject(error: Error): void };
 
@@ -42,8 +54,6 @@ type Terminal = {
   secrets: string[];
   requests: Map<string, SecretRequest>;
   replay: string;
-  attached: boolean;
-  timer: NodeJS.Timeout;
 };
 
 @Injectable()
@@ -61,14 +71,21 @@ export class TerminalsService implements OnModuleDestroy {
     @Inject(ConnectorsService) private readonly connectors: ConnectorsService,
     @Inject(McpServersService) private readonly mcp: McpServersService,
     @Inject(DAEMON_ADDRESS) private readonly address: DaemonAddress,
+    @Inject(LOCAL_KEYCHAIN) private readonly keychain: LocalKeychain,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   onModuleDestroy(): void {
     for (const id of [...this.terminals.keys()]) void this.end(id);
   }
 
-  /** Starts `claude --agent dev-tools-setup` in a pty under the active account's config dir. */
+  /**
+   * Starts `claude --agent dev-tools-setup` in a pty under the active account's config dir. One runs at a time: while
+   * it runs, this returns it.
+   */
   async create(_kind: TerminalKind): Promise<{ id: string }> {
+    const running = this.list()[0];
+    if (running) return { id: running.id };
     const account = this.accounts.active();
     const id = crypto.randomUUID();
     const dir = path.join(this.dataDir, 'terminals', id);
@@ -84,16 +101,38 @@ export class TerminalsService implements OnModuleDestroy {
     // Markers of the Claude Code session the daemon may have been started from would turn off this one's transcript.
     const env = { ...claudeEnv(this.accounts.configDir(account)) };
     for (const marker of ['CLAUDECODE', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_ENTRYPOINT']) delete env[marker];
+    // Model and effort follow the defaults in Settings › Agents, as a new Session's do. The CLI tops out at `max`.
+    const { model, effort } = this.settings.get(SESSION_DEFAULTS_KEY, sessionDefaultsSchema);
+    // No built-in tool and no slash command: the agent reaches the machine only through the console's setup tools.
     const pty = nodePty.spawn(
       this.claude.bin,
-      ['--agent', SETUP_AGENT, '--mcp-config', mcpConfig, '--strict-mcp-config'],
+      [
+        '--agent',
+        SETUP_AGENT,
+        '--model',
+        model,
+        '--effort',
+        effort === Effort.Ultrathink ? Effort.Max : effort,
+        '--mcp-config',
+        mcpConfig,
+        '--strict-mcp-config',
+        // Pre-approved: the daemon already masks secrets and only adds, so the auto mode classifier must not turn a
+        // read of a credential file down as credential exploration.
+        '--allowedTools',
+        SETUP_TOOLS.map((tool) => `mcp__${SETUP_SERVER}__${tool}`).join(','),
+        '--tools',
+        '',
+        '--disable-slash-commands',
+      ],
       {
         name: 'xterm-256color',
         cols: 100,
         rows: 30,
         cwd: dir,
         env: {
-          ...claudeEnv(this.accounts.configDir(account)),
+          ...env,
+          // The classic renderer: full screen draws on the alternate screen, which has no scrollback for the page to scroll.
+          CLAUDE_CODE_NO_FLICKER: '0',
           OPS_CONSOLE_URL: this.address.url(),
           OPS_CONSOLE_TOKEN: this.session.token,
           OPS_CONSOLE_TERMINAL: id,
@@ -108,8 +147,6 @@ export class TerminalsService implements OnModuleDestroy {
       secrets: [],
       requests: new Map(),
       replay: '',
-      attached: false,
-      timer: setTimeout(() => void this.end(id), UNATTACHED_MS),
     };
     this.terminals.set(id, terminal);
     pty.onData((data) => {
@@ -127,30 +164,34 @@ export class TerminalsService implements OnModuleDestroy {
     return this.terminals.has(id);
   }
 
+  /** The running terminals, for a page that opens after one started. */
+  list(): { id: string; kind: TerminalKind }[] {
+    return [...this.terminals.keys()].map((id) => ({ id, kind: TerminalKind.Setup }));
+  }
+
   /** Connects a socket; what the terminal printed so far is replayed to it. */
   attach(id: string, socket: WebSocket): void {
     const terminal = this.get(id);
-    clearTimeout(terminal.timer);
-    terminal.attached = true;
     terminal.sockets.add(socket);
     if (terminal.replay) socket.send(JSON.stringify({ type: 'output', data: terminal.replay }));
     for (const [requestId, request] of terminal.requests) {
       socket.send(JSON.stringify({ type: 'secret_requested', request_id: requestId, label: request.label }));
     }
-    // Closing the drawer or reloading the page ends the terminal (Behavior 17).
-    socket.once('close', () => {
-      terminal.sockets.delete(socket);
-      if (terminal.sockets.size === 0) void this.end(id);
-    });
+    // The terminal outlives its sockets: leaving the tab or reloading the page leaves it running (Behavior 17).
+    socket.once('close', () => terminal.sockets.delete(socket));
   }
 
-  input(id: string, data: string): void {
-    this.get(id).pty.write(data);
-  }
-
-  /** A full line: secrets are swapped for placeholders before Claude sees it, and the echo shows the placeholders. */
+  /**
+   * A full line: secrets are swapped for placeholders before Claude sees it, and the echo shows the placeholders.
+   * A line that would drive Claude Code itself, such as `/login` or `!cmd`, is refused and never written.
+   */
   line(id: string, text: string): void {
     const terminal = this.get(id);
+    const reason = refuseSetupLine(text);
+    if (reason !== null) {
+      this.send(terminal, { type: 'refused', reason });
+      return;
+    }
     const masked = maskLine(text, (value) => this.keep(terminal, value));
     // Claude Code's prompt reads text and Enter arriving together as one paste, so Enter follows on its own.
     terminal.pty.write(masked);
@@ -186,9 +227,57 @@ export class TerminalsService implements OnModuleDestroy {
       }
       case 'connect_connector': {
         const connectorId = String(args.id);
-        await this.connectors.connect(connectorId as never, this.resolve(terminal, args.secret) ?? undefined);
+        await this.connectors.connect(connectorId as never);
         this.send(terminal, { type: 'saved', target: 'connector', id: connectorId });
         return { started: connectorId };
+      }
+      case 'list_connections':
+        return (await this.connections.list()).data.map(({ name, type, env, access, config }) => ({
+          name,
+          type,
+          env,
+          access,
+          config,
+        }));
+      case 'read_local_file':
+        return readLocalFile(
+          String(args.path ?? ''),
+          (value) => this.keep(terminal, value),
+          Array.isArray(args.pick) ? args.pick.map(String) : undefined,
+        );
+      case 'list_mcp_servers':
+        return this.mcp.registeredServers();
+      case 'list_local_folder':
+        return listLocalDir(String(args.path ?? '~'));
+      case 'fetch_url':
+        return fetchUrl(String(args.url ?? ''), (value) => this.keep(terminal, value));
+      case 'list_keychain_items':
+        return this.keychain.items(String(args.filter ?? ''));
+      case 'read_keychain_secret': {
+        const item = keychainItemSchema.parse(args);
+        const value = await this.keychain.read({ ...item, account: item.account ?? '' });
+        if (value === null) throw new ApiError(404, ErrorCode.NotFound, `no Keychain item ${item.service}`);
+        return { placeholder: `{{secret:${this.keep(terminal, value)}}}` };
+      }
+      case 'add_mcp_server': {
+        // Remote servers only: a stdio server is a command the daemon would run.
+        const transport = args.transport ?? 'http';
+        if (transport !== 'http' && transport !== 'sse')
+          throw validationFailed('only an http or sse MCP server by URL');
+        const headers = Object.fromEntries(
+          Object.entries((args.headers ?? {}) as Record<string, unknown>).map(([name, value]) => [
+            name,
+            this.resolve(terminal, value) ?? '',
+          ]),
+        );
+        const body = parseInput(
+          createMcpServerSchema,
+          { name: args.name, transport, target: args.url, scope: 'user', headers },
+          'body',
+        );
+        await this.mcp.create(body);
+        this.send(terminal, { type: 'saved', target: 'mcp_server', id: body.name });
+        return { added: body.name };
       }
       case 'authenticate_mcp_server': {
         await this.mcp.authenticate(String(args.name));
@@ -204,7 +293,6 @@ export class TerminalsService implements OnModuleDestroy {
     const terminal = this.terminals.get(id);
     if (!terminal) return;
     this.terminals.delete(id);
-    clearTimeout(terminal.timer);
     for (const request of terminal.requests.values()) request.reject(new Error('the terminal ended'));
     terminal.secrets.length = 0;
     try {

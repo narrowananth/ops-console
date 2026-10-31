@@ -279,30 +279,48 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
     // in while the active one is signed out. An active account that signs out hands over, or leaves none active.
     const active = this.activeRow();
     if (status.signedIn && id !== active?.id && !active?.signedIn) this.switchTo(id, SwitchReason.Manual);
-    else if (!status.signedIn && id === active?.id) {
-      const next = this.rows().find((row) => row.id !== id && row.signedIn);
-      if (next) this.switchTo(next.id, SwitchReason.Manual);
-      else this.clearActive();
-    }
+    else if (!status.signedIn) this.handOver(id);
     if (status.signedIn) void this.pollUsage();
     this.autoSwitch();
     return this.one(id);
   }
 
-  /** Signs `account` out of what it just signed in as, deletes it when it is new. */
+  /**
+   * Signs `account` out of what it just signed in as, deletes it when it is new. Its usage goes too: readings since
+   * the twin signed in there were the twin's.
+   */
   private async rejectTwin(account: AccountRow, email: string): Promise<never> {
     await this.claude.authLogout(this.configDir(account));
     this.store.write((tx, emit) => {
       const row = tx
         .update(claudeAccounts)
-        .set({ signedIn: false, email: null, plan: null, lastCheckedAt: nowIso })
+        .set({
+          signedIn: false,
+          email: null,
+          plan: null,
+          lastCheckedAt: nowIso,
+          fiveHourPct: null,
+          fiveHourResetsAt: null,
+          weeklyPct: null,
+          weeklyResetsAt: null,
+          usageSeenAt: null,
+        })
         .where(eq(claudeAccounts.id, account.id))
         .returning()
         .get();
       if (row) this.emitUpdated(emit, row);
     });
+    this.handOver(account.id);
     await this.discardIfNew(account.id);
     throw new ApiError(409, ErrorCode.InvalidState, `${email} is already added`);
+  }
+
+  /** An active account that signed out hands over to the next signed-in one, or leaves none active. */
+  private handOver(id: string): void {
+    if (id !== this.activeRow()?.id) return;
+    const next = this.rows().find((row) => row.id !== id && row.signedIn);
+    if (next) this.switchTo(next.id, SwitchReason.Manual);
+    else this.clearActive();
   }
 
   /** Signs the account out of its config dir. */
@@ -347,7 +365,14 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
         rows.map(async (row) => {
           try {
             const reading = await this.usageSource.read(this.configDir(row));
-            if (reading) this.writeUsage(row.id, reading);
+            if (!reading) return;
+            // The folder signed in as someone else, such as through a `/login`: the numbers are not this account's.
+            if (reading.email && row.email && reading.email.toLowerCase() !== row.email.toLowerCase()) {
+              this.logger.warn(`"${row.label}" is signed in as ${reading.email}; checking it again`);
+              await this.check(row.id);
+              return;
+            }
+            this.writeUsage(row.id, reading);
           } catch (error) {
             this.logger.debug(`usage of "${row.label}" not read: ${error instanceof Error ? error.message : error}`);
           }

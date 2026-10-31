@@ -71,6 +71,20 @@
       "when": 1793404490261,
       "tag": "0009_devtools",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793473165267,
+      "tag": "0010_repo_removed_sessions_kept",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1793484112515,
+      "tag": "0011_connector_shopify",
+      "breakpoints": true
     }
   ]
 }

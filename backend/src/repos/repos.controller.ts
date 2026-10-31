@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Optional, Param, Patch, Post } from '@nestjs/common';
-import { type Branch, importRepoSchema, type Repo, renameRepoSchema } from '@ops-console/shared';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Optional, Param, Patch, Post, Query } from '@nestjs/common';
+import { type Branch, importRepoSchema, type Repo, removeRepoQuerySchema, renameRepoSchema } from '@ops-console/shared';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
 import { FOLDER_PICKER, type FolderPicker } from './folder-picker';
@@ -41,8 +41,9 @@ export class ReposController {
 
   @Delete(':id')
   @HttpCode(204)
-  remove(@Param() params: unknown): void {
-    this.repos.remove(parseInput(idParams, params, 'params').id);
+  remove(@Param() params: unknown, @Query() query: unknown): void {
+    const { id } = parseInput(idParams, params, 'params');
+    this.repos.remove(id, parseInput(removeRepoQuerySchema, query, 'query').sessions);
   }
 
   @Get(':id/branches')

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ConnectorId, HealthStatus, PrReviewState, type WsEvent } from '@ops-console/shared';
+import { ConnectorId, GitHost, HealthStatus, PrReviewState, type WsEvent } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
@@ -119,12 +119,14 @@ describe('Sessions in a Repo', () => {
     ]);
   });
 
-  it('refuses to remove a Repo that has Sessions, and deleting the Session keeps reviews and agent comments', async () => {
+  it('asks what to do with the Sessions before removing a Repo, and deleting a Session keeps reviews and agent comments', async () => {
     const ctx = await start();
     const id = await newSession(ctx);
+    expect((await ctx.http.get('/repos')).body.data[0].session_count).toBe(1);
     const refused = await ctx.http.delete(`/repos/${ctx.repoId}`);
     expect(refused.status).toBe(409);
     expect(refused.body.error.code).toBe('repo_has_sessions');
+    expect((await ctx.http.delete(`/repos/${ctx.repoId}?sessions=later`)).body.error.code).toBe('validation_failed');
 
     ctx.store.write((tx) => {
       tx.insert(prAgentReviews).values({ id: 'r1', repoId: ctx.repoId, prNumber: 1, headSha: 'a' }).run();
@@ -135,6 +137,56 @@ describe('Sessions in a Repo', () => {
     expect(ctx.store.db.select().from(agentComments).all()).toHaveLength(1);
     expect((await ctx.http.get('/repos')).body.data[0].branch).toBe('main');
     expect((await ctx.http.delete(`/repos/${ctx.repoId}`)).status).toBe(204);
+  });
+
+  it('removes a Repo with its Sessions kept, hides both, and brings both back when the folder is imported again', async () => {
+    const ctx = await start();
+    const id = await newSession(ctx);
+    const hold = gate();
+    ctx.daemon.sdk.script({ wait: hold.promise }, { text: 'done' });
+    await ctx.http.post(`/sessions/${id}/messages`, { text: 'go' });
+
+    expect((await ctx.http.delete(`/repos/${ctx.repoId}?sessions=keep`)).status).toBe(204);
+    expect((await ctx.http.get('/repos')).body.data).toEqual([]);
+    expect((await ctx.http.get('/sessions?kind=repo')).body.data).toEqual([]);
+    expect((await ctx.http.get(`/repos/${ctx.repoId}/branches`)).status).toBe(404);
+    expect((await ctx.http.post('/sessions', { repo_id: ctx.repoId, branch: 'main' })).status).toBe(404);
+
+    // The run it was in finishes unseen.
+    hold.open();
+    await until(
+      () => ctx.http.get(`/sessions/${id}`).then((res) => res.body.data.state),
+      (state) => state === 'idle',
+    );
+
+    const again = await ctx.http.post('/repos', { path: ctx.dir });
+    expect(again.status).toBe(201);
+    expect(again.body.data).toMatchObject({ id: ctx.repoId, session_count: 1 });
+    expect((await ctx.http.get('/sessions?kind=repo')).body.data.map((s: { id: string }) => s.id)).toEqual([id]);
+    expect((await ctx.http.post('/repos', { path: ctx.dir })).body.error.code).toBe('duplicate');
+  });
+
+  it('removes a Repo with its Sessions deleted, once none is running', async () => {
+    const ctx = await start();
+    const id = await newSession(ctx);
+    const hold = gate();
+    ctx.daemon.sdk.script({ wait: hold.promise }, { text: 'done' });
+    await ctx.http.post(`/sessions/${id}/messages`, { text: 'go' });
+
+    const busy = await ctx.http.delete(`/repos/${ctx.repoId}?sessions=delete`);
+    expect(busy.status).toBe(409);
+    expect(busy.body.error.code).toBe('session_busy');
+
+    hold.open();
+    await until(
+      () => ctx.http.get(`/sessions/${id}`).then((res) => res.body.data.state),
+      (state) => state === 'idle',
+    );
+    expect((await ctx.http.delete(`/repos/${ctx.repoId}?sessions=delete`)).status).toBe(204);
+    expect((await ctx.http.get(`/sessions/${id}`)).status).toBe(404);
+    const again = await ctx.http.post('/repos', { path: ctx.dir });
+    expect(again.body.data.id).not.toBe(ctx.repoId);
+    expect(again.body.data.session_count).toBe(0);
   });
 });
 
@@ -385,6 +437,32 @@ describe('pull requests', () => {
     const res = await ctx.http.get(`/pull-requests?repo_id=${id}`);
     expect(res.status).toBe(409);
     expect((await ctx.http.get('/pull-requests')).body.data).toEqual([]);
+  });
+
+  it('lists every other Repo when one sits on a host with no adapter yet, and refuses that Repo alone', async () => {
+    const ctx = await start();
+    ctx.host.unsupported.add(GitHost.Bitbucket);
+    ctx.store.write((tx) => {
+      tx.update(connectors).set({ status: HealthStatus.Ok }).where(eq(connectors.id, ConnectorId.Bitbucket)).run();
+    });
+    const billing = await makeRepo('billing', 'git@bitbucket.org:acme/billing.git');
+    const id = (await ctx.http.post('/repos', { path: billing })).body.data.id;
+    ctx.host.prs = [hostPr(1)];
+
+    const all = await ctx.http.get('/pull-requests');
+    expect(all.status).toBe(200);
+    expect(all.body.data.map((pr: { repo_id: string }) => pr.repo_id)).toEqual([ctx.repoId]);
+    expect((await ctx.http.get(`/pull-requests?repo_id=${id}`)).status).toBe(502);
+
+    const { events, close } = await listen(ctx.daemon);
+    await ctx.http.post('/pull-requests/refresh', {});
+    const refreshed = await until(
+      () => events,
+      (list) => list.some((event) => event.event === 'pull_request.refreshed'),
+      'pull_request.refreshed',
+    );
+    expect(refreshed.find((event) => event.event === 'pull_request.refreshed')?.data).toMatchObject({ status: 'ok' });
+    close();
   });
 });
 

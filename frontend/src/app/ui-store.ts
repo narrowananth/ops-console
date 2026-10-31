@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type SettingsTab = 'agents' | 'mcp' | 'connectors' | 'dev' | 'repos';
+export type SettingsTab = 'agents' | 'integrations' | 'dev' | 'repos' | 'setup';
 export type Theme = 'light' | 'dark';
 
 const THEME_KEY = 'ops-console-theme';
