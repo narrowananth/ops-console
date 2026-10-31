@@ -350,6 +350,19 @@ export function useImportRepo() {
   });
 }
 
+/** Opens the Finder folder dialog on this machine; the path is `null` when the operator closes it. */
+export function usePickFolder() {
+  return useMutation({
+    mutationFn: () =>
+      apiSend(
+        'POST',
+        '/repos/pick-folder',
+        undefined,
+        z.object({ data: z.object({ path: z.string().nullable() }) }),
+      ).then((body) => body.data.path),
+  });
+}
+
 export function useRemoveRepo() {
   const client = useQueryClient();
   return useMutation({

@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Inject, Optional, Param, Patch
 import { type Branch, importRepoSchema, type Repo, renameRepoSchema } from '@ops-console/shared';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
+import { FOLDER_PICKER, type FolderPicker } from './folder-picker';
 import { OPEN_PR_BRANCHES, type OpenPrBranches } from './open-pr-branches';
 import { ReposService } from './repos.service';
 
@@ -11,12 +12,20 @@ const idParams = z.object({ id: z.string().min(1) });
 export class ReposController {
   constructor(
     @Inject(ReposService) private readonly repos: ReposService,
+    @Inject(FOLDER_PICKER) private readonly picker: FolderPicker,
     @Optional() @Inject(OPEN_PR_BRANCHES) private readonly openPrs?: OpenPrBranches,
   ) {}
 
   @Get()
   list() {
     return this.repos.list();
+  }
+
+  /** Opens the folder dialog on this machine. Nothing is imported: the path goes back to the UI. */
+  @Post('pick-folder')
+  @HttpCode(200)
+  async pickFolder(): Promise<{ data: { path: string | null } }> {
+    return { data: { path: await this.picker.pick() } };
   }
 
   @Post()
