@@ -1,7 +1,8 @@
-import { readdir, rm } from 'node:fs/promises';
+import { readdir, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { AccessMode, Effort, SessionKind } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
+import { AgentRuntime } from '../src/agent/runtime';
 import { type AgentDaemon, api, converse, gate, listen, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
 
 const running: AgentDaemon[] = [];
@@ -286,6 +287,187 @@ describe('deleting a Session', () => {
     ]);
     const transcripts = await readdir(path.join(daemon.home, 'projects'), { recursive: true });
     expect(transcripts.some((file) => file.endsWith('.jsonl'))).toBe(true);
+  });
+});
+
+describe('editing the last message', () => {
+  type Said = { id: string; role: string; parts: { kind: string; text?: string }[] };
+  const said = async (daemon: AgentDaemon, id: string) =>
+    ((await api(daemon).get(`/sessions/${id}/messages`)).body.data as Said[]).map((message) => ({
+      id: message.id,
+      role: message.role,
+      text: message.parts.map((part) => part.text ?? '').join(''),
+    }));
+  const edit = (daemon: AgentDaemon, id: string, messageId: string, text: string) =>
+    api(daemon).post(`/sessions/${id}/messages/${messageId}/edit`, { text });
+  const settled = (daemon: AgentDaemon, id: string) =>
+    until(
+      async () => (await api(daemon).get(`/sessions/${id}`)).body.data.state,
+      (state) => state === 'idle' || state === 'failed',
+      'the run to end',
+    );
+
+  it('puts the files back, drops the old turn and runs the new text from just before it', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    await converse(daemon, id, 'first');
+    daemon.sdk.script({ text: 'Changed src/a.ts.' });
+    await converse(daemon, id, 'second');
+    const before = await said(daemon, id);
+    const last = before.filter((message) => message.role === 'user').at(-1);
+    const sdkSessionId = daemon.sdk.calls[1]?.sessionId;
+
+    daemon.sdk.rewindResult = {
+      canRewind: true,
+      filesChanged: [path.join(await realpath(WORKING_DIR), 'src/a.ts')],
+      insertions: 2,
+      deletions: 1,
+    };
+    daemon.sdk.script({ text: 'Did the edited thing.' });
+    const edited = await edit(daemon, id, last?.id ?? '', 'second, edited');
+    expect(edited.status).toBe(202);
+    expect(edited.body.data).toEqual({
+      message_id: expect.any(String),
+      reverted: { files: ['src/a.ts'], insertions: 2, deletions: 1 },
+      revert_error: null,
+    });
+    expect(daemon.sdk.rewinds).toEqual([
+      {
+        userMessageId: last?.id,
+        options: expect.objectContaining({ resume: sdkSessionId, enableFileCheckpointing: true }),
+      },
+    ]);
+    expect(await settled(daemon, id)).toBe('idle');
+
+    expect((await said(daemon, id)).map(({ role, text }) => ({ role, text }))).toEqual([
+      { role: 'user', text: 'first' },
+      { role: 'agent', text: 'Done.' },
+      { role: 'user', text: 'second, edited' },
+      { role: 'agent', text: 'Did the edited thing.' },
+    ]);
+    expect(daemon.sdk.calls[2]?.options).toMatchObject({
+      resume: sdkSessionId,
+      resumeSessionAt: before[1]?.id,
+      enableFileCheckpointing: true,
+    });
+  });
+
+  it('still runs the new text when the files cannot go back, and says why', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    await converse(daemon, id, 'only');
+    const [first] = await said(daemon, id);
+
+    daemon.sdk.rewindResult = { canRewind: false, error: 'No file checkpoint found for this message.' };
+    const edited = await edit(daemon, id, first?.id ?? '', 'only, edited');
+    expect(edited.body.data).toMatchObject({
+      reverted: null,
+      revert_error: 'No file checkpoint found for this message.',
+    });
+    await settled(daemon, id);
+    // The first message has nothing before it, so the conversation starts over.
+    expect(daemon.sdk.calls[1]?.options.resume).toBeUndefined();
+    expect((await said(daemon, id)).map(({ text }) => text)).toEqual(['only, edited', 'Done.']);
+  });
+
+  it('is refused for any message but the last, and while a run goes', async () => {
+    const daemon = await start();
+    const id = daemon.createSession({ access_mode: AccessMode.Full });
+    await converse(daemon, id, 'first');
+    await converse(daemon, id, 'second');
+    const [first] = await said(daemon, id);
+    const old = await edit(daemon, id, first?.id ?? '', 'again');
+    expect(old.status).toBe(409);
+    expect(old.body.error).toMatchObject({ code: 'invalid_state', message: 'only the last message can be edited' });
+
+    const hold = gate();
+    daemon.sdk.script({ wait: hold.promise });
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'third' });
+    const busy = await edit(daemon, id, first?.id ?? '', 'again');
+    expect(busy.body.error.code).toBe('session_busy');
+    hold.open();
+    await settled(daemon, id);
+    expect(daemon.sdk.rewinds).toEqual([]);
+  });
+});
+
+describe('stopping a run', () => {
+  const stateOf = (daemon: AgentDaemon, id: string, state: string) =>
+    until(
+      async () => (await api(daemon).get(`/sessions/${id}`)).body.data.state,
+      (value) => value === state,
+      state,
+    );
+
+  it('ends a working run, sets the Session idle, and lets it be deleted or take a new message', async () => {
+    const daemon = await start();
+    const id = daemon.createSession({ access_mode: AccessMode.Full });
+    const { events, close } = await listen(daemon);
+    daemon.sdk.script({ tool: 'Bash', input: { command: 'git status' } }, { wait: gate().promise });
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'status' });
+    await until(
+      async () => (await api(daemon).get('/action-log')).body.data.length,
+      (count) => count === 1,
+    );
+
+    expect((await api(daemon).post(`/sessions/${id}/stop`, {})).status).toBe(204);
+    await stateOf(daemon, id, 'idle');
+    await until(() => events.some((event) => event.event === 'session.finished'), Boolean);
+    close();
+    expect(events.find((event) => event.event === 'session.finished')?.data).toMatchObject({
+      session_id: id,
+      status: 'done',
+      state: 'idle',
+      error_code: null,
+    });
+
+    await converse(daemon, id, 'again');
+    expect((await api(daemon).delete(`/sessions/${id}`)).status).toBe(204);
+  });
+
+  it('ends a run waiting on a question or an Approval, and expires the Approval', async () => {
+    const daemon = await start();
+    const asking = daemon.createSession();
+    daemon.sdk.script({
+      tool: 'AskUserQuestion',
+      input: { questions: [{ question: 'Which branch?', header: 'Branch', multiSelect: false, options: [] }] },
+    });
+    await api(daemon).post(`/sessions/${asking}/messages`, { text: 'Fix it' });
+    await stateOf(daemon, asking, 'waiting_input');
+    expect((await api(daemon).post(`/sessions/${asking}/stop`, {})).status).toBe(204);
+    await stateOf(daemon, asking, 'idle');
+
+    const approving = daemon.createSession();
+    daemon.sdk.script({ tool: 'Bash', input: { command: 'rm -rf build' } });
+    await api(daemon).post(`/sessions/${approving}/messages`, { text: 'clean' });
+    await stateOf(daemon, approving, 'waiting_approval');
+    expect((await api(daemon).post(`/sessions/${approving}/stop`, {})).status).toBe(204);
+    await stateOf(daemon, approving, 'idle');
+    expect((await api(daemon).get('/approvals')).body.data).toEqual([
+      expect.objectContaining({ session_id: approving, status: 'expired' }),
+    ]);
+    expect(daemon.sdk.ran).toEqual([]);
+  });
+
+  it('ends a run stopped before its query starts, while its conversation is still being found', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    await converse(daemon, id, 'first');
+    daemon.sdk.script({ wait: gate().promise });
+    const runtime = daemon.app.get(AgentRuntime);
+    // A resumed run looks for its transcript before it queries; Stop lands in between.
+    runtime.send(id, 'second');
+    runtime.stop(id);
+    await stateOf(daemon, id, 'idle');
+    expect(daemon.sdk.calls).toHaveLength(1);
+  });
+
+  it('is refused with invalid_state when no run is going', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    const idle = await api(daemon).post(`/sessions/${id}/stop`, {});
+    expect(idle.status).toBe(409);
+    expect(idle.body.error.code).toBe('invalid_state');
   });
 });
 

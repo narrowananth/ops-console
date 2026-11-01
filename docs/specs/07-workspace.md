@@ -224,13 +224,20 @@ Adds `branch: string | null`.
   any running or picked one, then "Show N more" or "Show fewer". A row shows title and state on one line, with the
   branch under it when it differs from the Repo's. `+` shows the branch picker and Start; a Repo with no Sessions
   shows them at once, and a Repo whose folder is gone has no `+`. Each Repo's "Show N more", its open `+` and the
-  branch picked for a new Session are kept. With no Repos: "Import a Repo in Repos to work on its branches." Loading
+  branch picked for a new Session are kept. A row whose run goes, `waiting_input` included, shows `stop` over its
+  state on hover or focus. With no Repos: "Import a Repo in Repos to work on its branches." Loading
   reads "Reading Sessions…"; an error, "Could not read Sessions."
-- A "No Repo" group under the Repos lists anonymous Sessions; its `+` starts one at once.
+- A "No Repo" group above the Repos lists anonymous Sessions; its `+` starts one at once.
 - Session view: a header with the Repo's name (or "No Repo"), the title, the branch, the state and Delete, which is
-  disabled while the Session runs. An empty conversation says what to ask. The composer holds the Model, Effort and
-  Access chips, the branch switcher on a `repo` Session, and Send. Enter sends and Shift+Enter adds a line; the box
-  is disabled while the agent works. Its draft is kept per Session.
+  disabled while the Session runs or waits on the operator; a failed Delete shows why. An empty conversation says what
+  to ask. The composer holds the Model, Effort and Access chips, the branch switcher on a `repo` Session, and Send.
+  While a run goes, `waiting_input` included, Stop sits before Send and ends it (`02-settings-agents` Behavior 11a).
+  The agent's tool steps show as a compact path; while its message streams, the last step turns. The state in the
+  header is a pill: tinted and pulsing while a run goes, red when failed.
+  Each message the operator sent shows Copy on hover. The last one also shows Edit while no run goes: it opens the
+  text in place with Cancel and Revert and rerun (`02-settings-agents` Behavior 8a). A note above the composer then
+  names the files put back with their line counts, or says why none were, until closed or the next Send.
+  Enter sends and Shift+Enter adds a line; the box is disabled while the agent works. Its draft is kept per Session.
 - Branch switcher: the composer's branch chip shows the branch and "changed" or "clean" from the Repo's dirty state.
   Its menu lists branches A→Z with an "open PR" mark, and a field that creates a branch from the current one. It is
   disabled with the reason while Behavior 7 blocks it. "Uncommitted changes were stashed." shows after a checkout
@@ -255,7 +262,8 @@ Adds `branch: string | null`.
   `running`, and "Reviewed at this commit" while the latest is `ready` and not stale.
 - The latest Agent Review sits in a card: the commit's short id, a stale badge, its status, the verdict, each finding
   with its `file:line` and "Not posted to the host:" with `post_error` when its post failed, the PROD readiness
-  checklist and the Connections queried. A `failed` review reads "The review did not finish. Start it again."
+  checklist and the Connections queried. A `running` review has Stop beside its status. A `failed` review reads "The
+  review did not finish. Start it again."
 - The description sits in a card, and it and every comment are drawn as Markdown (headings, lists, tables, code).
   Comment threads follow, agent comments marked `agent`; with none: "No comments yet. Hover a line in a file and press
   + to comment on it." A thread on a line has Resolve or Unresolve, and every thread has Reply. A comment the operator

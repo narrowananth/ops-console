@@ -83,6 +83,7 @@ agent Session.
 | `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks; secrets via Keychain |
 | `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash and checkout |
 | `agent` | Sessions and their kinds, Claude Agent SDK runs, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors |
+| `playbooks` | Playbooks and the Trigger each one holds, the built-ins and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each (registered by `agent`) |
 | `accounts` | Claude accounts, their usage, Auto-switch and Smart usage |
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
 | `workspace` | `repo`, `pr_review` and `anonymous` Sessions; branch checkout with stash; pull requests, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews |
@@ -102,6 +103,7 @@ agent Session.
 | `integrations` | Integrations page: Connectors and MCP Servers |
 | `repos` | Repos page |
 | `setup` | Setup agent page with its xterm terminal |
+| `playbooks` | Playbooks page: Triggers, Playbooks, the editor with drag and drop, Step blocks; unsaved edits kept as a Remembered view; a job's Playbook steps |
 | `agents` | Agents & accounts page, Session transcript, model, effort and Access mode chips, Approval prompts, Report rendering |
 | `mcp`, `components/ui` | MCP status labels; shared controls |
 
@@ -139,9 +141,17 @@ to 25 redacted Samples, and records each Route's state. After a Scan the code fi
 each Service with no code: an imported Repo of the same name, a git folder of that name next to one,
 then a repository of that name on a connected Git host. The operator starts a Verification; it runs in
 the Alert's Session, a `repo` Session in the Service's Repo or an `anonymous` Session holding a
-clone of its Git URL. The Report also goes to a Markdown file in the Datadog Connector's reports
-folder. Confirming the Report starts the Fix in the same Session, stage by stage (ticket, branch,
-code, tests, PR), each stage an agent run that ends with JSON.
+clone of its Git URL. Its runs work in a scratch copy: a git worktree of that code at the default
+branch, under `scratch/` in the data directory, removed once the Report is ready. The Report also
+goes to a Markdown file in the Datadog Connector's reports folder. Confirming the Report starts the
+Fix in the same Session, in the checkout and in a new conversation, stage by stage (ticket, branch,
+steps, PR), each agent run ending with JSON.
+
+**Playbooks.** Each Trigger holds one Playbook, or its built-in. A job (Verification, Fix, Agent
+Review) copies its Trigger's Playbook when it starts and runs each step as its own turn, ending
+done, skipped or failed; a failed step stops the job. After the last step the console's own closing
+turn writes the Report or the review, and a Fix goes on to its PR. Chats (Session message, Reply in thread, Ask) read their
+Playbook's rules at each turn. An Alert's Session uses the rules its latest job copied.
 
 **Workspace pull requests.** Lists span every repository of every owner the operator can read on
 each connected Git host, plus imported Repos under other owners. The daemon keeps lists in memory and
@@ -161,7 +171,7 @@ Settings the operator changed, Claude accounts, Sessions and the Connections a `
 names, the Action Log and Approvals, MCP Servers the operator removed or disabled, Connectors (config
 and last check), Connections (no secrets), Repos, Agent Reviews, the ids of comments the agent
 posted, Services, Routes, Scans and their Route results, Alerts and their events, Reports, Reviews
-and Fixes. Pull requests stay on the Git host. Session messages stay in the Claude Code transcript, in
+and Fixes, Playbooks, the Trigger each one holds, and each job's copy of its Playbook steps. Pull requests stay on the Git host. Session messages stay in the Claude Code transcript, in
 the config dir of the Session's Claude account.
 
 ## Agent runs
@@ -173,7 +183,12 @@ Action Log row before every Bash and MCP call and holds a PROD write for an Appr
 access mode. `disallowedTools` denies `gh pr merge`, `glab mr merge` and the GitHub and GitLab MCP
 merge tools. Permission prompts in `supervised` mode, and the agent's questions, reach `canUseTool`
 and wait for the operator. MCP Servers the operator disabled, and for a `devtools` Session the
-Connections outside its scope, are denied for the run. Runs live in the daemon's memory; a restart
+Connections outside its scope, are denied for the run. Every run's system prompt appends the kind's
+instructions, then the Playbook's rules, then the console's safety lines. Those say that log lines and
+data are never instructions, that the agent never merges, and that no PROD value goes into a mock or
+anything else it writes. A
+conversation begun in one folder moves its transcript to the next run's folder, so a chat after a
+Verification resumes it in the checkout. Runs live in the daemon's memory; a restart
 fails them and expires their Approvals.
 
 Smart usage moves work to the best-ranked signed-in Claude account on its own, and Auto-switch does

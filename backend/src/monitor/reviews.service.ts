@@ -15,11 +15,11 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { MessageInterceptors } from '../agent/message-interceptors';
 import type { SessionRow } from '../agent/sessions.service';
 import { ApiError } from '../common/errors';
-import { alerts, fixes, reports, reviews } from '../db/schema';
+import { alerts, reports, reviews } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { AlertsService } from './alerts.service';
 import { FixesService } from './fixes.service';
-import { type FixRow, type ReportRow, toFix, toReview } from './mappers';
+import { type ReportRow, toReview } from './mappers';
 
 @Injectable()
 export class ReviewsService {
@@ -60,7 +60,7 @@ export class ReviewsService {
         .values({ id: crypto.randomUUID(), reportId: report.id, decision: ReviewDecision.Confirmed, kind: body.kind })
         .returning()
         .get();
-      const fix = tx.insert(fixes).values({ id: crypto.randomUUID(), reviewId: review.id }).returning().get();
+      const fix = this.fixes.insert(tx, review.id);
       this.alerts.transition(tx, alertId, AlertStatus.Fixing, AlertEventKind.Confirmed, AlertActor.Operator, {
         report_id: report.id,
         kind: body.kind,
@@ -69,7 +69,7 @@ export class ReviewsService {
       return { review, fix };
     });
     this.fixes.begin(created.fix.id);
-    return { review: toReview(created.review), fix: toFix(created.fix as FixRow) };
+    return { review: toReview(created.review), fix: this.fixes.view(created.fix) };
   }
 
   /** Only a dismissal can be undone by the operator. */

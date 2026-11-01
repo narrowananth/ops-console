@@ -15,6 +15,7 @@ import type { z } from 'zod';
 import { ApiError } from '../common/errors';
 import { alertEvents, alerts, fixes, reports, reviews, routes, services, sessions } from '../db/schema';
 import { STORE, type Store, type Tx } from '../db/store';
+import { jobPlaybook } from '../playbooks/job-steps';
 import { type AlertRow, samplesOf, toAlert, toAlertEvent, toFix, toReport, toReview } from './mappers';
 
 const SEQ = sql`"alert_events"."rowid"`;
@@ -80,9 +81,9 @@ export class AlertsService {
     return {
       ...alert,
       samples: samplesOf(this.row(id)),
-      latest_report: latest ? toReport(latest) : null,
+      latest_report: latest ? toReport(latest, jobPlaybook(this.store.db, 'report', latest)) : null,
       review: review ? toReview(review) : null,
-      fix: fix ? toFix(fix) : null,
+      fix: fix ? toFix(fix, jobPlaybook(this.store.db, 'fix', fix)) : null,
     };
   }
 
@@ -105,13 +106,13 @@ export class AlertsService {
       .where(eq(reports.alertId, id))
       .orderBy(asc(reports.version))
       .all()
-      .map(toReport);
+      .map((row) => toReport(row, jobPlaybook(this.store.db, 'report', row)));
   }
 
   report(id: string): Report {
     const row = this.store.db.select().from(reports).where(eq(reports.id, id)).get();
     if (!row) throw new ApiError(404, ErrorCode.NotFound, 'no such Report');
-    return toReport(row);
+    return toReport(row, jobPlaybook(this.store.db, 'report', row));
   }
 
   /** The newest Fix of the Alert's active Review, if any. */

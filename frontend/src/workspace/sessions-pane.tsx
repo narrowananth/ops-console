@@ -1,6 +1,7 @@
 import { type Repo, type Session, SessionKind, SessionState } from '@ops-console/shared';
 import { useState } from 'react';
 import { z } from 'zod';
+import { StopIcon } from '../agents/stop-run';
 import { RepoIcon } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Dropdown } from '../components/ui/dropdown';
@@ -12,6 +13,7 @@ import {
   useCreateRepoSession,
   useRepoSessions,
   useRepos,
+  useStopSession,
 } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
@@ -31,6 +33,27 @@ function readFolded(): string[] {
 
 const isRunning = (session: Session) =>
   session.state === SessionState.Working || session.state === SessionState.WaitingApproval;
+
+/** A question waiting on the operator still holds the run, so it can be stopped too. */
+const isBusy = (session: Session) => isRunning(session) || session.state === SessionState.WaitingInput;
+
+/** Stop on a busy row, over its state on hover or focus; a button may not sit inside the row's button. */
+function RowStop({ session }: { session: Session }) {
+  const stop = useStopSession(session.id);
+  return (
+    <button
+      type="button"
+      aria-label={`Stop ${session.title}`}
+      title={stop.isError ? stop.error.message : 'Stop the agent where it is'}
+      disabled={stop.isPending}
+      onClick={() => stop.mutate()}
+      className="absolute top-1.5 right-2 flex cursor-pointer items-center gap-1 rounded-full border border-line bg-card px-2 py-0.5 font-mono text-[10px] text-accent-700 opacity-0 shadow-sm group-hover:opacity-100 focus-visible:opacity-100 hover:border-accent-400 disabled:cursor-wait"
+    >
+      <StopIcon />
+      stop
+    </button>
+  );
+}
 
 function NewSession({ repo, onCreated }: { repo: Repo; onCreated: (id: string) => void }) {
   const branches = useBranches(repo.id);
@@ -86,7 +109,7 @@ function SessionRow({
   onSelect: () => void;
 }) {
   return (
-    <li>
+    <li className="group relative">
       <button
         type="button"
         aria-current={selected}
@@ -106,6 +129,7 @@ function SessionRow({
           <span className="truncate font-mono text-[11px] text-neutral-700">{session.branch}</span>
         )}
       </button>
+      {isBusy(session) && <RowStop session={session} />}
     </li>
   );
 }
@@ -290,6 +314,7 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
   };
   return (
     <div className="pb-3">
+      <AnonymousGroup sessions={anonymous} selected={selected} onSelect={onSelect} />
       {ascending(repos.data.data, (repo) => repo.name).map((repo) => (
         <RepoGroup
           key={repo.id}
@@ -304,7 +329,6 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
       {repos.data.data.length === 0 && (
         <p className="m-0 px-4 pt-2 pb-3 text-xs text-neutral-700">Import a Repo in Repos to work on its branches.</p>
       )}
-      <AnonymousGroup sessions={anonymous} selected={selected} onSelect={onSelect} />
     </div>
   );
 }

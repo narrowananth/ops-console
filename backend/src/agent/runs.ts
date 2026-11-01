@@ -7,6 +7,8 @@ export type Run = {
   messageId: string;
   accountId: string;
   workingDir: string;
+  /** The Playbook rules this run follows; null for none. */
+  rules: string | null;
   parts: Part[];
   /** The text part growing from stream deltas, until its block arrives whole. */
   growing: number | null;
@@ -25,10 +27,19 @@ export type Run = {
   onPart: ((part: Part) => void) | null;
   /** How steps name an MCP server, from the Session's kind. */
   serverLabel: ((server: string) => string | null) | null;
+  /** Aborts the SDK query when the operator stops the run. */
+  abort: AbortController;
+  /** Set when the operator stopped the run, so its end reads as stopped, not failed. */
+  stopped: boolean;
+  /** The conversation resumes from this transcript entry, dropping what came after it; null for all of it. */
+  resumeAt: string | null;
 };
 
-/** How a run ended, for the code that started it. */
-export type RunSummary = { ok: boolean; text: string };
+/** How a run ended, for the code that started it. `stopped` is set when the operator stopped it. */
+export type RunSummary = { ok: boolean; stopped: boolean; text: string };
+
+/** Why a job failed when the operator stopped its run. */
+export const STOPPED = 'stopped by the operator';
 
 export class RunRegistry {
   private readonly runs = new Map<string, Run>();

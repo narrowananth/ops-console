@@ -1,13 +1,23 @@
-import { SessionState } from '@ops-console/shared';
-import { useEffect } from 'react';
+import { type EditedMessage, SessionState } from '@ops-console/shared';
+import { useEffect, useState } from 'react';
 import { z } from 'zod';
 import { ApprovalPrompts } from '../agents/approval-prompts';
 import { SessionChips } from '../agents/session-chips';
+import { StopRun } from '../agents/stop-run';
 import { MessageView } from '../agents/transcript';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
-import { useDeleteSession, useMessages, useRepoSessions, useRepos, useSendMessage } from '../lib/queries';
+import { type PathwayState, StatusPill } from '../components/ui/pathway';
+import {
+  useDeleteSession,
+  useEditMessage,
+  useMessages,
+  useRepoSessions,
+  useRepos,
+  useSendMessage,
+} from '../lib/queries';
 import { useStored } from '../lib/remember';
+import { PlaybookLink } from '../playbooks/job-steps';
 import { BranchSwitcher } from './branch-switcher';
 
 export function SessionView({ id, onGone }: { id: string; onGone: () => void }) {
@@ -16,6 +26,9 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const messages = useMessages(id);
   const send = useSendMessage(id);
   const remove = useDeleteSession();
+  const editMessage = useEditMessage(id);
+  // What the last edit did to the files, until the operator closes it or sends again.
+  const [reverted, setReverted] = useState<EditedMessage | null>(null);
   const [text, setText] = useStored(`workspace.draft.session.${id}`, z.string(), '');
   const session = sessions.data?.find((candidate) => candidate.id === id);
   const gone = sessions.isSuccess && session === undefined;
@@ -27,8 +40,13 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   if (session === undefined) return null;
   const repo = repos.data?.data.find((candidate) => candidate.id === session.repo_id);
   const running = session.state === SessionState.Working || session.state === SessionState.WaitingApproval;
+  // A question waiting on the operator still holds the run: the next message answers it.
+  const busy = running || session.state === SessionState.WaitingInput;
+  // Only the last thing the operator asked can be edited and run again.
+  const lastAsked = messages.data?.findLast((message) => message.role === 'user')?.id;
   const submit = () => {
     if (text.trim() === '' || running) return;
+    setReverted(null);
     send.mutate(text, { onSuccess: () => setText('') });
   };
 
@@ -42,16 +60,27 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             {session.branch}
           </span>
         )}
-        <span className="rounded-full bg-neutral-200 px-2 py-0.5 text-[11px] text-neutral-700">
-          {session.state.replace('_', ' ')}
-        </span>
+        <StatusPill state={SESSION_STATE[session.state]}>{session.state.replace('_', ' ')}</StatusPill>
+        {session.playbook && (
+          <PlaybookLink
+            playbook={session.playbook}
+            label={`Playbook: ${session.playbook.name}`}
+            title="Rules in this Session come from this Playbook"
+          />
+        )}
         <Button
           className="px-2.5 py-1 text-xs"
-          disabled={running || remove.isPending}
+          title={busy ? 'Stop the agent first' : undefined}
+          disabled={busy || remove.isPending}
           onClick={() => remove.mutate(id)}
         >
           Delete
         </Button>
+        {remove.isError && (
+          <span role="alert" className="basis-full text-right text-xs text-accent-700">
+            {remove.error.message}
+          </span>
+        )}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {messages.isPending ? (
@@ -67,13 +96,25 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
         ) : (
           <ul className="m-0 list-none px-0 py-2">
             {messages.data.map((message) => (
-              <MessageView key={message.id} message={message} />
+              <MessageView
+                key={message.id}
+                message={message}
+                onEdit={
+                  message.id === lastAsked && !busy
+                    ? (edited) =>
+                        editMessage
+                          .mutateAsync({ messageId: message.id, text: edited })
+                          .then((result) => setReverted(result))
+                    : undefined
+                }
+              />
             ))}
           </ul>
         )}
       </div>
       <div className="flex flex-col gap-2 px-6 pb-4.5">
         <ApprovalPrompts sessionId={id} />
+        {reverted && <RevertNote result={reverted} onClose={() => setReverted(null)} />}
         <div className="rounded-lg border border-divider bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)]">
           <textarea
             aria-label="Message"
@@ -103,18 +144,58 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 {send.error.message}
               </span>
             )}
-            <Button
-              variant="primary"
-              title="Enter sends. Shift+Enter adds a new line."
-              className="ml-auto px-4 py-1.5"
-              disabled={running || text.trim() === '' || send.isPending}
-              onClick={submit}
-            >
-              Send
-            </Button>
+            <span className="ml-auto flex items-center gap-1.5">
+              {busy && <StopRun sessionId={id} className="px-4 py-1.5" />}
+              <Button
+                variant="primary"
+                title="Enter sends. Shift+Enter adds a new line."
+                className="px-4 py-1.5"
+                disabled={running || text.trim() === '' || send.isPending}
+                onClick={submit}
+              >
+                Send
+              </Button>
+            </span>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+const SESSION_STATE: Record<SessionState, PathwayState> = {
+  [SessionState.Idle]: 'pending',
+  [SessionState.Working]: 'running',
+  [SessionState.WaitingInput]: 'running',
+  [SessionState.WaitingApproval]: 'running',
+  [SessionState.Failed]: 'failed',
+};
+
+/** What editing the last message did to the files: the ones put back, or why none were. */
+function RevertNote({ result, onClose }: { result: EditedMessage; onClose: () => void }) {
+  const { reverted } = result;
+  return (
+    <div
+      role="status"
+      className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${
+        reverted ? 'border-line bg-card text-neutral-700' : 'border-accent-200 bg-accent-100 text-accent-900'
+      }`}
+    >
+      <span className="min-w-0 flex-1">
+        {reverted === null
+          ? `Files not put back: ${result.revert_error}. The edited message ran on the files as they are.`
+          : reverted.files.length === 0
+            ? 'No files to put back. The edited message runs again.'
+            : `Put back ${reverted.files.length} ${reverted.files.length === 1 ? 'file' : 'files'} (+${reverted.insertions} −${reverted.deletions}): ${reverted.files.join(', ')}`}
+      </span>
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className="cursor-pointer border-0 bg-transparent p-0 text-neutral-600 hover:text-text"
+      >
+        ×
+      </button>
     </div>
   );
 }

@@ -85,21 +85,30 @@ export class ApprovalsService {
     return this.get(id);
   }
 
-  /** Start-up recovery: a run does not survive a restart, so nothing waits on a `pending` Approval any more. */
-  expirePending(): void {
-    this.store.write((tx, emit) => {
-      const expired = tx
+  /**
+   * Start-up recovery, or one Session's run stopped: nothing waits on its `pending` Approvals any more. A call still
+   * waiting on one is told no.
+   */
+  expirePending(sessionId?: string): void {
+    const pending = eq(approvals.status, ApprovalStatus.Pending);
+    const expired = this.store.write((tx, emit) => {
+      const rows = tx
         .update(approvals)
         .set({ status: ApprovalStatus.Expired, decidedAt: nowIso })
-        .where(eq(approvals.status, ApprovalStatus.Pending))
+        .where(sessionId === undefined ? pending : and(pending, eq(approvals.sessionId, sessionId)))
         .returning()
         .all();
-      for (const row of expired) {
+      for (const row of rows) {
         if (row.actionLogId !== null)
           this.actionLog.close(tx, emit, row.actionLogId, ActionOutcome.Failed, 'interrupted');
         emit('approval.decided', { approval_id: row.id, decision: ApprovalStatus.Expired });
       }
+      return rows;
     });
+    for (const row of expired) {
+      this.waiting.get(row.id)?.(ApprovalStatus.Denied);
+      this.waiting.delete(row.id);
+    }
   }
 
   get(id: string): Approval {

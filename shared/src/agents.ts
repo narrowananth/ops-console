@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { pageQuerySchema } from './api';
+import { sessionPlaybookSchema } from './playbooks';
 
 export enum SessionKind {
   Repo = 'repo',
@@ -157,6 +158,8 @@ export const sessionSchema = z.object({
   last_message_preview: z.string().nullable(),
   created_at: z.string(),
   last_active_at: z.string(),
+  /** The Playbook its rules come from, when it is not built-in. */
+  playbook: sessionPlaybookSchema.nullable(),
 });
 
 export type Session = z.infer<typeof sessionSchema>;
@@ -180,6 +183,16 @@ export const sessionPatchSchema = z
 export type SessionPatch = z.infer<typeof sessionPatchSchema>;
 
 export const sendMessageSchema = z.object({ text: z.string().trim().min(1) });
+
+/** What editing the last message did to the files before it ran again. */
+export const editedMessageSchema = z.object({
+  message_id: z.string(),
+  /** Files put back as they were before the message; null when they could not be. */
+  reverted: z.object({ files: z.array(z.string()), insertions: z.number(), deletions: z.number() }).nullable(),
+  /** Why the files were not put back. */
+  revert_error: z.string().nullable(),
+});
+export type EditedMessage = z.infer<typeof editedMessageSchema>;
 
 export const actionLogRowSchema = z.object({
   id: z.string(),

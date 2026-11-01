@@ -35,6 +35,7 @@ const session = (id: string, repoId: string, title: string, state = 'idle', bran
   last_message_preview: null,
   created_at: NOW,
   last_active_at: NOW,
+  playbook: null,
 });
 
 test('a Repo shows its 3 newest Sessions and folds, so the next Repo stays in reach', async ({ page }) => {
@@ -117,4 +118,145 @@ test('removing a Repo with Sessions asks whether to keep or delete them', async 
   await expect(apis.getByRole('button', { name: 'Keep Sessions' })).toHaveCount(0);
   await apis.getByRole('button', { name: 'Remove' }).click();
   await expect.poll(() => removed).toEqual(['/api/repos/r1?sessions=keep', '/api/repos/r2']);
+});
+
+test('Stop ends a run waiting on the operator, and Delete waits until it has', async ({ page }) => {
+  let state = 'waiting_input';
+  const stops: string[] = [];
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'GET /v3/products failing', state)] } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
+  await page.route('**/api/sessions/s1/stop', (route) => {
+    stops.push(route.request().method());
+    state = 'idle';
+    return route.fulfill({ status: 204 });
+  });
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const header = page.locator('header', { hasText: 'GET /v3/products failing' });
+  await expect(header.getByRole('button', { name: 'Delete' })).toBeDisabled();
+  // The Session's row in the list stops it too, from its hover.
+  await expect(page.getByRole('button', { name: 'Stop GET /v3/products failing' })).toBeAttached();
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect.poll(() => stops).toEqual(['POST']);
+  await expect(page.getByRole('button', { name: /^Stop/ })).toHaveCount(0);
+  await expect(header.getByRole('button', { name: 'Delete' })).toBeEnabled();
+});
+
+test('every message the operator sent copies; the last one edits, reverts the files and runs again', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const said = (id: string, role: string, text: string) => ({
+    id,
+    role,
+    status: 'done',
+    parts: [{ kind: 'text', text }],
+    created_at: NOW,
+  });
+  const edits: { url: string; body: unknown }[] = [];
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform')] } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          said('u1', 'user', 'hello'),
+          said('a1', 'agent', 'Hello again!'),
+          said('u2', 'user', 'explain the engage platform integration'),
+          said('a2', 'agent', 'It posts orders to Engage.'),
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/sessions/s1/messages/*/edit', (route) => {
+    edits.push({ url: route.request().url(), body: route.request().postDataJSON() });
+    return route.fulfill({
+      status: 202,
+      json: {
+        data: {
+          message_id: 'm3',
+          reverted: { files: ['src/engage.ts'], insertions: 4, deletions: 2 },
+          revert_error: null,
+        },
+      },
+    });
+  });
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const mine = page.getByRole('listitem', { name: 'Your message' });
+  await expect(mine).toHaveCount(2);
+  await expect(mine.first().getByRole('button', { name: 'Edit' })).toHaveCount(0);
+  await mine.first().hover();
+  await mine.first().getByRole('button', { name: 'Copy' }).click();
+  await expect(mine.first().getByRole('button', { name: 'Copied' })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('hello');
+
+  await mine.last().hover();
+  await mine.last().getByRole('button', { name: 'Edit' }).click();
+  const box = mine.last().getByRole('textbox', { name: 'Edit message' });
+  await expect(box).toHaveValue('explain the engage platform integration');
+  await box.fill('explain the engage webhook only');
+  await mine.last().getByRole('button', { name: 'Revert and rerun' }).click();
+
+  expect(edits).toEqual([
+    {
+      url: expect.stringMatching(/\/api\/sessions\/s1\/messages\/u2\/edit$/),
+      body: { text: 'explain the engage webhook only' },
+    },
+  ]);
+  await expect(page.getByRole('status')).toHaveText(/Put back 1 file \(\+4 −2\): src\/engage\.ts/);
+  await expect(box).toHaveCount(0);
+});
+
+test("the agent's tool steps show as a path, the last one turning while the message streams", async ({ page }) => {
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform', 'working')] } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          {
+            id: 'u1',
+            role: 'user',
+            status: 'done',
+            parts: [{ kind: 'text', text: 'explain engage' }],
+            created_at: NOW,
+          },
+          {
+            id: 'a1',
+            role: 'agent',
+            status: 'streaming',
+            parts: [
+              { kind: 'text', text: 'Looking.' },
+              { kind: 'step', text: '$ ls scripts/platforms' },
+              { kind: 'step', text: 'Read scripts/platforms/engage.ts' },
+            ],
+            created_at: NOW,
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const steps = page.getByRole('list', { name: 'Agent steps' }).getByRole('listitem');
+  await expect(steps).toHaveText([
+    /\$ ls scripts\/platforms.*done/,
+    /Read scripts\/platforms\/engage\.ts.*in progress/,
+  ]);
+  await expect(steps.last()).toHaveAttribute('aria-current', 'step');
 });

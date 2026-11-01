@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { jobPlaybookSchema } from './playbooks';
 
 /** How far back a Scan reads. A schedule uses its `CheckInterval`; the operator picks any of these. */
 export enum ScanWindow {
@@ -126,8 +127,8 @@ export enum ReviewDecision {
 export enum FixStage {
   Ticket = 'ticket',
   Branch = 'branch',
-  Code = 'code',
-  Tests = 'tests',
+  /** The Playbook's steps, in order. */
+  Steps = 'steps',
   Pr = 'pr',
 }
 
@@ -183,6 +184,8 @@ export const reportSchema = z.object({
   error_message: z.string().nullable(),
   created_at: z.string(),
   finished_at: z.string().nullable(),
+  /** Null on Reports from before Playbooks. */
+  playbook: jobPlaybookSchema.nullable(),
 });
 
 export type Report = z.infer<typeof reportSchema>;
@@ -212,6 +215,7 @@ export const fixSchema = z.object({
   error_message: z.string().nullable(),
   started_at: z.string(),
   finished_at: z.string().nullable(),
+  playbook: jobPlaybookSchema.nullable(),
 });
 
 export type Fix = z.infer<typeof fixSchema>;

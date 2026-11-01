@@ -139,6 +139,12 @@ export class MonitorController {
     return { data: await this.verifications.start(parseInput(idParams, params, 'params').id) };
   }
 
+  @Post('reports/:id/retry')
+  @HttpCode(202)
+  retryReport(@Param() params: unknown): { data: Report } {
+    return { data: this.verifications.retry(parseInput(idParams, params, 'params').id) };
+  }
+
   @Post('alerts/:id/review')
   @HttpCode(200)
   review(@Param() params: unknown, @Body() body: unknown): { data: Review & { fix: Fix | null } } {

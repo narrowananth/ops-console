@@ -23,6 +23,8 @@ import {
   type McpScope,
   type McpTransport,
   type Model,
+  type PlaybookStepStatus,
+  type PlaybookTrigger,
   type ReportKind,
   type ReviewDecision,
   type RouteState,
@@ -47,6 +49,15 @@ import {
   unique,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
+
+/** The Playbook a job ran, as copied at start. `playbook_id` is null for a built-in and once the Playbook is deleted. */
+function jobPlaybookColumns() {
+  return {
+    playbookId: text('playbook_id').references((): AnySQLiteColumn => playbooks.id, { onDelete: 'set null' }),
+    playbookName: text('playbook_name'),
+    playbookRules: text('playbook_rules'),
+  };
+}
 
 export const nowIso = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
@@ -256,6 +267,7 @@ export const prAgentReviews = sqliteTable(
     checklist: text().notNull().default('[]'),
     tools: text().notNull().default('[]'),
     createdAt: text('created_at').notNull().default(nowIso),
+    ...jobPlaybookColumns(),
   },
   (table) => [
     index('pr_agent_reviews_pr_idx').on(table.repoId, table.prNumber, sql`${table.createdAt} DESC`),
@@ -461,6 +473,9 @@ export const reports = sqliteTable(
     errorMessage: text('error_message'),
     createdAt: text('created_at').notNull().default(nowIso),
     finishedAt: text('finished_at'),
+    ...jobPlaybookColumns(),
+    /** The scratch copy's folder; null once removed. */
+    scratchPath: text('scratch_path'),
   },
   (table) => [
     unique('reports_alert_version').on(table.alertId, table.version),
@@ -514,6 +529,7 @@ export const fixes = sqliteTable('fixes', {
   errorMessage: text('error_message'),
   startedAt: text('started_at').notNull().default(nowIso),
   finishedAt: text('finished_at'),
+  ...jobPlaybookColumns(),
 });
 
 /** The Connections a `devtools` Session may reach. No rows: every Connection with access. */
@@ -528,4 +544,76 @@ export const sessionConnections = sqliteTable(
       .references(() => connections.id, { onDelete: 'cascade' }),
   },
   (table) => [primaryKey({ columns: [table.sessionId, table.connectionId] })],
+);
+
+export const playbooks = sqliteTable(
+  'playbooks',
+  {
+    id: text().primaryKey().notNull(),
+    name: text().notNull(),
+    rules: text().notNull().default(''),
+    /** `[{ block, title, instructions, writes }]`. */
+    steps: text().notNull().default('[]'),
+    createdAt: text('created_at').notNull().default(nowIso),
+    updatedAt: text('updated_at').notNull().default(nowIso),
+  },
+  (table) => [
+    uniqueIndex('playbooks_name_idx').on(sql`${table.name} COLLATE NOCASE`),
+    check('playbooks_steps_json', sql`json_valid(${table.steps})`),
+  ],
+);
+
+/** Which Playbook each Trigger holds. No row: the built-in. */
+export const playbookTriggers = sqliteTable(
+  'playbook_triggers',
+  {
+    trigger: text().$type<PlaybookTrigger>().primaryKey().notNull(),
+    playbookId: text('playbook_id')
+      .notNull()
+      .references(() => playbooks.id, { onDelete: 'cascade' }),
+  },
+  (table) => [
+    index('playbook_triggers_playbook_idx').on(table.playbookId),
+    check(
+      'playbook_triggers_trigger',
+      sql`${table.trigger} IN ('verify', 'fix', 'review_pr', 'thread_reply', 'session_message')`,
+    ),
+  ],
+);
+
+/** A job's copy of its Playbook's steps and how each went. Exactly one job column is set. */
+export const playbookSteps = sqliteTable(
+  'playbook_steps',
+  {
+    id: text().primaryKey().notNull(),
+    reportId: text('report_id').references(() => reports.id, { onDelete: 'cascade' }),
+    fixId: text('fix_id').references(() => fixes.id, { onDelete: 'cascade' }),
+    agentReviewId: text('agent_review_id').references(() => prAgentReviews.id, { onDelete: 'cascade' }),
+    position: integer().notNull(),
+    title: text().notNull(),
+    instructions: text().notNull(),
+    writes: bool('writes').notNull().default(false),
+    status: text()
+      .$type<PlaybookStepStatus>()
+      .notNull()
+      .default('pending' as PlaybookStepStatus),
+    summary: text(),
+    startedAt: text('started_at'),
+    finishedAt: text('finished_at'),
+  },
+  (table) => [
+    uniqueIndex('playbook_steps_report_idx')
+      .on(table.reportId, table.position)
+      .where(sql`${table.reportId} IS NOT NULL`),
+    uniqueIndex('playbook_steps_fix_idx').on(table.fixId, table.position).where(sql`${table.fixId} IS NOT NULL`),
+    uniqueIndex('playbook_steps_review_idx')
+      .on(table.agentReviewId, table.position)
+      .where(sql`${table.agentReviewId} IS NOT NULL`),
+    check('playbook_steps_status', sql`${table.status} IN ('pending', 'running', 'done', 'skipped', 'failed')`),
+    check(
+      'playbook_steps_one_job',
+      sql`(${table.reportId} IS NOT NULL) + (${table.fixId} IS NOT NULL) + (${table.agentReviewId} IS NOT NULL) = 1`,
+    ),
+    check('playbook_steps_writes_bool', sql`${table.writes} IN (0, 1)`),
+  ],
 );

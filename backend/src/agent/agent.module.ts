@@ -5,6 +5,9 @@ import { USAGE_SOURCE } from '../accounts/usage-source';
 import { ActionLogController, ApprovalsController } from '../action-log/action-log.controller';
 import { ActionLogService } from '../action-log/action-log.service';
 import { ApprovalsService } from '../action-log/approvals.service';
+import { JobSteps } from '../playbooks/job-steps';
+import { PlaybooksController } from '../playbooks/playbooks.controller';
+import { PlaybooksService } from '../playbooks/playbooks.service';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
 import { ConnectionLookup } from './connection-lookup';
 import { MessageInterceptors } from './message-interceptors';
@@ -17,7 +20,7 @@ import { SessionsService } from './sessions.service';
 import { Transcripts } from './transcripts';
 
 /**
- * The agent runtime, Sessions, Claude accounts, the Action Log and Approvals. Kind specs register a working
+ * The agent runtime, Sessions, Playbooks, Claude accounts, the Action Log and Approvals. Kind specs register a working
  * directory with `SessionKinds` and create Sessions through `SessionsService.create`.
  */
 @Module({})
@@ -26,7 +29,13 @@ export class AgentModule {
     return {
       module: AgentModule,
       global: true,
-      controllers: [SessionsController, ActionLogController, ApprovalsController, AccountsController],
+      controllers: [
+        SessionsController,
+        ActionLogController,
+        ApprovalsController,
+        AccountsController,
+        PlaybooksController,
+      ],
       providers: [
         { provide: AGENT_CONFIG, useValue: config },
         { provide: USAGE_SOURCE, useValue: config.usage },
@@ -41,6 +50,8 @@ export class AgentModule {
         AccountsService,
         SessionsService,
         AgentRuntime,
+        PlaybooksService,
+        JobSteps,
       ],
       exports: [
         SessionKinds,
@@ -52,6 +63,8 @@ export class AgentModule {
         ActionLogService,
         AgentRuntime,
         AccountsService,
+        PlaybooksService,
+        JobSteps,
       ],
     };
   }

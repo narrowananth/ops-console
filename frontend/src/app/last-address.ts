@@ -12,6 +12,7 @@ const PAGE_PATHS = [
   '/repos',
   '/setup',
   '/agents',
+  '/playbooks',
 ];
 const FIRST_PAGE = '/monitor';
 

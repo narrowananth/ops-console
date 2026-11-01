@@ -6,6 +6,7 @@ import type {
   HookInput,
   HookJSONOutput,
   Options,
+  RewindFilesResult,
   SDKMessage,
   SDKPermissionDenial,
 } from '@anthropic-ai/claude-agent-sdk';
@@ -55,6 +56,15 @@ export class FakeAgentSdk implements AgentSdk {
   private readonly scripts: Step[][] = [];
   /** What the next runs' `init` message says about MCP servers. */
   mcpServers: { name: string; status: string }[] = [];
+  /** Each `rewindFiles` call, and what the next one answers. */
+  readonly rewinds: { userMessageId: string; options: Options }[] = [];
+  rewindResult: RewindFilesResult | Error = { canRewind: true, filesChanged: [], insertions: 0, deletions: 0 };
+
+  async rewindFiles(userMessageId: string, options: Options): Promise<RewindFilesResult> {
+    this.rewinds.push({ userMessageId, options });
+    if (this.rewindResult instanceof Error) throw this.rewindResult;
+    return this.rewindResult;
+  }
 
   constructor(private readonly home: string) {}
 
@@ -71,10 +81,18 @@ export class FakeAgentSdk implements AgentSdk {
     this.calls.push({ prompt, options, configDir, sessionId });
     const steps = this.scripts.shift() ?? [{ text: 'Done.' }];
     await mkdir(dir, { recursive: true });
+    // Aborting the controller ends the query with an error wherever it waits, as Claude Code's does.
+    const signal = options.abortController?.signal;
+    const aborted = new Promise<never>((_resolve, reject) =>
+      signal?.addEventListener('abort', () => reject(new Error('Claude Code process aborted by user')), { once: true }),
+    );
+    aborted.catch(() => {});
+    const abortable = <T>(promise: Promise<T>) => Promise.race([promise, aborted]);
 
-    // A resumed run chains onto the transcript's last entry, as Claude Code does.
+    // A resumed run chains onto the transcript's last entry, or onto `resumeSessionAt`, as Claude Code does.
     const existing = options.resume ? (await readFile(file, 'utf8')).trim().split('\n') : [];
-    let parent: string | null = existing.length ? JSON.parse(existing.at(-1) ?? '{}').uuid : null;
+    let parent: string | null =
+      options.resumeSessionAt ?? (existing.length ? JSON.parse(existing.at(-1) ?? '{}').uuid : null);
     const write = async (type: 'user' | 'assistant', content: unknown): Promise<string> => {
       const uuid = crypto.randomUUID();
       const message = type === 'user' ? { role: 'user', content } : { role: 'assistant', type: 'message', content };
@@ -108,7 +126,7 @@ export class FakeAgentSdk implements AgentSdk {
       for (const matcher of matchers) {
         for (const hook of matcher.hooks) {
           const hookInput = { hook_event_name: event, session_id: sessionId, cwd: options.cwd, ...input } as HookInput;
-          outputs.push(await hook(hookInput, id, { signal: new AbortController().signal }));
+          outputs.push(await abortable(hook(hookInput, id, { signal: new AbortController().signal })));
         }
       }
       return outputs;
@@ -126,7 +144,7 @@ export class FakeAgentSdk implements AgentSdk {
 
     for (const step of steps) {
       if ('wait' in step) {
-        await step.wait;
+        await abortable(step.wait);
       } else if ('crash' in step) {
         throw new Error(step.crash);
       } else if ('text' in step) {
@@ -234,11 +252,15 @@ export class FakeAgentSdk implements AgentSdk {
         let input = step.input;
         const hookAllowed = decisions.some((decision) => decision.permissionDecision === 'allow');
         if (!hookAllowed && this.asks(options.permissionMode ?? 'default', step)) {
-          const answer = await options.canUseTool?.(step.tool, input, {
-            signal: new AbortController().signal,
-            toolUseID: id,
-            requestId: crypto.randomUUID(),
-          });
+          const answer = await abortable(
+            Promise.resolve(
+              options.canUseTool?.(step.tool, input, {
+                signal: new AbortController().signal,
+                toolUseID: id,
+                requestId: crypto.randomUUID(),
+              }),
+            ),
+          );
           if (!answer || answer.behavior === 'deny') {
             await deny(answer?.message ?? 'denied');
             continue;

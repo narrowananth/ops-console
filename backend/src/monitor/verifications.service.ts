@@ -1,28 +1,37 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   AlertActor,
   AlertEventKind,
   AlertStatus,
+  ErrorCode,
   type Part,
+  PlaybookTrigger,
   type Report,
   ReportKind,
   type ReportStep,
   RunStatus,
+  stepSchema,
 } from '@ops-console/shared';
-import { eq, max } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, max, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { redact } from '../action-log/redact';
+import { type RunSummary, STOPPED } from '../agent/runs';
 import { AgentRuntime } from '../agent/runtime';
+import { parseAgentJson } from '../common/agent-json';
 import { DATA_DIR } from '../common/data-dir';
+import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
 import { reports, routes, services } from '../db/schema';
 import { STORE, type Store } from '../db/store';
-import { parseAgentJson } from './agent-json';
+import { JobSteps, jobPlaybook } from '../playbooks/job-steps';
+import { PlaybooksService } from '../playbooks/playbooks.service';
+import { GIT, Git, GitFailed } from '../repos/git';
+import { AnonymousSessionsService } from '../workspace/anonymous-sessions.service';
 import { AlertSessions, type CodeSource } from './alert-sessions';
 import { AlertsService } from './alerts.service';
-import { type AlertRow, type RouteRow, type ServiceRow, samplesOf, toReport } from './mappers';
+import { type AlertRow, type ReportRow, type RouteRow, type ServiceRow, samplesOf, toReport } from './mappers';
 import { ScansService } from './scans.service';
 
 const outputSchema = z.object({
@@ -45,18 +54,18 @@ export function cleanSlug(slug: string): string {
     .replace(/-+$/g, '');
 }
 
-/** What the agent is told about the Alert: its logs, where the code is, and the Report it must write. */
-export function verificationPrompt(alert: AlertRow, service: ServiceRow, route: RouteRow, source: CodeSource): string {
+/** What the agent is told about the Alert before its first step: its logs and where the code is. */
+export function verificationBrief(alert: AlertRow, service: ServiceRow, route: RouteRow, source: CodeSource): string {
   const samples = samplesOf(alert)
     .slice(0, 5)
     .map((sample) => `- ${sample.timestamp} ${sample.status}: ${sample.message}`)
     .join('\n');
   const where =
     source.kind === 'repo'
-      ? `the code in this folder (the local Repo ${source.name})`
-      : `the code in this folder, a fresh clone of ${source.name}`;
+      ? `this folder, a scratch copy of the local Repo ${source.name} at its default branch`
+      : `this folder, a scratch copy of a fresh clone of ${source.name}`;
   const what = route.method ? `route ${route.method} ${route.path}` : 'logs with no HTTP route';
-  return `Find the cause of a failure Datadog logged, in ${where}.
+  return `Find the cause of a failure Datadog logged, in the code in ${where}. The console throws this folder away afterwards: write files and run local commands here only when a step allows it.
 
 Alert: ${alert.title}
 Service: ${service.name} (${service.env}); ${what}
@@ -65,12 +74,11 @@ Events: ${alert.eventCount} since ${alert.firstSeenAt}; Datadog query: ${alert.d
 Newest log lines:
 ${samples}
 
-1. Map the log to the code that wrote it, and follow the call path end to end: entry point, the failing call, the data it read.
-2. If the failure is a request, replay it with curl against this code running locally, and note the response. Skip this when it cannot run locally.
-3. Cross-check the data with the Connections the console gives you, read only.
-4. Decide whether this is a bug or an improvement, and what the smallest fix is.
+The console sends the work as steps, one per turn.`;
+}
 
-Change nothing and run nothing that writes. Answer with one JSON block and nothing after it:
+/** The console's closing turn: the Report, in the shape the Monitor stores. */
+export const REPORT_PROMPT = `Write the Report on this Alert from what you found. Change no file in this turn. Answer with one JSON block and nothing after it:
 
 \`\`\`json
 {
@@ -85,7 +93,6 @@ Change nothing and run nothing that writes. Answer with one JSON block and nothi
 \`\`\`
 
 "replay" and "diff" may be null.`;
-}
 
 function stepOf(part: Part): ReportStep | null {
   if (part.kind === 'step') return { kind: part.text.startsWith('$ ') ? 'command' : 'step', text: part.text };
@@ -97,6 +104,9 @@ function toMarkdown(alert: AlertRow, output: z.infer<typeof outputSchema>): stri
   return `# ${alert.title}\n\n**Kind:** ${output.kind}\n\n## Root cause\n\n${output.root_cause}\n\n## Proposed fix\n\n${output.proposed_fix}\n`;
 }
 
+/** A failure that ends the Verification with its own message. */
+class VerificationFailed extends Error {}
+
 @Injectable()
 export class VerificationsService {
   private readonly logger = new Logger('monitor');
@@ -104,9 +114,13 @@ export class VerificationsService {
   constructor(
     @Inject(STORE) private readonly store: Store,
     @Inject(DATA_DIR) private readonly dataDir: string,
+    @Inject(GIT) private readonly git: Git,
     @Inject(AlertsService) private readonly alerts: AlertsService,
     @Inject(AlertSessions) private readonly sessions: AlertSessions,
+    @Inject(AnonymousSessionsService) private readonly anonymous: AnonymousSessionsService,
     @Inject(AgentRuntime) private readonly runtime: AgentRuntime,
+    @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
+    @Inject(JobSteps) private readonly steps: JobSteps,
     @Inject(ScansService) private readonly scans: ScansService,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
@@ -114,16 +128,17 @@ export class VerificationsService {
   }
 
   /**
-   * Answers with the Report in `running`. A clone, when the Service has no local Repo, and the agent run go on in the
-   * background; `alert.verified` reports the end.
+   * Answers with the Report in `running`, holding the copy of the Playbook Verify holds now. The clone, the scratch
+   * copy and the steps go on in the background; `alert.verified` reports the end.
    */
   async start(alertId: string): Promise<Report> {
     const alert = this.alerts.row(alertId);
     this.alerts.requireStatus(alert, AlertStatus.Open, AlertStatus.Verified);
-    const { service, route } = this.serviceOf(alert);
-    const source = this.sessions.sourceOf(service);
+    const { service } = this.serviceOf(alert);
+    // A Service with neither a Repo nor a Git URL is refused before a Report exists.
+    this.sessions.sourceOf(service);
+    const copy = this.playbooks.copyFor(PlaybookTrigger.Verify);
     const reportId = crypto.randomUUID();
-    const steps: ReportStep[] = [];
     const row = this.store.write((tx) => {
       const version =
         (tx
@@ -131,7 +146,19 @@ export class VerificationsService {
           .from(reports)
           .where(eq(reports.alertId, alertId))
           .get()?.v ?? 0) + 1;
-      const created = tx.insert(reports).values({ id: reportId, alertId, version }).returning().get();
+      const created = tx
+        .insert(reports)
+        .values({
+          id: reportId,
+          alertId,
+          version,
+          playbookId: copy.id,
+          playbookName: copy.name,
+          playbookRules: copy.rules,
+        })
+        .returning()
+        .get();
+      this.steps.seed(tx, { kind: 'report', id: reportId }, copy.steps);
       this.alerts.transition(
         tx,
         alertId,
@@ -142,18 +169,114 @@ export class VerificationsService {
       );
       return created;
     });
-    const onPart = (part: Part) => this.step(reportId, steps, part);
-    void (async () => {
-      const sessionId = await this.sessions.ensure(alert, service, (text) => onPart({ kind: 'step', text }));
-      const prompt = verificationPrompt(alert, service, route, source);
-      const summary = await this.runtime.runFor(sessionId, prompt, onPart).finished;
-      await this.complete(reportId, alert, summary);
-    })().catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`verification ${reportId} failed: ${message}`);
-      this.fail(reportId, alert.id, message.slice(0, 300));
+    this.detach(reportId, alert, false);
+    return toReport(row, jobPlaybook(this.store.db, 'report', row));
+  }
+
+  /** Runs a failed Report again from its failed step, in its scratch copy, into the same version (Behavior 17). */
+  retry(reportId: string): Report {
+    const report = this.store.db.select().from(reports).where(eq(reports.id, reportId)).get();
+    if (!report) throw new ApiError(404, ErrorCode.NotFound, 'no such Report');
+    const newest = this.store.db
+      .select({ id: reports.id })
+      .from(reports)
+      .where(eq(reports.alertId, report.alertId))
+      .orderBy(desc(reports.version))
+      .get();
+    if (report.status !== RunStatus.Failed || newest?.id !== report.id || !report.scratchPath) {
+      throw new ApiError(409, ErrorCode.InvalidState, 'Only the newest failed Report with its scratch copy can retry');
+    }
+    const alert = this.alerts.row(report.alertId);
+    const row = this.store.write((tx, emit) => {
+      const updated = tx
+        .update(reports)
+        .set({ status: RunStatus.Running, errorMessage: null, finishedAt: null })
+        .where(eq(reports.id, reportId))
+        .returning()
+        .get() as ReportRow;
+      this.steps.reset(tx, emit, { kind: 'report', id: reportId });
+      this.alerts.transition(
+        tx,
+        alert.id,
+        AlertStatus.Verifying,
+        AlertEventKind.VerificationStarted,
+        AlertActor.Operator,
+        { report_id: reportId, version: report.version, retry: true },
+      );
+      return updated;
     });
-    return toReport(row);
+    this.detach(reportId, alert, true);
+    return toReport(row, jobPlaybook(this.store.db, 'report', row));
+  }
+
+  private detach(reportId: string, alert: AlertRow, retry: boolean): void {
+    void this.execute(reportId, alert, retry).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!(error instanceof VerificationFailed)) this.logger.warn(`verification ${reportId} failed: ${message}`);
+      this.fail(reportId, alert.id, message.slice(0, 600));
+    });
+  }
+
+  private async execute(reportId: string, alert: AlertRow, retry: boolean): Promise<void> {
+    const { service, route } = this.serviceOf(alert);
+    const source = this.sessions.sourceOf(service);
+    const report = this.store.db.select().from(reports).where(eq(reports.id, reportId)).get() as ReportRow;
+    const reportSteps: ReportStep[] = z.array(stepSchema).parse(JSON.parse(report.steps));
+    const onPart = (part: Part) => this.step(reportId, reportSteps, part);
+    const sessionId = await this.sessions.ensure(alert, service, (text) => onPart({ kind: 'step', text }));
+    const scratch = retry ? (report.scratchPath as string) : await this.makeScratch(report, source, sessionId);
+    const job = { kind: 'report', id: reportId } as const;
+    const hasSteps = this.steps.rows(job).length > 0;
+    const rules = report.playbookRules;
+    const brief = verificationBrief(alert, service, route, source);
+    const failure = await this.steps.run({ job, sessionId, brief, rules, cwd: scratch, fresh: !retry, onPart });
+    if (failure) throw new VerificationFailed(failure);
+    const closing = hasSteps || retry ? REPORT_PROMPT : `${brief}\n\n${REPORT_PROMPT}`;
+    const summary = await this.runtime.runFor(sessionId, closing, onPart, {
+      cwd: scratch,
+      rules,
+      fresh: !retry && !hasSteps,
+    }).finished;
+    await this.complete(reportId, alert, summary);
+  }
+
+  /**
+   * A git worktree of the code at the commit its default branch points to locally, in the data directory. Earlier
+   * Reports' copies go first (Behavior 25). The operator's checkout keeps its branch and uncommitted work.
+   */
+  private async makeScratch(report: ReportRow, source: CodeSource, sessionId: string): Promise<string> {
+    await this.dropScratch(
+      this.store.db
+        .select()
+        .from(reports)
+        .where(and(eq(reports.alertId, report.alertId), ne(reports.id, report.id), isNotNull(reports.scratchPath)))
+        .all(),
+    );
+    const repo = source.kind === 'repo' ? source.repo.path : this.anonymous.folder(sessionId);
+    const branch =
+      source.kind === 'repo' ? source.repo.defaultBranch : ((await this.git.defaultBranch(repo)) ?? 'main');
+    const dir = path.join(this.dataDir, 'scratch', report.id);
+    try {
+      await mkdir(path.dirname(dir), { recursive: true, mode: 0o700 });
+      await this.git.addWorktree(repo, dir, branch);
+    } catch (error) {
+      const message = error instanceof GitFailed && error.message ? error.message : 'git failed';
+      throw new VerificationFailed(`Could not make a scratch copy: ${message}`);
+    }
+    this.store.write((tx) => tx.update(reports).set({ scratchPath: dir }).where(eq(reports.id, report.id)).run());
+    return dir;
+  }
+
+  private async dropScratch(rows: ReportRow[]): Promise<void> {
+    for (const row of rows) {
+      if (!row.scratchPath) continue;
+      await this.git
+        .removeWorktree(row.scratchPath)
+        .catch((error) =>
+          this.logger.warn(`scratch copy not removed: ${error instanceof Error ? error.message : String(error)}`),
+        );
+      this.store.write((tx) => tx.update(reports).set({ scratchPath: null }).where(eq(reports.id, row.id)).run());
+    }
   }
 
   private serviceOf(alert: AlertRow): { service: ServiceRow; route: RouteRow } {
@@ -180,15 +303,21 @@ export class VerificationsService {
     });
   }
 
-  private async complete(reportId: string, alert: AlertRow, summary: { ok: boolean; text: string }): Promise<void> {
+  private async complete(reportId: string, alert: AlertRow, summary: RunSummary): Promise<void> {
     const output = summary.ok ? parseAgentJson(summary.text, outputSchema) : null;
     if (!output) {
-      this.fail(reportId, alert.id, summary.ok ? 'the agent did not answer with a Report' : 'the agent run failed');
+      this.fail(
+        reportId,
+        alert.id,
+        summary.ok ? 'the agent did not answer with a Report' : summary.stopped ? STOPPED : 'the agent run failed',
+      );
       return;
     }
     const slug = cleanSlug(output.slug) || 'fix';
     const markdown = redact(output.markdown ?? toMarkdown(alert, output));
     const file = await this.writeFile(alert, reportId, markdown);
+    // A ready Report needs no scratch copy (Behavior 25); it goes before the Alert reads as verified.
+    await this.dropScratch(this.store.db.select().from(reports).where(eq(reports.id, reportId)).all());
     this.store.write((tx, emit) => {
       tx.update(reports)
         .set({
@@ -244,9 +373,30 @@ export class VerificationsService {
     });
   }
 
-  /** Start-up recovery: a Report left `running` failed with its steps kept (Behavior 26). */
-  private recover(): void {
+  /**
+   * Start-up recovery: a Report left `running` failed with its steps kept (Behavior 26). Scratch copies stay only for
+   * failed Reports, which Retry needs (Behavior 25).
+   */
+  private async recover(): Promise<void> {
     const running = this.store.db.select().from(reports).where(eq(reports.status, RunStatus.Running)).all();
     for (const report of running) this.fail(report.id, report.alertId, 'interrupted');
+    const kept = this.store.db
+      .select()
+      .from(reports)
+      .where(and(isNotNull(reports.scratchPath), eq(reports.status, RunStatus.Failed)))
+      .all();
+    await this.dropScratch(
+      this.store.db
+        .select()
+        .from(reports)
+        .where(and(isNotNull(reports.scratchPath), ne(reports.status, RunStatus.Failed)))
+        .all(),
+    );
+    const folder = path.join(this.dataDir, 'scratch');
+    const keep = new Set(kept.map((row) => row.scratchPath));
+    for (const name of await readdir(folder).catch(() => [])) {
+      const dir = path.join(folder, name);
+      if (!keep.has(dir)) await this.git.removeWorktree(dir);
+    }
   }
 }

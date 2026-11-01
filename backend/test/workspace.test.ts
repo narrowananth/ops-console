@@ -592,6 +592,12 @@ const REVIEW = [
   '```',
 ].join('\n');
 
+/** The built-in Review PR step's turn, then the closing turn with the findings. */
+function scriptReview(ctx: { daemon: AgentDaemon }): void {
+  ctx.daemon.sdk.script({ text: '```json\n{ "outcome": "done", "summary": "read the diff" }\n```' });
+  ctx.daemon.sdk.script({ text: REVIEW });
+}
+
 const waitForReview = (events: WsEvent[]) =>
   until(
     () => events,
@@ -622,7 +628,7 @@ describe('Agent Review', () => {
       rowsAtPost.push(ctx.store.db.select().from(actionLog).all().length);
     };
     ctx.host.failPosts = (comment) => comment.file_path === 'src/bad.ts';
-    ctx.daemon.sdk.script({ text: REVIEW });
+    scriptReview(ctx);
 
     const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
     expect(started.status).toBe(202);
@@ -662,7 +668,7 @@ describe('Agent Review', () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];
     const { events, close } = await listen(ctx.daemon);
-    ctx.daemon.sdk.script({ text: REVIEW });
+    scriptReview(ctx);
     await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
     await waitForReview(events);
 
@@ -670,7 +676,7 @@ describe('Agent Review', () => {
     const stale = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
     expect(stale[0].stale).toBe(true);
 
-    ctx.daemon.sdk.script({ text: REVIEW });
+    scriptReview(ctx);
     events.length = 0;
     const second = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
     expect(second.body.data).toMatchObject({ head_sha: 'sha-1-b', stale: false });
@@ -687,7 +693,7 @@ describe('Agent Review', () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];
     const { events, close } = await listen(ctx.daemon);
-    ctx.daemon.sdk.script({ text: REVIEW });
+    scriptReview(ctx);
     await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
     await waitForReview(events);
     const calls = ctx.daemon.sdk.calls.length;
@@ -703,18 +709,18 @@ describe('Agent Review', () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];
     const { events, close } = await listen(ctx.daemon);
-    ctx.daemon.sdk.script({ text: REVIEW });
+    scriptReview(ctx);
     await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
     await waitForReview(events);
     const first = ctx.host.posted[0]?.id as string;
 
     ctx.host.prs = [hostPr(1, { head_sha: 'sha-1-b' })];
-    ctx.daemon.sdk.script({ text: REVIEW });
+    scriptReview(ctx);
     events.length = 0;
     await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
     await waitForReview(events);
 
-    expect(ctx.daemon.sdk.calls.at(-1)?.prompt).toContain('on src/app.ts:3: **blocker**: Unchecked input.');
+    expect(ctx.daemon.sdk.calls.at(-2)?.prompt).toContain('on src/app.ts:3: **blocker**: Unchecked input.');
     // src/app.ts:3 points at the first thread; the rest have no open agent thread on their line, so they post.
     expect(ctx.host.posted.map((p) => [p.file_path ?? null, p.line ?? null])).toEqual([
       ['src/app.ts', 3],
@@ -746,11 +752,57 @@ describe('Agent Review', () => {
     close();
   });
 
+  it("runs Review PR's Playbook one step per turn, shows its steps, and fails whole on a failed step", async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1)];
+    const step = (title: string) => ({ block: 'custom', title, instructions: `Check ${title}.`, writes: false });
+    const created = await ctx.http.post('/playbooks', {
+      name: 'PROD readiness',
+      rules: 'Flag every missing migration.',
+      steps: [step('Migrations'), step('Rollback')],
+    });
+    await ctx.http.put('/playbook-triggers/review_pr', { playbook_id: created.body.data.id });
+    const { events, close } = await listen(ctx.daemon);
+    const outcome = (status: string, summary: string) => ({
+      text: `\`\`\`json\n${JSON.stringify({ outcome: status, summary })}\n\`\`\``,
+    });
+    ctx.daemon.sdk.script(outcome('done', 'no migration'));
+    ctx.daemon.sdk.script(outcome('failed', 'no rollback plan'));
+    const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
+    expect(started.body.data.playbook).toMatchObject({ name: 'PROD readiness' });
+    await waitForReview(events);
+    const [failed] = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
+    expect(failed.status).toBe('failed');
+    expect(failed.playbook.steps).toEqual([
+      { title: 'Migrations', writes: false, status: 'done', summary: 'no migration' },
+      { title: 'Rollback', writes: false, status: 'failed', summary: 'no rollback plan' },
+    ]);
+    expect(ctx.daemon.sdk.calls).toHaveLength(2);
+    expect(ctx.host.posted).toEqual([]);
+
+    events.length = 0;
+    ctx.daemon.sdk.script(outcome('done', 'no migration'));
+    ctx.daemon.sdk.script(outcome('skipped', 'nothing to roll back'));
+    ctx.daemon.sdk.script({ text: REVIEW });
+    await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
+    await waitForReview(events);
+    const [ready] = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
+    expect(ready).toMatchObject({ status: 'ready', verdict: 'Needs one fix' });
+    expect(ready.playbook.steps.map((s: { status: string }) => s.status)).toEqual(['done', 'skipped']);
+    const prompts = ctx.daemon.sdk.calls.slice(2).map((call) => call.prompt);
+    expect(prompts[0]).toContain('Review pull request #1');
+    expect(prompts[0]).toContain('Step 1 of 2: Migrations');
+    expect(prompts[2]).toMatch(/^Write your review/);
+    const append = (ctx.daemon.sdk.calls.at(-1)?.options.systemPrompt as { append: string } | undefined)?.append ?? '';
+    expect(append).toContain('Flag every missing migration.');
+    close();
+  });
+
   it('takes no message from the operator in a pr_review Session', async () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];
     const { events, close } = await listen(ctx.daemon);
-    ctx.daemon.sdk.script({ text: REVIEW });
+    scriptReview(ctx);
     await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
     await waitForReview(events);
     const session = (await ctx.http.get('/sessions?kind=pr_review')).body.data[0];
@@ -764,7 +816,7 @@ describe('Agent Review', () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];
     const { events, close } = await listen(ctx.daemon);
-    ctx.daemon.sdk.script({ text: REVIEW });
+    scriptReview(ctx);
     await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
     await waitForReview(events);
     const agentRoot = ctx.host.posted[0]?.id as string;

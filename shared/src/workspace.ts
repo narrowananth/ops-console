@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AccessMode, Effort, Model, SessionKind, sessionSchema } from './agents';
+import { jobPlaybookSchema } from './playbooks';
 import { GitHost } from './repos';
 
 export enum AgentReviewStatus {
@@ -72,6 +73,8 @@ export const prAgentReviewSchema = z.object({
   created_at: z.string(),
   /** The pull request moved on to another commit. */
   stale: z.boolean(),
+  /** Null on Agent Reviews from before Playbooks. */
+  playbook: jobPlaybookSchema.nullable(),
 });
 
 export type PrAgentReview = z.infer<typeof prAgentReviewSchema>;

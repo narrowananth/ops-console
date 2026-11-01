@@ -1,6 +1,6 @@
 # Agent Playbooks
 
-**Status:** draft
+**Status:** shipped
 **Design:** Playbooks in `design/ops-console.html` (sidebar, under Claude after Agents & accounts), in three columns:
 Triggers and Playbooks on the left, the open Playbook in the middle, Step blocks on the right. The same file shows
 the Playbook on the Monitor Verify button and Report panel, the Session header and the Agent Review card.
@@ -9,7 +9,7 @@ the Playbook on the Monitor Verify button and Report panel, the Session header a
 
 Each place the agent starts work has its method fixed by the console. A Verification always follows the same four
 steps (map the log, replay, cross-check, decide), a Fix always runs Code then Tests, an Agent Review always reads
-the diff the same way, and a Session or Dev tools question gets no standing instructions at all. The operator knows
+the diff the same way, and a Session gets no standing instructions at all. The operator knows
 how their services should be checked: which Repo really owns a failure, which other services call the feature,
 which Connection holds the data that explains it, how to build mock data and test a lasting fix instead of a quick
 patch. They have no place to write that down, so they retype it in every Session or the agent guesses.
@@ -18,8 +18,8 @@ patch. They have no place to write that down, so they retype it in every Session
 
 ### Triggers and Playbooks
 
-1. The Playbooks page lists six Triggers under their tabs. Monitor: Verify and Fix. Workspace: Review PR, Reply in
-   thread and Session message. Dev tools: Ask.
+1. The Playbooks page lists five Triggers under their tabs. Monitor: Verify and Fix. Workspace: Review PR, Reply in
+   thread and Session message. Dev tools has none: a Dev tools Session runs with no Playbook rules.
 2. Each Trigger holds exactly one Playbook. A Trigger with none runs its built-in Playbook, which holds today's
    method: Verify has the four steps it follows now, Fix has the steps Code and Tests, Review PR has one step,
    Review, and the three chat Triggers have no rules.
@@ -40,11 +40,11 @@ patch. They have no place to write that down, so they retype it in every Session
    mock data, Run the tests, Test a lasting fix, Check PROD readiness, and Custom step (empty).
 8. Dragging a block into Steps inserts a copy at the drop point; the copy's title and instructions are then the
    Playbook's own to edit. Dragging a step reorders it. Dragging a step out of Steps removes it. Dragging a Playbook
-   onto a Trigger attaches it (Behavior 5), and dragging a Trigger's chip off it detaches it.
+   onto a Trigger attaches it (Behavior 5), and dragging a Trigger that holds one off it detaches it.
 9. Every drag move has a keyboard and button path: Add to steps on a block, Move up and Move down and Remove on a
-   step, Attach to and Detach on a Playbook.
-10. A step that writes files or runs commands carries the tag "scratch copy". The blocks Make mock data, Run the tests
-    and Test a lasting fix carry it; Custom step has a checkbox for it. Editing a step's text keeps its tag.
+   step, Attach to and Detach on a Playbook, and each Trigger's dropdown of Built-in and the operator's Playbooks.
+10. A step that writes files or runs commands carries the tag "scratch copy". The blocks Replay the request locally,
+    Make mock data, Run the tests and Test a lasting fix carry it, whatever the step's text says; Custom step has a checkbox for it. Editing a step's text keeps its tag.
 11. Review PR reads only. Attaching a Playbook that has a tagged step to it is refused: "Review PR reads only: remove
     Make mock data first." Adding a tagged step to a Playbook that Review PR holds is refused the same way on Save.
 12. Save writes the Playbook; Discard drops the edits. Unsaved edits stay in the browser until Save or Discard,
@@ -60,7 +60,8 @@ patch. They have no place to write that down, so they retype it in every Session
     shows each step as pending, running, done, skipped or failed, with its summary, live.
 15. A skipped step lets the job go on: a step about a database the agent cannot reach can be skipped. A failed step
     stops the job, which fails with "Step 3 · Make mock data failed:" and the summary. An agent error, an answer the
-    console cannot read and the operator stopping the run each fail the running step.
+    console cannot read and the operator stopping the run each fail the running step; a stopped step's summary is
+    "stopped by the operator".
 16. After the last step the console runs its own closing turn: the Verification writes the Report, the Agent Review
     writes its findings, checklist and verdict, and the Fix goes on to its PR stage. Report, Agent Review and PR keep
     today's shape.
@@ -73,12 +74,12 @@ patch. They have no place to write that down, so they retype it in every Session
 
 ### Chat Triggers
 
-19. Session message, Reply in thread and Ask are chats, so they use only a Playbook's rules. On the page their
+19. Session message and Reply in thread are chats, so they use only a Playbook's rules. On the page their
     Playbook's steps show greyed with "Steps don't run on chat Triggers."
 20. A chat Trigger reads its Playbook at each turn, so an edit applies from the next message.
 21. In an Alert's Session, the operator's messages use the rules the Alert's latest job copied, not Session message.
-22. A Session's and a Dev tools Session's header names the Playbook its rules come from, when it is not built-in,
-    and links to it on the Playbooks page.
+22. A Session's header names the Playbook its rules come from, when it is not built-in, and links to it on the
+    Playbooks page.
 
 ### Rules
 
@@ -119,7 +120,7 @@ patch. They have no place to write that down, so they retype it in every Session
   Playbook. No scope by Service or Repo and no pick at run time; rules for one Repo belong in its `CLAUDE.md`,
   which runs already load.
 - **Many Triggers per Playbook**: one edit reaches each Trigger that holds it.
-- **Built-in in code**: the six built-in Playbooks and the ten Step blocks ship with the console and are not rows,
+- **Built-in in code**: the five built-in Playbooks and the ten Step blocks ship with the console and are not rows,
   so an update can improve them. A Trigger with no row holds its built-in.
 - **Job Triggers and chat Triggers**: Verify, Fix and Review PR start jobs with an end; only jobs run steps. The rest
   are chats and use rules only.
@@ -179,7 +180,7 @@ CREATE TABLE playbooks (
 -- Which Playbook each Trigger holds. No row: the built-in.
 CREATE TABLE playbook_triggers (
   trigger TEXT PRIMARY KEY NOT NULL
-    CHECK (trigger IN ('verify', 'fix', 'review_pr', 'thread_reply', 'session_message', 'devtools_ask')),
+    CHECK (trigger IN ('verify', 'fix', 'review_pr', 'thread_reply', 'session_message')),
   playbook_id TEXT NOT NULL REFERENCES playbooks(id) ON DELETE CASCADE
 );
 CREATE INDEX playbook_triggers_playbook_idx ON playbook_triggers (playbook_id);
@@ -250,7 +251,7 @@ Migration:
   "name": "string, 1 to 60",
   "rules": "string, up to 8000",
   "steps": [Step],
-  "triggers": ["verify | fix | review_pr | thread_reply | session_message | devtools_ask"],
+  "triggers": ["verify | fix | review_pr | thread_reply | session_message"],
   "updated_at": "ISO 8601 | null"
 }
 ```
@@ -334,10 +335,13 @@ Server to client, each time a job's step changes status.
 ## UI
 
 - **Sidebar**: Playbooks under Claude, after Agents & accounts, at `/playbooks`.
-- **Left column, Triggers**: grouped under Monitor, Workspace and Dev tools. Each is a drop target showing its
-  Playbook as a chip, or a grey "Built-in" chip. A drag over it outlines it; a drag of a Playbook with a tagged step
-  over Review PR shows it refused.
-- **Left column, Playbooks**: the operator's Playbooks A to Z with the Triggers each holds, then the six built-ins
+- **Left column, Triggers**: grouped under Monitor and Workspace. Each is a drop target with a dropdown showing
+  its Playbook or "Built-in". The dropdown lists Built-in and the operator's Playbooks A to Z with their step counts;
+  on Review PR a Playbook with a tagged step is listed with its refusal, and picking it shows the refusal. A drag
+  over a Trigger outlines it; a drag of a Playbook with a tagged step over Review PR shows it refused.
+- **Confirms**: Delete and Replace (Behaviors 5 and 6) ask in a modal over a dimmed page, with Cancel focused first.
+  Escape, Cancel or a click on the dimmed page closes it.
+- **Left column, Playbooks**: the operator's Playbooks A to Z with the Triggers each holds, then the five built-ins
   marked "built-in". New Playbook sits in the page header. The open one is in the address as `?playbook=<id>`. Empty: "No Playbooks
   yet. Duplicate a built-in or start a new one." Loading: "Reading Playbooks…". Error: "Could not read Playbooks:"
   and the reason.
@@ -353,10 +357,13 @@ Server to client, each time a job's step changes status.
 - **Monitor**: the Verify and Fix buttons name a Playbook that is not built-in (Behavior 18). The Report panel shows
   the Playbook's name, then its steps with status and summary above today's live tool steps, then "Writing the
   Report" during the closing turn. A failed one shows "Retry from step N" next to Verify again. Fix progress shows
-  Ticket, Branch, each step by title, and PR.
+  Ticket, Branch, each step by title, and PR as one path (`08-monitor-dashboard`). The Report's and the Agent
+  Review's steps use the same path under a progress bar, the console's closing turn last ("Write the Report",
+  "Write findings, checklist and verdict"). A job with no steps shows "Read the code" or "Read the change" in their
+  place. Each card's status is a pill tinted like its path.
 - **Workspace, pull request**: Review with agent names a Playbook that is not built-in. An Agent Review shows its
   Playbook's name and steps above the findings.
-- **Session and Dev tools Session headers**: "Playbook: <name>" linking to `/playbooks?playbook=<id>` (Behavior 22).
+- **Session header**: "Playbook: <name>" linking to `/playbooks?playbook=<id>` (Behavior 22).
 - **PROD**: no change. PROD Connections keep their badge and Approvals in every step.
 
 ## Rejected
@@ -367,8 +374,10 @@ Server to client, each time a job's step changes status.
 - **Playbooks that stack**: two Playbooks can contradict each other, and the job view could not name what the agent
   was told.
 - **One prompt with numbered steps**: cheaper, but no progress per step and no retry part way.
-- **Playbook files in each Repo** (`.ops-console/playbooks`): shared through git, but Monitor and Dev tools Triggers
-  have no Repo. A team's rules for one Repo already reach every run through the Repo's `CLAUDE.md`.
+- **Playbook files in each Repo** (`.ops-console/playbooks`): shared through git, but Monitor Triggers have no
+  Repo. A team's rules for one Repo already reach every run through the Repo's `CLAUDE.md`.
+- **An Ask Trigger in Dev tools**: a Dev tools Session's own instructions already tell the agent how to read each
+  Connection, compare them and keep PROD read-only, so a Playbook there would only repeat them.
 - **Steps on chat Triggers**: the operator drives a chat message by message, so ordered steps have no start or end
   to run between.
 - **Drag only**: a drag cannot be done from the keyboard; every move has a button too.
@@ -384,7 +393,7 @@ Server to client, each time a job's step changes status.
   Each Trigger holds one; one Playbook may be held by several.
   _Avoid_: rule, pipeline, workflow
 - **Trigger**: a place in a tab that starts the agent: Verify and Fix in Monitor, Review PR, Reply in thread and
-  Session message in Workspace, Ask in Dev tools.
+  Session message in Workspace.
   _Avoid_: action (the Action Log means each command the agent runs)
 - **Playbook step**: one titled instruction in a Playbook, run as its own agent turn, ending done, skipped or
   failed.

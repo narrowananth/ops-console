@@ -6,6 +6,7 @@ export * from './devtools';
 export * from './errors';
 export * from './mcp';
 export * from './monitor';
+export * from './playbooks';
 export * from './repos';
 export * from './settings';
 export * from './workspace';

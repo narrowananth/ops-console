@@ -39,6 +39,7 @@ test('the sidebar holds every page, and the Setup agent buttons open it', async 
     'Repos',
     'Setup agent',
     'Agents & accounts',
+    'Playbooks',
   ]);
 
   await nav.getByRole('link', { name: 'Repos' }).click();
