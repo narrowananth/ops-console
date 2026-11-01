@@ -1086,10 +1086,18 @@ describe('restart', () => {
     const hold = gate();
     first.daemon.sdk.script({ wait: hold.promise });
     const confirm = await first.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
-    // The run is blocked on the gate once the SDK was called for it: five Verification turns, then the ticket.
+    // The ticket run, after five Verification turns, is blocked on the gate once it has recorded its new
+    // conversation; stopping before that write would leave it writing to a closed store.
+    const fixSession = () =>
+      first.store.db
+        .select({ sdk: sessions.sdkSessionId })
+        .from(fixes)
+        .innerJoin(sessions, eq(sessions.id, fixes.sessionId))
+        .get()?.sdk;
     await until(
-      () => first.daemon.sdk.calls.length,
-      (count) => count >= 6,
+      () => (first.daemon.sdk.calls.length >= 6 ? fixSession() : null),
+      (sdk) => typeof sdk === 'string',
+      'the ticket run to reach the gate',
     );
     await first.daemon.stop();
     running.pop();
