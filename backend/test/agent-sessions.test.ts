@@ -2,6 +2,7 @@ import { readdir, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { AccessMode, Effort, SessionKind } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
+import { AgentRuntime } from '../src/agent/runtime';
 import { type AgentDaemon, api, converse, gate, listen, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
 
 const running: AgentDaemon[] = [];
@@ -446,6 +447,19 @@ describe('stopping a run', () => {
       expect.objectContaining({ session_id: approving, status: 'expired' }),
     ]);
     expect(daemon.sdk.ran).toEqual([]);
+  });
+
+  it('ends a run stopped before its query starts, while its conversation is still being found', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    await converse(daemon, id, 'first');
+    daemon.sdk.script({ wait: gate().promise });
+    const runtime = daemon.app.get(AgentRuntime);
+    // A resumed run looks for its transcript before it queries; Stop lands in between.
+    runtime.send(id, 'second');
+    runtime.stop(id);
+    await stateOf(daemon, id, 'idle');
+    expect(daemon.sdk.calls).toHaveLength(1);
   });
 
   it('is refused with invalid_state when no run is going', async () => {

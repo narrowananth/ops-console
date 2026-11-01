@@ -405,6 +405,8 @@ export class AgentRuntime {
       canUseTool: this.permissionPrompt(run),
     };
 
+    // Stop can land while the transcript moves, before the query listens for the abort.
+    if (run.stopped) return 'stopped';
     let rejected = false;
     let signInFailed = false;
     let failed = false;
