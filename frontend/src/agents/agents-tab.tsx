@@ -22,6 +22,7 @@ import {
   useRemoveAccount,
   useStartLogin,
 } from '../lib/queries';
+import { ascending } from '../lib/sort';
 import { ACCESS_MODES, EFFORTS, MODELS } from './options';
 
 const HOUR_MS = 3_600_000;
@@ -348,7 +349,7 @@ export function AgentsTab() {
 
   const accountList = (
     <ul aria-label="Claude Code accounts" className="m-0 list-none divide-y divide-line p-0">
-      {list.map((account, index) => (
+      {ascending(list, (account) => account.label).map((account, index) => (
         <AccountRow
           key={account.id}
           number={index + 1}

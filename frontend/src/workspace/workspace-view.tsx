@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Empty } from '../components/ui/empty';
 import { PullRequestView } from './pull-request-view';
 import { PullRequestsPane } from './pull-requests-pane';
@@ -9,7 +10,16 @@ type Tab = 'sessions' | 'pulls';
 
 export function WorkspaceView() {
   const [tab, setTab] = useState<Tab>('sessions');
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [params, setParams] = useSearchParams();
+  const [sessionId, setSessionId] = useState<string | null>(params.get('session'));
+  // A link from the Monitor names the Session to open; the address keeps no state after that.
+  useEffect(() => {
+    const linked = params.get('session');
+    if (linked === null) return;
+    setTab('sessions');
+    setSessionId(linked);
+    setParams({}, { replace: true });
+  }, [params, setParams]);
   const [pull, setPull] = useState<{ repoId: string; number: number } | null>(null);
 
   return (

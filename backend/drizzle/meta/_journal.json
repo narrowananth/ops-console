@@ -85,6 +85,20 @@
       "when": 1793484112515,
       "tag": "0011_connector_shopify",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1793501847047,
+      "tag": "0012_monitor_logs",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1793503916056,
+      "tag": "0013_scan_services",
+      "breakpoints": true
     }
   ]
 }

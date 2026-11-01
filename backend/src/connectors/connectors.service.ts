@@ -11,6 +11,7 @@ import {
   connectorConfigSchemas,
   ErrorCode,
   HealthStatus,
+  type McpServer,
 } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { ApiError, validationFailed } from '../common/errors';
@@ -34,6 +35,9 @@ export class ConnectorsService implements OnModuleDestroy {
   private readonly signIns = new Map<ConnectorId, AbortController>();
   private readonly prompts = new Map<ConnectorId, SignInPrompt>();
   private readonly rechecking = new Set<ConnectorId>();
+  /** Every sign-in still running, stopped or not: shutdown waits for them to let go of the store. */
+  private readonly running = new Set<Promise<void>>();
+  private stopping = false;
 
   constructor(
     @Inject(STORE) private readonly store: Store,
@@ -41,11 +45,14 @@ export class ConnectorsService implements OnModuleDestroy {
     @Inject(McpServersService) private readonly mcp: McpServersService,
   ) {}
 
-  onModuleDestroy(): void {
+  async onModuleDestroy(): Promise<void> {
+    this.stopping = true;
     for (const signIn of this.signIns.values()) signIn.abort();
+    await Promise.allSettled(this.running);
   }
 
   async list(): Promise<{ data: Connector[]; meta: { next_cursor: null } }> {
+    await this.follow();
     const rows = this.rows();
     const stale = rows.filter((row) => row.status !== HealthStatus.Off && isStale(row.lastCheckedAt));
     for (const row of stale) void this.recheck(row.id);
@@ -91,21 +98,35 @@ export class ConnectorsService implements OnModuleDestroy {
     const abort = new AbortController();
     this.signIns.set(id, abort);
     this.prompt(id, { code: null, url: null });
-    void this.signIn(id, abort.signal)
+    const run = this.signIn(id, abort.signal)
       .catch((error) => {
         if (!abort.signal.aborted) this.fail(id, error);
       })
       .finally(() => {
+        this.running.delete(run);
         if (this.signIns.get(id) !== abort) return;
         this.signIns.delete(id);
         this.prompts.delete(id);
-        this.announce(id);
+        if (!this.stopping) this.announce(id);
       });
+    this.running.add(run);
   }
 
   async check(id: ConnectorId): Promise<ConnectorCheck> {
+    const started = new Date().toISOString();
     const row = this.row(id);
     const reading = await this.read(id, row).catch((error): Reading => unreachable(error));
+    // A sign-in that ended while this check ran recorded what it found; this older reading must not replace it.
+    const now = this.row(id);
+    if (now.lastCheckedAt !== null && now.lastCheckedAt > started) {
+      return {
+        status: now.status,
+        status_detail: now.statusDetail,
+        account_label: now.accountLabel,
+        login: now.login,
+        last_checked_at: now.lastCheckedAt,
+      };
+    }
     return this.record(id, reading);
   }
 
@@ -135,16 +156,20 @@ export class ConnectorsService implements OnModuleDestroy {
     switch (id) {
       case ConnectorId.Datadog:
         await this.tools.datadogLogin(config.site ?? 'datadoghq.com', signal, onPrompt);
+        await this.landed(id, signal);
+        if (signal.aborted) return;
         if (await this.tools.datadogHasMcp()) await this.mcp.ensureRegistered(CONNECTOR_SERVERS[id] as McpSpec);
-        break;
+        return;
       case ConnectorId.Github: {
         await this.installMissing(['gh', 'github-mcp-server']);
         await this.tools.githubLogin(signal, onPrompt);
         const token = await this.tools.githubToken();
         if (!token) throw new ApiError(409, ErrorCode.InvalidState, 'gh did not finish signing in');
+        await this.landed(id, signal);
+        if (signal.aborted) return;
         // The token reaches the server through the Keychain and the launcher, never Claude Code's config.
         await this.mcp.ensureRegistered(CONNECTOR_SERVERS[id] as McpSpec, { GITHUB_PERSONAL_ACCESS_TOKEN: token });
-        break;
+        return;
       }
       case ConnectorId.Gitlab: {
         const host = config.host ?? 'gitlab.com';
@@ -153,16 +178,48 @@ export class ConnectorsService implements OnModuleDestroy {
         if ((await this.tools.gitlabUser(host)) === null) await this.tools.gitlabLogin(host, signal, onPrompt);
         break;
       }
-      case ConnectorId.Shopify:
-        await this.mcp.ensureRegistered(CONNECTOR_SERVERS[id] as McpSpec);
+      case ConnectorId.Bitbucket: {
+        // The Atlassian server lets the agent open pull requests; `bkt` reads them with no model turn.
+        const server = CONNECTOR_SERVERS[id] as McpSpec;
+        const added = await this.mcp.ensureRegistered(server);
+        await this.mcp.authenticateAndCheck(server.name, { signal, added });
+        if (signal.aborted) return;
+        if (!(await this.tools.installed('bkt'))) {
+          throw new ApiError(
+            409,
+            ErrorCode.InvalidState,
+            'bkt is not installed: install it from github.com/avivsinai/bitbucket-cli, then Connect again',
+          );
+        }
+        if ((await this.tools.bitbucketUser()) === null) await this.tools.bitbucketLogin(signal, onPrompt);
         break;
-      default: {
+      }
+      case ConnectorId.Shopify: {
         const server = CONNECTOR_SERVERS[id] as McpSpec;
         await this.mcp.ensureRegistered(server);
-        await this.mcp.authenticateAndCheck(server.name);
+        const found = await this.mcp.checkOne(server.name);
+        if (!signal.aborted) this.record(id, serverReading(found, config));
+        return;
+      }
+      default: {
+        const server = CONNECTOR_SERVERS[id] as McpSpec;
+        const added = await this.mcp.ensureRegistered(server);
+        const found = await this.mcp.authenticateAndCheck(server.name, { signal, added });
+        // The sign-in already read the server; checking again would wait for a new Probe in every account.
+        if (!signal.aborted) this.record(id, serverReading(found, config));
+        return;
       }
     }
+    await this.landed(id, signal);
+  }
+
+  /**
+   * The provider's sign-in finished: the drawer stops waiting and the check records the account at once. Steps after
+   * it, such as registering the MCP server, run on; one that fails records why.
+   */
+  private async landed(id: ConnectorId, signal: AbortSignal): Promise<void> {
     if (signal.aborted) return;
+    this.prompts.delete(id);
     await this.check(id);
   }
 
@@ -215,16 +272,17 @@ export class ConnectorsService implements OnModuleDestroy {
           ? signedOut('glab is not signed in')
           : { status: HealthStatus.Ok, detail: null, accountLabel: config.host ?? null, login };
       }
+      case ConnectorId.Bitbucket: {
+        const login = await this.tools.bitbucketUser();
+        return login === null
+          ? signedOut('bkt is not signed in, or macOS did not let it read its Keychain item')
+          : { status: HealthStatus.Ok, detail: null, accountLabel: config.workspace || login, login };
+      }
       default: {
         const server = CONNECTOR_SERVERS[id] as McpSpec;
-        const found = await this.mcp.recheck(server.name).catch(() => null);
+        const found = await this.mcp.checkOne(server.name).catch(() => null);
         if (found === null || !found.registered) return signedOut(`${server.name} is not registered`);
-        return {
-          status: found.status === HealthStatus.Off ? HealthStatus.Fail : found.status,
-          detail: found.status_detail,
-          accountLabel: config.workspace || config.org || config.site || null,
-          login: null,
-        };
+        return serverReading(found, config);
       }
     }
   }
@@ -259,8 +317,28 @@ export class ConnectorsService implements OnModuleDestroy {
     };
   }
 
+  /**
+   * A Connector reached only through its MCP server reads as the server reads now, from the kept Probes: a server
+   * that recovers or breaks moves the Connector at once instead of at its next check.
+   */
+  private async follow(): Promise<void> {
+    const riders = this.rows().filter(
+      (row) => SERVER_ONLY.includes(row.id) && row.status !== HealthStatus.Off && !this.signIns.has(row.id),
+    );
+    if (riders.length === 0) return;
+    const servers = await this.mcp.list().catch(() => null);
+    for (const row of riders) {
+      const found = servers?.data.find((server) => server.name === CONNECTOR_SERVERS[row.id]?.name);
+      if (!found?.registered || found.status === HealthStatus.Checking) continue;
+      const reading = serverReading(found, JSON.parse(row.config) as Record<string, string | null>);
+      // Same status: the stored reason stays, such as why the last sign-in failed.
+      if (reading.status !== row.status) this.record(row.id, reading);
+    }
+  }
+
   private async recheck(id: ConnectorId): Promise<void> {
-    if (this.rechecking.has(id)) return;
+    // A sign-in under way records its own result.
+    if (this.rechecking.has(id) || this.signIns.has(id)) return;
     this.rechecking.add(id);
     try {
       await this.check(id);
@@ -324,6 +402,9 @@ export class ConnectorsService implements OnModuleDestroy {
   }
 }
 
+/** Connectors with no CLI of their own: their status is their MCP server's. */
+const SERVER_ONLY: ConnectorId[] = [ConnectorId.Jira, ConnectorId.Slack, ConnectorId.Sentry, ConnectorId.Shopify];
+
 type McpSpec = NonNullable<(typeof CONNECTOR_SERVERS)[ConnectorId]>;
 
 function isStale(lastCheckedAt: string | null): boolean {
@@ -333,4 +414,15 @@ function isStale(lastCheckedAt: string | null): boolean {
 function unreachable(error: unknown): Reading {
   const detail = error instanceof ApiError ? error.message : 'the check did not finish';
   return { status: HealthStatus.Fail, detail, accountLabel: null, login: null };
+}
+
+/** A Connector that rides an MCP Server reads as the server does. */
+function serverReading(found: McpServer, config: Record<string, string | null>): Reading {
+  const off = found.status === HealthStatus.Off;
+  return {
+    status: off ? HealthStatus.Fail : found.status,
+    detail: off ? `${found.name} is turned off in MCP servers` : found.status_detail,
+    accountLabel: config.workspace || config.org || config.site || null,
+    login: null,
+  };
 }

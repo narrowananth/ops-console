@@ -5,6 +5,8 @@ export enum SessionKind {
   Repo = 'repo',
   Devtools = 'devtools',
   PrReview = 'pr_review',
+  /** Runs in its own folder in the data directory, with no imported Repo. */
+  Anonymous = 'anonymous',
 }
 
 export enum Model {
@@ -143,7 +145,7 @@ export const sessionSchema = z.object({
   account_id: z.string().nullable(),
   /** `repo` and `pr_review` Sessions run in a Repo. */
   repo_id: z.string().nullable(),
-  /** `repo` Sessions: the checked-out branch. */
+  /** `repo` Sessions: the checked-out branch; `anonymous` Sessions: the branch of the clone, if any. */
   branch: z.string().nullable(),
   /** `pr_review` Sessions: the pull request in `repo_id`. */
   pr_number: z.number().int().nullable(),

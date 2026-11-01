@@ -203,12 +203,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   /** Starts the browser sign-in in each account whose Probe reads `auth`. `connection.checked` reports the result. */
   async authenticate(name: string): Promise<void> {
     await this.authenticatePrepare(name);
-    const views = await this.views(true);
-    const waiting = views.filter((view) => view.state(name)?.status === HealthStatus.Auth);
-    void this.signIn(
-      name,
-      waiting.map((view) => view.account),
-    ).catch((error) => {
+    void this.signIn(name, await this.signInAccounts(name)).catch((error) => {
       this.logger.error(`checking ${name} after sign-in failed: ${String(error)}`);
     });
   }
@@ -224,27 +219,120 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     await this.register(name, current.scope, current.transport, current.target, {}, {}, null, repo);
   }
 
-  /** Authenticate, waiting for the sign-ins and the check. Connectors follow the result. */
-  async authenticateAndCheck(name: string): Promise<McpServer> {
+  /**
+   * Authenticate, waiting for the sign-ins and the check; `signal` stops the sign-in. Connectors follow the result. A
+   * server `added` just now holds no sign-in yet, so the active account's browser sign-in opens without reading it first.
+   */
+  async authenticateAndCheck(
+    name: string,
+    options: { signal?: AbortSignal; added?: boolean } = {},
+  ): Promise<McpServer> {
     await this.authenticatePrepare(name);
-    const views = await this.views(true);
-    const waiting = views.filter((view) => view.state(name)?.status === HealthStatus.Auth);
-    return this.signIn(
-      name,
-      waiting.map((view) => view.account),
-    );
+    const accounts = options.added ? this.activeAccounts() : await this.signInAccounts(name);
+    return this.signIn(name, accounts, options.signal);
+  }
+
+  /** The active account, else the first signed in. */
+  private activeAccounts(): Account[] {
+    const all = this.accounts.all().filter((account) => account.signedIn);
+    const active = all.find((account) => account.id === this.accounts.activeId()) ?? all[0];
+    return active ? [active] : [];
   }
 
   /**
-   * Registers the server a Connector rides on when it is missing or was removed. With `env`, a
-   * registered one is registered again, so a new token takes its place.
+   * Reads one server alone in the active account and sends `connection.checked`: a second or two, where `recheck`
+   * starts every server in every account.
+   */
+  async checkOne(name: string): Promise<McpServer> {
+    const [account] = this.activeAccounts();
+    if (account) await this.probeServer(account, await this.localDir(), name);
+    return this.answered(name);
+  }
+
+  /**
+   * The active account, when its Probe reads `auth`. The others sign in when they become active: each account keeps
+   * its own token, so signing in all of them opens one browser sign-in per account.
+   */
+  private async signInAccounts(name: string): Promise<Account[]> {
+    const active = this.accounts.activeId();
+    const pick = (views: Awaited<ReturnType<typeof this.views>>) =>
+      views.find((view) => view.account.id === active) ?? views.find((view) => view.account.signedIn);
+    let view = pick(await this.views(false));
+    if (!view) return [];
+    // No kept reading yet: connect this one server alone, not every server in the account.
+    if (view.state(name)?.status === HealthStatus.Checking) {
+      await this.probeServer(view.account, await this.localDir(), name);
+      view = pick(await this.views(false));
+    }
+    return view?.state(name)?.status === HealthStatus.Auth ? [view.account] : [];
+  }
+
+  /** Reads one server in one account into the kept Probe: it connects alone in a second or two. */
+  private async probeServer(account: Account, local: string, name: string): Promise<void> {
+    const entry = (await readRegistered(account.configDir, local)).find((item) => item.name === name);
+    if (!entry || (entry.transport !== McpTransport.Stdio && entry.url === null)) {
+      await this.probeOf(account, local, entry ? [name] : [], true);
+      return;
+    }
+    const key = `${account.configDir}\n${local}`;
+    const generation = this.generation;
+    const server =
+      entry.transport === McpTransport.Stdio
+        ? {
+            name,
+            transport: 'stdio' as const,
+            command: entry.command,
+            args: entry.args,
+            env: entry.env ?? {},
+            cwd: local,
+          }
+        : {
+            name,
+            transport: entry.transport === McpTransport.Sse ? ('sse' as const) : ('http' as const),
+            url: entry.url ?? '',
+            headers: entry.headers,
+          };
+    let read: ProbedServer;
+    try {
+      read = await this.probe.one(account.configDir, server);
+      // A stdio server's first start may download it (`npx -y`) and close before it answers; the second start is warm.
+      if (server.transport === 'stdio' && read.status === 'failed')
+        read = await this.probe.one(account.configDir, server);
+    } catch {
+      return;
+    }
+    if (generation !== this.generation) return;
+    this.keep(key, read);
+  }
+
+  /** Puts one server's reading into the account's kept Probe, making one if none has answered yet. */
+  private keep(key: string, read: ProbedServer): void {
+    const kept = this.probes.get(key);
+    if (kept?.servers) {
+      kept.servers.set(read.name, read);
+      kept.asked.add(read.name);
+      return;
+    }
+    // The others read `checking` until the account's Probe answers.
+    this.probes.set(key, { servers: new Map([[read.name, read]]), at: 0, asked: new Set([read.name]) });
+  }
+
+  /**
+   * Registers the server a Connector rides on when it is missing or was removed, and turns it on: Connect asks for it.
+   * With a changed `env`, a registered one is registered again, so a new token takes its place. True when it was
+   * registered just now.
    */
   async ensureRegistered(
     spec: { name: string; transport: McpTransport; target: string },
     env?: Record<string, string>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const found = (await this.servers()).find((server) => server.name === spec.name);
-    if (found?.registered && !env) return;
+    if (found && !found.enabled) {
+      this.setEnabled(spec.name, true);
+      this.invalidate();
+    }
+    const same = env === undefined || JSON.stringify(await this.storedEnv(spec.name)) === JSON.stringify(env);
+    if (found?.registered && same) return false;
     const previous = found?.registered ? await this.registrations(spec.name) : [];
     await this.register(
       spec.name,
@@ -256,6 +344,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
       previous.length > 0 ? previous : null,
     );
     this.dropRemoved(spec.name);
+    return true;
   }
 
   /** The server as it reads now, without a new Probe; `null` when it is unknown. */
@@ -268,21 +357,66 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     return this.checked(name);
   }
 
-  private async signIn(name: string, accounts: Account[]): Promise<McpServer> {
+  private async signIn(name: string, accounts: Account[], outer?: AbortSignal): Promise<McpServer> {
     const abort = new AbortController();
+    // A Connector's Disconnect or second Connect stops this `claude mcp login`; left running, it holds the sign-in open.
+    const stop = () => abort.abort();
+    outer?.addEventListener('abort', stop, { once: true });
     this.logins.add(abort);
     try {
+      const local = await this.localDir();
+      let failure: unknown = null;
       for (const account of accounts) {
+        if (abort.signal.aborted) break;
         try {
           await this.claude.mcpLogin(name, account.configDir, abort.signal);
-        } catch {
+          this.markConnected(account, local, name);
+          void this.probeServer(account, local, name)
+            .then(() => this.answered(name))
+            .catch(() => {
+              // The daemon stopped first; the next read probes again.
+            });
+        } catch (error) {
+          failure = error;
           this.logger.warn(`sign-in to ${name} did not finish in account ${account.label}`);
         }
       }
-      return await this.checked(name);
+      const server = await this.answered(name);
+      // The reason reaches the Connector pane instead of a bare `auth`.
+      if (failure && server.status === HealthStatus.Auth) throw failure;
+      return server;
     } finally {
+      outer?.removeEventListener('abort', stop);
       this.logins.delete(abort);
     }
+  }
+
+  /**
+   * A finished `claude mcp login` stored the token, so the kept reading turns connected at once; a one-server read
+   * brings the tools a second or two later. A Probe already under way read the server before the sign-in, so it is
+   * not kept.
+   */
+  private markConnected(account: Account, local: string, name: string): void {
+    this.generation += 1;
+    this.probing.clear();
+    const tools = this.probes.get(`${account.configDir}\n${local}`)?.servers?.get(name)?.tools ?? [];
+    this.keep(`${account.configDir}\n${local}`, { name, status: 'connected', error: null, tools });
+  }
+
+  /** The server from the kept Probes, sent as `connection.checked` without waiting for a new Probe. */
+  private async answered(name: string): Promise<McpServer> {
+    const started = Date.now();
+    const server = this.require(await this.servers(), name);
+    this.store.write((_tx, emit) =>
+      emit('connection.checked', {
+        target: CheckTarget.McpServer,
+        id: name,
+        status: server.status,
+        detail: server.status_detail,
+        latency_ms: Date.now() - started,
+      }),
+    );
+    return server;
   }
 
   /**
@@ -665,7 +799,12 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
             probed === undefined || !probed.asked.has(entry.name)
               ? { status: HealthStatus.Checking, detail: null, tools: [] }
               : probed.servers !== null && !probed.servers.has(entry.name)
-                ? { status: HealthStatus.Auth, detail: `${account.label}: pending approval in Claude Code`, tools: [] }
+                ? {
+                    status: HealthStatus.Auth,
+                    detail: `${account.label}: pending approval in Claude Code`,
+                    tools: [],
+                    account: account.id,
+                  }
                 : readServer(account, probed, entry.name),
           );
         }
@@ -711,9 +850,15 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
           const state = view.state(name);
           return state ? [state] : [];
         });
+      // Only the active account's `auth` counts: the others sign in when they become active.
+      const active = this.accounts.activeId();
       const worst =
-        states.find((s) => s.status === HealthStatus.Fail) ?? states.find((s) => s.status === HealthStatus.Auth);
+        states.find((s) => s.status === HealthStatus.Fail) ??
+        states.find((s) => s.status === HealthStatus.Auth && (active === null || s.account === active));
+      // An account still `checking` waits on its Probe; one that answered connected speaks for the server meanwhile.
       const reading = worst ??
+        states.find((s) => s.status === HealthStatus.Ok) ??
+        states.find((s) => s.status !== HealthStatus.Auth) ??
         states[0] ?? { status: HealthStatus.Fail, detail: 'no signed-in Claude account', tools: [] as string[] };
       const enabled = !disabled.has(name);
       const secrets = [...Object.values(entry.headers), ...Object.values(unwrapped ? await this.storedEnv(name) : {})];
@@ -810,10 +955,15 @@ function usedBy(name: string): ConnectorId | null {
   return (found?.[0] as ConnectorId | undefined) ?? null;
 }
 
-type Reading = { status: HealthStatus; detail: string | null; tools: string[] };
+/** `account` is the id of the account that read it. */
+type Reading = { status: HealthStatus; detail: string | null; tools: string[]; account?: string };
 
 /** One account's reading of a server from its Probe. */
 function readServer(account: Account, probed: Probed, name: string): Reading {
+  return { ...readOf(account, probed, name), account: account.id };
+}
+
+function readOf(account: Account, probed: Probed, name: string): Reading {
   if (probed.servers === null) {
     return { status: HealthStatus.Fail, detail: `${account.label}: Claude did not answer`, tools: [] };
   }

@@ -6,6 +6,13 @@ import { useConnectConnector, useDisconnectConnector } from '../lib/queries';
 import { statusGlyph } from '../mcp/status';
 import { IntegrationRow, rowAction, rowActionAttention } from './integration-row';
 
+/** The row and the pane read the same: signing in, not connected, or the check's status. */
+function connectorStatus(connector: Connector): { glyph: string; className: string } {
+  if (connector.sign_in) return { glyph: '◌ signing in', className: 'text-neutral-700' };
+  if (connector.status === HealthStatus.Off) return { glyph: '○ not connected', className: 'text-neutral-700' };
+  return statusGlyph[connector.status];
+}
+
 /** Shopify's Dev MCP has docs only: Connect registers it with no sign-in. */
 const NO_SIGN_IN: ConnectorId[] = [ConnectorId.Shopify];
 
@@ -16,7 +23,7 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
   const [confirming, setConfirming] = useState(false);
   const connected = connector.status !== HealthStatus.Off;
   const error = connect.error ?? disconnect.error;
-  const status = statusGlyph[connector.status];
+  const status = connectorStatus(connector);
 
   return (
     <div>
@@ -149,11 +156,7 @@ export function ConnectorRow({
   selected: boolean;
   onOpen: () => void;
 }) {
-  const status = connector.sign_in
-    ? { glyph: '◌ signing in', className: 'text-neutral-700' }
-    : connector.status === HealthStatus.Off
-      ? { glyph: '○ not connected', className: 'text-neutral-700' }
-      : statusGlyph[connector.status];
+  const status = connectorStatus(connector);
   const action =
     connector.status === HealthStatus.Off
       ? 'Connect'

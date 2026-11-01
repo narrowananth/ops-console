@@ -181,7 +181,10 @@ export class SessionsService {
   }
 }
 
-/** A `repo` Session has a Repo and a branch; a `pr_review` Session a Repo and a pull request; others neither. */
+/**
+ * A `repo` Session has a Repo and a branch; a `pr_review` Session a Repo and a pull request; an `anonymous` Session
+ * may have a branch; others none of these.
+ */
 function checkKindFields(input: NewSession): void {
   const hasRepo = input.repoId !== undefined;
   const hasBranch = input.branch !== undefined;
@@ -191,6 +194,8 @@ function checkKindFields(input: NewSession): void {
       ? hasRepo && hasBranch && !hasPr
       : input.kind === SessionKind.PrReview
         ? hasRepo && hasPr && !hasBranch
-        : !hasRepo && !hasBranch && !hasPr;
+        : input.kind === SessionKind.Anonymous
+          ? !hasRepo && !hasPr
+          : !hasRepo && !hasBranch && !hasPr;
   if (!ok) throw validationFailed(`invalid fields for a ${input.kind} session`);
 }

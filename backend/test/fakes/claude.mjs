@@ -2,7 +2,8 @@
 // Stands in for the `claude` CLI: prints output in its format and records add/remove calls.
 // Sign-in state lives in `fake-auth.json` in the config dir: `CLAUDE_CONFIG_DIR`, or `FAKE_CLAUDE_HOME` for the
 // operator's own setup. `mcp add` and `remove` edit `.claude.json` there, in Claude Code's shape. `mcp login` records
-// the server in `fake-mcp-auth.json`; `mcp-fail-add` in the dir makes `mcp add` fail, `FAKE_MCP_LOGIN=fail` makes login fail.
+// the server in `fake-mcp-auth.json`; `mcp-fail-add` in the dir makes `mcp add` fail, `FAKE_MCP_LOGIN=fail` makes login fail, `hang` makes it wait,
+// and login without a terminal fails as the real one does.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -155,8 +156,18 @@ To remove this server, run: claude mcp remove "sentry" -s local
   const file = path.join(process.env.CLAUDE_CONFIG_DIR, 'fake-mcp-auth.json');
   const names = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : [];
   if (command === 'login') {
-    if (process.env.FAKE_MCP_LOGIN === 'fail') process.exit(1);
-    writeFileSync(file, JSON.stringify([...names, rest[0]]));
+    // Claude Code 2.1.3xx refuses `mcp login` without a terminal on stdin.
+    if (!process.stdin.isTTY) {
+      console.error(`Couldn't complete authentication for "${rest[0]}": stdin isn't a terminal`);
+      process.exit(1);
+    }
+    if (process.env.FAKE_MCP_LOGIN === 'hang') {
+      // The operator never finishes in the browser; the process waits until it is stopped.
+      setInterval(() => {}, 60_000);
+    } else if (process.env.FAKE_MCP_LOGIN === 'fail') {
+      console.error(`Couldn't complete authentication for "${rest[0]}": SDK auth failed: Incompatible auth server`);
+      process.exit(1);
+    } else writeFileSync(file, JSON.stringify([...names, rest[0]]));
   } else {
     writeFileSync(file, JSON.stringify(names.filter((name) => name !== rest[0])));
   }

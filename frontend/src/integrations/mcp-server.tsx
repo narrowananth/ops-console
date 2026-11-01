@@ -8,6 +8,7 @@ import {
   useRemoveMcpServer,
   useUpdateMcpServer,
 } from '../lib/queries';
+import { ascending } from '../lib/sort';
 import { statusGlyph } from '../mcp/status';
 import { IntegrationRow, rowAction, rowActionAttention } from './integration-row';
 
@@ -111,7 +112,7 @@ export function McpDetail({ server, onBack }: { server: McpServer; onBack: () =>
       ))}
       <div className="px-5 pt-3.5 pb-1.5 text-[11px] tracking-[0.08em] text-neutral-700 uppercase">Tools</div>
       <div className="flex flex-wrap gap-1.5 border-b border-line px-5 pb-4">
-        {server.tools.map((tool) => (
+        {ascending(server.tools, (tool) => tool).map((tool) => (
           <span key={tool} className={`${mono} border border-divider px-2 py-0.5 text-[11px]`}>
             {tool}
           </span>

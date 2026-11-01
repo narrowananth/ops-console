@@ -6,8 +6,12 @@ import {
   AlertStatus,
   CheckInterval,
   ConnectorId,
+  type CreateScan,
   connectorConfigSchemas,
+  type DatadogService,
   ErrorCode,
+  type MonitorEnv,
+  NO_ENV,
   ReviewDecision,
   RouteState,
   SAMPLE_LIMIT,
@@ -15,9 +19,11 @@ import {
   type Scan,
   ScanStatus,
   ScanTrigger,
+  type ScanWindow,
   Severity,
+  WINDOW_HOURS,
 } from '@ops-console/shared';
-import { and, desc, eq, gt, isNull, max } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, max, notInArray } from 'drizzle-orm';
 import type { z } from 'zod';
 import { redact } from '../action-log/redact';
 import { ApiError } from '../common/errors';
@@ -27,7 +33,8 @@ import { alerts, connectors, reports, reviews, routes, scanRouteResults, scans, 
 import { type Emit, STORE, type Store, type Tx } from '../db/store';
 import { Scheduler } from '../scheduler/scheduler';
 import { AlertsService } from './alerts.service';
-import { DATADOG_READER, type DatadogReader, type RouteReading, type ServiceReading } from './datadog';
+import { CodeFinder } from './code-finder';
+import { DATADOG_READER, type DatadogReader, type LogGroup, type ServiceReading } from './datadog';
 import { fingerprint, maskSignature } from './fingerprint';
 import { type AlertRow, parseJson, type RouteRow, type ServiceRow, samplesOf } from './mappers';
 
@@ -49,6 +56,8 @@ export function toScan(row: ScanRow): Scan {
     triggered_by: row.triggeredBy,
     service_id: row.serviceId,
     window_size: row.windowSize,
+    envs: parseJson<string[]>(row.envs, []),
+    services: parseJson<string[] | null>(row.services, null),
     status: row.status,
     error_code: row.errorCode,
     error_message: row.errorMessage,
@@ -113,6 +122,14 @@ function mergeSamples(existing: Sample[], fresh: Sample[]): Sample[] {
   return [...byId.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, SAMPLE_LIMIT);
 }
 
+/** Logs that name no request hang on this Route of their Service; the API shows it as no Route. */
+const NO_ROUTE = { method: '', path: '' };
+
+/** How long the list of Datadog envs is kept before it is read again. */
+const ENVS_TTL_MS = 10 * 60_000;
+/** How long one range and env pick's list of Datadog Services is kept. */
+const SERVICES_TTL_MS = 2 * 60_000;
+
 /** The error kind of a reading: the most common masked message among its Samples, the newest on a tie. */
 function signatureOf(samples: Sample[]): string {
   const counts = new Map<string, number>();
@@ -128,12 +145,15 @@ function signatureOf(samples: Sample[]): string {
 @Injectable()
 export class ScansService {
   private readonly logger = new Logger('monitor');
+  private envCache: { at: number; names: string[] } | null = null;
+  private readonly serviceCache = new Map<string, { at: number; list: DatadogService[] }>();
 
   constructor(
     @Inject(STORE) private readonly store: Store,
     @Inject(ConnectorsService) private readonly connectors: ConnectorsService,
     @Inject(DATADOG_READER) private readonly reader: DatadogReader,
     @Inject(AlertsService) private readonly alerts: AlertsService,
+    @Inject(CodeFinder) private readonly finder: CodeFinder,
     @Inject(Scheduler) scheduler: Scheduler,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
@@ -176,17 +196,25 @@ export class ScansService {
     return { ...toScan(row), results };
   }
 
-  /** The operator's Scan: `serviceId` null scans every Service. Answers at once; the read goes on in the background. */
-  start(serviceId: string | null): Scan {
+  /**
+   * The operator's Scan over the window, envs and Datadog Services they picked; a null `service_id` and no `services`
+   * scans every Service. Answers at once; the read goes on in the background.
+   */
+  start(input: CreateScan): Scan {
     this.connectors.require(ConnectorId.Datadog);
     const config = this.config();
-    let window = config.default_interval as CheckInterval;
+    const serviceId = input.service_id;
+    let window: ScanWindow = input.window ?? (config.default_interval as CheckInterval);
+    let envs = [...new Set(input.envs ?? config.environments)];
+    let names = input.services ? [...new Set(input.services)] : null;
     if (serviceId !== null) {
       const service = this.store.db.select().from(services).where(eq(services.id, serviceId)).get();
       if (!service) throw new ApiError(404, ErrorCode.NotFound, 'no such Service');
-      window = (service.checkInterval ?? window) as CheckInterval;
+      window = input.window ?? service.checkInterval ?? window;
+      envs = [service.env];
+      names = [service.name];
     }
-    const row = this.create(ScanTrigger.Operator, serviceId, window);
+    const row = this.create(ScanTrigger.Operator, serviceId, window, envs, names);
     void this.execute(row).catch((error) =>
       this.logger.warn(`scan ${row.id} stopped: ${error instanceof Error ? error.message : String(error)}`),
     );
@@ -210,7 +238,7 @@ export class ScansService {
         .where(and(eq(scans.triggeredBy, ScanTrigger.Schedule), eq(scans.windowSize, window), isNull(scans.serviceId)))
         .get()?.at;
       if (last && new Date(last) >= slot) continue;
-      await this.execute(this.create(ScanTrigger.Schedule, null, window));
+      await this.execute(this.create(ScanTrigger.Schedule, null, window, config.environments, null));
     }
   }
 
@@ -228,11 +256,60 @@ export class ScansService {
     return connectorConfigSchemas[ConnectorId.Datadog].parse(parseJson(raw?.config ?? null, {}));
   }
 
-  private create(triggeredBy: ScanTrigger, serviceId: string | null, window: CheckInterval): ScanRow {
+  /** The env tags Datadog has logs for, the Connector's own first; read again after 10 minutes. */
+  async envs(): Promise<MonitorEnv[]> {
+    const configured = this.config().environments;
+    if (!this.envCache || Date.now() - this.envCache.at > ENVS_TTL_MS) {
+      this.connectors.require(ConnectorId.Datadog);
+      this.envCache = { at: Date.now(), names: await this.reader.envs() };
+    }
+    // Logs with no `env` tag are their own choice: many services send none.
+    const names = [...new Set([...configured, ...this.envCache.names, NO_ENV])];
+    return names.map((name) => ({ name, configured: configured.includes(name) }));
+  }
+
+  /** The Services Datadog has error or warn logs for in the window and envs, busiest first; kept 2 minutes. */
+  async datadogServices(window: ScanWindow, envs: string[]): Promise<DatadogService[]> {
+    const key = `${window}|${[...envs].sort().join(',')}`;
+    const kept = this.serviceCache.get(key);
+    if (kept && Date.now() - kept.at < SERVICES_TTL_MS) return kept.list;
+    this.connectors.require(ConnectorId.Datadog);
+    const byName = new Map<string, { envs: { env: string; errors: number }[]; errors: number }>();
+    for (const count of await this.reader.services(envs, window)) {
+      const entry = byName.get(count.name) ?? { envs: [], errors: 0 };
+      entry.envs.push({ env: count.env, errors: count.errors });
+      entry.errors += count.errors;
+      byName.set(count.name, entry);
+    }
+    const list = [...byName]
+      .map(([name, entry]) => ({
+        name,
+        envs: entry.envs.sort((a, b) => b.errors - a.errors).map((one) => one.env),
+        errors: entry.errors,
+      }))
+      .sort((a, b) => b.errors - a.errors || a.name.localeCompare(b.name));
+    this.serviceCache.set(key, { at: Date.now(), list });
+    return list;
+  }
+
+  private create(
+    triggeredBy: ScanTrigger,
+    serviceId: string | null,
+    window: ScanWindow,
+    envs: string[],
+    names: string[] | null,
+  ): ScanRow {
     return this.store.write((tx, emit) => {
       const row = tx
         .insert(scans)
-        .values({ id: crypto.randomUUID(), triggeredBy, serviceId, windowSize: window })
+        .values({
+          id: crypto.randomUUID(),
+          triggeredBy,
+          serviceId,
+          windowSize: window,
+          envs: JSON.stringify(envs),
+          services: names && JSON.stringify(names),
+        })
         .returning()
         .get();
       emit('scan.started', { scan_id: row.id, service_id: serviceId });
@@ -243,19 +320,17 @@ export class ScansService {
   private async execute(scan: ScanRow): Promise<void> {
     try {
       const config = this.config();
-      const target = scan.serviceId
-        ? this.store.db.select().from(services).where(eq(services.id, scan.serviceId)).get()
-        : undefined;
       const readings = await this.reader.read({
-        envs: config.environments,
+        envs: parseJson<string[]>(scan.envs, []),
         window: scan.windowSize,
-        service: target?.name ?? null,
+        services: parseJson<string[] | null>(scan.services, null),
         ignore: config.ignore,
       });
       this.store.write((tx, emit) => {
         this.apply(tx, emit, scan, config, readings);
         this.end(tx, emit, scan.id, ScanStatus.Ok, null, null);
       });
+      this.finder.lookForUnlinked();
     } catch (error) {
       const limited = error instanceof ApiError && error.code === ErrorCode.RateLimited;
       const message = error instanceof Error ? error.message : String(error);
@@ -302,61 +377,100 @@ export class ScansService {
     });
   }
 
-  private applies(scan: ScanRow, existing: ServiceRow | undefined, config: DatadogConfig): boolean {
+  /**
+   * Whether the Scan covers the Service: its env was read, and it is the one asked for, among the names asked for, or
+   * on this schedule.
+   */
+  private applies(
+    scan: ScanRow,
+    name: string,
+    existing: ServiceRow | undefined,
+    config: DatadogConfig,
+    env: string,
+  ): boolean {
+    if (!parseJson<string[]>(scan.envs, []).includes(env)) return false;
     if (scan.serviceId) return existing?.id === scan.serviceId;
+    const names = parseJson<string[] | null>(scan.services, null);
+    if (names && !names.includes(name)) return false;
     if (scan.triggeredBy === ScanTrigger.Operator) return true;
     return (existing?.checkInterval ?? config.default_interval) === scan.windowSize;
   }
 
   private apply(tx: Tx, emit: Emit, scan: ScanRow, config: DatadogConfig, readings: ServiceReading[]): void {
     const now = new Date().toISOString();
-    const seen = new Set<string>();
+    const seenRoutes = new Set<string>();
+    const seenAlerts = new Set<string>();
     for (const reading of readings) {
       let service = tx
         .select()
         .from(services)
         .where(and(eq(services.name, reading.name), eq(services.env, reading.env)))
         .get();
-      if (!this.applies(scan, service, config)) continue;
+      if (!this.applies(scan, reading.name, service, config, reading.env)) continue;
       service ??= tx
         .insert(services)
         .values({ id: crypto.randomUUID(), name: reading.name, env: reading.env })
         .returning()
         .get();
-      for (const read of reading.routes) {
-        const route = this.upsertRoute(tx, service, read);
-        seen.add(route.id);
+      if (reading.repoUrl && service.repoUrl === null) {
+        service = tx
+          .update(services)
+          .set({ repoUrl: reading.repoUrl })
+          .where(eq(services.id, service.id))
+          .returning()
+          .get() as ServiceRow;
+      }
+      // Several kinds of failure can share a Route; its result is their sum.
+      const results = new Map<string, { errors: number; rapid: boolean }>();
+      for (const group of reading.groups) {
+        if (group.errors === 0) continue;
+        const route = this.upsertRoute(tx, service, group.method ? group : NO_ROUTE);
         const skip =
-          route.ignored || config.ignore.some((rule) => rule.kind === 'route' && globMatch(rule.value, route.path));
-        const state =
-          read.peakPer10m >= config.rapid_errors_per_10m && read.errors > 0
-            ? RouteState.Rapid
-            : read.errors > 0
-              ? RouteState.Failing
-              : RouteState.Ok;
-        if (!skip && read.errors > 0) this.raise(tx, emit, scan, config, service, route, read, now);
+          route.ignored ||
+          (group.method !== '' &&
+            config.ignore.some((rule) => rule.kind === 'route' && globMatch(rule.value, route.path)));
+        if (!skip) seenAlerts.add(this.raise(tx, emit, scan, config, service, route, group, now));
+        if (!group.method) continue;
+        const result = results.get(route.id) ?? { errors: 0, rapid: false };
+        result.errors += group.errors;
+        result.rapid ||= group.peakPer10m >= config.rapid_errors_per_10m;
+        results.set(route.id, result);
+      }
+      for (const [routeId, result] of results) {
+        seenRoutes.add(routeId);
+        const state = result.rapid ? RouteState.Rapid : RouteState.Failing;
         tx.insert(scanRouteResults)
-          .values({ scanId: scan.id, routeId: route.id, scannedAt: now, errorCount: read.errors, state })
+          .values({ scanId: scan.id, routeId, scannedAt: now, errorCount: result.errors, state })
           .run();
       }
     }
-    // A known Route that logged nothing this time is healthy.
     const scope = tx
       .select()
       .from(services)
       .all()
-      .filter((service) => this.applies(scan, service, config));
+      .filter((service) => this.applies(scan, service.name, service, config, service.env));
+    // A known Route that logged nothing this time is healthy.
     for (const service of scope) {
-      for (const route of tx.select().from(routes).where(eq(routes.serviceId, service.id)).all()) {
-        if (seen.has(route.id)) continue;
+      const known = tx.select().from(routes).where(eq(routes.serviceId, service.id)).all();
+      for (const route of known) {
+        if (seenRoutes.has(route.id) || route.method === '') continue;
         tx.insert(scanRouteResults)
           .values({ scanId: scan.id, routeId: route.id, scannedAt: now, errorCount: 0, state: RouteState.Ok })
           .run();
       }
     }
+    // So is an Alert of a covered Service that this Scan did not see: a healthy sighting (Behavior 5).
+    const scopeIds = scope.map((service) => service.id);
+    if (scopeIds.length > 0) {
+      const covered = tx.select({ id: routes.id }).from(routes).where(inArray(routes.serviceId, scopeIds));
+      tx.update(alerts)
+        .set({ clearedAt: now })
+        .where(and(inArray(alerts.routeId, covered), notInArray(alerts.id, [...seenAlerts])))
+        .run();
+    }
   }
 
-  private upsertRoute(tx: Tx, service: ServiceRow, read: RouteReading): RouteRow {
+  private upsertRoute(tx: Tx, service: ServiceRow, read: { method: string; path: string }): RouteRow {
     const found = tx
       .select()
       .from(routes)
@@ -372,14 +486,14 @@ export class ScansService {
     );
   }
 
-  private severity(config: DatadogConfig, window: CheckInterval, read: RouteReading): Severity {
-    if (read.peakPer10m >= config.rapid_errors_per_10m) return Severity.Sev2;
-    const perHour = read.errors / HOURS[window];
+  private severity(config: DatadogConfig, window: ScanWindow, read: LogGroup): Severity {
+    if (read.peakPer10m >= config.rapid_errors_per_10m) return Severity.High;
+    const perHour = read.errors / WINDOW_HOURS[window];
     const errorLevel = read.samples.some((sample) => sample.status === 'error');
-    return perHour >= config.failing_errors_per_hour && errorLevel ? Severity.Sev3 : Severity.Warn;
+    return perHour >= config.failing_errors_per_hour && errorLevel ? Severity.Medium : Severity.Low;
   }
 
-  /** Creates the Alert, updates it, or reopens it as a Regression (Behaviors 2, 3, 5, 6). */
+  /** Creates the Alert, updates it, or reopens it as a Regression (Behaviors 2, 3, 5, 6). Returns its id. */
   private raise(
     tx: Tx,
     emit: Emit,
@@ -387,9 +501,9 @@ export class ScansService {
     config: DatadogConfig,
     service: ServiceRow,
     route: RouteRow,
-    read: RouteReading,
+    read: LogGroup,
     now: string,
-  ): void {
+  ): string {
     const fresh = read.samples.map(redactSample);
     const print = fingerprint(service.id, route.method, route.path, signatureOf(read.samples));
     const severity = this.severity(config, scan.windowSize, read);
@@ -403,7 +517,9 @@ export class ScansService {
           fingerprint: print,
           source: AlertSource.Scan,
           severity,
-          title: `${route.method} ${route.path} failing on ${service.name}`,
+          title: route.method
+            ? `${route.method} ${route.path} failing on ${service.name}`
+            : `${service.name}: ${maskSignature(signatureOf(read.samples)).slice(0, 100)}`,
           logLine: fresh[0]?.message ?? '',
           eventCount: read.errors,
           firstSeenAt: now,
@@ -417,11 +533,11 @@ export class ScansService {
       emit('alert.detected', {
         alert_id: row.id,
         severity,
-        route: { id: route.id, method: route.method, path: route.path },
+        route: route.method ? { id: route.id, method: route.method, path: route.path } : null,
       });
-      return;
+      return row.id;
     }
-    if (this.reopens(tx, existing)) {
+    if (this.reopens(existing)) {
       const since = existing.resolvedAt;
       const after = since ? fresh.filter((sample) => sample.timestamp > since) : fresh;
       this.alerts.transition(
@@ -443,10 +559,10 @@ export class ScansService {
       );
       if (existing.status === AlertStatus.Dismissed) this.undoDismissal(tx, existing.id, now);
       emit('alert.regressed', { alert_id: existing.id, regression_count: existing.regressionCount + 1 });
-      return;
+      return existing.id;
     }
-    // A resolved Alert whose Route has not been seen healthy since stays as it is.
-    if (existing.status === AlertStatus.Resolved) return;
+    // A resolved Alert that has not been seen healthy since stays as it is.
+    if (existing.status === AlertStatus.Resolved) return existing.id;
     const merged = mergeSamples(samplesOf(existing), fresh);
     const eventCount = existing.eventCount + read.errors;
     tx.update(alerts)
@@ -461,25 +577,14 @@ export class ScansService {
       .where(eq(alerts.id, existing.id))
       .run();
     emit('alert.updated', { alert_id: existing.id, event_count: eventCount, last_seen_at: now });
+    return existing.id;
   }
 
-  /** A resolved or dismissed Alert reopens once its Route was healthy after its last failing sighting. */
-  private reopens(tx: Tx, alert: AlertRow): boolean {
+  /** A resolved or dismissed Alert reopens once a Scan saw it healthy after its last failing sighting. */
+  private reopens(alert: AlertRow): boolean {
     if (alert.status !== AlertStatus.Resolved && alert.status !== AlertStatus.Dismissed) return false;
     const boundary = [alert.lastSeenAt, alert.resolvedAt ?? ''].sort().at(-1) as string;
-    return (
-      tx
-        .select({ at: scanRouteResults.scannedAt })
-        .from(scanRouteResults)
-        .where(
-          and(
-            eq(scanRouteResults.routeId, alert.routeId),
-            eq(scanRouteResults.state, RouteState.Ok),
-            gt(scanRouteResults.scannedAt, boundary),
-          ),
-        )
-        .get() !== undefined
-    );
+    return alert.clearedAt !== null && alert.clearedAt > boundary;
   }
 
   /** The dismissal no longer holds once the Alert is open again. */

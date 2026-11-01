@@ -32,7 +32,7 @@ export const CONNECTOR_VIA: Record<ConnectorId, string> = {
   [ConnectorId.Jira]: 'Atlassian MCP',
   [ConnectorId.Github]: 'gh CLI + GitHub MCP',
   [ConnectorId.Gitlab]: 'glab CLI',
-  [ConnectorId.Bitbucket]: 'Atlassian MCP',
+  [ConnectorId.Bitbucket]: 'bkt CLI + Atlassian MCP',
   [ConnectorId.Slack]: 'Slack MCP',
   [ConnectorId.Sentry]: 'Sentry MCP',
   [ConnectorId.Shopify]: 'Shopify Dev MCP',

@@ -1,11 +1,18 @@
-import { type Repo, type Session, SessionState } from '@ops-console/shared';
+import { type Repo, type Session, SessionKind, SessionState } from '@ops-console/shared';
 import { useState } from 'react';
 import { RepoIcon } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Dropdown } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
 import { item } from '../components/ui/item';
-import { useBranches, useCreateRepoSession, useRepoSessions, useRepos } from '../lib/queries';
+import {
+  useBranches,
+  useCreateAnonymousSession,
+  useCreateRepoSession,
+  useRepoSessions,
+  useRepos,
+} from '../lib/queries';
+import { ascending } from '../lib/sort';
 
 /** An open Repo lists this many of its Sessions, most recently active first, before "Show N more". */
 const SHOWN = 3;
@@ -35,7 +42,7 @@ function NewSession({ repo, onCreated }: { repo: Repo; onCreated: (id: string) =
           label={`Branch for a new Session in ${repo.name}`}
           title={chosen}
           value={chosen}
-          options={(branches.data ?? []).map((b) => ({
+          options={ascending(branches.data ?? [], (b) => b.name).map((b) => ({
             value: b.name,
             label: b.name,
             description: [b.current && 'checked out', b.has_open_pr && 'open PR'].filter(Boolean).join(' · '),
@@ -195,6 +202,77 @@ function RepoGroup({
   );
 }
 
+/** Sessions with no imported Repo: each works in its own folder, and may clone a repo into it. */
+function AnonymousGroup({
+  sessions,
+  selected,
+  onSelect,
+}: {
+  sessions: Session[];
+  selected: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const create = useCreateAnonymousSession();
+  const [all, setAll] = useState(false);
+  const shown = all
+    ? sessions
+    : sessions.filter((session, index) => index < SHOWN || isRunning(session) || session.id === selected);
+  const hidden = sessions.length - shown.length;
+  return (
+    <section aria-label="No Repo" className="px-2 pb-1.5">
+      <div className="flex items-center gap-1 rounded-md pr-1.5 hover:bg-neutral-200">
+        <span className="flex min-w-0 flex-1 items-center gap-2 py-2 pl-2">
+          <span aria-hidden className="w-3 flex-none" />
+          <span
+            aria-hidden
+            className="inline-flex size-4.5 flex-none items-center justify-center rounded-[5px] border border-dashed border-neutral-500 text-[10px] text-neutral-700"
+          >
+            ∅
+          </span>
+          <strong className="flex-none text-[13px]">No Repo</strong>
+          <span className="min-w-0 flex-1 truncate text-[11px] text-neutral-700">anonymous</span>
+          <span className="flex-none font-mono text-[11px] text-neutral-700">{sessions.length}</span>
+        </span>
+        <button
+          type="button"
+          aria-label="New anonymous Session"
+          title="New anonymous Session: no Repo, its own folder"
+          disabled={create.isPending}
+          onClick={() => create.mutate({}, { onSuccess: (session) => onSelect(session.id) })}
+          className="flex size-6.5 flex-none cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent text-base font-extrabold text-accent hover:bg-accent-100"
+        >
+          +
+        </button>
+      </div>
+      {create.isError && (
+        <div role="alert" className="px-2 pb-1 text-xs text-accent-700">
+          {create.error.message}
+        </div>
+      )}
+      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+        {shown.map((session) => (
+          <SessionRow
+            key={session.id}
+            session={session}
+            repoBranch={null}
+            selected={selected === session.id}
+            onSelect={() => onSelect(session.id)}
+          />
+        ))}
+      </ul>
+      {(hidden > 0 || all) && sessions.length > SHOWN && (
+        <button
+          type="button"
+          onClick={() => setAll(!all)}
+          className="mt-0.5 cursor-pointer rounded-sm border-0 bg-transparent py-1 pl-7 text-xs text-accent-700 hover:underline"
+        >
+          {all ? 'Show fewer' : `Show ${hidden} more`}
+        </button>
+      )}
+    </section>
+  );
+}
+
 export function SessionsPane({ selected, onSelect }: { selected: string | null; onSelect: (id: string) => void }) {
   const repos = useRepos();
   const sessions = useRepoSessions();
@@ -202,7 +280,7 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
   const [folded, setFolded] = useState(readFolded);
   if (repos.isPending || sessions.isPending) return <Empty>Reading Sessions…</Empty>;
   if (repos.isError || sessions.isError) return <Empty>Could not read Sessions.</Empty>;
-  if (repos.data.data.length === 0) return <Empty>Import a Repo in Repos</Empty>;
+  const anonymous = sessions.data.filter((session) => session.kind === SessionKind.Anonymous);
   const fold = (id: string) => {
     const next = folded.includes(id) ? folded.filter((other) => other !== id) : [...folded, id];
     localStorage.setItem(FOLDED_KEY, JSON.stringify(next));
@@ -210,7 +288,7 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
   };
   return (
     <div className="pb-3">
-      {repos.data.data.map((repo) => (
+      {ascending(repos.data.data, (repo) => repo.name).map((repo) => (
         <RepoGroup
           key={repo.id}
           repo={repo}
@@ -221,6 +299,10 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
           onSelect={onSelect}
         />
       ))}
+      {repos.data.data.length === 0 && (
+        <p className="m-0 px-4 pt-2 pb-3 text-xs text-neutral-700">Import a Repo in Repos to work on its branches.</p>
+      )}
+      <AnonymousGroup sessions={anonymous} selected={selected} onSelect={onSelect} />
     </div>
   );
 }

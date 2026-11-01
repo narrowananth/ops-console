@@ -25,6 +25,9 @@ export type HostPullRequest = {
   resolved_count: number;
 };
 
+/** A pull request read across an owner's repositories. */
+export type OwnedPullRequest = HostPullRequest & { slug: string };
+
 export type HostComment = {
   id: string;
   parent_id: string | null;
@@ -51,6 +54,10 @@ export type NewHostComment = {
  */
 export interface GitHostAdapter {
   list(slug: string, state: PrState): Promise<HostPullRequest[]>;
+  /** The accounts, organizations, groups or workspaces whose repositories the signed-in user can read. */
+  owners(): Promise<string[]>;
+  /** Pull requests in every repository of one owner, each with its repository's slug. */
+  listOwner(owner: string, state: PrState): Promise<OwnedPullRequest[]>;
   get(slug: string, number: number): Promise<{ pr: HostPullRequest; files: PrFile[]; comments: HostComment[] }>;
   postComment(slug: string, number: number, comment: NewHostComment): Promise<HostComment>;
   setResolved(slug: string, number: number, commentId: string, resolved: boolean): Promise<void>;

@@ -14,6 +14,7 @@ import type {
   HostComment,
   HostPullRequest,
   NewHostComment,
+  OwnedPullRequest,
 } from '../../src/workspace/git-host';
 
 export function hostPr(number: number, overrides: Partial<HostPullRequest> = {}): HostPullRequest {
@@ -41,7 +42,13 @@ export function hostPr(number: number, overrides: Partial<HostPullRequest> = {})
 
 /** One Git host in memory. Counts what reaches it and fails on cue. */
 export class FakeGitHost implements GitHostAdapter, GitHosts {
+  /** Pull requests of the imported Repo, `acme/orders-api`. */
   prs: HostPullRequest[] = [];
+  /** Pull requests of repositories that are not imported. */
+  elsewhere: OwnedPullRequest[] = [];
+  /** The owners the host says the operator can read. */
+  ownerNames: string[] = [];
+  readonly ownerReads: string[] = [];
   files: PrFile[] = [{ name: 'src/app.ts', additions: 3, deletions: 1, lines: [{ sign: '+', text: 'const a = 1;' }] }];
   comments = new Map<number, HostComment[]>();
   readonly calls = { list: 0, get: 0 };
@@ -95,6 +102,21 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
     this.calls.list++;
     this.check();
     return this.prs.filter((pr) => pr.state === state).map((pr) => this.counted(pr));
+  }
+
+  async owners(): Promise<string[]> {
+    this.check();
+    return this.ownerNames;
+  }
+
+  async listOwner(owner: string, state: PrState): Promise<OwnedPullRequest[]> {
+    this.calls.list++;
+    this.ownerReads.push(owner);
+    this.check();
+    const own = owner === 'acme' ? this.prs.map((pr) => ({ ...this.counted(pr), slug: 'acme/orders-api' })) : [];
+    return [...own, ...this.elsewhere.filter((pr) => pr.slug.startsWith(`${owner}/`))].filter(
+      (pr) => pr.state === state,
+    );
   }
 
   async get(_slug: string, number: number) {

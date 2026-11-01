@@ -1,6 +1,8 @@
 import {
   AlertStatus,
   FIX_STAGES,
+  type Fix,
+  FixStage,
   FixStatus,
   type Report,
   ReportKind,
@@ -9,19 +11,24 @@ import {
   type Sample,
 } from '@ops-console/shared';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Dropdown } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
+import { Markdown } from '../components/ui/markdown';
 import {
   useAlert,
   useAlertEvents,
   useAlertReports,
   useConnectors,
+  usePatchRoute,
   useRetryFix,
   useReviewAlert,
   useUndoDismissal,
   useVerifyAlert,
 } from '../lib/queries';
+import { CodeSource } from './repo-link';
+import { SeverityBadge } from './severity';
 
 function SampleList({ samples }: { samples: Sample[] }) {
   const [asJson, setAsJson] = useState(false);
@@ -63,8 +70,9 @@ function ReportPanel({ alertId, report }: { alertId: string; report: Report }) {
   const shown = versions.find((row) => row.id === picked) ?? report;
   return (
     <section aria-label="Report" className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
-      <header className="flex items-center gap-2 border-b border-divider bg-surface px-3 py-2 text-xs">
+      <header className="flex items-center gap-2 border-b border-divider bg-surface px-4 py-2 text-xs">
         <strong>Report v{shown.version}</strong>
+        {shown.kind && <span className="rounded-full bg-neutral-200 px-2 py-px">{shown.kind}</span>}
         {versions.length > 1 && (
           <Dropdown
             label="Report version"
@@ -80,47 +88,133 @@ function ReportPanel({ alertId, report }: { alertId: string; report: Report }) {
         )}
         <span className="ml-auto text-neutral-700">{shown.status}</span>
       </header>
-      <div className="flex flex-col gap-3 px-3 py-2.5 text-[13px]">
-        {shown.steps.length > 0 && (
-          <ol className="m-0 flex list-none flex-col gap-0.5 p-0 font-mono text-xs">
-            {shown.steps.map((step, index) => (
-              // Steps are an append-only list: the index is their identity.
-              // biome-ignore lint/suspicious/noArrayIndexKey: append-only list
-              <li key={index} className={step.kind === 'error' ? 'text-accent-700' : ''}>
-                {step.text}
-              </li>
-            ))}
-          </ol>
+      <div className="flex flex-col gap-3 px-4 py-3 text-[13px]">
+        {shown.status === RunStatus.Running && (
+          <>
+            <p className="m-0 font-bold">The agent is reading the code…</p>
+            <Steps report={shown} />
+          </>
         )}
-        {shown.status === RunStatus.Running && <p className="m-0">The agent is verifying…</p>}
         {shown.status === RunStatus.Failed && (
-          <p role="alert" className="m-0 text-accent-700">
-            The Verification did not finish{shown.error_message ? ` (${shown.error_message})` : ''}. Verify again.
-          </p>
+          <>
+            <p role="alert" className="m-0 text-accent-700">
+              The Verification did not finish{shown.error_message ? ` (${shown.error_message})` : ''}. Verify again.
+            </p>
+            <Steps report={shown} />
+          </>
         )}
-        {shown.root_cause && (
-          <div>
-            <div className="text-[10px] tracking-[0.08em] text-neutral-700 uppercase">Root cause</div>
-            <p className="m-0">{shown.root_cause}</p>
-          </div>
+        {shown.status === RunStatus.Ready && (
+          <>
+            {shown.markdown ? (
+              <Markdown source={shown.markdown} />
+            ) : (
+              <Markdown
+                source={`## Root cause\n\n${shown.root_cause ?? ''}\n\n## Proposed fix\n\n${shown.proposed_fix ?? ''}`}
+              />
+            )}
+            {shown.diff && (
+              <details>
+                <summary className="cursor-pointer text-xs text-neutral-700">Proposed diff</summary>
+                <pre className="m-0 mt-1.5 overflow-auto rounded-lg bg-neutral-900 p-3 font-mono text-xs text-neutral-100">
+                  {shown.diff.map((line) => `${line.sign}${line.text}`).join('\n')}
+                </pre>
+              </details>
+            )}
+            {shown.replay && (
+              <details>
+                <summary className="cursor-pointer text-xs text-neutral-700">Replay</summary>
+                <pre className="m-0 mt-1.5 overflow-auto font-mono text-xs">{shown.replay.request}</pre>
+                <pre className="m-0 overflow-auto font-mono text-xs text-neutral-700">{shown.replay.response}</pre>
+              </details>
+            )}
+            {shown.steps.length > 0 && (
+              <details>
+                <summary className="cursor-pointer text-xs text-neutral-700">
+                  Agent steps ({shown.steps.length})
+                </summary>
+                <div className="mt-1.5">
+                  <Steps report={shown} />
+                </div>
+              </details>
+            )}
+            {shown.markdown_path && (
+              <div className="font-mono text-[11px] break-all text-neutral-700">Saved to {shown.markdown_path}</div>
+            )}
+          </>
         )}
-        {shown.proposed_fix && (
-          <div>
-            <div className="text-[10px] tracking-[0.08em] text-neutral-700 uppercase">Proposed fix</div>
-            <p className="m-0">{shown.proposed_fix}</p>
-          </div>
+      </div>
+    </section>
+  );
+}
+
+function Steps({ report }: { report: Report }) {
+  if (report.steps.length === 0) return null;
+  return (
+    <ol className="m-0 flex max-h-72 list-none flex-col gap-0.5 overflow-auto p-0 font-mono text-xs">
+      {report.steps.map((step, index) => (
+        // Steps are an append-only list: the index is their identity.
+        // biome-ignore lint/suspicious/noArrayIndexKey: append-only list
+        <li key={index} className={step.kind === 'error' ? 'text-accent-700' : ''}>
+          {step.text}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** The Fix's stages as they run; the ticket shows as skipped when Jira was not connected. */
+function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: () => void; retrying: boolean }) {
+  const at = FIX_STAGES.indexOf(fix.stage);
+  return (
+    <section aria-label="Fix" className="rounded-xl border border-line bg-card px-4 py-3.5 shadow-sm">
+      <div className="mb-2 flex items-center gap-2 text-[13px]">
+        <strong>Fix</strong>
+        <span className="text-xs text-neutral-700">{fix.status}</span>
+        {fix.session_id && (
+          <Link to={`/workspace?session=${fix.session_id}`} className="ml-auto text-xs">
+            Open the Session →
+          </Link>
         )}
-        {shown.diff && (
-          <pre className="m-0 overflow-auto bg-neutral-900 p-3 font-mono text-xs text-neutral-100">
-            {shown.diff.map((line) => `${line.sign}${line.text}`).join('\n')}
-          </pre>
+      </div>
+      <ol className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs">
+        {FIX_STAGES.map((stage, index) => {
+          const done = fix.status === FixStatus.Done || index < at;
+          const failed = fix.status === FixStatus.Failed && index === at;
+          const skipped = stage === FixStage.Ticket && done && fix.jira_key === null;
+          return (
+            <li
+              key={stage}
+              className={
+                failed ? 'font-bold text-accent-700' : done ? '' : index === at ? 'font-bold' : 'text-neutral-700'
+              }
+            >
+              {done ? '✓' : failed ? '✕' : index === at ? '◐' : '·'} {stage}
+              {skipped && <span className="text-neutral-700"> (no Jira)</span>}
+            </li>
+          );
+        })}
+      </ol>
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+        {fix.branch && <span className="rounded-full bg-neutral-200 px-2 py-0.5 font-mono">{fix.branch}</span>}
+        {fix.jira_key && (
+          <a href={fix.jira_url ?? undefined} target="_blank" rel="noreferrer">
+            {fix.jira_key}
+          </a>
         )}
-        {shown.replay && (
-          <div>
-            <div className="text-[10px] tracking-[0.08em] text-neutral-700 uppercase">Replay</div>
-            <pre className="m-0 overflow-auto font-mono text-xs">{shown.replay.request}</pre>
-            <pre className="m-0 overflow-auto font-mono text-xs text-neutral-700">{shown.replay.response}</pre>
-          </div>
+        {fix.pr_url && (
+          <a href={fix.pr_url} target="_blank" rel="noreferrer" className="font-bold">
+            PR #{fix.pr_number} →
+          </a>
+        )}
+        {fix.status === FixStatus.Failed && (
+          <>
+            <span role="alert" className="text-accent-700">
+              {fix.error_message}
+            </span>
+            <Button className="px-2.5 py-1 text-xs" disabled={retrying} onClick={onRetry}>
+              Retry from {fix.stage}
+            </Button>
+          </>
         )}
       </div>
     </section>
@@ -135,6 +229,7 @@ export function AlertView({ id }: { id: string }) {
   const review = useReviewAlert(id);
   const undo = useUndoDismissal(id);
   const retry = useRetryFix(alert.data?.fix?.id ?? '');
+  const patchRoute = usePatchRoute();
   if (alert.isPending) return <Empty>Reading the Alert…</Empty>;
   if (alert.isError) return <Empty>Could not read the Alert: {alert.error.message}</Empty>;
   const data = alert.data;
@@ -142,14 +237,17 @@ export function AlertView({ id }: { id: string }) {
   const jiraUp = jira?.status === 'ok';
   const report = data.latest_report;
   const canVerify = data.status === AlertStatus.Open || data.status === AlertStatus.Verified;
-  const error = verify.error ?? review.error ?? undo.error ?? retry.error;
+  const hasCode = data.service.repo_id !== null || data.service.repo_url !== null;
+  const error = verify.error ?? review.error ?? undo.error ?? retry.error ?? patchRoute.error;
+  const kind = report?.kind ?? ReportKind.Bug;
+  const other = kind === ReportKind.Bug ? ReportKind.Improvement : ReportKind.Bug;
 
   return (
     <article className="flex flex-col gap-4 px-6 py-5">
       <header>
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="rounded-full bg-text px-2 py-px font-bold text-bg">{data.severity.toUpperCase()}</span>
-          <span className="text-neutral-700">{data.status}</span>
+          <SeverityBadge severity={data.severity} />
+          <span className="text-neutral-700">{data.status.replace('_', ' ')}</span>
           {data.regression_count > 0 && (
             <span className="rounded-full bg-accent-100 px-2 py-px text-accent-700">
               regression ×{data.regression_count}
@@ -159,12 +257,30 @@ export function AlertView({ id }: { id: string }) {
             <span className="text-neutral-700">waiting since {new Date(data.waiting_since).toLocaleString()}</span>
           )}
         </div>
-        <h1 className="m-0 mt-1 text-lg">{data.title}</h1>
+        <h1 className="m-0 mt-1 text-lg break-words">{data.title}</h1>
+        <div className="flex flex-wrap items-center gap-x-2 font-mono text-xs text-neutral-700">
+          <span className="font-bold text-text">{data.service.name}</span>
+          <span>{data.service.env}</span>
+          <span>·</span>
+          <span>{data.route ? `${data.route.method} ${data.route.path}` : 'no HTTP route'}</span>
+          {data.route && (
+            <button
+              type="button"
+              className="cursor-pointer border-0 bg-transparent p-0 font-sans text-[11px] text-accent hover:underline"
+              disabled={patchRoute.isPending}
+              onClick={() => data.route && patchRoute.mutate({ id: data.route.id, ignored: true })}
+            >
+              Ignore this Route
+            </button>
+          )}
+        </div>
         <div className="font-mono text-xs text-neutral-700">
           {data.event_count} events · first {new Date(data.first_seen_at).toLocaleString()} · last{' '}
           {new Date(data.last_seen_at).toLocaleString()}
         </div>
-        <div className="mt-1 font-mono text-xs break-all">{data.log_line}</div>
+        <pre className="m-0 mt-2 rounded-lg bg-neutral-900 p-3 font-mono text-xs whitespace-pre-wrap break-all text-neutral-100">
+          {data.log_line}
+        </pre>
         <div className="mt-1 font-mono text-[11px] break-all text-neutral-700">{data.datadog_query}</div>
       </header>
 
@@ -174,13 +290,17 @@ export function AlertView({ id }: { id: string }) {
         </div>
       )}
 
+      <CodeSource key={`${data.service.id}:${data.service.repo_url ?? ''}`} service={data.service} />
+
       {canVerify && (
         <div className="flex flex-wrap items-center gap-3">
-          <Button variant="primary" disabled={verify.isPending} onClick={() => verify.mutate()}>
+          <Button variant="primary" disabled={verify.isPending || !hasCode} onClick={() => verify.mutate()}>
             {data.status === AlertStatus.Verified ? 'Verify again' : 'Verify with agent'}
           </Button>
           <span className="text-xs text-neutral-700">
-            Maps the log to the local code and replays the request against the Repo running locally.
+            {hasCode
+              ? 'The agent traces the log through the code end to end and writes a Report: the issue and how to fix it.'
+              : 'Give the code first: a local Repo or a Git URL.'}
           </span>
         </div>
       )}
@@ -188,34 +308,40 @@ export function AlertView({ id }: { id: string }) {
       {report && <ReportPanel alertId={id} report={report} />}
 
       {data.status === AlertStatus.Verified && report?.kind && (
-        <section aria-label="Review" className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="primary"
-            disabled={!jiraUp || review.isPending}
-            onClick={() => review.mutate({ decision: ReviewDecision.Confirmed, kind: ReportKind.Bug })}
-          >
-            Confirm · create Jira bug
-          </Button>
-          <Button
-            disabled={!jiraUp || review.isPending}
-            onClick={() => review.mutate({ decision: ReviewDecision.Confirmed, kind: ReportKind.Improvement })}
-          >
-            Confirm · create Jira improvement
-          </Button>
-          <Button
-            variant="ghost"
-            disabled={review.isPending}
-            onClick={() => review.mutate({ decision: ReviewDecision.Dismissed, kind: null })}
-          >
-            Dismiss
-          </Button>
-          {!jiraUp && <span className="text-xs text-accent-700">Connect Jira in Integrations to confirm.</span>}
+        <section aria-label="Review" className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="primary"
+              disabled={review.isPending}
+              onClick={() => review.mutate({ decision: ReviewDecision.Confirmed, kind })}
+            >
+              Fix with agent
+            </Button>
+            <Button
+              disabled={review.isPending}
+              onClick={() => review.mutate({ decision: ReviewDecision.Confirmed, kind: other })}
+            >
+              Fix as {other}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={review.isPending}
+              onClick={() => review.mutate({ decision: ReviewDecision.Dismissed, kind: null })}
+            >
+              Dismiss
+            </Button>
+          </div>
+          <span className="text-xs text-neutral-700">
+            {data.service.repo_id ? 'In a Session on the local Repo' : 'In an anonymous Session with a clone'}:{' '}
+            {jiraUp ? 'a Jira ticket, then ' : ''}a branch, the code change, tests, a push and a pull request.
+            {jiraUp ? '' : ' Jira is not connected, so the branch is fix/<name>.'}
+          </span>
         </section>
       )}
 
       {data.status === AlertStatus.Dismissed && (
         <div className="rounded-lg border border-dashed border-neutral-400 px-3.5 py-3 text-[13px] text-neutral-700">
-          Dismissed. The Route stays on the Report and is checked again at the next Scan.{' '}
+          Dismissed. The log stays on the Report and is checked again at the next Scan.{' '}
           <Button
             variant="ghost"
             className="px-2 py-0.5 text-xs"
@@ -227,50 +353,7 @@ export function AlertView({ id }: { id: string }) {
         </div>
       )}
 
-      {data.fix && (
-        <section aria-label="Fix" className="rounded-xl border border-line bg-card px-4 py-3.5 shadow-sm">
-          <ol className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs">
-            {FIX_STAGES.map((stage) => {
-              const at = FIX_STAGES.indexOf(data.fix?.stage ?? stage);
-              const index = FIX_STAGES.indexOf(stage);
-              const done = data.fix?.status === FixStatus.Done || index < at;
-              const failed = data.fix?.status === FixStatus.Failed && index === at;
-              return (
-                <li
-                  key={stage}
-                  className={
-                    failed ? 'font-bold text-accent-700' : done ? '' : index === at ? 'font-bold' : 'text-neutral-700'
-                  }
-                >
-                  {done ? '✓' : failed ? '✕' : index === at ? '◐' : '·'} {stage}
-                </li>
-              );
-            })}
-          </ol>
-          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
-            {data.fix.jira_key && (
-              <a href={data.fix.jira_url ?? undefined} target="_blank" rel="noreferrer">
-                {data.fix.jira_key}
-              </a>
-            )}
-            {data.fix.pr_url && (
-              <a href={data.fix.pr_url} target="_blank" rel="noreferrer">
-                PR #{data.fix.pr_number}
-              </a>
-            )}
-            {data.fix.status === FixStatus.Failed && (
-              <>
-                <span role="alert" className="text-accent-700">
-                  {data.fix.error_message}
-                </span>
-                <Button className="px-2.5 py-1 text-xs" disabled={retry.isPending} onClick={() => retry.mutate()}>
-                  Retry from {data.fix.stage}
-                </Button>
-              </>
-            )}
-          </div>
-        </section>
-      )}
+      {data.fix && <FixProgress fix={data.fix} retrying={retry.isPending} onRetry={() => retry.mutate()} />}
 
       <SampleList samples={data.samples} />
 

@@ -61,6 +61,20 @@ export class Git {
       });
   }
 
+  /** Clones `url` into `dir`, which must be empty or missing. Throws with git's first line when it refuses. */
+  async clone(url: string, dir: string): Promise<void> {
+    try {
+      await run(this.bin, ['clone', '--quiet', url, dir], {
+        maxBuffer: 10 * 1024 * 1024,
+        // No prompt for a password: a clone the operator's git cannot do alone fails instead of hanging.
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      });
+    } catch (error) {
+      const { stderr } = error as { stderr?: unknown };
+      throw new GitFailed(typeof stderr === 'string' ? (stderr.trim().split('\n').at(-1) ?? '') : '');
+    }
+  }
+
   /** Puts uncommitted changes, untracked files included, on the stash. Throws when git refuses. */
   async stash(dir: string, message: string): Promise<void> {
     await this.must(dir, ['stash', 'push', '--include-untracked', '-m', message]);
@@ -89,6 +103,13 @@ export class Git {
       return null;
     }
   }
+}
+
+/** A URL git can clone: `github.com/acme/orders` gains `https://` and `.git`; a full or SSH URL is kept. */
+export function cloneUrl(url: string): string {
+  const trimmed = url.trim().replace(/\/+$/, '');
+  if (/^(?:[a-z+]+:\/\/|[^@/\s]+@)/i.test(trimmed)) return trimmed;
+  return `https://${trimmed.replace(/\.git$/, '')}.git`;
 }
 
 /** The host and `owner/name` an `origin` URL points at; any other host is `local`. */

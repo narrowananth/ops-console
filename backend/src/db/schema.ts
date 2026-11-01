@@ -29,6 +29,7 @@ import {
   type RunStatus,
   type ScanStatus,
   type ScanTrigger,
+  type ScanWindow,
   type SessionKind,
   SessionState,
   type Severity,
@@ -291,6 +292,8 @@ export const services = sqliteTable(
     /** Datadog env tag. */
     env: text().notNull(),
     repoId: text('repo_id').references(() => repos.id, { onDelete: 'set null' }),
+    /** The Git host URL of the code: from the logs' `git.repository_url` tag, or set by the operator. */
+    repoUrl: text('repo_url'),
     /** Null: the Datadog Connector's default. */
     checkInterval: text('check_interval').$type<CheckInterval>(),
     createdAt: text('created_at').notNull().default(nowIso),
@@ -324,7 +327,11 @@ export const scans = sqliteTable(
     triggeredBy: text('triggered_by').$type<ScanTrigger>().notNull(),
     /** Null: every Service. */
     serviceId: text('service_id').references(() => services.id, { onDelete: 'cascade' }),
-    windowSize: text('window_size').$type<CheckInterval>().notNull(),
+    windowSize: text('window_size').$type<ScanWindow>().notNull(),
+    /** JSON array of the Datadog environments read. */
+    envs: text().notNull().default('[]'),
+    /** JSON array of the Datadog Service names read; null for every Service with error or warn logs. */
+    services: text(),
     status: text()
       .$type<ScanStatus>()
       .notNull()
@@ -385,6 +392,8 @@ export const alerts = sqliteTable(
     firstSeenAt: text('first_seen_at').notNull(),
     lastSeenAt: text('last_seen_at').notNull(),
     resolvedAt: text('resolved_at'),
+    /** The latest Scan that covered the Alert's Service and did not see it: a healthy sighting. */
+    clearedAt: text('cleared_at'),
     regressionCount: integer('regression_count').notNull().default(0),
     samples: text().notNull().default('[]'),
     datadogQuery: text('datadog_query').notNull(),

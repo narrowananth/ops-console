@@ -1,0 +1,1 @@
+ALTER TABLE `scans` ADD `services` text;

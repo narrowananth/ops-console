@@ -35,6 +35,9 @@ export interface ConnectorTools {
   githubToken(): Promise<string | null>;
   gitlabUser(host: string): Promise<string | null>;
   gitlabLogin(host: string, signal: AbortSignal, onPrompt: (prompt: SignInPrompt) => void): Promise<void>;
+  /** The Bitbucket Cloud nickname `bkt` is signed in as, or `null` when it is signed out. */
+  bitbucketUser(): Promise<string | null>;
+  bitbucketLogin(signal: AbortSignal, onPrompt: (prompt: SignInPrompt) => void): Promise<void>;
   /** Whether a command is on the PATH. */
   installed(command: string): Promise<boolean>;
   /** `brew install <formula>`. */
@@ -43,11 +46,11 @@ export interface ConnectorTools {
 
 const datadogStatusSchema = z.object({ authenticated: z.boolean(), org: z.string().nullish() }).loose();
 
-export type ToolBins = { pup: string; gh: string; glab: string };
+export type ToolBins = { pup: string; gh: string; glab: string; bkt: string };
 
 /** Errors name the tool only: output may hold tokens. */
 export class CliConnectorTools implements ConnectorTools {
-  constructor(private readonly bins: ToolBins = { pup: 'pup', gh: 'gh', glab: 'glab' }) {}
+  constructor(private readonly bins: ToolBins = { pup: 'pup', gh: 'gh', glab: 'glab', bkt: 'bkt' }) {}
 
   async datadogStatus(): Promise<{ signedIn: boolean; org: string | null }> {
     const out = await this.exec(this.bins.pup, ['auth', 'status'], 'pup auth status', [0, 1]);
@@ -131,6 +134,27 @@ export class CliConnectorTools implements ConnectorTools {
         registries,
       ],
       'glab auth login',
+      [0],
+      { signal, login: true, onPrompt },
+    );
+  }
+
+  async bitbucketUser(): Promise<string | null> {
+    try {
+      const { stdout } = await run(this.bins.bkt, ['api', '/user'], { timeout: 60_000 });
+      const user = z.object({ nickname: z.string() }).safeParse(JSON.parse(stdout));
+      return user.success ? user.data.nickname : null;
+    } catch (error) {
+      if (typeof (error as { code?: unknown }).code === 'number') return null;
+      throw new ApiError(502, ErrorCode.UpstreamFailed, '`bkt api /user` failed');
+    }
+  }
+
+  async bitbucketLogin(signal: AbortSignal, onPrompt: (prompt: SignInPrompt) => void): Promise<void> {
+    await this.exec(
+      this.bins.bkt,
+      ['auth', 'login', 'https://bitbucket.org', '--kind', 'cloud', '--web'],
+      'bkt auth login',
       [0],
       { signal, login: true, onPrompt },
     );

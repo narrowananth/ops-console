@@ -4,6 +4,7 @@ import { BrandIcon, CONNECTION_BRAND } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
 import { useConnections } from '../lib/queries';
+import { ascending } from '../lib/sort';
 import { statusGlyph } from '../mcp/status';
 import { ConnectionForm } from './connection-form';
 import { hostOf, TYPE_BLURBS, TYPE_LABELS } from './fields';
@@ -72,7 +73,7 @@ export function DevToolsTab() {
           aria-label="Connection types"
           className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3 p-5"
         >
-          {Object.values(ConnectionType).map((type) => (
+          {ascending(Object.values(ConnectionType), (type) => TYPE_LABELS[type]).map((type) => (
             <li key={type}>
               <button
                 type="button"
@@ -113,7 +114,7 @@ export function DevToolsTab() {
         <Empty>No connections yet. Ask the Setup agent, or pick a type.</Empty>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-0.5 p-1.5">
-          {data.map((connection) => (
+          {ascending(data, (connection) => connection.name).map((connection) => (
             <Row
               key={connection.id}
               connection={connection}

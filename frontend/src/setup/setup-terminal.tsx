@@ -121,7 +121,9 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
             aria-hidden
             className={`size-2 flex-none rounded-full ${ended ? 'bg-neutral-400' : 'bg-ok shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-ok)_20%,transparent)]'}`}
           />
-          <strong className="text-[13px] whitespace-nowrap">{ended ? 'Setup agent ended' : 'Setup agent running'}</strong>
+          <strong className="text-[13px] whitespace-nowrap">
+            {ended ? 'Setup agent ended' : 'Setup agent running'}
+          </strong>
           <span className="truncate text-xs text-neutral-700">
             When Claude needs a password it asks in a masked field.
           </span>

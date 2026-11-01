@@ -1,5 +1,4 @@
-import { chmod, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
+import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Inject, Injectable, type OnModuleDestroy } from '@nestjs/common';
 import {
@@ -31,6 +30,7 @@ import { ConnectorsService } from '../connectors/connectors.service';
 import { MCP_CONFIG, type McpConfig, McpServersService } from '../mcp/mcp-servers.service';
 import { SettingsService } from '../settings/settings.service';
 import { fetchUrl, LOCAL_KEYCHAIN, type LocalKeychain, listLocalDir, readLocalFile } from './local-sources';
+import { loadPty } from './pty';
 import { maskLine, PLACEHOLDER } from './secret-masking';
 import { SETUP_AGENT, SETUP_SERVER, SETUP_TOOLS, writeSetupFiles } from './setup-agent';
 
@@ -360,21 +360,6 @@ export class TerminalsService implements OnModuleDestroy {
     if (!terminal) throw new ApiError(404, ErrorCode.NotFound, 'no such terminal');
     return terminal;
   }
-}
-
-type NodePty = typeof import('node-pty');
-let loaded: NodePty | undefined;
-
-/** node-pty ships its macOS helper without the execute bit; spawning fails until it has it. */
-async function loadPty(): Promise<NodePty> {
-  if (loaded) return loaded;
-  const require = createRequire(import.meta.url);
-  const root = path.dirname(require.resolve('node-pty/package.json'));
-  for (const arch of ['darwin-arm64', 'darwin-x64']) {
-    await chmod(path.join(root, 'prebuilds', arch, 'spawn-helper'), 0o755).catch(() => {});
-  }
-  loaded = require('node-pty') as NodePty;
-  return loaded;
 }
 
 /**

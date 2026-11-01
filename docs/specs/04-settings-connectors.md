@@ -11,18 +11,19 @@ Monitor needs Datadog to scan, the fix flow needs Jira and a Git host, and revie
 
 1. Listing Connectors returns all eight in a fixed order, each with how it is reached (`via`), status, account label and config. The first start seeds every Connector with status `off`.
 2. Connect takes no body. It starts the provider's own browser sign-in and answers 202 at once. Nothing is typed in the console before Connect.
-3. Connecting a Connector that rides an MCP Server (Jira, Bitbucket, Slack, Sentry, Shopify) registers that server in every account if it is missing (`03-settings-mcp-servers`), then runs its Authenticate; Shopify's Dev MCP needs no sign-in. Jira and Bitbucket share the `atlassian` server. The Connector's status follows the server's.
+3. Connecting a Connector that rides an MCP Server (Jira, Bitbucket, Slack, Sentry, Shopify) registers that server in every account if it is missing (`03-settings-mcp-servers`), turns it on if it was turned off, then runs its Authenticate; Shopify's Dev MCP needs no sign-in, and its Connect reads the server alone in the active account. A server registered by this Connect holds no sign-in yet, so its browser sign-in opens in the active account without a Probe first, within a second of the click. Jira and Bitbucket share the `atlassian` server. The Connector's status follows the server's, except Bitbucket's: after the server, Bitbucket signs `bkt` in with `bkt auth login --kind cloud --web` unless it already is, and its status follows `bkt api /user`. Its `login` is the Bitbucket nickname.
 4. Connecting Datadog, GitHub or GitLab runs the CLI's own browser sign-in (`pup auth login`, `gh auth login --web`, `glab auth login --web`). Connecting GitHub first installs `gh` and `github-mcp-server` from Homebrew when they are not on the PATH, and is refused with "install Homebrew from brew.sh" when Homebrew is missing too. After the sign-in it registers the `github` MCP Server (`github-mcp-server stdio`) with the `gh` token (`gh auth token`) as `GITHUB_PERSONAL_ACCESS_TOKEN`, kept in the Keychain and passed through the launcher, so it never reaches Claude Code's config. Connecting Datadog also registers the `datadog-pup` MCP Server (`pup mcp serve`) so the agent can query it, when the installed `pup` has an `mcp` command; `pup` 2.3.5 has none, and then nothing is registered. Connecting GitLab installs `glab` the same way, and skips the sign-in when `glab` is already signed in to the host, because `glab` asks to confirm a second sign-in.
 5. While a sign-in waits on the operator, the Connector's `sign_in` holds the page the CLI printed and, for GitHub, the one-time code (`gh` prints the page instead of opening it when no terminal is attached). Each change sends `connection.checked`; `sign_in` is `null` once the sign-in ends.
-6. After a sign-in, the console runs a check. A check records status, account label and, for a Git host, the signed-in `login`. `07-workspace` uses `login` to tell the operator's own pull requests apart.
+6. When the provider's sign-in ends, the console runs a check and records it before any later step, such as registering GitHub's or Datadog's MCP Server, so the drawer stops waiting within a second of the operator approving. A later step that fails records `auth` with its reason. GitHub's server registers again only when the `gh` token changed. A check records status, account label and, for a Git host, the signed-in `login`. `07-workspace` uses `login` to tell the operator's own pull requests apart.
 7. A sign-in that fails or is cancelled leaves the status `auth` with the reason in `status_detail`.
 8. Saving config validates it per Connector. A bad value (a Datadog threshold that is not a number, a scan time that is not `HH:MM`) returns `validation_failed` naming the fields and saves nothing. Blank fields keep their value.
 9. Disconnect clears what the console stored and sets the Connector `off`:
    - For an MCP-backed Connector it removes the server (`03-settings-mcp-servers` Behavior 12), unless another connected Connector rides it.
    - It clears `login`.
+   - It stops a sign-in still waiting on the browser, `claude mcp login` included, so a second Connect starts clean.
 10. Disconnect does not sign `pup`, `gh` or `glab` out. The operator's own terminal shares that login. The console stops calling the CLI for this Connector.
 11. An action that needs a Connector whose status is not `ok` is refused with `connector_not_connected`, naming the Connector. Nothing is started.
-12. Reading the list checks again, in the background, every connected Connector whose last check is older than 10 minutes.
+12. Reading the list checks again, in the background, every connected Connector whose last check is older than 10 minutes. A Connector reached only through its MCP Server (Jira, Slack, Sentry, Shopify) takes its server's status from the kept Probes on each read, so it moves when the server does; the stored reason stays while the status is unchanged. Its check reads that one server in the active account.
 13. Every check and sign-in sends `connection.checked` with target `connector`.
 14. No response, event or log carries a token.
 
@@ -41,7 +42,7 @@ Monitor needs Datadog to scan, the fix flow needs Jira and a Git host, and revie
   | `bitbucket` | Atlassian MCP Server; git over SSH | OAuth through Claude Code |
   | `shopify` | Shopify Dev MCP Server (`npx -y @shopify/dev-mcp@latest`) | none |
 
-- **Fixed reads**: the console calls `pup`, `gh` and `glab` directly for checks, Scans and pull request lists, with no model turn. Bitbucket has none: its OAuth token stays with Claude Code (ADR 0005). Ticket and message work runs in agent sessions through the MCP Servers.
+- **Fixed reads**: the console calls `pup`, `gh`, `glab` and `bkt` directly for checks, Scans and pull request lists, with no model turn. Atlassian's OAuth token stays with Claude Code; `bkt` keeps its own in the Keychain (ADR 0005). Ticket and message work runs in agent sessions through the MCP Servers.
 - **Order**: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify.
 - **Sentry**: kept as a Connector, as the architecture doc says, though the design shows "No Sentry connector yet".
 - **Reports folder**: defaults to `reports` inside the data directory (`01-base-daemon-setup`), not the design's `~/.ops-console/reports`.

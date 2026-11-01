@@ -39,7 +39,8 @@ a mode that asks.
 ### Monitor
 
 **Service**:
-A deployed app the console watches in Datadog, linked to one local Repo.
+A deployed app the console watches in Datadog. Its code is a local Repo, or a Git URL on its Git host when there
+is no local copy.
 _Avoid_: app, microservice
 
 **Route**:
@@ -47,11 +48,17 @@ One HTTP method and path of a Service (`POST /fb/webhook`), the unit a Scan repo
 _Avoid_: endpoint, API
 
 **Scan**:
-A scheduled pass over every Service's Routes in Datadog that marks each one failing or healthy.
+A read of the error and warn logs in Datadog over a time window and a set of envs, for every Service or the ones the
+operator picked, on the schedule or when the operator asks. Logs with no `env` tag count as the env `no env`. It groups the logs into Alerts and marks Routes failing or healthy.
 _Avoid_: check, sweep
 
 **Fingerprint**:
-The identity of an Alert: Service, Route and the error signature with ids, numbers, timestamps and addresses masked. Two failures with the same Fingerprint belong to one Alert.
+The identity of an Alert: Service, Route (none for a log with no request) and the error signature with ids, numbers, timestamps and addresses masked. Two failures with the same Fingerprint belong to one Alert.
+
+**Severity**:
+An Alert's tier. High: one 10-minute bucket reaches the rapid threshold. Medium: errors per hour reach the failing
+threshold with error-level logs. Low: anything else.
+_Avoid_: priority, sev2
 
 **Regression**:
 A resolved or dismissed Alert that fails again after a healthy Scan. It reopens the same Alert.
@@ -60,12 +67,13 @@ A resolved or dismissed Alert that fails again after a healthy Scan. It reopens 
 One Datadog log event kept on an Alert, with secret values and request body values redacted.
 
 **Alert**:
-A failing Route raised by a Scan, Datadog, Sentry or a Slack message, waiting to be verified.
+One kind of failure in a Service's logs, raised by a Scan, Datadog, Sentry or a Slack message, waiting to be
+verified.
 _Avoid_: incident, issue
 
 **Verification**:
-The agent's attempt to reproduce an Alert locally: map the log to code, replay the request against
-the Repo running locally, and cross-check Connections.
+The agent's attempt to explain an Alert from the code: follow the log through the code end to end, replay the
+request locally when it can, cross-check Connections, and write a Report on the issue and its fix.
 _Avoid_: investigation, triage
 
 **Report**:
@@ -77,10 +85,11 @@ The operator's decision on a Report: confirm as a bug or improvement, or dismiss
 _Avoid_: approval
 
 **Ticket**:
-The Jira issue the agent creates when the operator confirms a Report. Its key starts the fix branch name.
+The Jira issue the agent creates when the operator confirms a Report while Jira is connected. Its key starts the fix
+branch name.
 
 **Fix**:
-The work that follows a confirmed Review: ticket, branch, code change, tests and PR, run by the agent in one Session.
+The work that follows a confirmed Review: ticket (when Jira is connected), branch, code change, tests, push and PR, run by the agent in one Session.
 
 ### Workspace
 
@@ -92,9 +101,14 @@ The service holding a Repo's remote: GitHub, GitLab or Bitbucket.
 
 **Session**:
 One conversation between the operator and the agent. It runs in one Repo on one branch, except a
-dev-tools Session, which has no Repo. A pull request has its own Session for the agent's replies,
-with no composer.
+dev-tools Session and an anonymous Session, which have no Repo. A pull request has its own Session for the agent's
+replies, with no composer.
 _Avoid_: chat, thread
+
+**Anonymous Session**:
+A Session with no imported Repo. It works in a folder of its own in the data directory, and the agent may clone a
+repository into it. A Verification or Fix for a Service with no local Repo runs in one that holds a clone of the
+Service's Git URL.
 
 **Agent Review**:
 The agent's written review of a pull request: findings, a PROD readiness checklist and a verdict,

@@ -430,6 +430,34 @@ describe('pull requests', () => {
     expect(rows[0].actor).toBe('operator');
   });
 
+  it("lists every repository's pull requests under the host's owners, linking the imported Repo", async () => {
+    const ctx = await start();
+    ctx.host.ownerNames = ['octo-operator', 'acme'];
+    ctx.host.prs = [hostPr(1)];
+    ctx.host.elsewhere = [
+      {
+        ...hostPr(5, { author: 'octo-operator', url: 'https://github.com/acme/billing/pull/5' }),
+        slug: 'acme/billing',
+      },
+      { ...hostPr(6), slug: 'octo-operator/notes' },
+    ];
+    const res = await ctx.http.get('/pull-requests');
+    const rows = res.body.data.map((pr: { repo_id: string | null; slug: string; number: number; host: string }) => ({
+      repo: pr.repo_id,
+      slug: pr.slug,
+      number: pr.number,
+      host: pr.host,
+    }));
+    expect(rows).toEqual([
+      { repo: null, slug: 'octo-operator/notes', number: 6, host: 'github' },
+      { repo: null, slug: 'acme/billing', number: 5, host: 'github' },
+      { repo: ctx.repoId, slug: 'acme/orders-api', number: 1, host: 'github' },
+    ]);
+    expect(ctx.host.ownerReads).toEqual(['octo-operator', 'acme']);
+    const mine = await ctx.http.get('/pull-requests?mine=true');
+    expect(mine.body.data.map((pr: { number: number }) => pr.number)).toEqual([5]);
+  });
+
   it('has no pull requests for a Repo without a Git host', async () => {
     const ctx = await start();
     const local = await makeRepo('scratch', 'ssh://git.example.com/scratch.git');

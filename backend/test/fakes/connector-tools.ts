@@ -8,6 +8,7 @@ export class FakeConnectorTools implements ConnectorTools {
   datadogMcp = true;
   github: string | null = null;
   gitlab: string | null = null;
+  bitbucket: string | null = null;
   /** The next sign-in fails, or waits for its signal to abort. */
   next: 'ok' | 'fail' | 'hang' = 'ok';
   /** What `gh` prints for the browser step. */
@@ -52,6 +53,16 @@ export class FakeConnectorTools implements ConnectorTools {
     onPrompt(this.githubPrompt);
     await this.login(signal);
     this.github = 'octo-operator';
+  }
+
+  async bitbucketUser(): Promise<string | null> {
+    this.check();
+    return this.bitbucket;
+  }
+
+  async bitbucketLogin(signal: AbortSignal, _onPrompt: (prompt: SignInPrompt) => void): Promise<void> {
+    await this.login(signal);
+    this.bitbucket = 'bb-operator';
   }
 
   async githubToken(): Promise<string | null> {

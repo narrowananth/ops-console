@@ -11,12 +11,12 @@ The operator wants failing routes found before customers report them, checked by
 
 Scans and Alerts
 
-1. A Scan reads every Service in the Datadog environments through `pup`, with no model turn. Services and Routes it finds are created; existing ones are kept.
-2. A Scan that finds a failing Route creates one Alert holding severity, event count, `first_seen_at`, `last_seen_at`, the Datadog query and up to 25 Samples. An Alert with no matching Fingerprint starts as `open`.
-3. A later Scan that fails the same Route with the same Fingerprint updates that Alert (event count, `last_seen_at`, Samples) and creates no second row.
-4. Severity is `sev2` when the Route fails rapidly, `sev3` when it fails at the lower threshold with error-level logs, and `warn` otherwise. The thresholds come from the Datadog Connector's config (`04-settings-connectors`).
-5. A resolved Alert reopens as a regression when a Scan sees its Route healthy and a later Scan sees it failing again, counting only events after `resolved_at`. `regression_count` goes up by one and its Reports stay.
-6. A dismissed Alert whose Route keeps failing stays dismissed and keeps updating its counts. It reopens as a regression only after a healthy Scan followed by a failing one.
+1. A Scan reads the error and warn logs of every Service in its envs over its window through `pup`, with no model turn. The operator's Scan takes the window (`15m`, `1h`, `4h`, `24h`, `7d`), the envs and, when they picked one, the Datadog Service names; it reads, raises and clears for those Services only. A scheduled one reads the Connector's `environments` over its interval. Services and Routes it finds are created; existing ones are kept.
+2. A Scan groups each Service's logs by Route and masked message; a log with no HTTP request has no Route. Each group becomes one Alert holding severity, event count, `first_seen_at`, `last_seen_at`, the Datadog query and up to 25 Samples. An Alert with no matching Fingerprint starts as `open`.
+3. A later Scan that sees the same Fingerprint updates that Alert (event count, `last_seen_at`, Samples) and creates no second row.
+4. Severity is `high` when one 10-minute bucket of the group reaches the rapid threshold, `medium` when its errors per hour reach the failing threshold with error-level logs, and `low` otherwise. The thresholds come from the Datadog Connector's config (`04-settings-connectors`).
+5. A resolved Alert reopens as a regression when a Scan that covers its Service does not see it, and a later Scan sees it again, counting only events after `resolved_at`. `regression_count` goes up by one and its Reports stay.
+6. A dismissed Alert that keeps failing stays dismissed and keeps updating its counts. It reopens as a regression only after a Scan that does not see it followed by one that does.
 7. A Route marked `ignored` never raises an Alert. Its note is shown with the Route.
 8. A Scan that hits a Datadog rate limit ends `rate_limited`; one that cannot reach Datadog ends `failed`. Both leave every Alert as it was and record an error code on the Scan.
 9. Samples are redacted before they are written (`02-settings-agents`). An Alert keeps at most 25 Samples, newest first.
@@ -27,25 +27,33 @@ Scans and Alerts
 Verification and Review
 
 13. Starting a Verification on an `open` or `verified` Alert creates a Report in `running`, moves the Alert to `verifying`, and runs the agent in an agent session whose id the Report stores. Steps are stored as they arrive. `ready` moves the Alert to `verified`. A failed run sets the Report `failed` with its steps kept and returns the Alert to `open`.
-14. A Service with no linked Repo still gets Alerts. Starting a Verification on it returns `service_unlinked`.
+14. A Verification runs in the Service's local Repo when it has one. With no Repo but a Git URL, it makes an anonymous Session (`07-workspace`), clones the URL into it, and runs there; a failed clone fails the Report with git's reason. A Service with neither still gets Alerts; starting a Verification on it returns `service_unlinked`.
 15. A second Verification on a `verifying` Alert is refused with `invalid_state`. Verifying a `verified` Alert creates Report version + 1; older versions stay readable.
 16. An Alert in `verified` reports `waiting_since`, the time it entered that status (ADR 0002).
 17. Confirming a `verified` Alert as `bug` or `improvement` creates a Review and a Fix and moves the Alert to `fixing`. Confirming in any other status is refused with `invalid_state`.
-18. Confirming while the Jira Connector is not connected is refused with `connector_not_connected`. No Review or Fix is created.
+18. Confirming does not need Jira. With the Jira Connector not connected, the Fix skips the ticket and names the branch `fix/<report slug>`.
 19. Dismissing a `verified` Alert creates a Review with decision `dismissed` and moves the Alert to `dismissed`. Undo clears the Review and returns the Alert to `verified`.
-20. In a `repo` Session linked to an Alert, a message whose whole text is `go`, `yes`, `start`, `do it` or `ok` (any case), sent while the Alert is `verified`, confirms it with the `kind` of the latest ready Report. In any other state it is an ordinary message.
+20. In a Session linked to an Alert, a message whose whole text is `go`, `yes`, `start`, `do it` or `ok` (any case), sent while the Alert is `verified`, confirms it with the `kind` of the latest ready Report. In any other state it is an ordinary message.
 
 Fix
 
-21. A Fix runs in a `repo` Session linked to the Alert and moves through `ticket`, `branch`, `code`, `tests`, `pr`. The `ticket` stage creates a Jira issue through the Atlassian MCP server (issue type from the kind, priority High for `sev2` and Medium otherwise) with the Report attached, and names the branch `<KEY>-<report slug>`.
+21. A Fix runs in the Alert's Session, a `repo` Session or the anonymous one holding the clone, and moves through `ticket`, `branch`, `code`, `tests`, `pr`. With Jira connected, the `ticket` stage creates a Jira issue through the Atlassian MCP server (issue type from the kind, priority High for `high` and Medium otherwise) with the Report attached, and names the branch `<KEY>-<report slug>`. The `pr` stage commits, pushes the branch to `origin` and opens the pull request on its Git host: `gh`, `glab`, or the Bitbucket MCP server.
 22. A failure at any stage leaves the Fix `failed` at that stage and the Alert in `fixing`. A retry continues from the failed stage; a ticket that already exists is not created twice.
-23. When the PR opens, the Fix stores its number and URL, the Alert becomes `pr_open`, and the Jira issue moves to "In review" with the PR linked.
-24. Every 5 minutes, and on each PR refresh, the daemon reads the PR of every `pr_open` Fix through the Git host adapter (`07-workspace`). Merged: the Alert becomes `resolved`. Closed unmerged: the Fix becomes `abandoned`, the Review is undone and the Alert returns to `verified`.
+23. When the PR opens, the Fix stores its number and URL, the Alert becomes `pr_open`, and a Jira issue, if there is one, moves to "In review" with the PR linked.
+24. Every 5 minutes, and on each PR refresh, the daemon reads the PR of every `pr_open` Fix through the Git host adapter (`07-workspace`), using the Repo's remote or, for a clone, the Service's Git URL. Merged: the Alert becomes `resolved`. Closed unmerged: the Fix becomes `abandoned`, the Review is undone and the Alert returns to `verified`.
 
 History and restarts
 
 25. Every status change writes an `alert_events` row with the actor (`scan`, `agent` or `operator`) in the same transaction.
 26. On daemon start, a `running` Scan becomes `failed` with `interrupted`, a `running` Report becomes `failed` with its Alert moved as in Behavior 13, and a `running` Fix becomes `failed` at its stage.
+
+Logs, envs and where the code is
+
+27. `GET /monitor/envs` lists the `env` tags with logs in Datadog over the last 7 days, the Connector's `environments` first and marked `configured`, then `no env`. `no env` stands for logs sent with no `env` tag; it reads them with `-env:*`, and their Services are stored with env `no env`.
+31. `GET /monitor/datadog-services` lists the Services with error or warn logs in the given range and envs, busiest first, with the envs they logged in and the count. It reads one `pup logs aggregate` per env and keeps the answer 2 minutes.
+28. A Scan stores the Git URL from the logs' `git.repository_url` tag on a Service that has none. The operator can set or clear it.
+29. The Verification follows the log through the code end to end and answers with a Report whose Markdown has a summary, the evidence, the root cause with file and line, the impact, how to fix it and how to check the fix.
+30. A Service with neither a Repo nor a Git URL gets its code found with no help, first match wins: an imported Repo of the same name; a git folder of that name next to an imported Repo, which is imported; a repository of that name on a connected Git host, under the Bitbucket workspace, the GitHub login and its organizations, then the owners of imported Repos. It runs once per Service after a Scan, and again on `POST /services/:id/code`, which answers with every place it looked. Nothing found leaves both empty.
 
 ## Settled
 
@@ -53,18 +61,24 @@ History and restarts
 - **Fingerprint**: hash of Service, Route and the error signature with numbers, ids, timestamps and IPs masked. One Alert per Fingerprint, `UNIQUE`.
 - **Alert status**: `open`, `verifying`, `verified`, `fixing`, `pr_open`, `resolved`, `dismissed`. Stored on the Alert; `alert_events` records how it got there.
 - **Event count**: sum of each Scan's error count. Scan windows equal the interval, so they do not overlap.
+- **Scan reads**: per env, one `pup logs aggregate` by `service` over `status:(error OR warn)`, then one `pup logs search` per Service for its newest 1000 logs in the window. Groups, counts and the 10-minute peak come from those logs.
+- **Log with no request**: its Alert hangs on the Service's blank Route (empty method and path), which the API shows as `route: null` and the Services list leaves out.
+- **Message of a log**: its `message`, else `error.message`, `error.kind` or `logger.name`.
+- **Healthy sighting**: a Scan that covers a Service writes `cleared_at` on each of its Alerts it did not see. Regression needs a `cleared_at` newer than the Alert's last sighting and `resolved_at`.
+- **Finding the code**: names match without case or punctuation. Git hosts are asked with the operator's own tools: `gh repo view` for GitHub, `git ls-remote` over SSH with no prompt for Bitbucket and GitLab. Datadog's tag or attribute `git.repository_url` comes first, at the Scan.
+- **Code source**: the local Repo wins over the Git URL. The URL is `github.com/owner/name` or any URL git clones; a bare host path is cloned over HTTPS with the operator's own git credentials and no prompt.
 - **Alert sources**: `scan` is the only source written here; the others are kept for a later ingestion spec.
 - **Report storage**: the database holds the Report body; `markdown_path` records where the Report file was written in the Connector's reports folder.
 - **Review undo**: only a dismissal can be undone by the operator. A closed-unmerged PR undoes a confirmed Review.
 - **Fix Session**: the Fix's `repo` Session carries `alert_id`, so the Workspace shows it next to the Alert.
 - **Route identity**: ids in a path fold into `:id` (`/orders/1042` and `/orders/1043` are one Route) before a Route is stored or fingerprinted.
-- **Datadog reads**: a Scan reads `pup logs aggregate` on indexed storage (Flex is not on every account). It lists the env's Services with HTTP logs, then reads each Service's top 100 method and path groups by traffic and by errors, because Datadog refuses more than 10000 groups across all dimensions. A Route beyond a Service's top 100 is not seen.
-- **Healthy Route**: a known Route absent from a Scan's logs counts as healthy, with an `ok` result and zero errors. Regression needs an `ok` result newer than the Alert's last sighting.
+- **Datadog reads**: indexed storage only (Flex is not on every account).
+- **Healthy Route**: a known Route absent from a Scan's logs gets an `ok` result and zero errors, for its trend.
 - **Fingerprint signature**: the most common masked message among a Route's Samples; the newest wins a tie.
-- **Severity**: `sev2` when one 10-minute bucket reaches `rapid_errors_per_10m`; `sev3` when errors per hour reach `failing_errors_per_hour` and a Sample has status `error`; else `warn`.
+- **Severity**: `high` when one 10-minute bucket reaches `rapid_errors_per_10m`; `medium` when errors per hour over the window reach `failing_errors_per_hour` and a Sample has status `error`; else `low`.
 - **Schedule slots**: the daily time and every 6 hours after it are the grid. Each distinct interval runs once per slot of its own length, as one Scan of every Service on that interval. A slot that passed while Datadog is not connected is skipped.
 - **Scan on demand**: `POST /scans` needs the Datadog Connector connected, and answers `connector_not_connected` otherwise.
-- **Alert Session**: the first Verification makes one `repo` Session on the Repo's current branch, linked by `alert_id`, and every later Verification and Fix stage runs in it. `Alert` carries its id as `session_id`.
+- **Alert Session**: the first Verification makes one Session linked by `alert_id`: a `repo` Session on the Repo's current branch, or an anonymous Session with the clone. Every later Verification and Fix stage runs in it. `Alert` carries its id as `session_id`. A failed clone deletes that Session, so the next try clones again.
 - **Verification steps**: each tool step and text block of the run is stored, redacted, and sent as `verification.stepped`.
 - **Report file**: written to `reports_folder`, relative to the data folder. A failed write leaves `markdown_path` null and the Report ready.
 - **Fix runs**: each stage is its own run in the Alert Session and ends with a JSON block (`ticket`: key and URL; `code`: summary; `tests`: passed; `pr`: number and URL). Any other answer fails the stage. The `branch` stage is the console's own checkout, with stash, from `07-workspace`.
@@ -76,11 +90,14 @@ History and restarts
 - **Exact counts under overlap**: two Scans of one Service at once can both add their counts.
 - **Datadog retention**: Samples are kept and not refreshed.
 - **Jira after abandon**: the issue is left as it is.
-- **Routes past the top 100**: a Service with more than 100 Routes in the window shows its busiest 100 and its 100 with most errors.
+- **Counts past 1000 logs**: a Service with more than 1000 error and warn logs in the window is grouped from its newest 1000, so counts and peaks are a floor.
+- **Jira after a Fix without Jira**: connecting Jira later makes no ticket for a Fix already past `ticket`.
+- **Clones**: an anonymous Session's folder stays after the Session is deleted.
 
 ## Safety
 
 - The agent creates a Jira ticket only after the operator confirms a Report, and moves it to "In review" only when it opens the PR.
+- The console clones a Service's Git URL only for a Verification the operator starts. The agent pushes only the Fix branch, opens the PR and never merges it (ADR 0002).
 - A Verification reads code and replays requests locally. It writes nothing outside the Repo's working tree. A PROD query needs the Connection's Access Level and, for a write, an Approval (`02-settings-agents`).
 - The agent cannot change an Alert's status directly; only the Verification and Fix flows do.
 
@@ -92,6 +109,7 @@ CREATE TABLE services (
   name            TEXT NOT NULL,                 -- Datadog service name
   env             TEXT NOT NULL,                 -- Datadog env tag
   repo_id         TEXT REFERENCES repos (id) ON DELETE SET NULL,
+  repo_url        TEXT,                          -- Git URL of the code; from git.repository_url or the operator
   check_interval  TEXT,                          -- CheckInterval; null: Connector default
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE (name, env)
@@ -111,7 +129,9 @@ CREATE TABLE scans (
   id             TEXT PRIMARY KEY NOT NULL,
   triggered_by   TEXT NOT NULL,                  -- ScanTrigger
   service_id     TEXT REFERENCES services (id) ON DELETE CASCADE,  -- null: every Service
-  window_size    TEXT NOT NULL,                  -- CheckInterval
+  window_size    TEXT NOT NULL,                  -- ScanWindow
+  envs           TEXT NOT NULL DEFAULT '[]',     -- JSON array of the Datadog envs read
+  services       TEXT,                           -- JSON array of Datadog Service names read; null: every Service
   status         TEXT NOT NULL DEFAULT 'running',  -- ScanStatus
   error_code     TEXT,                           -- 'interrupted' when the daemon stopped mid-Scan
   error_message  TEXT,
@@ -144,6 +164,7 @@ CREATE TABLE alerts (
   first_seen_at     TEXT NOT NULL,
   last_seen_at      TEXT NOT NULL,
   resolved_at       TEXT,
+  cleared_at        TEXT,                        -- the latest Scan of its Service that did not see it
   regression_count  INTEGER NOT NULL DEFAULT 0,
   samples           TEXT NOT NULL DEFAULT '[]'
                     CHECK (json_valid(samples) AND json_type(samples) = 'array'
@@ -220,12 +241,13 @@ CREATE TABLE fixes (
 
 | Enum | Values | Columns |
 | ---- | ------ | ------- |
-| `CheckInterval` | `24h`, `12h`, `6h` | `services.check_interval`, `scans.window_size` |
+| `CheckInterval` | `24h`, `12h`, `6h` | `services.check_interval` |
+| `ScanWindow` | `15m`, `1h`, `4h`, `6h`, `12h`, `24h`, `7d` | `scans.window_size` |
 | `ScanTrigger` | `schedule`, `operator` | `scans.triggered_by` |
 | `ScanStatus` | `running`, `ok`, `failed`, `rate_limited` | `scans.status` |
 | `RouteState` | `ok`, `failing`, `rapid` | `scan_route_results.state` |
 | `AlertSource` | `scan`, `datadog`, `sentry`, `slack` | `alerts.source` |
-| `Severity` | `sev2`, `sev3`, `warn` | `alerts.severity` |
+| `Severity` | `high`, `medium`, `low` | `alerts.severity` |
 | `AlertStatus` | `open`, `verifying`, `verified`, `fixing`, `pr_open`, `resolved`, `dismissed` | `alerts.status` |
 | `AlertEventKind` | `detected`, `regressed`, `verification_started`, `verified`, `verification_failed`, `confirmed`, `dismissed`, `undone`, `ticket_created`, `fix_advanced`, `pr_opened`, `resolved`, `abandoned` | `alert_events.kind` |
 | `AlertActor` | `scan`, `agent`, `operator` | `alert_events.actor` |
@@ -235,7 +257,7 @@ CREATE TABLE fixes (
 | `FixStage` | `ticket`, `branch`, `code`, `tests`, `pr` | `fixes.stage` |
 | `FixStatus` | `running`, `done`, `failed`, `abandoned` | `fixes.status` |
 
-Migration of existing rows: none; existing Sessions and Action Log rows get a null `alert_id`.
+Migration of existing rows: existing Sessions and Action Log rows get a null `alert_id`. Severities move `sev2` to `high`, `sev3` to `medium` and `warn` to `low`; existing Scans get `envs` `[]` and a null `services`.
 
 ## API
 
@@ -245,7 +267,7 @@ Errors added here:
 
 | Status | Error code | When |
 | ------ | ---------- | ---- |
-| 409 | `service_unlinked` | The Alert's Service has no Repo |
+| 409 | `service_unlinked` | The Alert's Service has neither a Repo nor a Git URL |
 
 `Sample`, one entry of an Alert's `samples` (already redacted):
 
@@ -265,8 +287,8 @@ Errors added here:
 ```json
 {
   "id": "uuid",
-  "route": { "id": "uuid", "method": "string", "path": "string" },
-  "service": { "id": "uuid", "name": "string", "env": "string", "repo_id": "uuid | null" },
+  "route": { "id": "uuid", "method": "string", "path": "string" } | null,  // null: a log with no request
+  "service": { "id": "uuid", "name": "string", "env": "string", "repo_id": "uuid | null", "repo_url": "string | null" },
   "fingerprint": "string",
   "source": "AlertSource",
   "severity": "Severity",
@@ -296,11 +318,14 @@ Errors added here:
 | Method and path | Body | Returns |
 | --------------- | ---- | ------- |
 | `GET /services` | query `env?` | Services with `routes`, per-Route `state`, `trend` (error counts from the last Scans), `open_alert_count`, `last_scan_at` |
-| `PATCH /services/:id` | `{ repo_id?, check_interval? }` | Service |
+| `PATCH /services/:id` | `{ repo_id?, repo_url?, check_interval? }` | Service. `repo_url` must look like a Git URL |
+| `POST /services/:id/code` | | `{ service, found: "repo \| url \| null", tried: string[] }`, after looking (Behavior 30) |
 | `PATCH /routes/:id` | `{ ignored?, note? }` | Route |
 | `GET /scans` | query `service_id?` | newest first |
 | `GET /scans/:id` | | Scan with `results: [{ route_id, error_count, state }]` |
-| `POST /scans` | `{ service_id: "uuid \| null" }` | 202 Scan in `running`. Null scans every Service. Rate limits and failures land on the Scan row and `scan.finished` |
+| `POST /scans` | `{ service_id: "uuid \| null", window?: ScanWindow, envs?: string[], services?: string[] }` | 202 Scan in `running`, with `envs` and `services`. Null `service_id` and no `services` scans every Service. `window` defaults to the Connector's `default_interval`, `envs` to its `environments`; a single Service scans its own env. Rate limits and failures land on the Scan row and `scan.finished` |
+| `GET /monitor/envs` | | `[{ name, configured }]`, the Connector's envs first, `no env` last |
+| `GET /monitor/datadog-services?window=&envs=a,b` | | `[{ name, envs, errors }]`, busiest first |
 
 ### Alerts, Reports, Review, Fix
 
@@ -325,7 +350,7 @@ All server to client.
 | ----- | ------- | ---- |
 | `scan.started` | `{ scan_id, service_id }` | A Scan row is created |
 | `scan.finished` | `{ scan_id, status, error_code }` | A Scan ends |
-| `alert.detected` | `{ alert_id, severity, route }` | A Scan creates an Alert |
+| `alert.detected` | `{ alert_id, severity, route \| null }` | A Scan creates an Alert |
 | `alert.updated` | `{ alert_id, event_count, last_seen_at }` | A Scan changes an Alert's counts |
 | `alert.regressed` | `{ alert_id, regression_count }` | A resolved or dismissed Alert reopens |
 | `verification.stepped` | `{ report_id, index, step: { kind, text } }` | Each Report step as it is stored |
@@ -336,18 +361,22 @@ All server to client.
 
 ## UI
 
-- Monitor list of Services and Routes with trend and state. Empty: "Connect Datadog in Integrations". Scan failure shows the error code with the last good Scan's time.
-- Alert card: severity, counts, Samples (JSON and message toggle), events timeline, "waiting since" while `verified`, regression badge.
-- Report panel: live steps while `running`, then root cause, proposed fix, diff and replay. Version picker when there are several.
-- Review: confirm as bug or improvement, dismiss, undo dismiss. Confirm is disabled with the reason when Jira is not connected.
-- Fix progress: the five stages, Jira key and PR link, retry on failure.
+- Monitor, first column, Services: the range (`15m` to `7d`) and an Envs field that opens a checkbox per env (the Connector's and `no env` ticked by default); both are remembered in the browser. Under them a filter, "All Services", and the Datadog Services from Behavior 31 as rows, A→Z with the Services that have open Alerts but no logs in the range among them at 0: name, count, a bar of the count against the busiest, env tags A→Z (`no env` last) and open Alerts per tier. At the bottom, Scan: the picked Service, or every listed one, over the range and envs; then the last Scan's window, Services and envs.
+- Monitor, second column, logs of the picked Service or all: tabs All, High, Medium, Low with counts, and the logs as rows: tier, Service when all are shown, env, count, last seen, message, Route. Closed Alerts show only when asked. Empty: "Connect Datadog in Integrations". Scan failure shows the error code with the last good Scan's time.
+- Alert card: tier, status, Service, env and Route (or "no HTTP route"), counts, the log line, Samples (JSON and message toggle), events timeline, "waiting since" while `verified`, regression badge, and Ignore this Route.
+- Code: the local Repo picker and the Git URL field. With neither, the card looks for the code by itself, then lists where it looked, with Look again. Still nothing: Verify is disabled and the card says to give one.
+- Report panel: live steps while `running`; when ready, the Report Markdown drawn, then the diff, replay and steps folded, and where the file was saved. Version picker when there are several.
+- Review: Fix with agent (the Report's kind), Fix as the other kind, dismiss, undo dismiss. A line says where the Fix runs and whether a Jira ticket comes first.
+- Fix progress: the five stages, the ticket marked "no Jira" when skipped, the branch, Jira key, PR link, a link to the Session in Workspace, and retry on failure.
 
 ## Rejected
 
 - **One Alert per Scan**: the same failure would come back as a new card every day and restart the "waiting since" clock. Sentry and PagerDuty group repeats under one key.
 - **Only the Datadog query and trace ids**: nothing to read once Datadog drops the logs, and the Report's replay has no source.
 - **Status derived from `alert_events`**: every list query would aggregate events.
-- **Jira off, branch `fix/<slug>`**: breaks the link between Report, ticket and PR that the design shows.
+- **Jira required for a Fix**: an operator without Jira could not fix anything. With Jira the branch still carries the key, so Report, ticket and PR stay linked.
+- **Route aggregates only**: logs from workers and jobs carry no method or path, so a Scan never saw them.
+- **Agent searches the Git hosts for the code**: a model guess can pick the wrong repository. The finder asks only for the exact name, and the operator's choice overrides it.
 - **Scans as agent runs**: a Scan is a fixed read; a model turn per Scan costs tokens and gives different answers for the same data (ADR 0005).
 
 ## Glossary
@@ -356,13 +385,14 @@ All server to client.
 - **Regression**: A resolved or dismissed Alert that fails again after a healthy Scan. It reopens the same Alert.
 - **Sample**: One Datadog log event kept on an Alert, with secret values and request body values redacted.
 - **Ticket**: The Jira issue the agent creates when the operator confirms a Report. Its key starts the fix branch name.
-- **Fix**: The work that follows a confirmed Review: ticket, branch, code change, tests and PR, run by the agent in one Session.
+- **Fix**: The work that follows a confirmed Review: ticket (with Jira), branch, code change, tests, push and PR, run by the agent in one Session.
+- **Severity**: An Alert's tier, `high`, `medium` or `low`, from how fast its logs come in.
 
 ## Seams
 
-- **Backend + SQLite, over HTTP** (Supertest, temporary data directory, fakes for `pup`, the agent runtime, the Atlassian MCP server and the Git host adapter, a fake clock for the scheduler): 1 to 9, 11, 12, 14 to 20, 22, 24, 26. Start-up cases close the app and open it again on the same data directory.
+- **Backend + SQLite, over HTTP** (Supertest, temporary data directory, fakes for `pup`, the agent runtime, the Atlassian MCP server and the Git host adapter, a fake clock for the scheduler; a local git repository as the clone source): 1 to 9, 11, 12, 14 to 20, 22, 24, 26 to 30. Start-up cases close the app and open it again on the same data directory.
 - **Backend + SQLite, over WebSocket**: 13, 21, 23, 25. Asserts the events and the `alert_events` rows written with each change.
-- **Unit**: 10. Fingerprint masking.
+- **Unit**: 10, and the log grouping behind 2 and 4. Fingerprint masking, groups by Route and message, the 10-minute peak, the Git URL tag.
 
 ## Out of scope
 

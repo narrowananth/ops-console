@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { PageColumn } from '../app/page';
 import { Empty } from '../components/ui/empty';
 import { useConnectors, useMcpServers } from '../lib/queries';
+import { ascending } from '../lib/sort';
 import { ConnectorDrawer, ConnectorRow } from './connector';
 import { McpDetail, ServerRow } from './mcp-server';
 
@@ -32,7 +33,7 @@ export function IntegrationsTab() {
         <PageColumn wide>
           <div className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
             <ul aria-label="Integrations" className="m-0 flex list-none flex-col gap-0.5 p-1.5">
-              {connectorList.map((item) => (
+              {ascending(connectorList, (item) => item.name).map((item) => (
                 <ConnectorRow
                   key={item.id}
                   connector={item}
@@ -40,7 +41,7 @@ export function IntegrationsTab() {
                   onOpen={() => setOpen({ kind: 'connector', id: item.id })}
                 />
               ))}
-              {shown.map((item) => (
+              {ascending(shown, (item) => item.name).map((item) => (
                 <ServerRow
                   key={item.name}
                   server={item}

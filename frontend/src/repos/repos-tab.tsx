@@ -4,6 +4,7 @@ import { RepoIcon } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
 import { useImportRepo, usePickFolder, useRemoveRepo, useRepos } from '../lib/queries';
+import { ascending } from '../lib/sort';
 
 function RepoRow({ repo }: { repo: Repo }) {
   const remove = useRemoveRepo();
@@ -133,7 +134,7 @@ export function ReposTab() {
             <Empty>No repos yet. Import one above.</Empty>
           ) : (
             <ul className="m-0 list-none p-0">
-              {repos.data.data.map((repo) => (
+              {ascending(repos.data.data, (repo) => repo.name).map((repo) => (
                 <RepoRow key={repo.id} repo={repo} />
               ))}
             </ul>

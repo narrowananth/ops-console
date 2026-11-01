@@ -1,20 +1,20 @@
 import type { Message, Part } from '@ops-console/shared';
+import { Markdown } from '../components/ui/markdown';
 import { ComparisonView, ResultView } from '../devtools/result-tables';
-import { InlineText } from './inline-text';
+import { asReport, ReportDocument } from './report-document';
 
 /** One part of a Session's transcript: text, a tool step, a diff, a code block, a question or a Dev tools table. */
 function PartView({ part }: { part: Part }) {
   if (part.kind === 'result') return <ResultView part={part} connections={[]} />;
   if (part.kind === 'comparison') return <ComparisonView part={part} />;
   if (part.kind === 'text') {
-    return (
-      <p className="m-0 whitespace-pre-wrap text-[13px]">
-        <InlineText text={part.text} codeClassName="rounded-sm bg-surface px-1 text-xs" />
-      </p>
-    );
+    const report = asReport(part.text);
+    return report ? <ReportDocument report={report} /> : <Markdown source={part.text} />;
   }
   if (part.kind === 'step') return <div className="font-mono text-xs text-neutral-700">{part.text}</div>;
   if (part.kind === 'code') {
+    const report = asReport(part.text);
+    if (report) return <ReportDocument report={report} />;
     return <pre className="m-0 overflow-x-auto rounded-md bg-surface p-2.5 font-mono text-xs">{part.text}</pre>;
   }
   if (part.kind === 'diff') {

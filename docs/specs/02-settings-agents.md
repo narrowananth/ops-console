@@ -7,7 +7,7 @@
 
 The rest of the console relies on the agent, and every later spec needs the same pieces from it. A Session needs a place to run, a way to resume after a reload, and output that streams to the browser. The operator needs to know what the agent did outside its own process, and needs to say yes before it writes to PROD. The operator also works on more than one Claude subscription. The Agents tab shows each account's 5-hour and weekly usage, and can move Sessions to another account when the active one runs low, without losing the conversation.
 
-This spec builds the agent runtime, the core of a Session, the Action Log, Approvals and the Agents tab. Kind-specific Sessions (`repo`, `pr_review`, `devtools`) come later, in `07-workspace` and `09-dev-tools-agent`. Daemon, storage, envelopes, the `settings` table, the start-up hook and the `claude` CLI wrapper come from `01-base-daemon-setup`.
+This spec builds the agent runtime, the core of a Session, the Action Log, Approvals and the Agents tab. Kind-specific Sessions (`repo`, `pr_review`, `anonymous`, `devtools`) come later, in `07-workspace` and `09-dev-tools-agent`. Daemon, storage, envelopes, the `settings` table, the start-up hook and the `claude` CLI wrapper come from `01-base-daemon-setup`.
 
 ## Behavior
 
@@ -163,7 +163,7 @@ Enums live in code only (`01-base-daemon-setup`):
 
 | Enum | Values | Columns |
 | ---- | ------ | ------- |
-| `SessionKind` | `repo`, `devtools`, `pr_review` | `sessions.kind` |
+| `SessionKind` | `repo`, `devtools`, `pr_review`, `anonymous` | `sessions.kind` |
 | `Model` | `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-fable-5-1` | `sessions.model` |
 | `Effort` | `low`, `medium`, `high`, `xhigh`, `max`, `ultrathink` | `sessions.effort` |
 | `AccessMode` | `supervised`, `accept_edits`, `auto`, `full` | `sessions.access_mode` |

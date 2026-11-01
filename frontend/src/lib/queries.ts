@@ -13,6 +13,7 @@ import {
   type ConnectionType,
   type ConnectorId,
   type CreateConnection,
+  type CreateScan,
   checkoutResultSchema,
   claudeAccountSchema,
   connectionCheckSchema,
@@ -21,12 +22,15 @@ import {
   connectionTestResultSchema,
   connectorListSchema,
   connectorSchema,
+  datadogServiceSchema,
   diskAccessSchema,
+  findCodeResultSchema,
   fixSchema,
   healthSchema,
   mcpServerListSchema,
   mcpServerSchema,
   messageSchema,
+  monitorEnvSchema,
   type PrReviewEvent,
   prAgentReviewSchema,
   prCommentSchema,
@@ -39,6 +43,7 @@ import {
   repoSchema,
   reviewSchema,
   routeViewSchema,
+  type ScanWindow,
   type Session,
   type SessionDefaults,
   type SessionPatch,
@@ -434,11 +439,27 @@ export function useRemoveRepo() {
 }
 
 /** Every `repo` Session, newest first. `session.updated` over `/ws` keeps it fresh. */
+/** The Workspace's Sessions: those in a Repo and the anonymous ones, most recently active first. */
 export function useRepoSessions() {
   return useQuery({
     queryKey: queryKeys.sessions,
-    queryFn: () =>
-      apiGet('/sessions?kind=repo&limit=100', z.object({ data: z.array(sessionSchema) })).then((b) => b.data),
+    queryFn: async () => {
+      const read = (kind: string) =>
+        apiGet(`/sessions?kind=${kind}&limit=100`, z.object({ data: z.array(sessionSchema) })).then((b) => b.data);
+      const [inRepos, anonymous] = await Promise.all([read('repo'), read('anonymous')]);
+      return [...inRepos, ...anonymous].sort((a, b) => b.last_active_at.localeCompare(a.last_active_at));
+    },
+  });
+}
+
+export function useCreateAnonymousSession() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { title?: string } = {}) =>
+      apiSend('POST', '/sessions', { kind: 'anonymous', ...input }, z.object({ data: sessionSchema })).then(
+        (body) => body.data,
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.sessions }),
   });
 }
 
@@ -644,20 +665,64 @@ const refreshMonitor = (client: ReturnType<typeof useQueryClient>) =>
 export function useStartScan() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (serviceId: string | null) =>
-      apiSend('POST', '/scans', { service_id: serviceId }, z.object({ data: scanSchema })),
+    mutationFn: (input: CreateScan) => apiSend('POST', '/scans', input, z.object({ data: scanSchema })),
     onSuccess: () => refreshMonitor(client),
+  });
+}
+
+/** The Services Datadog has error or warn logs for in the range and envs, busiest first. */
+export function useDatadogServices(window: ScanWindow, envs: string[], enabled: boolean) {
+  const picked = [...envs].sort();
+  return useQuery({
+    queryKey: [...queryKeys.monitor, 'datadog-services', window, picked],
+    queryFn: () =>
+      apiGet(
+        `/monitor/datadog-services?window=${window}&envs=${encodeURIComponent(picked.join(','))}`,
+        listOf(datadogServiceSchema),
+      ).then((b) => b.data),
+    enabled: enabled && picked.length > 0,
+    staleTime: 2 * 60_000,
+    placeholderData: (previous) => previous,
+  });
+}
+
+/** Datadog `env` tags the Monitor can scan; the Connector's own come ticked. */
+export function useMonitorEnvs(enabled: boolean) {
+  return useQuery({
+    queryKey: [...queryKeys.monitor, 'envs'],
+    queryFn: () => apiGet('/monitor/envs', listOf(monitorEnvSchema)).then((b) => b.data),
+    enabled,
+    staleTime: 5 * 60_000,
   });
 }
 
 export function usePatchService() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: { id: string; repo_id?: string | null; check_interval?: string | null }) => {
+    mutationFn: (input: {
+      id: string;
+      repo_id?: string | null;
+      repo_url?: string | null;
+      check_interval?: string | null;
+    }) => {
       const { id, ...body } = input;
       return apiSend('PATCH', `/services/${id}`, body, z.object({ data: serviceSchema }));
     },
     onSuccess: () => refreshMonitor(client),
+  });
+}
+
+/** Looks for a Service's code: same-name Repo, a folder next to the Repos, then the Git hosts. */
+export function useFindCode() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (serviceId: string) =>
+      apiSend('POST', `/services/${serviceId}/code`, undefined, z.object({ data: findCodeResultSchema })).then(
+        (body) => body.data,
+      ),
+    onSuccess: (result) => {
+      if (result.found) void refreshMonitor(client);
+    },
   });
 }
 

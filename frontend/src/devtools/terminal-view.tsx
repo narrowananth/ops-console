@@ -26,6 +26,7 @@ import {
   useSendMessage,
   useUpdateSession,
 } from '../lib/queries';
+import { ascending } from '../lib/sort';
 import { ComparisonView, ResultView } from './result-tables';
 
 const ACCESS: Record<AccessLevel, string> = {
@@ -97,7 +98,7 @@ function SyncedTools({
       <div className="mt-3 mb-1 px-2 text-[10px] font-semibold tracking-[0.08em] text-neutral-600 uppercase">
         Connections
       </div>
-      {connections.map((connection) => {
+      {ascending(connections, (connection) => connection.name).map((connection) => {
         const on = scope.includes(connection.id);
         const off = connection.access === AccessLevel.None;
         return (

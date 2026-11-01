@@ -25,7 +25,14 @@ import { ConnectorsService } from '../connectors/connectors.service';
 import { agentComments, connectors, prAgentReviews, repos, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import type { OpenPrBranches } from '../repos/open-pr-branches';
-import { GIT_HOSTS, type GitHosts, type HostComment, type HostPullRequest } from './git-host';
+import {
+  GIT_HOSTS,
+  type GitHostAdapter,
+  type GitHosts,
+  type HostComment,
+  type HostPullRequest,
+  type OwnedPullRequest,
+} from './git-host';
 
 type RepoRow = typeof repos.$inferSelect;
 type ReviewRow = typeof prAgentReviews.$inferSelect;
@@ -34,6 +41,12 @@ type ReviewRow = typeof prAgentReviews.$inferSelect;
 export const LIST_TTL_MS = 60_000;
 
 type Entry = { at: number; prs: HostPullRequest[] };
+type OwnerEntry = { at: number; prs: OwnedPullRequest[] };
+
+/** How long the list of owners a host lets the operator read is kept. */
+const OWNERS_TTL_MS = 10 * 60_000;
+
+const sameSlug = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 export function toAgentReview(row: ReviewRow, headSha: string | null): PrAgentReview {
   return {
@@ -66,6 +79,8 @@ const signature = (pr: HostPullRequest) =>
 export class PullRequestsService implements OpenPrBranches {
   private readonly logger = new Logger('pull-requests');
   private readonly cache = new Map<string, Entry>();
+  private readonly ownerCache = new Map<string, OwnerEntry>();
+  private readonly ownersOf = new Map<GitHost, { at: number; owners: string[] }>();
   private readonly refreshListeners: (() => void)[] = [];
 
   constructor(
@@ -81,16 +96,56 @@ export class PullRequestsService implements OpenPrBranches {
     mine?: boolean;
     q?: string;
   }): Promise<{ data: PullRequest[]; meta: { synced_at: string | null; stale: boolean; next_cursor: null } }> {
-    const wanted = query.repo_id === undefined ? this.hostedRepos() : [this.repoRow(query.repo_id)];
     let stale = false;
     let oldest: number | null = null;
     const data: PullRequest[] = [];
-    for (const repo of wanted) {
-      if (query.repo_id === undefined && !this.connected(repo.host)) continue;
+    const seen = (at: number, wasStale: boolean) => {
+      stale ||= wasStale;
+      oldest = oldest === null ? at : Math.min(oldest, at);
+    };
+    if (query.repo_id !== undefined) {
+      const repo = this.repoRow(query.repo_id);
       const read = await this.read(repo, query.state);
-      stale ||= read.stale;
-      oldest = oldest === null ? read.at : Math.min(oldest, read.at);
-      data.push(...this.decorate(repo, read.prs));
+      seen(read.at, read.stale);
+      data.push(...this.decorate(repo, repo.host, repo.remoteSlug ?? '', read.prs));
+    } else {
+      const imported = this.hostedRepos();
+      const covered = new Set<string>();
+      // Every repository of every owner the operator can read on each connected host.
+      for (const host of PR_HOSTS.filter((one) => this.hosts.supports(one) && this.connected(one))) {
+        for (const owner of await this.owners(host, imported)) {
+          const read = await this.readOwner(host, owner, query.state).catch((error) => {
+            this.logger.warn(`${host} ${owner}: ${error instanceof Error ? error.message : String(error)}`);
+            return null;
+          });
+          if (read === null) {
+            stale = true;
+            continue;
+          }
+          covered.add(`${host}:${owner.toLowerCase()}`);
+          seen(read.at, read.stale);
+          const bySlug = new Map<string, OwnedPullRequest[]>();
+          for (const pr of read.prs) bySlug.set(pr.slug, [...(bySlug.get(pr.slug) ?? []), pr]);
+          for (const [slug, prs] of bySlug) {
+            const repo = imported.find((one) => one.host === host && sameSlug(one.remoteSlug ?? '', slug)) ?? null;
+            // The Repo's own list is this read too, so a Refresh compares against it.
+            if (repo && !read.stale) this.cache.set(this.key(repo.id, query.state), { at: read.at, prs });
+            data.push(...this.decorate(repo, host, slug, prs));
+          }
+        }
+      }
+      // An imported Repo under an owner no list covered is read on its own.
+      for (const repo of imported) {
+        const owner = (repo.remoteSlug ?? '').split('/')[0]?.toLowerCase() ?? '';
+        if (!this.connected(repo.host) || covered.has(`${repo.host}:${owner}`)) continue;
+        const read = await this.read(repo, query.state).catch(() => null);
+        if (read === null) {
+          stale = true;
+          continue;
+        }
+        seen(read.at, read.stale);
+        data.push(...this.decorate(repo, repo.host, repo.remoteSlug ?? '', read.prs));
+      }
     }
     const q = query.q?.trim().toLowerCase();
     const shown = data
@@ -109,6 +164,10 @@ export class PullRequestsService implements OpenPrBranches {
   /** Drops the memory and reads again in the background; `pull_request.refreshed` reports it. */
   refresh(repoId: string | undefined): void {
     const wanted = repoId === undefined ? this.hostedRepos() : [this.repoRow(repoId)];
+    if (repoId === undefined) {
+      this.ownerCache.clear();
+      this.ownersOf.clear();
+    }
     const before = new Map<string, Entry | undefined>();
     for (const repo of wanted) {
       before.set(repo.id, this.cache.get(this.key(repo.id, PrState.Open)));
@@ -132,7 +191,8 @@ export class PullRequestsService implements OpenPrBranches {
     const repo = this.hosted(repoId);
     const { pr, files, comments } = await this.adapter(repo).get(repo.remoteSlug as string, number);
     return {
-      ...(this.decorate(repo, [pr])[0] as PullRequest),
+      ...(this.decorate(repo, repo.host, repo.remoteSlug as string, [pr])[0] as PullRequest),
+      repo_id: repo.id,
       files,
       comments: this.markComments(repo.id, number, comments),
     };
@@ -253,9 +313,19 @@ export class PullRequestsService implements OpenPrBranches {
     return this.hosts.for(repo.host);
   }
 
+  /** The host's adapter when it has landed; null for a host the console cannot read yet. */
+  adapterFor(host: GitHost): GitHostAdapter | null {
+    return this.hosts.supports(host) ? this.hosts.for(host) : null;
+  }
+
   /** Forget what was read for a Repo, so the next list reads the host. */
   drop(repoId: string): void {
     for (const key of this.cache.keys()) if (key.startsWith(`${repoId}:`)) this.cache.delete(key);
+    // The owner's list holds the Repo's pull requests too.
+    const repo = this.store.db.select().from(repos).where(eq(repos.id, repoId)).get();
+    const owner = repo?.remoteSlug?.split('/')[0]?.toLowerCase();
+    if (!repo || !owner) return;
+    for (const key of this.ownerCache.keys()) if (key.startsWith(`${repo.host}:${owner}:`)) this.ownerCache.delete(key);
   }
 
   markComments(repoId: string, number: number, comments: HostComment[]): PrComment[] {
@@ -337,9 +407,83 @@ export class PullRequestsService implements OpenPrBranches {
     this.refreshListeners.push(listener);
   }
 
+  /**
+   * The owners to list on a host: those the host says the operator can read, the Connector's own (a Bitbucket
+   * workspace, a GitHub org), and the owners of imported Repos there. Kept 10 minutes.
+   */
+  private async owners(host: GitHost, imported: RepoRow[]): Promise<string[]> {
+    const kept = this.ownersOf.get(host);
+    let owners = kept && Date.now() - kept.at < OWNERS_TTL_MS ? kept.owners : null;
+    if (owners === null) {
+      owners = await this.hosts
+        .for(host)
+        .owners()
+        .catch((error) => {
+          this.logger.warn(`${host} owners: ${error instanceof Error ? error.message : String(error)}`);
+          return [];
+        });
+      if (owners.length > 0) this.ownersOf.set(host, { at: Date.now(), owners });
+    }
+    const out: string[] = [];
+    const add = (owner: string | null | undefined) => {
+      if (owner && !out.some((one) => sameSlug(one, owner))) out.push(owner);
+    };
+    for (const owner of owners) add(owner);
+    const config = this.connectorConfig(host);
+    add(typeof config.workspace === 'string' ? config.workspace : null);
+    add(typeof config.org === 'string' ? config.org : null);
+    for (const repo of imported) if (repo.host === host) add(repo.remoteSlug?.split('/')[0]);
+    return out;
+  }
+
+  private connectorConfig(host: GitHost): Record<string, unknown> {
+    const id = CONNECTOR_OF[host];
+    if (id === undefined) return {};
+    const raw = this.store.db.select({ config: connectors.config }).from(connectors).where(eq(connectors.id, id)).get();
+    try {
+      return JSON.parse(raw?.config ?? '{}') as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+
+  /** One owner's pull requests, cached like a Repo's; a failed read falls back to the cache and says so. */
+  private async readOwner(
+    host: GitHost,
+    owner: string,
+    state: PrState,
+  ): Promise<{ at: number; prs: OwnedPullRequest[]; stale: boolean }> {
+    const key = `${host}:${owner.toLowerCase()}:${state}`;
+    const hit = this.ownerCache.get(key);
+    if (hit && Date.now() - hit.at < LIST_TTL_MS) return { ...hit, stale: false };
+    try {
+      const entry = { at: Date.now(), prs: await this.hosts.for(host).listOwner(owner, state) };
+      this.ownerCache.set(key, entry);
+      return { ...entry, stale: false };
+    } catch (error) {
+      if (hit) return { ...hit, stale: true };
+      throw error;
+    }
+  }
+
   /** Adds what only the console knows: whose it is, which Session and which Agent Review belong to it. */
-  private decorate(repo: RepoRow, prs: HostPullRequest[]): PullRequest[] {
-    const login = this.login(repo.host);
+  private decorate(repo: RepoRow | null, host: GitHost, slug: string, prs: HostPullRequest[]): PullRequest[] {
+    const login = this.login(host);
+    if (repo === null) {
+      return prs.map((pr) => {
+        const { slug: _slug, ...fields } = pr as OwnedPullRequest;
+        return {
+          ...fields,
+          repo_id: null,
+          host,
+          slug,
+          by_agent: false,
+          is_mine: login !== null && pr.author === login,
+          agent_session_id: null,
+          latest_agent_review: null,
+        };
+      });
+    }
     const rows = this.store.db.select().from(sessions).where(eq(sessions.repoId, repo.id)).all();
     const worked = new Set(rows.filter((row) => row.kind === SessionKind.Repo).map((row) => row.branch));
     const reviewSession = new Map(
@@ -355,9 +499,12 @@ export class PullRequestsService implements OpenPrBranches {
     for (const review of reviews) if (!latest.has(review.prNumber)) latest.set(review.prNumber, review);
     return prs.map((pr) => {
       const review = latest.get(pr.number);
+      const { slug: _slug, ...fields } = pr as OwnedPullRequest;
       return {
+        ...fields,
         repo_id: repo.id,
-        ...pr,
+        host,
+        slug,
         // The agent opened it when a Session of its own worked on the branch.
         by_agent: worked.has(pr.branch),
         is_mine: (login !== null && pr.author === login) || worked.has(pr.branch),

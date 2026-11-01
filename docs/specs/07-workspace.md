@@ -36,6 +36,7 @@ Pull requests
 13. Approving or requesting changes on a PR whose `author` equals that `login` is refused with `invalid_state`. Commenting is allowed.
 14. `comment_count` counts every comment, replies included. `resolved_count` counts resolved threads.
 15. Merging is an operator endpoint. It reads the review state from the host and needs `approved`, else `invalid_state`. It writes an Action Log row of kind `pr` before calling the host. If the host rejects it, the PR stays open and the response is `upstream_failed`.
+23. With no `repo_id`, the list covers every repository on each connected host: per owner the host lets the operator read (the GitHub login and its orgs, the Bitbucket workspaces, the GitLab user and top-level groups), plus the Connector's own workspace or org and the owners of imported Repos. Each owner's list is kept 60 seconds like a Repo's; the owners are kept 10 minutes. A pull request whose repository is an imported Repo carries its `repo_id`; any other has a null `repo_id`. Every one carries `host` and `slug`. A Bitbucket workspace is read for its 300 most recently pushed repositories. An owner that fails leaves the rest listed and sets `meta.stale`.
 
 Agent Review and the agent's voice on a PR
 
@@ -45,17 +46,22 @@ Agent Review and the agent's voice on a PR
 19. When the operator replies in a thread whose first comment is in `agent_comments`, the reply goes to the host and the `pr_review` Session gets the thread and answers. The answer is posted in that thread with an Action Log row first, and recorded in `agent_comments`. A reply in any other thread does not start the agent.
 20. A comment is `by_agent` when it is in `agent_comments`.
 
+Anonymous Sessions
+
+21. Creating an `anonymous` Session needs no Repo and no branch. It works in its own folder, `anonymous/<session id>` in the data directory, made when the Session is. The agent may clone into it; the Monitor clones a Service's Git URL into one (`08-monitor-dashboard`).
+22. An `anonymous` Session's `branch` is the branch of the clone in its folder, null before there is one. It has no branch switcher. Deleting it leaves its folder.
+
 ## Settled
 
-- **Git host adapter**: one interface over `github`, `gitlab`, `bitbucket` and `local`, reached through the hosts' CLIs (`gh`, `glab`) or MCP servers, per ADR 0005. Listing and reading PRs is a fixed read with no model turn. `local` has no pull requests. Tests use a fake. Only the GitHub adapter exists (`gh api`); a GitLab or Bitbucket Repo answers `upstream_failed` until theirs lands.
+- **Git host adapter**: one interface over `github`, `gitlab`, `bitbucket` and `local`, reached through the hosts' CLIs (`gh`, `bkt`, `glab`), per ADR 0005. Listing and reading PRs is a fixed read with no model turn. `local` has no pull requests. Tests use a fake. GitHub (`gh api`) and Bitbucket Cloud (`bkt api`) do everything; GitLab (`glab api`) lists merge requests only, and the list opens them on GitLab.
 - **`by_agent` on a pull request**: a `repo` Session works on the PR's branch. The console keeps no record of who ran `gh pr create`, so the Session is the evidence.
 - **Agent Review output**: the agent ends with one JSON block holding `verdict`, `findings`, `checklist` and `tools`. Anything else marks the review `failed` and posts nothing.
 - **Starting runs**: the console starts the `pr_review` Session's runs itself. An Agent Review or a thread answer while that Session's run is going is refused with `session_busy`; a thread answer then goes unanswered.
 - **Pull request cache**: per Repo and state, in the daemon's memory. Posting, resolving, reviewing, merging and an Agent Review drop the Repo's entries. The branch list reads the open list through the same cache.
 - **Aggregate list**: with no `repo_id`, a Repo whose host Connector is not connected is skipped. With a `repo_id` it answers `connector_not_connected`.
-- **Pull request identity**: Repo and number. No `pull_requests` or `pr_comments` table.
+- **Pull request identity**: Repo and number for an imported Repo; host, slug and number otherwise. No `pull_requests` or `pr_comments` table.
 - **Stored here**: Agent Reviews and the ids of comments the agent posted. Everything else about a PR comes from the host.
-- **Session rules in code**: a `repo` Session has a Repo and a branch; a `pr_review` Session has a Repo and a PR number; other kinds have neither. SQLite cannot add these as `CHECK`s to an existing table, so the session service enforces them.
+- **Session rules in code**: a `repo` Session has a Repo and a branch; a `pr_review` Session has a Repo and a PR number; an `anonymous` Session has no Repo and may have a branch; other kinds have neither. SQLite cannot add these as `CHECK`s to an existing table, so the session service enforces them.
 - **Agent Review content**: findings, a PROD readiness checklist, the Connections the agent queried, and a verdict.
 - **Reactions**: not read. PR comment likes are dropped from the design.
 
@@ -133,7 +139,7 @@ Errors added here:
 
 ### `POST /sessions` (extends `02-settings-agents`)
 
-Adds `repo_id` and `branch`, required for kind `repo`. `pr_review` is never accepted. Errors: `validation_failed` when either is missing.
+Adds `repo_id` and `branch`, required for kind `repo`. Kind `anonymous` takes neither, and an optional `title`. `pr_review` is never accepted. Errors: `validation_failed` when a `repo` Session misses either.
 
 ### `GET /repos/:id/branches` (extends `06-settings-repos`)
 
@@ -153,7 +159,7 @@ Answers 200 with `{ "data": { "session": "Session", "stashed": false } }`. Error
 
 | Method and path | Body | Returns |
 | --------------- | ---- | ------- |
-| `GET /pull-requests` | query `repo_id?`, `state?` (default `open`), `mine?`, `q?` | `PullRequest[]` without detail fields. `meta` adds `synced_at` and `stale` |
+| `GET /pull-requests` | query `repo_id?`, `state?` (default `open`), `mine?`, `q?` | `PullRequest[]` without detail fields, each with `host`, `slug` and `repo_id` (null when not imported). `meta` adds `synced_at` and `stale` |
 | `POST /pull-requests/refresh` | `{ repo_id? }` | 202 `{ "data": { "accepted": true } }`; drops the cache. The outcome comes on `pull_request.refreshed` |
 | `GET /repos/:repo/pull-requests/:number` | | `PullRequest` with `files` and `comments` |
 | `POST /repos/:repo/pull-requests/:number/comments` | `{ body, file_path?, line?, parent_id? }` | 201 `PrComment` as the host returned it; `upstream_failed` |
@@ -197,9 +203,11 @@ Adds `branch: string | null`.
   Session count and `+`, and folds the group open or shut; the browser remembers folded Repos. An open Repo lists its
   3 most recently active Sessions, plus any running or picked one, then "Show N more". A row shows title and state on
   one line, with the branch under it when it differs from the Repo's. `+` shows the branch picker and Start; a Repo
-  with no Sessions shows them at once. Empty: "Import a Repo in Repos".
+  with no Sessions shows them at once. With no Repos: "Import a Repo in Repos to work on its branches."
+- A "No Repo" group under the Repos lists anonymous Sessions; its `+` starts one at once. `/workspace?session=<id>`
+  opens that Session, which is how the Monitor links to a Fix's Session.
 - Branch switcher: lists branches with an open-PR mark; disabled with the reason while Behavior 7 blocks it; a toast when changes were stashed.
-- Pull request list: mine and all, with a stale banner showing `synced_at` when `meta.stale` is true. Error state when the host fails with nothing cached.
+- Pull request list: mine and all, grouped by repository A→Z under its host's icon and `slug`, tagged `local` with the Repo's name when imported and `not imported` otherwise. Clicking a repository's header folds or unfolds its pull requests, and Collapse all folds every one; the folded set survives a reload, and a search unfolds every match. A pull request of an imported GitHub or Bitbucket Repo opens in the console; any other opens on the host in a new tab. A stale banner shows `synced_at` when `meta.stale` is true. Error state when the host fails with nothing cached.
 - Pull request view: files, comment threads with resolve, agent comments marked, the latest Agent Review with a stale badge. Approve and request changes are hidden on your own PR. Merge is enabled only when approved. No composer outside threads.
 
 ## Rejected
@@ -217,7 +225,7 @@ Adds `branch: string | null`.
 
 ## Seams
 
-- **Backend + SQLite, over HTTP** (Supertest, temporary data directory, fakes for the Git host adapter, git and the agent runtime): 1 to 5, 7, 9 to 17, 20.
+- **Backend + SQLite, over HTTP** (Supertest, temporary data directory, fakes for the Git host adapter, git and the agent runtime): 1 to 5, 7, 9 to 17, 20, 23. The Bitbucket adapter against a fake `bkt`.
 - **Backend + SQLite, over WebSocket**: 6, 8, 18, 19. Triggers through HTTP, asserts `session.updated`, `pull_request.*` events and the Action Log rows.
 
 ## Out of scope
@@ -226,5 +234,5 @@ Adds `branch: string | null`.
 - Repo import and the branch list itself: `06-settings-repos`.
 - The Git host `login` and sign-in: `04-settings-connectors`.
 - Fix branches and PRs opened from an Alert: `08-monitor-dashboard`, through the adapter here.
-- GitLab and Bitbucket adapters: the interface is ready; each needs its own spec or amendment.
+- The GitLab adapter beyond listing: reading, commenting, reviewing and merging merge requests.
 - The terminal panel: `05-settings-dev-tools` owns the terminal WebSocket.

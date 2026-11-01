@@ -134,6 +134,11 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
     return row;
   }
 
+  /** The id of the account runs go under, signed in or not; `null` before the first account. */
+  activeId(): string | null {
+    return this.setting().active_account_id;
+  }
+
   /** Every account with its config dir, in list order. */
   all(): { id: string; label: string; configDir: string; signedIn: boolean }[] {
     return this.rows().map((row) => ({

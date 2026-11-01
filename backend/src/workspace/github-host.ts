@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { ErrorCode, PrChecks, type PrFile, type PrReviewEvent, PrReviewState, PrState } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
-import type { GitHostAdapter, HostComment, HostPullRequest, NewHostComment } from './git-host';
+import type { GitHostAdapter, HostComment, HostPullRequest, NewHostComment, OwnedPullRequest } from './git-host';
 
 const run = promisify(execFile);
 
@@ -75,6 +75,13 @@ const STATES: Record<PrState, string> = {
 /** Issue comments and review comments count ids separately; issue comments carry this prefix. */
 const ISSUE = 'i';
 
+/** Search terms for each state; a closed pull request was not merged. */
+const SEARCH_STATES: Record<PrState, string> = {
+  [PrState.Open]: 'is:open',
+  [PrState.Merged]: 'is:merged',
+  [PrState.Closed]: 'is:closed is:unmerged',
+};
+
 const EVENTS: Record<PrReviewEvent, string> = {
   approve: 'APPROVE',
   request_changes: 'REQUEST_CHANGES',
@@ -95,6 +102,40 @@ export class GithubHost implements GitHostAdapter {
       .object({ repository: z.object({ pullRequests: z.object({ nodes: z.array(nodeSchema) }) }) })
       .parse(out);
     return parsed.repository.pullRequests.nodes.map(toPullRequest);
+  }
+
+  async owners(): Promise<string[]> {
+    const login = await this.login();
+    const orgs = z.array(z.object({ login: z.string() })).parse(await this.rest('user/orgs?per_page=100'));
+    return [...(login ? [login] : []), ...orgs.map((org) => org.login)];
+  }
+
+  async listOwner(owner: string, state: PrState): Promise<OwnedPullRequest[]> {
+    const scope = owner === (await this.login()) ? `user:${owner}` : `org:${owner}`;
+    const query = `query($q: String!) { search(query: $q, type: ISSUE, first: 100) {
+      nodes { ... on PullRequest { ${PR_FIELDS} repository { nameWithOwner } } } } }`;
+    const out = await this.graphql(query, { q: `is:pr ${SEARCH_STATES[state]} archived:false ${scope}` });
+    const nodes = z
+      .object({ search: z.object({ nodes: z.array(z.unknown()) }) })
+      .parse(out)
+      .search.nodes.flatMap((node) => {
+        const parsed = nodeSchema.extend({ repository: z.object({ nameWithOwner: z.string() }) }).safeParse(node);
+        return parsed.success ? [parsed.data] : [];
+      });
+    return nodes.map((node) => ({ ...toPullRequest(node), slug: node.repository.nameWithOwner }));
+  }
+
+  private loginRead: Promise<string | null> | null = null;
+
+  /** The signed-in login, read once. */
+  private login(): Promise<string | null> {
+    this.loginRead ??= this.rest('user')
+      .then((user) => z.object({ login: z.string() }).parse(user).login)
+      .catch(() => {
+        this.loginRead = null;
+        return null;
+      });
+    return this.loginRead;
   }
 
   async get(slug: string, number: number) {

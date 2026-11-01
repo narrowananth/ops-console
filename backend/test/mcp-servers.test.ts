@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { WsEvent } from '@ops-console/shared';
@@ -378,8 +379,9 @@ describe('editing', () => {
 });
 
 describe('authenticating and reconnecting', () => {
-  it('signs in each account that needs it, then reports ok', async () => {
+  it('signs in the active account only, then reports ok while the others still need auth', async () => {
     const ctx = await start();
+    const [active, other] = ctx.dirs as [string, string];
     await api(ctx.daemon).post('/mcp-servers', {
       name: 'sentry',
       transport: 'http',
@@ -399,8 +401,52 @@ describe('authenticating and reconnecting', () => {
     );
     close();
     expect(await find(ctx, 'sentry')).toMatchObject({ status: 'ok' });
-    for (const dir of ctx.dirs)
-      expect(JSON.parse(await readFile(path.join(dir, 'fake-mcp-auth.json'), 'utf8'))).toContain('sentry');
+    expect(JSON.parse(await readFile(path.join(active, 'fake-mcp-auth.json'), 'utf8'))).toContain('sentry');
+    expect(existsSync(path.join(other, 'fake-mcp-auth.json'))).toBe(false);
+  });
+
+  it('reports ok as soon as the sign-in finishes, without waiting for a new Probe', async () => {
+    const ctx = await start();
+    await api(ctx.daemon).post('/mcp-servers', {
+      name: 'sentry',
+      transport: 'http',
+      target: 'https://mcp.example.com/mcp',
+      scope: 'user',
+    });
+    for (const dir of ctx.dirs) ctx.probe.set(dir, 'sentry', { status: 'needs-auth' });
+    await api(ctx.daemon).post('/mcp-servers/sentry/checks');
+    ctx.probe.delayMs = 10_000;
+
+    const { events, close } = await listen(ctx.daemon);
+    const started = Date.now();
+    await api(ctx.daemon).post('/mcp-servers/sentry/auth');
+    await until(
+      () => checked(events),
+      (found) => found.some((event) => event.status === 'ok'),
+      'a passing check',
+    );
+    close();
+    expect(Date.now() - started).toBeLessThan(3_000);
+  });
+
+  it('reads auth again once the account that still needs it becomes active', async () => {
+    const ctx = await start();
+    const [active, other] = ctx.dirs as [string, string];
+    await api(ctx.daemon).post('/mcp-servers', {
+      name: 'sentry',
+      transport: 'http',
+      target: 'https://mcp.example.com/mcp',
+      scope: 'user',
+    });
+    ctx.probe.set(active, 'sentry', { status: 'connected' });
+    ctx.probe.set(other, 'sentry', { status: 'needs-auth' });
+    await api(ctx.daemon).post('/mcp-servers/sentry/checks');
+    expect(await find(ctx, 'sentry')).toMatchObject({ status: 'ok' });
+
+    const accounts = (await api(ctx.daemon).get('/agent-accounts')).body.data as { id: string; is_active: boolean }[];
+    const second = accounts.find((account) => !account.is_active);
+    await api(ctx.daemon).post(`/agent-accounts/${second?.id}/activate`);
+    expect(await find(ctx, 'sentry')).toMatchObject({ status: 'auth' });
   });
 
   it('leaves the status auth when the sign-in fails', async () => {

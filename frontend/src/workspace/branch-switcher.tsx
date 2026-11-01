@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Button } from '../components/ui/button';
 import { item, menu } from '../components/ui/item';
 import { useBranches, useCheckout } from '../lib/queries';
+import { ascending } from '../lib/sort';
 
 const RUNNING = [SessionState.Working, SessionState.WaitingApproval];
 
@@ -80,7 +81,7 @@ export function BranchSwitcher({ session, all, repo }: { session: Session; all: 
             {repo && <span className="truncate font-mono text-[11px] text-neutral-700">{repo.path}</span>}
           </div>
           <ul aria-label="Branches" className="m-0 flex max-h-60 list-none flex-col gap-0.5 overflow-y-auto p-0">
-            {branches.data?.map((branch) => {
+            {ascending(branches.data ?? [], (branch) => branch.name).map((branch) => {
               const current = branch.name === session.branch;
               return (
                 <li key={branch.name}>
