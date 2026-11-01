@@ -190,12 +190,22 @@ describe('branches', () => {
     const { daemon } = await start();
     const dir = await makeRepo('branchy');
     const { body } = await api(daemon).post('/repos', { path: dir });
+    // Branches sort by committer date, which `--date` leaves alone; pin it on each side of `main`'s commit.
+    const commitAt = (date: string, message: string) =>
+      execFileSync(
+        'git',
+        ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-q', '--allow-empty', '-m', message],
+        {
+          cwd: dir,
+          stdio: 'pipe',
+          env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+        },
+      );
     git(dir, 'checkout', '-q', '-b', 'older');
-    git(dir, 'commit', '-q', '--allow-empty', '-m', 'on older', '--date=2020-01-01T00:00:00');
+    commitAt('2020-01-01T00:00:00Z', 'on older');
     git(dir, 'checkout', '-q', 'main');
-    await new Promise((resolve) => setTimeout(resolve, 1100));
     git(dir, 'checkout', '-q', '-b', 'newer');
-    git(dir, 'commit', '-q', '--allow-empty', '-m', 'on newer');
+    commitAt('2099-01-01T00:00:00Z', 'on newer');
     const branches = await api(daemon).get(`/repos/${body.data.id}/branches`);
     expect(branches.body.data.map((branch: { name: string }) => branch.name)).toEqual(
       ['newer', 'main', 'older'].filter(Boolean),
