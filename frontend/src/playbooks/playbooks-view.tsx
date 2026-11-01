@@ -7,6 +7,8 @@ import {
 } from '@ops-console/shared';
 import { type DragEvent, type ReactNode, useState } from 'react';
 import { Button } from '../components/ui/button';
+import { ConfirmDialog } from '../components/ui/confirm-dialog';
+import { Dropdown, type DropdownOption } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
 import { item } from '../components/ui/item';
 import { useCreatePlaybook, usePlaybooks, useSetTrigger } from '../lib/queries';
@@ -15,7 +17,7 @@ import { ascending } from '../lib/sort';
 import { type Draft, type DraftStep, draftOf, useDrafts } from './drafts';
 import { type Drag, Grip, leftFor, startDrag } from './drag';
 import { ScratchTag } from './job-steps';
-import { freeName, holderOf, reviewRefusal } from './labels';
+import { builtinFor, freeName, holderOf, reviewRefusal } from './labels';
 import { PlaybookEditor } from './playbook-editor';
 
 function Caption({ children }: { children: ReactNode }) {
@@ -96,35 +98,20 @@ export function PlaybooksView() {
         onAttach={attach}
         onDetach={detach}
         error={setTrigger.error?.message ?? null}
-        replacing={
-          replacing && (
-            <div
-              role="alert"
-              className="mx-2 mt-2 flex flex-col gap-2 rounded-lg border border-line bg-card p-2.5 text-xs"
-            >
-              <span>
-                {TRIGGER_LABELS[replacing.trigger].label} runs {replacing.from.name}. Replace it with{' '}
-                {replacing.to.name}?
-              </span>
-              <div className="flex gap-1.5">
-                <Button
-                  variant="primary"
-                  className="px-2.5 py-1 text-xs"
-                  onClick={() => {
-                    setTrigger.mutate({ trigger: replacing.trigger, playbookId: replacing.to.id });
-                    setReplacing(null);
-                  }}
-                >
-                  Replace
-                </Button>
-                <Button className="px-2.5 py-1 text-xs" onClick={() => setReplacing(null)}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          )
-        }
       />
+      {replacing && (
+        <ConfirmDialog
+          title={`Replace ${replacing.from.name}?`}
+          action="Replace"
+          onConfirm={() => {
+            setTrigger.mutate({ trigger: replacing.trigger, playbookId: replacing.to.id });
+            setReplacing(null);
+          }}
+          onCancel={() => setReplacing(null)}
+        >
+          {TRIGGER_LABELS[replacing.trigger].label} runs {replacing.from.name}. Replace it with {replacing.to.name}?
+        </ConfirmDialog>
+      )}
       <PlaybookEditor
         key={open.id}
         playbook={open}
@@ -193,6 +180,15 @@ export function PlaybooksView() {
   );
 }
 
+/** The Dropdown value for a Trigger running its built-in. */
+const BUILT_IN = '';
+
+const stepCount = (playbook: Playbook | undefined) => {
+  if (!playbook) return undefined;
+  const count = playbook.steps.length;
+  return count === 0 ? 'rules only' : `${count} ${count === 1 ? 'step' : 'steps'}`;
+};
+
 const TABS = [...new Set(PLAYBOOK_TRIGGERS.map((trigger) => TRIGGER_LABELS[trigger].tab))];
 
 function TriggersColumn(props: {
@@ -205,7 +201,6 @@ function TriggersColumn(props: {
   onAttach: (trigger: PlaybookTrigger, playbook: Playbook) => void;
   onDetach: (trigger: PlaybookTrigger) => void;
   error: string | null;
-  replacing: ReactNode;
 }) {
   const { items, openId, drafts, drag, setDrag, onOpen, onAttach, onDetach } = props;
   const [over, setOver] = useState<PlaybookTrigger | null>(null);
@@ -220,6 +215,24 @@ function TriggersColumn(props: {
     startDrag(event, next, setDrag);
   };
 
+  const choices = (trigger: PlaybookTrigger): DropdownOption<string>[] => [
+    { value: BUILT_IN, label: 'Built-in', description: stepCount(builtinFor(items, trigger)) },
+    ...own.map((playbook) => ({
+      value: playbook.id,
+      label: playbook.name,
+      description: reviewRefusal(trigger, playbook.steps) ?? stepCount(playbook),
+    })),
+  ];
+  /** Built-in detaches; a Playbook attaches, unless Review PR refuses it (Behavior 11). */
+  const pick = (trigger: PlaybookTrigger, id: string) => {
+    if (id === BUILT_IN) return onDetach(trigger);
+    const playbook = own.find((candidate) => candidate.id === id);
+    if (!playbook) return;
+    const refused = reviewRefusal(trigger, playbook.steps);
+    setRefusal(refused);
+    if (!refused) onAttach(trigger, playbook);
+  };
+
   const slot = (trigger: PlaybookTrigger) => {
     const holder = holderOf(items, trigger);
     const refused = drag?.kind === 'playbook' ? reviewRefusal(trigger, drag.playbook.steps) : null;
@@ -230,6 +243,13 @@ function TriggersColumn(props: {
       <li
         key={trigger}
         aria-label={TRIGGER_LABELS[trigger].label}
+        draggable={holder !== undefined}
+        title={holder ? 'Drag off to put the built-in back' : undefined}
+        onDragStart={(event) => beginDrag(event, { kind: 'chip', trigger })}
+        onDragEnd={(event) => {
+          if (event.dataTransfer.dropEffect === 'none') onDetach(trigger);
+          setDrag(null);
+        }}
         onDragOver={(event) => {
           if (drag?.kind !== 'playbook' && !ownChip) return;
           setOver(trigger);
@@ -245,7 +265,9 @@ function TriggersColumn(props: {
           setOver(null);
           if (drag?.kind === 'playbook') onAttach(trigger, drag.playbook);
         }}
-        className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[13px] transition-colors ${
+        className={`flex items-center gap-2 rounded-lg border py-1.5 pr-1.5 pl-2.5 text-[13px] transition-colors ${
+          holder ? 'cursor-grab' : ''
+        } ${
           over === trigger && drag?.kind === 'playbook'
             ? refused
               ? 'cursor-no-drop border-neutral-400 bg-neutral-200'
@@ -253,27 +275,16 @@ function TriggersColumn(props: {
             : 'border-dashed border-divider'
         }`}
       >
-        <b>{TRIGGER_LABELS[trigger].label}</b>
-        {holder ? (
-          <button
-            type="button"
-            draggable
-            title="Drag off to put the built-in back"
-            onClick={() => onOpen(holder.id)}
-            onDragStart={(event) => beginDrag(event, { kind: 'chip', trigger })}
-            onDragEnd={(event) => {
-              if (event.dataTransfer.dropEffect === 'none') onDetach(trigger);
-              setDrag(null);
-            }}
-            className="ml-auto max-w-37.5 cursor-grab truncate rounded-full border-0 bg-accent-100 px-2.5 py-0.5 text-[11px] font-bold text-accent-700"
-          >
-            {holder.name}
-          </button>
-        ) : (
-          <span className="ml-auto rounded-full bg-neutral-200 px-2.5 py-0.5 text-[11px] text-neutral-700">
-            Built-in
-          </span>
-        )}
+        <b className="min-w-0 flex-1 truncate">{TRIGGER_LABELS[trigger].label}</b>
+        <Dropdown
+          label={`${TRIGGER_LABELS[trigger].label} runs`}
+          value={holder?.id ?? BUILT_IN}
+          options={choices(trigger)}
+          onChange={(id) => pick(trigger, id)}
+          className="w-36 flex-none"
+          listClassName="w-64"
+          heading={`${TRIGGER_LABELS[trigger].label} runs`}
+        />
       </li>
     );
   };
@@ -299,7 +310,7 @@ function TriggersColumn(props: {
           <span className="truncate font-bold">{playbook.name}</span>
           <span className="truncate text-[11px] text-neutral-700">
             {playbook.builtin
-              ? `built-in · ${playbook.steps.length === 0 ? 'rules only' : `${playbook.steps.length} ${playbook.steps.length === 1 ? 'step' : 'steps'}`}`
+              ? `built-in · ${stepCount(playbook)}`
               : playbook.triggers.map((trigger) => TRIGGER_LABELS[trigger].label).join(', ')}
           </span>
         </span>
@@ -318,7 +329,7 @@ function TriggersColumn(props: {
   return (
     <aside
       aria-label="Triggers and Playbooks"
-      className="flex w-72 flex-none flex-col gap-1 overflow-y-auto border-r border-line px-3 py-4"
+      className="flex w-80 flex-none flex-col gap-1 overflow-y-auto border-r border-line px-3 py-4"
     >
       <section aria-label="Triggers">
         <Caption>Triggers</Caption>
@@ -337,12 +348,11 @@ function TriggersColumn(props: {
             {refusal ?? props.error}
           </p>
         )}
-        {props.replacing}
         <p className="mx-2 mt-1.5 mb-0 text-xs text-neutral-700">
-          Drag a Playbook onto a Trigger. Drag its chip off to put the built-in back.
+          Pick a Playbook for a Trigger, or drag one onto it. Drag a Trigger off to put the built-in back.
         </p>
       </section>
-      <section aria-label="Playbooks">
+      <section aria-label="Playbooks" className="mt-2">
         <Caption>Playbooks</Caption>
         {own.length === 0 ? (
           <p className="mx-2 my-1 text-xs text-neutral-700">

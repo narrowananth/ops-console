@@ -31,7 +31,7 @@ async function create(http: Http, name: string, extra: object = {}) {
 const list = (http: Http) => http.get('/playbooks').then((res) => res.body.data);
 
 describe('Playbooks and Triggers', () => {
-  it('lists the six built-ins, each on its Trigger, and the ten Step blocks', async () => {
+  it('lists the five built-ins, each on its Trigger, and the ten Step blocks', async () => {
     const { http } = await start();
     const { items, blocks } = await list(http);
     expect(items.map((p: { id: string; triggers: string[] }) => [p.id, p.triggers])).toEqual([
@@ -40,7 +40,6 @@ describe('Playbooks and Triggers', () => {
       ['builtin:review_pr', ['review_pr']],
       ['builtin:thread_reply', ['thread_reply']],
       ['builtin:session_message', ['session_message']],
-      ['builtin:devtools_ask', ['devtools_ask']],
     ]);
     const steps = (id: string) =>
       items.find((p: { id: string }) => p.id === id).steps.map((s: { title: string }) => s.title);
@@ -131,7 +130,7 @@ describe('Playbooks and Triggers', () => {
     expect((await http.delete(`/playbooks/${safe.id}`)).status).toBe(204);
     const { items } = await list(http);
     expect(items.map((p: { id: string }) => p.id)).not.toContain(safe.id);
-    expect(items.filter((p: { triggers: string[] }) => p.triggers.length === 1)).toHaveLength(6);
+    expect(items.filter((p: { triggers: string[] }) => p.triggers.length === 1)).toHaveLength(5);
     expect((await http.delete(`/playbooks/${safe.id}`)).body.error.code).toBe('not_found');
   });
 

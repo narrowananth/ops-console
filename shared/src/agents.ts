@@ -184,6 +184,16 @@ export type SessionPatch = z.infer<typeof sessionPatchSchema>;
 
 export const sendMessageSchema = z.object({ text: z.string().trim().min(1) });
 
+/** What editing the last message did to the files before it ran again. */
+export const editedMessageSchema = z.object({
+  message_id: z.string(),
+  /** Files put back as they were before the message; null when they could not be. */
+  reverted: z.object({ files: z.array(z.string()), insertions: z.number(), deletions: z.number() }).nullable(),
+  /** Why the files were not put back. */
+  revert_error: z.string().nullable(),
+});
+export type EditedMessage = z.infer<typeof editedMessageSchema>;
+
 export const actionLogRowSchema = z.object({
   id: z.string(),
   at: z.string(),

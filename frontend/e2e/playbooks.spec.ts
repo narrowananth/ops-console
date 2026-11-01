@@ -63,20 +63,22 @@ test.beforeEach(async ({ request }) => {
   await reset(request);
 });
 
-test('Playbooks lists the six Triggers under their tabs, the built-ins and the ten Step blocks', async ({ page }) => {
+test('Playbooks lists the five Triggers under their tabs, the built-ins and the ten Step blocks', async ({ page }) => {
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
   await page.getByRole('navigation').getByRole('link', { name: 'Playbooks' }).click();
   const { triggers, playbooks, blocks } = regions(page);
 
   await expect(triggers).toContainText(
-    /Monitor\s*Verify.*Fix.*Workspace\s*Review PR.*Reply in thread.*Session message.*Dev tools\s*Ask/,
+    /Monitor\s*Verify.*Fix.*Workspace\s*Review PR.*Reply in thread.*Session message/,
   );
-  for (const trigger of ['Verify', 'Fix', 'Review PR', 'Reply in thread', 'Session message', 'Ask']) {
+  for (const trigger of ['Verify', 'Fix', 'Review PR', 'Reply in thread', 'Session message']) {
     await expect(triggers.getByRole('listitem', { name: trigger, exact: true })).toContainText('Built-in');
   }
   await expect(playbooks).toContainText('No Playbooks yet. Duplicate a built-in or start a new one.');
   await expect(playbooks.getByRole('button', { name: /^Verify \(built-in\)/ })).toContainText('built-in · 4 steps');
-  await expect(playbooks.getByRole('button', { name: /^Ask \(built-in\)/ })).toContainText('built-in · rules only');
+  await expect(playbooks.getByRole('button', { name: /^Session message \(built-in\)/ })).toContainText(
+    'built-in · rules only',
+  );
 
   const titles = [
     'Trace the log through the code',
@@ -249,7 +251,7 @@ test('a built-in reads only and Duplicate makes an editable copy; New Playbook s
   expect(names.data.items.filter((item: { builtin: boolean }) => !item.builtin)).toHaveLength(2);
 });
 
-test('a Playbook goes on a Trigger by drag or Attach to and comes off by drag or Detach; Review PR refuses writes', async ({
+test('a Playbook goes on a Trigger by drag, dropdown or Attach to and comes off by drag, dropdown or Detach; Review PR refuses writes', async ({
   page,
   request,
 }) => {
@@ -263,12 +265,25 @@ test('a Playbook goes on a Trigger by drag or Attach to and comes off by drag or
     await editor.getByRole('button', { name: 'Attach to' }).click();
     await editor.getByRole('group', { name: 'Attach to' }).getByRole('button', { name: trigger }).click();
   };
+  const pick = async (trigger: string, playbook: string) => {
+    await slot(trigger)
+      .getByRole('button', { name: `${trigger} runs` })
+      .click();
+    await page
+      .getByRole('listbox', { name: `${trigger} runs` })
+      .getByRole('option', { name: new RegExp(`^${playbook}`) })
+      .click();
+  };
+  const confirm = page.getByRole('alertdialog');
 
   await row('Checkout deep check').dragTo(slot('Verify'));
   await expect(slot('Verify')).toContainText('Checkout deep check');
   await expect(row('Checkout deep check')).toContainText('Verify');
 
   await row('Checkout deep check').dragTo(slot('Review PR'));
+  await expect(triggers.getByRole('alert')).toHaveText('Review PR reads only: remove Make mock data first.');
+  await expect(slot('Review PR')).toContainText('Built-in');
+  await pick('Review PR', 'Checkout deep check');
   await expect(triggers.getByRole('alert')).toHaveText('Review PR reads only: remove Make mock data first.');
   await expect(slot('Review PR')).toContainText('Built-in');
 
@@ -278,14 +293,13 @@ test('a Playbook goes on a Trigger by drag or Attach to and comes off by drag or
   await expect(editor).not.toContainText("Then the console's own turn:");
 
   await row('Safe DB fix').dragTo(slot('Verify'));
-  await expect(triggers.getByRole('alert')).toContainText(
-    'Verify runs Checkout deep check. Replace it with Safe DB fix?',
-  );
-  await triggers.getByRole('button', { name: 'Replace' }).click();
+  await expect(confirm).toContainText('Verify runs Checkout deep check. Replace it with Safe DB fix?');
+  await confirm.getByRole('button', { name: 'Replace' }).click();
+  await expect(confirm).toHaveCount(0);
   await expect(slot('Verify')).toContainText('Safe DB fix');
   await expect(editor).not.toContainText("Steps don't run on chat Triggers.");
 
-  await attach('Monitor · Fix');
+  await pick('Fix', 'Safe DB fix');
   await expect(editor).toContainText('On: Monitor · Verify, Monitor · Fix, Workspace · Session message');
   await expect(editor).toContainText("Then the console's own turn:");
   await expect(editor).toContainText('Verify: write the Report.');
@@ -296,17 +310,24 @@ test('a Playbook goes on a Trigger by drag or Attach to and comes off by drag or
   await editor.getByRole('button', { name: 'Detach' }).click();
   await editor.getByRole('group', { name: 'Detach' }).getByRole('button', { name: 'Workspace · Review PR' }).click();
   await expect(slot('Review PR')).toContainText('Built-in');
+  await pick('Review PR', 'Safe DB fix');
+  await expect(slot('Review PR')).toContainText('Safe DB fix');
+  await pick('Review PR', 'Built-in');
+  await expect(slot('Review PR')).toContainText('Built-in');
 
-  // A chip let go off its Trigger puts the built-in back.
-  await slot('Verify').getByRole('button', { name: 'Safe DB fix' }).dragTo(blocks);
+  // A Trigger dragged off puts the built-in back.
+  await slot('Verify').dragTo(blocks, { sourcePosition: { x: 12, y: 12 } });
   await expect(slot('Verify')).toContainText('Built-in');
   await expect(editor).toContainText('On: Monitor · Fix, Workspace · Session message');
 
   await editor.getByRole('button', { name: 'Delete' }).click();
-  await expect(editor.getByRole('alert')).toContainText(
-    'Delete Safe DB fix? Fix and Session message go back to built-in.',
-  );
-  await editor.getByRole('alert').getByRole('button', { name: 'Delete' }).click();
+  await expect(confirm).toContainText('Delete Safe DB fix?');
+  await expect(confirm).toContainText("Fix and Session message go back to built-in. This can't be undone.");
+  await confirm.getByRole('button', { name: 'Cancel' }).click();
+  await expect(confirm).toHaveCount(0);
+  await expect(row('Safe DB fix')).toBeVisible();
+  await editor.getByRole('button', { name: 'Delete' }).click();
+  await confirm.getByRole('button', { name: 'Delete' }).click();
   await expect(row('Safe DB fix')).toHaveCount(0);
   await expect(slot('Fix')).toContainText('Built-in');
   await expect(slot('Session message')).toContainText('Built-in');
@@ -383,7 +404,7 @@ const alert = (id: string, status: string, latestReport: ReturnType<typeof repor
   regression_count: 0,
   waiting_since: null,
   datadog_query: 'service:checkout-api env:prod',
-  session_id: null,
+  session_id: null as string | null,
   samples: [],
   review: null,
   latest_report: latestReport,
@@ -440,11 +461,8 @@ const ALERTS = {
   }),
 };
 
-test('Monitor names the Playbook on Verify and Fix, shows its steps on the Report and retries from the failed one', async ({
-  page,
-}) => {
-  const retried: string[] = [];
-  const all = Object.values(ALERTS);
+/** Answers Monitor's reads with one Service, checkout-api, and these Alerts. */
+async function routeAlerts(page: Page, all: ReturnType<typeof alert>[]) {
   await page.route('**/api/services', (route) =>
     route.fulfill({
       json: {
@@ -475,6 +493,14 @@ test('Monitor names the Playbook on Verify and Fix, shows its steps on the Repor
     if (tail === 'reports') return route.fulfill({ json: { data: [found?.latest_report] } });
     return route.fulfill({ json: { data: found } });
   });
+}
+
+test('Monitor names the Playbook on Verify and Fix, shows its steps on the Report and retries from the failed one', async ({
+  page,
+}) => {
+  const retried: string[] = [];
+  const all = Object.values(ALERTS);
+  await routeAlerts(page, all);
   await page.route('**/api/playbooks', (route) =>
     route.fulfill({
       json: builtinsList([
@@ -498,10 +524,12 @@ test('Monitor names the Playbook on Verify and Fix, shows its steps on the Repor
     '/playbooks?playbook=pb-deep',
   );
   const steps = reportPanel.getByRole('list', { name: 'Playbook steps' }).getByRole('listitem');
-  await expect(steps).toHaveCount(4);
+  // The Playbook's four steps, then the console's own closing turn.
+  await expect(steps).toHaveCount(5);
+  await expect(steps.nth(4)).toContainText('Write the Report');
   await expect(steps.nth(0)).toContainText('checkout-api owns it: src/orders/checkout.ts:142.');
-  await expect(steps.nth(1)).toContainText('skipped');
-  await expect(steps.nth(2)).toContainText('3 · Make mock data');
+  await expect(steps.nth(1)).toContainText('Skipped');
+  await expect(steps.nth(2)).toContainText('Make mock data');
   await expect(steps.nth(2)).toContainText('scratch copy');
   await expect(steps.nth(2)).toContainText('No fixture folder in this Repo.');
   await expect(reportPanel).toContainText('Read src/orders/checkout.ts');
@@ -520,13 +548,16 @@ test('Monitor names the Playbook on Verify and Fix, shows its steps on the Repor
 
   await show('a4');
   const fix = page.getByRole('region', { name: 'Fix', exact: true });
-  await expect(fix.getByRole('list', { name: 'Fix progress' }).getByRole('listitem')).toHaveText([
-    '✓ Ticket (no Jira)',
-    '✓ Branch',
-    '✓ Code',
-    '✕ Tests',
-    '· PR',
+  const stages = fix.getByRole('list', { name: 'Fix progress' }).getByRole('listitem');
+  await expect(stages).toHaveText([
+    /Ticket.*Skipped.*No Jira connected\./,
+    /Branch.*done.*fix\/orders-empty-cart/,
+    /Code.*done.*Guarded the shipping line\./,
+    /Tests.*Failed.*2 tests fail on the empty cart\./,
+    /Pull request.*to do/,
   ]);
+  await expect(fix.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '3');
+  await expect(stages.nth(3)).toContainText('Retry from step 2');
   await expect(fix).toContainText('Playbook: Fix (built-in)');
   await expect(fix.getByRole('button', { name: 'Retry from step 2' })).toBeVisible();
 });
@@ -599,9 +630,77 @@ test('Review with agent names the Review PR Playbook, and the Agent Review shows
     '/playbooks?playbook=pb-prod',
   );
   const steps = card.getByRole('list', { name: 'Playbook steps' }).getByRole('listitem');
-  await expect(steps).toHaveCount(2);
-  await expect(steps.nth(1)).toContainText('2 · Check PROD readiness');
+  await expect(steps).toHaveCount(3);
+  await expect(steps.nth(2)).toContainText('findings, checklist and verdict');
+  await expect(steps.nth(1)).toContainText('Check PROD readiness');
   await expect(steps.nth(1)).toContainText('No migration; the cache needs a TTL.');
+});
+
+test("a running Report, Fix and Agent Review each stop their Session's run", async ({ page }) => {
+  const stopped: string[] = [];
+  const steps = jobPlaybook(null, 'Fix (built-in)', [['Code', 'running', null, true]]);
+  const verifying = {
+    ...alert('a5', 'verifying', report('a5', 'running', jobPlaybook(null, 'Verify (built-in)', []))),
+    session_id: 'sv5',
+  };
+  const fixing = alert('a6', 'fixing', report('a6', 'ready', null), {
+    id: 'fix6',
+    review_id: 'rv6',
+    session_id: 'sf6',
+    stage: 'steps',
+    status: 'running',
+    jira_key: null,
+    jira_url: null,
+    branch: 'fix/orders-empty-cart',
+    pr_number: null,
+    pr_url: null,
+    error_message: null,
+    started_at: NOW,
+    finished_at: null,
+    playbook: steps,
+  });
+  await routeAlerts(page, [verifying, fixing]);
+  await page.route('**/api/sessions/*/stop', (route) => {
+    stopped.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ status: 204 });
+  });
+  await page.route('**/api/repos/r1/pull-requests/7', (route) =>
+    route.fulfill({
+      json: {
+        data: {
+          ...pullRequest({
+            id: 'ar1',
+            repo_id: 'r1',
+            pr_number: 7,
+            head_sha: '9c1e4b7d00000000000000000000000000000000',
+            status: 'running',
+            verdict: null,
+            findings: [],
+            checklist: [],
+            tools: [],
+            created_at: NOW,
+            stale: false,
+            playbook: null,
+          }),
+          agent_session_id: 'sr7',
+        },
+      },
+    }),
+  );
+
+  await page.goto(`${daemon.url}/monitor?service=checkout-api&alert=a5#token=${daemon.token}`);
+  await page.getByRole('region', { name: 'Report', exact: true }).getByRole('button', { name: 'Stop' }).click();
+  await expect.poll(() => stopped).toEqual(['/api/sessions/sv5/stop']);
+
+  await page.goto(`${daemon.url}/monitor?service=checkout-api&alert=a6#token=${daemon.token}`);
+  await page.getByRole('region', { name: 'Fix', exact: true }).getByRole('button', { name: 'Stop' }).click();
+  await expect.poll(() => stopped).toEqual(['/api/sessions/sv5/stop', '/api/sessions/sf6/stop']);
+
+  await page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1/7#token=${daemon.token}`);
+  await page.getByRole('region', { name: 'Agent Review' }).getByRole('button', { name: 'Stop' }).click();
+  await expect
+    .poll(() => stopped)
+    .toEqual(['/api/sessions/sv5/stop', '/api/sessions/sf6/stop', '/api/sessions/sr7/stop']);
 });
 
 const session = (id: string, kind: string, playbook: { id: string; name: string } | null) => ({
@@ -615,7 +714,7 @@ const session = (id: string, kind: string, playbook: { id: string; name: string 
   repo_id: null,
   branch: null,
   pr_number: null,
-  connection_ids: kind === 'devtools' ? [] : null,
+  connection_ids: null,
   state: 'idle',
   last_message_preview: null,
   created_at: NOW,
@@ -623,55 +722,18 @@ const session = (id: string, kind: string, playbook: { id: string; name: string 
   playbook,
 });
 
-test('a Session and a Dev tools Session name the Playbook their rules come from and link to it', async ({
-  page,
-  request,
-}) => {
+test('a Session names the Playbook its rules come from and links to it', async ({ page, request }) => {
   const id = await make(request, 'Safe DB fix', [], 'Never write to PROD.');
   const playbook = { id, name: 'Safe DB fix' };
   await page.route(/\/api\/sessions\?kind=anonymous/, (route) =>
     route.fulfill({ json: { data: [session('s1', 'anonymous', playbook), session('s2', 'anonymous', null)] } }),
   );
-  await page.route(/\/api\/sessions\?kind=(repo|devtools)/, (route) =>
-    route.fulfill({
-      json: { data: route.request().url().includes('devtools') ? [session('s3', 'devtools', playbook)] : [] },
-    }),
-  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) => route.fulfill({ json: { data: [] } }));
   await page.route(/\/api\/sessions\/s\d\/messages/, (route) => route.fulfill({ json: { data: [] } }));
 
   await page.goto(`${daemon.url}/workspace?session=s2#token=${daemon.token}`);
   await expect(page.getByRole('heading', { name: 'Session s2' })).toBeVisible();
   await expect(page.getByRole('link', { name: /^Playbook:/ })).toHaveCount(0);
-
-  await page.route('**/api/connections', (route) =>
-    route.fulfill({
-      json: {
-        data: [
-          {
-            id: 'c1',
-            name: 'pg-tenant',
-            type: 'postgres',
-            env: 'local',
-            access: 'read',
-            config: {},
-            status: 'ok',
-            status_detail: null,
-            latency_ms: 4,
-            last_checked_at: NOW,
-            created_at: NOW,
-            is_prod: false,
-            secret_stored: true,
-          },
-        ],
-        meta: { next_cursor: null },
-      },
-    }),
-  );
-  await page.goto(`${daemon.url}/devtools#token=${daemon.token}`);
-  await expect(page.getByRole('link', { name: 'Playbook: Safe DB fix' })).toHaveAttribute(
-    'href',
-    `/playbooks?playbook=${id}`,
-  );
 
   await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
   await page.getByRole('link', { name: 'Playbook: Safe DB fix' }).click();

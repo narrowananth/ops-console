@@ -138,16 +138,14 @@ export class PlaybooksService {
 
   /**
    * The rules a chat turn in this Session runs with, read at each turn, and the Playbook they come from when it is
-   * not built-in. An Alert's Session uses what the Alert's latest job copied (Behavior 21).
+   * not built-in. An Alert's Session uses what the Alert's latest job copied (Behavior 21). A `devtools` Session has
+   * no Trigger: its own instructions already cover Connections and PROD.
    */
   forSession(session: SessionRow): { rules: string | null; playbook: { id: string; name: string } | null } {
     if (session.alertId !== null) return this.latestAlertJob(session.alertId);
+    if (session.kind === SessionKind.Devtools) return { rules: null, playbook: null };
     const trigger =
-      session.kind === SessionKind.Devtools
-        ? PlaybookTrigger.DevtoolsAsk
-        : session.kind === SessionKind.PrReview
-          ? PlaybookTrigger.ThreadReply
-          : PlaybookTrigger.SessionMessage;
+      session.kind === SessionKind.PrReview ? PlaybookTrigger.ThreadReply : PlaybookTrigger.SessionMessage;
     const copy = this.copyFor(trigger);
     return { rules: copy.rules || null, playbook: copy.id ? { id: copy.id, name: copy.name } : null };
   }

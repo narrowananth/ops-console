@@ -17,6 +17,7 @@ import {
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { ActionLogService } from '../action-log/action-log.service';
+import type { RunSummary } from '../agent/runs';
 import { AgentRuntime } from '../agent/runtime';
 import { SessionsService } from '../agent/sessions.service';
 import { ApiError } from '../common/errors';
@@ -276,7 +277,7 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
     sessionId: string,
     slug: string,
     headSha: string,
-    summary: { ok: boolean; text: string },
+    summary: RunSummary,
   ): Promise<void> {
     const review = this.store.db.select().from(prAgentReviews).where(eq(prAgentReviews.id, reviewId)).get();
     if (!review) return;

@@ -131,7 +131,6 @@ export const BUILTIN_STEPS: Record<PlaybookTrigger, PlaybookStep[]> = {
   ],
   [PlaybookTrigger.ThreadReply]: [],
   [PlaybookTrigger.SessionMessage]: [],
-  [PlaybookTrigger.DevtoolsAsk]: [],
 };
 
 export const builtinId = (trigger: PlaybookTrigger) => `builtin:${trigger}`;

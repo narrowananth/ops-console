@@ -404,6 +404,21 @@ describe('results and comparisons', () => {
     expect((prompt as { append: string }).append).toMatch(/ops-result[\s\S]*ops-compare/);
   });
 
+  it('runs with no Playbook rules, whatever Session message holds, and has no Trigger of its own', async () => {
+    const daemon = await start();
+    const http = api(daemon);
+    const safe = (await http.post('/playbooks', { name: 'Safe DB fix', rules: 'Never touch the orders table.' })).body
+      .data as { id: string };
+    await http.put('/playbook-triggers/session_message', { playbook_id: safe.id });
+    const session = await newSession(daemon);
+    await ask(daemon, session.id, { text: 'ok' });
+    const append = (daemon.sdk.calls.at(-1)?.options.systemPrompt as { append: string } | undefined)?.append ?? '';
+    expect(append).not.toContain('Never touch the orders table.');
+    expect(append).toContain('Console safety rules');
+    expect((await http.get(`/sessions/${session.id}`)).body.data.playbook).toBeNull();
+    expect((await http.put('/playbook-triggers/devtools_ask', { playbook_id: safe.id })).status).toBe(400);
+  });
+
   it('draws each Result and the Comparison, live and on read-back, and keeps a block it cannot read as code', async () => {
     const daemon = await start();
     await connect(daemon, PG_STAGING);

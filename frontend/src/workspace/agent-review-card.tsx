@@ -1,10 +1,12 @@
 import { AgentReviewStatus, type PrAgentReview } from '@ops-console/shared';
-import { JobSteps, PlaybookLink } from '../playbooks/job-steps';
+import { StopRun } from '../agents/stop-run';
+import { StatusPill } from '../components/ui/pathway';
+import { JobPath, PlaybookLink, runState } from '../playbooks/job-steps';
 
 const MARK = { pass: '✓', warn: '!', fail: '✕', na: '–' } as const;
 
 /** The agent's written review, tied to the commit it read. */
-export function AgentReviewCard({ review }: { review: PrAgentReview }) {
+export function AgentReviewCard({ review, sessionId }: { review: PrAgentReview; sessionId: string | null }) {
   return (
     <section aria-label="Agent Review" className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
       <header className="flex items-center gap-2 border-b border-divider bg-surface px-3 py-2 text-xs">
@@ -14,13 +16,29 @@ export function AgentReviewCard({ review }: { review: PrAgentReview }) {
           <span className="rounded-full bg-accent-100 px-2 py-px text-[10px] text-accent-700">stale</span>
         )}
         {review.playbook && <PlaybookLink playbook={review.playbook} />}
-        <span className="ml-auto text-neutral-700">{review.status}</span>
+        <span className="ml-auto flex items-center gap-2">
+          {review.status === AgentReviewStatus.Running && sessionId && (
+            <StopRun sessionId={sessionId} title="Stop the review; it fails and can start again" />
+          )}
+          <StatusPill state={runState(review.status)}>{review.status}</StatusPill>
+        </span>
       </header>
       <div className="flex flex-col gap-3 px-3 py-2.5 text-[13px]">
-        {review.playbook && review.playbook.steps.length > 0 && <JobSteps playbook={review.playbook} />}
-        {review.status === AgentReviewStatus.Running && <p className="m-0">The agent is reading the change…</p>}
         {review.status === AgentReviewStatus.Failed && (
-          <p className="m-0 text-accent-700">The review did not finish. Start it again.</p>
+          <p role="alert" className="m-0 text-accent-700">
+            The review did not finish. Start it again.
+          </p>
+        )}
+        {(review.status !== AgentReviewStatus.Ready || (review.playbook && review.playbook.steps.length > 0)) && (
+          <JobPath
+            playbook={review.playbook}
+            status={review.status}
+            reading={{ todo: 'Read the change', doing: 'Reading the change' }}
+            closing={{
+              todo: 'Write findings, checklist and verdict',
+              doing: 'Writing findings, checklist and verdict',
+            }}
+          />
         )}
         {review.verdict && <p className="m-0 font-bold">{review.verdict}</p>}
         {review.findings.length > 0 && (

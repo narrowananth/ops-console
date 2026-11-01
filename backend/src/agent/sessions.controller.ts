@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query } from '@nestjs/common';
 import {
+  type EditedMessage,
   type Message,
   type Page,
   type Session,
@@ -15,6 +16,7 @@ import { SessionKinds } from './session-kinds';
 import { SessionsService } from './sessions.service';
 
 const idParams = z.object({ id: z.string().min(1) });
+const editParams = idParams.extend({ message_id: z.string().min(1) });
 
 /** Routes shared by every kind; each kind's own fields come from its handler in `SessionKinds`. */
 @Controller('sessions')
@@ -56,6 +58,21 @@ export class SessionsController {
   @HttpCode(204)
   remove(@Param() params: unknown): void {
     this.sessions.remove(parseInput(idParams, params, 'params').id);
+  }
+
+  /** Edits the last message and runs it again (Behavior 8a). */
+  @Post(':id/messages/:message_id/edit')
+  @HttpCode(202)
+  async edit(@Param() params: unknown, @Body() body: unknown): Promise<{ data: EditedMessage }> {
+    const { id, message_id } = parseInput(editParams, params, 'params');
+    return { data: await this.runtime.edit(id, message_id, parseInput(sendMessageSchema, body, 'body').text) };
+  }
+
+  /** Ends the Session's run; 409 `invalid_state` when none is going. */
+  @Post(':id/stop')
+  @HttpCode(204)
+  stop(@Param() params: unknown): void {
+    this.runtime.stop(parseInput(idParams, params, 'params').id);
   }
 
   @Get(':id/messages')

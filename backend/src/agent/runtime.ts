@@ -1,3 +1,5 @@
+import { realpath } from 'node:fs/promises';
+import path from 'node:path';
 import type {
   CanUseTool,
   EffortLevel,
@@ -14,6 +16,7 @@ import {
   ActionOutcome,
   ApprovalKind,
   ApprovalStatus,
+  type EditedMessage,
   Effort,
   ErrorCode,
   type Message,
@@ -75,9 +78,11 @@ export type RunOptions = {
   rules?: string | null;
   /** Starts a new agent conversation instead of resuming the Session's. */
   fresh?: boolean;
+  /** Resumes the conversation from this transcript entry, dropping what came after it. */
+  resumeAt?: string;
 };
 
-type RunResult = 'done' | ErrorCode.RateLimited | ErrorCode.Unauthorized | ErrorCode.UpstreamFailed;
+type RunResult = 'done' | 'stopped' | ErrorCode.RateLimited | ErrorCode.Unauthorized | ErrorCode.UpstreamFailed;
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -155,6 +160,67 @@ export class AgentRuntime {
   }
 
   /**
+   * Edits the Session's last message and runs it again (Behavior 8a): the files the agent changed with its edit tools
+   * since that message go back as they were, and the conversation goes on from just before it. Only the last
+   * message can be edited, and only while no run is going.
+   */
+  async edit(sessionId: string, messageId: string, text: string): Promise<EditedMessage> {
+    const session = this.sessions.get(sessionId);
+    const kind = this.kinds.get(session.kind);
+    if (!kind?.acceptsMessages) {
+      throw new ApiError(409, ErrorCode.InvalidState, `a ${session.kind} session takes no messages`);
+    }
+    if (this.runs.get(sessionId)) throw new ApiError(409, ErrorCode.SessionBusy, "the session's run is still going");
+    const notLast = new ApiError(409, ErrorCode.InvalidState, 'only the last message can be edited');
+    if (session.sdkSessionId === null || session.accountId === null) throw notLast;
+    const configDir = this.accounts.configDir(this.accounts.get(session.accountId));
+    const workingDir = kind.workingDir(session);
+    const entries = await this.transcripts.read(session.sdkSessionId, workingDir, configDir);
+    const last = toMessages(entries, undefined, kind.serverLabel).findLast((message) => message.role === 'user');
+    if (last?.id !== messageId) throw notLast;
+    const at = entries.findIndex((entry) => asRecord(entry).uuid === messageId);
+    const before = at > 0 ? asRecord(entries[at - 1]).uuid : undefined;
+
+    const rewind = await this.config.sdk
+      .rewindFiles(messageId, {
+        cwd: workingDir,
+        resume: session.sdkSessionId,
+        env: claudeEnv(configDir),
+        enableFileCheckpointing: true,
+      })
+      .catch((error: unknown) => ({ canRewind: false, error: error instanceof Error ? error.message : String(error) }));
+    // Claude Code names files by their real path; the operator reads them from the working directory.
+    const real = await realpath(workingDir).catch(() => workingDir);
+    const shown = (file: string) => {
+      const relative = path.relative(real, file);
+      return relative.startsWith('..') || path.isAbsolute(relative) ? file : relative;
+    };
+    const reverted =
+      rewind.canRewind && 'filesChanged' in rewind
+        ? {
+            files: (rewind.filesChanged ?? []).map(shown),
+            insertions: rewind.insertions ?? 0,
+            deletions: rewind.deletions ?? 0,
+          }
+        : null;
+
+    const { rules } = this.playbooks.forSession(session);
+    // The first message has nothing before it: the conversation starts over.
+    const run = this.begin(
+      sessionId,
+      text,
+      null,
+      null,
+      typeof before === 'string' ? { rules, resumeAt: before } : { rules, fresh: true },
+    );
+    return {
+      message_id: run.messageId,
+      reverted,
+      revert_error: reverted ? null : (rewind.error ?? 'Claude Code could not put the files back'),
+    };
+  }
+
+  /**
    * Starts a run the console asks for itself, in a Session that takes no operator messages. Throws `session_busy`
    * while the Session's run is going; `finished` settles when the run ends.
    */
@@ -199,6 +265,9 @@ export class AgentRuntime {
       onFinish,
       onPart,
       serverLabel: kind.serverLabel ?? null,
+      abort: new AbortController(),
+      stopped: false,
+      resumeAt: options.resumeAt ?? null,
     };
     this.runs.add(run);
     if (options.fresh) this.sessions.write(sessionId, { sdkSessionId: null });
@@ -210,6 +279,21 @@ export class AgentRuntime {
     });
     void this.execute(run, text);
     return run;
+  }
+
+  /**
+   * Ends the Session's run where it is: the SDK query aborts, its pending Approvals expire, and the Session goes back
+   * to `idle`. Refused with `invalid_state` when no run is going.
+   */
+  stop(sessionId: string): void {
+    this.sessions.get(sessionId);
+    const run = this.runs.get(sessionId);
+    if (!run) throw new ApiError(409, ErrorCode.InvalidState, 'the session has no run going');
+    run.stopped = true;
+    run.abort.abort();
+    this.approvals.expirePending(sessionId);
+    // An open question would hold the permission prompt forever; the aborted query ignores the answer.
+    run.answer?.('');
   }
 
   /** True while the Session's run is going. */
@@ -261,6 +345,7 @@ export class AgentRuntime {
         result = await this.runOnce(run, text, account);
       }
     } catch (error) {
+      if (run.stopped) return this.finish(run, 'stopped');
       this.logger.error(
         `run of session ${run.sessionId} failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -293,9 +378,12 @@ export class AgentRuntime {
       effort: SDK_EFFORT[session.effort],
       permissionMode: PERMISSION_MODES[session.accessMode],
       allowDangerouslySkipPermissions: session.accessMode === AccessMode.Full,
-      ...(resume === null ? {} : { resume }),
+      ...(resume === null ? {} : { resume, ...(run.resumeAt === null ? {} : { resumeSessionAt: run.resumeAt }) }),
+      // Each message gets a file checkpoint, so editing it can put the agent's file edits back (Behavior 8a).
+      enableFileCheckpointing: true,
       env: claudeEnv(configDir),
       includePartialMessages: true,
+      abortController: run.abort,
       disallowedTools: MERGE_DENIALS,
       systemPrompt: { type: 'preset', preset: 'claude_code', append: systemAppend(instructions, run.rules) },
       // Servers the operator disabled stay out of the run.
@@ -342,9 +430,12 @@ export class AgentRuntime {
         }
       }
     } catch (error) {
-      if (!rejected && !signInFailed) throw error;
+      if (!rejected && !signInFailed && !run.stopped) throw error;
     }
-    for (const row of run.toolRows.values()) this.actionLog.finish(row, ActionOutcome.Failed, 'no result');
+    for (const row of run.toolRows.values()) {
+      this.actionLog.finish(row, ActionOutcome.Failed, run.stopped ? 'stopped' : 'no result');
+    }
+    if (run.stopped) return 'stopped';
     if (rejected) return ErrorCode.RateLimited;
     if (signInFailed) return ErrorCode.Unauthorized;
     return failed ? ErrorCode.UpstreamFailed : 'done';
@@ -417,7 +508,8 @@ export class AgentRuntime {
 
   private finish(run: Run, result: RunResult): void {
     this.runs.remove(run.sessionId);
-    const failed = result !== 'done';
+    // A run the operator stopped ends `idle`, like one that finished; the job that started it still sees it fail.
+    const failed = result !== 'done' && result !== 'stopped';
     // The agent's first words in the message; its tool steps make a poor preview.
     const newest = run.parts.find((part): part is Extract<Part, { kind: 'text' }> => part.kind === 'text');
     this.store.write((tx, emit) => {
@@ -441,7 +533,8 @@ export class AgentRuntime {
       });
     });
     run.onFinish?.({
-      ok: !failed,
+      ok: result === 'done',
+      stopped: result === 'stopped',
       text: run.parts.map(partText).join('\n'),
     });
   }

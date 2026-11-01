@@ -1,5 +1,6 @@
 import { type JobPlaybook, PlaybookStepStatus, type PlaybookTrigger } from '@ops-console/shared';
 import { Link } from 'react-router-dom';
+import { Pathway, PathwayProgress, type PathwayState, type PathwayStep } from '../components/ui/pathway';
 import { usePlaybooks } from '../lib/queries';
 import { holderOf } from './labels';
 
@@ -39,12 +40,12 @@ export function PlaybookLink({
   );
 }
 
-const MARK: Record<PlaybookStepStatus, { mark: string; tone: string }> = {
-  [PlaybookStepStatus.Pending]: { mark: '·', tone: 'text-neutral-500' },
-  [PlaybookStepStatus.Running]: { mark: '◐', tone: 'text-accent' },
-  [PlaybookStepStatus.Done]: { mark: '✓', tone: 'text-ok' },
-  [PlaybookStepStatus.Skipped]: { mark: '○', tone: 'text-neutral-500' },
-  [PlaybookStepStatus.Failed]: { mark: '✕', tone: 'text-accent-700' },
+const STATE: Record<PlaybookStepStatus, PathwayState> = {
+  [PlaybookStepStatus.Pending]: 'pending',
+  [PlaybookStepStatus.Running]: 'running',
+  [PlaybookStepStatus.Done]: 'done',
+  [PlaybookStepStatus.Skipped]: 'skipped',
+  [PlaybookStepStatus.Failed]: 'failed',
 };
 
 /** "5 done, 1 skipped". */
@@ -64,47 +65,66 @@ export function failedStep(playbook: JobPlaybook | null): number | null {
 export const stepsFinished = (playbook: JobPlaybook) =>
   playbook.steps.every((step) => step.status === PlaybookStepStatus.Done || step.status === PlaybookStepStatus.Skipped);
 
-/** A job's copy of its Playbook's steps, each with its status and the agent's summary. */
+/** A job's copy of its Playbook's steps as a path, each with its status and the agent's summary. */
 export function JobSteps({ playbook, closing }: { playbook: JobPlaybook; closing?: string }) {
+  const steps = playbookPath(playbook);
+  if (closing) steps.push({ key: 'closing', title: closing, state: 'running' });
+  return <Pathway label="Playbook steps" steps={steps} />;
+}
+
+const playbookPath = (playbook: JobPlaybook): PathwayStep[] =>
+  playbook.steps.map((step, index) => ({
+    // A job's copy never changes order: the position is its identity.
+    key: String(index),
+    title: step.title,
+    state: STATE[step.status],
+    aside: step.writes ? <ScratchTag /> : undefined,
+    children: step.summary ? <span>{step.summary}</span> : undefined,
+  }));
+
+/** A Verification's or an Agent Review's status as a path state; both say `running`, `ready` or `failed`. */
+export const runState = (status: string): PathwayState =>
+  status === 'ready' ? 'done' : status === 'failed' ? 'failed' : status === 'running' ? 'running' : 'pending';
+
+/** What a stage is called before and while it runs: "Write the Report", "Writing the Report". */
+export type StageWords = { todo: string; doing: string };
+
+/**
+ * A whole job as a path under a progress bar: its Playbook's steps, or `reading` alone when it has none, then the
+ * console's own closing turn. A job with steps left runs them first; the closing turn turns once they are through.
+ */
+export function JobPath({
+  playbook,
+  status,
+  reading,
+  closing,
+}: {
+  playbook: JobPlaybook | null;
+  status: string;
+  reading: StageWords;
+  closing: StageWords;
+}) {
+  const state = runState(status);
+  const own = playbook && playbook.steps.length > 0;
+  const steps: PathwayStep[] = own
+    ? playbookPath(playbook)
+    : [{ key: 'reading', title: state === 'running' ? reading.doing : reading.todo, state }];
+  const through = own ? stepsFinished(playbook) : state === 'done';
+  const last: PathwayState =
+    state === 'done'
+      ? 'done'
+      : !through
+        ? 'pending'
+        : state === 'failed' && steps.every((step) => step.state !== 'failed')
+          ? 'failed'
+          : state === 'running'
+            ? 'running'
+            : 'pending';
+  steps.push({ key: 'closing', title: last === 'running' ? closing.doing : closing.todo, state: last });
   return (
-    <ol aria-label="Playbook steps" className="m-0 flex list-none flex-col gap-1.5 p-0 text-xs">
-      {playbook.steps.map((step, index) => {
-        const { mark, tone } = MARK[step.status];
-        const quiet = step.status === PlaybookStepStatus.Pending;
-        return (
-          // A job's copy never changes order: the position is its identity.
-          // biome-ignore lint/suspicious/noArrayIndexKey: fixed list
-          <li key={index} className="grid grid-cols-[18px_minmax(0,1fr)] gap-x-2 gap-y-0.5">
-            <span aria-hidden className={`text-center font-mono ${tone}`}>
-              {mark}
-            </span>
-            <span
-              className={`flex flex-wrap items-center gap-1.5 ${quiet ? 'text-neutral-700' : step.status === PlaybookStepStatus.Running ? 'font-bold' : ''}`}
-            >
-              {index + 1} · {step.title}
-              {step.writes && <ScratchTag />}
-              <span
-                className={
-                  step.status === PlaybookStepStatus.Skipped || step.status === PlaybookStepStatus.Failed
-                    ? 'text-neutral-700'
-                    : 'sr-only'
-                }
-              >
-                {step.status}
-              </span>
-            </span>
-            {step.summary && <span className="col-start-2 text-neutral-700">{step.summary}</span>}
-          </li>
-        );
-      })}
-      {closing && (
-        <li className="grid grid-cols-[18px_minmax(0,1fr)] gap-x-2 font-bold">
-          <span aria-hidden className="text-center font-mono text-accent">
-            ◐
-          </span>
-          <span>{closing}</span>
-        </li>
-      )}
-    </ol>
+    <div className="flex flex-col gap-3">
+      {state !== 'done' && <PathwayProgress steps={steps} />}
+      <Pathway label={own ? 'Playbook steps' : 'Progress'} steps={steps} />
+    </div>
   );
 }

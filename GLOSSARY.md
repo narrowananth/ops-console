@@ -45,7 +45,7 @@ _Avoid_: rule, pipeline, workflow
 
 **Trigger**:
 A place in a tab that starts the agent: Verify and Fix in Monitor, Review PR, Reply in thread and Session message in
-Workspace, Ask in Dev tools.
+Workspace.
 _Avoid_: action (the Action Log means each command the agent runs)
 
 **Playbook step**:

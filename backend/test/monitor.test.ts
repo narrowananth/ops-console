@@ -1364,6 +1364,33 @@ describe('Playbooks in Monitor jobs', () => {
     expect(last?.options.resume).toBeTruthy();
   });
 
+  it("fails the step and its Report as stopped when the operator stops the Session's run", async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    await linkRepo(ctx, alert.service.id);
+    await attach(ctx, 'verify', DEEP);
+    ctx.daemon.sdk.script({ wait: gate().promise }, outcome('done', 'never reached'));
+    const started = await ctx.http.post(`/alerts/${alert.id}/verifications`);
+    const sessionId = await until(
+      () => ctx.http.get(`/alerts/${alert.id}`).then((res) => res.body.data.session_id),
+      (id) => typeof id === 'string',
+    );
+    await until(
+      () => ctx.http.get(`/sessions/${sessionId}`).then((res) => res.body.data.state),
+      (state) => state === 'working',
+    );
+    expect((await ctx.http.post(`/sessions/${sessionId}/stop`, {})).status).toBe(204);
+    await until(
+      () => ctx.http.get(`/alerts/${alert.id}`).then((res) => res.body.data.status),
+      (status) => status !== 'verifying',
+    );
+    const report = (await ctx.http.get(`/reports/${started.body.data.id}`)).body.data;
+    expect(report.status).toBe('failed');
+    expect(report.error_message).toBe('Step 1 · Trace failed: stopped by the operator');
+    expect(report.playbook.steps.map((step: { status: string }) => step.status)).toEqual(['failed', 'pending']);
+    expect(ctx.daemon.sdk.calls).toHaveLength(1);
+  });
+
   it('fails a step left running by a stopped daemon, and its Report, as interrupted', async () => {
     const dataDir = await tempDir();
     const first = await start({ dataDir });

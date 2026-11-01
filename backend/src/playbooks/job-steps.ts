@@ -8,6 +8,7 @@ import {
 } from '@ops-console/shared';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { redact } from '../action-log/redact';
+import { STOPPED } from '../agent/runs';
 import { AgentRuntime } from '../agent/runtime';
 import { parseAgentJson } from '../common/agent-json';
 import { StartupRecovery } from '../common/recovery';
@@ -130,7 +131,11 @@ export class JobSteps {
         ? { status: parsed.outcome, summary: parsed.summary }
         : {
             status: PlaybookStepStatus.Failed,
-            summary: summary.ok ? 'the agent did not answer as asked' : 'the agent run failed',
+            summary: summary.ok
+              ? 'the agent did not answer as asked'
+              : summary.stopped
+                ? STOPPED
+                : 'the agent run failed',
           };
     } catch (error) {
       outcome = {

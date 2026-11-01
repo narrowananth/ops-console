@@ -576,7 +576,7 @@ export const playbookTriggers = sqliteTable(
     index('playbook_triggers_playbook_idx').on(table.playbookId),
     check(
       'playbook_triggers_trigger',
-      sql`${table.trigger} IN ('verify', 'fix', 'review_pr', 'thread_reply', 'session_message', 'devtools_ask')`,
+      sql`${table.trigger} IN ('verify', 'fix', 'review_pr', 'thread_reply', 'session_message')`,
     ),
   ],
 );

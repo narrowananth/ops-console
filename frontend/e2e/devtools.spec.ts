@@ -190,3 +190,25 @@ test('a question across Connections shows a Result per Connection and the Compar
   const copied = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
   expect(copied).toMatchObject({ key: 'shop_domain', connections: ['pg-tenant', 'mongo-prod'] });
 });
+
+test('a terminal whose agent is working stops, and its tab deletes only once it has', async ({ page }) => {
+  let state = 'working';
+  const stops: string[] = [];
+  await mock(page, []);
+  await page.route(/\/api\/sessions\?kind=devtools/, (route) =>
+    route.fulfill({ json: { data: [{ ...SESSION, state }] } }),
+  );
+  await page.route('**/api/sessions/s1/stop', (route) => {
+    stops.push(route.request().method());
+    state = 'idle';
+    return route.fulfill({ status: 204 });
+  });
+  await page.goto(`${daemon.url}/devtools#token=${daemon.token}`);
+
+  const remove = page.getByRole('button', { name: /^Delete / });
+  await expect(remove).toBeDisabled();
+  await page.getByRole('button', { name: 'stop', exact: true }).click();
+  await expect.poll(() => stops).toEqual(['POST']);
+  await expect(page.getByRole('button', { name: 'stop', exact: true })).toHaveCount(0);
+  await expect(remove).toBeEnabled();
+});

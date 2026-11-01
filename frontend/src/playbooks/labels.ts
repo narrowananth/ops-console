@@ -21,6 +21,10 @@ export function inWords(words: string[]): string {
 export const holderOf = (items: Playbook[], trigger: PlaybookTrigger) =>
   items.find((playbook) => !playbook.builtin && playbook.triggers.includes(trigger));
 
+/** The built-in Playbook a Trigger runs when it holds none of the operator's. */
+export const builtinFor = (items: Playbook[], trigger: PlaybookTrigger) =>
+  items.find((playbook) => playbook.id === `builtin:${trigger}`);
+
 /** A button that starts a job names the Playbook it runs, when that is not the built-in. */
 export const withPlaybook = (label: string, playbook: Playbook | undefined) =>
   playbook ? `${label} · ${playbook.name}` : label;

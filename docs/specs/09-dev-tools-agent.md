@@ -93,6 +93,7 @@ Messages, `session.output`, `session.finished`, `approval.requested` and `action
 - Scope picker: the Synced dev tools list, Connections with their type; `none` ones are shown disabled, with a hint to set the Access Level in Connections; PROD ones tagged.
 - Empty: "No Connections yet." with a link to Connections.
 - An Approval for a PROD write shows above the terminal, with the PROD tag, Approve and Deny.
+- While a terminal's run goes, `waiting_input` included, `stop` shows in its title bar and its tab's `×` is disabled.
 
 ## Rejected
 

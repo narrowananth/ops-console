@@ -26,7 +26,7 @@ CREATE TABLE `playbook_triggers` (
 	`trigger` text PRIMARY KEY NOT NULL,
 	`playbook_id` text NOT NULL,
 	FOREIGN KEY (`playbook_id`) REFERENCES `playbooks`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "playbook_triggers_trigger" CHECK("playbook_triggers"."trigger" IN ('verify', 'fix', 'review_pr', 'thread_reply', 'session_message', 'devtools_ask'))
+	CONSTRAINT "playbook_triggers_trigger" CHECK("playbook_triggers"."trigger" IN ('verify', 'fix', 'review_pr', 'thread_reply', 'session_message'))
 );
 --> statement-breakpoint
 CREATE INDEX `playbook_triggers_playbook_idx` ON `playbook_triggers` (`playbook_id`);--> statement-breakpoint

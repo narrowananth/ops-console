@@ -17,6 +17,7 @@ import {
 } from '@ops-console/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
+import { type RunSummary, STOPPED } from '../agent/runs';
 import { AgentRuntime } from '../agent/runtime';
 import { parseAgentJson } from '../common/agent-json';
 import { ApiError } from '../common/errors';
@@ -228,7 +229,7 @@ ${jira}Root cause: ${context.report.rootCause}. Proposed fix: ${context.report.p
 
   /** One agent run in the Alert's Session; the answer must carry the stage's JSON. */
   private async ask<T extends z.ZodType>(context: Context, prompt: string, schema: T): Promise<z.infer<T>> {
-    let finished: Promise<{ ok: boolean; text: string }>;
+    let finished: Promise<RunSummary>;
     try {
       finished = this.runtime.runFor(context.sessionId, prompt, null, {
         rules: context.fix.playbookRules,
@@ -238,7 +239,7 @@ ${jira}Root cause: ${context.report.rootCause}. Proposed fix: ${context.report.p
       throw new StageFailed(error instanceof Error ? error.message : 'the agent could not start');
     }
     const summary = await finished;
-    if (!summary.ok) throw new StageFailed('the agent run failed');
+    if (!summary.ok) throw new StageFailed(summary.stopped ? STOPPED : 'the agent run failed');
     const parsed = parseAgentJson(summary.text, schema);
     if (!parsed) throw new StageFailed('the agent did not answer as asked');
     return parsed;

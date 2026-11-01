@@ -25,6 +25,7 @@ import {
   connectorSchema,
   datadogServiceSchema,
   diskAccessSchema,
+  editedMessageSchema,
   findCodeResultSchema,
   fixSchema,
   healthSchema,
@@ -493,6 +494,15 @@ export function useDeleteSession() {
   });
 }
 
+/** Ends the Session's run; `session.updated` and `session.finished` bring the new state. */
+export function useStopSession(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('POST', `/sessions/${id}/stop`, undefined, z.undefined()),
+    onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.sessions }),
+  });
+}
+
 export function useMessages(sessionId: string) {
   return useQuery({
     queryKey: queryKeys.messages(sessionId),
@@ -513,6 +523,21 @@ export function useSendMessage(sessionId: string) {
         { text },
         z.object({ data: z.object({ message_id: z.string() }) }),
       ),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) }),
+  });
+}
+
+/** Edits the Session's last message and runs it again; the files the agent edited since it go back first. */
+export function useEditMessage(sessionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId, text }: { messageId: string; text: string }) =>
+      apiSend(
+        'POST',
+        `/sessions/${sessionId}/messages/${messageId}/edit`,
+        { text },
+        z.object({ data: editedMessageSchema }),
+      ).then((body) => body.data),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) }),
   });
 }
@@ -869,7 +894,7 @@ export function useAskNewDevtoolsSession() {
   });
 }
 
-/** The operator's Playbooks A to Z, then the six built-ins, and the Step blocks. */
+/** The operator's Playbooks A to Z, then the five built-ins, and the Step blocks. */
 export function usePlaybooks() {
   return useQuery({
     queryKey: queryKeys.playbooks,

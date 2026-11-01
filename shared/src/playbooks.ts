@@ -7,7 +7,6 @@ export enum PlaybookTrigger {
   ReviewPr = 'review_pr',
   ThreadReply = 'thread_reply',
   SessionMessage = 'session_message',
-  DevtoolsAsk = 'devtools_ask',
 }
 
 /** Triggers in the order the Playbooks page lists them. */
@@ -26,7 +25,6 @@ export const TRIGGER_LABELS: Record<PlaybookTrigger, { tab: string; label: strin
   [PlaybookTrigger.ReviewPr]: { tab: 'Workspace', label: 'Review PR' },
   [PlaybookTrigger.ThreadReply]: { tab: 'Workspace', label: 'Reply in thread' },
   [PlaybookTrigger.SessionMessage]: { tab: 'Workspace', label: 'Session message' },
-  [PlaybookTrigger.DevtoolsAsk]: { tab: 'Dev tools', label: 'Ask' },
 };
 
 /** The ready-made steps on the Playbooks page, and `custom` for one written from nothing or by a built-in. */

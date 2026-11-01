@@ -387,9 +387,13 @@ All server to client.
 - A button that starts the agent (Verify, Fix, Retry) greys out with a spinner from the click until the run's status is back. Verify reads "Verify with agent", "Verify again" on a `verified` Alert, and "Starting the agent…" after the click; it stays greyed, reading "Agent verifying…", while the Alert is `verifying`. Retry reads "Retry from" and the failed stage.
 - Alert card: severity badge (red High, amber Medium, grey Low), status, "regression ×N" when it has regressed, "waiting since" while `verified`, the title, Service, env and Route (or "no HTTP route") with Ignore this Route, the event count with first and last seen, the log line, the Datadog query, Samples with a JSON and Messages toggle, and the events timeline.
 - Code: the local Repo picker and the Git URL field. With neither, the card looks for the code by itself, then lists where it looked, with Look again. Still nothing: Verify is disabled and the card says to give one.
-- Report panel: live steps while `running`; when ready, the Report Markdown drawn, then the diff, replay and steps folded, and where the file was saved. A failed one says "The Verification did not finish", with its reason and steps, and asks to verify again. A version picker (`v2 · ready`) shows when there are several.
+- Report panel: live steps while `running`, with Stop beside the status; when ready, the Report Markdown drawn, then the diff, replay and steps folded, and where the file was saved. A failed one says "The Verification did not finish", with its reason and steps, and asks to verify again. A version picker (`v2 · ready`) shows when there are several.
 - Review, while `verified` with a Report kind: Fix with agent (the Report's kind), Fix as the other kind, and Dismiss. A line says where the Fix runs and whether a Jira ticket comes first; without Jira it says the branch is `fix/<name>`. A dismissed Alert says it is checked again at the next Scan, with Undo.
-- Fix progress: the five stages, the ticket marked "no Jira" when skipped, the branch, Jira key, PR link, "Open the Session →" to the Session in Workspace, and the error with retry on failure.
+- Fix progress: a path down the card with a node per stage joined by a line, under a bar that counts the stages
+  passed. A done node is ticked, the running one turns and is tagged "In progress", a failed one is crossed and
+  tagged "Failed", a skipped one is dashed. Each stage shows what it made under its title: the Jira key, or "No Jira
+  connected." on a skipped ticket; the branch; each Playbook step's summary; the PR link. The failed stage holds the
+  error and the retry. "Open the Session →" goes to the Session in Workspace; while the Fix runs, Stop sits beside it.
 
 ## Rejected
 

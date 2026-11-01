@@ -9,6 +9,7 @@ import {
 } from '@ops-console/shared';
 import { type DragEvent, useRef, useState } from 'react';
 import { Button, Spinner } from '../components/ui/button';
+import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { useCreatePlaybook, useDeletePlaybook, useSavePlaybook } from '../lib/queries';
 import type { Draft, DraftStep } from './drafts';
 import { type Drag, Grip, leftFor, startDrag } from './drag';
@@ -150,28 +151,25 @@ export function PlaybookEditor(props: {
             </fieldset>
           )}
           {confirmDelete && (
-            <div role="alert" className="flex flex-wrap items-center gap-2 px-1.5 text-xs">
-              <span>
-                Delete {playbook.name}?
-                {triggerLabels.length > 0 &&
-                  ` ${inWords(triggerLabels)} ${triggerLabels.length === 1 ? 'goes' : 'go'} back to built-in.`}
-              </span>
-              <Button
-                variant="primary"
-                className={small}
-                disabled={remove.isPending}
-                onClick={() => remove.mutate(playbook.id, { onSuccess: props.onDeleted })}
-              >
-                Delete
-              </Button>
-              <Button className={small} onClick={() => setConfirmDelete(false)}>
-                Cancel
-              </Button>
-            </div>
+            <ConfirmDialog
+              title={`Delete ${playbook.name}?`}
+              action="Delete"
+              pending={remove.isPending}
+              error={remove.error?.message}
+              onConfirm={() => remove.mutate(playbook.id, { onSuccess: props.onDeleted })}
+              onCancel={() => {
+                remove.reset();
+                setConfirmDelete(false);
+              }}
+            >
+              {triggerLabels.length > 0 &&
+                `${inWords(triggerLabels)} ${triggerLabels.length === 1 ? 'goes' : 'go'} back to built-in. `}
+              This can't be undone.
+            </ConfirmDialog>
           )}
-          {(duplicate.error ?? remove.error) && (
+          {duplicate.error && (
             <p role="alert" className="m-0 px-1.5 text-xs text-accent-700">
-              {(duplicate.error ?? remove.error)?.message}
+              {duplicate.error.message}
             </p>
           )}
           <div className="px-1.5 text-[13px] text-neutral-700">

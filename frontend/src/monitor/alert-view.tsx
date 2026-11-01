@@ -14,11 +14,13 @@ import {
 } from '@ops-console/shared';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
+import { StopRun } from '../agents/stop-run';
 import { Button, Spinner } from '../components/ui/button';
 import { DiffLines } from '../components/ui/diff';
 import { Dropdown } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
 import { Markdown } from '../components/ui/markdown';
+import { Pathway, PathwayProgress, type PathwayState, type PathwayStep, StatusPill } from '../components/ui/pathway';
 import {
   useAlert,
   useAlertEvents,
@@ -34,9 +36,11 @@ import {
 import { useStored } from '../lib/remember';
 import {
   failedStep,
+  JobPath,
   JobSteps,
   PlaybookLink,
-  stepsFinished,
+  runState,
+  ScratchTag,
   stepTally,
   useTriggerPlaybook,
 } from '../playbooks/job-steps';
@@ -77,7 +81,16 @@ function SampleList({ samples }: { samples: Sample[] }) {
   );
 }
 
-function ReportPanel({ alertId, report }: { alertId: string; report: Report }) {
+function ReportPanel({
+  alertId,
+  report,
+  sessionId,
+}: {
+  alertId: string;
+  report: Report;
+  /** The Alert's Session, where the Verification runs. */
+  sessionId: string | null;
+}) {
   const reports = useAlertReports(alertId);
   const [picked, setPicked] = useStored(`monitor.report.${alertId}`, z.string().nullable(), null);
   const versions = reports.data ?? [report];
@@ -100,25 +113,22 @@ function ReportPanel({ alertId, report }: { alertId: string; report: Report }) {
             listClassName="w-48"
           />
         )}
-        <span className="ml-auto text-neutral-700">{shown.status}</span>
+        <span className="ml-auto flex items-center gap-2">
+          {shown.status === RunStatus.Running && sessionId && (
+            <StopRun sessionId={sessionId} title="Stop the Verification; it fails and can retry from its step" />
+          )}
+          <StatusPill state={runState(shown.status)}>{shown.status}</StatusPill>
+        </span>
       </header>
       <div className="flex flex-col gap-3 px-4 py-3 text-[13px]">
-        {shown.status === RunStatus.Running && (
+        {shown.status !== RunStatus.Ready && (
           <>
-            {shown.playbook ? (
-              <PlaybookSteps report={shown} />
-            ) : (
-              <p className="m-0 font-bold">The agent is reading the code…</p>
+            {shown.status === RunStatus.Failed && (
+              <p role="alert" className="m-0 text-accent-700">
+                The Verification did not finish{shown.error_message ? ` (${shown.error_message})` : ''}. Verify again.
+              </p>
             )}
-            <Steps report={shown} />
-          </>
-        )}
-        {shown.status === RunStatus.Failed && (
-          <>
-            <p role="alert" className="m-0 text-accent-700">
-              The Verification did not finish{shown.error_message ? ` (${shown.error_message})` : ''}. Verify again.
-            </p>
-            {shown.playbook && <PlaybookSteps report={shown} />}
+            <VerificationPath report={shown} />
             <Steps report={shown} />
           </>
         )}
@@ -177,17 +187,22 @@ function ReportPanel({ alertId, report }: { alertId: string; report: Report }) {
   );
 }
 
-/** The Playbook the Verification copied, its steps live, then the console's closing turn. */
-function PlaybookSteps({ report }: { report: Report }) {
-  if (!report.playbook) return null;
-  const writing = report.status === RunStatus.Running && stepsFinished(report.playbook);
+/** The Verification as a path: the Playbook it copied, its steps live, then the console's closing turn. */
+function VerificationPath({ report }: { report: Report }) {
   return (
     <>
-      <div className="flex items-center gap-2 text-xs">
-        <span className="text-neutral-700">Playbook</span>
-        <PlaybookLink playbook={report.playbook} />
-      </div>
-      <JobSteps playbook={report.playbook} closing={writing ? 'Writing the Report' : undefined} />
+      {report.playbook && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-neutral-700">Playbook</span>
+          <PlaybookLink playbook={report.playbook} />
+        </div>
+      )}
+      <JobPath
+        playbook={report.playbook}
+        status={report.status}
+        reading={{ todo: 'Read the code', doing: 'Reading the code' }}
+        closing={{ todo: 'Write the Report', doing: 'Writing the Report' }}
+      />
     </>
   );
 }
@@ -214,98 +229,154 @@ const STAGE_LABEL: Record<FixStage, string> = {
   [FixStage.Pr]: 'PR',
 };
 
-type Mark = 'done' | 'failed' | 'running' | 'pending';
-
-const MARKS: Record<Mark, { mark: string; tone: string }> = {
-  done: { mark: '✓', tone: '' },
-  failed: { mark: '✕', tone: 'font-bold text-accent-700' },
-  running: { mark: '◐', tone: 'font-bold' },
-  pending: { mark: '·', tone: 'text-neutral-700' },
-};
-
-const STEP_MARK: Record<PlaybookStepStatus, Mark> = {
+const STEP_STATE: Record<PlaybookStepStatus, PathwayState> = {
   [PlaybookStepStatus.Done]: 'done',
-  [PlaybookStepStatus.Skipped]: 'done',
+  [PlaybookStepStatus.Skipped]: 'skipped',
   [PlaybookStepStatus.Failed]: 'failed',
   [PlaybookStepStatus.Running]: 'running',
   [PlaybookStepStatus.Pending]: 'pending',
 };
 
+const FIX_STATE: Record<FixStatus, PathwayState> = {
+  [FixStatus.Running]: 'running',
+  [FixStatus.Done]: 'done',
+  [FixStatus.Failed]: 'failed',
+  [FixStatus.Abandoned]: 'pending',
+};
+
+const outLink = 'font-semibold text-text';
+
 /**
- * The Fix's stages as they run: Ticket, Branch, each step of its Playbook by title, and PR. The ticket shows as
- * skipped when Jira was not connected.
+ * The Fix as a path: Ticket, Branch, each step of its Playbook by title, and PR, each with what it made. The ticket
+ * shows as skipped when Jira was not connected. A failed stage carries the error and Retry.
  */
 function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: () => void; retrying: boolean }) {
   const at = FIX_STAGES.indexOf(fix.stage);
-  const stageMark = (index: number): Mark =>
+  const stageState = (index: number): PathwayState =>
     fix.status === FixStatus.Done || index < at
       ? 'done'
       : index === at
         ? fix.status === FixStatus.Failed
           ? 'failed'
-          : 'running'
+          : fix.status === FixStatus.Abandoned
+            ? 'pending'
+            : 'running'
         : 'pending';
-  const rows = FIX_STAGES.flatMap((stage, index) => {
-    if (stage === FixStage.Steps && fix.playbook) {
-      return fix.playbook.steps.map((step, position) => ({
-        key: `step-${position}`,
-        label: step.title,
-        mark: STEP_MARK[step.status],
-        note: step.status === PlaybookStepStatus.Skipped ? ' (skipped)' : '',
-        summary: step.summary,
-      }));
-    }
-    const mark = stageMark(index);
-    const noJira = stage === FixStage.Ticket && mark === 'done' && fix.jira_key === null;
-    return [{ key: stage, label: STAGE_LABEL[stage], mark, note: noJira ? ' (no Jira)' : '', summary: null }];
-  });
   const failed = failedStep(fix.playbook);
+  const retry = fix.status === FixStatus.Failed && (
+    <div className="flex flex-col items-start gap-2 rounded-lg border border-accent-200 bg-accent-100/60 px-3 py-2">
+      {fix.error_message && (
+        <span role="alert" className="text-accent-900">
+          {fix.error_message}
+        </span>
+      )}
+      <Button className="px-2.5 py-1 text-xs" disabled={retrying} onClick={onRetry}>
+        {retrying && <Spinner />}
+        {fix.stage === FixStage.Steps && failed !== null
+          ? `Retry from step ${failed}`
+          : `Retry from ${STAGE_LABEL[fix.stage]}`}
+      </Button>
+    </div>
+  );
+
+  const steps: PathwayStep[] = FIX_STAGES.flatMap((stage, index): PathwayStep[] => {
+    const state = stageState(index);
+    const failedHere = state === 'failed' && retry;
+    if (stage === FixStage.Steps && fix.playbook && fix.playbook.steps.length > 0) {
+      return fix.playbook.steps.map((step, position) => {
+        const stepState = STEP_STATE[step.status];
+        return {
+          key: `step-${position}`,
+          title: step.title,
+          state: stepState,
+          aside: step.writes ? <ScratchTag /> : undefined,
+          // A failed step's error already says what its summary says.
+          children: stepState === 'failed' && retry ? retry : step.summary && <span>{step.summary}</span>,
+        };
+      });
+    }
+    if (stage === FixStage.Ticket) {
+      const noJira = state === 'done' && fix.jira_key === null;
+      return [
+        {
+          key: stage,
+          title: 'Ticket',
+          state: noJira ? 'skipped' : state,
+          children: (fix.jira_key || noJira || failedHere) && (
+            <>
+              {fix.jira_key && (
+                <a href={fix.jira_url ?? undefined} target="_blank" rel="noreferrer" className={outLink}>
+                  {fix.jira_key} →
+                </a>
+              )}
+              {noJira && <span>No Jira connected.</span>}
+              {failedHere}
+            </>
+          ),
+        },
+      ];
+    }
+    if (stage === FixStage.Branch) {
+      return [
+        {
+          key: stage,
+          title: 'Branch',
+          state,
+          children: (fix.branch || failedHere) && (
+            <>
+              {fix.branch && (
+                <span className="self-start rounded-full bg-neutral-200 px-2 py-0.5 font-mono text-text">
+                  {fix.branch}
+                </span>
+              )}
+              {failedHere}
+            </>
+          ),
+        },
+      ];
+    }
+    return [
+      {
+        key: stage,
+        title: stage === FixStage.Pr ? 'Pull request' : STAGE_LABEL[stage],
+        state,
+        children: (fix.pr_url || failedHere || (state === 'running' && stage === FixStage.Pr)) && (
+          <>
+            {state === 'running' && !fix.pr_url && <span>Committing, pushing and opening the PR…</span>}
+            {fix.pr_url && (
+              <a href={fix.pr_url} target="_blank" rel="noreferrer" className={outLink}>
+                PR #{fix.pr_number} →
+              </a>
+            )}
+            {failedHere}
+          </>
+        ),
+      },
+    ];
+  });
+
   return (
-    <section aria-label="Fix" className="rounded-xl border border-line bg-card px-4 py-3.5 shadow-sm">
-      <div className="mb-2 flex items-center gap-2 text-[13px]">
-        <strong>Fix</strong>
-        <span className="text-xs text-neutral-700">{fix.status}</span>
+    <section
+      aria-label="Fix"
+      className="flex flex-col gap-3.5 rounded-xl border border-line bg-card px-5 py-4 shadow-sm"
+    >
+      <div className="flex flex-wrap items-center gap-2 text-[13px]">
+        <strong className="font-heading text-sm">Fix</strong>
+        <StatusPill state={FIX_STATE[fix.status]}>{fix.status}</StatusPill>
         {fix.playbook && <PlaybookLink playbook={fix.playbook} label={`Playbook: ${fix.playbook.name}`} />}
         {fix.session_id && (
-          <Link to={`/workspace?session=${fix.session_id}`} className="ml-auto text-xs">
-            Open the Session →
-          </Link>
+          <span className="ml-auto flex items-center gap-3">
+            <Link to={`/workspace?session=${fix.session_id}`} className="text-xs">
+              Open the Session →
+            </Link>
+            {fix.status === FixStatus.Running && (
+              <StopRun sessionId={fix.session_id} title="Stop the Fix; it fails and can retry from where it stopped" />
+            )}
+          </span>
         )}
       </div>
-      <ol aria-label="Fix progress" className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs">
-        {rows.map((row) => (
-          <li key={row.key} className={MARKS[row.mark].tone} title={row.summary ?? undefined}>
-            {MARKS[row.mark].mark} {row.label}
-            {row.note && <span className="font-normal text-neutral-700">{row.note}</span>}
-          </li>
-        ))}
-      </ol>
-      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
-        {fix.branch && <span className="rounded-full bg-neutral-200 px-2 py-0.5 font-mono">{fix.branch}</span>}
-        {fix.jira_key && (
-          <a href={fix.jira_url ?? undefined} target="_blank" rel="noreferrer">
-            {fix.jira_key}
-          </a>
-        )}
-        {fix.pr_url && (
-          <a href={fix.pr_url} target="_blank" rel="noreferrer" className="font-bold">
-            PR #{fix.pr_number} →
-          </a>
-        )}
-        {fix.status === FixStatus.Failed && (
-          <>
-            <span role="alert" className="text-accent-700">
-              {fix.error_message}
-            </span>
-            <Button className="px-2.5 py-1 text-xs" disabled={retrying} onClick={onRetry}>
-              {retrying && <Spinner />}
-              {fix.stage === FixStage.Steps && failed !== null
-                ? `Retry from step ${failed}`
-                : `Retry from ${STAGE_LABEL[fix.stage]}`}
-            </Button>
-          </>
-        )}
-      </div>
+      <PathwayProgress steps={steps} />
+      <Pathway label="Fix progress" steps={steps} />
     </section>
   );
 }
@@ -419,7 +490,7 @@ export function AlertView({ id }: { id: string }) {
         </div>
       )}
 
-      {report && <ReportPanel alertId={id} report={report} />}
+      {report && <ReportPanel alertId={id} report={report} sessionId={data.session_id} />}
 
       {data.status === AlertStatus.Verified && report?.kind && (
         <section aria-label="Review" className="flex flex-col gap-2">

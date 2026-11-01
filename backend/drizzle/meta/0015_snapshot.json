@@ -1350,7 +1350,7 @@
       "checkConstraints": {
         "playbook_triggers_trigger": {
           "name": "playbook_triggers_trigger",
-          "value": "\"playbook_triggers\".\"trigger\" IN ('verify', 'fix', 'review_pr', 'thread_reply', 'session_message', 'devtools_ask')"
+          "value": "\"playbook_triggers\".\"trigger\" IN ('verify', 'fix', 'review_pr', 'thread_reply', 'session_message')"
         }
       }
     },

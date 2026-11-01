@@ -8,11 +8,12 @@ import {
   sessionDefaultsSchema,
 } from '@ops-console/shared';
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { ApprovalPrompts } from '../agents/approval-prompts';
 import { InlineText } from '../agents/inline-text';
 import { SessionChips, SettingsChips } from '../agents/session-chips';
+import { StopIcon } from '../agents/stop-run';
 import { BrandIcon, CONNECTION_BRAND } from '../components/ui/brand-icon';
 import { Empty } from '../components/ui/empty';
 import { item } from '../components/ui/item';
@@ -24,6 +25,7 @@ import {
   useDevtoolsSessions,
   useMessages,
   useSendMessage,
+  useStopSession,
   useUpdateSession,
 } from '../lib/queries';
 import { ascending } from '../lib/sort';
@@ -50,6 +52,9 @@ const WELCOME = [
 
 const isRunning = (session: Session | undefined) =>
   session?.state === SessionState.Working || session?.state === SessionState.WaitingApproval;
+
+/** A question waiting on the operator still holds the run: it can be stopped, not deleted. */
+const isBusy = (session: Session | undefined) => isRunning(session) || session?.state === SessionState.WaitingInput;
 
 /** The Synced dev tools list: picking Connections sets the scope; none picked means every Connection with access. */
 function SyncedTools({
@@ -240,16 +245,8 @@ function Terminal({
         <span className="flex-1">
           ops-agent · dev tools · scope: <span className="text-neutral-100">{scopeLabel}</span>
         </span>
-        {session?.playbook && (
-          <Link
-            to={`/playbooks?playbook=${encodeURIComponent(session.playbook.id)}`}
-            title="Rules in this Session come from this Playbook"
-            className="text-neutral-100 underline-offset-2 hover:underline"
-          >
-            Playbook: {session.playbook.name}
-          </Link>
-        )}
         <span>{session ? session.state.replace('_', ' ') : 'new terminal'}</span>
+        {session && isBusy(session) && <TerminalStop sessionId={session.id} />}
       </div>
       {/* biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: a click anywhere in the terminal moves the cursor to the prompt; the prompt itself takes the keys */}
       <div
@@ -485,8 +482,8 @@ export function DevToolsView() {
                   <button
                     type="button"
                     aria-label={`Delete ${label}`}
-                    title="Delete this terminal"
-                    disabled={isRunning(candidate) || remove.isPending}
+                    title={isBusy(candidate) ? 'Stop the agent first' : 'Delete this terminal'}
+                    disabled={isBusy(candidate) || remove.isPending}
                     onClick={() =>
                       remove.mutate(candidate.id, {
                         onSuccess: () => {
@@ -604,5 +601,29 @@ export function DevToolsView() {
         />
       </section>
     </div>
+  );
+}
+
+/** Stop, in the terminal's own colours: ends the run going in this terminal's Session. */
+function TerminalStop({ sessionId }: { sessionId: string }) {
+  const stop = useStopSession(sessionId);
+  return (
+    <>
+      {stop.isError && (
+        <span role="alert" className="text-accent-400">
+          {stop.error.message}
+        </span>
+      )}
+      <button
+        type="button"
+        title="Stop the agent where it is"
+        disabled={stop.isPending}
+        onClick={() => stop.mutate()}
+        className="flex cursor-pointer items-center gap-1.5 rounded-sm border border-neutral-600 bg-transparent px-2 py-0.5 font-mono text-[11px] text-neutral-200 hover:border-accent-400 hover:text-accent-400 disabled:cursor-wait disabled:opacity-60"
+      >
+        <StopIcon />
+        stop
+      </button>
+    </>
   );
 }

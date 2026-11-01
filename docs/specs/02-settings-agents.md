@@ -21,6 +21,13 @@ Sessions and runs
 6. A Session whose transcript is gone (deleted outside the console) lists no messages. Its next message starts a new SDK session and replaces `sdk_session_id`.
 7. A message to a Session whose run is still going is refused with `session_busy`. Runs of different Sessions go on side by side.
 8. When the agent asks the operator a question, the Session is `waiting_input` and the question shows as a `question` part. The operator's next message answers it and sets the Session `working`.
+8a. The operator can edit the Session's last message, and only that one, while no run is going. Every run keeps a
+    file checkpoint at each message. Editing first puts back the files the agent changed with its edit tools since
+    that message; changes made through Bash, such as a commit or `sed -i`, stay. The edited text then runs from
+    just before the old message, which drops out of the conversation with the agent's answer to it. Editing the first
+    message starts the conversation over. Files that cannot go back, such as edits from a run that had no
+    checkpoint, do not stop the run: the reply says why. Editing any other message is refused with `invalid_state`,
+    and editing while a run goes with `session_busy`.
 9. Access modes map to SDK permission modes:
    - `supervised` (`default`): every edit and every command that needs approval creates an Approval of kind `edit` or `command` and sets the Session `waiting_approval`.
    - `accept_edits` (`acceptEdits`): file edits inside the working directory run; commands still ask.
@@ -28,6 +35,12 @@ Sessions and runs
    - `full` (`bypassPermissions`): edits and commands run without asking.
 10. Changing a Session's model, effort or access mode applies from its next run.
 11. Deleting a Session removes its row. The transcript stays where Claude Code keeps it. Action Log rows and Approvals stay and lose their `session_id`. Deleting a Session whose run is going is refused with `session_busy`.
+11a. Stop ends a Session's run where it is, whether it is `working`, `waiting_input` or `waiting_approval`. The SDK query
+    aborts, the run's `pending` Approvals become `expired` with their Action Log row `failed` and `error_message`
+    `interrupted`, and a call still running gets `error_message` `stopped`. The Session goes back to `idle` and
+    `session.finished` says `done`; a job that started the run fails with "stopped by the operator" and can be
+    retried. Stopping a Session with no run going is refused with `invalid_state`. Stop shows wherever a run goes: the
+    Session view, its row in the Session list, a Dev tools terminal, and a running Report, Fix or Agent Review.
 
 Guards, Action Log and Approvals
 
@@ -213,6 +226,8 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 | `GET /sessions/:id` | | `Session` |
 | `PATCH /sessions/:id` | `{ title?, model?, effort?, access_mode? }`, plus `connection_ids?` on a `devtools` Session (`09-dev-tools-agent`) | `Session` |
 | `DELETE /sessions/:id` | | 204; `session_busy` |
+| `POST /sessions/:id/messages/:message_id/edit` | `{ text }` | 202 `{ message_id, reverted: { files, insertions, deletions } \| null, revert_error }`; `invalid_state` for any message but the last; `session_busy` (Behavior 8a) |
+| `POST /sessions/:id/stop` | | 204; `invalid_state` with no run going (Behavior 11a) |
 | `GET /sessions/:id/messages` | | `Message[]` oldest first, the in-flight message included; empty with no transcript |
 
 `POST /sessions` is defined by each kind's spec. This spec gives them the shared creation step (Behavior 1).
