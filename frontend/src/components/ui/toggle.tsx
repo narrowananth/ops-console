@@ -1,4 +1,4 @@
-/** On/off switch: a square knob that slides right and fills with the accent when on. */
+/** On/off switch: a round knob that slides right as the pill fills with the accent. */
 export function Toggle({
   checked,
   onChange,
@@ -18,11 +18,15 @@ export function Toggle({
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`flex h-6 w-11 flex-none cursor-pointer border-[1.5px] border-text p-0 disabled:cursor-default disabled:opacity-60 ${
-        checked ? 'justify-end bg-accent' : 'justify-start bg-bg'
+      className={`relative h-6.5 w-11.5 flex-none cursor-pointer rounded-full border-0 p-0 transition-colors duration-200 disabled:cursor-default disabled:opacity-60 ${
+        checked ? 'bg-accent' : 'bg-neutral-400'
       }`}
     >
-      <span className={`m-[1.5px] size-4.5 ${checked ? 'bg-bg' : 'bg-text'}`} />
+      <span
+        className={`absolute top-0.75 size-5 rounded-full bg-white shadow-[0_1px_3px_rgb(0_0_0/0.25)] transition-[left] duration-200 ${
+          checked ? 'left-5.75' : 'left-0.75'
+        }`}
+      />
     </button>
   );
 }

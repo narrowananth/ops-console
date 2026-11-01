@@ -10,7 +10,7 @@ import { useUi } from './ui-store';
 function Panel({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-1 items-center justify-center">
-      <div role="status" className="border-2 border-divider bg-surface px-6 py-5 text-[15px]">
+      <div role="status" className="rounded-lg border border-line bg-card shadow-sm px-6 py-5 text-[15px]">
         {children}
       </div>
     </div>

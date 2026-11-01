@@ -21,26 +21,37 @@ test('the URL from ops-console open signs in, hides the token and shows the shel
   await expect(nav.getByRole('link', { name: 'Monitor' })).toBeVisible();
 });
 
-test('the Settings drawer holds its five tabs', async ({ page }) => {
+test('the sidebar holds every page, and the Setup agent buttons open it', async ({ page }) => {
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('button', { name: 'Settings' }).click();
+  const nav = page.getByRole('navigation');
+  await expect(nav.getByRole('link')).toHaveText([
+    'Monitor',
+    'Workspace',
+    'Dev tools',
+    'Integrations',
+    'Connections',
+    'Repos',
+    'Setup agent',
+    'Agents & accounts',
+  ]);
 
-  const drawer = page.getByRole('dialog', { name: 'Settings' });
-  await expect(drawer).toBeVisible();
-  await expect(drawer.getByRole('tab')).toHaveText(['Agents', 'Integrations', 'Dev tools', 'Repos', 'Setup agent']);
-  await expect(drawer.getByRole('tab', { name: 'Agents' })).toHaveAttribute('aria-selected', 'true');
+  await nav.getByRole('link', { name: 'Repos' }).click();
+  await expect(page.getByRole('heading', { name: 'Repos' })).toBeVisible();
+  expect(page.url()).toContain('/repos');
 
-  await drawer.getByRole('tab', { name: 'Repos' }).click();
-  await expect(drawer.getByRole('tab', { name: 'Repos' })).toHaveAttribute('aria-selected', 'true');
-
-  for (const tab of ['Integrations', 'Dev tools']) {
-    await drawer.getByRole('tab', { name: tab }).click();
-    await drawer.getByRole('button', { name: 'Open Setup agent →' }).click();
-    await expect(drawer.getByRole('tab', { name: 'Setup agent' })).toHaveAttribute('aria-selected', 'true');
+  for (const [link, button] of [
+    ['Integrations', 'Add with Setup agent →'],
+    ['Connections', 'Import with Setup agent →'],
+  ]) {
+    await nav.getByRole('link', { name: link }).click();
+    await page.getByRole('button', { name: button }).click();
+    await expect(page.getByRole('heading', { name: 'Setup agent' })).toBeVisible();
   }
-  await expect(drawer.getByRole('button', { name: 'Start setup agent' })).toBeVisible();
-  await drawer.getByRole('button', { name: 'Close' }).click();
-  await expect(drawer).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Start setup agent' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Collapse sidebar' }).click();
+  await expect(nav.getByRole('link', { name: 'Monitor' })).toHaveAttribute('title', 'Monitor');
+  await page.getByRole('button', { name: 'Expand sidebar' }).click();
 });
 
 test('the installed app starts the Setup agent only once Full Disk Access is on', async ({ page }) => {
@@ -54,9 +65,8 @@ test('the installed app starts the Setup agent only once Full Disk Access is on'
     return route.fulfill({ status: 204 });
   });
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('button', { name: 'Settings' }).click();
-  const drawer = page.getByRole('dialog', { name: 'Settings' });
-  await drawer.getByRole('tab', { name: 'Setup agent' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  const drawer = page.getByRole('main');
 
   const permissions = drawer.getByRole('region', { name: 'Permissions' });
   const disk = permissions.getByRole('listitem', { name: 'Full Disk Access' });
@@ -78,9 +88,8 @@ test('under pnpm dev Full Disk Access reads off · dev build and the Setup agent
     route.fulfill({ json: { data: { granted: false, app_path: null } } }),
   );
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('button', { name: 'Settings' }).click();
-  const drawer = page.getByRole('dialog', { name: 'Settings' });
-  await drawer.getByRole('tab', { name: 'Setup agent' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  const drawer = page.getByRole('main');
 
   const disk = drawer.getByRole('listitem', { name: 'Full Disk Access' });
   await expect(disk).toContainText('off · dev build');
@@ -88,7 +97,7 @@ test('under pnpm dev Full Disk Access reads off · dev build and the Setup agent
   await expect(drawer.getByRole('button', { name: 'Start setup agent' })).toBeEnabled();
 });
 
-test('the Setup agent and its unsent line survive a tab switch, and only Close ends it', async ({ page }) => {
+test('the Setup agent and its unsent line survive a page switch, and only Close ends it', async ({ page }) => {
   let running = true;
   let closed = 0;
   await page.route('**/api/terminals', (route) =>
@@ -101,24 +110,25 @@ test('the Setup agent and its unsent line survive a tab switch, and only Close e
     return route.fulfill({ status: 204 });
   });
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('button', { name: 'Settings' }).click();
-  const drawer = page.getByRole('dialog', { name: 'Settings' });
-  await drawer.getByRole('tab', { name: 'Setup agent' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  const drawer = page.getByRole('main');
   await expect(drawer.getByText('Setup agent running')).toBeVisible();
 
   await drawer.getByRole('textbox', { name: 'Message to Claude' }).fill('import my local databases');
-  await drawer.getByRole('tab', { name: 'Repos' }).click();
-  await drawer.getByRole('tab', { name: 'Setup agent' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Repos' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
   await expect(drawer.getByText('Setup agent running')).toBeVisible();
   await expect(drawer.getByRole('textbox', { name: 'Message to Claude' })).toHaveValue('import my local databases');
   expect(closed).toBe(0);
 
-  await drawer.getByRole('button', { name: 'Close', exact: true }).nth(1).click();
+  await drawer.getByRole('button', { name: 'Close', exact: true }).click();
   await expect.poll(() => closed).toBe(1);
   await expect(drawer.getByRole('button', { name: 'Start setup agent' })).toBeVisible();
 });
 
-test('Integrations lists Connectors and MCP servers, each labelled, in one tab', async ({ page }) => {
+test('Integrations lists Connectors and MCP servers, each labelled, and opens one beside the list', async ({
+  page,
+}) => {
   const server = (name: string, usedBy: string | null) => ({
     name,
     scope: 'user',
@@ -146,9 +156,8 @@ test('Integrations lists Connectors and MCP servers, each labelled, in one tab',
     }),
   );
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('button', { name: 'Settings' }).click();
-  const drawer = page.getByRole('dialog', { name: 'Settings' });
-  await drawer.getByRole('tab', { name: 'Integrations' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Integrations' }).click();
+  const drawer = page.getByRole('main');
 
   const list = drawer.getByRole('list', { name: 'Integrations' });
   for (const name of ['Jira', 'Slack', 'GitHub', 'Shopify']) {
@@ -161,7 +170,7 @@ test('Integrations lists Connectors and MCP servers, each labelled, in one tab',
 
   await list.getByRole('listitem', { name: 'sentry-tools' }).getByRole('button').first().click();
   await expect(drawer.getByText('Tools', { exact: true })).toBeVisible();
-  await drawer.getByRole('button', { name: '← Back' }).click();
+  await drawer.getByRole('button', { name: 'Close', exact: true }).click();
   await list.getByRole('listitem', { name: 'Shopify' }).getByRole('button', { name: 'Connect', exact: true }).click();
   await expect(drawer.getByText('Connect Shopify to Ops Console')).toBeVisible();
   await expect(drawer.getByText('Reached through Shopify Dev MCP.')).toBeVisible();
@@ -188,9 +197,8 @@ test('Connect asks for nothing and shows GitHub its one-time code and sign-in pa
     return route.fulfill({ status: 202 });
   });
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('button', { name: 'Settings' }).click();
-  const drawer = page.getByRole('dialog', { name: 'Settings' });
-  await drawer.getByRole('tab', { name: 'Integrations' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Integrations' }).click();
+  const drawer = page.getByRole('main');
   await drawer.getByRole('listitem', { name: 'GitHub' }).getByRole('button', { name: 'Connect', exact: true }).click();
 
   const step = drawer.getByRole('region', { name: 'Sign in' });

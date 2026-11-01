@@ -1,9 +1,10 @@
 import { CONNECTOR_NAMES, type Connector, ConnectorId, HealthStatus } from '@ops-console/shared';
 import { useState } from 'react';
+import { BrandIcon, CONNECTOR_BRAND } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { useConnectConnector, useDisconnectConnector } from '../lib/queries';
 import { statusGlyph } from '../mcp/status';
-import { IntegrationRow, rowAction } from './integration-row';
+import { IntegrationRow, rowAction, rowActionAttention } from './integration-row';
 
 /** Shopify's Dev MCP has docs only: Connect registers it with no sign-in. */
 const NO_SIGN_IN: ConnectorId[] = [ConnectorId.Shopify];
@@ -19,12 +20,13 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
 
   return (
     <div>
-      <div className="flex items-center gap-2 border-b border-neutral-300 px-5 py-2.5">
-        <Button className="px-2.5 py-1 text-xs" onClick={onBack}>
-          ← Back
-        </Button>
+      <div className="flex items-center gap-2.5 border-b border-line px-5 py-2.5">
+        <BrandIcon brand={CONNECTOR_BRAND[connector.id]} size="sm" />
         <strong className="text-[13px]">{connector.name}</strong>
         <span className={`ml-auto font-mono text-xs ${status.className}`}>{status.glyph}</span>
+        <Button className="px-2.5 py-1 text-xs" onClick={onBack}>
+          Close
+        </Button>
       </div>
       <div className="flex flex-col gap-3 px-5 py-4">
         <div>
@@ -40,7 +42,7 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
       </div>
       {connected &&
         (confirming ? (
-          <div className="flex flex-col gap-2.5 bg-accent-100 px-5 py-3.5">
+          <div className="mx-5 mb-4 flex flex-col gap-2.5 rounded-lg bg-accent-100 px-4 py-3.5">
             <div className="font-extrabold text-accent-900">Disconnect {connector.name}?</div>
             <div className="text-xs text-accent-900">
               Signs out and stops Claude from using it. Monitor and tasks that rely on it pause. Your own terminal stays
@@ -58,7 +60,7 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
             </div>
           </div>
         ) : (
-          <div className="flex items-center gap-3 border-t-2 border-divider px-5 py-3.5">
+          <div className="mx-5 flex items-center gap-3 border-t border-line py-3.5">
             <div className="flex-1 text-xs text-neutral-700">Stops the console using {connector.name}.</div>
             <Button className="border-accent text-accent-700" onClick={() => setConfirming(true)}>
               Disconnect…
@@ -85,9 +87,12 @@ function SignInStep(props: { connector: Connector; pending: boolean; onConnect: 
           ? 'Adds its MCP server. No sign-in needed.'
           : `Opens ${connector.name}'s sign-in page in your browser. Nothing to fill in here.`;
   return (
-    <section aria-label="Sign in" className="flex flex-col gap-3 border border-neutral-300 px-4 py-3">
+    <section
+      aria-label="Sign in"
+      className="flex flex-col gap-3 rounded-lg border border-line bg-card px-4 py-3.5 shadow-sm"
+    >
       <div className="flex items-start gap-3">
-        <span className="flex size-6 shrink-0 items-center justify-center border border-neutral-300 font-mono text-xs">
+        <span className="flex size-6.5 shrink-0 items-center justify-center rounded-full bg-neutral-200 font-mono text-xs font-semibold">
           1
         </span>
         <div className="min-w-0 flex-1">
@@ -111,7 +116,7 @@ function SignInStep(props: { connector: Connector; pending: boolean; onConnect: 
         </Button>
       </div>
       {signIn && (signIn.code || signIn.url) && (
-        <div className="flex flex-wrap items-center gap-3 bg-neutral-200 px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-3 rounded-md bg-neutral-200 px-3.5 py-3">
           {signIn.code && (
             <div className="flex flex-col">
               <span className="text-[11px] text-neutral-700">Enter this code (already copied)</span>
@@ -123,7 +128,7 @@ function SignInStep(props: { connector: Connector; pending: boolean; onConnect: 
               href={signIn.url}
               target="_blank"
               rel="noreferrer"
-              className="ml-auto inline-flex items-center gap-2 bg-accent px-3.5 py-2 font-heading text-sm font-extrabold text-bg hover:bg-accent-600"
+              className="ml-auto inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 font-heading text-sm font-bold text-white no-underline shadow-sm hover:bg-accent-600 hover:text-white"
             >
               Open {connector.name} ↗
             </a>
@@ -135,24 +140,41 @@ function SignInStep(props: { connector: Connector; pending: boolean; onConnect: 
 }
 
 /** A Connector in the Integrations list. Off reads "not connected": a Connector is never disabled. */
-export function ConnectorRow({ connector, onOpen }: { connector: Connector; onOpen: () => void }) {
+export function ConnectorRow({
+  connector,
+  selected,
+  onOpen,
+}: {
+  connector: Connector;
+  selected: boolean;
+  onOpen: () => void;
+}) {
   const status = connector.sign_in
     ? { glyph: '◌ signing in', className: 'text-neutral-700' }
     : connector.status === HealthStatus.Off
       ? { glyph: '○ not connected', className: 'text-neutral-700' }
       : statusGlyph[connector.status];
   const action =
-    connector.status === HealthStatus.Off ? 'Connect' : connector.status === HealthStatus.Auth ? 'Sign in' : 'Manage';
+    connector.status === HealthStatus.Off
+      ? 'Connect'
+      : connector.status === HealthStatus.Auth
+        ? 'Sign in'
+        : connector.status === HealthStatus.Fail
+          ? 'Reconnect'
+          : 'Manage';
+  const attention = connector.status === HealthStatus.Auth || connector.status === HealthStatus.Fail;
   return (
     <IntegrationRow
       label={CONNECTOR_NAMES[connector.id]}
+      brand={CONNECTOR_BRAND[connector.id]}
       name={connector.name}
       kind="Connector"
       line={`${connector.via}${connector.account_label ? ` · ${connector.account_label}` : ''}`}
       status={status}
+      selected={selected}
       onOpen={onOpen}
       action={
-        <button type="button" className={rowAction} onClick={onOpen}>
+        <button type="button" className={attention ? rowActionAttention : rowAction} onClick={onOpen}>
           {action}
         </button>
       }

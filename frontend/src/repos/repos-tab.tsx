@@ -1,5 +1,6 @@
 import { RemovedRepoSessions, type Repo } from '@ops-console/shared';
 import { useState } from 'react';
+import { RepoIcon } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
 import { useImportRepo, usePickFolder, useRemoveRepo, useRepos } from '../lib/queries';
@@ -8,11 +9,12 @@ function RepoRow({ repo }: { repo: Repo }) {
   const remove = useRemoveRepo();
   const [confirming, setConfirming] = useState(false);
   return (
-    <li aria-label={repo.name} className="flex items-center gap-3 border-b border-neutral-300 px-5 py-2.5">
+    <li aria-label={repo.name} className="flex items-center gap-3.5 border-b border-line px-5 py-3">
+      <RepoIcon host={repo.host} size="lg" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <strong className="font-mono text-[13px]">{repo.name}</strong>
-          <span className="border border-divider px-1.5 py-px text-[10px] text-neutral-700">{repo.host}</span>
+          <span className="rounded-full bg-neutral-200 px-2 py-px text-[10px] text-neutral-700">{repo.host}</span>
           {repo.dirty && <span className="text-[10px] text-accent-700">uncommitted changes</span>}
         </div>
         <div className="truncate font-mono text-[11px] text-neutral-700">{repo.path}</div>
@@ -89,13 +91,13 @@ export function ReposTab() {
 
   return (
     <div>
-      <div className="flex flex-col gap-2 border-b-2 border-divider px-5 py-4">
+      <div className="flex flex-col gap-2 border-b border-line px-5 py-4">
         <div className="text-xs font-extrabold">Import a local repo</div>
         <button
           type="button"
           disabled={pick.isPending || importRepo.isPending}
           onClick={browse}
-          className="flex cursor-pointer flex-col items-start gap-0.5 border-[1.5px] border-text bg-bg px-3 py-2.5 text-left text-text hover:bg-neutral-200 disabled:cursor-wait"
+          className="flex cursor-pointer flex-col items-start gap-0.5 border border-divider bg-card px-3 py-2.5 text-left text-text hover:bg-neutral-200 disabled:cursor-wait"
         >
           <span className="text-[13px] font-extrabold">Local folder</span>
           <span className="text-[11px] text-neutral-700">

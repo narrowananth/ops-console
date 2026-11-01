@@ -32,11 +32,15 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center gap-2.5 border-b-2 border-divider px-6 py-3">
+      <header className="flex flex-wrap items-center gap-2.5 border-b border-line px-6 py-3">
         {repo && <span className="text-sm text-neutral-700">{repo.name} /</span>}
         <h2 className="m-0 min-w-0 flex-[1_1_200px] truncate text-base font-extrabold">{session.title}</h2>
-        <span className="border border-divider px-2 py-0.5 font-mono text-xs">{session.branch}</span>
-        <span className="text-[11px] text-neutral-700">{session.state.replace('_', ' ')}</span>
+        <span className="rounded-full border border-line bg-card px-2.5 py-0.5 font-mono text-xs">
+          {session.branch}
+        </span>
+        <span className="rounded-full bg-neutral-200 px-2 py-0.5 text-[11px] text-neutral-700">
+          {session.state.replace('_', ' ')}
+        </span>
         <Button
           className="px-2.5 py-1 text-xs"
           disabled={running || remove.isPending}
@@ -53,7 +57,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
         ) : messages.data.length === 0 ? (
           <Empty>Nothing said yet. Tell the agent what to do on {session.branch}.</Empty>
         ) : (
-          <ul className="m-0 list-none p-0">
+          <ul className="m-0 list-none px-0 py-2">
             {messages.data.map((message) => (
               <MessageView key={message.id} message={message} />
             ))}
@@ -62,7 +66,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
       </div>
       <div className="flex flex-col gap-2 px-6 pb-4.5">
         <ApprovalPrompts sessionId={id} />
-        <div className="border-2 border-text bg-bg">
+        <div className="rounded-lg border border-divider bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)]">
           <textarea
             aria-label="Message"
             value={text}
@@ -79,7 +83,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 submit();
               }
             }}
-            className="block max-h-50 min-h-16 w-full resize-y border-0 bg-transparent px-4 pt-3.5 pb-1.5 text-sm text-text outline-none"
+            className="block max-h-50 min-h-16 w-full resize-none border-0 bg-transparent px-4 pt-3.5 pb-1.5 text-sm text-text outline-none"
           />
           <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-1.5 pb-2.5">
             <SessionChips session={session} variant="chip" />
@@ -89,12 +93,10 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 {send.error.message}
               </span>
             )}
-            <span className="ml-auto text-[11px] text-neutral-600" title="Shift+Enter adds a new line">
-              Enter to send
-            </span>
             <Button
               variant="primary"
-              className="px-3.5 py-1.5"
+              title="Enter sends. Shift+Enter adds a new line."
+              className="ml-auto px-4 py-1.5"
               disabled={running || text.trim() === '' || send.isPending}
               onClick={submit}
             >

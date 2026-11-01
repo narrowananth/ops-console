@@ -1,7 +1,7 @@
 # Dev tools: import connections from the machine and from URLs
 
 **Status:** shipped
-**Design:** Settings › Setup agent (`05-settings-dev-tools`); no new screen
+**Design:** Setup agent (`05-settings-dev-tools`); no new screen
 
 ## Problem
 

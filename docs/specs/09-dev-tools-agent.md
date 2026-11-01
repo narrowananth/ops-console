@@ -88,7 +88,7 @@ Messages, `session.output`, `session.finished`, `approval.requested` and `action
 
 - Dev tools screen: opens ready to ask; the first question starts the dev-tools Session (`10-dev-tools-compare`). Header shows `scope:` with the chosen Connections or "all connected".
 - Scope picker: the Synced dev tools list, Connections with their type; `none` ones are shown disabled; PROD ones tagged.
-- Empty: no Connections yet, with a link to Settings › Dev tools.
+- Empty: no Connections yet, with a link to Connections.
 - An Approval for a PROD write shows inline with approve and deny.
 
 ## Rejected

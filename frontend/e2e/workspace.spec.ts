@@ -103,9 +103,8 @@ test('removing a Repo with Sessions asks whether to keep or delete them', async 
     return route.fulfill({ status: 204 });
   });
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('button', { name: 'Settings' }).click();
-  const drawer = page.getByRole('dialog', { name: 'Settings' });
-  await drawer.getByRole('tab', { name: 'Repos' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Repos' }).click();
+  const drawer = page.getByRole('main');
 
   const analytics = drawer.getByRole('listitem', { name: 'analytics' });
   await analytics.getByRole('button', { name: 'Remove' }).click();

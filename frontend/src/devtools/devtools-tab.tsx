@@ -1,12 +1,12 @@
 import { AccessLevel, type Connection, ConnectionType, HealthStatus } from '@ops-console/shared';
 import { useState } from 'react';
+import { BrandIcon, CONNECTION_BRAND } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
 import { useConnections } from '../lib/queries';
 import { statusGlyph } from '../mcp/status';
-import { SetupAgentLink } from '../setup/setup-agent-link';
 import { ConnectionForm } from './connection-form';
-import { hostOf, TYPE_LABELS } from './fields';
+import { hostOf, TYPE_BLURBS, TYPE_LABELS } from './fields';
 
 type View = { kind: 'list' } | { kind: 'pick' } | { kind: 'new'; type: ConnectionType } | { kind: 'edit'; id: string };
 
@@ -20,17 +20,18 @@ function Row({ connection, onOpen }: { connection: Connection; onOpen: () => voi
   const status = statusGlyph[connection.status];
   const failed = connection.status === HealthStatus.Fail && connection.status_detail;
   return (
-    <li aria-label={connection.name} className="border-b border-neutral-300">
+    <li aria-label={connection.name}>
       <button
         type="button"
         onClick={onOpen}
-        className="grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_120px_auto] items-center gap-3 border-0 bg-transparent px-5 py-2.5 text-left text-text hover:bg-neutral-200"
+        className="grid w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_120px_130px] items-center gap-3 rounded-lg border-0 bg-transparent px-3.5 py-2.5 text-left text-text transition-colors hover:bg-neutral-200/70"
       >
+        <BrandIcon brand={CONNECTION_BRAND[connection.type]} />
         <span className="min-w-0">
           <span className="flex items-center gap-2 font-mono text-[13px] font-semibold">
             {connection.name}
             {connection.is_prod && (
-              <span className="border-[1.5px] border-accent px-1.5 py-px font-sans text-[10px] font-extrabold text-accent-700">
+              <span className="rounded-full bg-accent-100 px-2 py-px font-sans text-[10px] font-extrabold text-accent-700">
                 PROD
               </span>
             )}
@@ -40,7 +41,7 @@ function Row({ connection, onOpen }: { connection: Connection; onOpen: () => voi
           </span>
         </span>
         <span className={`font-mono text-xs ${status.className}`}>{status.glyph}</span>
-        <span className="text-xs text-neutral-700">{ACCESS_LABEL[connection.access]}</span>
+        <span className="text-right text-xs text-neutral-700">{ACCESS_LABEL[connection.access]}</span>
       </button>
     </li>
   );
@@ -58,19 +59,38 @@ export function DevToolsTab() {
   if (view.kind === 'pick') {
     return (
       <div>
-        <div className="flex items-center gap-2 border-b border-neutral-300 px-5 py-2.5">
+        <div className="flex items-center gap-3 border-b border-line px-5 py-3">
           <Button className="px-2.5 py-1 text-xs" onClick={list}>
             ← Back
           </Button>
-          <strong className="text-[13px]">Pick a type</strong>
+          <div>
+            <strong className="block text-[13px]">Add a connection</strong>
+            <span className="text-xs text-neutral-700">Pick the kind of database</span>
+          </div>
         </div>
-        <div className="grid grid-cols-2 gap-2.5 px-5 py-4">
+        <ul
+          aria-label="Connection types"
+          className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3 p-5"
+        >
           {Object.values(ConnectionType).map((type) => (
-            <Button key={type} className="justify-start" onClick={() => setView({ kind: 'new', type })}>
-              {TYPE_LABELS[type]}
-            </Button>
+            <li key={type}>
+              <button
+                type="button"
+                onClick={() => setView({ kind: 'new', type })}
+                className="group flex w-full cursor-pointer items-center gap-3.5 rounded-xl border border-line bg-bg px-4 py-3.5 text-left text-text transition-all hover:-translate-y-px hover:border-accent-300 hover:bg-card hover:shadow-md"
+              >
+                <BrandIcon brand={CONNECTION_BRAND[type]} size="lg" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-extrabold">{TYPE_LABELS[type]}</span>
+                  <span className="block text-xs text-neutral-700">{TYPE_BLURBS[type]}</span>
+                </span>
+                <span aria-hidden className="text-neutral-500 transition-colors group-hover:text-accent">
+                  →
+                </span>
+              </button>
+            </li>
           ))}
-        </div>
+        </ul>
       </div>
     );
   }
@@ -83,7 +103,6 @@ export function DevToolsTab() {
 
   return (
     <div>
-      <SetupAgentLink what="database Connections, or import the ones on this machine" />
       <div className="flex items-center gap-2.5 border-b border-divider px-5 py-3 text-xs text-neutral-700">
         <span className="flex-1">Databases Claude can reach through MCP servers</span>
         <Button variant="primary" className="px-2.5 py-1 text-xs" onClick={() => setView({ kind: 'pick' })}>
@@ -93,7 +112,7 @@ export function DevToolsTab() {
       {data.length === 0 ? (
         <Empty>No connections yet. Ask the Setup agent, or pick a type.</Empty>
       ) : (
-        <ul className="m-0 list-none p-0">
+        <ul className="m-0 flex list-none flex-col gap-0.5 p-1.5">
           {data.map((connection) => (
             <Row
               key={connection.id}

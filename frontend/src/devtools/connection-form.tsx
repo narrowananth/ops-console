@@ -8,11 +8,12 @@ import {
   SERVER_TYPES,
 } from '@ops-console/shared';
 import { useEffect, useState } from 'react';
+import { BrandIcon, CONNECTION_BRAND } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { useCreateConnection, useDeleteConnection, useTestConnection, useUpdateConnection } from '../lib/queries';
 import { FIELDS, SECRET_LABELS, TYPE_LABELS, toConfig } from './fields';
 
-const input = 'w-full border-[1.5px] border-text bg-bg px-2 py-1.5 font-mono text-[13px] text-text';
+const input = 'w-full border border-divider bg-card px-2 py-1.5 font-mono text-[13px] text-text';
 
 function Segmented<T extends string>({
   label,
@@ -28,12 +29,14 @@ function Segmented<T extends string>({
   return (
     <fieldset className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0">
       <legend className="p-0 text-xs font-extrabold">{label}</legend>
-      <div className="flex w-max border border-divider">
+      <div className="flex w-max gap-0.5 rounded-lg bg-neutral-200 p-1">
         {options.map((option) => (
           <label
             key={option.value}
-            className={`px-3.5 py-1.5 text-xs ${option.disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${
-              value === option.value ? 'bg-text text-bg' : 'bg-bg text-text'
+            className={`rounded-md px-3.5 py-1.5 text-xs transition-colors has-focus-visible:outline-2 has-focus-visible:outline-accent ${option.disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${
+              value === option.value
+                ? 'bg-card font-bold text-text shadow-sm'
+                : 'bg-transparent text-neutral-700 hover:text-text'
             }`}
           >
             <input
@@ -110,15 +113,14 @@ export function ConnectionForm({
 
   return (
     <div>
-      <div className="flex items-center gap-2 border-b border-neutral-300 px-5 py-2.5">
+      <div className="flex items-center gap-2 border-b border-line px-5 py-2.5">
         <Button className="px-2.5 py-1 text-xs" onClick={onCancel}>
           ← Back
         </Button>
+        <BrandIcon brand={CONNECTION_BRAND[type]} size="sm" />
         <strong className="text-[13px]">{connection ? connection.name : `New ${TYPE_LABELS[type]} connection`}</strong>
         {(connection?.is_prod || env === ConnectionEnv.Prod) && (
-          <span className="border-[1.5px] border-accent px-1.5 py-px text-[10px] font-extrabold text-accent-700">
-            PROD
-          </span>
+          <span className="rounded-full bg-accent-100 px-2 py-px text-[10px] font-extrabold text-accent-700">PROD</span>
         )}
       </div>
       <div className="flex flex-col gap-3 px-5 py-4">
@@ -228,7 +230,7 @@ export function ConnectionForm({
           </div>
         )}
       </div>
-      <div className="flex flex-wrap items-center gap-2.5 border-t-2 border-divider px-5 py-3.5">
+      <div className="flex flex-wrap items-center gap-2.5 border-t border-line px-5 py-3.5">
         {connection &&
           (confirming ? (
             <>

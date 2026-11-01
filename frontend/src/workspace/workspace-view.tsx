@@ -14,8 +14,12 @@ export function WorkspaceView() {
 
   return (
     <>
-      <aside className="flex w-80 flex-none flex-col overflow-y-auto border-r-2 border-divider">
-        <div role="tablist" aria-label="Workspace" className="flex border-b-2 border-divider">
+      <aside className="flex w-80 flex-none flex-col overflow-y-auto border-r border-line">
+        <div
+          role="tablist"
+          aria-label="Workspace"
+          className="mx-3 mt-3.5 mb-2 flex gap-0.5 rounded-lg bg-neutral-200 p-1"
+        >
           {(
             [
               ['sessions', 'Sessions'],
@@ -28,7 +32,7 @@ export function WorkspaceView() {
               role="tab"
               aria-selected={tab === id}
               onClick={() => setTab(id)}
-              className={`-mb-0.5 flex-1 cursor-pointer border-0 border-b-3 bg-transparent px-3.5 py-2.5 text-left text-[13px] text-text hover:bg-neutral-200 ${tab === id ? 'border-b-accent font-extrabold' : 'border-b-transparent'}`}
+              className={`flex-1 cursor-pointer rounded-md border-0 px-3.5 py-1.5 text-center text-[13px] transition-colors ${tab === id ? 'bg-card font-bold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
             >
               {label}
             </button>

@@ -19,7 +19,25 @@ import { sessionToken } from '../lib/session';
  */
 const drafts = new Map<string, string>();
 
-const EXAMPLES = ['import my local databases'];
+const TERMINAL_BG = '#0f0e0e';
+
+/** What the Setup agent page offers to ask. */
+export const EXAMPLES = [
+  'import my local databases',
+  'connect GitHub and Datadog',
+  'add the MCP servers from my Claude config',
+];
+
+/** A line picked before the terminal exists; the terminal that starts next opens with it typed in. */
+let queued: string | null = null;
+export function queueSetupLine(text: string) {
+  queued = text;
+}
+function takeQueued(): string {
+  const text = queued ?? '';
+  queued = null;
+  return text;
+}
 
 /**
  * The Setup agent's terminal. Keystrokes are not sent as typed: a line goes to the daemon whole, so it can swap
@@ -30,7 +48,7 @@ const EXAMPLES = ['import my local databases'];
 export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onClose: () => void }) {
   const host = useRef<HTMLDivElement>(null);
   const socket = useRef<WebSocket | null>(null);
-  const [line, setLineState] = useState(() => drafts.get(terminalId) ?? '');
+  const [line, setLineState] = useState(() => drafts.get(terminalId) ?? takeQueued());
   const setLine = (text: string) => {
     if (text) drafts.set(terminalId, text);
     else drafts.delete(terminalId);
@@ -45,7 +63,12 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
   useEffect(() => {
     const token = sessionToken();
     if (!host.current || token === null) return;
-    const terminal = new Terminal({ convertEol: true, fontSize: 12, rows: 18, disableStdin: true });
+    const terminal = new Terminal({
+      convertEol: true,
+      fontSize: 13,
+      disableStdin: true,
+      theme: { background: TERMINAL_BG },
+    });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(host.current);
@@ -53,9 +76,18 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
     const url = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/terminals/${terminalId}`;
     const ws = new WebSocket(url, [WS_PROTOCOL, token]);
     socket.current = ws;
-    ws.addEventListener('open', () =>
-      ws.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows })),
-    );
+    const sendSize = () => {
+      if (ws.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
+    };
+    ws.addEventListener('open', sendSize);
+    // The terminal fills its box, and Claude redraws at the new size whenever the box changes.
+    const resized = new ResizeObserver(() => {
+      const before = `${terminal.cols}x${terminal.rows}`;
+      fit.fit();
+      if (`${terminal.cols}x${terminal.rows}` !== before) sendSize();
+    });
+    resized.observe(host.current);
     ws.addEventListener('message', (event) => {
       const parsed = terminalServerMessageSchema.safeParse(JSON.parse(String(event.data)));
       if (!parsed.success) return;
@@ -67,6 +99,7 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
       else if (message.type === 'exit') setEnded(true);
     });
     return () => {
+      resized.disconnect();
       ws.close();
       terminal.dispose();
     };
@@ -81,24 +114,38 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
   };
 
   return (
-    <div className="flex flex-col gap-2.5 border-b-2 border-divider px-5 py-4">
-      <div className="flex items-center gap-2">
-        <strong className="text-[13px]">Setup agent running</strong>
-        <span className="text-xs text-neutral-700">When Claude needs a password it asks in a masked field.</span>
-        <Button
-          className="ml-auto px-2.5 py-1 text-xs"
-          onClick={() => {
-            drafts.delete(terminalId);
-            onClose();
-          }}
-        >
-          Close
-        </Button>
-      </div>
-      <div ref={host} className="min-h-40 overflow-hidden bg-black p-1.5" />
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-line bg-card shadow-sm">
+        <div className="flex items-center gap-2.5 border-b border-line px-4.5 py-3">
+          <span
+            aria-hidden
+            className={`size-2 flex-none rounded-full ${ended ? 'bg-neutral-400' : 'bg-ok shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-ok)_20%,transparent)]'}`}
+          />
+          <strong className="text-[13px] whitespace-nowrap">{ended ? 'Setup agent ended' : 'Setup agent running'}</strong>
+          <span className="truncate text-xs text-neutral-700">
+            When Claude needs a password it asks in a masked field.
+          </span>
+          <Button
+            className="ml-auto px-3 py-1.25 text-xs"
+            onClick={() => {
+              drafts.delete(terminalId);
+              onClose();
+            }}
+          >
+            Close
+          </Button>
+        </div>
+        <div className="flex min-h-0 flex-1 p-2.5">
+          <div
+            ref={host}
+            className="min-h-60 flex-1 overflow-hidden rounded-lg p-3"
+            style={{ background: TERMINAL_BG }}
+          />
+        </div>
+      </section>
       {request && (
         <form
-          className="flex items-center gap-2"
+          className="flex items-end gap-2.5 rounded-xl border border-accent-300 bg-accent-100 px-4 py-3"
           onSubmit={(event) => {
             event.preventDefault();
             answer.mutate(
@@ -112,14 +159,14 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
             );
           }}
         >
-          <label className="flex-1 text-xs font-extrabold">
+          <label className="flex-1 text-xs font-extrabold text-accent-900">
             {request.label}
             <input
               type="password"
               autoComplete="off"
               value={secret}
               onChange={(event) => setSecret(event.target.value)}
-              className="mt-1 w-full border-[1.5px] border-text bg-bg px-2 py-1.5 font-mono text-[13px] text-text"
+              className="mt-1.5 w-full border border-divider bg-card px-3 py-2 font-mono text-[13px] text-text"
             />
           </label>
           <Button variant="primary" type="submit" disabled={secret === '' || answer.isPending}>
@@ -127,8 +174,8 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
           </Button>
         </form>
       )}
-      <div className="flex gap-2">
-        <input
+      <div className="rounded-xl border border-divider bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)]">
+        <textarea
           aria-label="Message to Claude"
           disabled={ended}
           value={line}
@@ -136,39 +183,51 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
           placeholder={
             ended
               ? 'The terminal ended. Close it and open it again.'
-              : 'Type a line and press Enter (Enter alone confirms a prompt)'
+              : 'Ask Claude to set something up, e.g. import my local databases. Enter alone confirms a prompt.'
           }
           aria-invalid={refused !== null}
           aria-describedby={refused === null ? undefined : 'setup-line-refused'}
           onChange={(event) => {
-            setLine(event.target.value);
+            // A request is one line: a pasted line break becomes a space.
+            setLine(event.target.value.replace(/\r?\n/g, ' '));
             setRefused(null);
           }}
-          onKeyDown={(event) => event.key === 'Enter' && submit()}
-          className="flex-1 border-[1.5px] border-text bg-bg px-2 py-1.5 font-mono text-[13px] text-text"
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              submit();
+            }
+          }}
+          className="block max-h-40 min-h-16 w-full resize-none border-0 bg-transparent px-4 pt-3.5 pb-1.5 text-sm text-text outline-none"
         />
-        <Button disabled={ended} onClick={submit}>
-          Send
-        </Button>
+        <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-1.5 pb-2.5">
+          {EXAMPLES.map((example) => (
+            <button
+              key={example}
+              type="button"
+              disabled={ended}
+              className="cursor-pointer rounded-full border border-line bg-bg px-3 py-1 text-xs text-text transition-colors hover:border-accent-300 hover:bg-accent-100 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => setLine(example)}
+            >
+              {example}
+            </button>
+          ))}
+          <Button
+            variant="primary"
+            title="Enter sends."
+            className="ml-auto px-4 py-1.5"
+            disabled={ended}
+            onClick={submit}
+          >
+            Send
+          </Button>
+        </div>
       </div>
       {refused && (
         <div id="setup-line-refused" role="alert" className="text-xs text-accent-700">
           {refused}
         </div>
       )}
-      <div className="flex flex-wrap gap-1.5 text-[11px] text-neutral-700">
-        Try:
-        {EXAMPLES.map((example) => (
-          <button
-            key={example}
-            type="button"
-            className="cursor-pointer border border-divider bg-transparent px-1.5 py-0.5 text-[11px] text-text"
-            onClick={() => setLine(example)}
-          >
-            {example}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

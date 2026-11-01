@@ -3,7 +3,7 @@
 Every outside system the console reaches is an MCP server or a CLI registered with Claude Code. To
 connect one, the console hands off to the provider's own browser sign-in: Claude Code's MCP OAuth,
 or the CLI's login (`pup`, `gh`, `glab`). The operator types no token and fills no form before
-Connect, the way claude.ai and ChatGPT connect. The drawer offers Connect, Reconnect and Disconnect
+Connect, the way claude.ai and ChatGPT connect. The Connector pane offers Connect, Reconnect and Disconnect
 only; config the console needs keeps its defaults. A secret the console must hold, such as an MCP server's env var, goes to
 the Keychain. The console registers servers with `claude mcp add`. Fixed reads, such as a pull
 request list or a health check, call the same servers and CLIs directly, with no model turn.

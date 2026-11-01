@@ -2,6 +2,7 @@ import { PrChecks, PrReviewState } from '@ops-console/shared';
 import { useState } from 'react';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
+import { item } from '../components/ui/item';
 import { usePullRequests, useRefreshPullRequests, useRepos } from '../lib/queries';
 
 type Pull = { repoId: string; number: number };
@@ -29,24 +30,26 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
 
   return (
     <div>
-      <div className="flex flex-col gap-2 border-b border-divider px-5 py-3">
+      <div className="flex flex-col gap-2 px-3 pt-1 pb-3">
         <div className="flex items-center gap-2">
-          {(
-            [
-              [true, 'Mine'],
-              [false, 'All'],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={label}
-              type="button"
-              aria-pressed={mine === value}
-              onClick={() => setMine(value)}
-              className={`cursor-pointer border px-2.5 py-1 text-xs text-text ${mine === value ? 'border-text bg-neutral-300 font-bold' : 'border-divider bg-transparent'}`}
-            >
-              {label}
-            </button>
-          ))}
+          <div className="flex gap-0.5 rounded-full bg-neutral-200 p-0.5">
+            {(
+              [
+                [true, 'Mine'],
+                [false, 'All'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={label}
+                type="button"
+                aria-pressed={mine === value}
+                onClick={() => setMine(value)}
+                className={`cursor-pointer rounded-full border-0 px-3 py-1 text-xs transition-colors ${mine === value ? 'bg-card font-bold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <Button className="ml-auto px-2.5 py-1 text-xs" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
             Refresh
           </Button>
@@ -56,7 +59,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
           value={q}
           placeholder="Search title, author, branch"
           onChange={(event) => setQ(event.target.value)}
-          className="border-[1.5px] border-text bg-bg px-2 py-1 text-xs text-text"
+          className="border border-divider bg-card px-3 py-1.75 text-xs text-text"
         />
       </div>
       {pulls.isPending ? (
@@ -66,7 +69,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
       ) : (
         <>
           {pulls.data.meta.stale && (
-            <div role="status" className="border-b border-divider bg-accent-100 px-5 py-2 text-xs text-accent-700">
+            <div role="status" className="mx-3 mb-2 rounded-md bg-accent-100 px-3 py-2 text-xs text-accent-700">
               The Git host did not answer. Showing what was read at{' '}
               {pulls.data.meta.synced_at && new Date(pulls.data.meta.synced_at).toLocaleTimeString()}.
             </div>
@@ -74,7 +77,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
           {pulls.data.data.length === 0 ? (
             <Empty>No open pull requests.</Empty>
           ) : (
-            <ul className="m-0 list-none p-0">
+            <ul className="m-0 flex list-none flex-col gap-0.5 px-2 pb-3">
               {pulls.data.data.map((pr) => {
                 const active = selected?.repoId === pr.repo_id && selected.number === pr.number;
                 return (
@@ -83,7 +86,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                       type="button"
                       aria-current={active}
                       onClick={() => onSelect({ repoId: pr.repo_id, number: pr.number })}
-                      className={`flex w-full cursor-pointer flex-col gap-0.5 border-0 border-l-3 px-5 py-2 text-left text-[13px] text-text hover:bg-neutral-200 ${active ? 'border-l-accent bg-neutral-200' : 'border-l-transparent bg-transparent'}`}
+                      className={`flex w-full flex-col gap-0.5 px-3 py-2 text-[13px] ${item(active)}`}
                     >
                       <span className="truncate font-bold">
                         #{pr.number} {pr.title}

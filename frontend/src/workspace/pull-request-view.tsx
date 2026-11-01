@@ -37,7 +37,7 @@ function Thread({
         <div key={comment.id} className="border-b border-divider px-3 py-2 text-[13px] last:border-b-0">
           <div className="flex items-center gap-2 text-xs">
             <strong>{comment.author}</strong>
-            {comment.by_agent && <span className="border border-text px-1.5 py-px text-[10px]">agent</span>}
+            {comment.by_agent && <span className="rounded-full bg-neutral-200 px-2 py-px text-[10px]">agent</span>}
             {comment.id === root.id && inline && (
               <span className="font-mono text-neutral-700">
                 {root.file_path}
@@ -64,7 +64,7 @@ function Thread({
           placeholder="Reply in this thread"
           onChange={(event) => setReply(event.target.value)}
           onKeyDown={(event) => event.key === 'Enter' && submit()}
-          className="min-w-0 flex-1 border-[1.5px] border-text bg-bg px-2 py-1 text-xs text-text"
+          className="min-w-0 flex-1 border border-divider bg-card px-2 py-1 text-xs text-text"
         />
         <Button className="px-2.5 py-1 text-xs" disabled={post.isPending || reply.trim() === ''} onClick={submit}>
           Reply
@@ -175,7 +175,7 @@ export function PullRequestView({ repoId, number }: { repoId: string; number: nu
               value={changes}
               onChange={(event) => setChanges(event.target.value)}
               placeholder="What needs to change"
-              className="min-w-0 flex-1 border-[1.5px] border-text bg-bg px-2 py-1 text-xs text-text"
+              className="min-w-0 flex-1 border border-divider bg-card px-2 py-1 text-xs text-text"
             />
             <Button
               className="px-2.5 py-1 text-xs"

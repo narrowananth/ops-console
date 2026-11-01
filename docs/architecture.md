@@ -107,6 +107,8 @@ rate-limit events and its usage request.
 
 Where the build departs from `design/ops-console.html` on purpose:
 
+- **Layout.** A left sidebar replaces the top bar and the Settings drawer; each former Settings tab is
+  its own page (`design/ops-console-sidebar.html`). Controls and cards are rounded.
 - **Replay source.** Datadog logs hold request headers, not bodies. A Verification rebuilds the
   request from the source (for example, the Shopify order by id) until a Service logs redacted
   bodies.

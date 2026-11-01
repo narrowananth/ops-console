@@ -1,7 +1,7 @@
 # Settings: Dev tools connections
 
 **Status:** shipped
-**Design:** Settings › Dev tools: the Connections list, the type picker and the connection form (fields, Environment, Claude access, Test, Delete)
+**Design:** Connections: the Connections list, the type picker and the connection form (fields, Environment, Claude access, Test, Delete)
 
 ## Problem
 
@@ -19,14 +19,14 @@ The agent checks a failing Route against real data: a Postgres table, a Mongo co
 8. Deleting a Connection removes its MCP Server from every account, its Keychain entry and its row.
 9. A name already used by a Connection or an MCP Server is refused with `duplicate`.
 10. No response, log row or event carries a secret. Reads show `secret_stored`.
-11. The Setup agent has its own tab, Settings › Setup agent, after Repos. Dev tools, MCP servers and Connectors each
-    show "Open Setup agent →", which opens it. Start setup agent starts a setup terminal: `claude --agent dev-tools-setup --model <model> --effort <effort> --allowedTools <its setup tools> --tools "" --disable-slash-commands` in node-pty, with the active account's config dir and the model and effort from `session_defaults` (`ultrathink` runs as `max`, the CLI's top level), streamed over an authenticated WebSocket. The agent has no built-in tool and no slash command; it reaches the machine only through the console's setup tools. Those tools are allowed up front: the daemon already masks secrets and only adds, and in auto mode Claude Code would otherwise turn down a read of a credential file such as `~/.my.cnf`. It runs with `CLAUDE_CODE_NO_FLICKER=0`, Claude Code's classic renderer, so the page's terminal keeps scrollback; the full-screen renderer draws on the alternate screen, which has none.
+11. The Setup agent has its own page, Setup agent, after Repos. Integrations shows "Add with Setup agent →" and
+    Connections "Import with Setup agent →"; each opens it. Start setup agent starts a setup terminal: `claude --agent dev-tools-setup --model <model> --effort <effort> --allowedTools <its setup tools> --tools "" --disable-slash-commands` in node-pty, with the active account's config dir and the model and effort from `session_defaults` (`ultrathink` runs as `max`, the CLI's top level), streamed over an authenticated WebSocket. The agent has no built-in tool and no slash command; it reaches the machine only through the console's setup tools. Those tools are allowed up front: the daemon already masks secrets and only adds, and in auto mode Claude Code would otherwise turn down a read of a credential file such as `~/.my.cnf`. It runs with `CLAUDE_CODE_NO_FLICKER=0`, Claude Code's classic renderer, so the page's terminal keeps scrollback; the full-screen renderer draws on the alternate screen, which has none.
 12. A line the operator types into the setup terminal goes through the daemon first. Values after `password`, `pass`, `pwd`, `token`, `secret` or `key`, and the password in a `user:password@` URI, are kept as pending secrets in the daemon's memory. Claude sees `{{secret:<n>}}` in their place, and the echo shows them masked. Only plain requests reach Claude. The page and the daemon both refuse a line that starts with a symbol (`/login`, `!cmd`, `#`), holds an `@path` word or a control character, or runs past 2,000 characters, and the daemon never writes it to the pty. The page shows why. An empty line passes, since Enter alone confirms a prompt. The socket takes no raw keystrokes.
 13. The setup agent works out the type, host, env and Access Level from the line, tests the connection and saves it through the console's tools. The tools take `{{secret:<n>}}` and resolve it inside the daemon. The secret never reaches Claude's transcript.
-14. When the setup agent needs a secret the operator did not give, it asks through the console's tools, and the drawer shows a masked field. The value becomes a pending secret, and the agent gets only its placeholder.
+14. When the setup agent needs a secret the operator did not give, it asks through the console's tools, and the Setup agent page shows a masked field. The value becomes a pending secret, and the agent gets only its placeholder.
 15. The setup agent can also connect a Connector, add a remote MCP Server by URL and authenticate an MCP Server, through the same code as those endpoints. The daemon refuses a `stdio` MCP Server from it: that would be a command the daemon runs. The agent turns down any request that is not setting one of these up. It can also import connections from files on the machine, from URLs and from the Keychain (`11-dev-tools-import`).
 16. Each test the setup agent runs writes an Action Log row of kind `query` first (`02-settings-agents`).
-17. The setup terminal runs until the operator presses Close, Claude exits or the daemon stops. Switching tabs, closing the drawer or reloading the page leaves it running, and the Setup agent tab attaches to it again with what it printed so far. One runs at a time: Start setup agent while one runs opens that one. Pending secrets end with it.
+17. The setup terminal runs until the operator presses Close, Claude exits or the daemon stops. Switching pages or reloading leaves it running, and the Setup agent page attaches to it again with what it printed so far. One runs at a time: Start setup agent while one runs opens that one. Pending secrets end with it.
 18. Every check sends `connection.checked` with target `connection`.
 19. On macOS the Setup agent tab lists the permissions macOS asks for before the agent reads the machine, one row
     each with its status. Full Disk Access lets it read folders macOS protects: on, off, or off · dev build. The
@@ -165,13 +165,13 @@ Server to client:
 
 ## UI
 
-Settings › Dev tools, as designed, without Add with Claude: "Open Setup agent →", then the Connections list (name, PROD badge, type and host, "Claude: read-only"), + Add connection opening the type picker, and the form with the type's fields, Environment, Claude access (Off, Read-only, Read / write) and its hint, Test, Save and Delete.
+Connections, as designed, without Add with Claude: "Import with Setup agent →" in the page header, then the Connections list (name, PROD badge, type and host, "Claude: read-only"), + Add connection opening the type picker, and the form with the type's fields, Environment, Claude access (Off, Read-only, Read / write) and its hint, Test, Save and Delete.
 
 - Empty: "No connections yet" with both ways to add one.
-- Settings › Setup agent: Permissions under the Ops Console logo, a Full Disk Access row (status, Open System
+- Setup agent: Permissions under the Ops Console logo, a Full Disk Access row (status, Open System
   Settings when installed and off, Check again) and a Keychain row; then Start setup agent; then the terminal with
   its "Try" examples and Close.
-- Departure from the design: Add with Claude moves from Dev tools to its own tab, since it also sets up MCP servers
+- Departure from the design: Add with Claude moves from Dev tools to its own page, since it also sets up MCP servers
   and Connectors.
 - Error: a failed test shows its error under the form; a failed Connection shows it in the row.
 - PROD: the PROD badge on the row and the form; with Read / write, the hint says every write needs a typed confirm.

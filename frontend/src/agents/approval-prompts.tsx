@@ -14,7 +14,10 @@ export function ApprovalPrompts({ sessionId }: { sessionId?: string }) {
   return (
     <ul className="m-0 flex list-none flex-col gap-2 p-0">
       {pending.map((approval) => (
-        <li key={approval.id} className="flex flex-col gap-2 border-2 border-text bg-surface px-3 py-2.5">
+        <li
+          key={approval.id}
+          className="flex flex-col gap-2 rounded-xl border border-accent-300 bg-accent-100/60 px-4 py-3 shadow-sm"
+        >
           <div className="flex items-center gap-2 text-[13px] font-extrabold">
             {approval.is_prod && <span className="bg-accent px-1.5 py-px text-[10px] text-bg">PROD</span>}
             <span>{approval.summary}</span>

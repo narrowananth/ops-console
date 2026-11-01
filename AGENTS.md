@@ -6,8 +6,9 @@ README.md has project overview and commands. Be extremely concise; sacrifice gra
 
 Ops Console: local web app on top of Claude Code. Shows connected MCP servers, services and their
 Datadog health, database connections, open PRs and Claude sessions. The agent verifies a failing
-route locally, the operator reviews, and only then does the agent fix and open a PR. Look and flows
-come from `design/ops-console.html`.
+route locally, the operator reviews, and only then does the agent fix and open a PR. Screens and
+flows come from `design/ops-console.html`; the layout (left sidebar, rounded controls) from
+`design/ops-console-sidebar.html`.
 
 ## Layout
 

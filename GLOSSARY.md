@@ -116,18 +116,17 @@ asks the operator first.
 
 **MCP Server**:
 A server registered in Claude Code that gives the agent tools (Slack, Atlassian, a database). The
-console registers it in every Claude account. It exposes tools; it does not sign anyone in. Settings ›
-Integrations lists them beside the Connectors; a Connector or Dev tools adds them.
+console registers it in every Claude account. It exposes tools; it does not sign anyone in. Integrations lists them beside the Connectors; a Connector or Dev tools adds them.
 
 **Probe**:
 A short Agent SDK session that reads which MCP Servers connect and which tools they give, then
 stops before the model runs.
 
 **Connector**:
-An outside service the operator signs in to: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify. It holds the sign-in and registers the service's MCP Server when it has one. Each is reached through a CLI or an MCP Server and is connected, checked and disconnected in Settings › Integrations, the one place a service is connected.
+An outside service the operator signs in to: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify. It holds the sign-in and registers the service's MCP Server when it has one. Each is reached through a CLI or an MCP Server and is connected, checked and disconnected in Integrations, the one place a service is connected.
 
 **Setup agent**:
-Claude in a terminal in Settings › Setup agent that adds Connections, remote MCP Servers and Connectors
+Claude in a terminal in Setup agent that adds Connections, remote MCP Servers and Connectors
 from what the operator types. It only adds, and reaches the machine only through the console's setup tools.
 _Avoid_: Add with Claude, setup terminal (the terminal is where it runs)
 

@@ -197,7 +197,7 @@ Adds `branch: string | null`.
   Session count and `+`, and folds the group open or shut; the browser remembers folded Repos. An open Repo lists its
   3 most recently active Sessions, plus any running or picked one, then "Show N more". A row shows title and state on
   one line, with the branch under it when it differs from the Repo's. `+` shows the branch picker and Start; a Repo
-  with no Sessions shows them at once. Empty: "Import a Repo in Settings › Repos".
+  with no Sessions shows them at once. Empty: "Import a Repo in Repos".
 - Branch switcher: lists branches with an open-PR mark; disabled with the reason while Behavior 7 blocks it; a toast when changes were stashed.
 - Pull request list: mine and all, with a stale banner showing `synced_at` when `meta.stale` is true. Error state when the host fails with nothing cached.
 - Pull request view: files, comment threads with resolve, agent comments marked, the latest Agent Review with a stale badge. Approve and request changes are hidden on your own PR. Merge is enabled only when approved. No composer outside threads.

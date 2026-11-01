@@ -117,8 +117,8 @@ Two kinds join the union. `session.output` and `GET /sessions/:id/messages` carr
   the Comparison under `■ Compared on <key> = <value>` with marked rows in the accent colour, then the summary. The
   prompt is the last line: `>` and an input. Enter sends. The prompt keeps the cursor: a click anywhere in the terminal moves it there, and it comes
   back when a run ends. While a run is going, the input reads "The agent is working…".
-- **Model, Effort and Access** sit as chips at the right of the tab row; their lists open downward. A change shows at once. A new terminal shows them too, starting from the defaults in Settings › Agents, and its Session starts with what they show. A pending Approval shows under that bar.
-- **Loading**: "Reading Dev tools…". **No Connections**: the empty state with the link to Settings › Dev tools,
+- **Model, Effort and Access** sit as chips at the right of the tab row; their lists open downward. A change shows at once. A new terminal shows them too, starting from the defaults in Agents & accounts, and its Session starts with what they show. A pending Approval shows under that bar.
+- **Loading**: "Reading Dev tools…". **No Connections**: the empty state with the link to Connections,
   as today. **Error**: the message in the terminal in the accent colour.
 - **Departure from the design**: the Comparison block and Copy JSON are new; the design has per-Connection tables
   only. The chips and a pending Approval sit above the terminal, in the light theme, rather than inside it.

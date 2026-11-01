@@ -1,9 +1,10 @@
-import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { item, menu } from './item';
 
 export type DropdownOption<T extends string> = { value: T; label: string; description?: string };
 
 /**
- * A button that opens a list of options with descriptions; the current one carries an accent bar. `chip` is the
+ * A button that opens a list of options with descriptions; the current one is tinted and ticked. `chip` is the
  * composer's borderless `Label Value ▼` button, whose list opens upward under a heading unless `opens` says down.
  * The list floats over the page, so a scrolling pane around the button does not clip it; scrolling closes it.
  */
@@ -44,6 +45,9 @@ export function Dropdown<T extends string>({
 }) {
   const [place, setPlace] = useState<CSSProperties | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  // The list renders hidden first, so its height is known before it picks a side.
+  const [measured, setMeasured] = useState(false);
   const open = place !== null;
   const current = options.find((option) => option.value === value);
   const chip = variant === 'chip';
@@ -66,9 +70,36 @@ export function Dropdown<T extends string>({
     };
   }, [open]);
 
+  // `opens` is the preferred side. A list taller than the room there opens on the other side when that has more
+  // room, and scrolls inside whatever room it gets.
+  useLayoutEffect(() => {
+    if (!open || measured) return;
+    const box = trigger.current?.getBoundingClientRect();
+    const height = list.current?.scrollHeight;
+    if (!box || height === undefined) return;
+    const margin = 8;
+    const below = window.innerHeight - box.bottom - 4 - margin;
+    const above = box.top - 6 - margin;
+    const preferred = opens === 'up' ? above : below;
+    const other = opens === 'up' ? below : above;
+    const side = height <= preferred || preferred >= other ? opens : opens === 'up' ? 'down' : 'up';
+    const room = side === 'up' ? above : below;
+    setPlace((now) => {
+      if (now === null) return now;
+      const { top: _top, bottom: _bottom, ...rest } = now;
+      return {
+        ...rest,
+        ...(side === 'up' ? { bottom: window.innerHeight - box.top + 6 } : { top: box.bottom + 4 }),
+        maxHeight: Math.min(320, room),
+      };
+    });
+    setMeasured(true);
+  }, [open, measured, opens]);
+
   const toggle = () => {
     const box = trigger.current?.getBoundingClientRect();
     if (open || !box) return setPlace(null);
+    setMeasured(false);
     setPlace({
       ...(opens === 'up' ? { bottom: window.innerHeight - box.top + 6 } : { top: box.bottom + 4 }),
       ...(align === 'left' ? { left: box.left } : { right: window.innerWidth - box.right }),
@@ -98,26 +129,39 @@ export function Dropdown<T extends string>({
         onClick={toggle}
         className={
           chip
-            ? `flex cursor-pointer items-center gap-1.25 border bg-transparent px-2.25 py-1 text-xs text-text hover:border-divider disabled:cursor-not-allowed disabled:opacity-50 ${
-                open ? 'border-text' : 'border-transparent'
+            ? `flex cursor-pointer items-center gap-1.25 rounded-full border px-3 py-1 text-xs text-text transition-colors hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-50 ${
+                open ? 'border-divider bg-neutral-200' : 'border-transparent bg-transparent'
               }`
-            : 'flex w-full cursor-pointer items-center gap-2 border-[1.5px] border-text bg-bg px-2.5 py-1.5 text-left text-[13px] text-text disabled:cursor-not-allowed disabled:opacity-50'
+            : `flex w-full cursor-pointer items-center gap-2 rounded-md border bg-card px-3 py-2 text-left text-[13px] text-text shadow-sm transition-colors hover:border-neutral-400 disabled:cursor-not-allowed disabled:opacity-50 ${
+                open ? 'border-accent-400 shadow-[0_0_0_3px_var(--color-accent-100)]' : 'border-divider'
+              }`
         }
       >
         {chip && caption && <span className="text-neutral-700">{caption}</span>}
         <span className={chip ? 'font-semibold' : 'min-w-0 flex-1 truncate'}>{current?.label ?? value}</span>
-        <span className={`text-[9px] ${chip ? 'text-neutral-600' : ''}`} aria-hidden>
-          ▼
-        </span>
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          aria-hidden
+          className={`flex-none text-neutral-600 transition-transform ${open ? 'rotate-180' : ''}`}
+        >
+          <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
       </button>
       {place && (
         <div
           role="listbox"
           aria-label={label}
-          style={place}
-          className={`fixed z-51 max-h-80 max-w-[calc(100vw-16px)] overflow-auto border-2 border-text bg-bg shadow-lg ${listClassName}`}
+          ref={list}
+          style={{ ...place, visibility: measured ? undefined : 'hidden' }}
+          className={`fixed z-51 max-h-80 max-w-[calc(100vw-16px)] overflow-auto ${menu} ${listClassName}`}
         >
-          {heading && <div className="px-3 pt-2 pb-1 text-[11px] font-extrabold text-neutral-700">{heading}</div>}
+          {heading && (
+            <div className="px-2.5 pt-1.5 pb-1 text-[11px] font-semibold tracking-[0.06em] text-neutral-600 uppercase">
+              {heading}
+            </div>
+          )}
           {options.map((option) => {
             const selected = option.value === value;
             return (
@@ -130,19 +174,22 @@ export function Dropdown<T extends string>({
                   setPlace(null);
                   if (!selected) onChange(option.value);
                 }}
-                className={`flex w-full cursor-pointer items-start gap-2.5 border-0 border-l-3 px-3 py-2 text-left text-text hover:bg-neutral-200 ${
-                  selected ? 'border-l-accent bg-neutral-200 font-extrabold' : 'border-l-transparent bg-transparent'
-                }`}
+                className={`flex w-full items-start gap-2.5 px-2.5 py-2 ${item(selected)}`}
               >
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="text-[13px] break-words">{option.label}</span>
+                  <span className={`text-[13px] break-words ${selected ? 'font-bold' : ''}`}>{option.label}</span>
                   {option.description && (
                     <span className="text-[11px] font-normal text-neutral-700">{option.description}</span>
                   )}
                 </span>
                 {option.value === defaultValue && (
-                  <span className="text-[10px] font-normal whitespace-nowrap text-neutral-700">default</span>
+                  <span className="mt-0.5 rounded-full bg-neutral-200 px-1.5 text-[10px] whitespace-nowrap text-neutral-700">
+                    default
+                  </span>
                 )}
+                <span aria-hidden className={`mt-0.5 w-3 flex-none text-xs ${selected ? 'text-accent' : 'invisible'}`}>
+                  ✓
+                </span>
               </button>
             );
           })}

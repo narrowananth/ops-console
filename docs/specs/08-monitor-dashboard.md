@@ -336,7 +336,7 @@ All server to client.
 
 ## UI
 
-- Monitor list of Services and Routes with trend and state. Empty: "Connect Datadog in Settings › Integrations". Scan failure shows the error code with the last good Scan's time.
+- Monitor list of Services and Routes with trend and state. Empty: "Connect Datadog in Integrations". Scan failure shows the error code with the last good Scan's time.
 - Alert card: severity, counts, Samples (JSON and message toggle), events timeline, "waiting since" while `verified`, regression badge.
 - Report panel: live steps while `running`, then root cause, proposed fix, diff and replay. Version picker when there are several.
 - Review: confirm as bug or improvement, dismiss, undo dismiss. Confirm is disabled with the reason when Jira is not connected.

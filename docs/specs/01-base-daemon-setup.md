@@ -1,7 +1,7 @@
 # Base layer: daemon, install and setup
 
 **Status:** shipped
-**Design:** none for the install and CLI. The app shell follows `design/ops-console.html`: top bar with the Monitor, Workspace and Dev tools views, and the Settings drawer frame with its tabs. The views and tabs stay empty until their specs.
+**Design:** none for the install and CLI. The app shell follows `design/ops-console-sidebar.html`: a left sidebar with every page. The pages stay empty until their specs.
 
 ## Problem
 
@@ -48,7 +48,7 @@ Daemon
 
 App shell
 
-27. Opening the URL from `ops-console open` stores the token in the tab's session storage and removes it from the address bar. The shell shows the top bar (Monitor, Workspace, Dev tools) and the Settings drawer with its tabs.
+27. Opening the URL from `ops-console open` stores the token in the tab's session storage and removes it from the address bar. The shell shows the left sidebar with every page.
 28. Without a token, or with a token the daemon refuses, the shell shows "Run `ops-console open` to sign in." A daemon that does not answer shows "The console daemon is not running. Run `ops-console start`."
 
 Release and checks
@@ -185,7 +185,7 @@ Server to client, after a `PATCH /api/settings` commits.
 
 ## UI
 
-- **Shell**: top bar with Monitor, Workspace and Dev tools, and the Settings drawer with the Agents, MCP servers, Connectors, Dev tools and Repos tabs, as in `design/ops-console.html`. Each view and tab shows an empty placeholder until its spec lands.
+- **Shell**: a left sidebar, as in `design/ops-console-sidebar.html`. Operate: Monitor, Workspace, Dev tools. Connect: Integrations, Connections, Repos, Setup agent. Claude: Agents & accounts. Each item is a route (`/monitor`, `/workspace`, `/devtools`, `/integrations`, `/connections`, `/repos`, `/setup`, `/agents`) with a page header: title, one line and the page's main actions. Monitor shows its open Alert count, Integrations how many need the operator, Connections and Repos how many there are. The foot holds the active Claude account's 5-hour and weekly usage, the theme switch and Collapse, which leaves icons only. Buttons, fields, cards, badges and switches are rounded. Each page shows an empty placeholder until its spec lands.
 - **No token**: one panel with "Run `ops-console open` to sign in."
 - **Daemon down**: one panel with "The console daemon is not running. Run `ops-console start`."
 - Theme tokens are ported from the design now, so later screens use them (`CODING_STANDARDS.md`, Frontend).

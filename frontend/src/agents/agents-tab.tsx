@@ -4,7 +4,9 @@ import {
   type ClaudeAccount,
   type SessionDefaults,
 } from '@ops-console/shared';
-import { useRef, useState } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
+import { Section } from '../app/page';
+import { BrandIcon } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Dropdown } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
@@ -57,9 +59,9 @@ function UsageBar({
   return (
     <div className="grid grid-cols-[48px_minmax(0,1fr)_160px] items-center gap-2.5">
       <span className="text-[11px] text-neutral-700">{label}</span>
-      <span className="block h-1.5 bg-neutral-300" aria-hidden>
+      <span className="block h-1.5 overflow-hidden rounded-full bg-neutral-200" aria-hidden>
         <span
-          className={`block h-1.5 ${hot ? 'bg-accent' : 'bg-text'}`}
+          className={`block h-1.5 rounded-full ${hot ? 'bg-accent' : 'bg-text'}`}
           style={{ width: `${Math.min(pct ?? 0, 100)}%` }}
         />
       </span>
@@ -91,18 +93,19 @@ function AccountRow({
   return (
     <li
       aria-label={account.label}
-      className={`grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2.5 border-t border-divider px-5 py-3 ${
-        current ? 'bg-neutral-200' : ''
-      }`}
+      className={`grid grid-cols-[24px_auto_minmax(0,1fr)_auto] items-center gap-3 px-5 py-4 ${current ? 'bg-ok/5' : ''}`}
     >
       <span className="font-mono text-[11px] text-neutral-700">{String(number).padStart(2, '0')}</span>
+      <BrandIcon brand="claude" />
       <div className="flex min-w-0 flex-col gap-1.25">
         <div className="flex flex-wrap items-center gap-2">
           <strong className="font-mono text-[13px]">{account.label}</strong>
           {account.plan && <span className="text-xs text-neutral-700">{account.plan}</span>}
-          {current && <span className="bg-text px-1.5 py-px text-[10px] font-extrabold text-bg">ACTIVE</span>}
+          {current && (
+            <span className="rounded-full bg-ok/12 px-2 py-px text-[10px] font-extrabold text-ok">ACTIVE</span>
+          )}
           {isPick && (
-            <span className="border-[1.5px] border-accent px-1.5 py-px text-[10px] font-extrabold text-accent-700">
+            <span className="rounded-full bg-accent-100 px-2 py-px text-[10px] font-extrabold text-accent-700">
               SMART PICK
             </span>
           )}
@@ -133,11 +136,11 @@ function AccountRow({
       <div className="flex items-center gap-1.5">
         {account.signing_in ? (
           <>
-            <Button className="px-2.5 py-1 text-xs" disabled={login.isPending} onClick={startLogin}>
+            <Button className="px-3 py-1.25 text-xs" disabled={login.isPending} onClick={startLogin}>
               Re-login
             </Button>
             <Button
-              className="px-2.5 py-1 text-xs"
+              className="px-3 py-1.25 text-xs"
               disabled={cancel.isPending}
               onClick={() => cancel.mutate(account.id)}
             >
@@ -145,21 +148,21 @@ function AccountRow({
             </Button>
           </>
         ) : !account.signed_in ? (
-          <Button variant="primary" className="px-2.5 py-1 text-xs" disabled={login.isPending} onClick={startLogin}>
+          <Button variant="primary" className="px-3 py-1.25 text-xs" disabled={login.isPending} onClick={startLogin}>
             Sign in
           </Button>
         ) : (
           <>
             {!current && (
-              <Button className="px-2.5 py-1 text-xs" onClick={onUse}>
+              <Button className="px-3 py-1.25 text-xs" onClick={onUse}>
                 Use
               </Button>
             )}
-            <Button className="px-2.5 py-1 text-xs" disabled={login.isPending} onClick={startLogin}>
+            <Button className="px-3 py-1.25 text-xs" disabled={login.isPending} onClick={startLogin}>
               Re-login
             </Button>
             <Button
-              className="px-2.5 py-1 text-xs"
+              className="px-3 py-1.25 text-xs"
               disabled={logout.isPending}
               onClick={() => logout.mutate(account.id)}
             >
@@ -201,7 +204,7 @@ function AddAccount({ primary = false }: { primary?: boolean }) {
   return (
     <div className="flex items-center gap-2">
       <Button
-        variant={primary ? 'primary' : 'ghost'}
+        variant={primary ? 'primary' : 'secondary'}
         disabled={add.isPending}
         onClick={() => add.mutate(undefined, { onSuccess: ({ data }) => login.mutate(data.account.id) })}
       >
@@ -234,7 +237,7 @@ function Switches({
   };
   return (
     <>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-4 px-5 py-4">
         <div className="flex-1">
           <div className="font-extrabold">Auto-switch accounts</div>
           <div className="text-xs text-neutral-700">
@@ -253,7 +256,7 @@ function Switches({
               onChange={(event) => setThreshold(event.target.value)}
               onBlur={commitThreshold}
               onKeyDown={(event) => event.key === 'Enter' && commitThreshold()}
-              className="w-14 border-[1.5px] border-text bg-bg px-1.5 py-1 text-right text-text"
+              className="w-16 border border-divider bg-card px-2 py-1.25 text-right text-text"
             />
             %
           </label>
@@ -264,7 +267,7 @@ function Switches({
           onChange={(auto_switch) => save({ auto_switch })}
         />
       </div>
-      <div className="flex items-center gap-3 border-t border-neutral-300 pt-3">
+      <div className="flex items-center gap-4 border-t border-line px-5 py-4">
         <div className="flex-1">
           <div className="font-extrabold">Smart usage</div>
           <div className="text-xs text-neutral-700">
@@ -277,6 +280,22 @@ function Switches({
     </>
   );
 }
+
+const DEFAULT_ICONS: Record<keyof SessionDefaults, ReactNode> = {
+  model: (
+    <>
+      <rect x="5" y="5" width="14" height="14" rx="2" />
+      <path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4" />
+    </>
+  ),
+  effort: <path d="M13 2 4 14h7l-1 8 9-12h-7z" />,
+  access_mode: (
+    <>
+      <path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z" />
+      <path d="m9 12 2 2 4-4" />
+    </>
+  ),
+};
 
 const DEFAULTS: {
   key: keyof SessionDefaults;
@@ -294,7 +313,7 @@ const DEFAULTS: {
   },
 ];
 
-/** Settings › Agents: Claude accounts and their usage, Auto-switch, Smart usage and the defaults for new Sessions. */
+/** Agents & accounts: Claude accounts and their usage, Auto-switch, Smart usage and the defaults for new Sessions. */
 export function AgentsTab() {
   const accounts = useAgentAccounts();
   const settings = useAgentSettings();
@@ -307,7 +326,7 @@ export function AgentsTab() {
       <div className="flex items-center gap-3 px-6 py-5 text-[13px]">
         <span role="alert">Could not load the Claude accounts.</span>
         <Button
-          className="px-2.5 py-1 text-xs"
+          className="px-3 py-1.25 text-xs"
           onClick={() => {
             void accounts.refetch();
             void settings.refetch();
@@ -327,94 +346,103 @@ export function AgentsTab() {
   // Nothing below the account list means anything until one Claude account is signed in.
   const ready = list.some((account) => account.signed_in);
 
-  if (list.length === 0) {
-    return (
-      <div className="flex flex-col items-start gap-3 px-5 py-8 text-sm">
-        <div className="font-extrabold">No Claude account yet</div>
-        <div className="text-xs text-neutral-700">
-          Add a Claude account to run agents. Signing in opens Anthropic in your browser. The usage and session settings
-          appear once an account is signed in.
-        </div>
-        <AddAccount primary />
-      </div>
-    );
-  }
+  const accountList = (
+    <ul aria-label="Claude Code accounts" className="m-0 list-none divide-y divide-line p-0">
+      {list.map((account, index) => (
+        <AccountRow
+          key={account.id}
+          number={index + 1}
+          account={account}
+          isPick={account.id === pick?.account_id}
+          onUse={() => activate.mutate(account.id)}
+        />
+      ))}
+    </ul>
+  );
 
   return (
     <div className="text-sm">
-      {!ready && (
-        <div className="border-b border-divider bg-accent-100 px-5 py-4 text-accent-900">
+      {list.length > 0 && !ready && (
+        <div className="mb-8 rounded-xl border border-accent-200 bg-accent-100 px-5 py-4 text-accent-900">
           <div className="font-extrabold">Sign in to a Claude account</div>
           <div className="text-xs">
             The agent runs under a Claude account. Sign in below; the settings appear once one account is signed in.
           </div>
         </div>
       )}
+      <Section
+        title="Claude Code accounts"
+        sub="The agent runs under one account at a time. Signing in opens Anthropic in your browser."
+        aside={<AddAccount primary={!ready} />}
+      >
+        {list.length === 0 ? (
+          <div className="px-5 py-8 text-center text-xs text-neutral-700">
+            No Claude account yet. Add one to run agents; the usage and session settings appear once it is signed in.
+          </div>
+        ) : (
+          accountList
+        )}
+      </Section>
       {ready && (
         <>
-          <div className="flex flex-col gap-3 border-b border-divider px-5 py-4">
+          <Section title="Account switching" sub="How the console moves sessions between your accounts.">
             <Switches
               key={setting.threshold}
               setting={setting}
               onChange={(next) => patch.mutate({ agent_accounts: next })}
             />
-            {(patch.isError || activate.isError) && (
-              <div role="alert" className="text-xs text-accent-700">
-                {(patch.error ?? activate.error)?.message}
-              </div>
-            )}
             {pick && (
-              <div className="bg-accent-100 px-3 py-2.5 text-xs text-accent-900">
+              <div className="border-t border-line bg-accent-100 px-5 py-3 text-xs text-accent-900">
                 <strong className="font-mono">{pickLabel}</strong> is the smart pick: {pick.reason}. It is used
                 automatically; turn Smart usage off to stop that.
               </div>
             )}
-          </div>
-
-          <div className="px-5 pt-4 pb-1 font-extrabold">Defaults for new sessions</div>
-          <div className="px-5 pb-2 text-xs text-neutral-700">
-            Every agent the console starts begins with these: Workspace and Dev tools terminals, Monitor Verify and Fix,
-            Agent Review, and the Setup agent. Change them for one session from its Model, Effort and Access chips.
-          </div>
-          {DEFAULTS.map((row) => (
-            <div key={row.key} className="flex items-center gap-3 border-t border-neutral-300 px-5 py-2.5">
-              <div className="min-w-0 flex-1">
-                <div className="font-bold">{row.label}</div>
-                <div className="text-xs text-neutral-700">{row.description}</div>
+            {(patch.isError || activate.isError) && (
+              <div role="alert" className="border-t border-line px-5 py-3 text-xs text-accent-700">
+                {(patch.error ?? activate.error)?.message}
               </div>
-              <Dropdown
-                label={row.label}
-                value={defaults[row.key]}
-                options={row.options as { value: string; label: string; description: string }[]}
-                onChange={(value) =>
-                  patch.mutate({ session_defaults: { ...defaults, [row.key]: value } as SessionDefaults })
-                }
-                className="w-48"
-              />
+            )}
+          </Section>
+          <Section
+            title="Defaults for new sessions"
+            sub="Every agent the console starts begins with these: Workspace and Dev tools terminals, Monitor Verify and Fix, Agent Review, and the Setup agent. Change them for one session from its Model, Effort and Access chips."
+          >
+            <div className="divide-y divide-line">
+              {DEFAULTS.map((row) => (
+                <div key={row.key} className="flex items-center gap-4 px-5 py-4">
+                  <span className="flex size-9 flex-none items-center justify-center rounded-lg bg-accent-100 text-accent-700">
+                    <svg
+                      width="17"
+                      height="17"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinejoin="round"
+                      aria-hidden
+                    >
+                      {DEFAULT_ICONS[row.key]}
+                    </svg>
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-bold">{row.label}</div>
+                    <div className="text-xs text-neutral-700">{row.description}</div>
+                  </div>
+                  <Dropdown
+                    label={row.label}
+                    value={defaults[row.key]}
+                    options={row.options as { value: string; label: string; description: string }[]}
+                    onChange={(value) =>
+                      patch.mutate({ session_defaults: { ...defaults, [row.key]: value } as SessionDefaults })
+                    }
+                    className="w-52"
+                  />
+                </div>
+              ))}
             </div>
-          ))}
+          </Section>
         </>
       )}
-
-      <div
-        className={`${ready ? 'mt-2 border-t-2' : ''} border-divider px-5 pt-4 pb-1.5 text-[11px] tracking-[0.08em] text-neutral-700 uppercase`}
-      >
-        Claude Code accounts
-      </div>
-      <ul aria-label="Claude Code accounts" className="m-0 list-none p-0">
-        {list.map((account, index) => (
-          <AccountRow
-            key={account.id}
-            number={index + 1}
-            account={account}
-            isPick={account.id === pick?.account_id}
-            onUse={() => activate.mutate(account.id)}
-          />
-        ))}
-      </ul>
-      <div className="border-t border-divider px-5 py-3">
-        <AddAccount />
-      </div>
     </div>
   );
 }

@@ -1,7 +1,6 @@
 import {
   AccessLevel,
   type Connection,
-  ConnectionType,
   type Message,
   type Part,
   type Session,
@@ -9,12 +8,14 @@ import {
   sessionDefaultsSchema,
 } from '@ops-console/shared';
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { ApprovalPrompts } from '../agents/approval-prompts';
 import { InlineText } from '../agents/inline-text';
 import { SessionChips, SettingsChips } from '../agents/session-chips';
-import { useUi } from '../app/ui-store';
+import { BrandIcon, CONNECTION_BRAND } from '../components/ui/brand-icon';
 import { Empty } from '../components/ui/empty';
+import { item } from '../components/ui/item';
 import {
   useAgentSettings,
   useAskNewDevtoolsSession,
@@ -27,17 +28,8 @@ import {
 } from '../lib/queries';
 import { ComparisonView, ResultView } from './result-tables';
 
-const ABBR: Record<ConnectionType, string> = {
-  [ConnectionType.Postgres]: 'PG',
-  [ConnectionType.Mongodb]: 'MDB',
-  [ConnectionType.Redis]: 'RDS',
-  [ConnectionType.Clickhouse]: 'CH',
-  [ConnectionType.Firebase]: 'FB',
-  [ConnectionType.Kafka]: 'KFK',
-};
-
 const ACCESS: Record<AccessLevel, string> = {
-  [AccessLevel.None]: 'Access Level none: set it in Settings › Dev tools',
+  [AccessLevel.None]: 'Access Level none: set it in Connections',
   [AccessLevel.Read]: 'read-only',
   [AccessLevel.Write]: 'read / write',
 };
@@ -50,7 +42,7 @@ const WELCOME = [
     className: 'text-neutral-500',
   },
   {
-    text: 'Searches every connected dev tool, or only the ones you select on the left. Access follows Settings › Dev tools.',
+    text: 'Searches every connected dev tool, or only the ones you select on the left. Access follows Connections.',
     className: 'text-neutral-500',
   },
 ];
@@ -69,28 +61,42 @@ function SyncedTools({
   onScope: (ids: string[]) => void;
 }) {
   const reachable = connections.filter((connection) => connection.access !== AccessLevel.None);
-  const row = (on: boolean) =>
-    `flex w-full cursor-pointer items-center gap-2 border-0 border-t border-l-3 border-t-neutral-300 px-4 py-2 text-left text-text hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-50 ${
-      on ? 'border-l-accent bg-neutral-200' : 'border-l-transparent bg-transparent'
-    }`;
   return (
     <aside
       aria-label="Synced dev tools"
-      className="flex max-w-70 min-w-50 flex-[1_1_220px] flex-col overflow-auto border-r-2 border-divider"
+      className="flex w-72 flex-none flex-col gap-0.5 overflow-auto border-r border-line bg-surface/40 px-3 py-4"
     >
-      <div className="px-4 pt-3.5 pb-1 font-extrabold">Synced dev tools</div>
-      <div className="px-4 pb-2.5 text-[11px] text-neutral-700">
-        Select tools to narrow the search. With none selected, the agent searches every connected dev tool.
-      </div>
       <button
         type="button"
         aria-pressed={scope.length === 0}
+        title="Search every connected dev tool. Pick tools below to narrow the search."
         onClick={() => onScope([])}
-        className={`${row(scope.length === 0)} text-xs font-bold`}
+        className={`flex w-full items-center gap-2.5 px-2.5 py-2 text-xs font-bold ${item(scope.length === 0)}`}
       >
+        <span
+          aria-hidden
+          className={`flex size-6 flex-none items-center justify-center rounded-md ${scope.length === 0 ? 'bg-accent text-white' : 'bg-neutral-200 text-neutral-700'}`}
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            aria-hidden
+          >
+            <path d="m12 3 9 5-9 5-9-5zM3 13l9 5 9-5" strokeLinejoin="round" />
+          </svg>
+        </span>
         All connected
-        <span className="ml-auto font-mono text-[11px] font-normal text-neutral-700">{reachable.length}</span>
+        <span className="ml-auto rounded-full bg-neutral-200 px-2 font-mono text-[11px] font-normal text-neutral-700">
+          {reachable.length}
+        </span>
       </button>
+      <div className="mt-3 mb-1 px-2 text-[10px] font-semibold tracking-[0.08em] text-neutral-600 uppercase">
+        Connections
+      </div>
       {connections.map((connection) => {
         const on = scope.includes(connection.id);
         const off = connection.access === AccessLevel.None;
@@ -102,14 +108,35 @@ function SyncedTools({
             disabled={off}
             title={ACCESS[connection.access]}
             onClick={() => onScope(on ? scope.filter((id) => id !== connection.id) : [...scope, connection.id])}
-            className={row(on)}
+            className={`flex w-full items-center gap-2.5 px-2.5 py-2 ${item(on)}`}
           >
-            <span className={`size-2 flex-none border-[1.5px] ${on ? 'border-accent bg-accent' : 'border-text'}`} />
-            <span className="w-7.5 flex-none border border-text px-0.5 text-center font-mono text-[9px]">
-              {ABBR[connection.type]}
+            <span
+              aria-hidden
+              className={`flex size-4 flex-none items-center justify-center rounded-[5px] border transition-colors ${
+                on ? 'border-accent bg-accent text-white' : 'border-neutral-400 bg-card'
+              }`}
+            >
+              {on && (
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 12 12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden
+                >
+                  <path d="m2.5 6 2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
             </span>
+            <BrandIcon brand={CONNECTION_BRAND[connection.type]} size="sm" />
             <span className="min-w-0 flex-1 truncate font-mono text-xs">{connection.name}</span>
-            {connection.is_prod && <span className="bg-accent px-1 py-px text-[9px] font-extrabold text-bg">PROD</span>}
+            {connection.is_prod && (
+              <span className="rounded-full bg-accent-100 px-1.75 py-px text-[9px] font-extrabold text-accent-700">
+                PROD
+              </span>
+            )}
           </button>
         );
       })}
@@ -206,7 +233,7 @@ function Terminal({
   const error = askError ?? (send.isError ? send.error.message : null);
 
   return (
-    <section className="term flex min-h-0 min-w-0 flex-1 flex-col">
+    <section className="term m-3 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl shadow-md">
       <div className="flex items-center gap-2.5 border-b border-neutral-700 px-4 py-2 font-mono text-[11px] text-neutral-400">
         <span className="size-1.75 bg-neutral-300" />
         <span className="flex-1">
@@ -286,6 +313,9 @@ function readKept(): Kept {
   return { drafts: [], typed: {}, picked: null };
 }
 
+const stripArrow =
+  'flex size-7 flex-none cursor-pointer items-center justify-center rounded-full border border-line bg-card text-base leading-none text-neutral-700 shadow-sm hover:bg-neutral-200 hover:text-text';
+
 const tabLabel = (session: Session, number: number) =>
   session.title === 'New session' ? `terminal ${number}` : session.title;
 
@@ -294,7 +324,7 @@ export function DevToolsView() {
   const connections = useConnections();
   const askNew = useAskNewDevtoolsSession();
   const remove = useDeleteSession();
-  const openSettings = useUi((state) => state.openSettings);
+  const navigate = useNavigate();
   const defaults = useAgentSettings().data?.data.session_defaults;
   // Each `+` opens another new terminal; each stays open, reloads included, until its first question or its `×`.
   const [kept, setKept] = useState(readKept);
@@ -341,6 +371,24 @@ export function DevToolsView() {
     )
       strip.current.scrollLeft = left - 24;
   }, [session?.id, draft?.id, sessions.data?.length, drafts.length]);
+  // Which ends of the strip have tabs scrolled out of sight: those ends fade and get an arrow.
+  const [edges, setEdges] = useState({ left: false, right: false });
+  const measureStrip = () => {
+    const el = strip.current;
+    if (!el) return;
+    const next = { left: el.scrollLeft > 1, right: el.scrollLeft + el.clientWidth < el.scrollWidth - 1 };
+    setEdges((now) => (now.left === next.left && now.right === next.right ? now : next));
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: measures again when tabs come or go
+  useEffect(() => {
+    measureStrip();
+    const el = strip.current;
+    if (!el) return;
+    const observer = new ResizeObserver(measureStrip);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [sessions.data, drafts.length]);
+  const scrollStrip = (by: number) => strip.current?.scrollBy({ left: by, behavior: 'smooth' });
 
   if (sessions.isPending || connections.isPending) return <Empty>Reading Dev tools…</Empty>;
   if (sessions.isError) return <Empty>Could not read Sessions: {sessions.error.message}</Empty>;
@@ -352,10 +400,10 @@ export function DevToolsView() {
         No Connections yet.{' '}
         <button
           type="button"
-          onClick={() => openSettings('dev')}
+          onClick={() => navigate('/connections')}
           className="cursor-pointer border-0 bg-transparent p-0 text-accent underline"
         >
-          Add one in Settings › Dev tools
+          Add one in Connections
         </button>
         .
       </Empty>
@@ -376,28 +424,51 @@ export function DevToolsView() {
   // Oldest on the left, as terminal tabs open.
   const tabs = [...sessions.data].reverse();
   const tab = (selected: boolean) =>
-    `-mb-0.5 flex flex-none items-center gap-1.5 border-0 border-b-3 font-mono text-xs ${
-      selected ? 'border-b-accent font-extrabold' : 'border-b-transparent'
-    }`;
+    `flex flex-none items-center gap-0.5 font-mono text-xs ${item(selected)} ${selected ? 'font-bold' : ''}`;
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <SyncedTools connections={all} scope={scope} onScope={setScope} />
       <section className="flex min-h-0 min-w-0 flex-[999_1_520px] flex-col">
-        <div className="flex items-center gap-2 border-b-2 border-divider pr-2">
-          <div ref={strip} role="tablist" aria-label="Terminals" className="flex min-w-0 flex-1 overflow-x-auto">
+        <div className="flex items-center gap-1 border-b border-line py-1.5 pr-2 pl-2">
+          {edges.left && (
+            <button
+              type="button"
+              aria-label="Scroll terminals left"
+              onClick={() => scrollStrip(-240)}
+              className={stripArrow}
+            >
+              ‹
+            </button>
+          )}
+          <div
+            ref={strip}
+            role="tablist"
+            aria-label="Terminals"
+            onScroll={measureStrip}
+            onWheel={(event) => {
+              // A mouse wheel scrolls the strip sideways; it has no vertical scroll of its own.
+              if (strip.current && event.deltaY !== 0) strip.current.scrollLeft += event.deltaY;
+            }}
+            style={{
+              maskImage: `linear-gradient(to right, ${edges.left ? 'transparent, black 28px' : 'black, black'}, ${
+                edges.right ? 'black calc(100% - 28px), transparent' : 'black, black'
+              })`,
+            }}
+            className="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
             {tabs.map((candidate, index) => {
               const label = tabLabel(candidate, index + 1);
               const selected = candidate.id === session?.id;
               return (
-                <div key={candidate.id} className={`${tab(selected)} hover:bg-neutral-200`}>
+                <div key={candidate.id} className={tab(selected)}>
                   <button
                     type="button"
                     role="tab"
                     aria-selected={selected}
                     title={candidate.title}
                     onClick={() => setPicked(candidate.id)}
-                    className="max-w-44 cursor-pointer truncate border-0 bg-transparent py-2 pl-3 font-[inherit] text-text"
+                    className="max-w-44 cursor-pointer truncate border-0 bg-transparent py-1.5 pl-3 font-[inherit] text-inherit"
                   >
                     {label}
                   </button>
@@ -414,7 +485,7 @@ export function DevToolsView() {
                         },
                       })
                     }
-                    className="cursor-pointer border-0 bg-transparent py-2 pr-2.5 text-neutral-600 hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                    className="mr-1 flex size-5 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent text-neutral-600 hover:bg-neutral-300 hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     ×
                   </button>
@@ -424,13 +495,13 @@ export function DevToolsView() {
             {draftTabs.map((candidate) => {
               const selected = candidate.id === draft?.id;
               return (
-                <div key={candidate.id} className={`${tab(selected)} hover:bg-neutral-200`}>
+                <div key={candidate.id} className={tab(selected)}>
                   <button
                     type="button"
                     role="tab"
                     aria-selected={selected}
                     onClick={() => setPicked(candidate.id)}
-                    className="cursor-pointer border-0 bg-transparent py-2 pl-3 font-[inherit] text-text"
+                    className="cursor-pointer border-0 bg-transparent py-1.5 pl-3 font-[inherit] text-inherit"
                   >
                     new terminal
                   </button>
@@ -440,7 +511,7 @@ export function DevToolsView() {
                     title="Close this terminal"
                     disabled={askingFrom === candidate.id}
                     onClick={() => closeDraft(candidate.id)}
-                    className="cursor-pointer border-0 bg-transparent py-2 pr-2.5 text-neutral-600 hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                    className="mr-1 flex size-5 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent text-neutral-600 hover:bg-neutral-300 hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     ×
                   </button>
@@ -448,6 +519,16 @@ export function DevToolsView() {
               );
             })}
           </div>
+          {edges.right && (
+            <button
+              type="button"
+              aria-label="Scroll terminals right"
+              onClick={() => scrollStrip(240)}
+              className={stripArrow}
+            >
+              ›
+            </button>
+          )}
           <button
             type="button"
             aria-label="New terminal"
@@ -457,7 +538,7 @@ export function DevToolsView() {
               setDrafts((all) => [...all, blankDraft(id)]);
               setPicked(id);
             }}
-            className="flex-none cursor-pointer border-0 bg-transparent px-2 py-1 text-base font-extrabold text-accent hover:bg-neutral-200"
+            className="flex size-7.5 flex-none cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-base font-extrabold text-accent hover:bg-accent-100"
           >
             +
           </button>

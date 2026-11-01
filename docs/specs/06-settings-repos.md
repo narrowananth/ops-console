@@ -1,7 +1,7 @@
 # Settings: Repos
 
 **Status:** shipped
-**Design:** Settings › Repos: Import a local repo, Imported repos list, Remove with confirm
+**Design:** Repos: Import a local repo, Imported repos list, Remove with confirm
 
 ## Problem
 
@@ -17,7 +17,7 @@ Sessions, Verifications and Fixes run inside a local git repository, and Monitor
 6. Renaming a Repo changes only its display name.
 7. Removing a Repo takes it off the list and leaves the folder untouched. A Repo with Sessions needs the operator's choice for them (`07-workspace` Behavior 3).
 8. Listing a Repo's branches reads git each time: local branches by most recent commit, the current one marked. A missing folder returns `not_found`.
-9. A Repo's `.mcp.json` servers appear in Settings › Integrations with scope `project` and this Repo (`03-settings-mcp-servers`). A server Claude Code has not approved yet reads `auth` with "pending approval in Claude Code".
+9. A Repo's `.mcp.json` servers appear in Integrations with scope `project` and this Repo (`03-settings-mcp-servers`). A server Claude Code has not approved yet reads `auth` with "pending approval in Claude Code".
 10. Adding a MCP server with scope `project` takes a `repo_id` and writes the Repo's `.mcp.json` once, with one `claude mcp add`; removing it removes it from that file. A project server cannot move to another scope.
 
 ## Settled
@@ -82,7 +82,7 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 
 ## UI
 
-Settings › Repos: a Local folder button that opens the Finder folder dialog and imports the chosen folder, with the result message below it, then "Imported repos" with a count, one row per Repo (name, path, branch, host), and Remove with an inline "Remove from the list?" confirm.
+Repos: a Local folder button that opens the Finder folder dialog and imports the chosen folder, with the result message below it, then "Imported repos" with a count, one row per Repo (name, path, branch, host), and Remove with an inline "Remove from the list?" confirm.
 
 - Empty: "No repos yet. Import one above."
 - Error: the refusal message under the field ("`<name>` is already imported", "Not a git repository").

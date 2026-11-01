@@ -1,7 +1,7 @@
 # Settings: Connectors
 
 **Status:** shipped
-**Design:** the design's Connectors tab, merged with MCP servers into Settings › Integrations, and the Connector drawer (a numbered sign-in step like claude.ai's, and Disconnect)
+**Design:** the design's Connectors tab, merged with MCP servers into Integrations, and the Connector pane beside the list (a numbered sign-in step like claude.ai's, and Disconnect)
 
 ## Problem
 
@@ -46,10 +46,10 @@ Monitor needs Datadog to scan, the fix flow needs Jira and a Git host, and revie
 - **Sentry**: kept as a Connector, as the architecture doc says, though the design shows "No Sentry connector yet".
 - **Reports folder**: defaults to `reports` inside the data directory (`01-base-daemon-setup`), not the design's `~/.ops-console/reports`.
 - **Check**: a check reads the CLI for a signed-in user (`pup auth status`, `gh api user`, `glab api user`) or, for an MCP-backed Connector, a new Probe of its server. A tool that fails to answer reads `fail`; a tool that is signed out reads `auth`.
-- **GitHub sign-in**: `gh auth login --web --git-protocol ssh --clipboard`. With no terminal attached `gh` copies the one-time code and prints `https://github.com/login/device` without opening it; the drawer shows both. GitHub's own OAuth would need a registered app secret, which this public repo cannot ship.
+- **GitHub sign-in**: `gh auth login --web --git-protocol ssh --clipboard`. With no terminal attached `gh` copies the one-time code and prints `https://github.com/login/device` without opening it; the Connector pane shows both. GitHub's own OAuth would need a registered app secret, which this public repo cannot ship.
 - **GitLab sign-in**: `glab auth login --hostname <host> --web --git-protocol ssh --container-registry-domains <host>,<host>:443,registry.<host>`; the flags answer every prompt but the browser step.
 - **MCP servers**: Jira and Bitbucket share `atlassian` (http), Slack is `slack` (http), Sentry is `sentry` (http), Datadog is `datadog-pup`, GitHub is `github` (stdio), Shopify is `shopify` (stdio). `03-settings-mcp-servers` shows the Connector in `used_by`.
-- **Design departure**: secrets go to the Keychain, not `~/.ops-console/secrets` (ADR 0004). The drawer has no token field, config fields or Test.
+- **Design departure**: secrets go to the Keychain, not `~/.ops-console/secrets` (ADR 0004). The Connector pane has no token field, config fields or Test.
 
 ## Not required
 
@@ -138,7 +138,7 @@ Config shapes:
 
 ## UI
 
-Settings › Integrations, first in the list: one row per Connector with name, a `Connector` label, status (`◌ signing in` while `sign_in` is set), `via` and account label. The drawer reads "Connect <name> to Ops Console" over one numbered step, "1 Sign in to <name>", with Connect on the right ("Opens <name>'s sign-in page in your browser. Nothing to fill in here."). While the sign-in waits, the step says to finish in the browser, shows GitHub's code ("Enter this code (already copied)") and an Open <name> ↗ link to the page. Once connected, the step reads "Signed in as <login>" with Reconnect, and Disconnect with a confirm ("Signs out and stops Claude from using it. Monitor and tasks that rely on it pause") follows. The drawer has only Connect, Reconnect and Disconnect: no config fields and no Test. Config keeps its defaults unless set through `PATCH /connectors/:id`.
+Integrations, first in the list: one row per Connector with name, a `Connector` label, status (`◌ signing in` while `sign_in` is set), `via` and account label. Picking a row opens the Connector pane beside the list, reading "Connect <name> to Ops Console" over one numbered step, "1 Sign in to <name>", with Connect on the right ("Opens <name>'s sign-in page in your browser. Nothing to fill in here."). While the sign-in waits, the step says to finish in the browser, shows GitHub's code ("Enter this code (already copied)") and an Open <name> ↗ link to the page. Once connected, the step reads "Signed in as <login>" with Reconnect, and Disconnect with a confirm ("Signs out and stops Claude from using it. Monitor and tasks that rely on it pause") follows. The pane has only Connect, Reconnect and Disconnect: no config fields and no Test. Config keeps its defaults unless set through `PATCH /connectors/:id`.
 
 - Loading: rows from the table at once; statuses refresh as checks return.
 - Not connected: the step's action is Connect.

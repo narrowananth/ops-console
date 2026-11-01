@@ -1,7 +1,7 @@
-# Settings › Agents: agent runtime, Claude accounts, Action Log and Approvals
+# Agents & accounts: agent runtime, Claude accounts, Action Log and Approvals
 
 **Status:** shipped
-**Design:** Settings › Agents in `design/ops-console.html` (accounts list, Auto-switch, Smart usage, default model, effort and access), plus the Session composer chips (Model, Effort, Access) and the approval prompts those settings drive
+**Design:** Agents & accounts in `design/ops-console.html` (accounts list, Auto-switch, Smart usage, default model, effort and access), plus the Session composer chips (Model, Effort, Access) and the approval prompts those settings drive
 
 ## Problem
 
@@ -320,7 +320,7 @@ Server to client, when the active account changes.
 
 ## UI
 
-Settings › Agents, as the design shows:
+Agents & accounts, as the design shows:
 
 - **Accounts**: rows in order (01, 02, …) labelled with the account's email, plan, a 5-hour bar with "resets in", and a weekly bar with "resets in Nd". The 5-hour bar turns accent at 90%, the weekly bar at 80%. The active row is shaded; others have Use. "SMART PICK" marks the pick, and each row shows its `smart_note`. The tab re-reads the accounts every 10 seconds while it is open. A signed-in row always shows both bars; with usage unknown the bars are empty and read "no usage yet". Only a signed-in active row is shaded and badged ACTIVE. A row not signed in shows Sign in, which opens Anthropic's sign-in in the browser; while it waits the row shows Re-login, which opens the browser sign-in again, and Cancel, which also deletes an account that never signed in.
 - **Smart banner**: when `smart_pick` is set and there is more than one account, the reason ("65% of its weekly quota is left and it resets in 2 days, use it first") and a line that it is used automatically while Smart usage is on. No Use button; the pick row carries SMART PICK.

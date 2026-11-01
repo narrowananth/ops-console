@@ -1,7 +1,7 @@
 # Settings: MCP servers
 
 **Status:** shipped
-**Design:** the design's MCP servers tab and its detail drawer (Details, Tools, Reconnect, Disconnect, Remove), merged with Connectors into Settings › Integrations. The design's add and edit form is left out: Connectors add servers (Behavior 17)
+**Design:** the design's MCP servers tab and its detail, shown as a pane beside the list, (Details, Tools, Reconnect, Disconnect, Remove), merged with Connectors into Integrations. The design's add and edit form is left out: Connectors add servers (Behavior 17)
 
 ## Problem
 
@@ -12,7 +12,7 @@ This spec gives the operator one list across every account, and add, edit, authe
 ## Behavior
 
 1. Listing MCP Servers reads every Claude account's config (user and local scope), merged by name. Project-scoped servers from each Repo's `.mcp.json` join the list. Each entry shows transport, command or URL, scope, status, tool count, and the Connector using it (`used_by`) when one matches.
-2. Servers that back a Connection are left out. `meta.connection_server_count` says how many there are, and the tab links to Settings › Dev tools.
+2. Servers that back a Connection are left out. `meta.connection_server_count` says how many there are; the sidebar's Connections page lists them.
 3. Status comes from a Probe per account. A server's status is the worst across accounts (`fail`, then `auth`, then `ok`); `status_detail` names the account and the error. A disabled server reads `off`. Probe results are kept in memory. The daemon starts the first Probes when it starts. A read never waits for a Probe: it answers in under 200 ms from the kept one, or `checking` before the first. A kept Probe older than 60 seconds, or one taken before a server was added, is run again in the background. Each server whose reading moves sends `connection.checked`, and the list reads again. Add, edit and Reconnect answer with `checking` the same way.
 4. Adding a server takes name, transport, command or URL, scope, and env vars (stdio) or headers (http, sse). Env vars go to the Keychain adapter under `mcp:<name>`. A stdio server with env vars is registered as `ops-console mcp-exec <name> -- <command>`; at launch that wrapper reads the env vars from the Keychain and starts the command with them. A stdio server with none is registered as its own command. The console runs `claude mcp add` in every account's config dir (user scope, or local scope in the folder `mcp-local` of the data folder) or writes the Repo's `.mcp.json` once (project scope, once `06-settings-repos` lands), then checks the server.
 5. If registering fails in any account, the accounts already done are rolled back, the Keychain entry is deleted, and the response is `upstream_failed`.
@@ -27,7 +27,7 @@ This spec gives the operator one list across every account, and add, edit, authe
 14. A server added or removed outside the console (in a terminal) shows up or drops out on the next list, unless it is in `removed_mcp_servers`.
 15. No response, event or log carries an env var value or a header value. Reads show `env_keys` (names only) and `has_headers`.
 16. Every check, sign-in and Reconnect sends `connection.checked` with target `mcp_server`.
-17. Settings › Integrations holds Connectors and MCP Servers in one list, each row labelled `Connector` or `MCP`. An MCP Server gives Claude tools; a Connector signs the operator in to a service and registers that service's server (`04-settings-connectors`). The list adds no server itself. A Connector's row stands for its server (`used_by`), connected or not, so that server has no row of its own; any other server, including one registered by hand, by a Repo's `.mcp.json` or by the Setup agent, gets an `MCP` row. Every row has the same columns: name and label with a line under it, status, and one text action (Connect, Sign in, Reconnect or Manage). A Connector that is off reads "not connected".
+17. Integrations holds Connectors and MCP Servers in one list, each row labelled `Connector` or `MCP`. An MCP Server gives Claude tools; a Connector signs the operator in to a service and registers that service's server (`04-settings-connectors`). The list adds no server itself. A Connector's row stands for its server (`used_by`), connected or not, so that server has no row of its own; any other server, including one registered by hand, by a Repo's `.mcp.json` or by the Setup agent, gets an `MCP` row. Every row has the same columns: name and label with a line under it, status, and one text action (Connect, Sign in, Reconnect or Manage). A Connector that is off reads "not connected".
 
 ## Settled
 
@@ -136,7 +136,7 @@ Server to client, after a check, sign-in or Reconnect of an MCP Server, Connecto
 
 ## UI
 
-Settings › Integrations, below the Connectors (`04-settings-connectors`): one row per server with name, an `MCP` label, scope and target, a status glyph (connected, needs authentication, failed, disabled), tool count, and an action (Authenticate, Reconnect or Manage). Below the list, the note on database servers links to Dev tools. The drawer shows read-only details, the tool list ("Tools are listed once the server is connected"), Reconnect, Disconnect or Enable, and Remove with a confirm that shows the `claude mcp remove` command.
+Integrations, below the Connectors (`04-settings-connectors`): one row per server with name, an `MCP` label, scope and target, a status glyph (connected, needs authentication, failed, disabled), tool count, and an action (Authenticate, Reconnect or Manage). Below the list, the note on database servers links to Connections. Picking a row opens a pane beside the list with read-only details, the tool list ("Tools are listed once the server is connected"), Reconnect, Disconnect or Enable, and Remove with a confirm that shows the `claude mcp remove` command.
 
 - Checking: a row reads "◌ checking" until the first Probe answers.
 - Error: a row whose Probe failed shows the start error under the target.

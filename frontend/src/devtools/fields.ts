@@ -11,6 +11,16 @@ export const TYPE_LABELS: Record<ConnectionType, string> = {
   [ConnectionType.Kafka]: 'Kafka',
 };
 
+/** One line under each type on the Pick a type screen. */
+export const TYPE_BLURBS: Record<ConnectionType, string> = {
+  [ConnectionType.Postgres]: 'Relational SQL database',
+  [ConnectionType.Mongodb]: 'Document database',
+  [ConnectionType.Redis]: 'Key-value store and cache',
+  [ConnectionType.Clickhouse]: 'Columnar analytics database',
+  [ConnectionType.Firebase]: 'Project services via a service account',
+  [ConnectionType.Kafka]: 'Event streaming cluster',
+};
+
 export const SECRET_LABELS: Record<ConnectionType, { label: string; optional: boolean; multiline?: boolean }> = {
   [ConnectionType.Postgres]: { label: 'Password', optional: false },
   [ConnectionType.Mongodb]: { label: 'Connection string', optional: false },

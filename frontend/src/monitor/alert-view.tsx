@@ -62,7 +62,7 @@ function ReportPanel({ alertId, report }: { alertId: string; report: Report }) {
   const versions = reports.data ?? [report];
   const shown = versions.find((row) => row.id === picked) ?? report;
   return (
-    <section aria-label="Report" className="border-2 border-text">
+    <section aria-label="Report" className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
       <header className="flex items-center gap-2 border-b border-divider bg-surface px-3 py-2 text-xs">
         <strong>Report v{shown.version}</strong>
         {versions.length > 1 && (
@@ -148,10 +148,10 @@ export function AlertView({ id }: { id: string }) {
     <article className="flex flex-col gap-4 px-6 py-5">
       <header>
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="border border-text px-1.5 py-px font-bold">{data.severity.toUpperCase()}</span>
+          <span className="rounded-full bg-text px-2 py-px font-bold text-bg">{data.severity.toUpperCase()}</span>
           <span className="text-neutral-700">{data.status}</span>
           {data.regression_count > 0 && (
-            <span className="border border-accent px-1.5 py-px text-accent-700">
+            <span className="rounded-full bg-accent-100 px-2 py-px text-accent-700">
               regression ×{data.regression_count}
             </span>
           )}
@@ -209,14 +209,12 @@ export function AlertView({ id }: { id: string }) {
           >
             Dismiss
           </Button>
-          {!jiraUp && (
-            <span className="text-xs text-accent-700">Connect Jira in Settings › Integrations to confirm.</span>
-          )}
+          {!jiraUp && <span className="text-xs text-accent-700">Connect Jira in Integrations to confirm.</span>}
         </section>
       )}
 
       {data.status === AlertStatus.Dismissed && (
-        <div className="border border-dashed border-neutral-400 px-3 py-2.5 text-[13px] text-neutral-700">
+        <div className="rounded-lg border border-dashed border-neutral-400 px-3.5 py-3 text-[13px] text-neutral-700">
           Dismissed. The Route stays on the Report and is checked again at the next Scan.{' '}
           <Button
             variant="ghost"
@@ -230,7 +228,7 @@ export function AlertView({ id }: { id: string }) {
       )}
 
       {data.fix && (
-        <section aria-label="Fix" className="border-2 border-text px-3 py-2.5">
+        <section aria-label="Fix" className="rounded-xl border border-line bg-card px-4 py-3.5 shadow-sm">
           <ol className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs">
             {FIX_STAGES.map((stage) => {
               const at = FIX_STAGES.indexOf(data.fix?.stage ?? stage);

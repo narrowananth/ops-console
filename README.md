@@ -5,7 +5,8 @@ is doing in Datadog, the databases the agent may use, open PRs and Claude sessio
 fails, the agent reproduces it locally and writes a report; the operator reviews it, and only then
 does the agent fix the code and open a PR.
 
-The screens come from [design/ops-console.html](design/ops-console.html) (open it in a browser).
+The screens come from [design/ops-console.html](design/ops-console.html) and the layout from
+[design/ops-console-sidebar.html](design/ops-console-sidebar.html) (open them in a browser).
 Stack and modules: [docs/architecture.md](docs/architecture.md). Terms: [GLOSSARY.md](GLOSSARY.md).
 
 ## Install

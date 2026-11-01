@@ -1,8 +1,10 @@
 import { type Repo, type Session, SessionState } from '@ops-console/shared';
 import { useState } from 'react';
+import { RepoIcon } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Dropdown } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
+import { item } from '../components/ui/item';
 import { useBranches, useCreateRepoSession, useRepoSessions, useRepos } from '../lib/queries';
 
 /** An open Repo lists this many of its Sessions, most recently active first, before "Show N more". */
@@ -27,7 +29,7 @@ function NewSession({ repo, onCreated }: { repo: Repo; onCreated: (id: string) =
   const [branch, setBranch] = useState<string | null>(null);
   const chosen = branch ?? branches.data?.find((b) => b.current)?.name ?? branches.data?.[0]?.name ?? '';
   return (
-    <div className="flex flex-col gap-1.5 px-5 pt-1 pb-2.5">
+    <div className="flex flex-col gap-1.5 px-2 pt-1 pb-2">
       <div className="flex gap-1.5">
         <Dropdown
           label={`Branch for a new Session in ${repo.name}`}
@@ -46,7 +48,7 @@ function NewSession({ repo, onCreated }: { repo: Repo; onCreated: (id: string) =
         />
         <Button
           variant="primary"
-          className="px-2.5 py-1 text-xs"
+          className="px-3.5 py-1.5 text-xs"
           disabled={chosen === '' || create.isPending}
           onClick={() => create.mutate({ repo_id: repo.id, branch: chosen }, { onSuccess: (s) => onCreated(s.id) })}
         >
@@ -81,12 +83,12 @@ function SessionRow({
         aria-current={selected}
         title={session.branch ? `${session.title} · ${session.branch}` : session.title}
         onClick={onSelect}
-        className={`flex w-full cursor-pointer flex-col border-0 border-l-3 py-1.5 pr-4 pl-8 text-left text-[13px] text-text hover:bg-neutral-200 ${selected ? 'border-l-accent bg-neutral-200' : 'border-l-transparent bg-transparent'}`}
+        className={`flex w-full flex-col py-2 pr-3 pl-7 text-[13px] ${item(selected)}`}
       >
         <span className="flex items-baseline gap-2">
           <span className="min-w-0 flex-1 truncate font-bold">{session.title}</span>
           <span
-            className={`flex-none font-mono text-[11px] ${session.state === SessionState.Idle ? 'text-neutral-700' : 'text-accent-700'}`}
+            className={`flex-none rounded-full px-1.75 font-mono text-[10px] ${session.state === SessionState.Idle ? 'bg-neutral-200 text-neutral-700' : 'bg-accent-100 text-accent-700'}`}
           >
             {session.state.replace('_', ' ')}
           </span>
@@ -123,17 +125,18 @@ function RepoGroup({
   const hidden = sessions.length - shown.length;
   const running = sessions.filter(isRunning).length;
   return (
-    <section aria-label={repo.name} className="border-b border-divider">
-      <div className="flex items-center gap-1 pr-2 hover:bg-neutral-200">
+    <section aria-label={repo.name} className="px-2 pb-1.5">
+      <div className="flex items-center gap-1 rounded-md pr-1.5 hover:bg-neutral-200">
         <button
           type="button"
           aria-expanded={!folded}
           onClick={onFold}
-          className="flex min-w-0 flex-1 cursor-pointer items-baseline gap-2 border-0 bg-transparent py-2 pl-3 text-left text-text"
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-0 bg-transparent py-2 pl-2 text-left text-text"
         >
           <span aria-hidden className="w-3 flex-none text-[10px] text-neutral-700">
             {folded ? '▸' : '▾'}
           </span>
+          <RepoIcon host={repo.host} size="xs" />
           <strong className="flex-none font-mono text-[13px]">{repo.name}</strong>
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-neutral-700">{repo.branch}</span>
           {running > 0 && <span className="flex-none font-mono text-[11px] text-accent-700">{running} running</span>}
@@ -149,7 +152,7 @@ function RepoGroup({
               if (folded) onFold();
               setStarting(folded || !starting);
             }}
-            className="flex-none cursor-pointer border-0 bg-transparent px-1.5 text-base font-extrabold text-accent hover:bg-neutral-300"
+            className="flex size-6.5 flex-none cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent text-base font-extrabold text-accent hover:bg-accent-100"
           >
             +
           </button>
@@ -166,7 +169,7 @@ function RepoGroup({
               }}
             />
           )}
-          <ul className="m-0 list-none p-0">
+          <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
             {shown.map((session) => (
               <SessionRow
                 key={session.id}
@@ -181,7 +184,7 @@ function RepoGroup({
             <button
               type="button"
               onClick={() => setAll(!all)}
-              className="mb-1.5 cursor-pointer border-0 bg-transparent py-1 pl-8 text-xs text-accent-700 underline"
+              className="mt-0.5 cursor-pointer rounded-sm border-0 bg-transparent py-1 pl-7 text-xs text-accent-700 hover:underline"
             >
               {all ? 'Show fewer' : `Show ${hidden} more`}
             </button>
@@ -199,14 +202,14 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
   const [folded, setFolded] = useState(readFolded);
   if (repos.isPending || sessions.isPending) return <Empty>Reading Sessions…</Empty>;
   if (repos.isError || sessions.isError) return <Empty>Could not read Sessions.</Empty>;
-  if (repos.data.data.length === 0) return <Empty>Import a Repo in Settings › Repos</Empty>;
+  if (repos.data.data.length === 0) return <Empty>Import a Repo in Repos</Empty>;
   const fold = (id: string) => {
     const next = folded.includes(id) ? folded.filter((other) => other !== id) : [...folded, id];
     localStorage.setItem(FOLDED_KEY, JSON.stringify(next));
     setFolded(next);
   };
   return (
-    <div>
+    <div className="pb-3">
       {repos.data.data.map((repo) => (
         <RepoGroup
           key={repo.id}

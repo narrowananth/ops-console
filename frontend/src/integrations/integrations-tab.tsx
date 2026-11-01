@@ -1,18 +1,15 @@
 import type { ConnectorId } from '@ops-console/shared';
 import { useState } from 'react';
-import { useUi } from '../app/ui-store';
-import { Button } from '../components/ui/button';
+import { PageColumn } from '../app/page';
 import { Empty } from '../components/ui/empty';
 import { useConnectors, useMcpServers } from '../lib/queries';
-import { SetupAgentLink } from '../setup/setup-agent-link';
 import { ConnectorDrawer, ConnectorRow } from './connector';
 import { McpDetail, ServerRow } from './mcp-server';
 
 type Open = { kind: 'connector'; id: ConnectorId } | { kind: 'mcp'; name: string } | null;
 
-/** Settings › Integrations: the Connectors, then every MCP Server no Connector stands for. */
+/** Integrations: the Connectors, then every MCP Server no Connector stands for; the picked one opens beside the list. */
 export function IntegrationsTab() {
-  const openSettings = useUi((state) => state.openSettings);
   const connectors = useConnectors();
   const servers = useMcpServers();
   const [open, setOpen] = useState<Open>(null);
@@ -23,41 +20,44 @@ export function IntegrationsTab() {
   if (servers.isError) return <Empty>Could not read MCP servers: {servers.error.message}</Empty>;
 
   const connectorList = connectors.data.data;
-  const { data: serverList, meta } = servers.data;
-  if (open?.kind === 'connector') {
-    const connector = connectorList.find((item) => item.id === open.id);
-    if (connector) return <ConnectorDrawer connector={connector} onBack={back} />;
-  }
-  if (open?.kind === 'mcp') {
-    const server = serverList.find((item) => item.name === open.name);
-    if (server) return <McpDetail server={server} onBack={back} />;
-  }
+  const { data: serverList } = servers.data;
+  const connector = open?.kind === 'connector' ? connectorList.find((item) => item.id === open.id) : undefined;
+  const server = open?.kind === 'mcp' ? serverList.find((item) => item.name === open.name) : undefined;
   // A Connector's row stands for its server, connected or not.
-  const shown = serverList.filter((server) => server.used_by === null);
+  const shown = serverList.filter((item) => item.used_by === null);
 
   return (
-    <div>
-      <SetupAgentLink what="one" />
-      <ul aria-label="Integrations" className="m-0 list-none p-0">
-        {connectorList.map((connector) => (
-          <ConnectorRow
-            key={connector.id}
-            connector={connector}
-            onOpen={() => setOpen({ kind: 'connector', id: connector.id })}
-          />
-        ))}
-        {shown.map((server) => (
-          <ServerRow key={server.name} server={server} onOpen={() => setOpen({ kind: 'mcp', name: server.name })} />
-        ))}
-      </ul>
-      <div className="flex items-center gap-2 px-5 py-3.5 text-xs text-neutral-700">
-        {meta.connection_server_count > 0
-          ? `${meta.connection_server_count} database servers are listed in Dev tools.`
-          : 'Database servers are managed in Dev tools.'}
-        <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => openSettings('dev')}>
-          Open Dev tools →
-        </Button>
+    <>
+      <div className="min-w-0 flex-1 overflow-auto">
+        <PageColumn wide>
+          <div className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
+            <ul aria-label="Integrations" className="m-0 flex list-none flex-col gap-0.5 p-1.5">
+              {connectorList.map((item) => (
+                <ConnectorRow
+                  key={item.id}
+                  connector={item}
+                  selected={connector?.id === item.id}
+                  onOpen={() => setOpen({ kind: 'connector', id: item.id })}
+                />
+              ))}
+              {shown.map((item) => (
+                <ServerRow
+                  key={item.name}
+                  server={item}
+                  selected={server?.name === item.name}
+                  onOpen={() => setOpen({ kind: 'mcp', name: item.name })}
+                />
+              ))}
+            </ul>
+          </div>
+        </PageColumn>
       </div>
-    </div>
+      {(connector || server) && (
+        <aside aria-label="Integration" className="w-105 flex-none overflow-auto border-l border-line bg-card">
+          {connector && <ConnectorDrawer key={connector.id} connector={connector} onBack={back} />}
+          {server && <McpDetail key={server.name} server={server} onBack={back} />}
+        </aside>
+      )}
+    </>
   );
 }

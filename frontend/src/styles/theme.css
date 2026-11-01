@@ -9,11 +9,15 @@
 @theme {
   --color-*: initial;
   --color-bg: #f3f2f2;
-  --color-surface: #eae9e9;
+  --color-surface: #ebe9e8;
+  --color-card: #fbfafa;
   --color-text: #201e1d;
   --color-accent: #ec3013;
   --color-accent-2: #e15b47;
-  --color-divider: color-mix(in srgb, #201e1d 40%, transparent);
+  --color-divider: color-mix(in srgb, #201e1d 18%, transparent);
+  --color-line: color-mix(in srgb, #201e1d 11%, transparent);
+  --color-ok: #2f7d3b;
+  --color-warn: #b26b00;
   --color-neutral-100: #f8f4f4;
   --color-neutral-200: #eae7e7;
   --color-neutral-300: #d7d3d3;
@@ -49,12 +53,15 @@
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
   --radius-*: initial;
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-full: 9999px;
 
-  --shadow-sm: 0 1px 2px color-mix(in srgb, #2d2b2b 14%, transparent);
-  --shadow-md: 0 3px 10px color-mix(in srgb, #2d2b2b 16%, transparent);
+  --shadow-sm:
+    0 1px 2px color-mix(in srgb, #2d2b2b 8%, transparent), 0 1px 1px color-mix(in srgb, #2d2b2b 4%, transparent);
+  --shadow-md: 0 4px 14px color-mix(in srgb, #2d2b2b 10%, transparent);
   --shadow-lg: 0 12px 32px color-mix(in srgb, #2d2b2b 22%, transparent);
 }
 
@@ -65,9 +72,13 @@
 [data-theme="dark"] {
   color-scheme: dark;
   --color-bg: #181716;
-  --color-surface: #211f1e;
+  --color-surface: #141312;
+  --color-card: #1f1d1c;
   --color-text: #ecebea;
-  --color-divider: color-mix(in srgb, #ecebea 30%, transparent);
+  --color-divider: color-mix(in srgb, #ecebea 16%, transparent);
+  --color-line: color-mix(in srgb, #ecebea 10%, transparent);
+  --color-ok: #6cc47a;
+  --color-warn: #f0a940;
   --color-neutral-100: #232120;
   --color-neutral-200: #2d2b2a;
   --color-neutral-300: #3b3837;
@@ -98,7 +109,16 @@
     color: var(--color-text);
     font-family: var(--font-body);
     font-size: 14px;
-    line-height: 1.45;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Controls are rounded everywhere; a component that wants a pill or a square says so. */
+  button,
+  input,
+  select,
+  textarea {
+    border-radius: var(--radius-md);
   }
 
   h1,

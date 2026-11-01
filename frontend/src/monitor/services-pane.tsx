@@ -1,6 +1,7 @@
 import { type Alert, AlertStatus, RouteState, ScanStatus, type Severity } from '@ops-console/shared';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
+import { item } from '../components/ui/item';
 import { useAlerts, usePatchRoute, useScans, useServices, useStartScan } from '../lib/queries';
 
 const STATE: Record<RouteState, string> = {
@@ -53,7 +54,7 @@ export function ServicesPane({
         <Button
           className="ml-auto px-2.5 py-1 text-xs"
           disabled={!connected || scan.isPending}
-          title={connected ? undefined : 'Connect Datadog in Settings › Integrations'}
+          title={connected ? undefined : 'Connect Datadog in Integrations'}
           onClick={() => scan.mutate(null)}
         >
           Scan now
@@ -97,13 +98,13 @@ export function ServicesPane({
               {service.routes.map((route) => {
                 const alert = alertOf(route.id);
                 return (
-                  <li key={route.id} className="flex items-center gap-2 px-5 py-1 text-xs">
+                  <li key={route.id} className="flex items-center gap-2 px-3 py-0.5 text-xs">
                     <button
                       type="button"
                       disabled={!alert}
                       aria-current={alert !== undefined && selected === alert.id}
                       onClick={() => alert && onSelect(alert.id)}
-                      className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-0 border-l-3 bg-transparent py-1 pl-2 text-left text-text disabled:cursor-default ${alert && selected === alert.id ? 'border-l-accent bg-neutral-200' : 'border-l-transparent'}`}
+                      className={`flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 disabled:cursor-default disabled:opacity-100 disabled:hover:bg-transparent ${item(alert !== undefined && selected === alert.id)}`}
                     >
                       <span className="w-12 flex-none font-mono text-[11px]">{route.method}</span>
                       <span className={`truncate font-mono ${route.ignored ? 'line-through' : ''}`}>{route.path}</span>

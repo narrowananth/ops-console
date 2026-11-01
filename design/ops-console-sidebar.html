@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ops Console · sidebar layout</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f3f2f2; --card: #fbfafa; --surface: #ebe9e8; --text: #201e1d; --accent: #ec3013; --accent-600: #dd2b0f; --accent-700: #ae1800;
+    --accent-100: #fff2ef; --line: color-mix(in srgb, #201e1d 11%, transparent); --divider: color-mix(in srgb, #201e1d 18%, transparent);
+    --n200: #eae7e7; --n300: #dedad9; --n400: #bab6b6; --n500: #9b9797; --n700: #605d5d; --n900: #2d2b2b;
+    --ok: #2f7d3b; --warn: #b26b00;
+    --r-sm: 6px; --r: 10px; --r-lg: 14px;
+    --shadow-sm: 0 1px 2px rgba(45,43,43,.08), 0 1px 1px rgba(45,43,43,.04);
+    --shadow-md: 0 4px 14px rgba(45,43,43,.10);
+    --mono: "JetBrains Mono", ui-monospace, monospace; --sans: "Archivo", system-ui, sans-serif;
+  }
+  [data-theme="dark"] {
+    --bg: #181716; --card: #1f1d1c; --surface: #141312; --text: #ecebea;
+    --line: color-mix(in srgb, #ecebea 10%, transparent); --divider: color-mix(in srgb, #ecebea 16%, transparent);
+    --n200: #2a2827; --n300: #353231; --n400: #55514f; --n500: #76726f; --n700: #b4b0ae; --n900: #efebea;
+    --accent-100: #3a140d; --accent-700: #ff8c77; --ok: #6cc47a; --warn: #f0a940;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.4); --shadow-md: 0 4px 14px rgba(0,0,0,.45);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .app { display: grid; grid-template-columns: 248px 1fr; height: 100vh; }
+
+  /* Sidebar */
+  .side { background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 0 20px; height: 68px; }
+  .brand svg { border-radius: 8px; }
+  .brand b { font-size: 17px; font-weight: 800; letter-spacing: -0.02em; }
+  .nav { flex: 1; overflow: auto; padding: 4px 12px 12px; }
+  .group { padding: 18px 10px 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--n700); font-weight: 600; }
+  .item { display: flex; align-items: center; gap: 11px; width: 100%; border: 0; background: none; border-radius: var(--r);
+          padding: 9px 12px; margin: 1px 0; cursor: pointer; text-align: left; font-size: 14px; transition: background .15s, box-shadow .15s; }
+  .item svg { flex: none; opacity: .7; transition: opacity .15s, color .15s; }
+  .item:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+  .item.on { background: var(--card); font-weight: 800; box-shadow: var(--shadow-sm); }
+  .item.on svg { opacity: 1; color: var(--accent); }
+  .item .count { margin-left: auto; font: 600 11px var(--mono); min-width: 20px; text-align: center; padding: 1px 7px; border-radius: 999px; background: var(--accent); color: #fff; }
+  .item .dot { margin-left: auto; font: 11px var(--mono); color: var(--n700); }
+  .item .attn { margin-left: auto; font: 600 11px var(--mono); min-width: 20px; text-align: center; padding: 0 7px; border-radius: 999px; background: var(--accent-100); color: var(--accent-700); }
+  .foot { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .acct { font-size: 12px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 12px 14px; box-shadow: var(--shadow-sm); }
+  .acct .who { display: flex; justify-content: space-between; align-items: center; font: 600 12px var(--mono); margin-bottom: 4px; }
+  .tag { font: 800 9.5px var(--sans); letter-spacing: .06em; background: var(--text); color: var(--bg); padding: 2px 6px; border-radius: 4px; }
+  .bar { display: grid; grid-template-columns: 52px 1fr 34px; gap: 8px; align-items: center; font-size: 11px; color: var(--n700); margin-top: 6px; }
+  .bar i { display: block; height: 6px; border-radius: 999px; background: var(--n300); position: relative; overflow: hidden; }
+  .bar i::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--w); background: var(--text); border-radius: 999px; }
+  .bar span:last-child { font-family: var(--mono); text-align: right; }
+  .foot-row { display: flex; gap: 8px; }
+  .icon-btn { flex: 1; justify-content: center; border: 1px solid var(--line); background: var(--card); border-radius: var(--r); height: 34px; padding: 0 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; transition: background .15s; }
+  .icon-btn:hover { background: var(--n200); }
+
+  /* Main */
+  main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .head { height: 68px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 32px; border-bottom: 1px solid var(--line); }
+  .head h1 { margin: 0; font-size: 21px; font-weight: 800; letter-spacing: -0.015em; }
+  .head .sub { color: var(--n700); font-size: 13px; }
+  .head .sp { flex: 1; }
+  .head .btn + .btn { margin-left: -4px; }
+  .crumb { color: var(--n700); font-size: 13px; }
+  .btn { border: 1px solid var(--divider); background: var(--card); border-radius: var(--r); padding: 8px 16px; font-weight: 700; font-size: 13px; cursor: pointer;
+         display: inline-flex; gap: 8px; align-items: center; box-shadow: var(--shadow-sm); transition: background .15s, box-shadow .15s, transform .05s; white-space: nowrap; }
+  .btn:hover { background: var(--n200); }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 1px 2px rgba(236,48,19,.25), 0 2px 8px rgba(236,48,19,.18); }
+  .btn.primary:hover { background: var(--accent-600); }
+  .btn.danger { color: var(--accent-700); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .btn.danger:hover { background: var(--accent-100); }
+  .btn.sm { padding: 4px 11px; font-size: 12px; border-radius: 8px; }
+  .btn[disabled] { opacity: .55; cursor: default; box-shadow: none; }
+  .body { flex: 1; min-height: 0; overflow: auto; }
+  .page { display: none; height: 100%; }
+  .page.on { display: flex; flex-direction: column; }
+  .split { display: grid; flex: 1; min-height: 0; }
+  .pane { border-right: 1px solid var(--line); overflow: auto; min-height: 0; padding-bottom: 12px; }
+  .pane:last-child { border-right: 0; }
+  .pane-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 22px 8px; font-weight: 800; font-size: 13px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 11px 14px; margin: 2px 10px; border-radius: var(--r); cursor: pointer; transition: background .15s, box-shadow .15s; }
+  .row:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+  .row.sel { background: var(--card); box-shadow: var(--shadow-sm), inset 3px 0 0 var(--accent); }
+  .row.grouph { background: none; cursor: default; margin-top: 10px; padding-bottom: 4px; font-size: 13px; }
+  .row.grouph:hover { background: none; }
+  .row .meta { color: var(--n700); font-size: 12px; margin-top: 1px; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .grow { flex: 1; min-width: 0; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .fail { color: var(--accent-700); } .muted { color: var(--n700); }
+  .kind { font: 700 9.5px var(--sans); letter-spacing: .06em; text-transform: uppercase; background: var(--n200); padding: 2px 7px; border-radius: 999px; color: var(--n700); margin-left: 6px; vertical-align: 1px; }
+  .env { font: 800 9.5px var(--sans); letter-spacing: .06em; padding: 3px 0; border-radius: 999px; background: var(--n200); width: 60px; text-align: center; flex: none; display: inline-block; }
+  .env.prod { background: var(--accent); color: #fff; }
+  .status { font: 12px var(--mono); padding: 3px 10px; border-radius: 999px; background: var(--n200); white-space: nowrap; }
+  .status.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); }
+  .status.fail { background: var(--accent-100); }
+  .act { font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); min-width: 82px; text-align: center; }
+  .act.warn { color: var(--accent-700); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-100); }
+  .wrap { max-width: 1000px; padding: 28px 32px; }
+  .section { border: 1px solid var(--line); border-radius: var(--r-lg); margin-bottom: 24px; background: var(--card); box-shadow: var(--shadow-sm); overflow: hidden; }
+  .section h3 { margin: 0; padding: 14px 22px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--n700); border-bottom: 1px solid var(--line); font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+  .set { display: flex; gap: 20px; align-items: center; padding: 18px 22px; border-bottom: 1px solid var(--line); }
+  .set:last-child { border-bottom: 0; }
+  .set .t { font-weight: 800; font-size: 15px; }
+  .set .d { color: var(--n700); font-size: 13px; margin-top: 2px; }
+  .toggle { width: 46px; height: 26px; border-radius: 999px; background: var(--n400); position: relative; flex: none; cursor: pointer; transition: background .2s; }
+  .toggle::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: left .2s; }
+  .toggle.on { background: var(--accent); }
+  .toggle.on::after { left: 23px; }
+  select, input.f { font: inherit; padding: 9px 12px; border: 1px solid var(--divider); border-radius: var(--r); background: var(--card); color: var(--text); min-width: 240px; transition: border-color .15s, box-shadow .15s; }
+  select:focus, input.f:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+  input.num { width: 72px; min-width: 0; font-family: var(--mono); text-align: center; }
+  .tabs { display: inline-flex; gap: 2px; margin: 14px 20px 6px; padding: 4px; border-radius: 12px; background: var(--n200); }
+  .tabs button { border: 0; background: none; padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--n700); transition: background .15s, color .15s; }
+  .tabs button.on { background: var(--card); color: var(--text); font-weight: 700; box-shadow: var(--shadow-sm); }
+  .card { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--card); padding: 16px 18px; margin-bottom: 14px; box-shadow: var(--shadow-sm); }
+  .card h4 { margin: 0 0 6px; font-size: 13px; font-weight: 800; }
+  .chip { font: 12px var(--mono); background: var(--n200); padding: 4px 10px; border-radius: 999px; display: inline-flex; gap: 6px; white-space: nowrap; }
+  .chip.fail { background: var(--accent-100); }
+  .term { background: #1b1a19; color: #e9e6e3; font: 13px/1.65 var(--mono); padding: 18px 20px; margin: 4px 20px 0; border-radius: var(--r-lg); }
+  .term .p { color: #ff8c77; }
+  .term .dim { color: #8f8a86; }
+  .prompt { display: flex; gap: 10px; padding: 14px 20px 18px; align-items: center; }
+  .prompt input { flex: 1; min-width: 0; padding: 12px 16px; border-radius: 12px; box-shadow: var(--shadow-sm); }
+  .prompt .btn { padding: 11px 18px; border-radius: 12px; }
+  .tbl { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--card); box-shadow: var(--shadow-sm); overflow: hidden; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--n700); font-weight: 600; padding: 12px 18px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--n200) 50%, transparent); }
+  td { padding: 13px 18px; border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: 0; }
+  tbody tr { transition: background .15s; }
+  tbody tr:hover td { background: color-mix(in srgb, var(--text) 3%, transparent); }
+  tr.diff td { background: var(--accent-100); }
+  .step { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--card); padding: 16px 18px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
+  .num { width: 26px; height: 26px; border-radius: 50%; background: var(--n200); display: grid; place-items: center; font: 600 12px var(--mono); flex: none; }
+  .code { display: flex; align-items: center; gap: 14px; background: var(--n200); border-radius: var(--r); padding: 12px 14px; margin-top: 14px; }
+  .code b { font: 800 20px var(--mono); letter-spacing: .15em; }
+  .detail { padding: 22px 24px; }
+  .detail-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 16px; margin-top: 20px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ Sidebar ============ -->
+  <aside class="side">
+    <div class="brand">
+      <svg width="28" height="28" viewBox="0 0 32 32" aria-label="Ops Console logo"><rect width="32" height="32" fill="#ec3013"/><path d="M8 9.5l7 6.5-7 6.5" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="square"/><rect x="17" y="20" width="8" height="3.2" fill="#fff"/><rect x="25" y="4" width="3" height="3" fill="#fff"/></svg>
+      <b>Ops Console</b>
+    </div>
+    <nav class="nav">
+      <div class="group">Operate</div>
+      <button class="item on" data-page="monitor">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+        Monitor <span class="count">3</span>
+      </button>
+      <button class="item" data-page="workspace">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16"/><path d="M3 9h18M9 9v11"/></svg>
+        Workspace <span class="dot">2 running</span>
+      </button>
+      <button class="item" data-page="devtools">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>
+        Dev tools
+      </button>
+
+      <div class="group">Connect</div>
+      <button class="item" data-page="integrations">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 7V3M15 7V3M7 7h10v5a5 5 0 0 1-10 0zM12 17v4"/></svg>
+        Integrations <span class="attn" title="2 need attention">2</span>
+      </button>
+      <button class="item" data-page="connections">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+        Connections <span class="dot">6</span>
+      </button>
+      <button class="item" data-page="repos">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8M18 10c0 4-6 3-10 7"/></svg>
+        Repos <span class="dot">4</span>
+      </button>
+      <button class="item" data-page="setup">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-5-6-5M12 19h8"/></svg>
+        Setup agent
+      </button>
+
+      <div class="group">Claude</div>
+      <button class="item" data-page="agents">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+        Agents &amp; accounts
+      </button>
+    </nav>
+    <div class="foot">
+      <div class="acct">
+        <div class="who">ops@example.com <span class="tag">ACTIVE</span></div>
+        <div class="bar"><span>5-hour</span><i style="--w:76%"></i><span>76%</span></div>
+        <div class="bar"><span>Weekly</span><i style="--w:58%"></i><span>58%</span></div>
+      </div>
+      <div class="foot-row">
+        <button class="icon-btn" id="theme" title="Switch theme">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z"/></svg> Dark
+        </button>
+        <button class="icon-btn" title="Collapse sidebar">⟨ Collapse</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ Main ============ -->
+  <main>
+    <div class="head" id="head"></div>
+    <div class="body">
+
+      <!-- Monitor -->
+      <section class="page on" id="p-monitor">
+        <div class="split" style="grid-template-columns: 340px 1fr;">
+          <div class="pane">
+            <div class="pane-h">Services <span class="muted mono">5</span></div>
+            <div class="row sel"><span class="fail">●</span><div class="grow"><b>checkout-api</b><div class="meta">prod · 142 errors / 10m · POST /orders</div></div><span class="chip fail" style="font-size:10.5px;padding:2px 9px">Alert</span></div>
+            <div class="row"><span class="warn">●</span><div class="grow"><b>catalog-sync</b><div class="meta">prod · 7 errors / hour</div></div><span class="chip fail" style="font-size:10.5px;padding:2px 9px">Alert</span></div>
+            <div class="row"><span class="fail">●</span><div class="grow"><b>billing-worker</b><div class="meta">prod · job retries rising</div></div><span class="chip fail" style="font-size:10.5px;padding:2px 9px">Alert</span></div>
+            <div class="row"><span class="ok">●</span><div class="grow"><b>auth-gateway</b><div class="meta">prod · healthy</div></div></div>
+            <div class="row"><span class="ok">●</span><div class="grow"><b>search-api</b><div class="meta">prod · healthy</div></div></div>
+          </div>
+          <div class="pane">
+            <div class="tabs"><button class="on">Alert</button><button>Verify</button><button>Fix</button><button>Review</button></div>
+            <div class="wrap">
+              <div class="crumb">checkout-api · prod · first seen 09:12</div>
+              <h2 style="margin:4px 0 12px;font-size:22px">POST /orders returns 500 after cart merge</h2>
+              <div style="display:flex;gap:8px;margin-bottom:18px"><span class="chip">142 errors / 10m</span><span class="chip">p95 2.4s</span><span class="chip fail">rapid</span></div>
+              <div class="card"><h4>Root cause</h4><div class="muted">The cart merge returns a null shipping line when the guest cart is empty; the tax step dereferences it.</div></div>
+              <div class="card"><h4>Proposed fix</h4><div class="muted">Skip tax lines with no shipping line, and add a test for the empty guest cart.</div></div>
+              <div style="display:flex;gap:10px"><button class="btn primary">Verify locally</button><button class="btn">Create Jira ticket</button><button class="btn">Ignore route…</button></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Workspace -->
+      <section class="page" id="p-workspace">
+        <div class="split" style="grid-template-columns: 320px 1fr;">
+          <div class="pane">
+            <div class="pane-h">Repos &amp; Sessions <button class="btn sm">+ Session</button></div>
+            <div class="row grouph"><b class="grow">shop-api</b><span class="mono muted">main</span></div>
+            <div class="row sel"><span class="ok">●</span><div class="grow">Fix empty cart tax<div class="meta">running · Opus · Auto</div></div></div>
+            <div class="row"><span class="muted">○</span><div class="grow">Bump node to 22<div class="meta">done 2h ago</div></div></div>
+            <div class="row grouph"><b class="grow">storefront</b><span class="mono muted">feat/search</span></div>
+            <div class="row"><span class="ok">●</span><div class="grow">Search facets<div class="meta">running · Sonnet · Ask</div></div></div>
+            <div class="pane-h" style="margin-top:14px">Pull requests <span class="muted mono">3</span></div>
+            <div class="row"><span class="mono">#412</span><div class="grow">Guard null shipping line<div class="meta">yours · review requested</div></div></div>
+            <div class="row"><span class="mono">#409</span><div class="grow">Search facet counts<div class="meta">yours · checks passing</div></div></div>
+          </div>
+          <div class="pane" style="display:flex;flex-direction:column">
+            <div class="pane-h">Fix empty cart tax <span style="display:flex;gap:6px"><span class="chip">Model Opus 5.5</span><span class="chip">Effort High</span><span class="chip">Access Auto</span></span></div>
+            <div class="wrap" style="flex:1;max-width:none">
+              <div class="card"><b>You</b><div class="muted">Reproduce the 500 on POST /orders with an empty guest cart, then fix it.</div></div>
+              <div class="card"><b>Claude</b><div class="muted">Reproduced locally: <span class="mono">TypeError: cannot read 'amount' of null</span> in tax.ts:88. Proposed a guard and a test. Waiting for your review before opening a PR.</div>
+                <div style="margin-top:10px;display:flex;gap:8px"><button class="btn primary">Approve &amp; open PR</button><button class="btn">Request changes</button></div></div>
+            </div>
+            <div class="prompt"><input class="f" placeholder="Message Claude…"><button class="btn primary">Send</button></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Dev tools -->
+      <section class="page" id="p-devtools">
+        <div class="split" style="grid-template-columns: 300px 1fr;">
+          <div class="pane">
+            <div class="pane-h">Synced dev tools <span class="muted mono">6</span></div>
+            <div class="row sel"><span class="env prod">PROD</span><div class="grow">pg-orders<div class="meta">postgres · read</div></div></div>
+            <div class="row"><span class="env">DEV</span><div class="grow">pg-orders-dev<div class="meta">postgres · write</div></div></div>
+            <div class="row"><span class="env prod">PROD</span><div class="grow">mongo-catalog<div class="meta">mongodb · read</div></div></div>
+            <div class="row"><span class="env">LOCAL</span><div class="grow">redis-local<div class="meta">redis · write</div></div></div>
+            <div class="row"><span class="env">STAGING</span><div class="grow">ch-events<div class="meta">clickhouse · read</div></div></div>
+            <div class="pane-h" style="margin-top:14px">Terminals <button class="btn sm">+ New</button></div>
+            <div class="row"><span class="ok">●</span><div class="grow">Orders per day, prod vs dev<div class="meta">Compare · 2 Connections</div></div></div>
+          </div>
+          <div class="pane" style="display:flex;flex-direction:column">
+            <div class="pane-h">Orders per day, prod vs dev <span style="display:flex;gap:6px"><span class="chip">Model Haiku 5.5</span><span class="chip">Effort Medium</span><span class="chip">Access Read</span></span></div>
+            <div class="wrap" style="max-width:none;flex:1">
+              <div class="muted" style="margin-bottom:12px">Connections queried: <span class="mono">pg-orders</span>, <span class="mono">pg-orders-dev</span></div>
+              <div class="tbl"><table>
+                <tr><th>Day</th><th>pg-orders</th><th>pg-orders-dev</th></tr>
+                <tr><td class="mono">10-29</td><td class="mono">1,204</td><td class="mono">1,204</td></tr>
+                <tr class="diff"><td class="mono">10-30</td><td class="mono">1,388</td><td class="mono">1,371</td></tr>
+                <tr><td class="mono">10-31</td><td class="mono">1,102</td><td class="mono">1,102</td></tr>
+              </table></div>
+            </div>
+            <div class="prompt"><input class="f" placeholder="Ask across your databases…"><button class="btn primary">Ask</button></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Integrations -->
+      <section class="page" id="p-integrations">
+        <div class="split" style="grid-template-columns: minmax(0,1fr) 420px;">
+          <div class="pane">
+            <div class="tabs"><button class="on">All 12</button><button>Connectors 8</button><button>MCP 4</button><button>Needs attention 2</button></div>
+            <div class="row"><div class="grow"><b>Datadog</b> <span class="kind">Connector</span><div class="meta">pup CLI + datadog-pup MCP · example-org</div></div><span class="status ok">● ok</span><span class="act">Manage</span></div>
+            <div class="row"><div class="grow"><b>Jira</b> <span class="kind">Connector</span><div class="meta">Atlassian MCP</div></div><span class="status fail">! sign in</span><span class="act warn">Sign in</span></div>
+            <div class="row sel"><div class="grow"><b>GitHub</b> <span class="kind">Connector</span><div class="meta">gh CLI + GitHub MCP</div></div><span class="status muted">◌ signing in</span><span class="act">Manage</span></div>
+            <div class="row"><div class="grow"><b>GitLab</b> <span class="kind">Connector</span><div class="meta">glab CLI</div></div><span class="status muted">○ not connected</span><span class="act">Connect</span></div>
+            <div class="row"><div class="grow"><b>Bitbucket</b> <span class="kind">Connector</span><div class="meta">Atlassian MCP</div></div><span class="status muted">○ not connected</span><span class="act">Connect</span></div>
+            <div class="row"><div class="grow"><b>Slack</b> <span class="kind">Connector</span><div class="meta">Slack MCP</div></div><span class="status fail">✕ fail</span><span class="act warn">Reconnect</span></div>
+            <div class="row"><div class="grow"><b>Sentry</b> <span class="kind">Connector</span><div class="meta">Sentry MCP</div></div><span class="status muted">○ not connected</span><span class="act">Connect</span></div>
+            <div class="row"><div class="grow"><b>Shopify</b> <span class="kind">Connector</span><div class="meta">Shopify Dev MCP</div></div><span class="status muted">○ not connected</span><span class="act">Connect</span></div>
+            <div class="row"><div class="grow"><b>sentry-tools</b> <span class="kind">MCP</span><div class="meta">http · mcp.example.com · 12 tools</div></div><span class="status ok">● ok</span><span class="act">Manage</span></div>
+            <div class="row"><div class="grow"><b>docs</b> <span class="kind">MCP</span><div class="meta">stdio · shop-api project · 4 tools</div></div><span class="status ok">● ok</span><span class="act">Manage</span></div>
+            <div class="row"><div class="grow"><b>pg-orders</b> <span class="kind">MCP</span><div class="meta">stdio · from Connection · 2 tools</div></div><span class="status muted">◌ checking</span><span class="act">Manage</span></div>
+          </div>
+          <div class="pane">
+            <div class="pane-h">GitHub <span class="mono muted">◌ signing in</span></div>
+            <div class="detail">
+              <div style="font-size:17px;font-weight:800">Connect GitHub to Ops Console</div>
+              <div class="muted" style="font-size:12px;margin-bottom:14px">Reached through gh CLI + GitHub MCP.</div>
+              <div class="step">
+                <div style="display:flex;gap:12px;align-items:flex-start;width:100%"><span class="num">1</span><div class="grow"><b style="font-size:13px">Sign in to GitHub</b><div class="muted" style="font-size:12px">Finish in the browser tab that opened. This updates on its own.</div></div>
+                  <button class="btn" disabled>Waiting…</button></div>
+                <div class="code" style="width:100%"><div class="grow"><div class="muted" style="font-size:11px">Enter this code (already copied)</div><b>WXYZ-1234</b></div><button class="btn primary">Open GitHub ↗</button></div>
+              </div>
+              <div class="detail-foot">
+                <span class="muted" style="font-size:12px">Stops the console using GitHub.</span><button class="btn danger">Disconnect…</button></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Connections -->
+      <section class="page" id="p-connections">
+        <div class="wrap" style="max-width:1120px">
+          <div class="tbl"><table>
+            <tr><th>Name</th><th>Type</th><th>Env</th><th>Access</th><th>Status</th><th></th></tr>
+            <tr><td><b>pg-orders</b></td><td>postgres</td><td><span class="env prod">PROD</span></td><td>read</td><td><span class="status ok">● ok · 18ms</span></td><td style="text-align:right"><button class="btn sm">Edit</button></td></tr>
+            <tr><td><b>pg-orders-dev</b></td><td>postgres</td><td><span class="env">DEV</span></td><td>write</td><td><span class="status ok">● ok · 9ms</span></td><td style="text-align:right"><button class="btn sm">Edit</button></td></tr>
+            <tr><td><b>mongo-catalog</b></td><td>mongodb</td><td><span class="env prod">PROD</span></td><td>read</td><td><span class="status ok">● ok · 31ms</span></td><td style="text-align:right"><button class="btn sm">Edit</button></td></tr>
+            <tr><td><b>redis-local</b></td><td>redis</td><td><span class="env">LOCAL</span></td><td>write</td><td><span class="status fail">✕ refused</span></td><td style="text-align:right"><button class="btn sm">Edit</button></td></tr>
+            <tr><td><b>ch-events</b></td><td>clickhouse</td><td><span class="env">STAGING</span></td><td>read</td><td><span class="status ok">● ok · 44ms</span></td><td style="text-align:right"><button class="btn sm">Edit</button></td></tr>
+            <tr><td><b>fb-app</b></td><td>firebase</td><td><span class="env">DEV</span></td><td>read</td><td><span class="status muted">◌ checking</span></td><td style="text-align:right"><button class="btn sm">Edit</button></td></tr>
+          </table></div>
+          <div class="muted" style="margin-top:14px;font-size:13px">Each Connection is also an MCP server Claude can query. Passwords stay in the Keychain.</div>
+        </div>
+      </section>
+
+      <!-- Repos -->
+      <section class="page" id="p-repos">
+        <div class="wrap" style="max-width:1120px">
+          <div class="tbl"><table>
+            <tr><th>Repo</th><th>Folder</th><th>Host</th><th>Branch</th><th>Project MCP</th><th>Sessions</th><th></th></tr>
+            <tr><td><b>shop-api</b></td><td class="mono">~/code/shop-api</td><td>GitHub</td><td class="mono">main</td><td>2</td><td>3</td><td style="text-align:right"><button class="btn sm danger">Remove</button></td></tr>
+            <tr><td><b>storefront</b></td><td class="mono">~/code/storefront</td><td>GitHub</td><td class="mono">feat/search</td><td>0</td><td>1</td><td style="text-align:right"><button class="btn sm danger">Remove</button></td></tr>
+            <tr><td><b>infra</b></td><td class="mono">~/code/infra</td><td>GitLab</td><td class="mono">main</td><td>1</td><td>0</td><td style="text-align:right"><button class="btn sm danger">Remove</button></td></tr>
+            <tr><td><b>scratch</b></td><td class="mono">~/code/scratch</td><td>local</td><td class="mono">main</td><td>0</td><td>0</td><td style="text-align:right"><button class="btn sm danger">Remove</button></td></tr>
+          </table></div>
+        </div>
+      </section>
+
+      <!-- Setup agent -->
+      <section class="page" id="p-setup">
+        <div class="split" style="grid-template-columns: 320px 1fr;">
+          <div class="pane">
+            <div class="pane-h">Permissions</div>
+            <div class="row" style="cursor:default"><div class="grow">Full Disk Access<div class="meta">reads ~/.my.cnf, ~/.claude.json</div></div><span class="status ok">● on</span></div>
+            <div class="row" style="cursor:default"><div class="grow">Keychain<div class="meta">secrets for Connections</div></div><span class="status">asks each time</span></div>
+            <div class="pane-h" style="margin-top:14px">Try</div>
+            <div class="row"><span class="mono muted">›</span><div class="grow">import my local databases</div></div>
+          </div>
+          <div class="pane" style="display:flex;flex-direction:column">
+            <div class="pane-h">Setup agent running <button class="btn sm">Close</button></div>
+            <div class="term" style="flex:1">
+              <div><span class="p">›</span> import my local databases</div>
+              <div class="dim">read_local_file ~/.my.cnf · list_connections</div>
+              <div>Found 2 MySQL hosts and 1 Postgres URL. pg-orders is already saved; skipping it.</div>
+              <div class="dim">test_connection mysql-reports … ok 12ms</div>
+              <div>Saved <b>mysql-reports</b> (local, write). The password went to the Keychain.</div>
+            </div>
+            <div class="prompt"><input class="f" placeholder="Message to Claude"><button class="btn primary">Send</button></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Agents & accounts -->
+      <section class="page" id="p-agents">
+        <div class="wrap">
+          <div class="section"><h3>Usage</h3>
+            <div class="set"><div class="grow"><div class="t">Auto-switch accounts</div><div class="d">When the active account reaches 90% of its usage window, the session moves to the next account with headroom. Context carries over.</div></div><input class="f num" value="90"> %<div class="toggle on"></div></div>
+            <div class="set"><div class="grow"><div class="t">Smart usage</div><div class="d">Uses the account whose weekly quota would otherwise go unused first. Accounts with a full 5-hour window are skipped.</div></div><div class="toggle"></div></div>
+          </div>
+          <div class="section"><h3>Defaults for new sessions</h3>
+            <div class="set"><div class="grow"><div class="t">Default model</div><div class="d">Model new sessions start with.</div></div><select><option>Claude Haiku 5.5</option><option>Claude Sonnet 5.5</option><option>Claude Opus 5.5</option></select></div>
+            <div class="set"><div class="grow"><div class="t">Default effort</div><div class="d">How much the agent thinks before acting.</div></div><select><option>Medium</option></select></div>
+            <div class="set"><div class="grow"><div class="t">Default access</div><div class="d">What the agent may do without asking. A PROD write always asks.</div></div><select><option>Auto</option></select></div>
+          </div>
+          <div class="section"><h3>Claude Code accounts <button class="btn sm">+ Add account</button></h3>
+            <div class="set"><span class="mono muted">01</span><div class="grow"><div class="mono"><b>ops@example.com</b> team <span class="tag">ACTIVE</span></div>
+              <div class="bar" style="max-width:340px"><span>5-hour</span><i style="--w:76%"></i><span>76%</span></div><div class="bar" style="max-width:340px"><span>Weekly</span><i style="--w:58%"></i><span>58%</span></div></div>
+              <button class="btn">Re-login</button><button class="btn">Log out</button></div>
+            <div class="set"><span class="mono muted">02</span><div class="grow"><div class="mono"><b>second@example.com</b> pro</div>
+              <div class="bar" style="max-width:340px"><span>5-hour</span><i style="--w:0%"></i><span>0%</span></div><div class="bar" style="max-width:340px"><span>Weekly</span><i style="--w:11%"></i><span>11%</span></div></div>
+              <button class="btn">Use</button><button class="btn">Re-login</button><button class="btn">Log out</button></div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+
+<script>
+  const heads = {
+    monitor: ['Monitor', 'Datadog scan 09:00 daily · last run 12 min ago', '<button class="btn primary">Scan now</button>'],
+    workspace: ['Workspace', 'Sessions in your Repos and their pull requests', '<button class="btn primary">+ New session</button>'],
+    devtools: ['Dev tools', 'Ask across your databases. PROD is read-only unless you allow write.', '<button class="btn primary">+ New terminal</button>'],
+    integrations: ['Integrations', 'Connectors sign in to a service. MCP servers give Claude tools.', '<button class="btn">Add with Setup agent →</button>'],
+    connections: ['Connections', 'Databases Dev tools and Claude can reach', '<button class="btn">Import with Setup agent →</button><button class="btn primary">+ Add connection</button>'],
+    repos: ['Repos', 'Local git folders Sessions work in', '<button class="btn primary">Import folder…</button>'],
+    setup: ['Setup agent', 'Claude adds Connections, MCP servers and Connectors for you', ''],
+    agents: ['Agents & accounts', 'Claude Code accounts and defaults for every session', ''],
+  };
+  const head = document.getElementById('head');
+  function show(page) {
+    document.querySelectorAll('.item').forEach((b) => b.classList.toggle('on', b.dataset.page === page));
+    document.querySelectorAll('.page').forEach((p) => p.classList.toggle('on', p.id === 'p-' + page));
+    const [title, sub, actions] = heads[page];
+    head.innerHTML = `<h1>${title}</h1><span class="sub">${sub}</span><span class="sp"></span>${actions}`;
+  }
+  document.querySelectorAll('.item').forEach((b) => b.addEventListener('click', () => show(b.dataset.page)));
+  document.querySelectorAll('.toggle').forEach((t) => t.addEventListener('click', () => t.classList.toggle('on')));
+  document.getElementById('theme').addEventListener('click', (e) => {
+    const dark = document.documentElement.dataset.theme !== 'dark';
+    document.documentElement.dataset.theme = dark ? 'dark' : '';
+    e.currentTarget.lastChild.textContent = dark ? ' Light' : ' Dark';
+  });
+  show('monitor');
+</script>
+</body>
+</html>
