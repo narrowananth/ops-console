@@ -37,12 +37,14 @@ ops-console open
 | Folder | What |
 |---|---|
 | `frontend/` | React 18 + Vite web UI |
-| `backend/` | NestJS daemon: API, WebSocket, agent runtime, jobs |
+| `backend/` | NestJS daemon: API, WebSocket, agent runtime, terminals, scheduled jobs; SQLite store |
 | `cli/` | The `ops-console` command |
-| `shared/` | Types both sides import |
+| `shared/` | Zod schemas and types both sides import: REST bodies, WebSocket events |
 | `install.sh` | The installer |
+| `scripts/` | `pnpm dev:open` and `pnpm package` |
 | `design/` | Claude Design export |
 | `docs/` | Architecture, ADRs, specs |
+| `GLOSSARY.md` | Domain terms |
 
 ## Develop
 

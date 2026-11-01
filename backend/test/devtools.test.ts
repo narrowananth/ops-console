@@ -204,7 +204,7 @@ describe('queries', () => {
     await ask(
       daemon,
       session.id,
-      { tool: 'mcp__mongo-prod__find', input: { collection: 'shops', filter: { domain: 'glowbar' } } },
+      { tool: 'mcp__mongo-prod__find', input: { collection: 'shops', filter: { domain: 'acme' } } },
       { tool: 'mcp__pg-staging__execute_sql', input: { sql: 'select * from reservations limit 5' } },
       { text: 'Found it.' },
     );
@@ -421,10 +421,10 @@ describe('results and comparisons', () => {
         total: 60,
         ms: 12,
       }),
-      fence('ops-result', { connection: 'mongo-prod', columns: ['shop', 'plan'], rows: [['glowbar', { tier: 2 }]] }),
+      fence('ops-result', { connection: 'mongo-prod', columns: ['shop', 'plan'], rows: [['acme', { tier: 2 }]] }),
       fence('ops-compare', {
         key: 'shop_domain',
-        value: 'glowbar.example.com',
+        value: 'acme.example.com',
         connections: ['pg-staging', 'mongo-prod'],
         rows: [
           { field: 'plan', values: ['pro', 'growth'] },
@@ -444,10 +444,10 @@ describe('results and comparisons', () => {
     const pgRows = pg?.rows as unknown[][] | undefined;
     expect(pgRows?.length).toBe(50);
     expect(pgRows?.[0]).toEqual([0, 'x'.repeat(200)]);
-    expect(mongo).toMatchObject({ query: null, total: null, ms: null, rows: [['glowbar', '{"tier":2}']] });
+    expect(mongo).toMatchObject({ query: null, total: null, ms: null, rows: [['acme', '{"tier":2}']] });
     expect(comparison).toMatchObject({
       key: 'shop_domain',
-      value: 'glowbar.example.com',
+      value: 'acme.example.com',
       rows: [
         { field: 'plan', values: ['pro', 'growth'], differs: true },
         { field: 'status', values: ['active', 'active '], differs: false },

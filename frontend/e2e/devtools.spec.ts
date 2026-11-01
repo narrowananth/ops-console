@@ -30,7 +30,7 @@ const CONNECTIONS = [
 const SESSION = {
   id: 's1',
   kind: 'devtools',
-  title: 'find shop glowbar',
+  title: 'find shop acme',
   model: 'claude-opus-5-5',
   effort: 'medium',
   access_mode: 'auto',
@@ -46,7 +46,7 @@ const SESSION = {
 };
 
 const MESSAGES = [
-  { id: 'm1', role: 'user', status: 'done', parts: [{ kind: 'text', text: 'find shop glowbar' }], created_at: NOW },
+  { id: 'm1', role: 'user', status: 'done', parts: [{ kind: 'text', text: 'find shop acme' }], created_at: NOW },
   {
     id: 'm2',
     role: 'agent',
@@ -57,9 +57,9 @@ const MESSAGES = [
       {
         kind: 'result',
         connection: 'pg-tenant',
-        query: "select id, shop_domain, plan from shops where shop_domain like '%glowbar%'",
+        query: "select id, shop_domain, plan from shops where shop_domain like '%acme%'",
         columns: ['id', 'shop_domain', 'plan'],
-        rows: [['4812', 'glowbar.example.com', 'pro']],
+        rows: [['4812', 'acme.example.com', 'pro']],
         total: 1,
         ms: 12,
       },
@@ -68,14 +68,14 @@ const MESSAGES = [
         connection: 'mongo-prod',
         query: null,
         columns: ['shop', 'plan'],
-        rows: [['glowbar', 'growth']],
+        rows: [['acme', 'growth']],
         total: 1,
         ms: 31,
       },
       {
         kind: 'comparison',
         key: 'shop_domain',
-        value: 'glowbar.example.com',
+        value: 'acme.example.com',
         connections: ['pg-tenant', 'mongo-prod'],
         rows: [
           { field: 'plan', values: ['pro', 'growth'], differs: true },
@@ -172,12 +172,12 @@ test('a question across Connections shows a Result per Connection and the Compar
 
   const pg = page.getByRole('region', { name: 'Result from pg-tenant' });
   await expect(pg).toContainText('── pg-tenant · Postgres');
-  await expect(pg).toContainText('glowbar.example.com');
+  await expect(pg).toContainText('acme.example.com');
   await expect(pg).toContainText('✓ 1 row · 12ms');
   await expect(page.getByRole('region', { name: 'Result from mongo-prod' })).toContainText('PROD');
 
   const compared = page.getByRole('region', { name: 'Compared on shop_domain' });
-  await expect(compared).toContainText('■ Compared on shop_domain = glowbar.example.com');
+  await expect(compared).toContainText('■ Compared on shop_domain = acme.example.com');
   await expect(compared.getByRole('row', { name: /plan/ })).toContainText('◀ differs');
   await expect(compared.getByRole('row', { name: /status/ })).not.toContainText('◀ differs');
   await expect(compared).toContainText('1 of 2 fields differ.');

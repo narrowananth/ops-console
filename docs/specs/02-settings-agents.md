@@ -17,7 +17,7 @@ Sessions and runs
 2. The first message starts a Claude Agent SDK run under the active Claude account, in the working directory the Session's kind supplies. The run's SDK session id and the account are stored on the Session. Later messages resume that SDK session.
 3. The console stores no messages. Listing a Session's messages reads the transcript through the SDK from the Session's account, oldest first, and maps user and assistant entries to `Message`s with parts: text to `text`, tool calls to `step`, file edits to `diff`, code blocks to `code`, the agent's questions to `question`.
 4. While a run streams, each part goes out as `session.output`. A part that grows is resent whole with the same `part_index`. The in-flight agent message lives in the daemon's memory: listing during a run returns it as `streaming`, and after a reload mid-run the next `session.output` continues from the next `part_index`.
-5. A run that ends sets the Session `idle`, or `failed` when the run errored, updates `last_message_preview` and `last_active_at`, and sends `session.finished`.
+5. A run that ends sets the Session `idle`, or `failed` when the run errored, updates `last_message_preview` (the first line of the agent's first text in that run, cut to 200 characters) and `last_active_at`, and sends `session.finished`. After a failed run, listing marks the last agent message `failed`.
 6. A Session whose transcript is gone (deleted outside the console) lists no messages. Its next message starts a new SDK session and replaces `sdk_session_id`.
 7. A message to a Session whose run is still going is refused with `session_busy`. Runs of different Sessions go on side by side.
 8. When the agent asks the operator a question, the Session is `waiting_input` and the question shows as a `question` part. The operator's next message answers it and sets the Session `working`.
@@ -60,7 +60,8 @@ Claude accounts
 - **Runtime**: `@anthropic-ai/claude-agent-sdk` `query()` with `resume` set to the stored SDK session id. The run's `env` carries the account's `CLAUDE_CONFIG_DIR`.
 - **Transcript reads**: `getSessionMessages()` with the run's working directory, under the Session's account. Documented in the SDK.
 - **Moving a transcript**: copying the session file into another config dir's `projects/` before `resume` is the documented way to resume elsewhere.
-- **Parts**: `text`, `step`, `diff`, `code`, `question`. `finding` belongs to `07-workspace`.
+- **Parts**: `text`, `step`, `diff`, `code`, `question`. `result` and `comparison` belong to `10-dev-tools-compare`.
+- **Effort**: `ultrathink` runs at the SDK's `max`; the other levels pass through as they are.
 - **Guards**: the PROD-write check and the Action Log write are `PreToolUse` hooks, which run before every other permission step and can deny even in `bypassPermissions`. The merge denial is a scoped `disallowedTools` rule, which holds in every mode. `supervised` prompts reach `canUseTool`.
 - **Action Log scope**: every Bash call and every MCP tool call. File reads and edits inside the working directory are not logged; the diff shows them.
 - **Approval kinds**: `prod_write` (hook), `command` and `edit` (permission prompts in `supervised`, or `auto` asking). An agent question is not an Approval; it is `waiting_input`.
@@ -158,7 +159,7 @@ CREATE TABLE approvals (
 CREATE INDEX approvals_pending_idx ON approvals (requested_at) WHERE status = 'pending';
 ```
 
-Later specs add columns with `ALTER TABLE … ADD COLUMN`: `sessions.repo_id`, `branch`, `alert_id`, `pr_number` and the Connection scope (`07-workspace`, `08-monitor-dashboard`, `09-dev-tools-agent`); `action_log.connection_id` (`05-settings-dev-tools`) and `action_log.alert_id` (`08-monitor-dashboard`), each a nullable reference with no default. A plain id without a foreign key was the alternative; a reference keeps `ON DELETE SET NULL` working.
+Later specs add columns with `ALTER TABLE … ADD COLUMN`: `sessions.repo_id`, `branch` and `pr_number` (`07-workspace`) and `sessions.alert_id` (`08-monitor-dashboard`); `action_log.connection_id` (`05-settings-dev-tools`) and `action_log.alert_id` (`08-monitor-dashboard`), each a nullable reference with no default. A `devtools` Session's Connection scope lives in its own table (`09-dev-tools-agent`). A plain id without a foreign key was the alternative; a reference keeps `ON DELETE SET NULL` working.
 
 Enums live in code only (`01-base-daemon-setup`):
 
@@ -174,7 +175,7 @@ Enums live in code only (`01-base-daemon-setup`):
 | `ActionOutcome` | `pending`, `ok`, `failed`, `denied` | `action_log.outcome` |
 | `ApprovalKind` | `prod_write`, `command`, `edit` | `approvals.kind` |
 | `ApprovalStatus` | `pending`, `approved`, `denied`, `expired` | `approvals.status` |
-| `SwitchReason` | `manual`, `auto`, `smart`, `rate_limited` | `account.switched` event |
+| `SwitchReason` | `manual`, `auto`, `smart`, `rate_limited`, `sign_in_failed` | `account.switched` event |
 
 Migration: no existing rows. A database from the build that seeded a `default` account (no `config_dir`) loses that row: it is deleted, its Sessions lose their account, and the first signed-in added account becomes active. The migration creates the tables in the order above and the `settings` keys `session_defaults` (Settled) and `agent_accounts` `{ "active_account_id": null, "auto_switch": true, "threshold": 95, "smart_usage": true }`.
 
@@ -198,7 +199,7 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 { "kind": "question", "text": "string", "options": ["string"] }
 ```
 
-`Session`: every `sessions` column except `sdk_session_id`, plus the columns later specs add.
+`Session`: every `sessions` column except `sdk_session_id`, plus the fields later specs add: `repo_id`, `branch` and `pr_number` (`07-workspace`), `connection_ids` (`09-dev-tools-agent`). `alert_id` stays out of it.
 
 `Message`, read from the transcript: `id` (the transcript entry id), `role` (`user | agent`), `status` (`streaming | done | failed`), `parts: Part[]`, `created_at`.
 
@@ -208,9 +209,9 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 
 | Method and path | Body | Returns |
 | --------------- | ---- | ------- |
-| `GET /sessions` | query `kind?`, `q?` (title search) | `Session[]`, newest `last_active_at` first |
+| `GET /sessions` | query `kind?`, `q?` (title search) | `Session[]`, newest `last_active_at` first; Sessions of a Repo removed with its Sessions kept are left out (`07-workspace` Behavior 3) |
 | `GET /sessions/:id` | | `Session` |
-| `PATCH /sessions/:id` | `{ title?, model?, effort?, access_mode? }` | `Session` |
+| `PATCH /sessions/:id` | `{ title?, model?, effort?, access_mode? }`, plus `connection_ids?` on a `devtools` Session (`09-dev-tools-agent`) | `Session` |
 | `DELETE /sessions/:id` | | 204; `session_busy` |
 | `GET /sessions/:id/messages` | | `Message[]` oldest first, the in-flight message included; empty with no transcript |
 
@@ -308,7 +309,7 @@ Server to client, when an account is deleted, including an abandoned first sign-
 Server to client, when an account's sign-in or usage changes.
 
 ```json
-{ "account_id": "uuid", "signed_in": true, "five_hour_pct": 0, "weekly_pct": 0, "usage_seen_at": "string | null" }
+{ "account_id": "uuid", "signed_in": true, "five_hour_pct": "number | null", "weekly_pct": "number | null", "usage_seen_at": "string | null" }
 ```
 
 ### WebSocket `account.switched`
@@ -316,16 +317,16 @@ Server to client, when an account's sign-in or usage changes.
 Server to client, when the active account changes.
 
 ```json
-{ "from": "uuid", "to": "uuid", "reason": "SwitchReason", "five_hour_pct": 0 }
+{ "from": "uuid", "to": "uuid", "reason": "SwitchReason", "five_hour_pct": "number | null" }
 ```
 
 ## UI
 
 Agents & accounts, as the design shows:
 
-- **Accounts**: rows in order (01, 02, …) labelled with the account's email, plan, a 5-hour bar with "resets in", and a weekly bar with "resets in Nd". The 5-hour bar turns accent at 90%, the weekly bar at 80%. The active row is shaded; others have Use. "SMART PICK" marks the pick, and each row shows its `smart_note`. The tab re-reads the accounts every 10 seconds while it is open. A signed-in row always shows both bars; with usage unknown the bars are empty and read "no usage yet". Only a signed-in active row is shaded and badged ACTIVE. A row not signed in shows Sign in, which opens Anthropic's sign-in in the browser; while it waits the row shows Re-login, which opens the browser sign-in again, and Cancel, which also deletes an account that never signed in.
+- **Accounts**: rows A→Z by label (the account's email), numbered 01, 02, …, each with its plan, a 5-hour bar with "resets in", and a weekly bar with "resets in Nd". The 5-hour bar turns accent at 90%, the weekly bar at 80%. The active row is shaded; others have Use. "SMART PICK" marks the pick. The tab re-reads the accounts every 10 seconds while it is open. A signed-in row always shows both bars; with usage unknown the bars are empty and read "no usage yet". Only a signed-in active row is shaded and badged ACTIVE. Under the bars a signed-in row shows its `smart_note` and how long ago its usage was seen. A row not signed in reads "Not signed in." and shows Sign in, which opens Anthropic's sign-in in the browser; while it waits the row reads "Finish signing in with Anthropic in your browser." and shows Re-login, which opens the browser sign-in again, and Cancel, which also deletes an account that never signed in.
 - **Smart banner**: when `smart_pick` is set and there is more than one account, the reason ("65% of its weekly quota is left and it resets in 2 days, use it first") and a line that it is used automatically while Smart usage is on. No Use button; the pick row carries SMART PICK.
-- **Auto-switch accounts**: toggle and threshold. Text: "When the active account reaches 95% of its usage window, the session moves to the next account with headroom. Context carries over."
+- **Auto-switch accounts**: toggle, and the threshold field while it is on. Text: "When the active account reaches 95% of its usage window, the session moves to the next account with headroom. Context carries over.", with the threshold set in place of 95.
 - **Smart usage**: toggle. Text: "Uses the account whose weekly quota would otherwise go unused first: weekly % left ÷ days until weekly reset. Accounts with a full 5-hour window are skipped."
 - **No account yet**: the tab holds a short note and Add Claude account, nothing else.
 - **Accounts, none signed in**: the account list and Add Claude account show under a banner that says to sign in. Auto-switch, Smart usage, and the defaults appear once one account is signed in.

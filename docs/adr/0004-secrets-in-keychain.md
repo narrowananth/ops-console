@@ -1,7 +1,8 @@
 # Secrets in the Keychain
 
-Connection passwords, tokens and service-account keys live in the macOS Keychain, keyed by
-Connection id; an MCP Server's env vars are keyed `mcp:<name>`. `state.db` holds only the
+Connection passwords, tokens and service-account keys live in the macOS Keychain under the service
+`ops-console`, keyed `connection:<id>`; an MCP Server's env vars are keyed `mcp:<name>`, the GitHub
+Connector's `gh` token included. `state.db` holds only the
 Connection's non-secret fields. Secrets are read at the moment of use and never reach the database,
 logs, WebSocket payloads or the browser.
 

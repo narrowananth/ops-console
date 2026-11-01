@@ -11,13 +11,15 @@ The operator wants failing routes found before customers report them, checked by
 
 Scans and Alerts
 
-1. A Scan reads the failing requests of every Service over its window through `pup`, with no model turn: logs whose `@http.status_code` is 400 or more, in every env Datadog has logs for and the logs with no env tag. Logs with no status code are not read. The operator's Scan takes the window (`15m`, `1h`, `4h`, `24h`, `7d`), the HTTP status codes and, when they picked one, the Datadog Service names; it reads, raises and clears for those Services and codes only. A scheduled one reads every code from 400 up over its interval. Services and Routes it finds are created; existing ones are kept.
+1. A Scan reads the failing requests of every Service over its window through `pup`, with no model turn: logs whose `@http.status_code` is 400 or more, in every env Datadog has logs for and the logs with no env tag. Logs with no status code are not read. The operator's Scan takes the window (any `ScanWindow`; the Monitor offers `15m`, `1h`, `4h`, `24h` and `7d`), the HTTP status codes and, when they picked some, the Datadog Service names; it reads, raises and clears for those Services and codes only. A scheduled one reads every code from 400 up over its interval. Services and Routes it finds are created; existing ones are kept.
+1a. A Scan of one stored Service (`service_id`) reads only that Service in its own env, over the window asked for, else the Service's `check_interval`, else the Connector's `default_interval`.
 2. A Scan groups each Service's logs by HTTP status code, Route and masked message; a log that names no request path has no Route. Each group becomes one Alert holding its status code, severity, event count, `first_seen_at`, `last_seen_at`, the Datadog query and up to 25 Samples. An Alert with no matching Fingerprint starts as `open`.
 3. A later Scan that sees the same Fingerprint updates that Alert (event count, `last_seen_at`, Samples) and creates no second row.
 4. Severity is `high` when one 10-minute bucket of the group reaches the rapid threshold, `medium` when its errors per hour reach the failing threshold with error-level logs, and `low` otherwise. The thresholds come from the Datadog Connector's config (`04-settings-connectors`).
-5. A resolved Alert reopens as a regression when a Scan that covers its Service does not see it, and a later Scan sees it again, counting only events after `resolved_at`. `regression_count` goes up by one and its Reports stay.
-6. A dismissed Alert that keeps failing stays dismissed and keeps updating its counts. It reopens as a regression only after a Scan that does not see it followed by one that does.
+5. A resolved Alert reopens as a regression when a Scan that covers its Service does not see it, and a later Scan sees it again. Its event count starts again, counting only events after `resolved_at`; its Samples keep only the logs after `resolved_at`; `resolved_at` is cleared, `regression_count` goes up by one and its Reports stay. A resolved Alert that a Scan sees with no healthy Scan between stays `resolved`, its counts unchanged.
+6. A dismissed Alert that keeps failing stays dismissed and keeps updating its counts. It reopens as a regression only after a Scan that does not see it followed by one that does. Reopening undoes the dismissal Review.
 7. A Route marked `ignored` never raises an Alert. Its note is shown with the Route.
+7a. The Datadog Connector's ignore rules (`04-settings-connectors`) work the same way: a `route` rule's glob on the path raises no Alert for a matching Route, and a `status_class` rule (`4xx`) leaves those codes out of every Scan's read.
 8. A Scan that hits a Datadog rate limit ends `rate_limited`; one that cannot reach Datadog ends `failed`. Both leave every Alert as it was and record an error code on the Scan.
 9. Samples are redacted before they are written (`02-settings-agents`). An Alert keeps at most 25 Samples, newest first.
 10. Two failures that differ only in ids, timestamps, IP addresses or counts share a Fingerprint. A different Route, HTTP status code or error kind gives a different one.
@@ -49,13 +51,20 @@ History and restarts
 
 Logs, status codes, envs and where the code is
 
-27. `GET /monitor/envs` lists the `env` tags with logs in Datadog over the last 7 days, the Connector's `environments` first and marked `configured`, then `no env`. `no env` stands for logs sent with no `env` tag; it reads them with `-env:*`, and their Services are stored with env `no env`.
-31. `GET /monitor/datadog-services` lists the Services with failing requests in the given range, busiest first, with the envs they logged in and the count. It reads every env unless `envs` names some, and every code from 400 up unless `codes` names some. It reads one `pup logs aggregate` per env and keeps the answer 2 minutes.
-32. `GET /monitor/status-codes` lists each HTTP status code from 400 up with requests in the given range, every env together, busiest first, with its count. It reads one `pup logs aggregate` by `@http.status_code` and keeps the answer 2 minutes.
-33. An Alert stored before Scans read status codes has none. The Monitor's lists and the sidebar count leave it out while it is `open`; in any other status it stays listed.
+27. `GET /monitor/envs` lists the `env` tags with logs in Datadog over the last 7 days, the Connector's `environments` first and marked `configured`, then `no env`. `no env` stands for logs sent with no `env` tag; it reads them with `-env:*`, and their Services are stored with env `no env`. The list is kept 10 minutes.
 28. A Scan stores the Git URL from the logs' `git.repository_url` tag on a Service that has none. The operator can set or clear it.
 29. The Verification follows the log through the code end to end and answers with a Report whose Markdown has a summary, the evidence, the root cause with file and line, the impact, how to fix it and how to check the fix.
 30. A Service with neither a Repo nor a Git URL gets its code found with no help, first match wins: an imported Repo of the same name; a git folder of that name next to an imported Repo, which is imported; a repository of that name on a connected Git host, under the Bitbucket workspace, the GitHub login and its organizations, then the owners of imported Repos. It runs once per Service after a Scan, and again on `POST /services/:id/code`, which answers with every place it looked. Nothing found leaves both empty.
+31. `GET /monitor/datadog-services` lists the Services with failing requests in the given range, busiest first, with the envs they logged in and the count. It reads every env unless `envs` names some, and every code from 400 up unless `codes` names some. It reads one `pup logs aggregate` per env and keeps the answer 2 minutes.
+32. `GET /monitor/status-codes` lists each HTTP status code from 400 up with requests in the given range, every env together, busiest first, with its count. It reads one `pup logs aggregate` by `@http.status_code` and keeps the answer 2 minutes.
+33. An Alert stored before Scans read status codes has none. The Monitor's lists and the sidebar count leave it out while it is `open`; in any other status it stays listed. In the Monitor's lists, an Alert with a code shows when its code is picked, or every code is; the sidebar counts every code.
+
+The Monitor screen
+
+34. The Scan button scans the ticked Services, else the picked Service, else every Service listed, over the picked range and codes. A ticked Service missing from the list stays ticked but is not scanned. While the newest Scan is `running`, the button is disabled and reads "Scanning…".
+35. The logs list shows the Alerts of the picked Service, or of every Service, with a picked code. `resolved` and `dismissed` Alerts show only with Closed ticked. Rows go highest tier first, newest sighting first within a tier, and are drawn 100 at a time; the open Alert stays drawn even past the rows shown.
+36. A Scan that ended `rate_limited` or `failed` shows under the Scan button with the time of the last `ok` Scan, or "No good Scan yet."
+37. The picked Service and Alert are kept in the address, and the Monitor's other choices in the browser, as `persist-selections-and-runs` Behaviors 1 to 11 set out.
 
 ## Settled
 
@@ -63,7 +72,7 @@ Logs, status codes, envs and where the code is
 - **Fingerprint**: hash of Service, Route, HTTP status code and the error signature with numbers, ids, timestamps and IPs masked; an Alert with no status code hashes without it. One Alert per Fingerprint, `UNIQUE`.
 - **Alert status**: `open`, `verifying`, `verified`, `fixing`, `pr_open`, `resolved`, `dismissed`. Stored on the Alert; `alert_events` records how it got there.
 - **Event count**: sum of each Scan's error count. Scan windows equal the interval, so they do not overlap.
-- **Scan reads**: per env, one `pup logs aggregate` by `service` over `@http.status_code:>=400` (or the picked codes), then one `pup logs search` per Service for its newest 1000 logs in the window. Groups, counts and the 10-minute peak come from those logs.
+- **Scan reads**: per env, one `pup logs aggregate` by `service` over `@http.status_code:>=400` (or the picked codes), then one `pup logs search` per Service for its newest 1000 logs in the window. A Scan that names its Services skips the aggregate. Groups, counts and the 10-minute peak come from those logs.
 - **Log with no request**: its Alert hangs on the Service's blank Route (empty method and path), which the API shows as `route: null` and the Services list leaves out.
 - **Message of a log**: its `message`, else `error.message`, `error.kind` or `logger.name`.
 - **Healthy sighting**: a Scan that covers a Service writes `cleared_at` on each of its Alerts it did not see. Regression needs a `cleared_at` newer than the Alert's last sighting and `resolved_at`.
@@ -159,6 +168,7 @@ CREATE TABLE alerts (
   id                TEXT PRIMARY KEY NOT NULL,
   route_id          TEXT NOT NULL REFERENCES routes (id) ON DELETE CASCADE,
   fingerprint       TEXT NOT NULL UNIQUE,
+  http_status       INTEGER,                     -- HTTP status code of its logs; null: stored before Scans read codes
   source            TEXT NOT NULL DEFAULT 'scan',  -- AlertSource
   severity          TEXT NOT NULL,               -- Severity
   status            TEXT NOT NULL DEFAULT 'open',  -- AlertStatus
@@ -234,7 +244,7 @@ CREATE TABLE fixes (
   status         TEXT NOT NULL DEFAULT 'running',  -- FixStatus
   jira_key       TEXT,                           -- set when the ticket stage ends
   jira_url       TEXT,
-  branch         TEXT,                           -- '<jira_key>-<slug>', set with jira_key
+  branch         TEXT,                           -- '<jira_key>-<slug>', or 'fix/<slug>' without Jira
   pr_number      INTEGER,                        -- in the Alert's Service's Repo
   pr_url         TEXT,
   error_message  TEXT,
@@ -261,7 +271,7 @@ CREATE TABLE fixes (
 | `FixStage` | `ticket`, `branch`, `code`, `tests`, `pr` | `fixes.stage` |
 | `FixStatus` | `running`, `done`, `failed`, `abandoned` | `fixes.status` |
 
-Migration of existing rows: existing Sessions and Action Log rows get a null `alert_id`. Severities move `sev2` to `high`, `sev3` to `medium` and `warn` to `low`; existing Scans get `envs` `[]` and a null `services`.
+Migration of existing rows: existing Sessions and Action Log rows get a null `alert_id`. Severities move `sev2` to `high`, `sev3` to `medium` and `warn` to `low`; existing Scans get `envs` `[]`, a null `services` and `status_codes` `[]`; existing Alerts get a null `http_status` (Behavior 33).
 
 ## API
 
@@ -294,6 +304,7 @@ Errors added here:
   "route": { "id": "uuid", "method": "string", "path": "string" } | null,  // null: a log with no request
   "service": { "id": "uuid", "name": "string", "env": "string", "repo_id": "uuid | null", "repo_url": "string | null" },
   "fingerprint": "string",
+  "http_status": "number | null",     // HTTP status code; null: stored before Scans read codes
   "source": "AlertSource",
   "severity": "Severity",
   "status": "AlertStatus",
@@ -306,6 +317,7 @@ Errors added here:
   "regression_count": 0,
   "waiting_since": "string | null",   // set while status is verified
   "datadog_query": "string",
+  "session_id": "uuid | null",        // the Alert Session, once there is one
   "samples": ["Sample"],              // detail only
   "latest_report": "Report | null",   // detail only
   "review": "Review | null",          // detail only
@@ -323,9 +335,9 @@ Errors added here:
 | --------------- | ---- | ------- |
 | `GET /services` | query `env?` | Services with `routes`, per-Route `state`, `trend` (error counts from the last Scans), `open_alert_count`, `last_scan_at` |
 | `PATCH /services/:id` | `{ repo_id?, repo_url?, check_interval? }` | Service. `repo_url` must look like a Git URL |
-| `POST /services/:id/code` | | `{ service, found: "repo \| url \| null", tried: string[] }`, after looking (Behavior 30) |
+| `POST /services/:id/code` | | 200 `{ service, found: "repo \| url \| null", tried: string[] }`, after looking (Behavior 30) |
 | `PATCH /routes/:id` | `{ ignored?, note? }` | Route |
-| `GET /scans` | query `service_id?` | newest first |
+| `GET /scans` | query `service_id?` | the 100 newest, newest first |
 | `GET /scans/:id` | | Scan with `results: [{ route_id, error_count, state }]` |
 | `POST /scans` | `{ service_id: "uuid \| null", window?: ScanWindow, envs?: string[], services?: string[], status_codes?: number[] }` | 202 Scan in `running`, with `envs`, `services` and `status_codes`. Null `service_id` and no `services` scans every Service. `window` defaults to the Connector's `default_interval`, `envs` to every env, `status_codes` to every code from 400 up; a single Service scans its own env. Rate limits and failures land on the Scan row and `scan.finished` |
 | `GET /monitor/envs` | | `[{ name, configured }]`, the Connector's envs first, `no env` last |
@@ -342,7 +354,7 @@ Errors added here:
 | `GET /alerts/:id/reports` | | every Report version |
 | `GET /reports/:id` | | `Report` |
 | `POST /alerts/:id/verifications` | | 202 `Report` in `running`; `invalid_state`, `service_unlinked` |
-| `POST /alerts/:id/review` | `{ decision: "confirmed \| dismissed", kind: "ReportKind \| null" }` | `Review`, plus `Fix` on confirm. `kind` required for confirm, null for dismiss. `invalid_state`, `connector_not_connected` |
+| `POST /alerts/:id/review` | `{ decision: "confirmed \| dismissed", kind: "ReportKind \| null" }` | `Review`, plus `Fix` on confirm. `kind` required for confirm, null for dismiss. `invalid_state` unless `verified` with a ready Report |
 | `DELETE /alerts/:id/review` | | 204; undoes a dismissal; `invalid_state` otherwise |
 | `GET /fixes/:id` | | `Fix` |
 | `POST /fixes/:id/retry` | | 202; `invalid_state` unless `failed` |
@@ -360,20 +372,24 @@ All server to client.
 | `alert.regressed` | `{ alert_id, regression_count }` | A resolved or dismissed Alert reopens |
 | `verification.stepped` | `{ report_id, index, step: { kind, text } }` | Each Report step as it is stored |
 | `alert.verified` | `{ alert_id, report_id, status: "ready \| failed" }` | A Verification ends |
-| `alert.reviewed` | `{ alert_id, decision: "confirmed \| dismissed \| undone" }` | Confirm, dismiss, undo |
+| `alert.reviewed` | `{ alert_id, decision: "confirmed \| dismissed \| undone" }` | Confirm, dismiss, undo, and `undone` when a PR closes unmerged |
 | `fix.advanced` | `{ fix_id, alert_id, stage, status, jira_key, pr_number }` | A Fix changes stage or status |
 | `alert.resolved` | `{ alert_id }` | A merged PR resolves an Alert |
 
 ## UI
 
-- Monitor, first column, Services: the range (`15m` to `7d`) and a Status field that opens the codes from Behavior 32 with their names and counts, under 4xx, 5xx and other, each class with its own checkbox, and "Every code from 400 up" (the default) on top; both are remembered in the browser. There is no env pick: every env is read. Under them a filter, "All Services", and the Datadog Services from Behavior 31 as rows, A→Z with the Services that have open Alerts but no failing requests in the range among them at 0: name, count, a bar of the count against the busiest, and open Alerts per tier. Each row has a checkbox to tick it for a Scan; the one on "All Services" ticks or unticks every row shown. Ticking does not change the logs shown; picking a row does. At the bottom, Scan: the ticked Services, or else the picked one, or else every listed one, over the range and codes, with Untick to clear the ticks; then the last Scan's window, Services and codes.
-- Monitor, second column, logs of the picked Service or all: tabs All, High, Medium, Low with counts, and the logs as rows: tier, Service when all are shown, status code (amber for 4xx, red for 5xx and above), count, last seen, message, Route. Only Alerts with a picked code show. Closed Alerts show only when asked. The rows come 100 at a time, with "Show 100 more" and how many of the total are drawn; a new Service, tab, Closed or code pick starts at 100 again, and the open Alert stays drawn. Empty: "Connect Datadog in Integrations". Scan failure shows the error code with the last good Scan's time.
-- A button that starts the agent (Verify, Fix, Retry) greys out with a spinner from the click until the run's status is back; Verify stays greyed, reading "Agent verifying…", while the Alert is `verifying`.
-- Alert card: tier, status, Service, env and Route (or "no HTTP route"), counts, the log line, Samples (JSON and message toggle), events timeline, "waiting since" while `verified`, regression badge, and Ignore this Route.
+- Monitor, whole page: with Datadog not connected and no Services stored, it shows only "Connect Datadog in Integrations." Otherwise three columns: Services, logs, and the open Alert ("Pick a log to see it and verify it." when none is open).
+- Monitor, first column, Services, top: the range buttons `15m`, `1h`, `4h`, `24h` and `7d` (`24h` at first), and a Status field that shows "all from 400 up" or the picked codes. It opens the codes from Behavior 32 with their names and counts, under 4xx, 5xx and other, each class with its own checkbox, and "Every code from 400 up" (the default) on top. Ticking every listed code is the same as every code; the last ticked code cannot be unticked. Range and codes are remembered in the browser. There is no env pick: every env is read. While the codes load it reads "Reading status codes…"; with Datadog not connected, "Datadog is not connected."; on an error, "Could not read status codes:" and the reason. A filter box shows once there are more than 8 rows.
+- Monitor, first column, rows: "All Services" with the row count, then the Datadog Services from Behavior 31, A→Z, with the Services that have open Alerts but no failing requests in the range among them at 0. Each row: name, count, a bar of the count against the busiest, and its open Alerts with a picked code as coloured counts per tier (red High, amber Medium, grey Low). Each row has a checkbox to tick it for a Scan; the one on "All Services" ticks or unticks every row the filter shows, and is indeterminate when only some are ticked. Ticking does not change the logs shown; picking a row does, and picking "All Services" shows every Service's logs. States: "Reading Services from Datadog…", "Could not read Services:" and the reason, and "No failing requests in 24h for these status codes."
+- Monitor, first column, bottom: the Scan button (Behavior 34), labelled "Scan checkout-api · 24h" for one ticked or picked Service, "Scan 3 ticked Services · 24h", or "Scan 12 Services · 24h" for every listed one. It is disabled with nothing to scan, and with Datadog not connected ("Connect Datadog in Integrations" on hover). While a Scan runs it shows a spinner and "Scanning…". With ticks, "Untick checkout-api" or "Untick all 3" clears every tick. Under it, the last Scan: "Last Scan 5m ago: 24h of checkout-api, HTTP 500, 502", or "of every Service" and "HTTP 400+". After a failed Scan, "The last Scan hit a Datadog rate limit." or "The last Scan could not read Datadog.", then "Last good one 2h ago." or "No good Scan yet." A refused Scan request shows its error there.
+- Monitor, second column, logs of the picked Service or "All Services": tabs All, High, Medium, Low, each with the count of Alerts in view, and a Closed checkbox (Behavior 35). Each row: severity badge, the Service when all are shown, the status code badge (amber for 4xx, red for 5xx and above, its name on hover), ×count and last seen, the log line, the Route, and the status when it is not `open`. The rows come 100 at a time, with "Show 100 more · 100 of 1240"; a new Service, tab, Closed or code pick starts at 100 again. Empty: "No logs from checkout-api yet. Scan it for the last 24h.", "No logs yet. Pick a Service or Scan them all.", or "None here." when a tab holds none. Error: "Could not read Alerts:" and the reason.
+- Remembered view (`persist-selections-and-runs`): the address holds `?service=<name>&alert=<id>`. The browser keeps the tier tab, Closed, the ticks, the filter, how many logs are drawn, the Samples JSON view and each Alert's picked Report version.
+- A button that starts the agent (Verify, Fix, Retry) greys out with a spinner from the click until the run's status is back. Verify reads "Verify with agent", "Verify again" on a `verified` Alert, and "Starting the agent…" after the click; it stays greyed, reading "Agent verifying…", while the Alert is `verifying`. Retry reads "Retry from" and the failed stage.
+- Alert card: severity badge (red High, amber Medium, grey Low), status, "regression ×N" when it has regressed, "waiting since" while `verified`, the title, Service, env and Route (or "no HTTP route") with Ignore this Route, the event count with first and last seen, the log line, the Datadog query, Samples with a JSON and Messages toggle, and the events timeline.
 - Code: the local Repo picker and the Git URL field. With neither, the card looks for the code by itself, then lists where it looked, with Look again. Still nothing: Verify is disabled and the card says to give one.
-- Report panel: live steps while `running`; when ready, the Report Markdown drawn, then the diff, replay and steps folded, and where the file was saved. Version picker when there are several.
-- Review: Fix with agent (the Report's kind), Fix as the other kind, dismiss, undo dismiss. A line says where the Fix runs and whether a Jira ticket comes first.
-- Fix progress: the five stages, the ticket marked "no Jira" when skipped, the branch, Jira key, PR link, a link to the Session in Workspace, and retry on failure.
+- Report panel: live steps while `running`; when ready, the Report Markdown drawn, then the diff, replay and steps folded, and where the file was saved. A failed one says "The Verification did not finish", with its reason and steps, and asks to verify again. A version picker (`v2 · ready`) shows when there are several.
+- Review, while `verified` with a Report kind: Fix with agent (the Report's kind), Fix as the other kind, and Dismiss. A line says where the Fix runs and whether a Jira ticket comes first; without Jira it says the branch is `fix/<name>`. A dismissed Alert says it is checked again at the next Scan, with Undo.
+- Fix progress: the five stages, the ticket marked "no Jira" when skipped, the branch, Jira key, PR link, "Open the Session →" to the Session in Workspace, and the error with retry on failure.
 
 ## Rejected
 
@@ -387,17 +403,18 @@ All server to client.
 
 ## Glossary
 
-- **Fingerprint**: The identity of an Alert: Service, Route, HTTP status code and the error signature with ids, numbers, timestamps and addresses masked. Two failures with the same Fingerprint belong to one Alert.
+- **Fingerprint**: The identity of an Alert: Service, Route (none for a log with no request), HTTP status code and the error signature with ids, numbers, timestamps and addresses masked. Two failures with the same Fingerprint belong to one Alert.
 - **Regression**: A resolved or dismissed Alert that fails again after a healthy Scan. It reopens the same Alert.
 - **Sample**: One Datadog log event kept on an Alert, with secret values and request body values redacted.
 - **Ticket**: The Jira issue the agent creates when the operator confirms a Report. Its key starts the fix branch name.
 - **Fix**: The work that follows a confirmed Review: ticket (with Jira), branch, code change, tests, push and PR, run by the agent in one Session.
-- **Severity**: An Alert's tier, `high`, `medium` or `low`, from how fast its logs come in.
+- **Severity**: An Alert's tier. High: one 10-minute bucket reaches the rapid threshold. Medium: errors per hour reach the failing threshold with error-level logs. Low: anything else.
 
 ## Seams
 
-- **Backend + SQLite, over HTTP** (Supertest, temporary data directory, fakes for `pup`, the agent runtime, the Atlassian MCP server and the Git host adapter, a fake clock for the scheduler; a local git repository as the clone source): 1 to 9, 11, 12, 14 to 20, 22, 24, 26 to 30. Start-up cases close the app and open it again on the same data directory.
+- **Backend + SQLite, over HTTP** (Supertest, temporary data directory, fakes for `pup`, the agent runtime, the Atlassian MCP server and the Git host adapter, a fake clock for the scheduler; a local git repository as the clone source): 1 to 9 with 1a and 7a, 11, 12, 14 to 20, 22, 24, 26 to 32. Start-up cases close the app and open it again on the same data directory.
 - **Backend + SQLite, over WebSocket**: 13, 21, 23, 25. Asserts the events and the `alert_events` rows written with each change.
+- **Browser (Playwright e2e)**: 33 to 37, and the UI states above.
 - **Unit**: 10, and the log grouping behind 2 and 4. Fingerprint masking, groups by Route and message, the 10-minute peak, the Git URL tag.
 
 ## Out of scope

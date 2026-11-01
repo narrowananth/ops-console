@@ -15,8 +15,8 @@ The console depends on each MCP server's tools and on the `claude` CLI's output 
 Claude Code cannot run is a server the console cannot use.
 
 A service with no browser sign-in that gives the console a token of its own is reached through
-Claude Code only. Bitbucket has two: Atlassian's MCP server for the agent, and `bkt` for fixed
-reads such as the pull request list. The console holds no Bitbucket token; `bkt` keeps its own in
+Claude Code only. Bitbucket has two: Atlassian's MCP server for the agent, and `bkt` for the
+console's own calls, such as the pull request list and the operator's merge. The console holds no Bitbucket token; `bkt` keeps its own in
 the Keychain, and macOS asks once before the daemon may read it. GitHub's OAuth needs a registered app and its secret, which a public repo
 cannot ship, so GitHub uses `gh`'s device sign-in and the operator enters a one-time code the
 console shows.

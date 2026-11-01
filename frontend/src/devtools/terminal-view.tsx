@@ -39,7 +39,7 @@ const WELCOME = [
   { text: '~ $ ops-agent --dev-tools', className: 'font-semibold' },
   { text: '✻ Dev tools agent · local terminal', className: 'text-neutral-500' },
   {
-    text: 'Ask in plain words, e.g. find shop glowbar, or show 5 pending reservations.',
+    text: 'Ask in plain words, e.g. find shop acme, or show 5 pending reservations.',
     className: 'text-neutral-500',
   },
   {
@@ -268,7 +268,7 @@ function Terminal({
             aria-busy={running}
             value={text}
             placeholder={
-              running ? 'The agent is working…' : 'Ask the agent — e.g. find shop glowbar · show 5 pending reservations'
+              running ? 'The agent is working…' : 'Ask the agent — e.g. find shop acme · show 5 pending reservations'
             }
             onChange={(event) => onText(event.target.value)}
             onKeyDown={(event) => {
