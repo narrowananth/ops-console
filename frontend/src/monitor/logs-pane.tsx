@@ -1,12 +1,17 @@
 import { type Alert, AlertStatus, type ScanWindow, SEVERITIES, type Severity } from '@ops-console/shared';
-import { useState } from 'react';
+import { z } from 'zod';
 import { Empty } from '../components/ui/empty';
 import { item } from '../components/ui/item';
 import { useAlerts } from '../lib/queries';
-import { ago, envLabel } from './scan-scope';
+import { useStored } from '../lib/remember';
+import { ago, shown as inMonitor } from './scan-scope';
 import { SEVERITY_LABEL, SeverityBadge } from './severity';
+import { StatusBadge } from './status-picker';
 
 const CLOSED = [AlertStatus.Resolved, AlertStatus.Dismissed];
+
+/** Rows drawn at a time. A Scan can raise more than a thousand Alerts; drawing them all makes every click slow. */
+export const LOGS_PAGE = 100;
 
 function Row({
   alert,
@@ -31,7 +36,7 @@ function Row({
         <span className="flex items-center gap-2 text-[11px]">
           <SeverityBadge severity={alert.severity} />
           {showService && <strong className="min-w-0 truncate text-[12px]">{alert.service.name}</strong>}
-          <span className="font-mono text-neutral-700">{envLabel(alert.service.env)}</span>
+          {alert.http_status !== null && <StatusBadge code={alert.http_status} />}
           <span className="ml-auto flex-none whitespace-nowrap text-neutral-700">
             ×{alert.event_count} · {ago(alert.last_seen_at)}
           </span>
@@ -53,25 +58,32 @@ function Row({
 /** The Monitor's second column: the logs a Scan raised as Alerts, for one Service or all, split into tiers. */
 export function LogsPane({
   service,
-  envs,
+  codes,
   range,
   selected,
   onSelect,
 }: {
   service: string | null;
-  envs: string[];
+  codes: number[];
   range: ScanWindow;
   selected: string | null;
   onSelect: (alertId: string) => void;
 }) {
   const alerts = useAlerts();
-  const [tier, setTier] = useState<Severity | 'all'>('all');
-  const [showClosed, setShowClosed] = useState(false);
+  const [tier, setTier] = useStored<Severity | 'all'>('monitor.tier', z.enum(['all', ...SEVERITIES]), 'all');
+  const [showClosed, setShowClosed] = useStored('monitor.closed', z.boolean(), false);
+  // How many rows are drawn, for the list as it is now picked; a new pick starts at one page again.
+  const view = `${service}|${tier}|${showClosed}|${codes.join(',')}`;
+  const [paged, setPaged] = useStored(
+    'monitor.logs-shown',
+    z.object({ view: z.string(), limit: z.number().int().positive() }),
+    { view, limit: LOGS_PAGE },
+  );
 
   const inScope = (alerts.data ?? []).filter(
     (alert) =>
       (service === null || alert.service.name === service) &&
-      envs.includes(alert.service.env) &&
+      inMonitor(alert, codes) &&
       (showClosed || !CLOSED.includes(alert.status)),
   );
   const counts = Object.fromEntries(
@@ -82,6 +94,11 @@ export function LogsPane({
     .map((alert, index) => ({ alert, index }))
     .sort((a, b) => SEVERITIES.indexOf(a.alert.severity) - SEVERITIES.indexOf(b.alert.severity) || a.index - b.index)
     .map(({ alert }) => alert);
+  const picked = selected === null ? -1 : shown.findIndex((alert) => alert.id === selected);
+  // The open Alert stays drawn even when it sits past the pages shown.
+  const limit = Math.max(paged.view === view ? paged.limit : LOGS_PAGE, picked + 1);
+  const drawn = shown.slice(0, limit);
+  const left = shown.length - drawn.length;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -129,7 +146,7 @@ export function LogsPane({
           </Empty>
         ) : (
           <ul aria-label="Logs" className="m-0 flex list-none flex-col gap-0.5 p-1.5">
-            {shown.map((alert) => (
+            {drawn.map((alert) => (
               <Row
                 key={alert.id}
                 alert={alert}
@@ -138,6 +155,20 @@ export function LogsPane({
                 onSelect={() => onSelect(alert.id)}
               />
             ))}
+            {left > 0 && (
+              <li className="px-1.5 pt-1 pb-2">
+                <button
+                  type="button"
+                  onClick={() => setPaged({ view, limit: limit + LOGS_PAGE })}
+                  className="w-full cursor-pointer rounded-md border border-divider bg-card px-3 py-2 text-xs font-semibold text-text shadow-sm hover:bg-neutral-200"
+                >
+                  Show {Math.min(LOGS_PAGE, left)} more{' '}
+                  <span className="font-mono font-normal text-neutral-700">
+                    · {drawn.length} of {shown.length}
+                  </span>
+                </button>
+              </li>
+            )}
           </ul>
         )}
       </div>

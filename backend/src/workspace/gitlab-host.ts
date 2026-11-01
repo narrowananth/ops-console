@@ -40,6 +40,7 @@ function toPullRequest(mr: z.infer<typeof mrSchema>): OwnedPullRequest {
     head_sha: mr.sha ?? '',
     state: mr.state === 'merged' ? PrState.Merged : mr.state === 'opened' ? PrState.Open : PrState.Closed,
     review_state: PrReviewState.None,
+    approved_by: [],
     checks: PrChecks.None,
     additions: 0,
     deletions: 0,
@@ -105,6 +106,8 @@ export class GitlabHost implements GitHostAdapter {
   }
 
   get = async () => this.unsupported();
+  fileAt = async () => this.unsupported();
+  deleteComment = async () => this.unsupported();
   postComment = async () => this.unsupported();
   setResolved = async () => this.unsupported();
   review = async () => this.unsupported();

@@ -10,6 +10,7 @@ const run = promisify(execFile);
 const PR_FIELDS = `
   number title url body state author { login } headRefName baseRefName headRefOid additions deletions createdAt
   mergedAt reviewDecision comments { totalCount }
+  latestReviews(first: 30) { nodes { state author { login } } }
   reviewThreads(first: 100) { nodes { id isResolved comments(first: 1) { totalCount nodes { databaseId } } } }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`;
 
@@ -28,6 +29,9 @@ const nodeSchema = z.object({
   createdAt: z.string(),
   mergedAt: z.string().nullable(),
   reviewDecision: z.string().nullable(),
+  latestReviews: z
+    .object({ nodes: z.array(z.object({ state: z.string(), author: z.object({ login: z.string() }).nullable() })) })
+    .nullish(),
   comments: z.object({ totalCount: z.number().int() }),
   reviewThreads: z.object({
     nodes: z.array(
@@ -260,12 +264,31 @@ export class GithubHost implements GitHostAdapter {
     });
   }
 
+  async deleteComment(slug: string, _number: number, commentId: string): Promise<void> {
+    await this.rest(
+      commentId.startsWith(ISSUE)
+        ? `repos/${slug}/issues/comments/${commentId.slice(ISSUE.length)}`
+        : `repos/${slug}/pulls/comments/${commentId}`,
+      'DELETE',
+    );
+  }
+
   async review(slug: string, number: number, event: PrReviewEvent, body: string): Promise<void> {
     await this.rest(`repos/${slug}/pulls/${number}/reviews`, 'POST', { event: EVENTS[event], body });
   }
 
   async merge(slug: string, number: number): Promise<void> {
     await this.rest(`repos/${slug}/pulls/${number}/merge`, 'PUT', {});
+  }
+
+  async fileAt(slug: string, ref: string, path: string): Promise<string | null> {
+    const at = `repos/${slug}/contents/${encodePath(path)}?ref=${ref}`;
+    try {
+      return await this.exec(['api', '-H', 'Accept: application/vnd.github.raw', at], 'gh api contents');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
+    }
   }
 
   private async graphql(
@@ -297,10 +320,16 @@ export class GithubHost implements GitHostAdapter {
       if (typeof stderr === 'string' && /rate limit/i.test(stderr)) {
         throw new ApiError(429, ErrorCode.RateLimited, 'GitHub is rate limiting the console');
       }
+      if (typeof stderr === 'string' && /\bHTTP 404\b/.test(stderr)) {
+        throw new ApiError(404, ErrorCode.NotFound, `\`${what}\` found nothing`);
+      }
       throw new ApiError(502, ErrorCode.UpstreamFailed, `\`${what}\` failed`);
     }
   }
 }
+
+/** Each segment of a repository path escaped for a URL; the slashes stay. */
+export const encodePath = (path: string) => path.split('/').map(encodeURIComponent).join('/');
 
 function splitSlug(slug: string): [string, string] {
   const [owner = '', name = ''] = slug.split('/');
@@ -324,6 +353,9 @@ function toPullRequest(node: Node): HostPullRequest {
         : node.reviewDecision === 'CHANGES_REQUESTED'
           ? PrReviewState.ChangesRequested
           : PrReviewState.None,
+    approved_by: (node.latestReviews?.nodes ?? [])
+      .filter((review) => review.state === 'APPROVED')
+      .map((review) => review.author?.login ?? 'ghost'),
     checks:
       rollup === undefined
         ? PrChecks.None

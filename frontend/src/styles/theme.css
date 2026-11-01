@@ -18,6 +18,14 @@
   --color-line: color-mix(in srgb, #201e1d 11%, transparent);
   --color-ok: #2f7d3b;
   --color-warn: #b26b00;
+  --color-diff-add: #e7f5ea;
+  --color-diff-add-strong: #c6e9cf;
+  --color-diff-add-text: #1d6b30;
+  --color-diff-del: #fdeceb;
+  --color-diff-del-strong: #f9cdc7;
+  --color-diff-del-text: #a3200d;
+  --color-diff-hunk: #e9f0fb;
+  --color-diff-hunk-text: #3d5f92;
   --color-neutral-100: #f8f4f4;
   --color-neutral-200: #eae7e7;
   --color-neutral-300: #d7d3d3;
@@ -79,6 +87,14 @@
   --color-line: color-mix(in srgb, #ecebea 10%, transparent);
   --color-ok: #6cc47a;
   --color-warn: #f0a940;
+  --color-diff-add: #15281a;
+  --color-diff-add-strong: #1f3d27;
+  --color-diff-add-text: #8bd699;
+  --color-diff-del: #2e1714;
+  --color-diff-del-strong: #4a221b;
+  --color-diff-del-text: #ff9c89;
+  --color-diff-hunk: #161f2d;
+  --color-diff-hunk-text: #93b3e3;
   --color-neutral-100: #232120;
   --color-neutral-200: #2d2b2a;
   --color-neutral-300: #3b3837;
@@ -111,6 +127,19 @@
     font-size: 14px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+  }
+
+  /*
+   * A scroll box holds what is absolutely placed inside it, such as an `sr-only` label. Without a position, such an
+   * element escapes the box and makes the whole page taller, so the window scrolls past the app into blank space. A
+   * utility that places the box itself (`absolute`, `fixed`, `sticky`) still wins: utilities sit above this layer.
+   */
+  .overflow-auto,
+  .overflow-scroll,
+  .overflow-x-auto,
+  .overflow-y-auto,
+  .overflow-y-scroll {
+    position: relative;
   }
 
   /* Controls are rounded everywhere; a component that wants a pill or a square says so. */

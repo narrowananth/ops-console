@@ -1,4 +1,5 @@
 import type { Message, Part } from '@ops-console/shared';
+import { DiffLines } from '../components/ui/diff';
 import { Markdown } from '../components/ui/markdown';
 import { ComparisonView, ResultView } from '../devtools/result-tables';
 import { asReport, ReportDocument } from './report-document';
@@ -20,16 +21,8 @@ function PartView({ part }: { part: Part }) {
   if (part.kind === 'diff') {
     return (
       <div className="overflow-hidden rounded-md border border-line font-mono text-xs">
-        <div className="bg-surface px-2 py-1 font-bold">{part.file}</div>
-        {part.lines.map((line, index) => (
-          <div
-            // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no id
-            key={index}
-            className={line.sign === '+' ? 'bg-neutral-200' : line.sign === '-' ? 'bg-accent-100 text-accent-700' : ''}
-          >
-            {line.sign} {line.text}
-          </div>
-        ))}
+        <div className="border-b border-line bg-surface px-2 py-1 font-bold">{part.file}</div>
+        <DiffLines lines={part.lines} />
       </div>
     );
   }

@@ -1,8 +1,8 @@
-import { type MonitorEnv, NO_ENV, SCAN_RANGES, ScanWindow } from '@ops-console/shared';
+import { type Alert, AlertStatus, SCAN_RANGES, ScanWindow } from '@ops-console/shared';
 import { useState } from 'react';
 
 const RANGE_KEY = 'ops-console-monitor-range';
-const ENVS_KEY = 'ops-console-monitor-scan-envs';
+const CODES_KEY = 'ops-console-monitor-status-codes';
 
 function stored<T>(key: string, fallback: T, valid: (value: unknown) => value is T): T {
   try {
@@ -14,36 +14,41 @@ function stored<T>(key: string, fallback: T, valid: (value: unknown) => value is
 }
 
 const isRange = (value: unknown): value is ScanWindow => SCAN_RANGES.includes(value as ScanWindow);
-const isNames = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.length > 0 && value.every((name) => typeof name === 'string');
-
-/** How an env reads on screen. */
-export const envLabel = (env: string) => (env === NO_ENV ? 'no env tag' : env);
+const isCodes = (value: unknown): value is number[] =>
+  Array.isArray(value) && value.every((code) => Number.isInteger(code) && code >= 400);
 
 export type ScanScope = {
   range: ScanWindow;
   pickRange: (range: ScanWindow) => void;
-  /** The envs ticked: the operator's last pick, else the Connector's envs and the logs with no env tag. */
-  envs: string[];
-  toggleEnv: (env: string) => void;
+  /** The HTTP status codes picked; empty for every code from 400 up. */
+  codes: number[];
+  pickCodes: (codes: number[]) => void;
 };
 
-/** The range and envs the Monitor lists Services for and scans; both kept across reloads. */
-export function useScanScope(known: MonitorEnv[] | undefined): ScanScope {
+/**
+ * Whether the Monitor lists an Alert. One with no HTTP status code came from before Scans read codes: it shows only
+ * while the operator is working on it. Any other shows when its code is in the pick, or the pick is every code.
+ */
+export function shown(alert: Alert, codes: number[] = []): boolean {
+  if (alert.http_status === null) return alert.status !== AlertStatus.Open;
+  return codes.length === 0 || codes.includes(alert.http_status);
+}
+
+/** The range and HTTP status codes the Monitor lists Services for and scans, in every env; kept across reloads. */
+export function useScanScope(): ScanScope {
   const [range, setRange] = useState<ScanWindow>(() => stored(RANGE_KEY, ScanWindow.Day, isRange));
-  const [picked, setPicked] = useState<string[] | null>(() => stored<string[] | null>(ENVS_KEY, null, isNames));
-  const envs = picked ?? (known ?? []).filter((env) => env.configured || env.name === NO_ENV).map((env) => env.name);
+  const [codes, setCodes] = useState<number[]>(() => stored<number[]>(CODES_KEY, [], isCodes));
   return {
     range,
     pickRange: (next) => {
       setRange(next);
       localStorage.setItem(RANGE_KEY, JSON.stringify(next));
     },
-    envs,
-    toggleEnv: (env) => {
-      const next = envs.includes(env) ? envs.filter((other) => other !== env) : [...envs, env];
-      setPicked(next);
-      localStorage.setItem(ENVS_KEY, JSON.stringify(next));
+    codes,
+    pickCodes: (next) => {
+      const sorted = [...new Set(next)].sort((a, b) => a - b);
+      setCodes(sorted);
+      localStorage.setItem(CODES_KEY, JSON.stringify(sorted));
     },
   };
 }

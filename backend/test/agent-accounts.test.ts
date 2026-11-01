@@ -619,6 +619,42 @@ describe('a run rejected for its limit', () => {
   });
 });
 
+describe('a run whose account cannot sign in', () => {
+  it('marks the account signed out and resumes once on the next signed-in one', async () => {
+    const daemon = await start();
+    const { events, close } = await listen(daemon);
+    const personal = await addSignedIn(daemon, 'personal');
+    const [primary] = (await accounts(daemon)).data;
+    await api(daemon).post(`/agent-accounts/${primary?.id}/activate`);
+
+    const id = daemon.createSession();
+    daemon.sdk.script({ signInExpired: true });
+    const session = await converse(daemon, id, 'go');
+
+    expect(session).toMatchObject({ state: 'idle', account_id: personal.id });
+    expect(switched(events).at(-1)).toMatchObject({ from: primary?.id, to: personal.id, reason: 'sign_in_failed' });
+    const list = await accounts(daemon);
+    expect(list.data.find((account: { id: string }) => account.id === primary?.id)).toMatchObject({ signed_in: false });
+    expect(daemon.sdk.calls.at(-1)).toMatchObject({ prompt: 'go', configDir: personal.configDir });
+    close();
+  });
+
+  it('fails with unauthorized when no other account is signed in', async () => {
+    const daemon = await start();
+    const { events, close } = await listen(daemon);
+    const id = daemon.createSession();
+    daemon.sdk.script({ signInExpired: true });
+    expect((await converse(daemon, id, 'go')).state).toBe('failed');
+    await until(() => events.some((event) => event.event === 'session.finished'), Boolean);
+    expect(events.find((event) => event.event === 'session.finished')?.data).toMatchObject({
+      status: 'failed',
+      error_code: 'unauthorized',
+    });
+    expect(daemon.sdk.calls).toHaveLength(1);
+    close();
+  });
+});
+
 describe('removing an account', () => {
   it('moves its Sessions to the active account, signs it out and deletes the row', async () => {
     const daemon = await start();

@@ -330,8 +330,10 @@ export const scans = sqliteTable(
     windowSize: text('window_size').$type<ScanWindow>().notNull(),
     /** JSON array of the Datadog environments read. */
     envs: text().notNull().default('[]'),
-    /** JSON array of the Datadog Service names read; null for every Service with error or warn logs. */
+    /** JSON array of the Datadog Service names read; null for every Service with failing requests. */
     services: text(),
+    /** JSON array of the HTTP status codes read; empty for every code from 400 up. */
+    statusCodes: text('status_codes').notNull().default('[]'),
     status: text()
       .$type<ScanStatus>()
       .notNull()
@@ -376,6 +378,8 @@ export const alerts = sqliteTable(
       .notNull()
       .references(() => routes.id, { onDelete: 'cascade' }),
     fingerprint: text().notNull().unique(),
+    /** The HTTP status code its logs answered with; null for Alerts from before Scans read codes. */
+    httpStatus: integer('http_status'),
     source: text()
       .$type<AlertSource>()
       .notNull()

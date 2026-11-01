@@ -4,6 +4,7 @@ import { ErrorCode, PrChecks, type PrFile, PrReviewEvent, PrReviewState, PrState
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import type { GitHostAdapter, HostComment, HostPullRequest, NewHostComment, OwnedPullRequest } from './git-host';
+import { encodePath } from './github-host';
 
 const run = promisify(execFile);
 
@@ -34,7 +35,15 @@ const prSchema = z.object({
   created_on: z.string(),
   updated_on: z.string().nullish(),
   comment_count: z.number().int().nullish(),
-  participants: z.array(z.object({ approved: z.boolean().nullish(), state: z.string().nullish() })).nullish(),
+  participants: z
+    .array(
+      z.object({
+        approved: z.boolean().nullish(),
+        state: z.string().nullish(),
+        user: z.object({ display_name: z.string().nullish(), nickname: z.string().nullish() }).nullish(),
+      }),
+    )
+    .nullish(),
   links: z.object({ html: z.object({ href: z.string() }) }),
 });
 
@@ -79,6 +88,9 @@ function toPullRequest(pr: BitbucketPr): HostPullRequest {
       : (pr.participants ?? []).some((participant) => participant.approved)
         ? PrReviewState.Approved
         : PrReviewState.None,
+    approved_by: (pr.participants ?? [])
+      .filter((participant) => participant.approved)
+      .map((participant) => participant.user?.display_name ?? who(participant.user)),
     checks: PrChecks.None,
     additions: 0,
     deletions: 0,
@@ -147,7 +159,7 @@ export class BitbucketHost implements GitHostAdapter {
   }
 
   async owners(): Promise<string[]> {
-    const out = await this.json('/user/permissions/workspaces', { pagelen: '100' });
+    const out = await this.json('/user/workspaces', { pagelen: '100' });
     return page(z.object({ workspace: z.object({ slug: z.string() }) }))
       .parse(out)
       .values.map((value) => value.workspace.slug);
@@ -181,11 +193,13 @@ export class BitbucketHost implements GitHostAdapter {
 
   async get(slug: string, number: number) {
     const base = `/repositories/${slug}/pullrequests/${number}`;
-    const [pr, stats, diff, comments] = await Promise.all([
+    // Five reads side by side: each `bkt` call is a process and a round trip, so in a row they add up.
+    const [pr, stats, diff, comments, checks] = await Promise.all([
       this.json(base),
       this.json(`${base}/diffstat`, { pagelen: '500' }),
       this.exec(['api', `${base}/diff`], 'bkt api diff'),
       this.json(`${base}/comments`, { pagelen: '100' }),
+      this.json(`${base}/statuses`, { pagelen: '100' }),
     ]);
     const parsed = prSchema.parse(pr);
     const files = diffFiles(diff, page(diffstatSchema).parse(stats).values);
@@ -193,12 +207,9 @@ export class BitbucketHost implements GitHostAdapter {
       .parse(comments)
       .values.filter((comment) => !comment.deleted)
       .map(toComment);
-    const head = parsed.source.commit?.hash;
-    const statuses = head
-      ? page(statusSchema)
-          .parse(await this.json(`/repositories/${slug}/commit/${head}/statuses`, { pagelen: '100' }))
-          .values.map((status) => status.state)
-      : [];
+    const statuses = page(statusSchema)
+      .parse(checks)
+      .values.map((status) => status.state);
     return {
       pr: {
         ...toPullRequest(parsed),
@@ -233,6 +244,11 @@ export class BitbucketHost implements GitHostAdapter {
     await this.exec(['api', path, '-X', resolved ? 'POST' : 'DELETE'], 'bkt api resolve');
   }
 
+  async deleteComment(slug: string, number: number, commentId: string): Promise<void> {
+    const path = `/repositories/${slug}/pullrequests/${number}/comments/${commentId}`;
+    await this.exec(['api', path, '-X', 'DELETE'], 'bkt api delete comment');
+  }
+
   async review(slug: string, number: number, event: PrReviewEvent, body: string): Promise<void> {
     const base = `/repositories/${slug}/pullrequests/${number}`;
     if (event === PrReviewEvent.Approve) await this.exec(['api', `${base}/approve`, '-X', 'POST'], 'bkt api approve');
@@ -245,6 +261,15 @@ export class BitbucketHost implements GitHostAdapter {
 
   async merge(slug: string, number: number): Promise<void> {
     await this.json(`/repositories/${slug}/pullrequests/${number}/merge`, {}, 'POST', {});
+  }
+
+  async fileAt(slug: string, ref: string, path: string): Promise<string | null> {
+    try {
+      return await this.exec(['api', `/repositories/${slug}/src/${ref}/${encodePath(path)}`], 'bkt api src');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
+    }
   }
 
   private async json(
@@ -270,6 +295,9 @@ export class BitbucketHost implements GitHostAdapter {
       const { stderr } = error as { stderr?: unknown };
       if (typeof stderr === 'string' && /\b429\b|rate limit/i.test(stderr)) {
         throw new ApiError(429, ErrorCode.RateLimited, 'Bitbucket is rate limiting the console');
+      }
+      if (typeof stderr === 'string' && /\b404\b|not found/i.test(stderr)) {
+        throw new ApiError(404, ErrorCode.NotFound, `\`${what}\` found nothing`);
       }
       throw new ApiError(502, ErrorCode.UpstreamFailed, `\`${what}\` failed`);
     }

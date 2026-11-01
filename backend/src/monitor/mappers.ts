@@ -97,6 +97,7 @@ export function toAlert(
       repo_url: service.repoUrl,
     },
     fingerprint: row.fingerprint,
+    http_status: row.httpStatus,
     source: row.source,
     severity: row.severity,
     status: row.status,

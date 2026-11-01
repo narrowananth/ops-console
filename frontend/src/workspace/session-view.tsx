@@ -1,11 +1,13 @@
 import { SessionState } from '@ops-console/shared';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
+import { z } from 'zod';
 import { ApprovalPrompts } from '../agents/approval-prompts';
 import { SessionChips } from '../agents/session-chips';
 import { MessageView } from '../agents/transcript';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
 import { useDeleteSession, useMessages, useRepoSessions, useRepos, useSendMessage } from '../lib/queries';
+import { useStored } from '../lib/remember';
 import { BranchSwitcher } from './branch-switcher';
 
 export function SessionView({ id, onGone }: { id: string; onGone: () => void }) {
@@ -14,7 +16,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const messages = useMessages(id);
   const send = useSendMessage(id);
   const remove = useDeleteSession();
-  const [text, setText] = useState('');
+  const [text, setText] = useStored(`workspace.draft.session.${id}`, z.string(), '');
   const session = sessions.data?.find((candidate) => candidate.id === id);
   const gone = sessions.isSuccess && session === undefined;
   useEffect(() => {

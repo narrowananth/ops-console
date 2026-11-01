@@ -11,6 +11,7 @@ import {
   PR_HOSTS,
   type PrAgentReview,
   type PrComment,
+  type PrFileContent,
   PrReviewEvent,
   PrReviewState,
   PrState,
@@ -37,14 +38,37 @@ import {
 type RepoRow = typeof repos.$inferSelect;
 type ReviewRow = typeof prAgentReviews.$inferSelect;
 
-/** A list read this recently is served from memory. */
+/** A list read this recently is served from memory. Older, it is still served at once while a new read runs. */
 export const LIST_TTL_MS = 60_000;
 
-type Entry = { at: number; prs: HostPullRequest[] };
-type OwnerEntry = { at: number; prs: OwnedPullRequest[] };
+/** A pull request's detail read this recently is served from memory; older, like a list. */
+const DETAIL_TTL_MS = 15_000;
+
+/** `failed`: the last background read failed, so what is kept may be out of date. `tried`: when that read ran. */
+type Kept = { at: number; failed?: boolean; tried?: number };
+type Entry = Kept & { prs: HostPullRequest[] };
+type OwnerEntry = Kept & { prs: OwnedPullRequest[] };
+type HostDetail = Awaited<ReturnType<GitHostAdapter['get']>>;
+type DetailEntry = Kept & { value: HostDetail };
+
+const expired = (entry: Kept, ttl: number) => Date.now() - Math.max(entry.at, entry.tried ?? 0) >= ttl;
 
 /** How long the list of owners a host lets the operator read is kept. */
 const OWNERS_TTL_MS = 10 * 60_000;
+
+/** Pull requests added, gone or changed between two reads of a list, by number. */
+function changedNumbers<T extends HostPullRequest>(
+  before: T[],
+  after: T[],
+  scope: (pr: T) => string = () => '',
+): number[] {
+  const old = new Map(before.map((pr) => [`${scope(pr)}#${pr.number}`, signature(pr)]));
+  const now = new Map(after.map((pr) => [`${scope(pr)}#${pr.number}`, signature(pr)]));
+  const out = new Set<number>();
+  for (const pr of after) if (old.get(`${scope(pr)}#${pr.number}`) !== signature(pr)) out.add(pr.number);
+  for (const pr of before) if (!now.has(`${scope(pr)}#${pr.number}`)) out.add(pr.number);
+  return [...out];
+}
 
 const sameSlug = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -72,7 +96,15 @@ const CONNECTOR_OF: Partial<Record<GitHost, ConnectorId>> = {
 };
 
 const signature = (pr: HostPullRequest) =>
-  [pr.head_sha, pr.state, pr.review_state, pr.checks, pr.comment_count, pr.resolved_count].join('|');
+  [
+    pr.head_sha,
+    pr.state,
+    pr.review_state,
+    pr.approved_by.join(','),
+    pr.checks,
+    pr.comment_count,
+    pr.resolved_count,
+  ].join('|');
 
 /** Pull requests live on the Git host. This keeps list reads in memory for 60 seconds and adds what only the console knows. */
 @Injectable()
@@ -80,6 +112,9 @@ export class PullRequestsService implements OpenPrBranches {
   private readonly logger = new Logger('pull-requests');
   private readonly cache = new Map<string, Entry>();
   private readonly ownerCache = new Map<string, OwnerEntry>();
+  private readonly details = new Map<string, DetailEntry>();
+  /** Background reads under way, one per cache key. */
+  private readonly reading = new Map<string, Promise<void>>();
   private readonly ownersOf = new Map<GitHost, { at: number; owners: string[] }>();
   private readonly refreshListeners: (() => void)[] = [];
 
@@ -112,33 +147,47 @@ export class PullRequestsService implements OpenPrBranches {
       const imported = this.hostedRepos();
       const covered = new Set<string>();
       // Every repository of every owner the operator can read on each connected host.
-      for (const host of PR_HOSTS.filter((one) => this.hosts.supports(one) && this.connected(one))) {
-        for (const owner of await this.owners(host, imported)) {
-          const read = await this.readOwner(host, owner, query.state).catch((error) => {
-            this.logger.warn(`${host} ${owner}: ${error instanceof Error ? error.message : String(error)}`);
-            return null;
-          });
-          if (read === null) {
-            stale = true;
-            continue;
-          }
-          covered.add(`${host}:${owner.toLowerCase()}`);
-          seen(read.at, read.stale);
-          const bySlug = new Map<string, OwnedPullRequest[]>();
-          for (const pr of read.prs) bySlug.set(pr.slug, [...(bySlug.get(pr.slug) ?? []), pr]);
-          for (const [slug, prs] of bySlug) {
-            const repo = imported.find((one) => one.host === host && sameSlug(one.remoteSlug ?? '', slug)) ?? null;
-            // The Repo's own list is this read too, so a Refresh compares against it.
-            if (repo && !read.stale) this.cache.set(this.key(repo.id, query.state), { at: read.at, prs });
-            data.push(...this.decorate(repo, host, slug, prs));
-          }
+      // Hosts and owners are read side by side; the list is put together in their order.
+      const hosts = PR_HOSTS.filter((one) => this.hosts.supports(one) && this.connected(one));
+      const reads = await Promise.all(
+        hosts.map(async (host) => {
+          const owners = await this.owners(host, imported);
+          return Promise.all(
+            owners.map(async (owner) => ({
+              host,
+              owner,
+              read: await this.readOwner(host, owner, query.state).catch((error) => {
+                this.logger.warn(`${host} ${owner}: ${error instanceof Error ? error.message : String(error)}`);
+                return null;
+              }),
+            })),
+          );
+        }),
+      );
+      for (const { host, owner, read } of reads.flat()) {
+        if (read === null) {
+          stale = true;
+          continue;
+        }
+        covered.add(`${host}:${owner.toLowerCase()}`);
+        seen(read.at, read.stale);
+        const bySlug = new Map<string, OwnedPullRequest[]>();
+        for (const pr of read.prs) bySlug.set(pr.slug, [...(bySlug.get(pr.slug) ?? []), pr]);
+        for (const [slug, prs] of bySlug) {
+          const repo = imported.find((one) => one.host === host && sameSlug(one.remoteSlug ?? '', slug)) ?? null;
+          // The Repo's own list is this read too, so a Refresh compares against it.
+          if (repo && !read.stale) this.cache.set(this.key(repo.id, query.state), { at: read.at, prs });
+          data.push(...this.decorate(repo, host, slug, prs));
         }
       }
       // An imported Repo under an owner no list covered is read on its own.
-      for (const repo of imported) {
+      const alone = imported.filter((repo) => {
         const owner = (repo.remoteSlug ?? '').split('/')[0]?.toLowerCase() ?? '';
-        if (!this.connected(repo.host) || covered.has(`${repo.host}:${owner}`)) continue;
-        const read = await this.read(repo, query.state).catch(() => null);
+        return this.connected(repo.host) && !covered.has(`${repo.host}:${owner}`);
+      });
+      const own = await Promise.all(alone.map((repo) => this.read(repo, query.state).catch(() => null)));
+      for (const [index, repo] of alone.entries()) {
+        const read = own[index] ?? null;
         if (read === null) {
           stale = true;
           continue;
@@ -189,13 +238,19 @@ export class PullRequestsService implements OpenPrBranches {
 
   async get(repoId: string, number: number): Promise<PullRequestDetail> {
     const repo = this.hosted(repoId);
-    const { pr, files, comments } = await this.adapter(repo).get(repo.remoteSlug as string, number);
+    const { pr, files, comments } = await this.detail(repo, number);
     return {
       ...(this.decorate(repo, repo.host, repo.remoteSlug as string, [pr])[0] as PullRequest),
       repo_id: repo.id,
       files,
       comments: this.markComments(repo.id, number, comments),
     };
+  }
+
+  /** One file of the pull request at `ref`, read from the host. */
+  async file(repoId: string, path: string, ref: string): Promise<PrFileContent> {
+    const repo = this.hosted(repoId);
+    return { path, ref, text: await this.adapter(repo).fileAt(repo.remoteSlug as string, ref, path) };
   }
 
   async comment(
@@ -224,6 +279,31 @@ export class PullRequestsService implements OpenPrBranches {
     this.drop(repo.id);
     const after = (await adapter.get(slug, number)).comments;
     return this.markComments(repo.id, number, after).find((comment) => comment.id === commentId) as PrComment;
+  }
+
+  /** Deletes a comment the operator or the agent wrote; anyone else's is refused before the host is asked. */
+  async deleteComment(repoId: string, number: number, commentId: string): Promise<void> {
+    const repo = this.hosted(repoId);
+    const adapter = this.adapter(repo);
+    const slug = repo.remoteSlug as string;
+    const found = this.markComments(repo.id, number, (await adapter.get(slug, number)).comments).find(
+      (comment) => comment.id === commentId,
+    );
+    if (!found) throw new ApiError(404, ErrorCode.NotFound, 'no such comment');
+    if (!found.is_mine) throw new ApiError(409, ErrorCode.InvalidState, 'You can delete only your own comments');
+    await adapter.deleteComment(slug, number, commentId);
+    this.store.write((tx) => {
+      tx.delete(agentComments)
+        .where(
+          and(
+            eq(agentComments.repoId, repo.id),
+            eq(agentComments.prNumber, number),
+            eq(agentComments.commentId, commentId),
+          ),
+        )
+        .run();
+    });
+    this.drop(repo.id);
   }
 
   /** Approve and request changes are refused on the operator's own pull request. */
@@ -318,9 +398,53 @@ export class PullRequestsService implements OpenPrBranches {
     return this.hosts.supports(host) ? this.hosts.for(host) : null;
   }
 
+  /**
+   * A pull request as the host has it, kept like a list. Writes read the host themselves; this is for showing it.
+   */
+  async detail(repo: RepoRow, number: number): Promise<HostDetail> {
+    const key = `${repo.id}:#${number}`;
+    const read = () => this.adapter(repo).get(repo.remoteSlug as string, number);
+    const hit = this.details.get(key);
+    if (!hit) {
+      const value = await read();
+      this.details.set(key, { at: Date.now(), value });
+      return value;
+    }
+    if (expired(hit, DETAIL_TTL_MS)) {
+      this.inBackground(key, async () => {
+        try {
+          const value = await read();
+          if (this.details.get(key) !== hit) return;
+          this.details.set(key, { at: Date.now(), value });
+          if (JSON.stringify(value) !== JSON.stringify(hit.value)) {
+            this.announce(repo.id, [{ repo_id: repo.id, number }]);
+          }
+        } catch {
+          if (this.details.get(key) === hit) this.details.set(key, { ...hit, failed: true, tried: Date.now() });
+        }
+      });
+    }
+    return hit.value;
+  }
+
+  /** Runs `work` unless a background read for `key` is already under way. */
+  private inBackground(key: string, work: () => Promise<void>): void {
+    if (this.reading.has(key)) return;
+    this.reading.set(
+      key,
+      work().finally(() => this.reading.delete(key)),
+    );
+  }
+
+  /** Tells the UI that a background read brought something new, so it reads again; the read is served from memory. */
+  private announce(repoId: string | null, changed: { repo_id: string; number: number }[]): void {
+    this.store.write((_tx, emit) => emit('pull_request.refreshed', { repo_id: repoId, status: 'ok', changed }));
+  }
+
   /** Forget what was read for a Repo, so the next list reads the host. */
   drop(repoId: string): void {
     for (const key of this.cache.keys()) if (key.startsWith(`${repoId}:`)) this.cache.delete(key);
+    for (const key of this.details.keys()) if (key.startsWith(`${repoId}:`)) this.details.delete(key);
     // The owner's list holds the Repo's pull requests too.
     const repo = this.store.db.select().from(repos).where(eq(repos.id, repoId)).get();
     const owner = repo?.remoteSlug?.split('/')[0]?.toLowerCase();
@@ -329,6 +453,7 @@ export class PullRequestsService implements OpenPrBranches {
   }
 
   markComments(repoId: string, number: number, comments: HostComment[]): PrComment[] {
+    const login = this.login(this.repoRow(repoId).host);
     const mine = new Set(
       this.store.db
         .select({ id: agentComments.commentId })
@@ -340,6 +465,7 @@ export class PullRequestsService implements OpenPrBranches {
     return comments.map((comment) => ({
       ...comment,
       by_agent: mine.has(comment.id),
+      is_mine: mine.has(comment.id) || (login !== null && comment.author === login),
       reply_count: comments.filter((other) => other.parent_id === comment.id).length,
     }));
   }
@@ -367,20 +493,40 @@ export class PullRequestsService implements OpenPrBranches {
     );
   }
 
-  /** The cached list, or a fresh one; a failed read falls back to the cache and says it is stale. */
+  /**
+   * The kept list, read again in the background once it is a minute old; with nothing kept, a fresh one. A failed
+   * background read leaves the list kept and marks it stale.
+   */
   private async read(repo: RepoRow, state: PrState): Promise<{ at: number; prs: HostPullRequest[]; stale: boolean }> {
     const key = this.key(repo.id, state);
-    const hit = this.cache.get(key);
-    if (hit && Date.now() - hit.at < LIST_TTL_MS) return { ...hit, stale: false };
-    try {
+    const fetch = async () => {
       this.hosted(repo.id);
-      const entry = { at: Date.now(), prs: await this.adapter(repo).list(repo.remoteSlug as string, state) };
+      return { at: Date.now(), prs: await this.adapter(repo).list(repo.remoteSlug as string, state) };
+    };
+    const hit = this.cache.get(key);
+    if (!hit) {
+      const entry = await fetch();
       this.cache.set(key, entry);
       return { ...entry, stale: false };
-    } catch (error) {
-      if (hit) return { ...hit, stale: true };
-      throw error;
     }
+    if (expired(hit, LIST_TTL_MS)) {
+      this.inBackground(key, async () => {
+        try {
+          const entry = await fetch();
+          if (this.cache.get(key) !== hit) return;
+          this.cache.set(key, entry);
+          if (changedNumbers(hit.prs, entry.prs).length > 0) {
+            this.announce(
+              repo.id,
+              changedNumbers(hit.prs, entry.prs).map((number) => ({ repo_id: repo.id, number })),
+            );
+          }
+        } catch {
+          if (this.cache.get(key) === hit) this.cache.set(key, { ...hit, failed: true, tried: Date.now() });
+        }
+      });
+    }
+    return { at: hit.at, prs: hit.prs, stale: hit.failed === true };
   }
 
   private async refreshAll(wanted: RepoRow[], before: Map<string, Entry | undefined>, repoId: string | null) {
@@ -422,7 +568,8 @@ export class PullRequestsService implements OpenPrBranches {
           this.logger.warn(`${host} owners: ${error instanceof Error ? error.message : String(error)}`);
           return [];
         });
-      if (owners.length > 0) this.ownersOf.set(host, { at: Date.now(), owners });
+      // An empty answer is kept too: asking again on every list would add the host's delay to each one.
+      this.ownersOf.set(host, { at: Date.now(), owners });
     }
     const out: string[] = [];
     const add = (owner: string | null | undefined) => {
@@ -454,16 +601,26 @@ export class PullRequestsService implements OpenPrBranches {
     state: PrState,
   ): Promise<{ at: number; prs: OwnedPullRequest[]; stale: boolean }> {
     const key = `${host}:${owner.toLowerCase()}:${state}`;
+    const fetch = async () => ({ at: Date.now(), prs: await this.hosts.for(host).listOwner(owner, state) });
     const hit = this.ownerCache.get(key);
-    if (hit && Date.now() - hit.at < LIST_TTL_MS) return { ...hit, stale: false };
-    try {
-      const entry = { at: Date.now(), prs: await this.hosts.for(host).listOwner(owner, state) };
+    if (!hit) {
+      const entry = await fetch();
       this.ownerCache.set(key, entry);
       return { ...entry, stale: false };
-    } catch (error) {
-      if (hit) return { ...hit, stale: true };
-      throw error;
     }
+    if (expired(hit, LIST_TTL_MS)) {
+      this.inBackground(key, async () => {
+        try {
+          const entry = await fetch();
+          if (this.ownerCache.get(key) !== hit) return;
+          this.ownerCache.set(key, entry);
+          if (changedNumbers(hit.prs, entry.prs, (pr) => pr.slug).length > 0) this.announce(null, []);
+        } catch {
+          if (this.ownerCache.get(key) === hit) this.ownerCache.set(key, { ...hit, failed: true, tried: Date.now() });
+        }
+      });
+    }
+    return { at: hit.at, prs: hit.prs, stale: hit.failed === true };
   }
 
   /** Adds what only the console knows: whose it is, which Session and which Agent Review belong to it. */

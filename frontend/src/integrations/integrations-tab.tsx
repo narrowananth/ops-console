@@ -1,19 +1,32 @@
 import type { ConnectorId } from '@ops-console/shared';
-import { useState } from 'react';
 import { PageColumn } from '../app/page';
 import { Empty } from '../components/ui/empty';
 import { useConnectors, useMcpServers } from '../lib/queries';
+import { useAddress } from '../lib/remember';
 import { ascending } from '../lib/sort';
 import { ConnectorDrawer, ConnectorRow } from './connector';
 import { McpDetail, ServerRow } from './mcp-server';
 
 type Open = { kind: 'connector'; id: ConnectorId } | { kind: 'mcp'; name: string } | null;
 
+function parseOpen(value: string | null): Open {
+  if (value?.startsWith('connector:'))
+    return { kind: 'connector', id: value.slice('connector:'.length) as ConnectorId };
+  if (value?.startsWith('mcp:')) return { kind: 'mcp', name: value.slice('mcp:'.length) };
+  return null;
+}
+
 /** Integrations: the Connectors, then every MCP Server no Connector stands for; the picked one opens beside the list. */
 export function IntegrationsTab() {
   const connectors = useConnectors();
   const servers = useMcpServers();
-  const [open, setOpen] = useState<Open>(null);
+  // The open Connector or MCP Server lives in the address: `connector:<id>` or `mcp:<name>`.
+  const [address, setAddress] = useAddress('open');
+  const open = parseOpen(address.open);
+  const setOpen = (next: Open) =>
+    setAddress({
+      open: next === null ? null : next.kind === 'connector' ? `connector:${next.id}` : `mcp:${next.name}`,
+    });
   const back = () => setOpen(null);
 
   if (connectors.isPending || servers.isPending) return <Empty>Loading integrations…</Empty>;

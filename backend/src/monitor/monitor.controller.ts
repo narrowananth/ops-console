@@ -17,8 +17,10 @@ import {
   reviewAlertSchema,
   type Scan,
   type Service,
+  type StatusCodeCount,
   scansQuerySchema,
   servicesQuerySchema,
+  statusCodesQuerySchema,
 } from '@ops-console/shared';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
@@ -84,8 +86,8 @@ export class MonitorController {
 
   @Post('scans')
   @HttpCode(202)
-  startScan(@Body() body: unknown): { data: Scan } {
-    return { data: this.scans.start(parseInput(createScanSchema, body, 'body')) };
+  async startScan(@Body() body: unknown): Promise<{ data: Scan }> {
+    return { data: await this.scans.start(parseInput(createScanSchema, body, 'body')) };
   }
 
   @Get('monitor/envs')
@@ -95,8 +97,15 @@ export class MonitorController {
 
   @Get('monitor/datadog-services')
   async datadogServices(@Query() query: unknown): Promise<{ data: DatadogService[] }> {
-    const { window, envs } = parseInput(datadogServicesQuerySchema, query, 'query');
-    return { data: await this.scans.datadogServices(window, envs) };
+    const { window, envs, codes } = parseInput(datadogServicesQuerySchema, query, 'query');
+    return { data: await this.scans.datadogServices(window, envs, codes ?? []) };
+  }
+
+  /** The HTTP status codes from 400 up with requests in the range, every env together, busiest first. */
+  @Get('monitor/status-codes')
+  async statusCodes(@Query() query: unknown): Promise<{ data: StatusCodeCount[] }> {
+    const { window } = parseInput(statusCodesQuerySchema, query, 'query');
+    return { data: await this.scans.statusCodes(window) };
   }
 
   @Get('alerts')

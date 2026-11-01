@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import { Empty } from '../components/ui/empty';
 import { ApiError } from '../lib/api';
 import { useHealth } from '../lib/queries';
-import { sessionToken } from '../lib/session';
+import { forgetToken, sessionToken } from '../lib/session';
 import { Shell } from './shell';
 import { useUi } from './ui-store';
 
@@ -23,7 +23,11 @@ function Gate() {
     return <SignIn />;
   }
   if (health.isPending) return <Empty>Connecting to the daemon…</Empty>;
-  if (health.error instanceof ApiError && health.error.code === ErrorCode.Unauthorized) return <SignIn />;
+  if (health.error instanceof ApiError && health.error.code === ErrorCode.Unauthorized) {
+    // A reinstall made a new token; the kept one will not work again.
+    forgetToken();
+    return <SignIn />;
+  }
   if (health.isError) {
     return (
       <Panel>

@@ -29,22 +29,27 @@ Branches
 
 Pull requests
 
-9. Listing pull requests reads the Git host, kept in the daemon's memory per Repo for up to 60 seconds. Refresh drops that cache.
-10. When the host rate limits or fails and a cached list exists, the list comes back with `meta.stale: true`. With nothing cached it returns `rate_limited` or `upstream_failed`. The cache is empty after a daemon restart.
+9. Listing pull requests reads the Git host, kept in the daemon's memory per Repo. A list under 60 seconds old is served as is. An older one is served at once while the host is read again in the background; when that read finds a pull request added, gone or changed, `pull_request.refreshed` goes out with them in `changed`, and the next list has it. A pull request's detail is kept the same way for 15 seconds, and a change to it goes out as `pull_request.refreshed` with that pull request. Refresh drops that cache. With nothing kept, the list waits for the host.
+10. When the host rate limits or fails on a background read, the kept list comes back with `meta.stale: true` from the next list on. With nothing cached it returns `rate_limited` or `upstream_failed`. The cache is empty after a daemon restart.
 11. Posting a comment, a reply or a resolve goes to the host. On failure nothing changes. On success the cache for that PR is dropped.
 12. A pull request is `is_mine` when its `author` equals the `login` on the Git host's Connector (`04-settings-connectors`), or when the agent opened it (`by_agent`).
 13. Approving or requesting changes on a PR whose `author` equals that `login` is refused with `invalid_state`. Commenting is allowed.
 14. `comment_count` counts every comment, replies included. `resolved_count` counts resolved threads.
 15. Merging is an operator endpoint. It reads the review state from the host and needs `approved`, else `invalid_state`. It writes an Action Log row of kind `pr` before calling the host. If the host rejects it, the PR stays open and the response is `upstream_failed`.
-23. With no `repo_id`, the list covers every repository on each connected host: per owner the host lets the operator read (the GitHub login and its orgs, the Bitbucket workspaces, the GitLab user and top-level groups), plus the Connector's own workspace or org and the owners of imported Repos. Each owner's list is kept 60 seconds like a Repo's; the owners are kept 10 minutes. A pull request whose repository is an imported Repo carries its `repo_id`; any other has a null `repo_id`. Every one carries `host` and `slug`. A Bitbucket workspace is read for its 300 most recently pushed repositories. An owner that fails leaves the rest listed and sets `meta.stale`.
+23. With no `repo_id`, the list covers every repository on each connected host: per owner the host lets the operator read (the GitHub login and its orgs, the Bitbucket workspaces from `/user/workspaces`, the GitLab user and top-level groups), plus the Connector's own workspace or org and the owners of imported Repos. Each owner's list is kept like a Repo's; the owners are kept 10 minutes, an empty or failed answer too. Hosts and owners are read side by side. A pull request whose repository is an imported Repo carries its `repo_id`; any other has a null `repo_id`. Every one carries `host` and `slug`. A Bitbucket workspace is read for its 300 most recently pushed repositories. An owner that fails leaves the rest listed and sets `meta.stale`.
 
 Agent Review and the agent's voice on a PR
 
-16. Starting an Agent Review stores a row with the Repo, PR number and the PR's `head_sha`, and runs the agent in the PR's `pr_review` Session. Starting another adds a row. A review whose `head_sha` differs from the PR's current one reads as `stale`.
+16. Starting an Agent Review stores a row with the Repo, PR number and the PR's `head_sha`, and runs the agent in the PR's `pr_review` Session. Starting another adds a row. Starting one on a commit that already has a `ready` review is refused with `invalid_state`; a `failed` one can be retried. The prompt lists the PR's open threads and tells the agent not to repeat what they say. A review whose `head_sha` differs from the PR's current one reads as `stale`. On daemon start, a review left `running` becomes `failed`.
 17. A pull request has at most one `pr_review` Session. The backend creates it on the first Agent Review or thread reply. It has no composer: sending it a message is refused with `invalid_state`.
-18. When an Agent Review finishes, each finding is posted to the host as an inline comment on its file and line; a finding with no file or line posts as a general comment. An Action Log row of kind `pr` exists before each post. Each comment the host accepts is recorded in `agent_comments`. One failed post does not stop the others; the finding records `post_error`.
+18. When an Agent Review finishes, each finding is posted to the host as an inline comment on its file and line; a finding with no file or line posts as a general comment. An Action Log row of kind `pr` exists before each post. Each comment the host accepts is recorded in `agent_comments`. One failed post does not stop the others; the finding records `post_error`. A finding on a file and line where an earlier review's agent thread is still open is not posted again: its `comment_id` points at that thread.
 19. When the operator replies in a thread whose first comment is in `agent_comments`, the reply goes to the host and the `pr_review` Session gets the thread and answers. The answer is posted in that thread with an Action Log row first, and recorded in `agent_comments`. A reply in any other thread does not start the agent.
-20. A comment is `by_agent` when it is in `agent_comments`.
+20. A comment is `by_agent` when it is in `agent_comments`. It is `is_mine` when it is `by_agent` or its author is the host Connector's login. `DELETE /repos/:repo/pull-requests/:number/comments/:comment_id` deletes an `is_mine` comment on the host and its `agent_comments` row, and answers 204; anyone else's is refused with `invalid_state` before the host is asked.
+
+Reading a pull request
+
+24. `approved_by` lists who approved the pull request, as the host names them: GitHub's latest review per reviewer that is `APPROVED`, Bitbucket's participants with `approved`. GitLab lists none.
+25. `GET /repos/:repo/pull-requests/:number/file?path=&ref=` answers one file's text at commit `ref`, read from the host. `ref` is a commit id; anything else is `validation_failed`. A file not there at `ref` answers `text: null`.
 
 Anonymous Sessions
 
@@ -67,7 +72,7 @@ Anonymous Sessions
 
 ## Not required
 
-- **Fresh PR data**: a list can be up to 60 seconds old, or older with `meta.stale` while the host fails.
+- **Fresh PR data**: a list can be up to 60 seconds old, plus the time its background read takes, or older with `meta.stale` while the host fails. The UI starts the first list read as it opens, so the Workspace finds it kept.
 - **PRs offline**: with the host unreachable after a restart, the PR list is an error until the host answers.
 - **Thread answers while the daemon is down**: a reply posted on the host directly, not through the console, does not wake the agent.
 - **Thread answers during a run**: a reply to an agent thread while the pull request's Session is running gets no answer.
@@ -131,7 +136,7 @@ Errors added here:
 | ------ | ---------- | ---- |
 | 409 | `repo_has_sessions` | Removing a Repo with Sessions without `sessions=keep` or `delete` |
 
-`PullRequest`, read from the host: `repo_id`, `number`, `url`, `title`, `author`, `branch`, `base_branch`, `head_sha`, `state`, `review_state`, `checks`, `additions`, `deletions`, `body`, `opened_at`, `merged_at`, plus `is_mine`, `by_agent`, `comment_count`, `resolved_count`, `agent_session_id` (the `pr_review` Session, or null), `latest_agent_review` (`PrAgentReview | null`, with `stale: boolean`). The detail response adds `files` (`[{ name, additions, deletions, lines: [{ sign, text }] }]`) and `comments: PrComment[]`.
+`PullRequest`, read from the host: `repo_id`, `number`, `url`, `title`, `author`, `branch`, `base_branch`, `head_sha`, `state`, `review_state`, `approved_by`, `checks`, `additions`, `deletions`, `body`, `opened_at`, `merged_at`, plus `is_mine`, `by_agent`, `comment_count`, `resolved_count`, `agent_session_id` (the `pr_review` Session, or null), `latest_agent_review` (`PrAgentReview | null`, with `stale: boolean`). The detail response adds `files` (`[{ name, additions, deletions, lines: [{ sign, text }] }]`) and `comments: PrComment[]`.
 
 `PrComment`, read from the host: `id` (the host's id), `parent_id`, `author`, `by_agent`, `body`, `file_path`, `line`, `resolved` (thread roots), `created_at`, `reply_count`.
 
@@ -207,8 +212,9 @@ Adds `branch: string | null`.
 - A "No Repo" group under the Repos lists anonymous Sessions; its `+` starts one at once. `/workspace?session=<id>`
   opens that Session, which is how the Monitor links to a Fix's Session.
 - Branch switcher: lists branches with an open-PR mark; disabled with the reason while Behavior 7 blocks it; a toast when changes were stashed.
-- Pull request list: mine and all, grouped by repository A→Z under its host's icon and `slug`, tagged `local` with the Repo's name when imported and `not imported` otherwise. Clicking a repository's header folds or unfolds its pull requests, and Collapse all folds every one; the folded set survives a reload, and a search unfolds every match. A pull request of an imported GitHub or Bitbucket Repo opens in the console; any other opens on the host in a new tab. A stale banner shows `synced_at` when `meta.stale` is true. Error state when the host fails with nothing cached.
-- Pull request view: files, comment threads with resolve, agent comments marked, the latest Agent Review with a stale badge. Approve and request changes are hidden on your own PR. Merge is enabled only when approved. No composer outside threads.
+- Pull request list: mine and all, grouped by repository A→Z under its host's icon and `slug`, tagged `local` with the Repo's name when imported and `not imported` otherwise. Clicking a repository's header folds or unfolds its pull requests, and Collapse all folds every one; the folded set survives a reload, and a search unfolds every match. A pull request of an imported GitHub or Bitbucket Repo opens in the console; any other opens on the host in a new tab. A stale banner shows `synced_at` when `meta.stale` is true. Error state when the host fails with nothing cached. A search that matches nothing says so with the search text.
+- Pull request view: the description in a card and every comment drawn as Markdown (headings, lists, tables, code), files, comment threads with resolve, who approved it, agent comments marked, the latest Agent Review with a stale badge. Approve and request changes are hidden on your own PR. Merge is enabled only when approved. Agent Review is greyed, reading "Agent reviewing…", while the latest review is `running`, and "Reviewed at this commit" while the latest is `ready` and not stale. Hovering an added or unchanged line in the unified diff shows a `+` that opens a comment box under it; posting sends an inline comment on that new-side line. Threads on a line sit under it, with Resolve and Reply. A comment the operator or the agent wrote has a ⋯ menu with Delete, which asks once more before it deletes the comment on the host. Under the thread list, a box comments on the pull request itself.
+- A changed file reads as a unified diff: added lines green, removed lines red, hunk headers blue, old and new line numbers. Its header folds it and shows `+N −N` with a five-block bar. Viewed marks the file and folds it; the Files header counts viewed files. The browser keeps the marks per pull request, and a mark clears when the file's patch changes. The file's ⋯ menu switches to side by side or to the entire file (Behavior 25), and opens the file at `head_sha` on the host.
 
 ## Rejected
 

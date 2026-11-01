@@ -15,10 +15,16 @@ test('the URL from ops-console open signs in, hides the token and shows the shel
   await expect(nav.getByRole('link', { name: 'Dev tools' })).toBeVisible();
   expect(page.url()).not.toContain(daemon.token);
   expect(page.url()).not.toContain('#');
-  expect(await page.evaluate(() => sessionStorage.getItem('ops-console.token'))).toBe(daemon.token);
+  expect(await page.evaluate(() => localStorage.getItem('ops-console.token'))).toBe(daemon.token);
 
   await page.reload();
   await expect(nav.getByRole('link', { name: 'Monitor' })).toBeVisible();
+
+  // Closing the tab and opening the console again stays signed in.
+  const again = await page.context().newPage();
+  await page.close();
+  await again.goto(daemon.url);
+  await expect(again.getByRole('navigation').getByRole('link', { name: 'Monitor' })).toBeVisible();
 });
 
 test('the sidebar holds every page, and the Setup agent buttons open it', async ({ page }) => {
@@ -232,4 +238,46 @@ test('a daemon that does not answer says to start it', async ({ page }) => {
   await page.route('**/api/health', (route) => route.abort('connectionrefused'));
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
   await expect(page.getByRole('status')).toHaveText(DAEMON_DOWN);
+});
+
+test('picks stay through page switches, reloads and reopening the console', async ({ page, context }) => {
+  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+  const nav = page.getByRole('navigation');
+  await page.getByRole('tab', { name: 'Pull requests' }).click();
+  await expect(page).toHaveURL(/\/workspace\?tab=pulls$/);
+
+  await nav.getByRole('link', { name: 'Integrations' }).click();
+  await page
+    .getByRole('list', { name: 'Integrations' })
+    .getByRole('listitem', { name: 'Shopify' })
+    .getByRole('button', { name: 'Connect', exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/integrations\?open=connector%3Ashopify$/);
+
+  // The sidebar brings each page back as it was left.
+  await nav.getByRole('link', { name: 'Workspace' }).click();
+  await expect(page.getByRole('tab', { name: 'Pull requests' })).toHaveAttribute('aria-selected', 'true');
+  await nav.getByRole('link', { name: 'Integrations' }).click();
+  await expect(page.getByText('Connect Shopify to Ops Console')).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByText('Connect Shopify to Ops Console')).toBeVisible();
+
+  // A new tab at `/` opens the last page, still signed in.
+  const again = await context.newPage();
+  await page.close();
+  await again.goto(daemon.url);
+  await expect(again).toHaveURL(/\/integrations\?open=connector%3Ashopify$/);
+  await expect(again.getByText('Connect Shopify to Ops Console')).toBeVisible();
+});
+
+test('a stored choice that no longer reads falls back to the default', async ({ page }) => {
+  await page.goto(`${daemon.url}/workspace?tab=pulls#token=${daemon.token}`);
+  await page.getByRole('button', { name: 'All', exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+  await page.evaluate(() => localStorage.setItem('ops-console:workspace.pr-mine', '"not a boolean"'));
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Mine', exact: true })).toHaveAttribute('aria-pressed', 'true');
 });

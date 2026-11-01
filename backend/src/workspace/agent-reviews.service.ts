@@ -4,6 +4,7 @@ import {
   ActionOutcome,
   AgentReviewStatus,
   checklistItemSchema,
+  ErrorCode,
   type Finding,
   FindingSeverity,
   type PrAgentReview,
@@ -17,9 +18,11 @@ import { z } from 'zod';
 import { ActionLogService } from '../action-log/action-log.service';
 import { AgentRuntime } from '../agent/runtime';
 import { SessionsService } from '../agent/sessions.service';
+import { ApiError } from '../common/errors';
+import { StartupRecovery } from '../common/recovery';
 import { agentComments, prAgentReviews, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
-import type { HostPullRequest } from './git-host';
+import type { HostComment, HostPullRequest } from './git-host';
 import { PullRequestsService, toAgentReview } from './pull-requests.service';
 
 const outputSchema = z.object({
@@ -39,7 +42,18 @@ const outputSchema = z.object({
 /** Patches past this size are left out of the prompt; the agent still has the file list. */
 const PATCH_BUDGET = 60_000;
 
-export function reviewPrompt(slug: string, pr: HostPullRequest, files: PrFile[]): string {
+/** Open threads, so the agent does not raise a point someone, itself included, already made. */
+function openThreads(comments: HostComment[]): string {
+  const open = comments.filter((comment) => comment.parent_id === null && !comment.resolved);
+  if (open.length === 0) return '';
+  const lines = open.map(
+    (comment) =>
+      `- ${comment.author}${comment.file_path ? ` on ${comment.file_path}${comment.line ? `:${comment.line}` : ''}` : ''}: ${comment.body.replace(/\s+/g, ' ').slice(0, 400)}`,
+  );
+  return `\n\nOpen comment threads already on this pull request:\n${lines.join('\n')}\n\nDo not repeat a point these threads already make, in other words or on another line. Report only what they miss.`;
+}
+
+export function reviewPrompt(slug: string, pr: HostPullRequest, files: PrFile[], comments: HostComment[] = []): string {
   let budget = PATCH_BUDGET;
   const patches = files.map((file) => {
     const text = file.lines
@@ -54,7 +68,7 @@ export function reviewPrompt(slug: string, pr: HostPullRequest, files: PrFile[])
 
 ${pr.body || '(no description)'}
 
-${patches.join('\n\n')}
+${patches.join('\n\n')}${openThreads(comments)}
 
 Read the change as a careful reviewer would. Do not change anything and do not post comments: the console posts your findings. Answer with one JSON block and nothing after it:
 
@@ -93,11 +107,26 @@ export class AgentReviewsService {
     @Inject(SessionsService) private readonly sessions: SessionsService,
     @Inject(AgentRuntime) private readonly runtime: AgentRuntime,
     @Inject(ActionLogService) private readonly actionLog: ActionLogService,
-  ) {}
+    @Inject(StartupRecovery) recovery: StartupRecovery,
+  ) {
+    recovery.register('pull request agent reviews', () => this.recover());
+  }
+
+  /** Start-up recovery: a review the last daemon left `running` did not finish; it would block the next one. */
+  private recover(): void {
+    const running = this.store.db
+      .select()
+      .from(prAgentReviews)
+      .where(eq(prAgentReviews.status, AgentReviewStatus.Running))
+      .all();
+    for (const review of running) {
+      this.finish(review.id, review.repoId, review.prNumber, { status: AgentReviewStatus.Failed }, 0, 0);
+    }
+  }
 
   async list(repoId: string, number: number): Promise<PrAgentReview[]> {
     const repo = this.pulls.hosted(repoId);
-    const { pr } = await this.pulls.adapter(repo).get(repo.remoteSlug as string, number);
+    const { pr } = await this.pulls.detail(repo, number);
     return this.store.db
       .select()
       .from(prAgentReviews)
@@ -107,13 +136,34 @@ export class AgentReviewsService {
       .map((row) => toAgentReview(row, pr.head_sha));
   }
 
-  /** Stores a `running` review and answers; the agent runs on, and `pull_request.reviewed` reports the end. */
+  /**
+   * Stores a `running` review and answers; the agent runs on, and `pull_request.reviewed` reports the end. A commit
+   * already reviewed is not reviewed again: its findings are on the host.
+   */
   async start(repoId: string, number: number): Promise<PrAgentReview> {
     const repo = this.pulls.hosted(repoId);
     const slug = repo.remoteSlug as string;
-    const { pr, files } = await this.pulls.adapter(repo).get(slug, number);
+    const { pr, files, comments } = await this.pulls.adapter(repo).get(slug, number);
+    const reviewed = this.store.db
+      .select({ id: prAgentReviews.id })
+      .from(prAgentReviews)
+      .where(
+        and(
+          eq(prAgentReviews.repoId, repoId),
+          eq(prAgentReviews.prNumber, number),
+          eq(prAgentReviews.headSha, pr.head_sha),
+          eq(prAgentReviews.status, AgentReviewStatus.Ready),
+        ),
+      )
+      .get();
+    if (reviewed)
+      throw new ApiError(
+        409,
+        ErrorCode.InvalidState,
+        'The agent already reviewed this commit; push a change to review again',
+      );
     const session = this.reviewSession(repoId, number, `${repo.name} #${number} review`);
-    const { finished } = this.runtime.runFor(session, reviewPrompt(slug, pr, files));
+    const { finished } = this.runtime.runFor(session, reviewPrompt(slug, pr, files, comments));
     const row = this.store.write((tx) =>
       tx
         .insert(prAgentReviews)
@@ -193,6 +243,7 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
     }
     const repo = this.pulls.repoRow(review.repoId);
     const adapter = this.pulls.adapter(repo);
+    const earlier = await this.openAgentThreads(review.repoId, review.prNumber, slug);
     const findings: Finding[] = [];
     let posted = 0;
     for (const found of output.findings) {
@@ -205,6 +256,13 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
         comment_id: null,
         post_error: null,
       };
+      // An earlier review's open thread on the same line already says it; point the finding there.
+      const same = found.file && found.line ? earlier.get(`${found.file}:${found.line}`) : undefined;
+      if (same) {
+        finding.comment_id = same;
+        findings.push(finding);
+        continue;
+      }
       const row = this.actionLog.start({
         sessionId,
         kind: ActionKind.Pr,
@@ -272,6 +330,29 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
         post_failed: postFailed,
       });
     });
+  }
+
+  /** `file:line` to the id of an open thread the agent started there. A host that cannot be read gives none. */
+  private async openAgentThreads(repoId: string, number: number, slug: string): Promise<Map<string, string>> {
+    const ours = new Set(
+      this.store.db
+        .select({ id: agentComments.commentId })
+        .from(agentComments)
+        .where(and(eq(agentComments.repoId, repoId), eq(agentComments.prNumber, number)))
+        .all()
+        .map((row) => row.id),
+    );
+    if (ours.size === 0) return new Map();
+    try {
+      const { comments } = await this.pulls.adapter(this.pulls.repoRow(repoId)).get(slug, number);
+      return new Map(
+        comments
+          .filter((c) => c.parent_id === null && !c.resolved && c.file_path && c.line && ours.has(c.id))
+          .map((c) => [`${c.file_path}:${c.line}`, c.id]),
+      );
+    } catch {
+      return new Map();
+    }
   }
 
   private record(repoId: string, number: number, commentId: string, reviewId: string | null): void {

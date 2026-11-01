@@ -228,6 +228,8 @@ export const alertSchema = z.object({
     repo_url: z.string().nullable(),
   }),
   fingerprint: z.string(),
+  /** The HTTP status code its logs answered with; null for an Alert from before Scans read status codes. */
+  http_status: z.number().int().nullable(),
   source: z.enum(AlertSource),
   severity: z.enum(Severity),
   status: z.enum(AlertStatus),
@@ -304,8 +306,10 @@ export const scanSchema = z.object({
   window_size: z.enum(ScanWindow),
   /** The Datadog environments read. */
   envs: z.array(z.string()),
-  /** The Datadog Services read; null for every Service with error or warn logs. */
+  /** The Datadog Services read; null for every Service with failing requests. */
   services: z.array(z.string()).nullable(),
+  /** The HTTP status codes read; empty for every code from 400 up. */
+  status_codes: z.array(z.number().int()),
   status: z.enum(ScanStatus),
   error_code: z.string().nullable(),
   error_message: z.string().nullable(),
@@ -357,10 +361,12 @@ export const createScanSchema = z.strictObject({
   service_id: z.string().min(1).nullable(),
   /** Defaults to the Datadog Connector's `default_interval`. */
   window: z.enum(ScanWindow).optional(),
-  /** Defaults to the Datadog Connector's `environments`. */
+  /** Defaults to every env Datadog has logs for, and the logs with no env tag. */
   envs: z.array(z.string().trim().min(1)).min(1).optional(),
-  /** Datadog Service names to read; every Service with error or warn logs when left out. */
+  /** Datadog Service names to read; every Service with failing requests when left out. */
   services: z.array(z.string().trim().min(1)).min(1).optional(),
+  /** HTTP status codes to read, each 400 or more; every one from 400 up when left out or empty. */
+  status_codes: z.array(z.number().int().min(400).max(999)).optional(),
 });
 
 export type CreateScan = z.infer<typeof createScanSchema>;
@@ -370,32 +376,43 @@ export type CreateScan = z.infer<typeof createScanSchema>;
  */
 export const NO_ENV = 'no env';
 
-/** A Service Datadog has error or warn logs for in the range and envs asked about. */
+/** A Service Datadog has failing requests for (HTTP status 400 or more) in the range and codes asked about. */
 export const datadogServiceSchema = z.object({
   name: z.string(),
-  /** The envs it logged errors in, busiest first. */
+  /** The envs it logged them in, busiest first. */
   envs: z.array(z.string()),
-  /** Error and warn logs in the range, every env together. */
+  /** Failing requests in the range, every env together. */
   errors: z.number().int(),
 });
 
 export type DatadogService = z.infer<typeof datadogServiceSchema>;
 
+const commaList = z.string().transform((value) => [
+  ...new Set(
+    value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ),
+]);
+
+/** HTTP status codes from 400 up, comma-separated. */
+const codeList = commaList.transform((list) => list.map(Number)).pipe(z.array(z.number().int().min(400).max(999)));
+
 export const datadogServicesQuerySchema = z.object({
   window: z.enum(ScanWindow),
-  /** Comma-separated env names. */
-  envs: z
-    .string()
-    .min(1)
-    .transform((value) => [
-      ...new Set(
-        value
-          .split(',')
-          .map((env) => env.trim())
-          .filter(Boolean),
-      ),
-    ]),
+  /** Comma-separated env names; every env when left out. */
+  envs: commaList.pipe(z.array(z.string()).min(1)).optional(),
+  /** Comma-separated HTTP status codes; every code from 400 up when left out. */
+  codes: codeList.optional(),
 });
+
+export const statusCodesQuerySchema = z.object({ window: z.enum(ScanWindow) });
+
+/** An HTTP status code from 400 up that Datadog has requests for in the range, every env together. */
+export const statusCodeCountSchema = z.object({ code: z.number().int(), count: z.number().int() });
+
+export type StatusCodeCount = z.infer<typeof statusCodeCountSchema>;
 
 /** A Datadog `env` tag the Monitor can scan. */
 export const monitorEnvSchema = z.object({

@@ -38,6 +38,17 @@ describe('log groups', () => {
     expect(groups[1]?.query).toBe('env:prod service:orders-api');
   });
 
+  it('splits a Route by HTTP status code, read as a number or a string', () => {
+    const coded = (code: unknown) => ({ http: { method: 'GET', url_details: { path: '/me' }, status_code: code } });
+    const logs = [log(0, 'denied', coded(401)), log(1, 'denied', coded('401')), log(2, 'denied', coded(500))];
+    const groups = groupLogs(logs, 'service:apis');
+    expect(groups.map((group) => [group.statusCode, group.errors])).toEqual([
+      [401, 2],
+      [500, 1],
+    ]);
+    expect(groups[0]?.query).toBe('service:apis @http.status_code:401 @http.method:GET @http.url_details.path:/me');
+  });
+
   it('counts the worst 10-minute bucket and keeps 25 Samples', () => {
     const logs = Array.from({ length: 40 }, (_, minute) => log(minute, 'boom'));
     const [group] = groupLogs(logs, 'q');

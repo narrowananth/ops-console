@@ -273,6 +273,71 @@ describe('Scans and Alerts', () => {
     expect(byName('billing')?.clearedAt).toBeNull();
   });
 
+  it('reads every env when the operator picks none', async () => {
+    const ctx = await start();
+    ctx.datadog.readings = [
+      service('orders-api', [route('POST', '/orders', 4)], 'prod'),
+      service('webhook', [route('POST', '/hooks', 3)], 'no env'),
+    ];
+    const done = await scan(ctx);
+    expect((await ctx.http.get(`/scans/${done.id}`)).body.data.envs).toEqual(['prod', 'staging', 'no env']);
+    expect((await alertList(ctx)).map((alert: { service: { name: string } }) => alert.service.name).sort()).toEqual([
+      'orders-api',
+      'webhook',
+    ]);
+    const listed = await ctx.http.get('/monitor/datadog-services?window=24h');
+    expect(listed.body.data.map((row: { name: string }) => row.name)).toEqual(['orders-api', 'webhook']);
+  });
+
+  it('splits one Route by HTTP status code, and a Scan of some codes clears only those', async () => {
+    const ctx = await start();
+    ctx.datadog.readings = [
+      service('orders-api', [
+        route('POST', '/orders', 7, { statusCode: 401, samples: samples(7, 'token expired') }),
+        route('POST', '/orders', 3, { statusCode: 500, samples: samples(3, 'token expired') }),
+      ]),
+    ];
+    await scan(ctx);
+    const raised = await alertList(ctx);
+    expect(raised.map((alert: { http_status: number }) => alert.http_status).sort()).toEqual([401, 500]);
+    expect(raised.find((alert: { http_status: number }) => alert.http_status === 401).title).toBe(
+      '401 POST /orders failing on orders-api',
+    );
+
+    ctx.datadog.readings = [];
+    const started = await ctx.http.post('/scans', { service_id: null, status_codes: [500] });
+    expect(started.body.data.status_codes).toEqual([500]);
+    await until(
+      () => ctx.http.get(`/scans/${started.body.data.id}`).then((res) => res.body.data.status),
+      (status) => status !== 'running',
+    );
+    expect(ctx.datadog.calls.at(-1)).toMatchObject({ codes: [500] });
+    const rows = ctx.store.db.select().from(alerts).all();
+    expect(rows.find((row) => row.httpStatus === 500)?.clearedAt).not.toBeNull();
+    expect(rows.find((row) => row.httpStatus === 401)?.clearedAt).toBeNull();
+    expect((await ctx.http.post('/scans', { service_id: null, status_codes: [200] })).body.error.code).toBe(
+      'validation_failed',
+    );
+  });
+
+  it('lists the HTTP status codes and the Services failing with the ones picked', async () => {
+    const ctx = await start();
+    ctx.datadog.readings = [
+      service('orders-api', [route('POST', '/orders', 7, { statusCode: 401 }), route('GET', '/orders', 2)]),
+      service('billing', [route('POST', '/charge', 5, { statusCode: 404 })]),
+    ];
+    expect((await ctx.http.get('/monitor/status-codes?window=24h')).body.data).toEqual([
+      { code: 401, count: 7 },
+      { code: 404, count: 5 },
+      { code: 500, count: 2 },
+    ]);
+    const picked = await ctx.http.get('/monitor/datadog-services?window=24h&codes=401,500');
+    expect(picked.body.data).toEqual([{ name: 'orders-api', envs: ['prod'], errors: 9 }]);
+    expect((await ctx.http.get('/monitor/datadog-services?window=24h&codes=200')).body.error.code).toBe(
+      'validation_failed',
+    );
+  });
+
   it('raises Alerts for logs with no HTTP route, and takes the Git URL from the logs', async () => {
     const ctx = await start();
     const job = samples(6, 'Job 812 failed: queue timeout');
@@ -308,14 +373,27 @@ describe('Scans and Alerts', () => {
         route('GET', '/rapid', 400, { peakPer10m: 150 }),
         route('GET', '/steady', 240, { peakPer10m: 20 }),
         route('GET', '/quiet', 3),
-        route('GET', '/warnonly', 240, { peakPer10m: 20, samples: samples(5, 'slow query', 'warn') }),
+        route('GET', '/warnonly', 240, { statusCode: 404, peakPer10m: 20, samples: samples(5, 'slow query', 'warn') }),
+        route('GET', '/emergency', 240, {
+          statusCode: 401,
+          peakPer10m: 20,
+          samples: samples(5, 'db down', 'emergency'),
+        }),
+        route('GET', '/server', 240, { statusCode: 502, peakPer10m: 20, samples: samples(5, 'bad gateway', 'warn') }),
       ]),
     ];
     await scan(ctx);
     const bySeverity = Object.fromEntries(
       (await alertList(ctx)).map((a: { route: { path: string }; severity: string }) => [a.route.path, a.severity]),
     );
-    expect(bySeverity).toEqual({ '/rapid': 'high', '/steady': 'medium', '/quiet': 'low', '/warnonly': 'low' });
+    expect(bySeverity).toEqual({
+      '/rapid': 'high',
+      '/steady': 'medium',
+      '/quiet': 'low',
+      '/warnonly': 'low',
+      '/emergency': 'medium',
+      '/server': 'medium',
+    });
   });
 
   it('never raises an Alert for an ignored Route, and shows its note', async () => {

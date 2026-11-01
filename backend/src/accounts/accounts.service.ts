@@ -423,6 +423,31 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
   }
 
   /**
+   * After a run under `accountId` failed to authenticate: its saved sign-in no longer works, though `claude auth
+   * status` may still read signed in (an expired token that cannot refresh). Marks it signed out, hands the active
+   * role to the account Auto-switch would pick, else any signed-in one, with reason `sign_in_failed`, and returns the account to resume on, or `null`.
+   */
+  signInFailed(accountId: string): AccountRow | null {
+    this.store.write((tx, emit) => {
+      const row = tx
+        .update(claudeAccounts)
+        .set({ signedIn: false, lastCheckedAt: nowIso })
+        .where(eq(claudeAccounts.id, accountId))
+        .returning()
+        .get();
+      if (row) this.emitUpdated(emit, row);
+    });
+    if (accountId === this.activeRow()?.id) {
+      // The account Auto-switch would pick, else any signed-in one: one under its limit beats the first in the list.
+      const next = this.candidate(accountId) ?? this.rows().find((row) => row.id !== accountId && row.signedIn)?.id;
+      if (next) this.switchTo(next, SwitchReason.SignInFailed);
+      else this.clearActive();
+    }
+    const active = this.activeRow();
+    return active?.signedIn && active.id !== accountId ? active : null;
+  }
+
+  /**
    * Each Session on the account moves its transcript to the account that stays active first (Behavior 27). Removing
    * the active account hands over to another signed-in one, or leaves none active.
    */

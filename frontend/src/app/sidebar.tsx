@@ -1,7 +1,9 @@
 import { AlertStatus, type ClaudeAccount, HealthStatus } from '@ops-console/shared';
 import type { ReactNode } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useAgentAccounts, useAlerts, useConnections, useConnectors, useMcpServers, useRepos } from '../lib/queries';
+import { shown } from '../monitor/scan-scope';
+import { lastAddress } from './last-address';
 import { useUi } from './ui-store';
 
 export function Logo({ size = 28 }: { size?: number }) {
@@ -83,7 +85,7 @@ function useBadges(): Record<string, { text: string; tone: 'alert' | 'attention'
   const connections = useConnections().data?.data;
   const repos = useRepos().data?.data;
   const open = alerts.filter(
-    (alert) => alert.status !== AlertStatus.Resolved && alert.status !== AlertStatus.Dismissed,
+    (alert) => alert.status !== AlertStatus.Resolved && alert.status !== AlertStatus.Dismissed && shown(alert),
   ).length;
   const attention =
     connectors.filter((connector) => NEEDS_ATTENTION.includes(connector.status)).length +
@@ -107,6 +109,8 @@ export function Sidebar() {
   const { theme, toggleTheme, collapsed, toggleCollapsed } = useUi();
   const badges = useBadges();
   const groups = [...new Set(PAGES.map((page) => page.group))];
+  // Each link goes back to its page's last address; moving re-reads them.
+  useLocation();
   return (
     <aside
       className={`flex min-h-0 flex-none flex-col border-r border-line bg-surface transition-[width] duration-200 ${
@@ -132,7 +136,7 @@ export function Sidebar() {
               return (
                 <NavLink
                   key={page.path}
-                  to={page.path}
+                  to={lastAddress(page.path)}
                   title={collapsed ? page.label : undefined}
                   aria-label={page.label}
                   className={({ isActive }) =>

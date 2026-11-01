@@ -1,5 +1,6 @@
 import { type Repo, type Session, SessionKind, SessionState } from '@ops-console/shared';
 import { useState } from 'react';
+import { z } from 'zod';
 import { RepoIcon } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Dropdown } from '../components/ui/dropdown';
@@ -12,6 +13,7 @@ import {
   useRepoSessions,
   useRepos,
 } from '../lib/queries';
+import { useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
 
 /** An open Repo lists this many of its Sessions, most recently active first, before "Show N more". */
@@ -33,7 +35,7 @@ const isRunning = (session: Session) =>
 function NewSession({ repo, onCreated }: { repo: Repo; onCreated: (id: string) => void }) {
   const branches = useBranches(repo.id);
   const create = useCreateRepoSession();
-  const [branch, setBranch] = useState<string | null>(null);
+  const [branch, setBranch] = useStored(`workspace.new-branch.${repo.id}`, z.string().nullable(), null);
   const chosen = branch ?? branches.data?.find((b) => b.current)?.name ?? branches.data?.[0]?.name ?? '';
   return (
     <div className="flex flex-col gap-1.5 px-2 pt-1 pb-2">
@@ -123,8 +125,8 @@ function RepoGroup({
   selected: string | null;
   onSelect: (id: string) => void;
 }) {
-  const [all, setAll] = useState(false);
-  const [starting, setStarting] = useState(sessions.length === 0);
+  const [all, setAll] = useStored(`workspace.sessions-all.${repo.id}`, z.boolean(), false);
+  const [starting, setStarting] = useStored(`workspace.starting.${repo.id}`, z.boolean(), sessions.length === 0);
   // Past the first few, a running or selected Session still shows: it is the one the operator is after.
   const shown = all
     ? sessions
@@ -213,7 +215,7 @@ function AnonymousGroup({
   onSelect: (id: string) => void;
 }) {
   const create = useCreateAnonymousSession();
-  const [all, setAll] = useState(false);
+  const [all, setAll] = useStored('workspace.sessions-all.anonymous', z.boolean(), false);
   const shown = all
     ? sessions
     : sessions.filter((session, index) => index < SHOWN || isRunning(session) || session.id === selected);

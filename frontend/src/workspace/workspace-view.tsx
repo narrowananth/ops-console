@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import { Empty } from '../components/ui/empty';
+import { useAddress } from '../lib/remember';
 import { PullRequestView } from './pull-request-view';
 import { PullRequestsPane } from './pull-requests-pane';
 import { SessionView } from './session-view';
@@ -8,19 +7,24 @@ import { SessionsPane } from './sessions-pane';
 
 type Tab = 'sessions' | 'pulls';
 
+/** `<repo id>/<number>` from the address. */
+function parsePull(value: string | null): { repoId: string; number: number } | null {
+  const at = value?.lastIndexOf('/') ?? -1;
+  if (value === null || at < 1) return null;
+  const number = Number(value.slice(at + 1));
+  return Number.isInteger(number) && number > 0 ? { repoId: value.slice(0, at), number } : null;
+}
+
 export function WorkspaceView() {
-  const [tab, setTab] = useState<Tab>('sessions');
-  const [params, setParams] = useSearchParams();
-  const [sessionId, setSessionId] = useState<string | null>(params.get('session'));
-  // A link from the Monitor names the Session to open; the address keeps no state after that.
-  useEffect(() => {
-    const linked = params.get('session');
-    if (linked === null) return;
-    setTab('sessions');
-    setSessionId(linked);
-    setParams({}, { replace: true });
-  }, [params, setParams]);
-  const [pull, setPull] = useState<{ repoId: string; number: number } | null>(null);
+  // The tab, Session and pull request live in the address, so a reload, Back, or a link from the Monitor opens them.
+  const [address, setAddress] = useAddress('tab', 'session', 'pr');
+  const tab: Tab = address.tab === 'pulls' ? 'pulls' : 'sessions';
+  const setTab = (next: Tab) => setAddress({ tab: next === 'sessions' ? null : next });
+  const sessionId = address.session;
+  const setSessionId = (id: string | null) => setAddress({ session: id });
+  const pull = parsePull(address.pr);
+  const setPull = (next: { repoId: string; number: number } | null) =>
+    setAddress({ pr: next ? `${next.repoId}/${next.number}` : null });
 
   return (
     <>
@@ -57,7 +61,11 @@ export function WorkspaceView() {
       <section className="min-w-0 flex-1 overflow-y-auto">
         {tab === 'sessions' ? (
           sessionId ? (
-            <SessionView key={sessionId} id={sessionId} onGone={() => setSessionId(null)} />
+            <SessionView
+              key={sessionId}
+              id={sessionId}
+              onGone={() => setAddress({ session: null }, { replace: true })}
+            />
           ) : (
             <Empty>Pick a Session, or start one on a branch.</Empty>
           )

@@ -5,11 +5,13 @@ import { DevToolsTab } from '../devtools/devtools-tab';
 import { DevToolsView } from '../devtools/terminal-view';
 import { IntegrationsTab } from '../integrations/integrations-tab';
 import { useLiveEvents } from '../lib/live';
+import { usePrefetchPullRequests } from '../lib/queries';
 import { MonitorView } from '../monitor/monitor-view';
 import { ReposTab } from '../repos/repos-tab';
 import { SetupAgentButton } from '../setup/setup-agent-link';
 import { SetupAgentTab } from '../setup/setup-agent-tab';
 import { WorkspaceView } from '../workspace/workspace-view';
+import { lastPage, useKeepAddress } from './last-address';
 import { Page, PageColumn } from './page';
 import { Sidebar } from './sidebar';
 
@@ -24,6 +26,8 @@ function Card({ children, wide }: { children: ReactNode; wide?: boolean }) {
 
 export function Shell() {
   useLiveEvents();
+  usePrefetchPullRequests();
+  useKeepAddress();
   return (
     <div className="flex min-h-0 flex-1">
       <Sidebar />
@@ -109,7 +113,7 @@ export function Shell() {
               </Page>
             }
           />
-          <Route path="*" element={<Navigate to="/monitor" replace />} />
+          <Route path="*" element={<Navigate to={lastPage()} replace />} />
         </Routes>
       </main>
     </div>

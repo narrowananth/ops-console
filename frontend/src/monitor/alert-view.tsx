@@ -10,9 +10,10 @@ import {
   RunStatus,
   type Sample,
 } from '@ops-console/shared';
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button } from '../components/ui/button';
+import { z } from 'zod';
+import { Button, Spinner } from '../components/ui/button';
+import { DiffLines } from '../components/ui/diff';
 import { Dropdown } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
 import { Markdown } from '../components/ui/markdown';
@@ -27,11 +28,12 @@ import {
   useUndoDismissal,
   useVerifyAlert,
 } from '../lib/queries';
+import { useStored } from '../lib/remember';
 import { CodeSource } from './repo-link';
 import { SeverityBadge } from './severity';
 
 function SampleList({ samples }: { samples: Sample[] }) {
-  const [asJson, setAsJson] = useState(false);
+  const [asJson, setAsJson] = useStored('monitor.samples-json', z.boolean(), false);
   return (
     <section aria-label="Samples">
       <div className="flex items-center gap-2 py-1.5">
@@ -65,7 +67,7 @@ function SampleList({ samples }: { samples: Sample[] }) {
 
 function ReportPanel({ alertId, report }: { alertId: string; report: Report }) {
   const reports = useAlertReports(alertId);
-  const [picked, setPicked] = useState<string | null>(null);
+  const [picked, setPicked] = useStored(`monitor.report.${alertId}`, z.string().nullable(), null);
   const versions = reports.data ?? [report];
   const shown = versions.find((row) => row.id === picked) ?? report;
   return (
@@ -115,9 +117,9 @@ function ReportPanel({ alertId, report }: { alertId: string; report: Report }) {
             {shown.diff && (
               <details>
                 <summary className="cursor-pointer text-xs text-neutral-700">Proposed diff</summary>
-                <pre className="m-0 mt-1.5 overflow-auto rounded-lg bg-neutral-900 p-3 font-mono text-xs text-neutral-100">
-                  {shown.diff.map((line) => `${line.sign}${line.text}`).join('\n')}
-                </pre>
+                <div className="mt-1.5 overflow-hidden rounded-lg border border-divider bg-card">
+                  <DiffLines lines={shown.diff} />
+                </div>
               </details>
             )}
             {shown.replay && (
@@ -212,6 +214,7 @@ function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: () => void
               {fix.error_message}
             </span>
             <Button className="px-2.5 py-1 text-xs" disabled={retrying} onClick={onRetry}>
+              {retrying && <Spinner />}
               Retry from {fix.stage}
             </Button>
           </>
@@ -236,7 +239,9 @@ export function AlertView({ id }: { id: string }) {
   const jira = connectors.data?.data.find((connector) => connector.id === 'jira');
   const jiraUp = jira?.status === 'ok';
   const report = data.latest_report;
-  const canVerify = data.status === AlertStatus.Open || data.status === AlertStatus.Verified;
+  const verifying = data.status === AlertStatus.Verifying;
+  // Shown greyed while the agent verifies, so a second click cannot start another run.
+  const canVerify = data.status === AlertStatus.Open || data.status === AlertStatus.Verified || verifying;
   const hasCode = data.service.repo_id !== null || data.service.repo_url !== null;
   const error = verify.error ?? review.error ?? undo.error ?? retry.error ?? patchRoute.error;
   const kind = report?.kind ?? ReportKind.Bug;
@@ -294,8 +299,19 @@ export function AlertView({ id }: { id: string }) {
 
       {canVerify && (
         <div className="flex flex-wrap items-center gap-3">
-          <Button variant="primary" disabled={verify.isPending || !hasCode} onClick={() => verify.mutate()}>
-            {data.status === AlertStatus.Verified ? 'Verify again' : 'Verify with agent'}
+          <Button
+            variant="primary"
+            disabled={verify.isPending || verifying || !hasCode}
+            onClick={() => verify.mutate()}
+          >
+            {(verify.isPending || verifying) && <Spinner />}
+            {verifying
+              ? 'Agent verifying…'
+              : verify.isPending
+                ? 'Starting the agent…'
+                : data.status === AlertStatus.Verified
+                  ? 'Verify again'
+                  : 'Verify with agent'}
           </Button>
           <span className="text-xs text-neutral-700">
             {hasCode
@@ -315,6 +331,7 @@ export function AlertView({ id }: { id: string }) {
               disabled={review.isPending}
               onClick={() => review.mutate({ decision: ReviewDecision.Confirmed, kind })}
             >
+              {review.isPending && <Spinner />}
               Fix with agent
             </Button>
             <Button

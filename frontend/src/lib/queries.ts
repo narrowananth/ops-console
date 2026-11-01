@@ -30,10 +30,10 @@ import {
   mcpServerListSchema,
   mcpServerSchema,
   messageSchema,
-  monitorEnvSchema,
   type PrReviewEvent,
   prAgentReviewSchema,
   prCommentSchema,
+  prFileContentSchema,
   pullRequestDetailSchema,
   pullRequestListSchema,
   type RemovedRepoSessions,
@@ -51,11 +51,13 @@ import {
   serviceSchema,
   sessionDefaultsSchema,
   sessionSchema,
+  statusCodeCountSchema,
   terminalListSchema,
   type UpdateConnection,
   type UpdateMcpServer,
 } from '@ops-console/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { z } from 'zod';
 import { apiGet, apiSend } from './api';
 import { sessionToken } from './session';
@@ -534,14 +536,29 @@ export function useCheckout(sessionId: string, repoId: string) {
 export type PullRequestFilter = { mine: boolean; q: string };
 
 /** The Git host's open pull requests across every Repo, kept 60 seconds in the daemon. */
-export function usePullRequests(filter: PullRequestFilter) {
+function pullRequestsQuery(filter: PullRequestFilter) {
   const params = new URLSearchParams();
   if (filter.mine) params.set('mine', 'true');
   if (filter.q) params.set('q', filter.q);
-  return useQuery({
+  return {
     queryKey: [...queryKeys.pulls, 'list', filter],
     queryFn: () => apiGet(`/pull-requests?${params}`, pullRequestListSchema),
-  });
+  };
+}
+
+export function usePullRequests(filter: PullRequestFilter) {
+  return useQuery(pullRequestsQuery(filter));
+}
+
+/**
+ * Reads the Workspace's first pull request list as the app opens. The daemon's first read of every host repository
+ * takes seconds; started here, it is in memory by the time the operator opens the Workspace.
+ */
+export function usePrefetchPullRequests() {
+  const client = useQueryClient();
+  useEffect(() => {
+    void client.prefetchQuery(pullRequestsQuery({ mine: true, q: '' }));
+  }, [client]);
 }
 
 export function useRefreshPullRequests() {
@@ -558,10 +575,24 @@ export function usePullRequest(repoId: string, number: number) {
   });
 }
 
+/** One file of the pull request at `ref`, read when `enabled`. A commit's file never changes, so it is kept. */
+export function usePrFile(repoId: string, number: number, path: string, ref: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [...queryKeys.pulls, 'file', repoId, number, ref, path],
+    queryFn: () =>
+      apiGet(
+        `/repos/${repoId}/pull-requests/${number}/file?${new URLSearchParams({ path, ref })}`,
+        z.object({ data: prFileContentSchema }),
+      ).then((b) => b.data),
+    enabled,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
 export function usePostComment(repoId: string, number: number) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: { body: string; parent_id?: string }) =>
+    mutationFn: (input: { body: string; parent_id?: string; file_path?: string; line?: number }) =>
       apiSend('POST', `/repos/${repoId}/pull-requests/${number}/comments`, input, z.object({ data: prCommentSchema })),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
   });
@@ -577,6 +608,15 @@ export function useResolveComment(repoId: string, number: number) {
         { resolved: input.resolved },
         z.object({ data: prCommentSchema }),
       ),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
+  });
+}
+
+export function useDeleteComment(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (commentId: string) =>
+      apiSend('DELETE', `/repos/${repoId}/pull-requests/${number}/comments/${commentId}`, undefined, z.undefined()),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
   });
 }
@@ -670,29 +710,33 @@ export function useStartScan() {
   });
 }
 
-/** The Services Datadog has error or warn logs for in the range and envs, busiest first. */
-export function useDatadogServices(window: ScanWindow, envs: string[], enabled: boolean) {
-  const picked = [...envs].sort();
+/**
+ * The Services Datadog has failing requests for in the range, every env together, busiest first: HTTP status 400 or
+ * more, or only `codes`.
+ */
+export function useDatadogServices(window: ScanWindow, codes: number[], enabled: boolean) {
+  const picked = [...codes].sort((a, b) => a - b);
   return useQuery({
     queryKey: [...queryKeys.monitor, 'datadog-services', window, picked],
     queryFn: () =>
       apiGet(
-        `/monitor/datadog-services?window=${window}&envs=${encodeURIComponent(picked.join(','))}`,
+        `/monitor/datadog-services?window=${window}${picked.length > 0 ? `&codes=${picked.join(',')}` : ''}`,
         listOf(datadogServiceSchema),
       ).then((b) => b.data),
-    enabled: enabled && picked.length > 0,
+    enabled,
     staleTime: 2 * 60_000,
     placeholderData: (previous) => previous,
   });
 }
 
-/** Datadog `env` tags the Monitor can scan; the Connector's own come ticked. */
-export function useMonitorEnvs(enabled: boolean) {
+/** The HTTP status codes from 400 up Datadog has requests for in the range, busiest first. */
+export function useStatusCodes(window: ScanWindow, enabled: boolean) {
   return useQuery({
-    queryKey: [...queryKeys.monitor, 'envs'],
-    queryFn: () => apiGet('/monitor/envs', listOf(monitorEnvSchema)).then((b) => b.data),
+    queryKey: [...queryKeys.monitor, 'status-codes', window],
+    queryFn: () => apiGet(`/monitor/status-codes?window=${window}`, listOf(statusCodeCountSchema)).then((b) => b.data),
     enabled,
-    staleTime: 5 * 60_000,
+    staleTime: 2 * 60_000,
+    placeholderData: (previous) => previous,
   });
 }
 

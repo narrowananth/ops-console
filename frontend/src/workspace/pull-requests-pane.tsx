@@ -1,10 +1,12 @@
 import { GitHost, PrChecks, PrReviewState, type PullRequest } from '@ops-console/shared';
 import { useState } from 'react';
+import { z } from 'zod';
 import { BrandIcon } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
 import { item } from '../components/ui/item';
 import { usePullRequests, useRefreshPullRequests, useRepos } from '../lib/queries';
+import { useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
 
 type Pull = { repoId: string; number: number };
@@ -69,8 +71,8 @@ const REVIEWS: Record<PrReviewState, string> = {
 };
 
 export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null; onSelect: (pull: Pull) => void }) {
-  const [mine, setMine] = useState(true);
-  const [q, setQ] = useState('');
+  const [mine, setMine] = useStored('workspace.pr-mine', z.boolean(), true);
+  const [q, setQ] = useStored('workspace.pr-search', z.string(), '');
   const pulls = usePullRequests({ mine, q });
   const refresh = useRefreshPullRequests();
   const repos = useRepos();
@@ -188,7 +190,13 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
             </div>
           )}
           {pulls.data.data.length === 0 ? (
-            <Empty>{mine ? 'No open pull requests of yours.' : 'No open pull requests.'}</Empty>
+            <Empty>
+              {q.trim() !== ''
+                ? `No ${mine ? 'pull requests of yours' : 'pull requests'} match “${q.trim()}”.`
+                : mine
+                  ? 'No open pull requests of yours.'
+                  : 'No open pull requests.'}
+            </Empty>
           ) : (
             <div className="flex flex-col gap-1 px-2 pt-2 pb-3">
               {projects.map((project) => (
@@ -248,7 +256,11 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                               <span className="truncate">{pr.branch}</span>
                               {pr.by_agent && <span>agent</span>}
                               {CHECKS[pr.checks] && <span>{CHECKS[pr.checks]}</span>}
-                              {REVIEWS[pr.review_state] && <span>{REVIEWS[pr.review_state]}</span>}
+                              {pr.approved_by.length > 0 ? (
+                                <span className="text-ok">✓ approved by {pr.approved_by.join(', ')}</span>
+                              ) : (
+                                REVIEWS[pr.review_state] && <span>{REVIEWS[pr.review_state]}</span>
+                              )}
                               {pr.comment_count > 0 && <span>{pr.comment_count} comments</span>}
                             </span>
                           </>

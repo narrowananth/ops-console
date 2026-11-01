@@ -79,6 +79,8 @@ export enum SwitchReason {
   Auto = 'auto',
   Smart = 'smart',
   RateLimited = 'rate_limited',
+  /** The active account's sign-in stopped working mid-run. */
+  SignInFailed = 'sign_in_failed',
 }
 
 const cellSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);

@@ -19,7 +19,7 @@ const pr = (id, repo, extra = {}) => ({
 });
 const page = rest.includes('page=2') ? 2 : 1;
 const bodies = {
-  '/user/permissions/workspaces': { values: [{ workspace: { slug: 'acme' } }] },
+  '/user/workspaces': { values: [{ workspace: { slug: 'acme' } }] },
   '/repositories/acme':
     page === 1
       ? { values: [{ slug: 'orders' }], next: 'https://api.example.com/next' }

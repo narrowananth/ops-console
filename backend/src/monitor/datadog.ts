@@ -12,13 +12,15 @@ export const DATADOG_READER = Symbol('DATADOG_READER');
 export type IgnoreRule = { kind: 'status_class' | 'route'; value: string };
 
 /**
- * One kind of failure as a Scan saw it: the logs of one Service that share a masked message and, for HTTP logs, a
- * Route. `method` and `path` are empty for logs with no request. `errors` counts the logs read in the window;
+ * One kind of failure as a Scan saw it: the logs of one Service that share an HTTP status code, a masked message and a
+ * Route. `method` and `path` are empty for logs that name no request path. `errors` counts the logs read in the window;
  * `peakPer10m` is their worst 10-minute bucket.
  */
 export type LogGroup = {
   method: string;
   path: string;
+  /** The HTTP status code the requests answered with. */
+  statusCode: number | null;
   errors: number;
   peakPer10m: number;
   /** Newest first, up to 25. */
@@ -37,8 +39,10 @@ export type ServiceReading = {
 export type ReadRequest = {
   envs: string[];
   window: ScanWindow;
-  /** Only these Services; every Service with error or warn logs when null. */
+  /** Only these Services; every Service with failing requests when null. */
   services: string[] | null;
+  /** Only these HTTP status codes; every code from 400 up when empty. */
+  codes: number[];
   ignore: IgnoreRule[];
 };
 
@@ -48,11 +52,20 @@ export interface DatadogReader {
   read(request: ReadRequest): Promise<ServiceReading[]>;
   /** Every `env` tag with logs in the last 7 days. */
   envs(): Promise<string[]>;
-  /** The Services with error or warn logs in each env over the window, and how many. */
-  services(envs: string[], window: ScanWindow): Promise<ServiceCount[]>;
+  /** The Services with failing requests in each env over the window, and how many. */
+  services(envs: string[], window: ScanWindow, codes: number[]): Promise<ServiceCount[]>;
+  /** Each HTTP status code from 400 up with requests in the window, every env together, busiest first. */
+  statusCodes(window: ScanWindow): Promise<{ code: number; count: number }[]>;
 }
 
 export type ServiceCount = { name: string; env: string; errors: number };
+
+/** Datadog's statuses at error level and above: it keeps `emergency`, `alert` and `critical` apart from `error`. */
+export const ERROR_LEVEL = ['emergency', 'alert', 'critical', 'error'];
+
+/** The requests that failed: every HTTP status code from 400 up, or only `codes`. */
+export const failingQuery = (codes: number[]) =>
+  codes.length === 0 ? '@http.status_code:>=400' : `@http.status_code:(${[...codes].sort().join(' OR ')})`;
 
 /** The query that picks one env's logs; `NO_ENV` picks the logs with no `env` tag. */
 export const envQuery = (env: string) => (env === NO_ENV ? '-env:*' : `env:${env}`);
@@ -83,6 +96,7 @@ const searchSchema = z.object({
 export const LOGS_PER_SERVICE = 1000;
 const SERVICE_LIMIT = 500;
 const ENV_LIMIT = 50;
+const CODE_LIMIT = 100;
 const TEN_MINUTES = 600_000;
 const REPO_TAG = 'git.repository_url:';
 
@@ -111,6 +125,12 @@ function messageOf(log: { message?: string; attributes?: Record<string, unknown>
   return found ?? '(no message)';
 }
 
+/** The HTTP status code a log carries, as Datadog's `http.status_code` attribute; null when it has none. */
+export function statusCodeOf(sample: Sample): number | null {
+  const code = Number(field(sample.attributes, 'http', 'status_code'));
+  return Number.isInteger(code) && code > 0 ? code : null;
+}
+
 /** The Route an HTTP log names; empty for a log with no request. */
 function routeOf(sample: Sample): { method: string; path: string } {
   const method = field(sample.attributes, 'http', 'method');
@@ -127,13 +147,15 @@ export function groupLogs(logs: Sample[], scope: string): LogGroup[] {
   const groups = new Map<string, LogGroup & { buckets: Map<number, number> }>();
   for (const sample of logs) {
     const { method, path } = routeOf(sample);
-    const key = `${method} ${path}\n${maskSignature(sample.message)}`;
+    const statusCode = statusCodeOf(sample);
+    const key = `${statusCode} ${method} ${path}\n${maskSignature(sample.message)}`;
     let group = groups.get(key);
     if (!group) {
-      const query = method
-        ? `${scope} @http.method:${method} @http.url_details.path:${path.replaceAll(':id', '*')}`
-        : scope;
-      group = { method, path, errors: 0, peakPer10m: 0, samples: [], query, buckets: new Map() };
+      const parts = [scope];
+      if (statusCode !== null) parts.push(`@http.status_code:${statusCode}`);
+      if (method) parts.push(`@http.method:${method} @http.url_details.path:${path.replaceAll(':id', '*')}`);
+      const query = parts.join(' ');
+      group = { method, path, statusCode, errors: 0, peakPer10m: 0, samples: [], query, buckets: new Map() };
       groups.set(key, group);
     }
     group.errors += 1;
@@ -170,7 +192,7 @@ export class PupDatadog implements DatadogReader {
       return range ? [range] : [];
     });
     for (const env of request.envs) {
-      const scope = [envQuery(env), 'status:(error OR warn)', ...ignored].join(' ');
+      const scope = [envQuery(env), failingQuery(request.codes), ...ignored].join(' ');
       const names = request.services ?? (await this.counts(scope, request.window)).map((count) => count.name);
       for (const name of names) {
         const query = `${scope} service:${name}`;
@@ -186,14 +208,22 @@ export class PupDatadog implements DatadogReader {
     return buckets.flatMap((bucket) => (typeof bucket.by.env === 'string' ? [bucket.by.env] : []));
   }
 
-  async services(envs: string[], window: ScanWindow): Promise<ServiceCount[]> {
+  async services(envs: string[], window: ScanWindow, codes: number[]): Promise<ServiceCount[]> {
     const perEnv = await Promise.all(
       envs.map(async (env) => {
-        const counts = await this.counts(`${envQuery(env)} status:(error OR warn)`, window);
+        const counts = await this.counts(`${envQuery(env)} ${failingQuery(codes)}`, window);
         return counts.map((count) => ({ ...count, env }));
       }),
     );
     return perEnv.flat();
+  }
+
+  async statusCodes(window: ScanWindow): Promise<{ code: number; count: number }[]> {
+    const buckets = await this.aggregate(failingQuery([]), window, '@http.status_code', CODE_LIMIT);
+    return buckets.flatMap((bucket) => {
+      const code = Number(bucket.by['@http.status_code']);
+      return Number.isInteger(code) && code >= 400 ? [{ code, count: Number(bucket.computes.c0 ?? 0) }] : [];
+    });
   }
 
   /** Every Service the query matches, busiest first: one dimension, so the group cap is no problem. */

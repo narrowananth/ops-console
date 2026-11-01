@@ -48,7 +48,7 @@ Daemon
 
 App shell
 
-27. Opening the URL from `ops-console open` stores the token in the tab's session storage and removes it from the address bar. The shell shows the left sidebar with every page.
+27. Opening the URL from `ops-console open` stores the token in the browser's local storage and removes it from the address bar, so closing the tab and opening the console again stays signed in. A token the daemon refuses is cleared (`persist-selections-and-runs`). The shell shows the left sidebar with every page.
 28. Without a token, or with a token the daemon refuses, the shell shows "Run `ops-console open` to sign in." A daemon that does not answer shows "The console daemon is not running. Run `ops-console start`."
 
 Release and checks

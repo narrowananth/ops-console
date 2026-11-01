@@ -1,15 +1,25 @@
 import { AccessLevel, type Connection, ConnectionType, HealthStatus } from '@ops-console/shared';
-import { useState } from 'react';
 import { BrandIcon, CONNECTION_BRAND } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
 import { useConnections } from '../lib/queries';
+import { useAddress } from '../lib/remember';
 import { ascending } from '../lib/sort';
 import { statusGlyph } from '../mcp/status';
 import { ConnectionForm } from './connection-form';
 import { hostOf, TYPE_BLURBS, TYPE_LABELS } from './fields';
 
 type View = { kind: 'list' } | { kind: 'pick' } | { kind: 'new'; type: ConnectionType } | { kind: 'edit'; id: string };
+
+function parseView(value: string | null): View {
+  if (value === null) return { kind: 'list' };
+  if (value === 'new') return { kind: 'pick' };
+  if (value.startsWith('new:')) {
+    const type = value.slice('new:'.length) as ConnectionType;
+    return Object.values(ConnectionType).includes(type) ? { kind: 'new', type } : { kind: 'pick' };
+  }
+  return { kind: 'edit', id: value };
+}
 
 const ACCESS_LABEL: Record<AccessLevel, string> = {
   [AccessLevel.None]: 'Claude: off',
@@ -50,7 +60,14 @@ function Row({ connection, onOpen }: { connection: Connection; onOpen: () => voi
 
 export function DevToolsTab() {
   const connections = useConnections();
-  const [view, setView] = useState<View>({ kind: 'list' });
+  // What is open lives in the address: `connection=new` to pick a type, `new:<type>`, or a Connection's id.
+  const [address, setAddress] = useAddress('connection');
+  const view = parseView(address.connection);
+  const setView = (next: View) =>
+    setAddress({
+      connection:
+        next.kind === 'list' ? null : next.kind === 'pick' ? 'new' : next.kind === 'new' ? `new:${next.type}` : next.id,
+    });
   const list = () => setView({ kind: 'list' });
 
   if (connections.isPending) return <Empty>Loading connections…</Empty>;

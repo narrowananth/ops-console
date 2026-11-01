@@ -28,6 +28,7 @@ export function hostPr(number: number, overrides: Partial<HostPullRequest> = {})
     head_sha: `sha-${number}-a`,
     state: PrState.Open,
     review_state: PrReviewState.None,
+    approved_by: [],
     checks: PrChecks.Passed,
     additions: 10,
     deletions: 2,
@@ -144,6 +145,14 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
     return posted;
   }
 
+  async deleteComment(_slug: string, number: number, commentId: string): Promise<void> {
+    this.check();
+    this.comments.set(
+      number,
+      (this.comments.get(number) ?? []).filter((comment) => comment.id !== commentId),
+    );
+  }
+
   async setResolved(_slug: string, number: number, commentId: string, resolved: boolean): Promise<void> {
     this.check();
     for (const comment of this.comments.get(number) ?? []) if (comment.id === commentId) comment.resolved = resolved;
@@ -153,8 +162,18 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
     this.check();
     this.reviews.push({ number, event, body });
     const pr = this.pr(number);
-    if (event === 'approve') pr.review_state = PrReviewState.Approved;
+    if (event === 'approve') {
+      pr.review_state = PrReviewState.Approved;
+      pr.approved_by = [...new Set([...pr.approved_by, 'me'])];
+    }
     if (event === 'request_changes') pr.review_state = PrReviewState.ChangesRequested;
+  }
+
+  /** File text by `ref:path`. */
+  texts = new Map<string, string>();
+  async fileAt(_slug: string, ref: string, path: string): Promise<string | null> {
+    this.check();
+    return this.texts.get(`${ref}:${path}`) ?? null;
   }
 
   async merge(_slug: string, number: number): Promise<void> {

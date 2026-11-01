@@ -81,6 +81,8 @@ export const prCommentSchema = z.object({
   parent_id: z.string().nullable(),
   author: z.string(),
   by_agent: z.boolean(),
+  /** Written by the operator or the agent, both signed in as the operator: the ones the operator can delete. */
+  is_mine: z.boolean(),
   body: z.string(),
   file_path: z.string().nullable(),
   line: z.number().int().nullable(),
@@ -116,6 +118,8 @@ export const pullRequestSchema = z.object({
   head_sha: z.string(),
   state: z.enum(PrState),
   review_state: z.enum(PrReviewState),
+  /** Who approved it, as the Git host names them. */
+  approved_by: z.array(z.string()),
   checks: z.enum(PrChecks),
   additions: z.number().int(),
   deletions: z.number().int(),
@@ -184,6 +188,22 @@ export const pullRequestQuerySchema = z.object({
 });
 
 export const refreshPullRequestsSchema = z.object({ repo_id: z.string().optional() });
+
+/** `GET /repos/:repo/pull-requests/:number/file`: one file of the pull request at a commit. */
+export const prFileQuerySchema = z.object({
+  path: z.string().min(1),
+  /** A commit id; the pull request's `head_sha`. */
+  ref: z.string().regex(/^[0-9a-f]{7,40}$/i),
+});
+
+export const prFileContentSchema = z.object({
+  path: z.string(),
+  ref: z.string(),
+  /** Null when the file is not there at `ref`, as for a deleted file. */
+  text: z.string().nullable(),
+});
+
+export type PrFileContent = z.infer<typeof prFileContentSchema>;
 
 export const postCommentSchema = z.object({
   body: z.string().trim().min(1),

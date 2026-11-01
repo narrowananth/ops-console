@@ -19,6 +19,7 @@ export function route(method: string, path: string, errors: number, extra: Parti
   return {
     method,
     path,
+    statusCode: 500,
     errors,
     peakPer10m: errors,
     samples: errors > 0 ? samples(Math.min(errors, 25)) : [],
@@ -39,6 +40,10 @@ export const service = (
   repoUrl,
 });
 
+/** Whether a group answers with one of `codes`; every group does when `codes` is empty. */
+const picked = (codes: number[], group: LogGroup) =>
+  codes.length === 0 || (group.statusCode !== null && codes.includes(group.statusCode));
+
 /** Datadog in memory: returns what the test set, or fails on cue. */
 export class FakeDatadog implements DatadogReader {
   readings: ServiceReading[] = [];
@@ -53,22 +58,36 @@ export class FakeDatadog implements DatadogReader {
     if (this.hold) await this.hold;
     if (this.down === 'rate_limited') throw new ApiError(429, ErrorCode.RateLimited, 'Datadog rate limit reached');
     if (this.down === 'failed') throw new ApiError(502, ErrorCode.UpstreamFailed, '`pup logs aggregate` failed');
-    return structuredClone(this.readings).filter(
-      (reading) => (!request.services || request.services.includes(reading.name)) && request.envs.includes(reading.env),
-    );
+    return structuredClone(this.readings)
+      .filter(
+        (reading) =>
+          (!request.services || request.services.includes(reading.name)) && request.envs.includes(reading.env),
+      )
+      .map((reading) => ({ ...reading, groups: reading.groups.filter((group) => picked(request.codes, group)) }));
   }
 
   /** Counts the set readings' errors, as Datadog's aggregate does. */
-  async services(envs: string[], _window: string): Promise<ServiceCount[]> {
+  async services(envs: string[], _window: string, codes: number[]): Promise<ServiceCount[]> {
     if (this.down) throw new ApiError(502, ErrorCode.UpstreamFailed, '`pup logs aggregate` failed');
     return this.readings
       .filter((reading) => envs.includes(reading.env))
       .map((reading) => ({
         name: reading.name,
         env: reading.env,
-        errors: reading.groups.reduce((sum, group) => sum + group.errors, 0),
+        errors: reading.groups.filter((group) => picked(codes, group)).reduce((sum, group) => sum + group.errors, 0),
       }))
       .filter((count) => count.errors > 0);
+  }
+
+  async statusCodes(_window: string): Promise<{ code: number; count: number }[]> {
+    if (this.down) throw new ApiError(502, ErrorCode.UpstreamFailed, '`pup logs aggregate` failed');
+    const counts = new Map<number, number>();
+    for (const reading of this.readings) {
+      for (const group of reading.groups) {
+        if (group.statusCode !== null) counts.set(group.statusCode, (counts.get(group.statusCode) ?? 0) + group.errors);
+      }
+    }
+    return [...counts].map(([code, count]) => ({ code, count })).sort((a, b) => b.count - a.count);
   }
 
   async envs(): Promise<string[]> {

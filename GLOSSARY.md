@@ -48,12 +48,13 @@ One HTTP method and path of a Service (`POST /fb/webhook`), the unit a Scan repo
 _Avoid_: endpoint, API
 
 **Scan**:
-A read of the error and warn logs in Datadog over a time window and a set of envs, for every Service or the ones the
-operator picked, on the schedule or when the operator asks. Logs with no `env` tag count as the env `no env`. It groups the logs into Alerts and marks Routes failing or healthy.
+A read of the failing requests in Datadog (logs with an HTTP status code of 400 or more, or the codes the operator
+picked) over a time window in every env, for every Service or the ones the operator picked, on the schedule or when the
+operator asks. Logs with no `env` tag count as the env `no env`. It groups the logs into Alerts and marks Routes failing or healthy.
 _Avoid_: check, sweep
 
 **Fingerprint**:
-The identity of an Alert: Service, Route (none for a log with no request) and the error signature with ids, numbers, timestamps and addresses masked. Two failures with the same Fingerprint belong to one Alert.
+The identity of an Alert: Service, Route (none for a log with no request), HTTP status code and the error signature with ids, numbers, timestamps and addresses masked. Two failures with the same Fingerprint belong to one Alert.
 
 **Severity**:
 An Alert's tier. High: one 10-minute bucket reaches the rapid threshold. Medium: errors per hour reach the failing
