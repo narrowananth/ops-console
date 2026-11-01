@@ -43,6 +43,7 @@ const SESSION = {
   last_message_preview: null,
   created_at: NOW,
   last_active_at: NOW,
+  playbook: null,
 };
 
 const MESSAGES = [

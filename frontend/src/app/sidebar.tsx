@@ -61,6 +61,12 @@ const ICONS = {
       <path d="M4 21c0-4 4-6 8-6s8 2 8 6" />
     </>,
   ),
+  playbooks: icon(
+    <>
+      <path d="M5 4h11l3 3v13H5z" />
+      <path d="M9 10h6M9 14h6M9 18h3" />
+    </>,
+  ),
 };
 
 /** Where every view lives, in sidebar order. */
@@ -73,6 +79,7 @@ export const PAGES = [
   { group: 'Connect', path: '/repos', label: 'Repos', icon: ICONS.repos },
   { group: 'Connect', path: '/setup', label: 'Setup agent', icon: ICONS.setup },
   { group: 'Claude', path: '/agents', label: 'Agents & accounts', icon: ICONS.agents },
+  { group: 'Claude', path: '/playbooks', label: 'Playbooks', icon: ICONS.playbooks },
 ] as const;
 
 const NEEDS_ATTENTION: HealthStatus[] = [HealthStatus.Auth, HealthStatus.Fail];

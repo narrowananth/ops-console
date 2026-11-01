@@ -19,6 +19,7 @@ import { ApiError, validationFailed } from '../common/errors';
 import { afterCursor, toPage } from '../common/pagination';
 import { repos, sessions } from '../db/schema';
 import { type Emit, STORE, type Store } from '../db/store';
+import { PlaybooksService } from '../playbooks/playbooks.service';
 import { SettingsRegistry } from '../settings/settings.registry';
 import { SettingsService } from '../settings/settings.service';
 import { RunRegistry } from './runs';
@@ -56,6 +57,7 @@ export function toSession(row: SessionRow): Session {
     last_message_preview: row.lastMessagePreview,
     created_at: row.createdAt,
     last_active_at: row.lastActiveAt,
+    playbook: null,
   };
 }
 
@@ -76,6 +78,7 @@ export class SessionsService {
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(RunRegistry) private readonly runs: RunRegistry,
     @Inject(SessionKinds) private readonly kinds: SessionKinds,
+    @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
     @Inject(SettingsRegistry) registry: SettingsRegistry,
   ) {
     registry.register({ key: SESSION_DEFAULTS_KEY, schema: sessionDefaultsSchema, default: SESSION_DEFAULTS });
@@ -138,7 +141,11 @@ export class SessionsService {
 
   /** The Session with the fields its kind adds. */
   view(row: SessionRow): Session {
-    return { ...toSession(row), ...this.kinds.get(row.kind)?.view?.(row) };
+    return {
+      ...toSession(row),
+      playbook: this.playbooks.forSession(row).playbook,
+      ...this.kinds.get(row.kind)?.view?.(row),
+    };
   }
 
   /** Model, effort and access mode apply from the Session's next run. */

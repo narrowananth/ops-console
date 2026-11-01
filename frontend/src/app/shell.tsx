@@ -7,6 +7,7 @@ import { IntegrationsTab } from '../integrations/integrations-tab';
 import { useLiveEvents } from '../lib/live';
 import { usePrefetchPullRequests } from '../lib/queries';
 import { MonitorView } from '../monitor/monitor-view';
+import { NewPlaybookButton, PlaybooksView } from '../playbooks/playbooks-view';
 import { ReposTab } from '../repos/repos-tab';
 import { SetupAgentButton } from '../setup/setup-agent-link';
 import { SetupAgentTab } from '../setup/setup-agent-tab';
@@ -110,6 +111,18 @@ export function Shell() {
                 <PageColumn>
                   <AgentsTab />
                 </PageColumn>
+              </Page>
+            }
+          />
+          <Route
+            path="/playbooks"
+            element={
+              <Page
+                title="Playbooks"
+                sub="What the agent follows when each Trigger starts it. One Playbook per Trigger."
+                actions={<NewPlaybookButton />}
+              >
+                <PlaybooksView />
               </Page>
             }
           />

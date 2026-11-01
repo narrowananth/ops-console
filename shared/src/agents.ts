@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { pageQuerySchema } from './api';
+import { sessionPlaybookSchema } from './playbooks';
 
 export enum SessionKind {
   Repo = 'repo',
@@ -157,6 +158,8 @@ export const sessionSchema = z.object({
   last_message_preview: z.string().nullable(),
   created_at: z.string(),
   last_active_at: z.string(),
+  /** The Playbook its rules come from, when it is not built-in. */
+  playbook: sessionPlaybookSchema.nullable(),
 });
 
 export type Session = z.infer<typeof sessionSchema>;

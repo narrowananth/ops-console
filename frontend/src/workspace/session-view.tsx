@@ -8,6 +8,7 @@ import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
 import { useDeleteSession, useMessages, useRepoSessions, useRepos, useSendMessage } from '../lib/queries';
 import { useStored } from '../lib/remember';
+import { PlaybookLink } from '../playbooks/job-steps';
 import { BranchSwitcher } from './branch-switcher';
 
 export function SessionView({ id, onGone }: { id: string; onGone: () => void }) {
@@ -45,6 +46,13 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
         <span className="rounded-full bg-neutral-200 px-2 py-0.5 text-[11px] text-neutral-700">
           {session.state.replace('_', ' ')}
         </span>
+        {session.playbook && (
+          <PlaybookLink
+            playbook={session.playbook}
+            label={`Playbook: ${session.playbook.name}`}
+            title="Rules in this Session come from this Playbook"
+          />
+        )}
         <Button
           className="px-2.5 py-1 text-xs"
           disabled={running || remove.isPending}

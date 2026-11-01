@@ -21,7 +21,7 @@ export function apiGet<T extends z.ZodType>(path: string, schema: T): Promise<z.
 }
 
 export function apiSend<T extends z.ZodType>(
-  method: 'POST' | 'PATCH' | 'DELETE',
+  method: 'POST' | 'PATCH' | 'PUT' | 'DELETE',
   path: string,
   body: unknown,
   schema: T,

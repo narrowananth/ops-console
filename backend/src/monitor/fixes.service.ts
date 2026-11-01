@@ -10,6 +10,7 @@ import {
   FixStage,
   FixStatus,
   GitHost,
+  PlaybookTrigger,
   PrState,
   SessionKind,
   Severity,
@@ -17,24 +18,24 @@ import {
 import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { AgentRuntime } from '../agent/runtime';
+import { parseAgentJson } from '../common/agent-json';
 import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
 import { ConnectorsService } from '../connectors/connectors.service';
 import { alerts, fixes, reports, repos, reviews, routes, services, sessions } from '../db/schema';
 import { type Emit, STORE, type Store, type Tx } from '../db/store';
+import { JobSteps, jobPlaybook } from '../playbooks/job-steps';
+import { PlaybooksService } from '../playbooks/playbooks.service';
 import { cloneUrl, GIT, Git, parseRemote } from '../repos/git';
 import { everyMinutes, Scheduler } from '../scheduler/scheduler';
 import { AnonymousSessionsService } from '../workspace/anonymous-sessions.service';
 import { PullRequestsService } from '../workspace/pull-requests.service';
 import { WorkspaceSessionsService } from '../workspace/workspace-sessions.service';
-import { parseAgentJson } from './agent-json';
 import { AlertSessions } from './alert-sessions';
 import { AlertsService } from './alerts.service';
 import { type AlertRow, type FixRow, type ReportRow, type ReviewRow, type ServiceRow, toFix } from './mappers';
 
 const ticketSchema = z.object({ key: z.string().min(1), url: z.string().min(1) });
-const doneSchema = z.object({ summary: z.string() });
-const testsSchema = z.object({ passed: z.boolean(), summary: z.string() });
 const prSchema = z.object({ number: z.number().int(), url: z.string().min(1) });
 const okSchema = z.object({ ok: z.literal(true) });
 
@@ -51,6 +52,8 @@ type Context = {
   review: ReviewRow;
   sessionId: string;
   slug: string;
+  /** Set until the Fix's first agent turn, which starts a new conversation in the checkout (Behavior 26). */
+  fresh: boolean;
 };
 
 @Injectable()
@@ -68,6 +71,8 @@ export class FixesService {
     @Inject(AnonymousSessionsService) private readonly anonymous: AnonymousSessionsService,
     @Inject(PullRequestsService) private readonly pulls: PullRequestsService,
     @Inject(GIT) private readonly git: Git,
+    @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
+    @Inject(JobSteps) private readonly steps: JobSteps,
     @Inject(Scheduler) scheduler: Scheduler,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
@@ -82,7 +87,29 @@ export class FixesService {
   }
 
   get(id: string): Fix {
-    return toFix(this.row(id));
+    return this.view(this.row(id));
+  }
+
+  view(row: FixRow): Fix {
+    return toFix(row, jobPlaybook(this.store.db, 'fix', row));
+  }
+
+  /** The Fix a confirmed Review starts, holding the copy of the Playbook Fix holds now (Behavior 13). */
+  insert(tx: Tx, reviewId: string): FixRow {
+    const copy = this.playbooks.copyFor(PlaybookTrigger.Fix);
+    const row = tx
+      .insert(fixes)
+      .values({
+        id: crypto.randomUUID(),
+        reviewId,
+        playbookId: copy.id,
+        playbookName: copy.name,
+        playbookRules: copy.rules,
+      })
+      .returning()
+      .get();
+    this.steps.seed(tx, { kind: 'fix', id: row.id }, copy.steps);
+    return row;
   }
 
   row(id: string): FixRow {
@@ -93,12 +120,15 @@ export class FixesService {
 
   /** Runs in the background from the first stage; `fix.advanced` reports each step. */
   begin(fixId: string): void {
-    this.detach(fixId);
+    this.detach(fixId, true);
   }
 
   retry(id: string): Fix {
     const fix = this.row(id);
     if (fix.status !== FixStatus.Failed) throw new ApiError(409, ErrorCode.InvalidState, `the Fix is ${fix.status}`);
+    // A Fix that failed before its first agent turn still owes the new conversation (Behavior 26).
+    const unstarted =
+      fix.jiraKey === null && this.steps.rows({ kind: 'fix', id }).every((step) => step.startedAt === null);
     const row = this.store.write((tx, emit) => {
       const updated = tx
         .update(fixes)
@@ -106,23 +136,24 @@ export class FixesService {
         .where(eq(fixes.id, id))
         .returning()
         .get() as FixRow;
+      if (updated.stage === FixStage.Steps) this.steps.reset(tx, emit, { kind: 'fix', id });
       this.announce(tx, emit, updated);
       return updated;
     });
-    this.detach(id);
-    return toFix(row);
+    this.detach(id, unstarted);
+    return this.view(row);
   }
 
   /** A run nobody awaits must not reject: a store closed by shutdown ends it, and recovery fails the Fix on the next start. */
-  private detach(fixId: string): void {
-    void this.run(fixId).catch((error) =>
+  private detach(fixId: string, fresh: boolean): void {
+    void this.run(fixId, fresh).catch((error) =>
       this.logger.warn(`fix ${fixId} stopped: ${error instanceof Error ? error.message : String(error)}`),
     );
   }
 
-  private async run(fixId: string): Promise<void> {
+  private async run(fixId: string, fresh: boolean): Promise<void> {
     try {
-      const context = await this.context(fixId);
+      const context = await this.context(fixId, fresh);
       for (const stage of FIX_STAGES.slice(FIX_STAGES.indexOf(context.fix.stage))) {
         this.setStage(fixId, stage);
         await this.stage(stage, context);
@@ -137,7 +168,7 @@ export class FixesService {
     }
   }
 
-  private async context(fixId: string): Promise<Context> {
+  private async context(fixId: string, fresh: boolean): Promise<Context> {
     const found = this.store.db
       .select({ fix: fixes, alert: alerts, report: reports, review: reviews, service: services })
       .from(fixes)
@@ -153,27 +184,21 @@ export class FixesService {
     if (found.fix.sessionId !== sessionId) {
       this.store.write((tx) => tx.update(fixes).set({ sessionId }).where(eq(fixes.id, fixId)).run());
     }
-    return { ...found, sessionId, slug: found.report.slug ?? 'fix' };
+    return { ...found, sessionId, slug: found.report.slug ?? 'fix', fresh };
   }
 
   private async stage(stage: FixStage, context: Context): Promise<void> {
     if (stage === FixStage.Ticket) return this.ticket(context);
     if (stage === FixStage.Branch) return this.branch(context);
-    if (stage === FixStage.Code) {
-      await this.ask(
-        context,
-        `${this.brief(context)}\n\nImplement the proposed fix on the current branch. Keep the change small and add or update a test. Do not commit and do not push. ${JSON_ONLY}\n\n\`\`\`json\n{ "summary": "what you changed" }\n\`\`\``,
-        doneSchema,
-      );
-      return;
-    }
-    if (stage === FixStage.Tests) {
-      const result = await this.ask(
-        context,
-        `Run the repo's tests that cover this change, and fix what you broke. ${JSON_ONLY}\n\n\`\`\`json\n{ "passed": true, "summary": "what ran and how it ended" }\n\`\`\``,
-        testsSchema,
-      );
-      if (!result.passed) throw new StageFailed(`tests failed: ${result.summary}`.slice(0, 500));
+    if (stage === FixStage.Steps) {
+      const failure = await this.steps.run({
+        job: { kind: 'fix', id: context.fix.id },
+        sessionId: context.sessionId,
+        brief: `${this.brief(context)}\nThe console sends the work as steps, one per turn, on branch ${context.fix.branch}.`,
+        rules: context.fix.playbookRules,
+        fresh: this.takeFresh(context),
+      });
+      if (failure) throw new StageFailed(failure);
       return;
     }
     return this.pullRequest(context);
@@ -195,11 +220,20 @@ ${jira}Root cause: ${context.report.rootCause}. Proposed fix: ${context.report.p
     }
   }
 
+  private takeFresh(context: Context): boolean {
+    const fresh = context.fresh;
+    context.fresh = false;
+    return fresh;
+  }
+
   /** One agent run in the Alert's Session; the answer must carry the stage's JSON. */
   private async ask<T extends z.ZodType>(context: Context, prompt: string, schema: T): Promise<z.infer<T>> {
     let finished: Promise<{ ok: boolean; text: string }>;
     try {
-      finished = this.runtime.runFor(context.sessionId, prompt).finished;
+      finished = this.runtime.runFor(context.sessionId, prompt, null, {
+        rules: context.fix.playbookRules,
+        fresh: this.takeFresh(context),
+      }).finished;
     } catch (error) {
       throw new StageFailed(error instanceof Error ? error.message : 'the agent could not start');
     }

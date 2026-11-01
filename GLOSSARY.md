@@ -36,6 +36,28 @@ write asks in every mode.
 The operator's yes or no on one agent action that needs it: a PROD write, or an edit or command in
 a mode that asks.
 
+### Playbooks
+
+**Playbook**:
+The rules and ordered steps the agent follows when a Trigger starts it, written by the operator. Each Trigger holds
+one; one Playbook may be held by several.
+_Avoid_: rule, pipeline, workflow
+
+**Trigger**:
+A place in a tab that starts the agent: Verify and Fix in Monitor, Review PR, Reply in thread and Session message in
+Workspace, Ask in Dev tools.
+_Avoid_: action (the Action Log means each command the agent runs)
+
+**Playbook step**:
+One titled instruction in a Playbook, run as its own agent turn, ending done, skipped or failed.
+
+**Step block**:
+A ready-made Playbook step the operator drags into a Playbook and then edits.
+
+**Scratch copy**:
+A throwaway copy of a Service's code, at its default branch, where a Verification may write files and run local
+commands. A Playbook step that needs one carries the tag "scratch copy"; Review PR takes no such step.
+
 ### Monitor
 
 **Service**:
@@ -78,8 +100,9 @@ PR open to resolved, or is dismissed.
 _Avoid_: incident, issue
 
 **Verification**:
-The agent's attempt to explain an Alert from the code: follow the log through the code end to end, replay the
-request locally when it can, cross-check Connections, and write a Report on the issue and its fix.
+The agent's attempt to explain an Alert from the code, in a scratch copy of it: follow the log through the code end to
+end, replay the request and test with mock data locally when it can, cross-check Connections, and write a Report on the
+issue and its fix.
 _Avoid_: investigation, triage
 
 **Report**:
@@ -95,8 +118,8 @@ The Jira issue the agent creates when the operator confirms a Report while Jira 
 branch name.
 
 **Fix**:
-The work that follows a confirmed Review: ticket (when Jira is connected), branch, code change, tests, push and PR, run
-by the agent in the Alert's Session. A merged PR resolves the Alert; a PR closed unmerged abandons the Fix.
+The work that follows a confirmed Review: ticket (when Jira is connected), branch, the steps of its Playbook (code
+change and tests by default), push and PR, run by the agent in the Alert's Session. A merged PR resolves the Alert; a PR closed unmerged abandons the Fix.
 
 ### Workspace
 

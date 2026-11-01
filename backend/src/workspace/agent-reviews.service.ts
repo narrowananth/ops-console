@@ -7,6 +7,7 @@ import {
   ErrorCode,
   type Finding,
   FindingSeverity,
+  PlaybookTrigger,
   type PrAgentReview,
   type PrComment,
   type PrFile,
@@ -22,6 +23,8 @@ import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
 import { agentComments, prAgentReviews, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
+import { JobSteps, jobPlaybook } from '../playbooks/job-steps';
+import { PlaybooksService } from '../playbooks/playbooks.service';
 import type { HostComment, HostPullRequest } from './git-host';
 import { PullRequestsService, toAgentReview } from './pull-requests.service';
 
@@ -53,7 +56,8 @@ function openThreads(comments: HostComment[]): string {
   return `\n\nOpen comment threads already on this pull request:\n${lines.join('\n')}\n\nDo not repeat a point these threads already make, in other words or on another line. Report only what they miss.`;
 }
 
-export function reviewPrompt(slug: string, pr: HostPullRequest, files: PrFile[], comments: HostComment[] = []): string {
+/** What the agent is told about the pull request before its first step. */
+export function reviewBrief(slug: string, pr: HostPullRequest, files: PrFile[], comments: HostComment[] = []): string {
   let budget = PATCH_BUDGET;
   const patches = files.map((file) => {
     const text = file.lines
@@ -70,7 +74,11 @@ ${pr.body || '(no description)'}
 
 ${patches.join('\n\n')}${openThreads(comments)}
 
-Read the change as a careful reviewer would. Do not change anything and do not post comments: the console posts your findings. Answer with one JSON block and nothing after it:
+Do not change anything and do not post comments: the console posts your findings. The console sends the review as steps, one per turn.`;
+}
+
+/** The console's closing turn: findings, checklist and verdict, in the shape it posts. */
+export const REVIEW_PROMPT = `Write your review of this pull request from what you found. Answer with one JSON block and nothing after it:
 
 \`\`\`json
 {
@@ -82,7 +90,6 @@ Read the change as a careful reviewer would. Do not change anything and do not p
 \`\`\`
 
 The checklist covers PROD readiness: migrations, config and secrets, backwards compatibility, rollback, tests. "tools" lists the Connections you queried, and stays empty when you queried none.`;
-}
 
 export function parseReview(text: string): z.infer<typeof outputSchema> | null {
   const fenced = [...text.matchAll(/```json\s*([\s\S]*?)```/g)].at(-1)?.[1];
@@ -107,6 +114,8 @@ export class AgentReviewsService {
     @Inject(SessionsService) private readonly sessions: SessionsService,
     @Inject(AgentRuntime) private readonly runtime: AgentRuntime,
     @Inject(ActionLogService) private readonly actionLog: ActionLogService,
+    @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
+    @Inject(JobSteps) private readonly steps: JobSteps,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
     recovery.register('pull request agent reviews', () => this.recover());
@@ -133,7 +142,7 @@ export class AgentReviewsService {
       .where(and(eq(prAgentReviews.repoId, repoId), eq(prAgentReviews.prNumber, number)))
       .orderBy(desc(prAgentReviews.createdAt), desc(prAgentReviews.id))
       .all()
-      .map((row) => toAgentReview(row, pr.head_sha));
+      .map((row) => toAgentReview(row, pr.head_sha, jobPlaybook(this.store.db, 'agent_review', row)));
   }
 
   /**
@@ -163,20 +172,54 @@ export class AgentReviewsService {
         'The agent already reviewed this commit; push a change to review again',
       );
     const session = this.reviewSession(repoId, number, `${repo.name} #${number} review`);
-    const { finished } = this.runtime.runFor(session, reviewPrompt(slug, pr, files, comments));
-    const row = this.store.write((tx) =>
-      tx
+    if (this.runtime.busy(session)) throw new ApiError(409, ErrorCode.SessionBusy, "the session's run is still going");
+    const copy = this.playbooks.copyFor(PlaybookTrigger.ReviewPr);
+    const row = this.store.write((tx) => {
+      const created = tx
         .insert(prAgentReviews)
-        .values({ id: crypto.randomUUID(), repoId, prNumber: number, headSha: pr.head_sha })
+        .values({
+          id: crypto.randomUUID(),
+          repoId,
+          prNumber: number,
+          headSha: pr.head_sha,
+          playbookId: copy.id,
+          playbookName: copy.name,
+          playbookRules: copy.rules,
+        })
         .returning()
-        .get(),
+        .get();
+      this.steps.seed(tx, { kind: 'agent_review', id: created.id }, copy.steps);
+      return created;
+    });
+    void this.execute(row.id, session, slug, pr.head_sha, reviewBrief(slug, pr, files, comments), copy.rules).catch(
+      (error) => {
+        this.logger.error(`review ${row.id} failed: ${error instanceof Error ? error.message : error}`);
+        this.finish(row.id, repoId, number, { status: AgentReviewStatus.Failed }, 0, 0);
+      },
     );
-    void finished
-      .then((summary) => this.complete(row.id, session, slug, pr.head_sha, summary))
-      .catch((error) =>
-        this.logger.error(`review ${row.id} failed: ${error instanceof Error ? error.message : error}`),
-      );
-    return toAgentReview(row, pr.head_sha);
+    return toAgentReview(row, pr.head_sha, jobPlaybook(this.store.db, 'agent_review', row));
+  }
+
+  /** The Playbook's steps, one turn each, then the closing turn the console posts from (Behavior 16). */
+  private async execute(
+    reviewId: string,
+    sessionId: string,
+    slug: string,
+    headSha: string,
+    brief: string,
+    rules: string,
+  ): Promise<void> {
+    const job = { kind: 'agent_review', id: reviewId } as const;
+    const hasSteps = this.steps.rows(job).length > 0;
+    const failure = await this.steps.run({ job, sessionId, brief, rules });
+    if (failure) {
+      const review = this.store.db.select().from(prAgentReviews).where(eq(prAgentReviews.id, reviewId)).get();
+      if (review) this.finish(reviewId, review.repoId, review.prNumber, { status: AgentReviewStatus.Failed }, 0, 0);
+      return;
+    }
+    const closing = hasSteps ? REVIEW_PROMPT : `${brief}\n\n${REVIEW_PROMPT}`;
+    const summary = await this.runtime.runFor(sessionId, closing, null, { rules }).finished;
+    await this.complete(reviewId, sessionId, slug, headSha, summary);
   }
 
   /** After the operator posts a reply: a thread the agent started wakes the agent. */
@@ -195,6 +238,7 @@ export class AgentReviewsService {
     const thread = comments.filter((comment) => comment.id === root || comment.parent_id === root);
     const rootComment = thread.find((comment) => comment.id === root);
     const session = this.reviewSession(repoId, number, `${repo.name} #${number} review`);
+    const { rules } = this.playbooks.forSession(this.sessions.get(session));
     const text = `The operator replied in a review thread you started on pull request #${number} of ${slug}${
       rootComment?.file_path ? `, on ${rootComment.file_path}${rootComment.line ? `:${rootComment.line}` : ''}` : ''
     }.
@@ -202,7 +246,7 @@ export class AgentReviewsService {
 ${thread.map((comment) => `${comment.author}: ${comment.body}`).join('\n\n')}
 
 Answer the last message in plain text, in a few sentences. Do not change anything.`;
-    const summary = await this.runtime.runFor(session, text).finished;
+    const summary = await this.runtime.runFor(session, text, null, { rules }).finished;
     if (!summary.ok || !summary.text.trim()) return;
     const row = this.actionLog.start({
       sessionId: session,

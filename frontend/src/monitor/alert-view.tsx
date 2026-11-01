@@ -4,6 +4,8 @@ import {
   type Fix,
   FixStage,
   FixStatus,
+  PlaybookStepStatus,
+  PlaybookTrigger,
   type Report,
   ReportKind,
   ReviewDecision,
@@ -24,11 +26,21 @@ import {
   useConnectors,
   usePatchRoute,
   useRetryFix,
+  useRetryReport,
   useReviewAlert,
   useUndoDismissal,
   useVerifyAlert,
 } from '../lib/queries';
 import { useStored } from '../lib/remember';
+import {
+  failedStep,
+  JobSteps,
+  PlaybookLink,
+  stepsFinished,
+  stepTally,
+  useTriggerPlaybook,
+} from '../playbooks/job-steps';
+import { withPlaybook } from '../playbooks/labels';
 import { CodeSource } from './repo-link';
 import { SeverityBadge } from './severity';
 
@@ -93,7 +105,11 @@ function ReportPanel({ alertId, report }: { alertId: string; report: Report }) {
       <div className="flex flex-col gap-3 px-4 py-3 text-[13px]">
         {shown.status === RunStatus.Running && (
           <>
-            <p className="m-0 font-bold">The agent is reading the code…</p>
+            {shown.playbook ? (
+              <PlaybookSteps report={shown} />
+            ) : (
+              <p className="m-0 font-bold">The agent is reading the code…</p>
+            )}
             <Steps report={shown} />
           </>
         )}
@@ -102,11 +118,23 @@ function ReportPanel({ alertId, report }: { alertId: string; report: Report }) {
             <p role="alert" className="m-0 text-accent-700">
               The Verification did not finish{shown.error_message ? ` (${shown.error_message})` : ''}. Verify again.
             </p>
+            {shown.playbook && <PlaybookSteps report={shown} />}
             <Steps report={shown} />
           </>
         )}
         {shown.status === RunStatus.Ready && (
           <>
+            {shown.playbook && (
+              <details>
+                <summary className="cursor-pointer text-xs text-neutral-700">
+                  Playbook: {shown.playbook.name}
+                  {shown.playbook.steps.length > 0 && ` · ${stepTally(shown.playbook)}`}
+                </summary>
+                <div className="mt-2">
+                  <JobSteps playbook={shown.playbook} />
+                </div>
+              </details>
+            )}
             {shown.markdown ? (
               <Markdown source={shown.markdown} />
             ) : (
@@ -149,6 +177,21 @@ function ReportPanel({ alertId, report }: { alertId: string; report: Report }) {
   );
 }
 
+/** The Playbook the Verification copied, its steps live, then the console's closing turn. */
+function PlaybookSteps({ report }: { report: Report }) {
+  if (!report.playbook) return null;
+  const writing = report.status === RunStatus.Running && stepsFinished(report.playbook);
+  return (
+    <>
+      <div className="flex items-center gap-2 text-xs">
+        <span className="text-neutral-700">Playbook</span>
+        <PlaybookLink playbook={report.playbook} />
+      </div>
+      <JobSteps playbook={report.playbook} closing={writing ? 'Writing the Report' : undefined} />
+    </>
+  );
+}
+
 function Steps({ report }: { report: Report }) {
   if (report.steps.length === 0) return null;
   return (
@@ -164,37 +207,78 @@ function Steps({ report }: { report: Report }) {
   );
 }
 
-/** The Fix's stages as they run; the ticket shows as skipped when Jira was not connected. */
+const STAGE_LABEL: Record<FixStage, string> = {
+  [FixStage.Ticket]: 'Ticket',
+  [FixStage.Branch]: 'Branch',
+  [FixStage.Steps]: 'Steps',
+  [FixStage.Pr]: 'PR',
+};
+
+type Mark = 'done' | 'failed' | 'running' | 'pending';
+
+const MARKS: Record<Mark, { mark: string; tone: string }> = {
+  done: { mark: '✓', tone: '' },
+  failed: { mark: '✕', tone: 'font-bold text-accent-700' },
+  running: { mark: '◐', tone: 'font-bold' },
+  pending: { mark: '·', tone: 'text-neutral-700' },
+};
+
+const STEP_MARK: Record<PlaybookStepStatus, Mark> = {
+  [PlaybookStepStatus.Done]: 'done',
+  [PlaybookStepStatus.Skipped]: 'done',
+  [PlaybookStepStatus.Failed]: 'failed',
+  [PlaybookStepStatus.Running]: 'running',
+  [PlaybookStepStatus.Pending]: 'pending',
+};
+
+/**
+ * The Fix's stages as they run: Ticket, Branch, each step of its Playbook by title, and PR. The ticket shows as
+ * skipped when Jira was not connected.
+ */
 function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: () => void; retrying: boolean }) {
   const at = FIX_STAGES.indexOf(fix.stage);
+  const stageMark = (index: number): Mark =>
+    fix.status === FixStatus.Done || index < at
+      ? 'done'
+      : index === at
+        ? fix.status === FixStatus.Failed
+          ? 'failed'
+          : 'running'
+        : 'pending';
+  const rows = FIX_STAGES.flatMap((stage, index) => {
+    if (stage === FixStage.Steps && fix.playbook) {
+      return fix.playbook.steps.map((step, position) => ({
+        key: `step-${position}`,
+        label: step.title,
+        mark: STEP_MARK[step.status],
+        note: step.status === PlaybookStepStatus.Skipped ? ' (skipped)' : '',
+        summary: step.summary,
+      }));
+    }
+    const mark = stageMark(index);
+    const noJira = stage === FixStage.Ticket && mark === 'done' && fix.jira_key === null;
+    return [{ key: stage, label: STAGE_LABEL[stage], mark, note: noJira ? ' (no Jira)' : '', summary: null }];
+  });
+  const failed = failedStep(fix.playbook);
   return (
     <section aria-label="Fix" className="rounded-xl border border-line bg-card px-4 py-3.5 shadow-sm">
       <div className="mb-2 flex items-center gap-2 text-[13px]">
         <strong>Fix</strong>
         <span className="text-xs text-neutral-700">{fix.status}</span>
+        {fix.playbook && <PlaybookLink playbook={fix.playbook} label={`Playbook: ${fix.playbook.name}`} />}
         {fix.session_id && (
           <Link to={`/workspace?session=${fix.session_id}`} className="ml-auto text-xs">
             Open the Session →
           </Link>
         )}
       </div>
-      <ol className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs">
-        {FIX_STAGES.map((stage, index) => {
-          const done = fix.status === FixStatus.Done || index < at;
-          const failed = fix.status === FixStatus.Failed && index === at;
-          const skipped = stage === FixStage.Ticket && done && fix.jira_key === null;
-          return (
-            <li
-              key={stage}
-              className={
-                failed ? 'font-bold text-accent-700' : done ? '' : index === at ? 'font-bold' : 'text-neutral-700'
-              }
-            >
-              {done ? '✓' : failed ? '✕' : index === at ? '◐' : '·'} {stage}
-              {skipped && <span className="text-neutral-700"> (no Jira)</span>}
-            </li>
-          );
-        })}
+      <ol aria-label="Fix progress" className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs">
+        {rows.map((row) => (
+          <li key={row.key} className={MARKS[row.mark].tone} title={row.summary ?? undefined}>
+            {MARKS[row.mark].mark} {row.label}
+            {row.note && <span className="font-normal text-neutral-700">{row.note}</span>}
+          </li>
+        ))}
       </ol>
       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
         {fix.branch && <span className="rounded-full bg-neutral-200 px-2 py-0.5 font-mono">{fix.branch}</span>}
@@ -215,7 +299,9 @@ function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: () => void
             </span>
             <Button className="px-2.5 py-1 text-xs" disabled={retrying} onClick={onRetry}>
               {retrying && <Spinner />}
-              Retry from {fix.stage}
+              {fix.stage === FixStage.Steps && failed !== null
+                ? `Retry from step ${failed}`
+                : `Retry from ${STAGE_LABEL[fix.stage]}`}
             </Button>
           </>
         )}
@@ -232,7 +318,10 @@ export function AlertView({ id }: { id: string }) {
   const review = useReviewAlert(id);
   const undo = useUndoDismissal(id);
   const retry = useRetryFix(alert.data?.fix?.id ?? '');
+  const retryReport = useRetryReport();
   const patchRoute = usePatchRoute();
+  const verifyPlaybook = useTriggerPlaybook(PlaybookTrigger.Verify);
+  const fixPlaybook = useTriggerPlaybook(PlaybookTrigger.Fix);
   if (alert.isPending) return <Empty>Reading the Alert…</Empty>;
   if (alert.isError) return <Empty>Could not read the Alert: {alert.error.message}</Empty>;
   const data = alert.data;
@@ -243,7 +332,9 @@ export function AlertView({ id }: { id: string }) {
   // Shown greyed while the agent verifies, so a second click cannot start another run.
   const canVerify = data.status === AlertStatus.Open || data.status === AlertStatus.Verified || verifying;
   const hasCode = data.service.repo_id !== null || data.service.repo_url !== null;
-  const error = verify.error ?? review.error ?? undo.error ?? retry.error ?? patchRoute.error;
+  const error = verify.error ?? review.error ?? undo.error ?? retry.error ?? retryReport.error ?? patchRoute.error;
+  // Only the newest Report can run again from its failed step.
+  const retryFrom = report?.status === RunStatus.Failed ? failedStep(report.playbook) : null;
   const kind = report?.kind ?? ReportKind.Bug;
   const other = kind === ReportKind.Bug ? ReportKind.Improvement : ReportKind.Bug;
 
@@ -309,10 +400,17 @@ export function AlertView({ id }: { id: string }) {
               ? 'Agent verifying…'
               : verify.isPending
                 ? 'Starting the agent…'
-                : data.status === AlertStatus.Verified
-                  ? 'Verify again'
-                  : 'Verify with agent'}
+                : withPlaybook(
+                    data.status === AlertStatus.Verified ? 'Verify again' : 'Verify with agent',
+                    verifyPlaybook,
+                  )}
           </Button>
+          {report && retryFrom !== null && !verifying && (
+            <Button disabled={retryReport.isPending || verify.isPending} onClick={() => retryReport.mutate(report.id)}>
+              {retryReport.isPending && <Spinner />}
+              Retry from step {retryFrom}
+            </Button>
+          )}
           <span className="text-xs text-neutral-700">
             {hasCode
               ? 'The agent traces the log through the code end to end and writes a Report: the issue and how to fix it.'
@@ -332,13 +430,13 @@ export function AlertView({ id }: { id: string }) {
               onClick={() => review.mutate({ decision: ReviewDecision.Confirmed, kind })}
             >
               {review.isPending && <Spinner />}
-              Fix with agent
+              {withPlaybook('Fix with agent', fixPlaybook)}
             </Button>
             <Button
               disabled={review.isPending}
               onClick={() => review.mutate({ decision: ReviewDecision.Confirmed, kind: other })}
             >
-              Fix as {other}
+              {withPlaybook(`Fix as ${other}`, fixPlaybook)}
             </Button>
             <Button
               variant="ghost"

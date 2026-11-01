@@ -1,4 +1,5 @@
 import { AgentReviewStatus, type PrAgentReview } from '@ops-console/shared';
+import { JobSteps, PlaybookLink } from '../playbooks/job-steps';
 
 const MARK = { pass: '✓', warn: '!', fail: '✕', na: '–' } as const;
 
@@ -12,9 +13,11 @@ export function AgentReviewCard({ review }: { review: PrAgentReview }) {
         {review.stale && (
           <span className="rounded-full bg-accent-100 px-2 py-px text-[10px] text-accent-700">stale</span>
         )}
+        {review.playbook && <PlaybookLink playbook={review.playbook} />}
         <span className="ml-auto text-neutral-700">{review.status}</span>
       </header>
       <div className="flex flex-col gap-3 px-3 py-2.5 text-[13px]">
+        {review.playbook && review.playbook.steps.length > 0 && <JobSteps playbook={review.playbook} />}
         {review.status === AgentReviewStatus.Running && <p className="m-0">The agent is reading the change…</p>}
         {review.status === AgentReviewStatus.Failed && (
           <p className="m-0 text-accent-700">The review did not finish. Start it again.</p>

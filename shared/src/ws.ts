@@ -10,6 +10,7 @@ import {
 } from './agents';
 import { CheckTarget, HealthStatus } from './mcp';
 import { FixStage, FixStatus, ReviewDecision, ScanStatus, Severity } from './monitor';
+import { PlaybookStepStatus } from './playbooks';
 import { prRefreshStatus } from './workspace';
 
 /** First WebSocket subprotocol; the session token is the second. */
@@ -159,6 +160,17 @@ export const wsEventSchema = z.discriminatedUnion('event', [
       status: z.enum(FixStatus),
       jira_key: z.string().nullable(),
       pr_number: z.number().int().nullable(),
+    }),
+  ),
+  event(
+    'playbook_step.updated',
+    z.object({
+      report_id: z.string().nullable(),
+      fix_id: z.string().nullable(),
+      agent_review_id: z.string().nullable(),
+      position: z.number().int(),
+      status: z.enum(PlaybookStepStatus),
+      summary: z.string().nullable(),
     }),
   ),
   event('alert.resolved', z.object({ alert_id: z.string() })),

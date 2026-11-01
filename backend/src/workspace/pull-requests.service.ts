@@ -8,6 +8,7 @@ import {
   type Finding,
   GitHost,
   HealthStatus,
+  type JobPlaybook,
   PR_HOSTS,
   type PrAgentReview,
   type PrComment,
@@ -25,6 +26,7 @@ import { ApiError, validationFailed } from '../common/errors';
 import { ConnectorsService } from '../connectors/connectors.service';
 import { agentComments, connectors, prAgentReviews, repos, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
+import { jobPlaybook } from '../playbooks/job-steps';
 import type { OpenPrBranches } from '../repos/open-pr-branches';
 import {
   GIT_HOSTS,
@@ -72,7 +74,7 @@ function changedNumbers<T extends HostPullRequest>(
 
 const sameSlug = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
-export function toAgentReview(row: ReviewRow, headSha: string | null): PrAgentReview {
+export function toAgentReview(row: ReviewRow, headSha: string | null, playbook: JobPlaybook | null): PrAgentReview {
   return {
     id: row.id,
     repo_id: row.repoId,
@@ -85,6 +87,7 @@ export function toAgentReview(row: ReviewRow, headSha: string | null): PrAgentRe
     tools: JSON.parse(row.tools),
     created_at: row.createdAt,
     stale: headSha !== null && row.headSha !== headSha,
+    playbook,
   };
 }
 
@@ -666,7 +669,9 @@ export class PullRequestsService implements OpenPrBranches {
         by_agent: worked.has(pr.branch),
         is_mine: (login !== null && pr.author === login) || worked.has(pr.branch),
         agent_session_id: reviewSession.get(pr.number) ?? null,
-        latest_agent_review: review ? toAgentReview(review, pr.head_sha) : null,
+        latest_agent_review: review
+          ? toAgentReview(review, pr.head_sha, jobPlaybook(this.store.db, 'agent_review', review))
+          : null,
       };
     });
   }

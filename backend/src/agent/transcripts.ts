@@ -1,6 +1,9 @@
-import { cp, readdir, readFile, stat } from 'node:fs/promises';
+import { cp, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { getSessionMessages, type SessionStore } from '@anthropic-ai/claude-agent-sdk';
+
+/** The folder name Claude Code files a working directory's transcripts under. */
+const projectKey = (dir: string) => dir.replace(/[^A-Za-z0-9]/g, '-');
 
 /**
  * Claude Code keeps a Session's transcript at `<config dir>/projects/<project key>/<sdk session id>.jsonl`.
@@ -50,21 +53,37 @@ export class Transcripts {
     }
   }
 
+  /**
+   * Copies the transcript under the project folder Claude Code reads for `cwd`, when it sits under another one. A
+   * conversation begun in a Verification's scratch copy then resumes in the checkout.
+   */
+  async place(sdkSessionId: string, configDir: string, cwd: string): Promise<void> {
+    const from = await this.find(sdkSessionId, configDir);
+    if (from === null) return;
+    const real = await realpath(cwd).catch(() => cwd);
+    for (const key of new Set([projectKey(cwd), projectKey(real)])) {
+      if (key === from) continue;
+      const source = path.join(configDir, 'projects', from);
+      const target = path.join(configDir, 'projects', key);
+      await cp(path.join(source, `${sdkSessionId}.jsonl`), path.join(target, `${sdkSessionId}.jsonl`));
+    }
+  }
+
   private async find(sdkSessionId: string, configDir: string): Promise<string | null> {
     const projects = path.join(configDir, 'projects');
     const keys = await readdir(projects).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return [];
       throw error;
     });
+    // A conversation moved between folders has a copy in each; the one written last is current.
+    let newest: { key: string; at: number } | null = null;
     for (const key of keys) {
-      if (
-        await stat(path.join(projects, key, `${sdkSessionId}.jsonl`)).then(
-          () => true,
-          () => false,
-        )
-      )
-        return key;
+      const at = await stat(path.join(projects, key, `${sdkSessionId}.jsonl`)).then(
+        (entry) => entry.mtimeMs,
+        () => null,
+      );
+      if (at !== null && (newest === null || at > newest.at)) newest = { key, at };
     }
-    return null;
+    return newest?.key ?? null;
   }
 }

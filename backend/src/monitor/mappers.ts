@@ -3,6 +3,7 @@ import {
   type AlertEvent,
   AlertStatus,
   type Fix,
+  type JobPlaybook,
   type Report,
   type Review,
   type Sample,
@@ -19,7 +20,7 @@ export type ServiceRow = typeof services.$inferSelect;
 export const parseJson = <T>(text: string | null, fallback: T): T =>
   text === null ? fallback : (JSON.parse(text) as T);
 
-export function toReport(row: ReportRow): Report {
+export function toReport(row: ReportRow, playbook: JobPlaybook | null): Report {
   return {
     id: row.id,
     alert_id: row.alertId,
@@ -37,6 +38,7 @@ export function toReport(row: ReportRow): Report {
     error_message: row.errorMessage,
     created_at: row.createdAt,
     finished_at: row.finishedAt,
+    playbook,
   };
 }
 
@@ -51,7 +53,7 @@ export function toReview(row: ReviewRow): Review {
   };
 }
 
-export function toFix(row: FixRow): Fix {
+export function toFix(row: FixRow, playbook: JobPlaybook | null): Fix {
   return {
     id: row.id,
     review_id: row.reviewId,
@@ -66,6 +68,7 @@ export function toFix(row: FixRow): Fix {
     error_message: row.errorMessage,
     started_at: row.startedAt,
     finished_at: row.finishedAt,
+    playbook,
   };
 }
 

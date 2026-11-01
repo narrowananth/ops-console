@@ -7,6 +7,8 @@ export type Run = {
   messageId: string;
   accountId: string;
   workingDir: string;
+  /** The Playbook rules this run follows; null for none. */
+  rules: string | null;
   parts: Part[];
   /** The text part growing from stream deltas, until its block arrives whole. */
   growing: number | null;

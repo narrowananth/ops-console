@@ -145,6 +145,7 @@ export const api = (daemon: AgentDaemon) => ({
   get: (url: string) => request(daemon.url).get(`/api${url}`).set(daemon.auth),
   post: (url: string, body?: object) => request(daemon.url).post(`/api${url}`).set(daemon.auth).send(body),
   patch: (url: string, body: object) => request(daemon.url).patch(`/api${url}`).set(daemon.auth).send(body),
+  put: (url: string, body: object) => request(daemon.url).put(`/api${url}`).set(daemon.auth).send(body),
   delete: (url: string) => request(daemon.url).delete(`/api${url}`).set(daemon.auth),
 });
 

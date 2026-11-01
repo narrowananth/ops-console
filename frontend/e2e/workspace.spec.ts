@@ -35,6 +35,7 @@ const session = (id: string, repoId: string, title: string, state = 'idle', bran
   last_message_preview: null,
   created_at: NOW,
   last_active_at: NOW,
+  playbook: null,
 });
 
 test('a Repo shows its 3 newest Sessions and folds, so the next Repo stays in reach', async ({ page }) => {

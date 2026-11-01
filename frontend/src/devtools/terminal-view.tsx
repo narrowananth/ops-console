@@ -8,7 +8,7 @@ import {
   sessionDefaultsSchema,
 } from '@ops-console/shared';
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { ApprovalPrompts } from '../agents/approval-prompts';
 import { InlineText } from '../agents/inline-text';
@@ -240,6 +240,15 @@ function Terminal({
         <span className="flex-1">
           ops-agent · dev tools · scope: <span className="text-neutral-100">{scopeLabel}</span>
         </span>
+        {session?.playbook && (
+          <Link
+            to={`/playbooks?playbook=${encodeURIComponent(session.playbook.id)}`}
+            title="Rules in this Session come from this Playbook"
+            className="text-neutral-100 underline-offset-2 hover:underline"
+          >
+            Playbook: {session.playbook.name}
+          </Link>
+        )}
         <span>{session ? session.state.replace('_', ' ') : 'new terminal'}</span>
       </div>
       {/* biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: a click anywhere in the terminal moves the cursor to the prompt; the prompt itself takes the keys */}

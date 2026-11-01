@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { realpath } from 'node:fs/promises';
+import { realpath, rm } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { GitHost } from '@ops-console/shared';
 
@@ -83,6 +83,18 @@ export class Git {
   /** Checks out an existing branch, or makes `branch` from the current one first. Throws when git refuses. */
   async checkout(dir: string, branch: string, create: boolean): Promise<void> {
     await this.must(dir, create ? ['checkout', '-b', branch] : ['checkout', branch]);
+  }
+
+  /** A detached worktree of `repo` at `ref`, in `dir`. Throws with git's first line when it refuses. */
+  async addWorktree(repo: string, dir: string, ref: string): Promise<void> {
+    await this.must(repo, ['worktree', 'add', '--detach', '--quiet', dir, ref]);
+  }
+
+  /** Removes a worktree folder and the record its repository keeps of it. */
+  async removeWorktree(dir: string): Promise<void> {
+    const common = (await this.try(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir']))?.trim();
+    await rm(dir, { recursive: true, force: true });
+    if (common) await this.try(common, ['worktree', 'prune']);
   }
 
   /** The first line of git's own message; it names the problem and holds no secrets. */

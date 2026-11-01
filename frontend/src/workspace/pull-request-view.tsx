@@ -1,4 +1,11 @@
-import { AgentReviewStatus, PrReviewEvent, PrReviewState, PrState, type PullRequestDetail } from '@ops-console/shared';
+import {
+  AgentReviewStatus,
+  PlaybookTrigger,
+  PrReviewEvent,
+  PrReviewState,
+  PrState,
+  type PullRequestDetail,
+} from '@ops-console/shared';
 import { useState } from 'react';
 import { z } from 'zod';
 import { Button, Spinner } from '../components/ui/button';
@@ -13,6 +20,8 @@ import {
   useStartAgentReview,
 } from '../lib/queries';
 import { useStored } from '../lib/remember';
+import { useTriggerPlaybook } from '../playbooks/job-steps';
+import { withPlaybook } from '../playbooks/labels';
 import { AgentReviewCard } from './agent-review-card';
 import { PrFileView, useViewed } from './pr-file';
 import { CommentComposer, Thread } from './pr-thread';
@@ -42,6 +51,7 @@ function Loaded(props: {
   );
   const [confirmMerge, setConfirmMerge] = useState(false);
   const viewed = useViewed(pr);
+  const reviewPlaybook = useTriggerPlaybook(PlaybookTrigger.ReviewPr);
   const comment = usePostComment(pr.repo_id, pr.number);
   // One review at a time: a second would run the agent again on the same change.
   const reviewing = pr.latest_agent_review?.status === AgentReviewStatus.Running;
@@ -117,7 +127,7 @@ function Loaded(props: {
                 ? 'Starting…'
                 : reviewed
                   ? 'Reviewed at this commit'
-                  : 'Agent Review'}
+                  : withPlaybook('Agent Review', reviewPlaybook)}
           </Button>
           {open && !confirmMerge && (
             <Button

@@ -75,6 +75,10 @@ export function useLiveEvents(): void {
       ) {
         refetch(queryKeys.monitor);
       }
+      if (event.event === 'playbook_step.updated') {
+        if (event.data.agent_review_id !== null) refetch(queryKeys.pulls);
+        else refetch(queryKeys.monitor);
+      }
     });
     return () => {
       if (timer) clearTimeout(timer);

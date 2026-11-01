@@ -1,6 +1,6 @@
 # Agent Playbooks
 
-**Status:** draft
+**Status:** shipped
 **Design:** Playbooks in `design/ops-console.html` (sidebar, under Claude after Agents & accounts), in three columns:
 Triggers and Playbooks on the left, the open Playbook in the middle, Step blocks on the right. The same file shows
 the Playbook on the Monitor Verify button and Report panel, the Session header and the Agent Review card.
@@ -43,8 +43,8 @@ patch. They have no place to write that down, so they retype it in every Session
    onto a Trigger attaches it (Behavior 5), and dragging a Trigger's chip off it detaches it.
 9. Every drag move has a keyboard and button path: Add to steps on a block, Move up and Move down and Remove on a
    step, Attach to and Detach on a Playbook.
-10. A step that writes files or runs commands carries the tag "scratch copy". The blocks Make mock data, Run the tests
-    and Test a lasting fix carry it; Custom step has a checkbox for it. Editing a step's text keeps its tag.
+10. A step that writes files or runs commands carries the tag "scratch copy". The blocks Replay the request locally,
+    Make mock data, Run the tests and Test a lasting fix carry it, whatever the step's text says; Custom step has a checkbox for it. Editing a step's text keeps its tag.
 11. Review PR reads only. Attaching a Playbook that has a tagged step to it is refused: "Review PR reads only: remove
     Make mock data first." Adding a tagged step to a Playbook that Review PR holds is refused the same way on Save.
 12. Save writes the Playbook; Discard drops the edits. Unsaved edits stay in the browser until Save or Discard,

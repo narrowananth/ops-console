@@ -31,6 +31,8 @@ import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
 import { disabledMcpServers, nowIso, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
+import { PlaybooksService } from '../playbooks/playbooks.service';
+import { systemAppend } from '../playbooks/prompts';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
 import { ConnectionLookup } from './connection-lookup';
 import { MessageInterceptors } from './message-interceptors';
@@ -64,6 +66,16 @@ export const MERGE_DENIALS = [
   'mcp__github__merge_pull_request',
   'mcp__gitlab__merge_merge_request',
 ];
+
+/** How a run the console starts itself differs from an operator's message. */
+export type RunOptions = {
+  /** Runs in this folder instead of the Session's own. */
+  cwd?: string;
+  /** The Playbook rules the job copied. */
+  rules?: string | null;
+  /** Starts a new agent conversation instead of resuming the Session's. */
+  fresh?: boolean;
+};
 
 type RunResult = 'done' | ErrorCode.RateLimited | ErrorCode.Unauthorized | ErrorCode.UpstreamFailed;
 
@@ -101,6 +113,7 @@ export class AgentRuntime {
     @Inject(Transcripts) private readonly transcripts: Transcripts,
     @Inject(MessageInterceptors) private readonly interceptors: MessageInterceptors,
     @Inject(ConnectionLookup) private readonly connections: ConnectionLookup,
+    @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
     recovery.register('agent sessions and approvals', () => this.recover());
@@ -136,7 +149,9 @@ export class AgentRuntime {
       return { message_id: current.messageId };
     }
     if (this.interceptors.handle(session, text)) return { message_id: crypto.randomUUID() };
-    return { message_id: this.begin(sessionId, text, null).messageId };
+    // A chat reads its Playbook at each turn, so an edit applies from the next message (Behavior 20).
+    const { rules } = this.playbooks.forSession(session);
+    return { message_id: this.begin(sessionId, text, null, null, { rules }).messageId };
   }
 
   /**
@@ -147,12 +162,13 @@ export class AgentRuntime {
     sessionId: string,
     text: string,
     onPart: ((part: Part) => void) | null = null,
+    options: RunOptions = {},
   ): { finished: Promise<RunSummary> } {
     let settle: (summary: RunSummary) => void = () => {};
     const finished = new Promise<RunSummary>((resolve) => {
       settle = resolve;
     });
-    this.begin(sessionId, text, settle, onPart);
+    this.begin(sessionId, text, settle, onPart, options);
     return { finished };
   }
 
@@ -161,6 +177,7 @@ export class AgentRuntime {
     text: string,
     onFinish: ((summary: RunSummary) => void) | null,
     onPart: ((part: Part) => void) | null = null,
+    options: RunOptions = {},
   ): Run {
     const session = this.sessions.get(sessionId);
     const kind = this.kinds.get(session.kind);
@@ -170,7 +187,8 @@ export class AgentRuntime {
       sessionId,
       messageId: crypto.randomUUID(),
       accountId: this.accounts.active().id,
-      workingDir: kind.workingDir(session),
+      workingDir: options.cwd ?? kind.workingDir(session),
+      rules: options.rules ?? null,
       parts: [],
       growing: null,
       sdkUuids: new Set(),
@@ -183,6 +201,7 @@ export class AgentRuntime {
       serverLabel: kind.serverLabel ?? null,
     };
     this.runs.add(run);
+    if (options.fresh) this.sessions.write(sessionId, { sdkSessionId: null });
     const isFirst = session.title === NEW_SESSION_TITLE && session.sdkSessionId === null;
     this.sessions.write(sessionId, {
       state: SessionState.Working,
@@ -191,6 +210,11 @@ export class AgentRuntime {
     });
     void this.execute(run, text);
     return run;
+  }
+
+  /** True while the Session's run is going. */
+  busy(sessionId: string): boolean {
+    return this.runs.get(sessionId) !== undefined;
   }
 
   /** The transcript, oldest first, with the in-flight message last while a run streams. */
@@ -257,6 +281,8 @@ export class AgentRuntime {
       }
       // A transcript deleted outside the console starts a new SDK session (Behavior 6).
       if (!(await this.transcripts.exists(resume, configDir))) resume = null;
+      // Claude Code finds a conversation by its folder: one begun in a scratch copy moves to this run's folder.
+      else await this.transcripts.place(resume, configDir, run.workingDir);
     }
     if (session.accountId !== account.id) this.sessions.write(run.sessionId, { accountId: account.id });
     const instructions = this.kinds.get(session.kind)?.instructions;
@@ -271,7 +297,7 @@ export class AgentRuntime {
       env: claudeEnv(configDir),
       includePartialMessages: true,
       disallowedTools: MERGE_DENIALS,
-      ...(instructions ? { systemPrompt: { type: 'preset', preset: 'claude_code', append: instructions } } : {}),
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: systemAppend(instructions, run.rules) },
       // Servers the operator disabled stay out of the run.
       settings: {
         deniedMcpServers: [
