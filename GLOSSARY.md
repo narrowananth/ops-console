@@ -39,9 +39,13 @@ a mode that asks.
 ### Monitor
 
 **Service**:
-A deployed app the console watches in Datadog. Its code is a local Repo, or a Git URL on its Git host when there
-is no local copy.
+A deployed app the console watches in Datadog, one per Datadog service name and env. Its code is a local Repo, or a
+Git URL on its Git host when there is no local copy.
 _Avoid_: app, microservice
+
+**Check interval**:
+How often the schedule scans a Service and how far back that Scan reads: 6, 12 or 24 hours, in slots from the
+Datadog Connector's daily scan time.
 
 **Route**:
 One HTTP method and path of a Service (`POST /fb/webhook`), the unit a Scan reports on.
@@ -49,8 +53,9 @@ _Avoid_: endpoint, API
 
 **Scan**:
 A read of the failing requests in Datadog (logs with an HTTP status code of 400 or more, or the codes the operator
-picked) over a time window in every env, for every Service or the ones the operator picked, on the schedule or when the
-operator asks. Logs with no `env` tag count as the env `no env`. It groups the logs into Alerts and marks Routes failing or healthy.
+picked) over a time window in every env, for every Service or the ones the operator ticked, on the schedule or when the
+operator asks. A Scan of one Service reads its own env. Logs with no `env` tag count as the env `no env`. It groups the
+logs into Alerts and marks Routes healthy, failing or rapid.
 _Avoid_: check, sweep
 
 **Fingerprint**:
@@ -58,7 +63,7 @@ The identity of an Alert: Service, Route (none for a log with no request), HTTP 
 
 **Severity**:
 An Alert's tier. High: one 10-minute bucket reaches the rapid threshold. Medium: errors per hour reach the failing
-threshold with error-level logs. Low: anything else.
+threshold, and the logs are at error level or the status code is 500 or more. Low: anything else.
 _Avoid_: priority, sev2
 
 **Regression**:
@@ -68,8 +73,8 @@ A resolved or dismissed Alert that fails again after a healthy Scan. It reopens 
 One Datadog log event kept on an Alert, with secret values and request body values redacted.
 
 **Alert**:
-One kind of failure in a Service's logs, raised by a Scan, Datadog, Sentry or a Slack message, waiting to be
-verified.
+One kind of failure in a Service's logs, raised by a Scan. It moves from open through verifying, verified, fixing and
+PR open to resolved, or is dismissed.
 _Avoid_: incident, issue
 
 **Verification**:
@@ -82,7 +87,7 @@ The written outcome of a Verification: steps, the replayed request and its resul
 proposed fix.
 
 **Review**:
-The operator's decision on a Report: confirm as a bug or improvement, or dismiss.
+The operator's decision on a Report: confirm as a bug or improvement, or dismiss. A dismissal can be undone.
 _Avoid_: approval
 
 **Ticket**:
@@ -90,7 +95,8 @@ The Jira issue the agent creates when the operator confirms a Report while Jira 
 branch name.
 
 **Fix**:
-The work that follows a confirmed Review: ticket (when Jira is connected), branch, code change, tests, push and PR, run by the agent in one Session.
+The work that follows a confirmed Review: ticket (when Jira is connected), branch, code change, tests, push and PR, run
+by the agent in the Alert's Session. A merged PR resolves the Alert; a PR closed unmerged abandons the Fix.
 
 ### Workspace
 
@@ -103,7 +109,7 @@ The service holding a Repo's remote: GitHub, GitLab or Bitbucket.
 **Session**:
 One conversation between the operator and the agent. It runs in one Repo on one branch, except a
 dev-tools Session and an anonymous Session, which have no Repo. A pull request has its own Session for the agent's
-replies, with no composer.
+replies, with no composer, and an Alert has one for its Verification and Fix.
 _Avoid_: chat, thread
 
 **Anonymous Session**:
@@ -113,7 +119,7 @@ Service's Git URL.
 
 **Agent Review**:
 The agent's written review of a pull request: findings, a PROD readiness checklist and a verdict,
-tied to the commit it read. Each finding is also posted to the Git host as a comment.
+tied to the commit it read. Each finding is also posted to the Git host as a comment. A newer commit makes it stale.
 
 ### Dev tools
 
@@ -153,6 +159,13 @@ The agent's match of Results from two or more Connections on one key: one row pe
 rows whose values differ marked.
 
 **Action Log**:
-The record of every action the agent took outside its own process: query, shell command, message,
-PR.
+The record of every action the agent took outside its own process: query, shell command, git command,
+message, ticket, PR.
 _Avoid_: audit trail, history
+
+### Console
+
+**Remembered view**:
+What the operator picked, ticked, typed or opened on a page, kept until they change it, through page switches,
+reloads and reopening the console.
+_Avoid_: saved state, preferences

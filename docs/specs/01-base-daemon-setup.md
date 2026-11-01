@@ -1,13 +1,13 @@
 # Base layer: daemon, install and setup
 
 **Status:** shipped
-**Design:** none for the install and CLI. The app shell follows `design/ops-console-sidebar.html`: a left sidebar with every page. The pages stay empty until their specs.
+**Design:** none for the install and CLI. The app shell follows `design/ops-console-sidebar.html`: a left sidebar with every page.
 
 ## Problem
 
 The operator wants the console the way T3 Code and Monocode arrive: one `curl … | sh` line, then `ops-console start`, then `ops-console open`. Nothing should need a database server or sudo.
 
-Every later spec needs the same footing: a daemon that launchd keeps running, a local SQLite file it migrates on start, one API and WebSocket convention, a session token, settings, a scheduler, and one way to reach outside systems. That way is Claude Code: forms collect config, secrets go to the Keychain, the console registers an MCP server with Claude Code, and Claude connects to it. This spec builds that footing and nothing a screen shows.
+Every later spec needs the same footing: a daemon that launchd keeps running, a local SQLite file it migrates on start, one API and WebSocket convention, a session token, settings, a scheduler, and one way to reach outside systems. That way is Claude Code: forms collect config, secrets go to the Keychain, the console registers an MCP server with Claude Code, and Claude connects to it. This spec builds that footing and the app shell around the pages, and nothing a page shows.
 
 ## Behavior
 
@@ -20,7 +20,7 @@ Install
 
 CLI
 
-5. `ops-console start` writes `~/Library/LaunchAgents/dev.ops-console.plist` (`RunAtLoad`, `KeepAlive`) pointing at `current`, enables and bootstraps it in `gui/<uid>`, and returns once the daemon answers `GET /api/health`. If the daemon does not answer within 15 seconds, it prints the last log lines and exits non-zero. With the daemon already running, it says so and exits 0.
+5. `ops-console start` writes `~/Library/LaunchAgents/dev.ops-console.plist` (`RunAtLoad`, `KeepAlive`) pointing at `current`, enables and bootstraps it in `gui/<uid>`, and returns once the daemon answers `GET /api/health`. If the daemon does not answer within 15 seconds, it boots the agent out again, prints the last 20 log lines and exits non-zero. With the daemon already running, it says so and exits 0.
 6. `ops-console stop` boots the agent out and disables it, so it stays stopped across logins until the next `start`.
 7. `ops-console status` prints running or stopped, and for a running daemon its pid, version, port and health. It exits 0 when running and 3 when stopped.
 8. `ops-console open` opens `http://127.0.0.1:4545/#token=<token>` with the token from the runtime file. With the daemon stopped, it says to run `ops-console start` and exits 1.
@@ -48,8 +48,13 @@ Daemon
 
 App shell
 
-27. Opening the URL from `ops-console open` stores the token in the browser's local storage and removes it from the address bar, so closing the tab and opening the console again stays signed in. A token the daemon refuses is cleared (`persist-selections-and-runs`). The shell shows the left sidebar with every page.
+27. Opening the URL from `ops-console open` stores the token in the browser's local storage and removes it from the address bar, so closing the tab and opening the console again stays signed in while the daemon runs. A token the daemon refuses, such as after a restart issued a new one, is cleared (`persist-selections-and-runs`). The shell shows the left sidebar with every page.
 28. Without a token, or with a token the daemon refuses, the shell shows "Run `ops-console open` to sign in." A daemon that does not answer shows "The console daemon is not running. Run `ops-console start`."
+28a. Each sidebar link opens its page at the address it had when the operator last left it, picks in the address included. Opening `/`, or any path that is no page, goes to the last page visited, or Monitor the first time. The browser keeps both in local storage.
+28b. A sidebar item shows what waits there: Monitor the count of Alerts it lists that are not resolved or dismissed, Integrations the count of Connectors and of MCP Servers with no Connector that read `auth` or `fail`, Connections and Repos how many there are. A count of 0 shows no badge.
+28c. The sidebar foot shows the active Claude account, or the first signed-in one, with its 5-hour and weekly usage, and links to Agents & accounts. With no signed-in account it shows nothing.
+28d. The theme switch moves between light and dark, and Collapse leaves icons only, each naming its page on hover. The browser keeps both. The first theme follows the system's.
+28e. A page scrolls inside its own body, never past the app: an absolutely placed element inside a scroll box, such as a label only screen readers read, stays within that box.
 
 Release and checks
 
@@ -79,7 +84,7 @@ Release and checks
 - **Keychain adapter** (ADR 0004): `set`, `get` and `delete` by key in the login Keychain under service `ops-console`, through `@napi-rs/keyring`. Tests use a fake.
 - **Claude CLI wrapper**: runs `claude` with an argument array, never a shell string, and parses each output with Zod. It covers `claude mcp add`, `remove`, `list` and `get`. Tests use a fake.
 - **MCP client**: connects to a server registered with Claude Code, using the config `claude mcp get` returns, to call a tool directly for a fixed read with no model turn. Tests use a fake MCP server.
-- **Integration layer** (ADR 0005): every outside system the console reaches is an MCP server or a CLI that Claude Code also uses. A form collects config, the secret goes to the Keychain adapter, and the console registers the server with `claude mcp add`. Fixed reads (PR lists, Scan counts, health checks) go through the MCP client or the CLI. Judgment work (Verification, Fix, Agent Review, Add with Claude, dev-tools queries) runs as an agent session; see `02-settings-agents`.
+- **Integration layer** (ADR 0005): every outside system the console reaches is an MCP server or a CLI that Claude Code also uses. A form collects config, the secret goes to the Keychain adapter, and the console registers the server with `claude mcp add`. Fixed reads (PR lists, Scan counts, health checks) go through the MCP client or the CLI. Judgment work (Verification, Fix, Agent Review, the Setup agent, dev-tools queries) runs as an agent session; see `02-settings-agents`.
 - **Docs**: `/ship` rewrites ADR 0001, adds ADR 0005, and updates `docs/architecture.md` (SQLite, one port, the integration layer), `README.md` and `AGENTS.md` (install, `ops-console` commands, development, `pnpm check`), `CODING_STANDARDS.md` (tests use a temporary SQLite file; lists return `{ data, meta }`), and the `backend/` and `frontend/` READMEs (ports, test folder).
 
 ## Not required
@@ -97,7 +102,7 @@ No agent runs in this change, so the agent's reach is unchanged.
 
 - `install.sh` needs no sudo, writes only under the home folder, and installs nothing without a matching checksum.
 - The daemon binds `127.0.0.1` only, and every REST call and WebSocket needs the token issued at that start (ADR 0003).
-- The token reaches the browser through the URL fragment, which is never sent to the server, and leaves the address bar on load.
+- The token reaches the browser through the URL fragment, which is never sent to the server, and leaves the address bar on load. The browser keeps it in local storage until the daemon refuses it.
 - The daemon log never holds the token or a Keychain value.
 - The runtime file, which holds the token, is readable only by the operator (mode `0600`).
 
@@ -185,7 +190,7 @@ Server to client, after a `PATCH /api/settings` commits.
 
 ## UI
 
-- **Shell**: a left sidebar, as in `design/ops-console-sidebar.html`. Operate: Monitor, Workspace, Dev tools. Connect: Integrations, Connections, Repos, Setup agent. Claude: Agents & accounts. Each item is a route (`/monitor`, `/workspace`, `/devtools`, `/integrations`, `/connections`, `/repos`, `/setup`, `/agents`) with a page header: title, one line and the page's main actions. Monitor shows its open Alert count, Integrations how many need the operator, Connections and Repos how many there are. The foot holds the active Claude account's 5-hour and weekly usage, the theme switch and Collapse, which leaves icons only. Buttons, fields, cards, badges and switches are rounded. Each page shows an empty placeholder until its spec lands.
+- **Shell**: a left sidebar, as in `design/ops-console-sidebar.html`. Operate: Monitor, Workspace, Dev tools. Connect: Integrations, Connections, Repos, Setup agent. Claude: Agents & accounts. Each item is a route (`/monitor`, `/workspace`, `/devtools`, `/integrations`, `/connections`, `/repos`, `/setup`, `/agents`) with a page header: title, one line and the page's main actions (Integrations "Add with Setup agent →", Connections "Import with Setup agent →"). The active item is bold with its icon in the accent colour. Badges follow Behavior 28b. The foot holds the active Claude account's 5-hour and weekly usage, then Dark or Light and Collapse; collapsed, the foot keeps only the two buttons. Buttons, fields, cards, badges and switches are rounded.
 - **No token**: one panel with "Run `ops-console open` to sign in."
 - **Daemon down**: one panel with "The console daemon is not running. Run `ops-console start`."
 - Theme tokens are ported from the design now, so later screens use them (`CODING_STANDARDS.md`, Frontend).
@@ -211,14 +216,14 @@ Server to client, after a `PATCH /api/settings` commits.
 - **Backend + SQLite, over HTTP** (Supertest, a temporary data folder per test, fakes for the Keychain adapter, the `claude` CLI and an MCP server; start-up cases close the app and open it again on the same folder): 13, 15 to 19, 21 to 24, 26.
 - **Backend + SQLite, over WebSocket**: 22, 25.
 - **Unit**: 20, the scheduler with a fake clock.
-- **Browser** (Playwright against the built daemon): 27, 28.
+- **Browser** (Playwright against the built daemon): 27, 28, 28a, and Collapse in 28d. 28b, 28c, 28e and the theme have no test.
 - **Release job on macOS runners**: 29, with real `launchctl`. It also runs the CLI checks for 5 to 8 once per tag.
 - **CI**: 30, `pnpm check` on a runner.
 
 ## Out of scope
 
-- Agent runtime, Sessions, session defaults, the Agents tab, Action Log and Approvals: `02-settings-agents`.
-- Integrations tab: MCP Servers in `03-settings-mcp-servers`, Connectors in `04-settings-connectors`. Connections and the setup terminal: `05-settings-dev-tools`. Repos: `06-settings-repos`.
-- Workspace, Git host adapter and pull requests: `07-workspace`. Monitor: `08-monitor-dashboard`. Dev tools view: `09-dev-tools-agent`.
+- Agent runtime, Sessions, session defaults, Agents & accounts, Action Log and Approvals: `02-settings-agents`.
+- Integrations: MCP Servers in `03-settings-mcp-servers`, Connectors in `04-settings-connectors`. Connections and the Setup agent: `05-settings-dev-tools`. Repos: `06-settings-repos`.
+- Workspace, Git host adapter and pull requests: `07-workspace`. Monitor: `08-monitor-dashboard`. Dev tools: `09-dev-tools-agent`.
 - A Linux `systemd --user` unit, a custom domain for `install.sh`, a Homebrew tap, and a Tauri or Electron window around the daemon: later specs.
 - `GLOSSARY.md`: this spec adds no terms.

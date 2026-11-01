@@ -9,16 +9,16 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { useEffect, useRef, useState } from 'react';
-import { z } from 'zod';
 import { Button } from '../components/ui/button';
 import { useAnswerSecret } from '../lib/queries';
-import { readStored, writeStored } from '../lib/remember';
 import { sessionToken } from '../lib/session';
 
 /**
  * The unsent line per terminal, so it survives a tab switch. Memory only: a typed line may hold a password the daemon
  * has not masked yet, so it never reaches browser storage.
  */
+const drafts = new Map<string, string>();
+
 const TERMINAL_BG = '#0f0e0e';
 
 /** What the Setup agent page offers to ask. */
@@ -48,11 +48,10 @@ function takeQueued(): string {
 export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onClose: () => void }) {
   const host = useRef<HTMLDivElement>(null);
   const socket = useRef<WebSocket | null>(null);
-  // The typed line is kept on disk per terminal, so a reload or reopening the console keeps it.
-  const draftKey = `setup.draft.${terminalId}`;
-  const [line, setLineState] = useState(() => takeQueued() || readStored(draftKey, z.string(), ''));
+  const [line, setLineState] = useState(() => drafts.get(terminalId) ?? takeQueued());
   const setLine = (text: string) => {
-    writeStored(draftKey, text, '');
+    if (text) drafts.set(terminalId, text);
+    else drafts.delete(terminalId);
     setLineState(text);
   };
   const [request, setRequest] = useState<{ request_id: string; label: string } | null>(null);
@@ -131,7 +130,7 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
           <Button
             className="ml-auto px-3 py-1.25 text-xs"
             onClick={() => {
-              writeStored(draftKey, '', '');
+              drafts.delete(terminalId);
               onClose();
             }}
           >

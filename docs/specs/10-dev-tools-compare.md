@@ -5,19 +5,20 @@
 
 ## Problem
 
-The operator wants to ask one question ("find shop glowbar") and see what every database holds about it, without
-opening a client per Connection or reading the agent's prose to work out which value came from where. Today the
-Dev tools screen opens on an "Open terminal" button, the scope picker sits above a plain chat, and answers come back
-as text. When Postgres says a shop is on `pro` and Mongo says `growth`, nothing shows the operator that the two
-disagree.
+The operator wants to ask one question ("find shop acme") and see what every database holds about it, without
+opening a client per Connection or reading the agent's prose to work out which value came from where. Answers that
+come back as text hide that: when Postgres says a shop is on `pro` and Mongo says `growth`, nothing shows the
+operator that the two disagree.
 
 ## Behavior
 
 1. The Dev tools screen opens ready to ask: the Synced dev tools list on the left and the terminal with its prompt on
-   the right. With no `devtools` Session yet, the first question creates one with an empty scope and runs.
+   the right. With no `devtools` Session yet, the first question creates one with the scope and the Model, Effort
+   and Access picked so far (an empty scope unless the operator picked Connections) and runs.
 2. The list shows "All connected" with a count, then each Connection: type, name and a PROD tag. A Connection with
    Access Level `none` shows but cannot be picked. Picking Connections sets the Session's scope; picking "All
-   connected" clears it. The change applies to the next run (`09-dev-tools-agent` Behavior 4).
+   connected" clears it. The change applies to the next run (`09-dev-tools-agent` Behavior 4). On a new terminal,
+   the picks become its Session's scope when its first question starts it.
 3. The terminal header reads `ops-agent · dev tools · scope: <names>` or `scope: all connected (<n>)`.
 4. A question that names no Connection or type runs on every Connection in scope. One that names a Connection or a
    type ("in mongo", "pg-tenant") narrows to those. The agent says which it picked in a `step` part before the first
@@ -25,10 +26,11 @@ disagree.
 5. Each Connection queried gives one Result: the Connection, the query, the columns, at most 50 rows, the row count
    and the time it took. It shows as a table under `── <name> · <type>`, tagged PROD where the Connection is.
 6. A Connection in scope that is skipped (down, needs a login, read-only for a write) shows one line with the
-   reason, as today (`09-dev-tools-agent` Behavior 8). A Connection with no matching rows shows `no matches`.
+   reason (`09-dev-tools-agent` Behavior 8). A Connection with no matching rows shows `no matches`.
 7. When Results from two or more Connections describe the same thing, the agent adds one Comparison: the key it
    matched on and its value, one column per Connection, one row per field. A row whose non-empty values differ is
-   marked. With nothing shared, there is no Comparison and the summary says so.
+   marked, and the block ends with how many fields differ, or "Every shared field agrees." With nothing shared,
+   there is no Comparison and the summary says so.
 8. The run ends with a summary line: `<rows> rows across <answered> of <queried> Connections`.
 9. Results and Comparisons read back the same after a reload or from another tab, since they come from the
    transcript.
@@ -37,6 +39,10 @@ disagree.
 11. Each Result and Comparison has Copy JSON.
 12. A PROD write still waits for an Approval, which shows above the terminal with approve and deny (`09-dev-tools-agent` Behavior 7).
 13. Two terminals still run side by side, each with its own scope (`09-dev-tools-agent` Behavior 10).
+14. A terminal tab's `×` deletes its Session, and is disabled while its run goes. A new terminal's `×` closes it,
+    with nothing to delete.
+15. With no tab picked, the newest Session opens. With no Session and no new terminal, one blank new terminal waits
+    for the first question.
 
 ## Settled
 
@@ -47,18 +53,21 @@ disagree.
   Connection or type is named, one `ops-result` per Connection queried, one `ops-compare` when Results share a key,
   then the summary line.
 - **Who marks a difference**: the console. A Comparison row is marked when two of its non-empty values differ as
-  text. The agent's own opinion is not stored.
+  text, spaces at either end aside. The agent's own opinion is not stored. A Comparison needs at least two
+  Connections; one with fewer does not read (Behavior 10).
 - **Caps**: 50 rows per Result and 200 characters per cell are shown; `total` keeps the real count. A larger
-  block is cut on read, not refused.
+  block is cut on read, not refused. A cell that is an object or a list shows as its JSON text.
 - **PROD tag and type** on a Result come from the Connection with that name. A name the console does not know
   shows without them.
-- **The Session starts on the first question**: the "Open terminal" button goes. "New terminal" (`+`) opens a blank
-  terminal, and its Session starts on its first question too, so an unused terminal leaves nothing behind.
+- **The Session starts on the first question**: there is no Open terminal button. "New terminal" (`+`) opens a
+  blank terminal, and its Session starts on its first question too, so an unused terminal leaves nothing behind.
+- **What the browser keeps**: the new terminals with their scope and settings, the text typed at each prompt and
+  not sent, and the open tab live in the browser's local storage, not in the address.
 
 ## Not required
 
 - **Joins the console runs**: the agent matches the rows; the console only lays out what the agent sent
-  (`09-dev-tools-agent` Not required, now with a Comparison to show the match).
+  (`09-dev-tools-agent` Not required), with a Comparison to show the match.
 - **Exact values**: the Result holds what the agent copied from the tool result. The `step` part above it still
   names the real query and Connection.
 - **Paging past 50 rows**: the operator asks for the next page in words.
@@ -78,9 +87,9 @@ Two kinds join the union. `session.output` and `GET /sessions/:id/messages` carr
 {
   "kind": "result",
   "connection": "pg-tenant",
-  "query": "select id, shop_domain, plan from shops where shop_domain like '%glowbar%' limit 5",
+  "query": "select id, shop_domain, plan from shops where shop_domain like '%acme%' limit 5",
   "columns": ["id", "shop_domain", "plan"],
-  "rows": [["4812", "glowbar.example.com", "pro"]],
+  "rows": [["4812", "acme.example.com", "pro"]],
   "total": 1,
   "ms": 12
 }
@@ -95,7 +104,7 @@ Two kinds join the union. `session.output` and `GET /sessions/:id/messages` carr
 {
   "kind": "comparison",
   "key": "shop_domain",
-  "value": "glowbar.example.com",
+  "value": "acme.example.com",
   "connections": ["pg-tenant", "mongo-prod"],
   "rows": [{ "field": "plan", "values": ["pro", "growth"], "differs": true }]
 }
@@ -107,14 +116,18 @@ Two kinds join the union. `session.output` and `GET /sessions/:id/messages` carr
 ## UI
 
 - **Dev tools screen** follows the design: the Synced dev tools list, then the dark terminal. Terminal tabs sit
-  above the terminal in one row that scrolls sideways, oldest on the left. A tab shows the terminal's first question,
-  or `terminal <n>` before one, and an `×` that deletes it. Each `+` opens another new terminal, blank,
+  above the terminal in one row that scrolls sideways, oldest on the left, new terminals after the Sessions. When
+  tabs are out of sight, that end of the row fades and gets an arrow; a mouse wheel scrolls the row sideways. A tab
+  shows the terminal's first question, or `terminal <n>` before one, and an `×` that deletes it. Each `+` opens another new terminal, blank,
   with its own `new terminal` tab. That tab stays while the operator moves to other tabs and across reloads, keeping
   its scope and settings, until its first question turns it into a Session or its `×` closes it. Text typed at any
   terminal's prompt and not sent stays with that terminal, and the open tab stays open after a reload; the browser
   keeps both.
-- **Terminal**: the operator's question as `> <text>`, `step` parts as dim `●` lines, Results as monospace tables,
-  the Comparison under `■ Compared on <key> = <value>` with marked rows in the accent colour, then the summary. The
+- **Terminal**: the panel stays dark in both themes. Its header reads the scope (Behavior 3) and the Session's
+  state, or `new terminal`. Welcome lines open it. Then the operator's question as `> <text>`, `step` parts as dim
+  `●` lines, Results as monospace tables under the query, ending `✓ <total> rows`, `showing <n>` when cut, and the
+  time, the Comparison under `■ Compared on <key> = <value>` with marked rows in the accent colour and `◀ differs`,
+  then the summary. A streaming message ends with `Working…`; a failed run with `✘ The run failed.` The
   prompt is the last line: `>` and an input. Enter sends. The prompt keeps the cursor: a click anywhere in the terminal moves it there, and it comes
   back when a run ends. While a run is going, the input reads "The agent is working…".
 - **Model, Effort and Access** sit as chips at the right of the tab row; their lists open downward. A change shows at once. A new terminal shows them too, starting from the defaults in Agents & accounts, and its Session starts with what they show. A pending Approval shows under that bar.
@@ -141,7 +154,8 @@ Two kinds join the union. `session.output` and `GET /sessions/:id/messages` carr
 
 - **Backend + SQLite, over HTTP and WebSocket** (fake agent SDK): 5, 7, 9, 10, the caps, `differs`, and the
   appended instructions on a `devtools` run. 2, 4, 6, 12 and 13 stay covered by `09-dev-tools-agent`'s tests.
-- **Browser** (Playwright, with the API answered by the test): 1 to 3, the Result and Comparison tables, 8 and 11.
+- **Browser** (Playwright, with the API answered by the test): 1 to 3, the Result and Comparison tables, 8, 11,
+  14, 15, and what the browser keeps across a reload.
 
 ## Out of scope
 

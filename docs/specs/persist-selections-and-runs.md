@@ -1,6 +1,7 @@
 # Persist selections and runs
 
 **Status:** draft
+**Built:** Behaviors 1 to 11 are shipped; 12 to 23 (runs through a daemon restart) are still to build.
 **Design:** none; every page in `design/ops-console.html` keeps its layout. This spec changes what each page remembers, not what it draws.
 
 ## Problem
@@ -16,26 +17,26 @@ Agent runs already go on when the browser reloads or closes, because the daemon 
 1. On every page, what the operator picks stays picked until they change it: through switching pages, reloading, and closing the tab and opening the console again. Pages that have nothing to pick are left as they are.
 2. The picked item of a page lives in the address, so Back and Forward step through picks and a copied address opens the same item:
    - Monitor: `?service=<name>&alert=<id>`.
-   - Workspace: `?tab=sessions&session=<id>` or `?tab=pulls&pr=<repo id>/<number>`.
-   - Dev tools: `?session=<id>`, or `?draft=<id>` for a new terminal.
+   - Workspace: `?session=<id>` on the Sessions tab, or `?tab=pulls&pr=<repo id>/<number>`.
    - Integrations: `?open=connector:<id>` or `?open=mcp:<name>`.
-   - Connections: `?connection=<id>`, or `?connection=new`.
-   - Setup agent: `?terminal=<id>`.
+   - Connections: `?connection=<id>`, `?connection=new` to pick a type, or `?connection=new:<type>` for the new Connection's form.
+   - Dev tools keeps its picked terminal in local storage with its open terminals (Behavior 3), not in the address. The Setup agent has one terminal at a time, so its page has nothing to pick.
 3. Every other choice on a page is kept in the browser's local storage for that page:
-   - Monitor: severity tab, Closed, ticked Services, the Services filter, how many logs are shown, the Alert's JSON view and its picked Report version. Range and status codes are kept as today.
-   - Workspace: Mine or All, the pull request search, each "show all" in the Sessions list, the branch picked for a new Session, a pull request's picked file, split and full view, and which files are open. Viewed files and folded groups are kept as today.
-   - Dev tools keeps its open terminals as today. Integrations, Connections and Setup agent have nothing to keep beyond their pick.
-4. Typed drafts are kept per target until they are sent or cleared: a pull request comment by file and line, a reply by thread, a Session's message box by Session, a Dev tools question by terminal (kept as today), a Setup agent line by terminal (kept for the browser's life today, now on disk), and a filter or search box by page.
-5. Clicking a page in the sidebar opens it at the address it had when the operator last left it. Opening the console at `/` lands on the last page visited, `/monitor` the first time.
+   - Monitor: severity tab, Closed, ticked Services, the Services filter, how many logs are shown, the Samples JSON view, and each Alert's picked Report version. Range and status codes are kept too.
+   - Workspace: Mine or All, the pull request search, each "show all" in the Sessions list, whether a Repo's new-Session form is open and the branch picked in it, each pull request file's split and full view and whether it is open, and which line's comment box and which thread's reply box are open. Viewed files and folded groups are kept too.
+   - Dev tools: its new terminals, the picked terminal and the text typed at each prompt.
+   - Integrations and Connections have nothing to keep beyond their pick. The Connection form's fields are not kept, because the form holds a secret.
+4. Typed drafts are kept per target until they are sent or cleared: a pull request comment by file and line, a reply by thread, a Request changes body by pull request, a Session's message box by Session, a Dev tools question by terminal, and a filter or search box by page.
+5. Clicking a page in the sidebar opens it at the address it had when the operator last left it, Repos and Agents & accounts included. Opening the console at `/`, or at an address that is no page, lands on the last page visited, `/monitor` the first time.
 6. A Workspace link from the Monitor that names a Session opens that Session and keeps `?session=<id>` in the address instead of clearing it.
 7. A picked item that no longer exists, such as a deleted Session, a dismissed and purged Alert, or a removed Connection, leaves the page in its nothing-picked state. The pick is dropped from the address and storage, with no error shown.
-8. A ticked Service that is missing from the current range stays ticked but is not counted or scanned. It counts again when a range lists it. Untick clears every tick, listed or not.
+8. A ticked Service that is missing from the Services list for the current range stays ticked but is not counted or scanned. It counts again when a range lists it. Untick clears every tick, listed or not.
 9. A stored value that fails to read, from an older build or a hand edit, is ignored and the page shows its default.
 10. Menus, confirm steps (Delete, Merge, Remove), dropdowns and "Copied" flashes start closed after a reload or a page switch.
 
 ### Sign-in
 
-11. The sign-in token is kept in local storage, so closing the tab and opening the console again lands where the operator left off. A daemon that answers `unauthorized`, such as after a reinstall that made a new token, clears the stored token and shows "Run `ops-console open` to sign in". Remembered views stay.
+11. The sign-in token is kept in local storage, so closing the tab and opening the console again lands where the operator left off. A daemon that answers `unauthorized`, such as after a reinstall that made a new token, clears the stored token and shows "Run `ops-console open` to sign in". Remembered views stay. A token an older build kept in the tab's session storage moves to local storage on the next load.
 
 ### Runs through a daemon restart
 
@@ -59,7 +60,7 @@ Agent runs already go on when the browser reloads or closes, because the daemon 
 
 ## Settled
 
-- **Address or storage**: the item a page shows (Session, pull request, Alert, Connection, Integration, terminal) goes in the address. Everything else that shapes the page goes in local storage. This keeps links and Back working, and keeps addresses short.
+- **Address or storage**: the item a page shows (Session, pull request, Alert, Connection, Integration) goes in the address. Everything else that shapes the page goes in local storage, and so does the Dev tools terminal, which is kept with the open terminals. This keeps links and Back working, and keeps addresses short.
 - **Scope of storage**: per browser profile, keyed by page. Two tabs share it; the last change wins, and the other tab reads it on its next load.
 - **Validation**: each stored value is parsed with a schema; a failed parse means the default (Behavior 9).
 - **Transient UI**: menus, confirm steps and flashes are not remembered (Behavior 10). A confirm step for a destructive action never reopens on its own.
@@ -75,6 +76,7 @@ Agent runs already go on when the browser reloads or closes, because the daemon 
 
 - **Live sync between tabs**: a pick in one tab shows in another only after that tab reloads.
 - **Sync between browsers or machines**: picks stay in the browser that made them.
+- **The Setup agent's unsent line after a reload**: it may hold a password the daemon has not masked yet, so it stays in memory only and a reload clears it (`05-settings-dev-tools` Behavior 21).
 - **Scroll position**: lists open at the top after a reload; the picked row is in the address and highlighted, but the list does not scroll back to it.
 - **Exact replay of a half-done tool call**: if the daemon stopped in the middle of a tool call, the resumed run decides from its transcript whether to call it again. The resume prompt tells it to check first.
 - **Pending secrets across a restart**: the Setup agent asks again (Behavior 19).
@@ -127,8 +129,10 @@ Server to client, when a Scan starts over after a restart. Same payload as when 
 - **Every page**: reads its remembered view on load before the first draw and writes each change as it happens. A pick that no longer exists falls back as in Behavior 7. Loading, empty and error states are unchanged.
 - **Sidebar**: each item links to the page's last address (Behavior 5).
 - **Monitor**: Service, Alert, severity tab, Closed, ticks, filter, log count, JSON view and Report version kept. While a Scan restarts after a restart, the Scan button shows "Scanning…" as for any running Scan.
-- **Workspace**: tab, Session or pull request, Mine or All, search, file, split and full, open files and drafts kept. A resumed Session shows the "Resumed after the console restarted" step and streams on.
-- **Dev tools, Integrations, Connections, Setup agent**: picked item in the address. Setup agent reattaches to a relaunched terminal and shows the resumed Claude conversation.
+- **Workspace**: tab, Session or pull request, Mine or All, search, split and full, open files, open comment and reply boxes, and drafts kept. A resumed Session shows the "Resumed after the console restarted" step and streams on.
+- **Integrations, Connections**: picked item in the address.
+- **Dev tools**: picked terminal, new terminals and typed questions in local storage.
+- **Setup agent**: reattaches to a relaunched terminal and shows the resumed Claude conversation.
 - **Sign-in**: closing and reopening the tab skips the sign-in panel while the token holds.
 
 ## Rejected
