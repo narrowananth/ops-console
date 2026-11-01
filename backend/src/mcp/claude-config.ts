@@ -10,6 +10,7 @@ const entrySchema = z
     args: z.array(z.string()).optional(),
     url: z.string().optional(),
     headers: z.record(z.string(), z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
   })
   .loose();
 
@@ -34,6 +35,8 @@ export type RegisteredServer = {
   args: string[];
   url: string | null;
   headers: Record<string, string>;
+  /** A stdio server's env vars as the config holds them; a launcher-wrapped one reads its own from the Keychain. */
+  env?: Record<string, string>;
 };
 
 export function configFile(configDir: string): string {
@@ -78,6 +81,7 @@ export async function readRegistered(configDir: string, localDir: string): Promi
     args: entry.args ?? [],
     url: entry.url ?? null,
     headers: entry.headers ?? {},
+    env: entry.env ?? {},
   }));
 }
 

@@ -1,51 +1,65 @@
 import { WS_PATH, WS_PROTOCOL, wsEventSchema } from '@ops-console/shared';
-import { useQueryClient } from '@tanstack/react-query';
+import { type QueryKey, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { queryKeys } from './queries';
 import { sessionToken } from './session';
 
-/** Keeps queries fresh from `/ws` events: the server sends each change once, so a refetch per event is enough. */
+/** Events that land this close together refetch each query once. */
+const BATCH_MS = 40;
+
+/** Keeps queries fresh from `/ws` events. A burst, such as a Probe reporting ten servers, refetches each query once. */
 export function useLiveEvents(): void {
   const client = useQueryClient();
   useEffect(() => {
     const token = sessionToken();
     if (token === null) return;
+    const due = new Map<string, QueryKey>();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const refetch = (queryKey: QueryKey) => {
+      due.set(JSON.stringify(queryKey), queryKey);
+      timer ??= setTimeout(() => {
+        timer = null;
+        const keys = [...due.values()];
+        due.clear();
+        for (const key of keys) void client.invalidateQueries({ queryKey: key });
+      }, BATCH_MS);
+    };
     const url = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}${WS_PATH}`;
     const socket = new WebSocket(url, [WS_PROTOCOL, token]);
     socket.addEventListener('message', (message) => {
       const parsed = wsEventSchema.safeParse(JSON.parse(String(message.data)));
       if (!parsed.success) return;
       const event = parsed.data;
-      if (event.event === 'settings.updated') void client.invalidateQueries({ queryKey: queryKeys.settings });
+      if (event.event === 'settings.updated') refetch(queryKeys.settings);
       if (
         event.event === 'account.updated' ||
         event.event === 'account.switched' ||
         event.event === 'account.removed' ||
         event.event === 'settings.updated'
       ) {
-        void client.invalidateQueries({ queryKey: queryKeys.accounts });
+        refetch(queryKeys.accounts);
       }
       if (event.event === 'connection.checked') {
-        void client.invalidateQueries({ queryKey: queryKeys.mcpServers });
-        void client.invalidateQueries({ queryKey: queryKeys.connectors });
-        void client.invalidateQueries({ queryKey: queryKeys.connections });
+        refetch(queryKeys.mcpServers);
+        refetch(queryKeys.connectors);
+        refetch(queryKeys.connections);
       }
       if (event.event === 'approval.requested' || event.event === 'approval.decided') {
-        void client.invalidateQueries({ queryKey: queryKeys.approvals });
+        refetch(queryKeys.approvals);
       }
       if (event.event === 'session.updated') {
-        void client.invalidateQueries({ queryKey: queryKeys.session(event.data.session_id) });
-        void client.invalidateQueries({ queryKey: queryKeys.sessions });
+        refetch(queryKeys.session(event.data.session_id));
+        refetch(queryKeys.sessions);
       }
       if (event.event === 'session.output' || event.event === 'session.finished') {
-        void client.invalidateQueries({ queryKey: queryKeys.messages(event.data.session_id) });
+        refetch(queryKeys.messages(event.data.session_id));
       }
       if (
         event.event === 'pull_request.refreshed' ||
         event.event === 'pull_request.commented' ||
         event.event === 'pull_request.reviewed'
       ) {
-        void client.invalidateQueries({ queryKey: queryKeys.pulls });
+        refetch(queryKeys.pulls);
       }
       if (
         event.event === 'scan.started' ||
@@ -59,9 +73,12 @@ export function useLiveEvents(): void {
         event.event === 'fix.advanced' ||
         event.event === 'alert.resolved'
       ) {
-        void client.invalidateQueries({ queryKey: queryKeys.monitor });
+        refetch(queryKeys.monitor);
       }
     });
-    return () => socket.close();
+    return () => {
+      if (timer) clearTimeout(timer);
+      socket.close();
+    };
   }, [client]);
 }

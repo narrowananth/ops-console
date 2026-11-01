@@ -65,14 +65,21 @@ export const MERGE_DENIALS = [
   'mcp__gitlab__merge_merge_request',
 ];
 
-type RunResult = 'done' | ErrorCode.RateLimited | ErrorCode.UpstreamFailed;
+type RunResult = 'done' | ErrorCode.RateLimited | ErrorCode.Unauthorized | ErrorCode.UpstreamFailed;
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
-/** The text of a part with its fences restored; steps and diffs have none. */
-const partText = (part: Part): string =>
-  part.kind === 'text' ? part.text : part.kind === 'code' ? `\`\`\`${part.lang}\n${part.text}\n\`\`\`` : '';
+/** The text of a part with its fences restored, Dev tools tables included; steps and diffs have none. */
+const partText = (part: Part): string => {
+  if (part.kind === 'text') return part.text;
+  if (part.kind === 'code') return `\`\`\`${part.lang}\n${part.text}\n\`\`\``;
+  if (part.kind === 'result' || part.kind === 'comparison') {
+    const { kind, ...block } = part;
+    return `\`\`\`ops-${kind === 'result' ? 'result' : 'compare'}\n${JSON.stringify(block)}\n\`\`\``;
+  }
+  return '';
+};
 
 const firstLine = (text: string, max: number) => (text.trim().split('\n')[0] ?? '').slice(0, max);
 
@@ -216,8 +223,14 @@ export class AgentRuntime {
     try {
       let account = this.accounts.get(run.accountId);
       result = await this.runOnce(run, text, account);
-      // A run rejected for a limit resumes once, on the account Auto-switch picks (Behavior 26).
-      const next = result === ErrorCode.RateLimited ? this.accounts.switchAfterRejection(account.id) : null;
+      // A run rejected for a limit resumes once, on the account Auto-switch picks (Behavior 26). One whose sign-in no
+      // longer works resumes once on the next signed-in account (Behavior 26a).
+      const next =
+        result === ErrorCode.RateLimited
+          ? this.accounts.switchAfterRejection(account.id)
+          : result === ErrorCode.Unauthorized
+            ? this.accounts.signInFailed(account.id)
+            : null;
       if (next) {
         account = next;
         run.accountId = next.id;
@@ -246,6 +259,7 @@ export class AgentRuntime {
       if (!(await this.transcripts.exists(resume, configDir))) resume = null;
     }
     if (session.accountId !== account.id) this.sessions.write(run.sessionId, { accountId: account.id });
+    const instructions = this.kinds.get(session.kind)?.instructions;
 
     const options: Options = {
       cwd: run.workingDir,
@@ -257,6 +271,7 @@ export class AgentRuntime {
       env: claudeEnv(configDir),
       includePartialMessages: true,
       disallowedTools: MERGE_DENIALS,
+      ...(instructions ? { systemPrompt: { type: 'preset', preset: 'claude_code', append: instructions } } : {}),
       // Servers the operator disabled stay out of the run.
       settings: {
         deniedMcpServers: [
@@ -277,6 +292,7 @@ export class AgentRuntime {
     };
 
     let rejected = false;
+    let signInFailed = false;
     let failed = false;
     try {
       for await (const message of this.config.sdk.query(text, options)) {
@@ -295,14 +311,16 @@ export class AgentRuntime {
           failed = message.is_error;
         } else {
           rejected ||= message.type === 'assistant' && message.error === 'rate_limit';
+          signInFailed ||= message.type === 'assistant' && message.error === 'authentication_failed';
           this.stream(run, message);
         }
       }
     } catch (error) {
-      if (!rejected) throw error;
+      if (!rejected && !signInFailed) throw error;
     }
     for (const row of run.toolRows.values()) this.actionLog.finish(row, ActionOutcome.Failed, 'no result');
     if (rejected) return ErrorCode.RateLimited;
+    if (signInFailed) return ErrorCode.Unauthorized;
     return failed ? ErrorCode.UpstreamFailed : 'done';
   }
 

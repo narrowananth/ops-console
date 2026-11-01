@@ -1,0 +1,236 @@
+import {
+  refuseSetupLine,
+  SETUP_LINE_MAX,
+  type TerminalServerMessage,
+  terminalServerMessageSchema,
+  WS_PROTOCOL,
+} from '@ops-console/shared';
+import { FitAddon } from '@xterm/addon-fit';
+import { Terminal } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
+import { useEffect, useRef, useState } from 'react';
+import { z } from 'zod';
+import { Button } from '../components/ui/button';
+import { useAnswerSecret } from '../lib/queries';
+import { readStored, writeStored } from '../lib/remember';
+import { sessionToken } from '../lib/session';
+
+/**
+ * The unsent line per terminal, so it survives a tab switch. Memory only: a typed line may hold a password the daemon
+ * has not masked yet, so it never reaches browser storage.
+ */
+const TERMINAL_BG = '#0f0e0e';
+
+/** What the Setup agent page offers to ask. */
+export const EXAMPLES = [
+  'import my local databases',
+  'connect GitHub and Datadog',
+  'add the MCP servers from my Claude config',
+];
+
+/** A line picked before the terminal exists; the terminal that starts next opens with it typed in. */
+let queued: string | null = null;
+export function queueSetupLine(text: string) {
+  queued = text;
+}
+function takeQueued(): string {
+  const text = queued ?? '';
+  queued = null;
+  return text;
+}
+
+/**
+ * The Setup agent's terminal. Keystrokes are not sent as typed: a line goes to the daemon whole, so it can swap
+ * passwords for placeholders before Claude sees them. Only plain requests go: the daemon refuses a line that would
+ * drive Claude Code itself, such as `/login` or `!cmd`. It runs on while the
+ * operator is elsewhere or reloads, and the page attaches to it again; only Close ends it.
+ */
+export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onClose: () => void }) {
+  const host = useRef<HTMLDivElement>(null);
+  const socket = useRef<WebSocket | null>(null);
+  // The typed line is kept on disk per terminal, so a reload or reopening the console keeps it.
+  const draftKey = `setup.draft.${terminalId}`;
+  const [line, setLineState] = useState(() => takeQueued() || readStored(draftKey, z.string(), ''));
+  const setLine = (text: string) => {
+    writeStored(draftKey, text, '');
+    setLineState(text);
+  };
+  const [request, setRequest] = useState<{ request_id: string; label: string } | null>(null);
+  const [secret, setSecret] = useState('');
+  const [ended, setEnded] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+  const answer = useAnswerSecret();
+
+  useEffect(() => {
+    const token = sessionToken();
+    if (!host.current || token === null) return;
+    const terminal = new Terminal({
+      convertEol: true,
+      fontSize: 13,
+      disableStdin: true,
+      theme: { background: TERMINAL_BG },
+    });
+    const fit = new FitAddon();
+    terminal.loadAddon(fit);
+    terminal.open(host.current);
+    fit.fit();
+    const url = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/terminals/${terminalId}`;
+    const ws = new WebSocket(url, [WS_PROTOCOL, token]);
+    socket.current = ws;
+    const sendSize = () => {
+      if (ws.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
+    };
+    ws.addEventListener('open', sendSize);
+    // The terminal fills its box, and Claude redraws at the new size whenever the box changes.
+    const resized = new ResizeObserver(() => {
+      const before = `${terminal.cols}x${terminal.rows}`;
+      fit.fit();
+      if (`${terminal.cols}x${terminal.rows}` !== before) sendSize();
+    });
+    resized.observe(host.current);
+    ws.addEventListener('message', (event) => {
+      const parsed = terminalServerMessageSchema.safeParse(JSON.parse(String(event.data)));
+      if (!parsed.success) return;
+      const message: TerminalServerMessage = parsed.data;
+      if (message.type === 'output') terminal.write(message.data);
+      else if (message.type === 'secret_requested')
+        setRequest({ request_id: message.request_id, label: message.label });
+      else if (message.type === 'refused') setRefused(message.reason);
+      else if (message.type === 'exit') setEnded(true);
+    });
+    return () => {
+      resized.disconnect();
+      ws.close();
+      terminal.dispose();
+    };
+  }, [terminalId]);
+
+  const submit = () => {
+    const reason = refuseSetupLine(line);
+    setRefused(reason);
+    if (reason !== null) return;
+    socket.current?.send(JSON.stringify({ type: 'line', text: line }));
+    setLine('');
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-line bg-card shadow-sm">
+        <div className="flex items-center gap-2.5 border-b border-line px-4.5 py-3">
+          <span
+            aria-hidden
+            className={`size-2 flex-none rounded-full ${ended ? 'bg-neutral-400' : 'bg-ok shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-ok)_20%,transparent)]'}`}
+          />
+          <strong className="text-[13px] whitespace-nowrap">
+            {ended ? 'Setup agent ended' : 'Setup agent running'}
+          </strong>
+          <span className="truncate text-xs text-neutral-700">
+            When Claude needs a password it asks in a masked field.
+          </span>
+          <Button
+            className="ml-auto px-3 py-1.25 text-xs"
+            onClick={() => {
+              writeStored(draftKey, '', '');
+              onClose();
+            }}
+          >
+            Close
+          </Button>
+        </div>
+        <div className="flex min-h-0 flex-1 p-2.5">
+          <div
+            ref={host}
+            className="min-h-60 flex-1 overflow-hidden rounded-lg p-3"
+            style={{ background: TERMINAL_BG }}
+          />
+        </div>
+      </section>
+      {request && (
+        <form
+          className="flex items-end gap-2.5 rounded-xl border border-accent-300 bg-accent-100 px-4 py-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            answer.mutate(
+              { terminalId, requestId: request.request_id, value: secret },
+              {
+                onSuccess: () => {
+                  setSecret('');
+                  setRequest(null);
+                },
+              },
+            );
+          }}
+        >
+          <label className="flex-1 text-xs font-extrabold text-accent-900">
+            {request.label}
+            <input
+              type="password"
+              autoComplete="off"
+              value={secret}
+              onChange={(event) => setSecret(event.target.value)}
+              className="mt-1.5 w-full border border-divider bg-card px-3 py-2 font-mono text-[13px] text-text"
+            />
+          </label>
+          <Button variant="primary" type="submit" disabled={secret === '' || answer.isPending}>
+            Send
+          </Button>
+        </form>
+      )}
+      <div className="rounded-xl border border-divider bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)]">
+        <textarea
+          aria-label="Message to Claude"
+          disabled={ended}
+          value={line}
+          maxLength={SETUP_LINE_MAX}
+          placeholder={
+            ended
+              ? 'The terminal ended. Close it and open it again.'
+              : 'Ask Claude to set something up, e.g. import my local databases. Enter alone confirms a prompt.'
+          }
+          aria-invalid={refused !== null}
+          aria-describedby={refused === null ? undefined : 'setup-line-refused'}
+          onChange={(event) => {
+            // A request is one line: a pasted line break becomes a space.
+            setLine(event.target.value.replace(/\r?\n/g, ' '));
+            setRefused(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              submit();
+            }
+          }}
+          className="block max-h-40 min-h-16 w-full resize-none border-0 bg-transparent px-4 pt-3.5 pb-1.5 text-sm text-text outline-none"
+        />
+        <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-1.5 pb-2.5">
+          {EXAMPLES.map((example) => (
+            <button
+              key={example}
+              type="button"
+              disabled={ended}
+              className="cursor-pointer rounded-full border border-line bg-bg px-3 py-1 text-xs text-text transition-colors hover:border-accent-300 hover:bg-accent-100 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => setLine(example)}
+            >
+              {example}
+            </button>
+          ))}
+          <Button
+            variant="primary"
+            title="Enter sends."
+            className="ml-auto px-4 py-1.5"
+            disabled={ended}
+            onClick={submit}
+          >
+            Send
+          </Button>
+        </div>
+      </div>
+      {refused && (
+        <div id="setup-line-refused" role="alert" className="text-xs text-accent-700">
+          {refused}
+        </div>
+      )}
+    </div>
+  );
+}

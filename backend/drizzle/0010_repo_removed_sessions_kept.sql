@@ -1,0 +1,1 @@
+ALTER TABLE `repos` ADD `removed_at` text;

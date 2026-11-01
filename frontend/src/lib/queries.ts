@@ -13,16 +13,18 @@ import {
   type ConnectionType,
   type ConnectorId,
   type CreateConnection,
-  type CreateMcpServer,
+  type CreateScan,
   checkoutResultSchema,
   claudeAccountSchema,
   connectionCheckSchema,
   connectionListSchema,
   connectionSchema,
   connectionTestResultSchema,
-  connectorCheckSchema,
   connectorListSchema,
   connectorSchema,
+  datadogServiceSchema,
+  diskAccessSchema,
+  findCodeResultSchema,
   fixSchema,
   healthSchema,
   mcpServerListSchema,
@@ -31,24 +33,31 @@ import {
   type PrReviewEvent,
   prAgentReviewSchema,
   prCommentSchema,
+  prFileContentSchema,
   pullRequestDetailSchema,
   pullRequestListSchema,
+  type RemovedRepoSessions,
   type ReviewAlert,
   repoListSchema,
   reportSchema,
   repoSchema,
   reviewSchema,
   routeViewSchema,
+  type ScanWindow,
+  type Session,
   type SessionDefaults,
   type SessionPatch,
   scanSchema,
   serviceSchema,
   sessionDefaultsSchema,
   sessionSchema,
+  statusCodeCountSchema,
+  terminalListSchema,
   type UpdateConnection,
   type UpdateMcpServer,
 } from '@ops-console/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { z } from 'zod';
 import { apiGet, apiSend } from './api';
 import { sessionToken } from './session';
@@ -69,6 +78,8 @@ export const queryKeys = {
   alert: (id: string) => ['monitor', 'alert', id] as const,
   session: (id: string) => ['sessions', id] as const,
   messages: (id: string) => ['messages', id] as const,
+  diskAccess: ['disk-access'] as const,
+  terminals: ['terminals'] as const,
 };
 
 export function useHealth() {
@@ -190,11 +201,22 @@ export function useActivateAccount() {
 }
 
 /** The Session composer chips: model, effort and access apply from the next run. */
+/** Every cached Session list shows the change at once; the reply, or a refetch after a failure, settles it. */
 export function useUpdateSession(id: string) {
   const client = useQueryClient();
+  const apply = (change: (session: Session) => Session) =>
+    client.setQueriesData<Session[]>({ queryKey: queryKeys.sessions }, (list) =>
+      list?.map((session) => (session.id === id ? change(session) : session)),
+    );
   return useMutation({
-    mutationFn: (patch: SessionPatch) => apiSend('PATCH', `/sessions/${id}`, patch, z.object({ data: sessionSchema })),
-    onSuccess: (session) => client.setQueryData(queryKeys.session(id), session),
+    mutationFn: (patch: SessionPatch) =>
+      apiSend('PATCH', `/sessions/${id}`, patch, z.object({ data: sessionSchema })).then((body) => body.data),
+    onMutate: async (patch) => {
+      await client.cancelQueries({ queryKey: queryKeys.sessions });
+      apply((session) => ({ ...session, ...patch }));
+    },
+    onSuccess: (saved) => apply(() => saved),
+    onError: () => client.invalidateQueries({ queryKey: queryKeys.sessions }),
   });
 }
 
@@ -229,10 +251,6 @@ function useMcpMutation<V>(send: (variables: V) => Promise<unknown>) {
     mutationFn: send,
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.mcpServers }),
   });
-}
-
-export function useCreateMcpServer() {
-  return useMcpMutation((body: CreateMcpServer) => apiSend('POST', '/mcp-servers', body, mcpServerResponse));
 }
 
 export function useUpdateMcpServer() {
@@ -274,23 +292,9 @@ function useConnectorMutation<V>(send: (variables: V) => Promise<unknown>) {
   });
 }
 
-export function useSaveConnector() {
-  return useConnectorMutation(({ id, config }: { id: ConnectorId; config: Record<string, unknown> }) =>
-    apiSend('PATCH', `/connectors/${id}`, { config }, z.object({ data: connectorSchema })),
-  );
-}
-
 /** Starts the sign-in; the result arrives as `connection.checked`. */
 export function useConnectConnector() {
-  return useConnectorMutation(({ id, secret }: { id: ConnectorId; secret?: string }) =>
-    apiSend('POST', `/connectors/${id}/connect`, secret ? { secret } : {}, z.undefined()),
-  );
-}
-
-export function useTestConnector() {
-  return useConnectorMutation((id: ConnectorId) =>
-    apiSend('POST', `/connectors/${id}/checks`, undefined, z.object({ data: connectorCheckSchema })),
-  );
+  return useConnectorMutation((id: ConnectorId) => apiSend('POST', `/connectors/${id}/connect`, {}, z.undefined()));
 }
 
 export function useDisconnectConnector() {
@@ -344,12 +348,46 @@ export function useTestConnection() {
   });
 }
 
+/** The running setup terminal, if any: it keeps running while the operator is elsewhere, so the tab finds it again. */
+export function useSetupTerminal() {
+  return useQuery({
+    queryKey: queryKeys.terminals,
+    queryFn: () =>
+      apiGet('/terminals', terminalListSchema).then((r) => r.data.find((item) => item.kind === 'setup')?.id ?? null),
+  });
+}
+
 export function useStartSetupTerminal() {
+  const client = useQueryClient();
   return useMutation({
     mutationFn: () =>
       apiSend('POST', '/terminals', { kind: 'setup' }, z.object({ data: z.object({ id: z.string() }) })).then(
         (response) => response.data.id,
       ),
+    onSuccess: (id) => client.setQueryData(queryKeys.terminals, id),
+  });
+}
+
+export function useCloseSetupTerminal() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiSend('DELETE', `/terminals/${id}`, undefined, z.undefined()),
+    onSuccess: () => client.setQueryData(queryKeys.terminals, null),
+  });
+}
+
+/** Checked again whenever the window comes back into focus, as it does on the way back from System Settings. */
+export function useDiskAccess() {
+  return useQuery({
+    queryKey: queryKeys.diskAccess,
+    queryFn: () => apiGet('/terminals/disk-access', z.object({ data: diskAccessSchema })).then((r) => r.data),
+    refetchOnWindowFocus: 'always',
+  });
+}
+
+export function useOpenDiskAccessSettings() {
+  return useMutation({
+    mutationFn: () => apiSend('POST', '/terminals/disk-access/settings', undefined, z.undefined()),
   });
 }
 
@@ -369,7 +407,11 @@ export function useImportRepo() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (path: string) => apiSend('POST', '/repos', { path }, z.object({ data: repoSchema })),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.repos }),
+    // A Repo removed with its Sessions kept brings them back.
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: queryKeys.repos });
+      client.invalidateQueries({ queryKey: queryKeys.sessions });
+    },
   });
 }
 
@@ -389,17 +431,37 @@ export function usePickFolder() {
 export function useRemoveRepo() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => apiSend('DELETE', `/repos/${id}`, undefined, z.undefined()),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.repos }),
+    mutationFn: ({ id, sessions }: { id: string; sessions?: RemovedRepoSessions }) =>
+      apiSend('DELETE', `/repos/${id}${sessions ? `?sessions=${sessions}` : ''}`, undefined, z.undefined()),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: queryKeys.repos });
+      client.invalidateQueries({ queryKey: queryKeys.sessions });
+    },
   });
 }
 
 /** Every `repo` Session, newest first. `session.updated` over `/ws` keeps it fresh. */
+/** The Workspace's Sessions: those in a Repo and the anonymous ones, most recently active first. */
 export function useRepoSessions() {
   return useQuery({
     queryKey: queryKeys.sessions,
-    queryFn: () =>
-      apiGet('/sessions?kind=repo&limit=100', z.object({ data: z.array(sessionSchema) })).then((b) => b.data),
+    queryFn: async () => {
+      const read = (kind: string) =>
+        apiGet(`/sessions?kind=${kind}&limit=100`, z.object({ data: z.array(sessionSchema) })).then((b) => b.data);
+      const [inRepos, anonymous] = await Promise.all([read('repo'), read('anonymous')]);
+      return [...inRepos, ...anonymous].sort((a, b) => b.last_active_at.localeCompare(a.last_active_at));
+    },
+  });
+}
+
+export function useCreateAnonymousSession() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { title?: string } = {}) =>
+      apiSend('POST', '/sessions', { kind: 'anonymous', ...input }, z.object({ data: sessionSchema })).then(
+        (body) => body.data,
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.sessions }),
   });
 }
 
@@ -416,7 +478,12 @@ export function useDeleteSession() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => apiSend('DELETE', `/sessions/${id}`, undefined, z.undefined()),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.sessions }),
+    onSuccess: (_none, id) => {
+      client.setQueriesData<Session[]>({ queryKey: queryKeys.sessions }, (list) =>
+        list?.filter((session) => session.id !== id),
+      );
+      void client.invalidateQueries({ queryKey: queryKeys.sessions });
+    },
   });
 }
 
@@ -425,6 +492,8 @@ export function useMessages(sessionId: string) {
     queryKey: queryKeys.messages(sessionId),
     queryFn: () =>
       apiGet(`/sessions/${sessionId}/messages`, z.object({ data: z.array(messageSchema) })).then((b) => b.data),
+    // Dev tools draws its terminal before the first question makes a Session.
+    enabled: sessionId !== '',
   });
 }
 
@@ -467,14 +536,29 @@ export function useCheckout(sessionId: string, repoId: string) {
 export type PullRequestFilter = { mine: boolean; q: string };
 
 /** The Git host's open pull requests across every Repo, kept 60 seconds in the daemon. */
-export function usePullRequests(filter: PullRequestFilter) {
+function pullRequestsQuery(filter: PullRequestFilter) {
   const params = new URLSearchParams();
   if (filter.mine) params.set('mine', 'true');
   if (filter.q) params.set('q', filter.q);
-  return useQuery({
+  return {
     queryKey: [...queryKeys.pulls, 'list', filter],
     queryFn: () => apiGet(`/pull-requests?${params}`, pullRequestListSchema),
-  });
+  };
+}
+
+export function usePullRequests(filter: PullRequestFilter) {
+  return useQuery(pullRequestsQuery(filter));
+}
+
+/**
+ * Reads the Workspace's first pull request list as the app opens. The daemon's first read of every host repository
+ * takes seconds; started here, it is in memory by the time the operator opens the Workspace.
+ */
+export function usePrefetchPullRequests() {
+  const client = useQueryClient();
+  useEffect(() => {
+    void client.prefetchQuery(pullRequestsQuery({ mine: true, q: '' }));
+  }, [client]);
 }
 
 export function useRefreshPullRequests() {
@@ -491,10 +575,24 @@ export function usePullRequest(repoId: string, number: number) {
   });
 }
 
+/** One file of the pull request at `ref`, read when `enabled`. A commit's file never changes, so it is kept. */
+export function usePrFile(repoId: string, number: number, path: string, ref: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [...queryKeys.pulls, 'file', repoId, number, ref, path],
+    queryFn: () =>
+      apiGet(
+        `/repos/${repoId}/pull-requests/${number}/file?${new URLSearchParams({ path, ref })}`,
+        z.object({ data: prFileContentSchema }),
+      ).then((b) => b.data),
+    enabled,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
 export function usePostComment(repoId: string, number: number) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: { body: string; parent_id?: string }) =>
+    mutationFn: (input: { body: string; parent_id?: string; file_path?: string; line?: number }) =>
       apiSend('POST', `/repos/${repoId}/pull-requests/${number}/comments`, input, z.object({ data: prCommentSchema })),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
   });
@@ -510,6 +608,15 @@ export function useResolveComment(repoId: string, number: number) {
         { resolved: input.resolved },
         z.object({ data: prCommentSchema }),
       ),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
+  });
+}
+
+export function useDeleteComment(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (commentId: string) =>
+      apiSend('DELETE', `/repos/${repoId}/pull-requests/${number}/comments/${commentId}`, undefined, z.undefined()),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
   });
 }
@@ -598,20 +705,68 @@ const refreshMonitor = (client: ReturnType<typeof useQueryClient>) =>
 export function useStartScan() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (serviceId: string | null) =>
-      apiSend('POST', '/scans', { service_id: serviceId }, z.object({ data: scanSchema })),
+    mutationFn: (input: CreateScan) => apiSend('POST', '/scans', input, z.object({ data: scanSchema })),
     onSuccess: () => refreshMonitor(client),
+  });
+}
+
+/**
+ * The Services Datadog has failing requests for in the range, every env together, busiest first: HTTP status 400 or
+ * more, or only `codes`.
+ */
+export function useDatadogServices(window: ScanWindow, codes: number[], enabled: boolean) {
+  const picked = [...codes].sort((a, b) => a - b);
+  return useQuery({
+    queryKey: [...queryKeys.monitor, 'datadog-services', window, picked],
+    queryFn: () =>
+      apiGet(
+        `/monitor/datadog-services?window=${window}${picked.length > 0 ? `&codes=${picked.join(',')}` : ''}`,
+        listOf(datadogServiceSchema),
+      ).then((b) => b.data),
+    enabled,
+    staleTime: 2 * 60_000,
+    placeholderData: (previous) => previous,
+  });
+}
+
+/** The HTTP status codes from 400 up Datadog has requests for in the range, busiest first. */
+export function useStatusCodes(window: ScanWindow, enabled: boolean) {
+  return useQuery({
+    queryKey: [...queryKeys.monitor, 'status-codes', window],
+    queryFn: () => apiGet(`/monitor/status-codes?window=${window}`, listOf(statusCodeCountSchema)).then((b) => b.data),
+    enabled,
+    staleTime: 2 * 60_000,
+    placeholderData: (previous) => previous,
   });
 }
 
 export function usePatchService() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: { id: string; repo_id?: string | null; check_interval?: string | null }) => {
+    mutationFn: (input: {
+      id: string;
+      repo_id?: string | null;
+      repo_url?: string | null;
+      check_interval?: string | null;
+    }) => {
       const { id, ...body } = input;
       return apiSend('PATCH', `/services/${id}`, body, z.object({ data: serviceSchema }));
     },
     onSuccess: () => refreshMonitor(client),
+  });
+}
+
+/** Looks for a Service's code: same-name Repo, a folder next to the Repos, then the Git hosts. */
+export function useFindCode() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (serviceId: string) =>
+      apiSend('POST', `/services/${serviceId}/code`, undefined, z.object({ data: findCodeResultSchema })).then(
+        (body) => body.data,
+      ),
+    onSuccess: (result) => {
+      if (result.found) void refreshMonitor(client);
+    },
   });
 }
 
@@ -673,16 +828,29 @@ export function useDevtoolsSessions() {
   });
 }
 
-export function useCreateDevtoolsSession() {
+/** The Dev tools screen's first question: a Session with the picked scope, then the question as its first message. */
+export function useAskNewDevtoolsSession() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (connectionIds: string[]) =>
-      apiSend(
+    mutationFn: async (input: { connectionIds: string[]; settings: Partial<SessionDefaults>; text: string }) => {
+      const session = await apiSend(
         'POST',
         '/sessions',
-        { kind: 'devtools', connection_ids: connectionIds },
+        { kind: 'devtools', connection_ids: input.connectionIds, ...input.settings },
         z.object({ data: sessionSchema }),
-      ).then((body) => body.data),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.sessions }),
+      ).then((body) => body.data);
+      await apiSend(
+        'POST',
+        `/sessions/${session.id}/messages`,
+        { text: input.text },
+        z.object({ data: z.object({ message_id: z.string() }) }),
+      );
+      return session;
+    },
+    // The new terminal shows its tab at once, before the list is read again.
+    onSuccess: (session) => {
+      client.setQueryData<Session[]>([...queryKeys.sessions, 'devtools'], (list) => [session, ...(list ?? [])]);
+      void client.invalidateQueries({ queryKey: queryKeys.sessions });
+    },
   });
 }

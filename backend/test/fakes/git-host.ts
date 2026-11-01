@@ -14,6 +14,7 @@ import type {
   HostComment,
   HostPullRequest,
   NewHostComment,
+  OwnedPullRequest,
 } from '../../src/workspace/git-host';
 
 export function hostPr(number: number, overrides: Partial<HostPullRequest> = {}): HostPullRequest {
@@ -27,6 +28,7 @@ export function hostPr(number: number, overrides: Partial<HostPullRequest> = {})
     head_sha: `sha-${number}-a`,
     state: PrState.Open,
     review_state: PrReviewState.None,
+    approved_by: [],
     checks: PrChecks.Passed,
     additions: 10,
     deletions: 2,
@@ -41,7 +43,13 @@ export function hostPr(number: number, overrides: Partial<HostPullRequest> = {})
 
 /** One Git host in memory. Counts what reaches it and fails on cue. */
 export class FakeGitHost implements GitHostAdapter, GitHosts {
+  /** Pull requests of the imported Repo, `acme/orders-api`. */
   prs: HostPullRequest[] = [];
+  /** Pull requests of repositories that are not imported. */
+  elsewhere: OwnedPullRequest[] = [];
+  /** The owners the host says the operator can read. */
+  ownerNames: string[] = [];
+  readonly ownerReads: string[] = [];
   files: PrFile[] = [{ name: 'src/app.ts', additions: 3, deletions: 1, lines: [{ sign: '+', text: 'const a = 1;' }] }];
   comments = new Map<number, HostComment[]>();
   readonly calls = { list: 0, get: 0 };
@@ -56,8 +64,18 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
   beforePost: (comment: NewHostComment) => void = () => {};
   private nextId = 100;
 
+  /** Hosts that answer like one whose adapter has not landed. */
+  readonly unsupported = new Set<GitHost>();
+
+  supports(host: GitHost): boolean {
+    return host !== GitHost.Local && !this.unsupported.has(host);
+  }
+
   for(host: GitHost): GitHostAdapter {
     if (host === GitHost.Local) throw new ApiError(409, ErrorCode.InvalidState, 'a local Repo has no pull requests');
+    if (this.unsupported.has(host)) {
+      throw new ApiError(502, ErrorCode.UpstreamFailed, `${host} pull requests are not supported yet`);
+    }
     return this;
   }
 
@@ -87,6 +105,21 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
     return this.prs.filter((pr) => pr.state === state).map((pr) => this.counted(pr));
   }
 
+  async owners(): Promise<string[]> {
+    this.check();
+    return this.ownerNames;
+  }
+
+  async listOwner(owner: string, state: PrState): Promise<OwnedPullRequest[]> {
+    this.calls.list++;
+    this.ownerReads.push(owner);
+    this.check();
+    const own = owner === 'acme' ? this.prs.map((pr) => ({ ...this.counted(pr), slug: 'acme/orders-api' })) : [];
+    return [...own, ...this.elsewhere.filter((pr) => pr.slug.startsWith(`${owner}/`))].filter(
+      (pr) => pr.state === state,
+    );
+  }
+
   async get(_slug: string, number: number) {
     this.calls.get++;
     this.check();
@@ -112,6 +145,14 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
     return posted;
   }
 
+  async deleteComment(_slug: string, number: number, commentId: string): Promise<void> {
+    this.check();
+    this.comments.set(
+      number,
+      (this.comments.get(number) ?? []).filter((comment) => comment.id !== commentId),
+    );
+  }
+
   async setResolved(_slug: string, number: number, commentId: string, resolved: boolean): Promise<void> {
     this.check();
     for (const comment of this.comments.get(number) ?? []) if (comment.id === commentId) comment.resolved = resolved;
@@ -121,8 +162,18 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
     this.check();
     this.reviews.push({ number, event, body });
     const pr = this.pr(number);
-    if (event === 'approve') pr.review_state = PrReviewState.Approved;
+    if (event === 'approve') {
+      pr.review_state = PrReviewState.Approved;
+      pr.approved_by = [...new Set([...pr.approved_by, 'me'])];
+    }
     if (event === 'request_changes') pr.review_state = PrReviewState.ChangesRequested;
+  }
+
+  /** File text by `ref:path`. */
+  texts = new Map<string, string>();
+  async fileAt(_slug: string, ref: string, path: string): Promise<string | null> {
+    this.check();
+    return this.texts.get(`${ref}:${path}`) ?? null;
   }
 
   async merge(_slug: string, number: number): Promise<void> {

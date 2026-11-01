@@ -20,9 +20,9 @@ import { StartupRecovery } from '../common/recovery';
 import { reports, routes, services } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { parseAgentJson } from './agent-json';
-import { AlertSessions } from './alert-sessions';
+import { AlertSessions, type CodeSource } from './alert-sessions';
 import { AlertsService } from './alerts.service';
-import { type AlertRow, type ServiceRow, samplesOf, toReport } from './mappers';
+import { type AlertRow, type RouteRow, type ServiceRow, samplesOf, toReport } from './mappers';
 import { ScansService } from './scans.service';
 
 const outputSchema = z.object({
@@ -45,22 +45,28 @@ export function cleanSlug(slug: string): string {
     .replace(/-+$/g, '');
 }
 
-export function verificationPrompt(alert: AlertRow, service: ServiceRow, repoName: string): string {
+/** What the agent is told about the Alert: its logs, where the code is, and the Report it must write. */
+export function verificationPrompt(alert: AlertRow, service: ServiceRow, route: RouteRow, source: CodeSource): string {
   const samples = samplesOf(alert)
     .slice(0, 5)
     .map((sample) => `- ${sample.timestamp} ${sample.status}: ${sample.message}`)
     .join('\n');
-  return `Verify a failing route from Datadog against the code in this folder (${repoName}).
+  const where =
+    source.kind === 'repo'
+      ? `the code in this folder (the local Repo ${source.name})`
+      : `the code in this folder, a fresh clone of ${source.name}`;
+  const what = route.method ? `route ${route.method} ${route.path}` : 'logs with no HTTP route';
+  return `Find the cause of a failure Datadog logged, in ${where}.
 
 Alert: ${alert.title}
-Service: ${service.name} (${service.env}); route ${alert.title.split(' failing')[0]}
+Service: ${service.name} (${service.env}); ${what}
 Events: ${alert.eventCount} since ${alert.firstSeenAt}; Datadog query: ${alert.datadogQuery}
 
 Newest log lines:
 ${samples}
 
-1. Map the log to the code that raised it.
-2. Replay the request with curl against this repo running locally, and note the response.
+1. Map the log to the code that wrote it, and follow the call path end to end: entry point, the failing call, the data it read.
+2. If the failure is a request, replay it with curl against this code running locally, and note the response. Skip this when it cannot run locally.
 3. Cross-check the data with the Connections the console gives you, read only.
 4. Decide whether this is a bug or an improvement, and what the smallest fix is.
 
@@ -70,11 +76,11 @@ Change nothing and run nothing that writes. Answer with one JSON block and nothi
 {
   "kind": "bug | improvement",
   "slug": "short-kebab-name",
-  "root_cause": "what is wrong, in plain words",
+  "root_cause": "what is wrong, in plain words, with file:line",
   "proposed_fix": "what to change and where",
   "replay": { "request": "curl command", "response": "status and body, secrets removed" },
   "diff": [{ "sign": "+ | - | space", "text": "line" }],
-  "markdown": "the full Report as Markdown"
+  "markdown": "the full Report as Markdown, with the sections: Summary, Evidence (log lines), Root cause (file:line), Impact, How to fix (steps), How to check the fix"
 }
 \`\`\`
 
@@ -107,18 +113,17 @@ export class VerificationsService {
     recovery.register('monitor verifications', () => this.recover());
   }
 
-  /** Answers with the Report in `running`; the agent works on, and `alert.verified` reports the end. */
+  /**
+   * Answers with the Report in `running`. A clone, when the Service has no local Repo, and the agent run go on in the
+   * background; `alert.verified` reports the end.
+   */
   async start(alertId: string): Promise<Report> {
     const alert = this.alerts.row(alertId);
     this.alerts.requireStatus(alert, AlertStatus.Open, AlertStatus.Verified);
-    const service = this.serviceOf(alert);
-    const repo = this.sessions.repoOf(service);
-    const sessionId = await this.sessions.ensure(alert, service);
+    const { service, route } = this.serviceOf(alert);
+    const source = this.sessions.sourceOf(service);
     const reportId = crypto.randomUUID();
     const steps: ReportStep[] = [];
-    const { finished } = this.runtime.runFor(sessionId, verificationPrompt(alert, service, repo.name), (part) =>
-      this.step(reportId, steps, part),
-    );
     const row = this.store.write((tx) => {
       const version =
         (tx
@@ -133,29 +138,32 @@ export class VerificationsService {
         AlertStatus.Verifying,
         AlertEventKind.VerificationStarted,
         AlertActor.Operator,
-        {
-          report_id: reportId,
-          version,
-        },
+        { report_id: reportId, version },
       );
       return created;
     });
-    void finished
-      .then((summary) => this.complete(reportId, alert, summary))
-      .catch((error) =>
-        this.logger.error(`verification ${reportId} failed: ${error instanceof Error ? error.message : error}`),
-      );
+    const onPart = (part: Part) => this.step(reportId, steps, part);
+    void (async () => {
+      const sessionId = await this.sessions.ensure(alert, service, (text) => onPart({ kind: 'step', text }));
+      const prompt = verificationPrompt(alert, service, route, source);
+      const summary = await this.runtime.runFor(sessionId, prompt, onPart).finished;
+      await this.complete(reportId, alert, summary);
+    })().catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`verification ${reportId} failed: ${message}`);
+      this.fail(reportId, alert.id, message.slice(0, 300));
+    });
     return toReport(row);
   }
 
-  private serviceOf(alert: AlertRow): ServiceRow {
+  private serviceOf(alert: AlertRow): { service: ServiceRow; route: RouteRow } {
     const found = this.store.db
-      .select({ service: services })
+      .select({ service: services, route: routes })
       .from(routes)
       .innerJoin(services, eq(services.id, routes.serviceId))
       .where(eq(routes.id, alert.routeId))
       .get();
-    return (found as { service: ServiceRow }).service;
+    return found as { service: ServiceRow; route: RouteRow };
   }
 
   private step(reportId: string, steps: ReportStep[], part: Part): void {

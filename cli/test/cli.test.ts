@@ -34,7 +34,11 @@ describe('ops-console start', () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toMatch(/running on http:\/\/127\.0\.0\.1:\d+/);
     const plist = await readFile(path.join(m.home, 'Library/LaunchAgents/dev.ops-console.plist'), 'utf8');
-    expect(plist).toContain(`<string>${path.join(m.installDir, 'current/bin/ops-console')}</string>`);
+    // The daemon runs as Ops Console.app, so macOS names it Ops Console in System Settings.
+    expect(plist).toContain(
+      `<string>${path.join(m.installDir, 'current/Ops Console.app/Contents/MacOS/Ops Console')}</string>`,
+    );
+    expect(plist).toContain(`<string>${path.join(m.installDir, 'current/app/main.js')}</string>`);
     expect(plist).toMatch(/<key>RunAtLoad<\/key>\s*<true\/>/);
     expect(plist).toMatch(/<key>KeepAlive<\/key>\s*<true\/>/);
     expect(await m.calls()).toEqual(

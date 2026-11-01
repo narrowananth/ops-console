@@ -1,11 +1,13 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query } from '@nestjs/common';
 import {
   checkoutSchema,
   type PrAgentReview,
   type PrComment,
+  type PrFileContent,
   type PullRequest,
   type PullRequestDetail,
   postCommentSchema,
+  prFileQuerySchema,
   pullRequestQuerySchema,
   refreshPullRequestsSchema,
   resolveCommentSchema,
@@ -64,6 +66,13 @@ export class PullRequestsController {
     return { data: await this.pulls.get(repo, number) };
   }
 
+  @Get('repos/:repo/pull-requests/:number/file')
+  async file(@Param() params: unknown, @Query() query: unknown): Promise<{ data: PrFileContent }> {
+    const { repo } = parseInput(pullParams, params, 'params');
+    const { path, ref } = parseInput(prFileQuerySchema, query, 'query');
+    return { data: await this.pulls.file(repo, path, ref) };
+  }
+
   @Post('repos/:repo/pull-requests/:number/comments')
   async comment(@Param() params: unknown, @Body() body: unknown): Promise<{ data: PrComment }> {
     const { repo, number } = parseInput(pullParams, params, 'params');
@@ -77,6 +86,13 @@ export class PullRequestsController {
     const { repo, number, comment_id } = parseInput(commentParams, params, 'params');
     const { resolved } = parseInput(resolveCommentSchema, body, 'body');
     return { data: await this.pulls.resolve(repo, number, comment_id, resolved) };
+  }
+
+  @Delete('repos/:repo/pull-requests/:number/comments/:comment_id')
+  @HttpCode(204)
+  async deleteComment(@Param() params: unknown): Promise<void> {
+    const { repo, number, comment_id } = parseInput(commentParams, params, 'params');
+    await this.pulls.deleteComment(repo, number, comment_id);
   }
 
   @Post('repos/:repo/pull-requests/:number/reviews')

@@ -69,9 +69,9 @@ Judgment work (Verification, Fix, Agent Review) runs as an agent session.
 | `claude-cli` | `claude mcp add`, `remove`, `list`, `get`, parsed with Zod |
 | `mcp-client` | Calls a tool on a server registered with Claude Code |
 | `mcp` | Servers registered in every Claude account (`.claude.json`), Probe, add, edit, reconnect, disable, remove, and the `mcp-exec` launcher |
-| `connectors` | The seven Connectors: sign-in through `pup`, `gh`, `glab`, a token or an MCP Server; checks; config |
+| `connectors` | The eight Connectors: browser sign-in through `pup`, `gh`, `glab` or an MCP Server; the MCP Server each registers; checks; config |
 | `monitor` | Services, Routes, Scans, Alerts through `pup`; Verification and Reports; the operator's Review; the Fix from ticket to merged PR |
-| `devtools` | `devtools` Sessions scoped to Connections; ties MCP calls to their Connection; the PROD-write rule |
+| `devtools` | `devtools` Sessions scoped to Connections; ties MCP calls to their Connection; the PROD-write rule; the instructions that make the agent hand over Results and a Comparison |
 | `workspace` | Sessions in a Repo, branch checkout with stash, pull requests and Agent Reviews through the Git host adapter (`gh`) |
 | `agent` | Sessions, Claude Agent SDK runs, permission hooks, streaming output, transcripts |
 | `accounts` | Claude accounts, their usage, Auto-switch and Smart usage |
@@ -107,10 +107,13 @@ rate-limit events and its usage request.
 
 Where the build departs from `design/ops-console.html` on purpose:
 
+- **Layout.** A left sidebar replaces the top bar and the Settings drawer; each former Settings tab is
+  its own page (`design/ops-console-sidebar.html`). Controls and cards are rounded.
 - **Replay source.** Datadog logs hold request headers, not bodies. A Verification rebuilds the
   request from the source (for example, the Shopify order by id) until a Service logs redacted
   bodies.
-- **Access Level** changes how a Connection's MCP server launches (read-only flag or read-only
-  user), not only the badge.
+- **Access Level** changes how a Connection's MCP server launches (read-only flag, config file or
+  read-only user), not only the badge.
 - **Merge** is a button for the operator only; the agent has no merge tool.
 - **Connectors** add Sentry and drop Kafka.
+- **Dev tools** adds a Comparison under the per-Connection Results, and Copy JSON on each.

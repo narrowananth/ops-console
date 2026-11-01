@@ -1,18 +1,21 @@
-import type { Repo } from '@ops-console/shared';
+import { RemovedRepoSessions, type Repo } from '@ops-console/shared';
 import { useState } from 'react';
+import { RepoIcon } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
 import { useImportRepo, usePickFolder, useRemoveRepo, useRepos } from '../lib/queries';
+import { ascending } from '../lib/sort';
 
 function RepoRow({ repo }: { repo: Repo }) {
   const remove = useRemoveRepo();
   const [confirming, setConfirming] = useState(false);
   return (
-    <li aria-label={repo.name} className="flex items-center gap-3 border-b border-neutral-300 px-5 py-2.5">
+    <li aria-label={repo.name} className="flex items-center gap-3.5 border-b border-line px-5 py-3">
+      <RepoIcon host={repo.host} size="lg" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <strong className="font-mono text-[13px]">{repo.name}</strong>
-          <span className="border border-divider px-1.5 py-px text-[10px] text-neutral-700">{repo.host}</span>
+          <span className="rounded-full bg-neutral-200 px-2 py-px text-[10px] text-neutral-700">{repo.host}</span>
           {repo.dirty && <span className="text-[10px] text-accent-700">uncommitted changes</span>}
         </div>
         <div className="truncate font-mono text-[11px] text-neutral-700">{repo.path}</div>
@@ -25,19 +28,46 @@ function RepoRow({ repo }: { repo: Repo }) {
           </div>
         )}
       </div>
-      {confirming ? (
+      {confirming && repo.session_count > 0 ? (
+        <div className="flex max-w-80 flex-col items-end gap-1.5 text-xs">
+          <span className="text-right">
+            Remove from the list? It has {repo.session_count} {repo.session_count === 1 ? 'Session' : 'Sessions'}. Kept
+            ones come back when you import this folder again.
+          </span>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="primary"
+              className="px-2.5 py-1 text-xs"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate({ id: repo.id, sessions: RemovedRepoSessions.Keep })}
+            >
+              Keep Sessions
+            </Button>
+            <Button
+              className="px-2.5 py-1 text-xs"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate({ id: repo.id, sessions: RemovedRepoSessions.Delete })}
+            >
+              Delete Sessions
+            </Button>
+            <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : confirming ? (
         <div className="flex items-center gap-1.5 text-xs">
           <span>Remove from the list?</span>
           <Button
             variant="primary"
             className="px-2.5 py-1 text-xs"
             disabled={remove.isPending}
-            onClick={() => remove.mutate(repo.id)}
+            onClick={() => remove.mutate({ id: repo.id })}
           >
             Remove
           </Button>
           <Button className="px-2.5 py-1 text-xs" onClick={() => setConfirming(false)}>
-            Keep
+            Cancel
           </Button>
         </div>
       ) : (
@@ -62,13 +92,13 @@ export function ReposTab() {
 
   return (
     <div>
-      <div className="flex flex-col gap-2 border-b-2 border-divider px-5 py-4">
+      <div className="flex flex-col gap-2 border-b border-line px-5 py-4">
         <div className="text-xs font-extrabold">Import a local repo</div>
         <button
           type="button"
           disabled={pick.isPending || importRepo.isPending}
           onClick={browse}
-          className="flex cursor-pointer flex-col items-start gap-0.5 border-[1.5px] border-text bg-bg px-3 py-2.5 text-left text-text hover:bg-neutral-200 disabled:cursor-wait"
+          className="flex cursor-pointer flex-col items-start gap-0.5 border border-divider bg-card px-3 py-2.5 text-left text-text hover:bg-neutral-200 disabled:cursor-wait"
         >
           <span className="text-[13px] font-extrabold">Local folder</span>
           <span className="text-[11px] text-neutral-700">
@@ -104,7 +134,7 @@ export function ReposTab() {
             <Empty>No repos yet. Import one above.</Empty>
           ) : (
             <ul className="m-0 list-none p-0">
-              {repos.data.data.map((repo) => (
+              {ascending(repos.data.data, (repo) => repo.name).map((repo) => (
                 <RepoRow key={repo.id} repo={repo} />
               ))}
             </ul>

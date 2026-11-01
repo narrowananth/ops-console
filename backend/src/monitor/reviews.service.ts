@@ -4,7 +4,6 @@ import {
   AlertEventKind,
   AlertStatus,
   CONFIRM_WORDS,
-  ConnectorId,
   ErrorCode,
   type Fix,
   type Review,
@@ -16,7 +15,6 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { MessageInterceptors } from '../agent/message-interceptors';
 import type { SessionRow } from '../agent/sessions.service';
 import { ApiError } from '../common/errors';
-import { ConnectorsService } from '../connectors/connectors.service';
 import { alerts, fixes, reports, reviews } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { AlertsService } from './alerts.service';
@@ -30,7 +28,6 @@ export class ReviewsService {
   constructor(
     @Inject(STORE) private readonly store: Store,
     @Inject(AlertsService) private readonly alerts: AlertsService,
-    @Inject(ConnectorsService) private readonly connectors: ConnectorsService,
     @Inject(FixesService) private readonly fixes: FixesService,
     @Inject(MessageInterceptors) interceptors: MessageInterceptors,
   ) {
@@ -57,7 +54,6 @@ export class ReviewsService {
       });
       return { review: toReview(row), fix: null };
     }
-    this.connectors.require(ConnectorId.Jira);
     const created = this.store.write((tx, emit) => {
       const review = tx
         .insert(reviews)

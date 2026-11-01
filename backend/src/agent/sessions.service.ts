@@ -17,7 +17,7 @@ import { and, desc, eq, lt, or, type SQL, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import { ApiError, validationFailed } from '../common/errors';
 import { afterCursor, toPage } from '../common/pagination';
-import { sessions } from '../db/schema';
+import { repos, sessions } from '../db/schema';
 import { type Emit, STORE, type Store } from '../db/store';
 import { SettingsRegistry } from '../settings/settings.registry';
 import { SettingsService } from '../settings/settings.service';
@@ -114,6 +114,8 @@ export class SessionsService {
     const filters: (SQL | undefined)[] = [
       query.kind === undefined ? undefined : eq(sessions.kind, query.kind),
       query.q ? sql`instr(lower(${sessions.title}), lower(${query.q})) > 0` : undefined,
+      // Kept with a removed Repo: they come back when the operator imports it again.
+      sql`(${sessions.repoId} is null or ${sessions.repoId} not in (select ${repos.id} from ${repos} where ${repos.removedAt} is not null))`,
     ];
     const after = afterCursor(query.cursor);
     if (after !== undefined) {
@@ -151,7 +153,10 @@ export class SessionsService {
       ...(patch.effort === undefined ? {} : { effort: patch.effort }),
       ...(patch.access_mode === undefined ? {} : { accessMode: patch.access_mode }),
     };
-    return Object.keys(values).length === 0 ? row : this.write(id, values);
+    if (Object.keys(values).length > 0) return this.write(id, values);
+    // A change only the kind stores, such as a devtools scope, still tells every open page.
+    if (own) this.store.write((_tx, emit) => emitSessionUpdated(emit, row));
+    return row;
   }
 
   setState(id: string, state: SessionState): SessionRow {
@@ -176,7 +181,10 @@ export class SessionsService {
   }
 }
 
-/** A `repo` Session has a Repo and a branch; a `pr_review` Session a Repo and a pull request; others neither. */
+/**
+ * A `repo` Session has a Repo and a branch; a `pr_review` Session a Repo and a pull request; an `anonymous` Session
+ * may have a branch; others none of these.
+ */
 function checkKindFields(input: NewSession): void {
   const hasRepo = input.repoId !== undefined;
   const hasBranch = input.branch !== undefined;
@@ -186,6 +194,8 @@ function checkKindFields(input: NewSession): void {
       ? hasRepo && hasBranch && !hasPr
       : input.kind === SessionKind.PrReview
         ? hasRepo && hasPr && !hasBranch
-        : !hasRepo && !hasBranch && !hasPr;
+        : input.kind === SessionKind.Anonymous
+          ? !hasRepo && !hasPr
+          : !hasRepo && !hasBranch && !hasPr;
   if (!ok) throw validationFailed(`invalid fields for a ${input.kind} session`);
 }

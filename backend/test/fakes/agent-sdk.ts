@@ -26,6 +26,8 @@ export type Step =
   | { rateLimitInfo: object }
   /** The API refuses the account for its limit; the run ends. */
   | { rejected: true }
+  /** The account's sign-in expired and cannot refresh; the run ends. */
+  | { signInExpired: true }
   /** Holds the run until the promise settles. */
   | { wait: Promise<unknown> }
   /** The SDK throws, as when the Claude Code process dies. */
@@ -175,6 +177,19 @@ export class FakeAgentSdk implements AgentSdk {
           uuid: crypto.randomUUID(),
           session_id: sessionId,
         });
+      } else if ('signInExpired' in step) {
+        yield await assistant(
+          [{ type: 'text', text: 'Failed to authenticate: OAuth session expired and could not be refreshed' }],
+          { error: 'authentication_failed' },
+        );
+        yield sdk({
+          type: 'result',
+          subtype: 'success',
+          is_error: true,
+          permission_denials: denials,
+          session_id: sessionId,
+        });
+        return;
       } else if ('rejected' in step) {
         yield sdk({
           type: 'rate_limit_event',

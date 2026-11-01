@@ -5,6 +5,8 @@ export enum SessionKind {
   Repo = 'repo',
   Devtools = 'devtools',
   PrReview = 'pr_review',
+  /** Runs in its own folder in the data directory, with no imported Repo. */
+  Anonymous = 'anonymous',
 }
 
 export enum Model {
@@ -77,7 +79,13 @@ export enum SwitchReason {
   Auto = 'auto',
   Smart = 'smart',
   RateLimited = 'rate_limited',
+  /** The active account's sign-in stopped working mid-run. */
+  SignInFailed = 'sign_in_failed',
 }
+
+const cellSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+
+export type Cell = z.infer<typeof cellSchema>;
 
 export const partSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('text'), text: z.string() }),
@@ -89,6 +97,32 @@ export const partSchema = z.discriminatedUnion('kind', [
   }),
   z.object({ kind: z.literal('code'), lang: z.string(), text: z.string() }),
   z.object({ kind: z.literal('question'), text: z.string(), options: z.array(z.string()) }),
+  /** The rows one Connection gave for one question (`10-dev-tools-compare`). */
+  z.object({
+    kind: z.literal('result'),
+    connection: z.string(),
+    query: z.string().nullable(),
+    columns: z.array(z.string()),
+    rows: z.array(z.array(cellSchema)),
+    /** Rows the query matched; `rows` holds at most 50 of them. */
+    total: z.number().nullable(),
+    ms: z.number().nullable(),
+  }),
+  /** The agent's match of Results from two or more Connections on one key. */
+  z.object({
+    kind: z.literal('comparison'),
+    key: z.string(),
+    value: z.string(),
+    connections: z.array(z.string()),
+    rows: z.array(
+      z.object({
+        field: z.string(),
+        values: z.array(z.string().nullable()),
+        /** Set by the console: two non-empty values differ as text. */
+        differs: z.boolean(),
+      }),
+    ),
+  }),
 ]);
 
 export type Part = z.infer<typeof partSchema>;
@@ -113,7 +147,7 @@ export const sessionSchema = z.object({
   account_id: z.string().nullable(),
   /** `repo` and `pr_review` Sessions run in a Repo. */
   repo_id: z.string().nullable(),
-  /** `repo` Sessions: the checked-out branch. */
+  /** `repo` Sessions: the checked-out branch; `anonymous` Sessions: the branch of the clone, if any. */
   branch: z.string().nullable(),
   /** `pr_review` Sessions: the pull request in `repo_id`. */
   pr_number: z.number().int().nullable(),

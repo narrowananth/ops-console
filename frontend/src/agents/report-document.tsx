@@ -1,0 +1,84 @@
+import { useState } from 'react';
+import { Button } from '../components/ui/button';
+import { Markdown } from '../components/ui/markdown';
+
+export type AgentReport = { title: string; kind: string | null; markdown: string; raw: string };
+
+/** An agent's JSON answer that carries a `markdown` Report, as a Verification asks for; null for any other text. */
+export function asReport(text: string): AgentReport | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{')) return null;
+  try {
+    const value: unknown = JSON.parse(trimmed);
+    if (typeof value !== 'object' || value === null) return null;
+    const fields = value as Record<string, unknown>;
+    if (typeof fields.markdown !== 'string' || fields.markdown.trim() === '') return null;
+    return {
+      title: typeof fields.slug === 'string' && fields.slug !== '' ? fields.slug : 'report',
+      kind: typeof fields.kind === 'string' ? fields.kind : null,
+      markdown: fields.markdown,
+      raw: JSON.stringify(value, null, 2),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** A Report drawn as a document: a file bar with Copy, Download and the raw JSON, then the Markdown. */
+export function ReportDocument({ report }: { report: AgentReport }) {
+  const [raw, setRaw] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const file = `${report.title}.md`;
+  const copy = () => {
+    void navigator.clipboard.writeText(report.markdown).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([report.markdown], { type: 'text/markdown' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = file;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <article aria-label={file} className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
+      <header className="flex flex-wrap items-center gap-2 border-b border-line bg-surface px-4 py-2">
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden className="flex-none text-neutral-600">
+          <path
+            d="M4 1.5h5.5L13 5v9.5H4z M9.5 1.5V5H13"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <strong className="min-w-0 truncate font-mono text-xs">{file}</strong>
+        {report.kind && (
+          <span className="rounded-full bg-neutral-200 px-2 py-px text-[10px] font-bold tracking-[0.06em] text-neutral-700 uppercase">
+            {report.kind}
+          </span>
+        )}
+        <span className="ml-auto flex gap-1.5">
+          <Button className="px-2.5 py-1 text-xs" aria-pressed={raw} onClick={() => setRaw(!raw)}>
+            {raw ? 'Document' : 'JSON'}
+          </Button>
+          <Button className="px-2.5 py-1 text-xs" onClick={copy}>
+            {copied ? 'Copied' : 'Copy'}
+          </Button>
+          <Button className="px-2.5 py-1 text-xs" onClick={download}>
+            Download .md
+          </Button>
+        </span>
+      </header>
+      {raw ? (
+        <pre className="m-0 max-h-[60vh] overflow-auto p-4 font-mono text-xs whitespace-pre-wrap">{report.raw}</pre>
+      ) : (
+        <Markdown source={report.markdown} className="max-w-[80ch] px-6 py-5" />
+      )}
+    </article>
+  );
+}

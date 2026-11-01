@@ -1,13 +1,14 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { OPEN_PR_BRANCHES } from '../repos/open-pr-branches';
 import { AgentReviewsService } from './agent-reviews.service';
+import { AnonymousSessionsService } from './anonymous-sessions.service';
 import { CliGitHosts } from './cli-git-hosts';
 import { GIT_HOSTS, type GitHosts } from './git-host';
 import { PullRequestsService } from './pull-requests.service';
 import { PullRequestsController, WorkspaceSessionsController } from './workspace.controller';
 import { WorkspaceSessionsService } from './workspace-sessions.service';
 
-/** Workspace: Sessions in a Repo, their branches, and the pull requests on the Git host. */
+/** Workspace: Sessions in a Repo or a folder of their own, their branches, and the pull requests on the Git host. */
 @Module({})
 export class WorkspaceModule {
   static forRoot(config: { hosts?: GitHosts } = {}): DynamicModule {
@@ -20,9 +21,10 @@ export class WorkspaceModule {
         PullRequestsService,
         AgentReviewsService,
         WorkspaceSessionsService,
+        AnonymousSessionsService,
         { provide: OPEN_PR_BRANCHES, useExisting: PullRequestsService },
       ],
-      exports: [PullRequestsService, WorkspaceSessionsService, OPEN_PR_BRANCHES],
+      exports: [PullRequestsService, WorkspaceSessionsService, AnonymousSessionsService, OPEN_PR_BRANCHES],
     };
   }
 }

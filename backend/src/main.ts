@@ -59,7 +59,7 @@ const daemon = await startDaemon({
     MonitorModule.forRoot(),
     DevtoolsModule.forRoot(),
     TerminalsModule.forRoot(),
-    ConnectionsModule.forRoot({ tester: new McpConnectionTester(version) }),
+    ConnectionsModule.forRoot({ tester: new McpConnectionTester(version), launchDir: path.join(appDir, 'launch') }),
     ConnectorsModule.forRoot({ tools: new CliConnectorTools() }),
     McpServersModule.forRoot({
       probe: new SdkProbe(),

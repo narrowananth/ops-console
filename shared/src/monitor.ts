@@ -1,10 +1,44 @@
 import { z } from 'zod';
 
-export enum CheckInterval {
-  Day = '24h',
-  HalfDay = '12h',
+/** How far back a Scan reads. A schedule uses its `CheckInterval`; the operator picks any of these. */
+export enum ScanWindow {
+  FifteenMinutes = '15m',
+  Hour = '1h',
+  FourHours = '4h',
   SixHours = '6h',
+  HalfDay = '12h',
+  Day = '24h',
+  Week = '7d',
 }
+
+/** How often a Service is scanned on the schedule: the windows a schedule slot can have. */
+export const CheckInterval = {
+  Day: ScanWindow.Day,
+  HalfDay: ScanWindow.HalfDay,
+  SixHours: ScanWindow.SixHours,
+} as const;
+
+export type CheckInterval = (typeof CheckInterval)[keyof typeof CheckInterval];
+
+/** The ranges the Monitor offers for a Scan on demand, shortest first. */
+export const SCAN_RANGES: ScanWindow[] = [
+  ScanWindow.FifteenMinutes,
+  ScanWindow.Hour,
+  ScanWindow.FourHours,
+  ScanWindow.Day,
+  ScanWindow.Week,
+];
+
+/** Hours each window covers. */
+export const WINDOW_HOURS: Record<ScanWindow, number> = {
+  [ScanWindow.FifteenMinutes]: 0.25,
+  [ScanWindow.Hour]: 1,
+  [ScanWindow.FourHours]: 4,
+  [ScanWindow.SixHours]: 6,
+  [ScanWindow.HalfDay]: 12,
+  [ScanWindow.Day]: 24,
+  [ScanWindow.Week]: 168,
+};
 
 export enum ScanTrigger {
   Schedule = 'schedule',
@@ -31,11 +65,15 @@ export enum AlertSource {
   Slack = 'slack',
 }
 
+/** An Alert's tier, from how fast its logs come in (Glossary: Severity). */
 export enum Severity {
-  Sev2 = 'sev2',
-  Sev3 = 'sev3',
-  Warn = 'warn',
+  High = 'high',
+  Medium = 'medium',
+  Low = 'low',
 }
+
+/** Highest first. */
+export const SEVERITIES: Severity[] = [Severity.High, Severity.Medium, Severity.Low];
 
 export enum AlertStatus {
   Open = 'open',
@@ -180,9 +218,18 @@ export type Fix = z.infer<typeof fixSchema>;
 
 export const alertSchema = z.object({
   id: z.string(),
-  route: z.object({ id: z.string(), method: z.string(), path: z.string() }),
-  service: z.object({ id: z.string(), name: z.string(), env: z.string(), repo_id: z.string().nullable() }),
+  /** The HTTP Route the logs name; null for logs with no request, such as a worker's. */
+  route: z.object({ id: z.string(), method: z.string(), path: z.string() }).nullable(),
+  service: z.object({
+    id: z.string(),
+    name: z.string(),
+    env: z.string(),
+    repo_id: z.string().nullable(),
+    repo_url: z.string().nullable(),
+  }),
   fingerprint: z.string(),
+  /** The HTTP status code its logs answered with; null for an Alert from before Scans read status codes. */
+  http_status: z.number().int().nullable(),
   source: z.enum(AlertSource),
   severity: z.enum(Severity),
   status: z.enum(AlertStatus),
@@ -241,6 +288,8 @@ export const serviceSchema = z.object({
   name: z.string(),
   env: z.string(),
   repo_id: z.string().nullable(),
+  /** Where the code lives on its Git host, for a Service with no local Repo. */
+  repo_url: z.string().nullable(),
   check_interval: z.enum(CheckInterval).nullable(),
   created_at: z.string(),
   routes: z.array(routeViewSchema),
@@ -254,7 +303,13 @@ export const scanSchema = z.object({
   id: z.string(),
   triggered_by: z.enum(ScanTrigger),
   service_id: z.string().nullable(),
-  window_size: z.enum(CheckInterval),
+  window_size: z.enum(ScanWindow),
+  /** The Datadog environments read. */
+  envs: z.array(z.string()),
+  /** The Datadog Services read; null for every Service with failing requests. */
+  services: z.array(z.string()).nullable(),
+  /** The HTTP status codes read; empty for every code from 400 up. */
+  status_codes: z.array(z.number().int()),
   status: z.enum(ScanStatus),
   error_code: z.string().nullable(),
   error_message: z.string().nullable(),
@@ -270,10 +325,30 @@ export const scanDetailSchema = scanSchema.extend({
 
 export const servicesQuerySchema = z.object({ env: z.string().min(1).optional() });
 
+/** `github.com/acme/orders`, with or without a scheme or `.git`; an SSH remote is kept as written. */
+export const repoUrlSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(300)
+  .regex(/^(?:https?:\/\/|git@|ssh:\/\/)?[\w.-]+\.[a-z]{2,}[/:][\w.~-]+\/[\w.~/-]+$/i, 'not a Git URL');
+
 export const patchServiceSchema = z.strictObject({
   repo_id: z.string().min(1).nullable().optional(),
+  repo_url: repoUrlSchema.nullable().optional(),
   check_interval: z.enum(CheckInterval).nullable().optional(),
 });
+
+/** What `POST /services/:id/code` looked at, and the Service after it. */
+export const findCodeResultSchema = z.object({
+  service: serviceSchema,
+  /** `repo`: a local Repo is linked; `url`: a Git URL is set; null: nothing found. */
+  found: z.enum(['repo', 'url']).nullable(),
+  /** Each place looked, in order; empty when the Service already had its code. */
+  tried: z.array(z.string()),
+});
+
+export type FindCodeResult = z.infer<typeof findCodeResultSchema>;
 
 export const patchRouteSchema = z.strictObject({
   ignored: z.boolean().optional(),
@@ -282,7 +357,71 @@ export const patchRouteSchema = z.strictObject({
 
 export const scansQuerySchema = z.object({ service_id: z.string().min(1).optional() });
 
-export const createScanSchema = z.strictObject({ service_id: z.string().min(1).nullable() });
+export const createScanSchema = z.strictObject({
+  service_id: z.string().min(1).nullable(),
+  /** Defaults to the Datadog Connector's `default_interval`. */
+  window: z.enum(ScanWindow).optional(),
+  /** Defaults to every env Datadog has logs for, and the logs with no env tag. */
+  envs: z.array(z.string().trim().min(1)).min(1).optional(),
+  /** Datadog Service names to read; every Service with failing requests when left out. */
+  services: z.array(z.string().trim().min(1)).min(1).optional(),
+  /** HTTP status codes to read, each 400 or more; every one from 400 up when left out or empty. */
+  status_codes: z.array(z.number().int().min(400).max(999)).optional(),
+});
+
+export type CreateScan = z.infer<typeof createScanSchema>;
+
+/**
+ * The env a Monitor shows for logs that carry no `env` tag. Datadog tags hold no spaces, so no real env has this name.
+ */
+export const NO_ENV = 'no env';
+
+/** A Service Datadog has failing requests for (HTTP status 400 or more) in the range and codes asked about. */
+export const datadogServiceSchema = z.object({
+  name: z.string(),
+  /** The envs it logged them in, busiest first. */
+  envs: z.array(z.string()),
+  /** Failing requests in the range, every env together. */
+  errors: z.number().int(),
+});
+
+export type DatadogService = z.infer<typeof datadogServiceSchema>;
+
+const commaList = z.string().transform((value) => [
+  ...new Set(
+    value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ),
+]);
+
+/** HTTP status codes from 400 up, comma-separated. */
+const codeList = commaList.transform((list) => list.map(Number)).pipe(z.array(z.number().int().min(400).max(999)));
+
+export const datadogServicesQuerySchema = z.object({
+  window: z.enum(ScanWindow),
+  /** Comma-separated env names; every env when left out. */
+  envs: commaList.pipe(z.array(z.string()).min(1)).optional(),
+  /** Comma-separated HTTP status codes; every code from 400 up when left out. */
+  codes: codeList.optional(),
+});
+
+export const statusCodesQuerySchema = z.object({ window: z.enum(ScanWindow) });
+
+/** An HTTP status code from 400 up that Datadog has requests for in the range, every env together. */
+export const statusCodeCountSchema = z.object({ code: z.number().int(), count: z.number().int() });
+
+export type StatusCodeCount = z.infer<typeof statusCodeCountSchema>;
+
+/** A Datadog `env` tag the Monitor can scan. */
+export const monitorEnvSchema = z.object({
+  name: z.string(),
+  /** In the Datadog Connector's `environments`: ticked by default. */
+  configured: z.boolean(),
+});
+
+export type MonitorEnv = z.infer<typeof monitorEnvSchema>;
 
 export const alertsQuerySchema = z.object({
   status: z.enum(AlertStatus).optional(),

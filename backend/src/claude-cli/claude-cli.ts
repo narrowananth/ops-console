@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { ErrorCode } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
+import { loadPty } from '../terminals/pty';
 
 const run = promisify(execFile);
 
@@ -48,12 +49,15 @@ export type ConfigDir = string | null;
 
 export const LOGIN_TIMEOUT_MS = 5 * 60_000;
 
-/** Credentials the shell can hand `claude`; each beats the config dir's own sign-in. */
-const ENV_CREDENTIALS = ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+/**
+ * What the shell can hand `claude` that beats the config dir's own sign-in: three credentials, and an API host
+ * that answers the account's token with 401 (a gateway expects its own token).
+ */
+const ENV_CREDENTIALS = ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_BASE_URL'];
 
 /**
  * The environment for `claude` under a config dir. An added account signs in through its own dir, so shell
- * credentials are dropped: left in, every account reads as signed in and runs bill the shell's login.
+ * credentials are dropped: left in, every account reads as signed in and runs bill the shell's login, or fail.
  */
 export function claudeEnv(configDir: ConfigDir): NodeJS.ProcessEnv {
   if (configDir === null) return process.env;
@@ -108,19 +112,28 @@ export class ClaudeCli {
     await this.exec(['mcp', 'remove', name, '--scope', scope], 'mcp remove', target);
   }
 
-  /** Opens the browser and ends when the operator finishes the server's sign-in, or on `signal` or the timeout. */
+  /**
+   * Opens the browser and ends when the operator finishes the server's sign-in, or on `signal` or the timeout.
+   * `claude mcp login` refuses to start without a terminal on stdin, so it runs in a pseudo-terminal.
+   */
   async mcpLogin(name: string, configDir: ConfigDir, signal: AbortSignal): Promise<void> {
-    const login = run(this.bin, ['mcp', 'login', name], {
-      env: claudeEnv(configDir),
-      signal,
-      timeout: LOGIN_TIMEOUT_MS,
+    const pty = await loadPty();
+    const env = Object.fromEntries(
+      Object.entries(claudeEnv(configDir)).filter((entry): entry is [string, string] => entry[1] !== undefined),
+    );
+    const login = pty.spawn(this.bin, ['mcp', 'login', name], { cols: 120, rows: 30, env });
+    const stop = () => login.kill();
+    const timer = setTimeout(stop, LOGIN_TIMEOUT_MS);
+    signal.addEventListener('abort', stop, { once: true });
+    // Only the last few lines are kept, for the reason a sign-in failed; earlier ones hold the sign-in URL.
+    let tail = '';
+    login.onData((data) => {
+      tail = (tail + data).slice(-2000);
     });
-    login.child.stdin?.end();
-    try {
-      await login;
-    } catch {
-      throw new ApiError(502, ErrorCode.UpstreamFailed, '`claude mcp login` failed');
-    }
+    const exitCode = await new Promise<number>((resolve) => login.onExit((event) => resolve(event.exitCode)));
+    clearTimeout(timer);
+    signal.removeEventListener('abort', stop);
+    if (exitCode !== 0) throw new ApiError(502, ErrorCode.UpstreamFailed, loginFailure(tail));
   }
 
   async mcpLogout(name: string, configDir: ConfigDir): Promise<void> {
@@ -165,6 +178,14 @@ export class ClaudeCli {
       throw new ApiError(502, ErrorCode.UpstreamFailed, `\`claude ${subcommand}\` failed (${String(code)})`);
     }
   }
+}
+
+/** Claude Code's own reason from `claude mcp login` output, URLs dropped; a generic line when it gave none. */
+export function loginFailure(output: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
+  const plain = output.replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b\[[0-9;?]*[a-zA-Z]/g, '');
+  const line = plain.match(/Couldn't complete authentication[^\r\n]*/)?.[0];
+  return line ? line.replace(/https?:\/\/\S+/g, '<url>').trim() : '`claude mcp login` failed';
 }
 
 function splitArgs(text: string | undefined): string[] {

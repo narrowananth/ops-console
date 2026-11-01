@@ -71,6 +71,41 @@
       "when": 1793404490261,
       "tag": "0009_devtools",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793473165267,
+      "tag": "0010_repo_removed_sessions_kept",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1793484112515,
+      "tag": "0011_connector_shopify",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1793501847047,
+      "tag": "0012_monitor_logs",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1793503916056,
+      "tag": "0013_scan_services",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1793543875310,
+      "tag": "0014_http_status_codes",
+      "breakpoints": true
     }
   ]
 }

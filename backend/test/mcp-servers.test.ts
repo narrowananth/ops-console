@@ -1,9 +1,11 @@
+import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { WsEvent } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { KEYCHAIN } from '../src/keychain/keychain';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
+import { McpServersService } from '../src/mcp/mcp-servers.service';
 import { type AgentDaemon, api, converse, listen, signIn, startAgentDaemon, until } from './agent-fixtures';
 import { FakeKeychain } from './fakes/keychain';
 import { FakeProbe } from './fakes/probe';
@@ -25,7 +27,9 @@ async function start(): Promise<Ctx> {
   const probe = new FakeProbe();
   const record = path.join(await tempDir(), 'claude-calls.jsonl');
   process.env.FAKE_CLAUDE_RECORD = record;
-  const daemon = await startAgentDaemon({ modules: [McpServersModule.forRoot({ probe, launcher: LAUNCHER })] });
+  const daemon = await startAgentDaemon({
+    modules: [McpServersModule.forRoot({ probe, launcher: LAUNCHER })],
+  });
   running.push(daemon);
   const added = await api(daemon).post('/agent-accounts');
   const second = path.join(daemon.dataDir, 'accounts', added.body.data.account.id);
@@ -47,6 +51,9 @@ async function registered(configDir: string): Promise<Record<string, Record<stri
     return {};
   }
 }
+
+/** Waits for the background Removes. */
+const settled = (ctx: Ctx) => ctx.daemon.app.get(McpServersService).settled();
 
 const checked = (events: WsEvent[]) =>
   events.flatMap((event) => (event.event === 'connection.checked' ? [event.data] : []));
@@ -142,7 +149,35 @@ describe('listing', () => {
       path.join(ctx.dirs[0] ?? '', '.claude.json'),
       JSON.stringify({ mcpServers: { terminal: { type: 'stdio', command: 'node', args: ['x.js'], env: {} } } }),
     );
-    expect(await find(ctx, 'terminal')).toMatchObject({ status: 'ok' });
+    await until(
+      () => find(ctx, 'terminal'),
+      (server) => server?.status === 'ok',
+      'the Probe that reads it',
+    );
+  });
+
+  it('answers before a slow Probe finishes, then sends connection.checked with its reading', async () => {
+    const ctx = await start();
+    await list(ctx);
+    ctx.probe.delayMs = 2_000;
+    const { events, close } = await listen(ctx.daemon);
+    const started = Date.now();
+    const created = await api(ctx.daemon).post('/mcp-servers', {
+      name: 'slow',
+      transport: 'http',
+      target: 'https://mcp.example.com/mcp',
+      scope: 'user',
+    });
+    expect(created.body.data).toMatchObject({ name: 'slow', status: 'checking' });
+    expect((await list(ctx)).data.find((server) => server.name === 'slow')).toMatchObject({ status: 'checking' });
+    expect(Date.now() - started).toBeLessThan(ctx.probe.delayMs);
+    await until(
+      () => checked(events).filter((event) => event.id === 'slow'),
+      (found) => found.length > 0,
+      'the Probe',
+    );
+    close();
+    expect(await find(ctx, 'slow')).toMatchObject({ status: 'ok' });
   });
 
   it('lists without a server while Claude Code is half way through rewriting its config', async () => {
@@ -264,6 +299,7 @@ describe('adding', () => {
     expect((await api(ctx.daemon).post('/mcp-servers', body)).status).toBe(201);
     expect((await api(ctx.daemon).post('/mcp-servers', body)).body.error.code).toBe('duplicate');
     await api(ctx.daemon).delete('/mcp-servers/tools/credentials');
+    await settled(ctx);
     expect((await api(ctx.daemon).post('/mcp-servers', body)).body.error.code).toBe('duplicate');
   });
 
@@ -343,8 +379,9 @@ describe('editing', () => {
 });
 
 describe('authenticating and reconnecting', () => {
-  it('signs in each account that needs it, then reports ok', async () => {
+  it('signs in the active account only, then reports ok while the others still need auth', async () => {
     const ctx = await start();
+    const [active, other] = ctx.dirs as [string, string];
     await api(ctx.daemon).post('/mcp-servers', {
       name: 'sentry',
       transport: 'http',
@@ -364,8 +401,52 @@ describe('authenticating and reconnecting', () => {
     );
     close();
     expect(await find(ctx, 'sentry')).toMatchObject({ status: 'ok' });
-    for (const dir of ctx.dirs)
-      expect(JSON.parse(await readFile(path.join(dir, 'fake-mcp-auth.json'), 'utf8'))).toContain('sentry');
+    expect(JSON.parse(await readFile(path.join(active, 'fake-mcp-auth.json'), 'utf8'))).toContain('sentry');
+    expect(existsSync(path.join(other, 'fake-mcp-auth.json'))).toBe(false);
+  });
+
+  it('reports ok as soon as the sign-in finishes, without waiting for a new Probe', async () => {
+    const ctx = await start();
+    await api(ctx.daemon).post('/mcp-servers', {
+      name: 'sentry',
+      transport: 'http',
+      target: 'https://mcp.example.com/mcp',
+      scope: 'user',
+    });
+    for (const dir of ctx.dirs) ctx.probe.set(dir, 'sentry', { status: 'needs-auth' });
+    await api(ctx.daemon).post('/mcp-servers/sentry/checks');
+    ctx.probe.delayMs = 10_000;
+
+    const { events, close } = await listen(ctx.daemon);
+    const started = Date.now();
+    await api(ctx.daemon).post('/mcp-servers/sentry/auth');
+    await until(
+      () => checked(events),
+      (found) => found.some((event) => event.status === 'ok'),
+      'a passing check',
+    );
+    close();
+    expect(Date.now() - started).toBeLessThan(3_000);
+  });
+
+  it('reads auth again once the account that still needs it becomes active', async () => {
+    const ctx = await start();
+    const [active, other] = ctx.dirs as [string, string];
+    await api(ctx.daemon).post('/mcp-servers', {
+      name: 'sentry',
+      transport: 'http',
+      target: 'https://mcp.example.com/mcp',
+      scope: 'user',
+    });
+    ctx.probe.set(active, 'sentry', { status: 'connected' });
+    ctx.probe.set(other, 'sentry', { status: 'needs-auth' });
+    await api(ctx.daemon).post('/mcp-servers/sentry/checks');
+    expect(await find(ctx, 'sentry')).toMatchObject({ status: 'ok' });
+
+    const accounts = (await api(ctx.daemon).get('/agent-accounts')).body.data as { id: string; is_active: boolean }[];
+    const second = accounts.find((account) => !account.is_active);
+    await api(ctx.daemon).post(`/agent-accounts/${second?.id}/activate`);
+    expect(await find(ctx, 'sentry')).toMatchObject({ status: 'auth' });
   });
 
   it('leaves the status auth when the sign-in fails', async () => {
@@ -443,6 +524,7 @@ describe('removing', () => {
     });
     await api(ctx.daemon).patch('/mcp-servers/pg', { enabled: false });
     const removed = await api(ctx.daemon).delete('/mcp-servers/pg/credentials');
+    await settled(ctx);
     expect(removed.status).toBe(200);
     expect(removed.body.data).toMatchObject({
       name: 'pg',
@@ -465,15 +547,13 @@ describe('removing', () => {
       scope: 'user',
     });
     await api(ctx.daemon).delete('/mcp-servers/sentry/credentials');
-    const { events, close } = await listen(ctx.daemon);
+    await settled(ctx);
     expect((await api(ctx.daemon).post('/mcp-servers/sentry/auth')).status).toBe(202);
     await until(
-      () => checked(events),
-      (found) => found.length > 0,
-      'a check',
+      () => find(ctx, 'sentry'),
+      (server) => server?.registered === true && server.status === 'ok',
+      'the sign-in',
     );
-    close();
-    expect(await find(ctx, 'sentry')).toMatchObject({ registered: true, status: 'ok' });
     expect((await registered(ctx.dirs[0] ?? '')).sentry).toBeDefined();
   });
 
@@ -487,6 +567,7 @@ describe('removing', () => {
       env: { K: 'value-1234' },
     });
     await api(ctx.daemon).delete('/mcp-servers/pg/credentials');
+    await settled(ctx);
     expect((await api(ctx.daemon).post('/mcp-servers/pg/auth')).status).toBe(409);
     const again = await api(ctx.daemon).patch('/mcp-servers/pg', { env: { K: 'value-1234' } });
     expect(again.body.data).toMatchObject({ registered: true, env_keys: ['K'] });
@@ -501,6 +582,7 @@ describe('removing', () => {
       scope: 'user',
     });
     await api(ctx.daemon).delete('/mcp-servers/tools/credentials');
+    await settled(ctx);
     await writeFile(
       path.join(ctx.dirs[0] ?? '', '.claude.json'),
       JSON.stringify({ mcpServers: { tools: { type: 'stdio', command: 'node', args: ['a.js'], env: {} } } }),

@@ -9,7 +9,9 @@ import {
   type Fix,
   FixStage,
   FixStatus,
+  GitHost,
   PrState,
+  SessionKind,
   Severity,
 } from '@ops-console/shared';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -18,10 +20,11 @@ import { AgentRuntime } from '../agent/runtime';
 import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
 import { ConnectorsService } from '../connectors/connectors.service';
-import { alerts, fixes, reports, repos, reviews, routes, services } from '../db/schema';
+import { alerts, fixes, reports, repos, reviews, routes, services, sessions } from '../db/schema';
 import { type Emit, STORE, type Store, type Tx } from '../db/store';
-import { GIT, Git } from '../repos/git';
+import { cloneUrl, GIT, Git, parseRemote } from '../repos/git';
 import { everyMinutes, Scheduler } from '../scheduler/scheduler';
+import { AnonymousSessionsService } from '../workspace/anonymous-sessions.service';
 import { PullRequestsService } from '../workspace/pull-requests.service';
 import { WorkspaceSessionsService } from '../workspace/workspace-sessions.service';
 import { parseAgentJson } from './agent-json';
@@ -62,6 +65,7 @@ export class FixesService {
     @Inject(AgentRuntime) private readonly runtime: AgentRuntime,
     @Inject(ConnectorsService) private readonly connectors: ConnectorsService,
     @Inject(WorkspaceSessionsService) private readonly workspace: WorkspaceSessionsService,
+    @Inject(AnonymousSessionsService) private readonly anonymous: AnonymousSessionsService,
     @Inject(PullRequestsService) private readonly pulls: PullRequestsService,
     @Inject(GIT) private readonly git: Git,
     @Inject(Scheduler) scheduler: Scheduler,
@@ -176,8 +180,19 @@ export class FixesService {
   }
 
   private brief(context: Context): string {
+    const jira = context.fix.jiraKey ? `Jira: ${context.fix.jiraKey}. ` : '';
     return `Fix for Alert "${context.alert.title}" on ${context.service.name}.
-Jira: ${context.fix.jiraKey ?? '(none yet)'}. Root cause: ${context.report.rootCause}. Proposed fix: ${context.report.proposedFix}.`;
+${jira}Root cause: ${context.report.rootCause}. Proposed fix: ${context.report.proposedFix}.`;
+  }
+
+  /** Jira is optional: with it the Fix makes a ticket and names the branch after its key. */
+  private jiraUp(): boolean {
+    try {
+      this.connectors.require(ConnectorId.Jira);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** One agent run in the Alert's Session; the answer must carry the stage's JSON. */
@@ -195,16 +210,28 @@ Jira: ${context.fix.jiraKey ?? '(none yet)'}. Root cause: ${context.report.rootC
     return parsed;
   }
 
-  /** The ticket exists after this stage, once: a retry finds the key and skips it (Behavior 22). */
+  /**
+   * The ticket exists after this stage, once: a retry finds the key and skips it (Behavior 22). With Jira not
+   * connected there is no ticket and the branch is `fix/<slug>`.
+   */
   private async ticket(context: Context): Promise<void> {
-    if (context.fix.jiraKey) return;
+    if (context.fix.jiraKey || context.fix.branch) return;
+    if (!this.jiraUp()) {
+      const branch = `fix/${context.slug}`;
+      this.store.write((tx, emit) => {
+        const row = tx.update(fixes).set({ branch }).where(eq(fixes.id, context.fix.id)).returning().get() as FixRow;
+        this.announce(tx, emit, row);
+      });
+      context.fix = this.row(context.fix.id);
+      return;
+    }
     const jira = (await this.connectors.get(ConnectorId.Jira)).config as {
       project_key: string;
       issue_types: { bug: string; improvement: string };
     };
     const kind = context.review.kind ?? 'bug';
     const issueType = jira.issue_types[kind];
-    const priority = context.alert.severity === Severity.Sev2 ? 'High' : 'Medium';
+    const priority = context.alert.severity === Severity.High ? 'High' : 'Medium';
     const created = await this.ask(
       context,
       `Create a Jira issue through the Atlassian MCP server. Project ${jira.project_key}, issue type "${issueType}", priority ${priority}, summary "${context.alert.title}". Put this Report in the description:
@@ -238,18 +265,26 @@ Change nothing else. ${JSON_ONLY}
   private async branch(context: Context): Promise<void> {
     const branch = context.fix.branch;
     if (!branch) throw new StageFailed('the Fix has no branch name');
-    const repo = this.sessions.repoOf(context.service);
-    const exists = (await this.git.branches(repo.path)).some((candidate) => candidate.name === branch);
+    const session = this.store.db.select().from(sessions).where(eq(sessions.id, context.sessionId)).get();
+    if (session?.kind === SessionKind.Anonymous) {
+      await this.anonymous.checkout(context.sessionId, branch);
+      return;
+    }
+    const source = this.sessions.sourceOf(context.service);
+    if (source.kind !== 'repo') throw new StageFailed('the Fix Session lost its Repo');
+    const exists = (await this.git.branches(source.repo.path)).some((candidate) => candidate.name === branch);
     await this.workspace.checkout(context.sessionId, branch, !exists);
   }
 
   private async pullRequest(context: Context): Promise<void> {
-    const key = context.fix.jiraKey as string;
+    const key = context.fix.jiraKey;
+    const prefix = key ? `${key}: ` : '';
     let fix = this.row(context.fix.id);
     if (fix.prNumber === null) {
+      const link = fix.jiraUrl ? `Link ${fix.jiraUrl} and summarize` : 'Summarize';
       const opened = await this.ask(
         context,
-        `${this.brief(context)}\n\nCommit the work with a message that starts with "${key}:", push the branch, and open a pull request with the gh CLI titled "${key}: ${context.alert.title}". Link ${fix.jiraUrl} and summarize the Report in its description. Never merge it. ${JSON_ONLY}\n\n\`\`\`json\n{ "number": 123, "url": "https://github.com/owner/repo/pull/123" }\n\`\`\``,
+        `${this.brief(context)}\n\nCommit the work${key ? ` with a message that starts with "${key}:"` : ''}, push branch ${fix.branch} to origin, and open a pull request on origin's Git host titled "${prefix}${context.alert.title}": gh for GitHub, glab for GitLab, the Bitbucket MCP server or API for Bitbucket. ${link} the Report in its description. Never merge it. ${JSON_ONLY}\n\n\`\`\`json\n{ "number": 123, "url": "https://github.com/owner/repo/pull/123" }\n\`\`\``,
         prSchema,
       );
       fix = this.store.write(
@@ -262,12 +297,14 @@ Change nothing else. ${JSON_ONLY}
             .get() as FixRow,
       );
     }
-    const jira = (await this.connectors.get(ConnectorId.Jira)).config as { in_review_status: string };
-    await this.ask(
-      context,
-      `Move Jira issue ${key} to "${jira.in_review_status}" through the Atlassian MCP server and link ${fix.prUrl} on it. Change nothing else. ${JSON_ONLY}\n\n\`\`\`json\n{ "ok": true }\n\`\`\``,
-      okSchema,
-    );
+    if (key) {
+      const jira = (await this.connectors.get(ConnectorId.Jira)).config as { in_review_status: string };
+      await this.ask(
+        context,
+        `Move Jira issue ${key} to "${jira.in_review_status}" through the Atlassian MCP server and link ${fix.prUrl} on it. Change nothing else. ${JSON_ONLY}\n\n\`\`\`json\n{ "ok": true }\n\`\`\``,
+        okSchema,
+      );
+    }
     this.store.write((tx, emit) => {
       this.alerts.transition(tx, context.alert.id, AlertStatus.PrOpen, AlertEventKind.PrOpened, AlertActor.Agent, {
         pr_number: fix.prNumber,
@@ -275,7 +312,7 @@ Change nothing else. ${JSON_ONLY}
       });
       this.announce(tx, emit, fix);
     });
-    this.pulls.drop(context.service.repoId as string);
+    if (context.service.repoId) this.pulls.drop(context.service.repoId);
   }
 
   private setStage(fixId: string, stage: FixStage): void {
@@ -342,25 +379,31 @@ Change nothing else. ${JSON_ONLY}
     this.checking = true;
     try {
       const open = this.store.db
-        .select({ fix: fixes, alert: alerts, repo: repos })
+        .select({ fix: fixes, alert: alerts, service: services, repo: repos })
         .from(fixes)
         .innerJoin(reviews, eq(reviews.id, fixes.reviewId))
         .innerJoin(reports, eq(reports.id, reviews.reportId))
         .innerJoin(alerts, eq(alerts.id, reports.alertId))
         .innerJoin(routes, eq(routes.id, alerts.routeId))
         .innerJoin(services, eq(services.id, routes.serviceId))
-        .innerJoin(repos, eq(repos.id, services.repoId))
+        .leftJoin(repos, eq(repos.id, services.repoId))
         .where(and(eq(alerts.status, AlertStatus.PrOpen), isNull(reviews.undoneAt)))
         .all();
-      for (const { fix, alert, repo } of open) {
-        if (fix.prNumber === null || repo.remoteSlug === null) continue;
+      for (const { fix, alert, service, repo } of open) {
+        // A Fix made in a clone has no Repo: its host and slug come from the Service's Git URL.
+        const remote = repo
+          ? { host: repo.host, slug: repo.remoteSlug }
+          : parseRemote(service.repoUrl ? cloneUrl(service.repoUrl) : null);
+        if (fix.prNumber === null || remote.slug === null || remote.host === GitHost.Local) continue;
+        const adapter = this.pulls.adapterFor(remote.host);
+        if (!adapter) continue;
         try {
-          const { pr } = await this.pulls.adapter(repo).get(repo.remoteSlug, fix.prNumber);
+          const { pr } = await adapter.get(remote.slug, fix.prNumber);
           if (pr.state === PrState.Merged) this.resolve(fix, alert);
           else if (pr.state === PrState.Closed) this.abandon(fix, alert);
         } catch (error) {
           this.logger.warn(
-            `PR ${repo.name}#${fix.prNumber} not read: ${error instanceof Error ? error.message : String(error)}`,
+            `PR ${remote.slug}#${fix.prNumber} not read: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
       }

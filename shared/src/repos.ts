@@ -21,9 +21,21 @@ export const repoSchema = z.object({
   branch: z.string().nullable(),
   dirty: z.boolean(),
   missing: z.boolean(),
+  /** Sessions in this Repo; removing it asks whether to keep or delete them. */
+  session_count: z.number().int(),
 });
 
 export type Repo = z.infer<typeof repoSchema>;
+
+/** What removing a Repo does with its Sessions. */
+export enum RemovedRepoSessions {
+  /** Hidden with the Repo; importing the same folder again brings both back. */
+  Keep = 'keep',
+  Delete = 'delete',
+}
+
+/** Needed only when the Repo has Sessions. */
+export const removeRepoQuerySchema = z.object({ sessions: z.enum(RemovedRepoSessions).optional() });
 
 export const repoListSchema = z.object({ data: z.array(repoSchema), meta: z.object({ next_cursor: z.null() }) });
 

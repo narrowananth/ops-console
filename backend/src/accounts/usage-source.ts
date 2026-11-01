@@ -6,7 +6,8 @@ export const USAGE_SOURCE = Symbol('USAGE_SOURCE');
 /** One usage window: percent used (0 to 100) and when it resets. */
 export type UsageWindow = { pct: number; resetsAt: string };
 
-export type UsageReading = { fiveHour: UsageWindow | null; weekly: UsageWindow | null };
+/** `email` is the account Claude Code answered as, which can differ from the one the folder was added for. */
+export type UsageReading = { email?: string; fiveHour: UsageWindow | null; weekly: UsageWindow | null };
 
 /** Reads an account's current usage. Tests replace it with a scripted fake. */
 export interface UsageSource {
@@ -43,7 +44,7 @@ export class SdkUsageSource implements UsageSource {
       },
     });
     try {
-      await probe.initializationResult();
+      const { account } = await probe.initializationResult();
       const usage = await probe.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true });
       if (!usage.rate_limits_available || !usage.rate_limits) return null;
       const { five_hour: fiveHour, seven_day: weekly } = usage.rate_limits;
@@ -51,7 +52,7 @@ export class SdkUsageSource implements UsageSource {
         window?.utilization != null && window.resets_at
           ? { pct: window.utilization, resetsAt: new Date(window.resets_at).toISOString() }
           : null;
-      return { fiveHour: windowOf(fiveHour), weekly: windowOf(weekly) };
+      return { email: account?.email, fiveHour: windowOf(fiveHour), weekly: windowOf(weekly) };
     } finally {
       clearTimeout(timer);
       abort.abort();

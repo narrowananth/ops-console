@@ -81,6 +81,8 @@ export const prCommentSchema = z.object({
   parent_id: z.string().nullable(),
   author: z.string(),
   by_agent: z.boolean(),
+  /** Written by the operator or the agent, both signed in as the operator: the ones the operator can delete. */
+  is_mine: z.boolean(),
   body: z.string(),
   file_path: z.string().nullable(),
   line: z.number().int().nullable(),
@@ -102,7 +104,11 @@ export const prFileSchema = z.object({
 export type PrFile = z.infer<typeof prFileSchema>;
 
 export const pullRequestSchema = z.object({
-  repo_id: z.string(),
+  /** The imported Repo it belongs to; null for a repository on the host that is not imported. */
+  repo_id: z.string().nullable(),
+  host: z.enum(GitHost),
+  /** The repository on the host, `owner/name` (GitLab: `group/subgroup/name`). */
+  slug: z.string(),
   number: z.number().int(),
   url: z.string(),
   title: z.string(),
@@ -112,6 +118,8 @@ export const pullRequestSchema = z.object({
   head_sha: z.string(),
   state: z.enum(PrState),
   review_state: z.enum(PrReviewState),
+  /** Who approved it, as the Git host names them. */
+  approved_by: z.array(z.string()),
   checks: z.enum(PrChecks),
   additions: z.number().int(),
   deletions: z.number().int(),
@@ -130,6 +138,7 @@ export const pullRequestSchema = z.object({
 export type PullRequest = z.infer<typeof pullRequestSchema>;
 
 export const pullRequestDetailSchema = pullRequestSchema.extend({
+  repo_id: z.string(),
   files: z.array(prFileSchema),
   comments: z.array(prCommentSchema),
 });
@@ -153,6 +162,17 @@ export const createRepoSessionSchema = z.strictObject({
 
 export type CreateRepoSession = z.infer<typeof createRepoSessionSchema>;
 
+/** A Session with no imported Repo: the agent works in a folder of its own, and may clone into it. */
+export const createAnonymousSessionSchema = z.strictObject({
+  kind: z.literal(SessionKind.Anonymous),
+  title: z.string().trim().min(1).max(200).optional(),
+  model: z.enum(Model).optional(),
+  effort: z.enum(Effort).optional(),
+  access_mode: z.enum(AccessMode).optional(),
+});
+
+export type CreateAnonymousSession = z.infer<typeof createAnonymousSessionSchema>;
+
 export const checkoutSchema = z.object({ branch: z.string().trim().min(1), create: z.boolean().default(false) });
 
 export const checkoutResultSchema = z.object({ session: sessionSchema, stashed: z.boolean() });
@@ -168,6 +188,22 @@ export const pullRequestQuerySchema = z.object({
 });
 
 export const refreshPullRequestsSchema = z.object({ repo_id: z.string().optional() });
+
+/** `GET /repos/:repo/pull-requests/:number/file`: one file of the pull request at a commit. */
+export const prFileQuerySchema = z.object({
+  path: z.string().min(1),
+  /** A commit id; the pull request's `head_sha`. */
+  ref: z.string().regex(/^[0-9a-f]{7,40}$/i),
+});
+
+export const prFileContentSchema = z.object({
+  path: z.string(),
+  ref: z.string(),
+  /** Null when the file is not there at `ref`, as for a deleted file. */
+  text: z.string().nullable(),
+});
+
+export type PrFileContent = z.infer<typeof prFileContentSchema>;
 
 export const postCommentSchema = z.object({
   body: z.string().trim().min(1),

@@ -84,6 +84,10 @@ spacing from the theme tokens ported from the design, never hard-coded.
 
 Every panel has loading, empty and error states. A PROD connection always shows its PROD tag.
 
+A list of named things (Repos, projects, Services, envs, branches, Connections, servers, tools)
+renders A→Z through `ascending` in `frontend/src/lib/sort.ts`. A list ordered by time or severity
+(Sessions, Alerts, logs, messages, pull requests in a project) keeps that order.
+
 ## Prose
 
 Prose written into this repo goes through the `humanizer` skill, including ADRs, specs,

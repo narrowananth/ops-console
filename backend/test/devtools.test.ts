@@ -29,7 +29,7 @@ async function start(): Promise<AgentDaemon> {
     fixtureKinds: false,
     modules: [
       McpServersModule.forRoot({ probe: new FakeProbe(), launcher: '/opt/ops-console/bin/ops-console' }),
-      ConnectionsModule.forRoot({ tester: new FakeConnectionTester() }),
+      ConnectionsModule.forRoot({ tester: new FakeConnectionTester(), launchDir: '/opt/ops-console/app/launch' }),
       DevtoolsModule.forRoot(),
     ],
   });
@@ -105,6 +105,20 @@ describe('scope', () => {
     expect((await api(daemon).get(`/sessions/${one.id}`)).body.data.connection_ids).toEqual([mongo.id]);
     await ask(daemon, one.id, { text: 'ok' });
     expect(denied(daemon)).toEqual(['pg-staging']);
+  });
+
+  it('sends session.updated when only the scope changes, so every open page redraws it', async () => {
+    const daemon = await start();
+    const mongo = await connect(daemon, MONGO_PROD);
+    const made = await newSession(daemon);
+    const listener = await listen(daemon);
+    const patched = await api(daemon).patch(`/sessions/${made.id}`, { connection_ids: [mongo.id] });
+    expect(patched.body.data.connection_ids).toEqual([mongo.id]);
+    await until(
+      () => listener.events,
+      (events) => events.some((event) => event.event === 'session.updated' && event.data.session_id === made.id),
+      'session.updated for the scope change',
+    );
   });
 
   it('refuses a scope that names a Connection with Access Level none', async () => {
@@ -370,5 +384,84 @@ describe('what counts as a write', () => {
     expect(isWrite(ConnectionType.Redis, 'hset', {})).toBe(true);
     expect(isWrite(ConnectionType.Redis, 'a_new_tool', {})).toBe(true);
     expect(AccessLevel.Write).toBe('write');
+  });
+});
+
+describe('results and comparisons', () => {
+  const fence = (lang: string, body: unknown) =>
+    `\`\`\`${lang}\n${typeof body === 'string' ? body : JSON.stringify(body)}\n\`\`\``;
+  type PartOf = { kind: string } & Record<string, unknown>;
+  const partsOf = (messages: { role: string; parts: PartOf[] }[]) =>
+    messages.filter((message) => message.role === 'agent').flatMap((message) => message.parts);
+
+  it('tells a Dev tools run how to hand over Results and a Comparison', async () => {
+    const daemon = await start();
+    await connect(daemon, PG_STAGING);
+    const session = await newSession(daemon);
+    await ask(daemon, session.id, { text: 'ok' });
+    const prompt = daemon.sdk.calls.at(-1)?.options.systemPrompt;
+    expect(prompt).toMatchObject({ type: 'preset', preset: 'claude_code' });
+    expect((prompt as { append: string }).append).toMatch(/ops-result[\s\S]*ops-compare/);
+  });
+
+  it('draws each Result and the Comparison, live and on read-back, and keeps a block it cannot read as code', async () => {
+    const daemon = await start();
+    await connect(daemon, PG_STAGING);
+    await connect(daemon, MONGO_PROD);
+    const session = await newSession(daemon);
+    const listener = await listen(daemon);
+    const many = Array.from({ length: 60 }, (_, index) => [index, 'x'.repeat(300)]);
+    const text = [
+      'Asking pg-staging and mongo-prod.',
+      fence('ops-result', {
+        connection: 'pg-staging',
+        query: 'select id, note from shops',
+        columns: ['id', 'note'],
+        rows: many,
+        total: 60,
+        ms: 12,
+      }),
+      fence('ops-result', { connection: 'mongo-prod', columns: ['shop', 'plan'], rows: [['glowbar', { tier: 2 }]] }),
+      fence('ops-compare', {
+        key: 'shop_domain',
+        value: 'glowbar.example.com',
+        connections: ['pg-staging', 'mongo-prod'],
+        rows: [
+          { field: 'plan', values: ['pro', 'growth'] },
+          { field: 'status', values: ['active', 'active '] },
+          { field: 'region', values: [null, 'eu'] },
+        ],
+      }),
+      fence('ops-result', '{"connection": "pg-staging", oops'),
+      '61 rows across 2 of 2 Connections.',
+    ].join('\n');
+    await ask(daemon, session.id, { text });
+
+    const read = partsOf((await api(daemon).get(`/sessions/${session.id}/messages`)).body.data);
+    expect(read.map((part) => part.kind)).toEqual(['text', 'result', 'result', 'comparison', 'code', 'text']);
+    const [, pg, mongo, comparison, broken] = read;
+    expect(pg).toMatchObject({ connection: 'pg-staging', query: 'select id, note from shops', total: 60, ms: 12 });
+    const pgRows = pg?.rows as unknown[][] | undefined;
+    expect(pgRows?.length).toBe(50);
+    expect(pgRows?.[0]).toEqual([0, 'x'.repeat(200)]);
+    expect(mongo).toMatchObject({ query: null, total: null, ms: null, rows: [['glowbar', '{"tier":2}']] });
+    expect(comparison).toMatchObject({
+      key: 'shop_domain',
+      value: 'glowbar.example.com',
+      rows: [
+        { field: 'plan', values: ['pro', 'growth'], differs: true },
+        { field: 'status', values: ['active', 'active '], differs: false },
+        { field: 'region', values: [null, 'eu'], differs: false },
+      ],
+    });
+    expect(broken).toEqual({ kind: 'code', lang: 'ops-result', text: '{"connection": "pg-staging", oops' });
+
+    const streamed = listener.events.flatMap((event) =>
+      event.event === 'session.output' && ['result', 'comparison'].includes(event.data.part.kind)
+        ? [event.data.part]
+        : [],
+    );
+    listener.close();
+    expect(streamed).toEqual([pg, mongo, comparison]);
   });
 });

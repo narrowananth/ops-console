@@ -5,7 +5,11 @@ import {
   type AlertEvent,
   alertsQuerySchema,
   createScanSchema,
+  type DatadogService,
+  datadogServicesQuerySchema,
+  type FindCodeResult,
   type Fix,
+  type MonitorEnv,
   patchRouteSchema,
   patchServiceSchema,
   type Report,
@@ -13,12 +17,15 @@ import {
   reviewAlertSchema,
   type Scan,
   type Service,
+  type StatusCodeCount,
   scansQuerySchema,
   servicesQuerySchema,
+  statusCodesQuerySchema,
 } from '@ops-console/shared';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
 import { AlertsService } from './alerts.service';
+import { CodeFinder } from './code-finder';
 import { FixesService } from './fixes.service';
 import { ReviewsService } from './reviews.service';
 import { ScansService } from './scans.service';
@@ -33,6 +40,7 @@ export class MonitorController {
   constructor(
     @Inject(ServicesService) private readonly services: ServicesService,
     @Inject(ScansService) private readonly scans: ScansService,
+    @Inject(CodeFinder) private readonly finder: CodeFinder,
     @Inject(AlertsService) private readonly alerts: AlertsService,
     @Inject(VerificationsService) private readonly verifications: VerificationsService,
     @Inject(ReviewsService) private readonly reviews: ReviewsService,
@@ -48,6 +56,16 @@ export class MonitorController {
   patchService(@Param() params: unknown, @Body() body: unknown): { data: Service } {
     const { id } = parseInput(idParams, params, 'params');
     return { data: this.services.patch(id, parseInput(patchServiceSchema, body, 'body')) };
+  }
+
+  /** Looks for the Service's code now: same-name Repo, a folder next to the Repos, then the Git hosts. */
+  @Post('services/:id/code')
+  @HttpCode(200)
+  async findCode(@Param() params: unknown): Promise<{ data: FindCodeResult }> {
+    const { id } = parseInput(idParams, params, 'params');
+    this.services.get(id);
+    const { found, tried } = await this.finder.find(id);
+    return { data: { service: this.services.get(id), found, tried } };
   }
 
   @Patch('routes/:id')
@@ -68,8 +86,26 @@ export class MonitorController {
 
   @Post('scans')
   @HttpCode(202)
-  startScan(@Body() body: unknown): { data: Scan } {
-    return { data: this.scans.start(parseInput(createScanSchema, body, 'body').service_id) };
+  async startScan(@Body() body: unknown): Promise<{ data: Scan }> {
+    return { data: await this.scans.start(parseInput(createScanSchema, body, 'body')) };
+  }
+
+  @Get('monitor/envs')
+  async envs(): Promise<{ data: MonitorEnv[] }> {
+    return { data: await this.scans.envs() };
+  }
+
+  @Get('monitor/datadog-services')
+  async datadogServices(@Query() query: unknown): Promise<{ data: DatadogService[] }> {
+    const { window, envs, codes } = parseInput(datadogServicesQuerySchema, query, 'query');
+    return { data: await this.scans.datadogServices(window, envs, codes ?? []) };
+  }
+
+  /** The HTTP status codes from 400 up with requests in the range, every env together, busiest first. */
+  @Get('monitor/status-codes')
+  async statusCodes(@Query() query: unknown): Promise<{ data: StatusCodeCount[] }> {
+    const { window } = parseInput(statusCodesQuerySchema, query, 'query');
+    return { data: await this.scans.statusCodes(window) };
   }
 
   @Get('alerts')

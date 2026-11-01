@@ -35,3 +35,4 @@ await build({
   logLevel: 'warning',
 });
 await cp('drizzle', 'dist/drizzle', { recursive: true });
+await cp('launch', 'dist/launch', { recursive: true });

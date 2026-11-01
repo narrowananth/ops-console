@@ -26,6 +26,7 @@ import {
   reviews,
   scanRouteResults,
   scans,
+  services,
   sessions,
 } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
@@ -37,6 +38,7 @@ import { ReposModule } from '../src/repos/repos.module';
 import { WorkspaceModule } from '../src/workspace/workspace.module';
 import { type AgentDaemon, api, gate, listen, startAgentDaemon, until } from './agent-fixtures';
 import type { Step } from './fakes/agent-sdk';
+import { FakeCodeHosts } from './fakes/code-hosts';
 import { FakeConnectorTools } from './fakes/connector-tools';
 import { FakeDatadog, route, samples, service } from './fakes/datadog';
 import { FakeGitHost, hostPr } from './fakes/git-host';
@@ -82,6 +84,7 @@ type Ctx = {
   store: Store;
   http: ReturnType<typeof api>;
   dir: string;
+  codeHosts: FakeCodeHosts;
 };
 
 function setConnector(store: Store, id: ConnectorId, patch: Partial<typeof connectors.$inferInsert>) {
@@ -91,6 +94,7 @@ function setConnector(store: Store, id: ConnectorId, patch: Partial<typeof conne
 async function start(options: { dataDir?: string; datadog?: FakeDatadog; connected?: boolean } = {}): Promise<Ctx> {
   const datadog = options.datadog ?? new FakeDatadog();
   const host = new FakeGitHost();
+  const codeHosts = new FakeCodeHosts();
   const daemon = await startAgentDaemon({
     fixtureKinds: false,
     dataDir: options.dataDir,
@@ -99,7 +103,7 @@ async function start(options: { dataDir?: string; datadog?: FakeDatadog; connect
       ConnectorsModule.forRoot({ tools: new FakeConnectorTools() }),
       ReposModule.forRoot(),
       WorkspaceModule.forRoot({ hosts: host }),
-      MonitorModule.forRoot({ datadog }),
+      MonitorModule.forRoot({ datadog, codeHosts }),
     ],
   });
   running.push(daemon);
@@ -109,7 +113,7 @@ async function start(options: { dataDir?: string; datadog?: FakeDatadog; connect
     setConnector(store, ConnectorId.Jira, { status: HealthStatus.Ok });
     setConnector(store, ConnectorId.Github, { status: HealthStatus.Ok, login: 'octo-operator' });
   }
-  return { daemon, datadog, host, store, http: api(daemon), dir: '' };
+  return { daemon, datadog, host, store, http: api(daemon), dir: '', codeHosts };
 }
 
 async function scan(ctx: Ctx, serviceId: string | null = null): Promise<{ id: string; status: string }> {
@@ -192,15 +196,163 @@ describe('Scans and Alerts', () => {
     const services = (await ctx.http.get('/services')).body.data;
     expect(services).toHaveLength(1);
     expect(services[0].routes.map((r: { path: string; state: string }) => [r.path, r.state])).toEqual([
-      ['/orders', 'ok'],
       ['/orders', 'failing'],
     ]);
     const alerts = await alertList(ctx);
     expect(alerts).toHaveLength(1);
-    expect(alerts[0]).toMatchObject({ status: 'open', event_count: 12, severity: 'warn', source: 'scan' });
+    expect(alerts[0]).toMatchObject({ status: 'open', event_count: 12, severity: 'low', source: 'scan' });
     const detail = (await ctx.http.get(`/alerts/${alerts[0].id}`)).body.data;
     expect(detail.samples).toHaveLength(12);
     expect(detail.waiting_since).toBeNull();
+  });
+
+  it('reads the window and envs the operator picked', async () => {
+    const ctx = await start();
+    ctx.datadog.readings = [
+      service('orders-api', [route('POST', '/orders', 4)], 'prod'),
+      service('orders-api', [route('POST', '/orders', 9)], 'staging'),
+    ];
+    const started = await ctx.http.post('/scans', { service_id: null, window: '1h', envs: ['staging'] });
+    expect(started.body.data).toMatchObject({ window_size: '1h', envs: ['staging'] });
+    await until(
+      () => ctx.http.get(`/scans/${started.body.data.id}`).then((res) => res.body.data.status),
+      (status) => status !== 'running',
+    );
+    expect(ctx.datadog.calls.at(-1)).toMatchObject({ window: '1h', envs: ['staging'] });
+    const alerts = await alertList(ctx);
+    expect(alerts.map((alert: { service: { env: string } }) => alert.service.env)).toEqual(['staging']);
+    const bad = await ctx.http.post('/scans', { service_id: null, window: '3d' });
+    expect(bad.body.error.code).toBe('validation_failed');
+  });
+
+  it('lists the Datadog envs with the Connector ones ticked', async () => {
+    const ctx = await start();
+    const envs = (await ctx.http.get('/monitor/envs')).body.data;
+    expect(envs).toEqual([
+      { name: 'prod', configured: true },
+      { name: 'staging', configured: false },
+      { name: 'no env', configured: false },
+    ]);
+  });
+
+  it('lists the Datadog Services with errors in the range and envs, busiest first', async () => {
+    const ctx = await start();
+    ctx.datadog.readings = [
+      service('orders-api', [route('POST', '/orders', 4)], 'prod'),
+      service('orders-api', [route('POST', '/orders', 9)], 'staging'),
+      service('webhook', [route('POST', '/hooks', 30)], 'no env'),
+      service('quiet', [route('GET', '/ping', 0)], 'prod'),
+    ];
+    const listed = await ctx.http.get('/monitor/datadog-services?window=24h&envs=prod,staging,no%20env');
+    expect(listed.body.data).toEqual([
+      { name: 'webhook', envs: ['no env'], errors: 30 },
+      { name: 'orders-api', envs: ['staging', 'prod'], errors: 13 },
+    ]);
+    const bad = await ctx.http.get('/monitor/datadog-services?window=3d&envs=prod');
+    expect(bad.body.error.code).toBe('validation_failed');
+  });
+
+  it('reads only the Services the operator picked, and clears only theirs', async () => {
+    const ctx = await start();
+    ctx.datadog.readings = [
+      service('orders-api', [route('POST', '/orders', 4)], 'prod'),
+      service('billing', [route('POST', '/charge', 5)], 'prod'),
+    ];
+    await scan(ctx);
+    ctx.datadog.readings = [];
+    const started = await ctx.http.post('/scans', { service_id: null, envs: ['prod'], services: ['orders-api'] });
+    expect(started.body.data).toMatchObject({ services: ['orders-api'] });
+    await until(
+      () => ctx.http.get(`/scans/${started.body.data.id}`).then((res) => res.body.data.status),
+      (status) => status !== 'running',
+    );
+    expect(ctx.datadog.calls.at(-1)).toMatchObject({ services: ['orders-api'] });
+    const cleared = ctx.store.db.select().from(alerts).all();
+    const byName = (name: string) => cleared.find((row) => row.title.includes(name));
+    expect(byName('orders-api')?.clearedAt).not.toBeNull();
+    expect(byName('billing')?.clearedAt).toBeNull();
+  });
+
+  it('reads every env when the operator picks none', async () => {
+    const ctx = await start();
+    ctx.datadog.readings = [
+      service('orders-api', [route('POST', '/orders', 4)], 'prod'),
+      service('webhook', [route('POST', '/hooks', 3)], 'no env'),
+    ];
+    const done = await scan(ctx);
+    expect((await ctx.http.get(`/scans/${done.id}`)).body.data.envs).toEqual(['prod', 'staging', 'no env']);
+    expect((await alertList(ctx)).map((alert: { service: { name: string } }) => alert.service.name).sort()).toEqual([
+      'orders-api',
+      'webhook',
+    ]);
+    const listed = await ctx.http.get('/monitor/datadog-services?window=24h');
+    expect(listed.body.data.map((row: { name: string }) => row.name)).toEqual(['orders-api', 'webhook']);
+  });
+
+  it('splits one Route by HTTP status code, and a Scan of some codes clears only those', async () => {
+    const ctx = await start();
+    ctx.datadog.readings = [
+      service('orders-api', [
+        route('POST', '/orders', 7, { statusCode: 401, samples: samples(7, 'token expired') }),
+        route('POST', '/orders', 3, { statusCode: 500, samples: samples(3, 'token expired') }),
+      ]),
+    ];
+    await scan(ctx);
+    const raised = await alertList(ctx);
+    expect(raised.map((alert: { http_status: number }) => alert.http_status).sort()).toEqual([401, 500]);
+    expect(raised.find((alert: { http_status: number }) => alert.http_status === 401).title).toBe(
+      '401 POST /orders failing on orders-api',
+    );
+
+    ctx.datadog.readings = [];
+    const started = await ctx.http.post('/scans', { service_id: null, status_codes: [500] });
+    expect(started.body.data.status_codes).toEqual([500]);
+    await until(
+      () => ctx.http.get(`/scans/${started.body.data.id}`).then((res) => res.body.data.status),
+      (status) => status !== 'running',
+    );
+    expect(ctx.datadog.calls.at(-1)).toMatchObject({ codes: [500] });
+    const rows = ctx.store.db.select().from(alerts).all();
+    expect(rows.find((row) => row.httpStatus === 500)?.clearedAt).not.toBeNull();
+    expect(rows.find((row) => row.httpStatus === 401)?.clearedAt).toBeNull();
+    expect((await ctx.http.post('/scans', { service_id: null, status_codes: [200] })).body.error.code).toBe(
+      'validation_failed',
+    );
+  });
+
+  it('lists the HTTP status codes and the Services failing with the ones picked', async () => {
+    const ctx = await start();
+    ctx.datadog.readings = [
+      service('orders-api', [route('POST', '/orders', 7, { statusCode: 401 }), route('GET', '/orders', 2)]),
+      service('billing', [route('POST', '/charge', 5, { statusCode: 404 })]),
+    ];
+    expect((await ctx.http.get('/monitor/status-codes?window=24h')).body.data).toEqual([
+      { code: 401, count: 7 },
+      { code: 404, count: 5 },
+      { code: 500, count: 2 },
+    ]);
+    const picked = await ctx.http.get('/monitor/datadog-services?window=24h&codes=401,500');
+    expect(picked.body.data).toEqual([{ name: 'orders-api', envs: ['prod'], errors: 9 }]);
+    expect((await ctx.http.get('/monitor/datadog-services?window=24h&codes=200')).body.error.code).toBe(
+      'validation_failed',
+    );
+  });
+
+  it('raises Alerts for logs with no HTTP route, and takes the Git URL from the logs', async () => {
+    const ctx = await start();
+    const job = samples(6, 'Job 812 failed: queue timeout');
+    ctx.datadog.readings = [
+      service('billing-worker', [route('', '', 6, { samples: job })], 'prod', 'github.com/acme/billing'),
+    ];
+    await scan(ctx);
+    const [alert] = await alertList(ctx);
+    expect(alert).toMatchObject({
+      route: null,
+      title: 'billing-worker: job <n> failed: queue timeout',
+      service: { name: 'billing-worker', repo_url: 'github.com/acme/billing', repo_id: null },
+    });
+    const services = (await ctx.http.get('/services')).body.data;
+    expect(services[0]).toMatchObject({ repo_url: 'github.com/acme/billing', routes: [] });
   });
 
   it('updates the same Alert on a later Scan with the same Fingerprint', async () => {
@@ -221,14 +373,27 @@ describe('Scans and Alerts', () => {
         route('GET', '/rapid', 400, { peakPer10m: 150 }),
         route('GET', '/steady', 240, { peakPer10m: 20 }),
         route('GET', '/quiet', 3),
-        route('GET', '/warnonly', 240, { peakPer10m: 20, samples: samples(5, 'slow query', 'warn') }),
+        route('GET', '/warnonly', 240, { statusCode: 404, peakPer10m: 20, samples: samples(5, 'slow query', 'warn') }),
+        route('GET', '/emergency', 240, {
+          statusCode: 401,
+          peakPer10m: 20,
+          samples: samples(5, 'db down', 'emergency'),
+        }),
+        route('GET', '/server', 240, { statusCode: 502, peakPer10m: 20, samples: samples(5, 'bad gateway', 'warn') }),
       ]),
     ];
     await scan(ctx);
     const bySeverity = Object.fromEntries(
       (await alertList(ctx)).map((a: { route: { path: string }; severity: string }) => [a.route.path, a.severity]),
     );
-    expect(bySeverity).toEqual({ '/rapid': 'sev2', '/steady': 'sev3', '/quiet': 'warn', '/warnonly': 'warn' });
+    expect(bySeverity).toEqual({
+      '/rapid': 'high',
+      '/steady': 'medium',
+      '/quiet': 'low',
+      '/warnonly': 'low',
+      '/emergency': 'medium',
+      '/server': 'medium',
+    });
   });
 
   it('never raises an Alert for an ignored Route, and shows its note', async () => {
@@ -347,7 +512,7 @@ describe('Scans and Alerts', () => {
     ctx.datadog.calls.length = 0;
     const ended = await scan(ctx, svc.id);
     expect(ended).toMatchObject({ status: 'ok', service_id: svc.id, window_size: '6h' });
-    expect(ctx.datadog.calls[0]).toMatchObject({ window: '6h', service: 'orders-api' });
+    expect(ctx.datadog.calls[0]).toMatchObject({ window: '6h', services: ['orders-api'] });
   });
 });
 
@@ -526,17 +691,6 @@ describe('Review', () => {
     }
   });
 
-  it('refuses a confirm while Jira is not connected and creates nothing', async () => {
-    const ctx = await start();
-    const { alert } = await verified(ctx);
-    setConnector(ctx.store, ConnectorId.Jira, { status: HealthStatus.Off });
-    const response = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
-    expect([response.status, response.body.error.code]).toEqual([409, 'connector_not_connected']);
-    expect(ctx.store.db.select().from(reviews).all()).toHaveLength(0);
-    expect(ctx.store.db.select().from(fixes).all()).toHaveLength(0);
-    expect((await alertList(ctx))[0].status).toBe('verified');
-  });
-
   it('dismisses a verified Alert, and undo returns it to verified', async () => {
     const ctx = await start();
     const { alert } = await verified(ctx);
@@ -579,6 +733,117 @@ describe('Review', () => {
     );
     expect(ctx.daemon.sdk.calls.at(-1)?.prompt).toBe('go');
     expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.status).toBe('dismissed');
+  });
+});
+
+describe('Verification without a local Repo', () => {
+  it('clones the Git URL into an anonymous Session and verifies there', async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    const origin = await makeRepo();
+    ctx.store.write((tx) =>
+      tx
+        .update(services)
+        .set({ repoUrl: `file://${origin}` })
+        .where(eq(services.id, alert.service.id))
+        .run(),
+    );
+    await verify(ctx, alert.id);
+    const detail = (await ctx.http.get(`/alerts/${alert.id}`)).body.data;
+    expect(detail.latest_report).toMatchObject({ status: 'ready', kind: 'bug' });
+    expect(detail.latest_report.steps[0].text).toBe(`$ git clone file://${origin}`);
+    const session = (await ctx.http.get(`/sessions/${detail.session_id}`)).body.data;
+    expect(session).toMatchObject({ kind: 'anonymous', repo_id: null, branch: 'main' });
+    const prompt = ctx.daemon.sdk.calls.at(-1)?.prompt ?? '';
+    expect(prompt).toContain(`a fresh clone of file://${origin}`);
+  });
+
+  it('refuses a Service with neither a Repo nor a Git URL', async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    const response = await ctx.http.post(`/alerts/${alert.id}/verifications`);
+    expect([response.status, response.body.error.code]).toEqual([409, 'service_unlinked']);
+  });
+
+  it('takes a Git URL from the operator and refuses one that is not', async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    const ok = await ctx.http.patch(`/services/${alert.service.id}`, { repo_url: 'bitbucket.org/acme/orders' });
+    expect(ok.body.data.repo_url).toBe('bitbucket.org/acme/orders');
+    const bad = await ctx.http.patch(`/services/${alert.service.id}`, { repo_url: 'not a url' });
+    expect(bad.body.error.code).toBe('validation_failed');
+  });
+});
+
+describe('Finding the code', () => {
+  it('links an imported Repo with the Service name after a Scan', async () => {
+    const ctx = await start();
+    const dir = await makeRepo();
+    const repo = (await ctx.http.post('/repos', { path: dir })).body.data;
+    ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 4)])];
+    await scan(ctx);
+    const linked = await until(
+      () => ctx.http.get('/services').then((res) => res.body.data[0]),
+      (found) => found.repo_id !== null,
+      'the Repo to be linked',
+    );
+    expect(linked.repo_id).toBe(repo.id);
+  });
+
+  it('imports a git folder of that name next to an imported Repo', async () => {
+    const ctx = await start();
+    const dir = await makeRepo();
+    await ctx.http.post('/repos', { path: dir });
+    const sibling = path.join(path.dirname(dir), 'billing-worker');
+    await mkdir(sibling);
+    git(sibling, 'init', '-q', '-b', 'main');
+    ctx.datadog.readings = [service('billing-worker', [route('', '', 3)])];
+    await scan(ctx);
+    const [svc] = (await ctx.http.get('/services')).body.data;
+    const result = (await ctx.http.post(`/services/${svc.id}/code`)).body.data;
+    expect(result.found).toBe('repo');
+    const repos = (await ctx.http.get('/repos')).body.data;
+    expect(repos.find((repo: { id: string }) => repo.id === result.service.repo_id)?.name).toBe('billing-worker');
+  });
+
+  it('finds a repository of that name on a connected Git host', async () => {
+    const ctx = await start();
+    setConnector(ctx.store, ConnectorId.Bitbucket, {
+      status: HealthStatus.Ok,
+      config: JSON.stringify({ workspace: 'acme' }),
+    });
+    ctx.codeHosts.existing.add('bitbucket/acme/orders-api');
+    await failing(ctx);
+    const svc = await until(
+      () => ctx.http.get('/services').then((res) => res.body.data[0]),
+      (found) => found.repo_url !== null,
+      'the Git URL to be set',
+    );
+    expect(svc.repo_url).toBe('git@bitbucket.example:acme/orders-api.git');
+  });
+
+  it('says where it looked when nothing matches', async () => {
+    const ctx = await start();
+    ctx.codeHosts.orgs = ['acme-org'];
+    await failing(ctx);
+    const [svc] = (await ctx.http.get('/services')).body.data;
+    const result = (await ctx.http.post(`/services/${svc.id}/code`)).body.data;
+    expect(result).toMatchObject({ found: null, service: { repo_id: null, repo_url: null } });
+    expect(result.tried).toEqual([
+      'an imported Repo named orders-api',
+      'github.com/octo-operator/orders-api',
+      'github.com/acme-org/orders-api',
+    ]);
+  });
+});
+
+describe('Anonymous Sessions', () => {
+  it('makes a Session with no Repo that works in its own folder', async () => {
+    const ctx = await start();
+    const created = await ctx.http.post('/sessions', { kind: 'anonymous', title: 'Scratch' });
+    expect(created.body.data).toMatchObject({ kind: 'anonymous', title: 'Scratch', repo_id: null, branch: null });
+    const listed = (await ctx.http.get('/sessions?kind=anonymous')).body.data;
+    expect(listed.map((session: { id: string }) => session.id)).toEqual([created.body.data.id]);
   });
 });
 
@@ -632,6 +897,29 @@ describe('Fix', () => {
     expect(prompts[1]).toContain('priority Medium');
   });
 
+  it('skips the ticket with Jira off and names the branch fix/<slug>', async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    await linkRepo(ctx, alert.service.id);
+    await verify(ctx, alert.id);
+    setConnector(ctx.store, ConnectorId.Jira, { status: HealthStatus.Off });
+    const callsBefore = ctx.daemon.sdk.calls.length;
+    scriptRuns(ctx, CODED, PASSED, OPENED);
+    const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
+    expect(confirm.status).toBe(200);
+    const fix = await until(
+      () => ctx.http.get(`/fixes/${confirm.body.data.fix.id}`).then((res) => res.body.data),
+      (found) => found.status !== 'running',
+      'the Fix to end',
+    );
+    expect(fix).toMatchObject({ status: 'done', jira_key: null, branch: 'fix/null-order-total', pr_number: 41 });
+    expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.status).toBe('pr_open');
+    expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe('fix/null-order-total');
+    const prompts = ctx.daemon.sdk.calls.slice(callsBefore).map((call) => call.prompt);
+    expect(prompts).toHaveLength(3);
+    expect(prompts.some((prompt) => prompt.includes('Atlassian'))).toBe(false);
+  });
+
   it('fails at the stage that failed, keeps the Alert in fixing, and a retry does not create the ticket twice', async () => {
     const ctx = await start();
     const alert = await failing(ctx);
@@ -664,7 +952,7 @@ describe('Fix', () => {
     expect((await ctx.http.post(`/fixes/${fixId}/retry`)).body.error.code).toBe('invalid_state');
   });
 
-  it('uses priority High for sev2', async () => {
+  it('uses priority High for a high Alert', async () => {
     const ctx = await start();
     ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 400, { peakPer10m: 200 })])];
     await scan(ctx);

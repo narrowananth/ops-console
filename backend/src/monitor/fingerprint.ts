@@ -34,10 +34,16 @@ export function normalizePath(path: string): string {
     .join('/');
 }
 
-/** The identity of an Alert: Service, Route and the error signature (Glossary: Fingerprint). */
-export function fingerprint(serviceId: string, method: string, path: string, message: string): string {
-  return createHash('sha256')
-    .update([serviceId, method.toUpperCase(), path, maskSignature(message)].join('\n'))
-    .digest('hex')
-    .slice(0, 32);
+/** The identity of an Alert: Service, Route, HTTP status code and the error signature (Glossary: Fingerprint). */
+export function fingerprint(
+  serviceId: string,
+  method: string,
+  path: string,
+  message: string,
+  statusCode: number | null = null,
+): string {
+  const parts = [serviceId, method.toUpperCase(), path, maskSignature(message)];
+  // An Alert from before codes were read keeps its Fingerprint.
+  if (statusCode !== null) parts.push(String(statusCode));
+  return createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 32);
 }

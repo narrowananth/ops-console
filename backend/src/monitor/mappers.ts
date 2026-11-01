@@ -88,9 +88,16 @@ export function toAlert(
 ): Alert {
   return {
     id: row.id,
-    route: { id: route.id, method: route.method, path: route.path },
-    service: { id: service.id, name: service.name, env: service.env, repo_id: service.repoId },
+    route: route.method ? { id: route.id, method: route.method, path: route.path } : null,
+    service: {
+      id: service.id,
+      name: service.name,
+      env: service.env,
+      repo_id: service.repoId,
+      repo_url: service.repoUrl,
+    },
     fingerprint: row.fingerprint,
+    http_status: row.httpStatus,
     source: row.source,
     severity: row.severity,
     status: row.status,

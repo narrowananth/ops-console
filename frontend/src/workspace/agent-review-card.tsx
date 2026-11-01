@@ -5,11 +5,13 @@ const MARK = { pass: '✓', warn: '!', fail: '✕', na: '–' } as const;
 /** The agent's written review, tied to the commit it read. */
 export function AgentReviewCard({ review }: { review: PrAgentReview }) {
   return (
-    <section aria-label="Agent Review" className="border-2 border-text">
+    <section aria-label="Agent Review" className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
       <header className="flex items-center gap-2 border-b border-divider bg-surface px-3 py-2 text-xs">
         <strong>Agent Review</strong>
         <span className="font-mono text-neutral-700">{review.head_sha.slice(0, 7)}</span>
-        {review.stale && <span className="border border-accent px-1.5 py-px text-[10px] text-accent-700">stale</span>}
+        {review.stale && (
+          <span className="rounded-full bg-accent-100 px-2 py-px text-[10px] text-accent-700">stale</span>
+        )}
         <span className="ml-auto text-neutral-700">{review.status}</span>
       </header>
       <div className="flex flex-col gap-3 px-3 py-2.5 text-[13px]">

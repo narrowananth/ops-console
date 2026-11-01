@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ConnectorId, HealthStatus, PrReviewState, type WsEvent } from '@ops-console/shared';
+import { ConnectorId, GitHost, HealthStatus, PrReviewState, type WsEvent } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
+import { StartupRecovery } from '../src/common/recovery';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
 import { actionLog, agentComments, connectors, prAgentReviews } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
@@ -119,12 +120,14 @@ describe('Sessions in a Repo', () => {
     ]);
   });
 
-  it('refuses to remove a Repo that has Sessions, and deleting the Session keeps reviews and agent comments', async () => {
+  it('asks what to do with the Sessions before removing a Repo, and deleting a Session keeps reviews and agent comments', async () => {
     const ctx = await start();
     const id = await newSession(ctx);
+    expect((await ctx.http.get('/repos')).body.data[0].session_count).toBe(1);
     const refused = await ctx.http.delete(`/repos/${ctx.repoId}`);
     expect(refused.status).toBe(409);
     expect(refused.body.error.code).toBe('repo_has_sessions');
+    expect((await ctx.http.delete(`/repos/${ctx.repoId}?sessions=later`)).body.error.code).toBe('validation_failed');
 
     ctx.store.write((tx) => {
       tx.insert(prAgentReviews).values({ id: 'r1', repoId: ctx.repoId, prNumber: 1, headSha: 'a' }).run();
@@ -135,6 +138,56 @@ describe('Sessions in a Repo', () => {
     expect(ctx.store.db.select().from(agentComments).all()).toHaveLength(1);
     expect((await ctx.http.get('/repos')).body.data[0].branch).toBe('main');
     expect((await ctx.http.delete(`/repos/${ctx.repoId}`)).status).toBe(204);
+  });
+
+  it('removes a Repo with its Sessions kept, hides both, and brings both back when the folder is imported again', async () => {
+    const ctx = await start();
+    const id = await newSession(ctx);
+    const hold = gate();
+    ctx.daemon.sdk.script({ wait: hold.promise }, { text: 'done' });
+    await ctx.http.post(`/sessions/${id}/messages`, { text: 'go' });
+
+    expect((await ctx.http.delete(`/repos/${ctx.repoId}?sessions=keep`)).status).toBe(204);
+    expect((await ctx.http.get('/repos')).body.data).toEqual([]);
+    expect((await ctx.http.get('/sessions?kind=repo')).body.data).toEqual([]);
+    expect((await ctx.http.get(`/repos/${ctx.repoId}/branches`)).status).toBe(404);
+    expect((await ctx.http.post('/sessions', { repo_id: ctx.repoId, branch: 'main' })).status).toBe(404);
+
+    // The run it was in finishes unseen.
+    hold.open();
+    await until(
+      () => ctx.http.get(`/sessions/${id}`).then((res) => res.body.data.state),
+      (state) => state === 'idle',
+    );
+
+    const again = await ctx.http.post('/repos', { path: ctx.dir });
+    expect(again.status).toBe(201);
+    expect(again.body.data).toMatchObject({ id: ctx.repoId, session_count: 1 });
+    expect((await ctx.http.get('/sessions?kind=repo')).body.data.map((s: { id: string }) => s.id)).toEqual([id]);
+    expect((await ctx.http.post('/repos', { path: ctx.dir })).body.error.code).toBe('duplicate');
+  });
+
+  it('removes a Repo with its Sessions deleted, once none is running', async () => {
+    const ctx = await start();
+    const id = await newSession(ctx);
+    const hold = gate();
+    ctx.daemon.sdk.script({ wait: hold.promise }, { text: 'done' });
+    await ctx.http.post(`/sessions/${id}/messages`, { text: 'go' });
+
+    const busy = await ctx.http.delete(`/repos/${ctx.repoId}?sessions=delete`);
+    expect(busy.status).toBe(409);
+    expect(busy.body.error.code).toBe('session_busy');
+
+    hold.open();
+    await until(
+      () => ctx.http.get(`/sessions/${id}`).then((res) => res.body.data.state),
+      (state) => state === 'idle',
+    );
+    expect((await ctx.http.delete(`/repos/${ctx.repoId}?sessions=delete`)).status).toBe(204);
+    expect((await ctx.http.get(`/sessions/${id}`)).status).toBe(404);
+    const again = await ctx.http.post('/repos', { path: ctx.dir });
+    expect(again.body.data.id).not.toBe(ctx.repoId);
+    expect(again.body.data.session_count).toBe(0);
   });
 });
 
@@ -259,17 +312,52 @@ describe('pull requests', () => {
     ctx.host.down = null;
     await ctx.http.get('/pull-requests');
     ctx.host.down = 'failed';
-    // Past the minute the list is read again; the host fails and the cache answers.
+    // Past the minute the kept list answers at once and is read again behind it; that read fails, so the next answer
+    // says the list is stale.
     const { LIST_TTL_MS } = await import('../src/workspace/pull-requests.service');
     const realNow = Date.now;
     Date.now = () => realNow() + LIST_TTL_MS + 1;
     try {
-      const stale = await ctx.http.get('/pull-requests');
-      expect(stale.status).toBe(200);
-      expect(stale.body.meta.stale).toBe(true);
+      const first = await ctx.http.get('/pull-requests');
+      expect(first.status).toBe(200);
+      expect(first.body.data).toHaveLength(1);
+      const stale = await until(
+        () => ctx.http.get('/pull-requests'),
+        (res) => res.body.meta.stale === true,
+        'a stale list',
+      );
       expect(stale.body.data).toHaveLength(1);
     } finally {
       Date.now = realNow;
+    }
+  });
+
+  it('answers a minute-old list from memory, reads the host behind it, and tells the UI what changed', async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1)];
+    await ctx.http.get(`/pull-requests?repo_id=${ctx.repoId}`);
+    const { events, close } = await listen(ctx.daemon);
+    ctx.host.prs = [hostPr(1), hostPr(2)];
+    const { LIST_TTL_MS } = await import('../src/workspace/pull-requests.service');
+    const realNow = Date.now;
+    Date.now = () => realNow() + LIST_TTL_MS + 1;
+    try {
+      const kept = await ctx.http.get(`/pull-requests?repo_id=${ctx.repoId}`);
+      expect(kept.body.data).toHaveLength(1);
+      const refreshed = await until(
+        () => events,
+        (all) => all.some((event) => event.event === 'pull_request.refreshed'),
+        'pull_request.refreshed',
+      );
+      expect(refreshed.find((event) => event.event === 'pull_request.refreshed')?.data).toMatchObject({
+        repo_id: ctx.repoId,
+        status: 'ok',
+        changed: [{ repo_id: ctx.repoId, number: 2 }],
+      });
+      expect((await ctx.http.get(`/pull-requests?repo_id=${ctx.repoId}`)).body.data).toHaveLength(2);
+    } finally {
+      Date.now = realNow;
+      close();
     }
   });
 
@@ -323,6 +411,40 @@ describe('pull requests', () => {
     expect(notRoot.body.error.code).toBe('invalid_state');
   });
 
+  it("deletes the operator's and the agent's comments, and refuses anyone else's", async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1)];
+    const own = (await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/comments`, { body: 'mine' })).body.data;
+    ctx.store.write((tx) => {
+      tx.insert(agentComments).values({ repoId: ctx.repoId, prNumber: 1, commentId: own.id }).run();
+    });
+    ctx.host.comments.set(1, [
+      ...(ctx.host.comments.get(1) ?? []),
+      {
+        id: 'theirs',
+        parent_id: null,
+        author: 'someone-else',
+        body: 'not yours',
+        file_path: null,
+        line: null,
+        resolved: false,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    const before = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1`)).body.data;
+    expect(before.comments.map((c: { is_mine: boolean }) => c.is_mine)).toEqual([true, false]);
+
+    const refused = await ctx.http.delete(`/repos/${ctx.repoId}/pull-requests/1/comments/theirs`);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.code).toBe('invalid_state');
+    expect((await ctx.http.delete(`/repos/${ctx.repoId}/pull-requests/1/comments/${own.id}`)).status).toBe(204);
+    expect((await ctx.http.delete(`/repos/${ctx.repoId}/pull-requests/1/comments/${own.id}`)).status).toBe(404);
+
+    const after = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1`)).body.data;
+    expect(after.comments.map((c: { id: string }) => c.id)).toEqual(['theirs']);
+    expect(ctx.store.db.select().from(agentComments).all()).toEqual([]);
+  });
+
   it('changes nothing when the host refuses a comment, and drops the cache when it accepts', async () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];
@@ -354,6 +476,19 @@ describe('pull requests', () => {
     expect(noBody.body.error.code).toBe('validation_failed');
     const approved = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/2/reviews`, { event: 'approve' });
     expect(approved.body.data.review_state).toBe(PrReviewState.Approved);
+    expect(approved.body.data.approved_by).toEqual(['me']);
+  });
+
+  it('reads one file of a pull request at a commit, null when it is not there', async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1)];
+    ctx.host.texts.set('abc1234:src/app.ts', 'const a = 1;\n');
+    const found = await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/file?path=src/app.ts&ref=abc1234`);
+    expect(found.body.data).toEqual({ path: 'src/app.ts', ref: 'abc1234', text: 'const a = 1;\n' });
+    const gone = await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/file?path=src/old.ts&ref=abc1234`);
+    expect(gone.body.data.text).toBeNull();
+    const bad = await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/file?path=src/app.ts&ref=main;rm`);
+    expect(bad.body.error.code).toBe('validation_failed');
   });
 
   it('merges only an approved open pull request, logs it first, and keeps it open when the host refuses', async () => {
@@ -378,6 +513,34 @@ describe('pull requests', () => {
     expect(rows[0].actor).toBe('operator');
   });
 
+  it("lists every repository's pull requests under the host's owners, linking the imported Repo", async () => {
+    const ctx = await start();
+    ctx.host.ownerNames = ['octo-operator', 'acme'];
+    ctx.host.prs = [hostPr(1)];
+    ctx.host.elsewhere = [
+      {
+        ...hostPr(5, { author: 'octo-operator', url: 'https://github.com/acme/billing/pull/5' }),
+        slug: 'acme/billing',
+      },
+      { ...hostPr(6), slug: 'octo-operator/notes' },
+    ];
+    const res = await ctx.http.get('/pull-requests');
+    const rows = res.body.data.map((pr: { repo_id: string | null; slug: string; number: number; host: string }) => ({
+      repo: pr.repo_id,
+      slug: pr.slug,
+      number: pr.number,
+      host: pr.host,
+    }));
+    expect(rows).toEqual([
+      { repo: null, slug: 'octo-operator/notes', number: 6, host: 'github' },
+      { repo: null, slug: 'acme/billing', number: 5, host: 'github' },
+      { repo: ctx.repoId, slug: 'acme/orders-api', number: 1, host: 'github' },
+    ]);
+    expect(ctx.host.ownerReads).toEqual(['octo-operator', 'acme']);
+    const mine = await ctx.http.get('/pull-requests?mine=true');
+    expect(mine.body.data.map((pr: { number: number }) => pr.number)).toEqual([5]);
+  });
+
   it('has no pull requests for a Repo without a Git host', async () => {
     const ctx = await start();
     const local = await makeRepo('scratch', 'ssh://git.example.com/scratch.git');
@@ -385,6 +548,32 @@ describe('pull requests', () => {
     const res = await ctx.http.get(`/pull-requests?repo_id=${id}`);
     expect(res.status).toBe(409);
     expect((await ctx.http.get('/pull-requests')).body.data).toEqual([]);
+  });
+
+  it('lists every other Repo when one sits on a host with no adapter yet, and refuses that Repo alone', async () => {
+    const ctx = await start();
+    ctx.host.unsupported.add(GitHost.Bitbucket);
+    ctx.store.write((tx) => {
+      tx.update(connectors).set({ status: HealthStatus.Ok }).where(eq(connectors.id, ConnectorId.Bitbucket)).run();
+    });
+    const billing = await makeRepo('billing', 'git@bitbucket.org:acme/billing.git');
+    const id = (await ctx.http.post('/repos', { path: billing })).body.data.id;
+    ctx.host.prs = [hostPr(1)];
+
+    const all = await ctx.http.get('/pull-requests');
+    expect(all.status).toBe(200);
+    expect(all.body.data.map((pr: { repo_id: string }) => pr.repo_id)).toEqual([ctx.repoId]);
+    expect((await ctx.http.get(`/pull-requests?repo_id=${id}`)).status).toBe(502);
+
+    const { events, close } = await listen(ctx.daemon);
+    await ctx.http.post('/pull-requests/refresh', {});
+    const refreshed = await until(
+      () => events,
+      (list) => list.some((event) => event.event === 'pull_request.refreshed'),
+      'pull_request.refreshed',
+    );
+    expect(refreshed.find((event) => event.event === 'pull_request.refreshed')?.data).toMatchObject({ status: 'ok' });
+    close();
   });
 });
 
@@ -411,6 +600,19 @@ const waitForReview = (events: WsEvent[]) =>
   );
 
 describe('Agent Review', () => {
+  it('fails a review the last daemon left running, so a new one can start', async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1)];
+    ctx.store.write((tx) => {
+      tx.insert(prAgentReviews)
+        .values({ id: 'left-running', repoId: ctx.repoId, prNumber: 1, headSha: 'sha-1-a' })
+        .run();
+    });
+    await ctx.daemon.app.get(StartupRecovery).runAll();
+    const [review] = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
+    expect(review).toMatchObject({ id: 'left-running', status: 'failed' });
+  });
+
   it("runs in the pull request's own Session, posts each finding with an Action Log row first, and records the comments", async () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];
@@ -478,6 +680,50 @@ describe('Agent Review', () => {
     expect(rows[1].stale).toBe(true);
     const sessions = (await ctx.http.get('/sessions?kind=pr_review')).body.data;
     expect(sessions).toHaveLength(1);
+    close();
+  });
+
+  it('refuses a second review of a commit already reviewed', async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1)];
+    const { events, close } = await listen(ctx.daemon);
+    ctx.daemon.sdk.script({ text: REVIEW });
+    await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
+    await waitForReview(events);
+    const calls = ctx.daemon.sdk.calls.length;
+    const again = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
+    expect(again.status).toBe(409);
+    expect(again.body.error.code).toBe('invalid_state');
+    expect(ctx.daemon.sdk.calls).toHaveLength(calls);
+    expect(ctx.host.posted).toHaveLength(3);
+    close();
+  });
+
+  it('shows the agent the open threads, and does not post again on a line where its own open thread is', async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1)];
+    const { events, close } = await listen(ctx.daemon);
+    ctx.daemon.sdk.script({ text: REVIEW });
+    await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
+    await waitForReview(events);
+    const first = ctx.host.posted[0]?.id as string;
+
+    ctx.host.prs = [hostPr(1, { head_sha: 'sha-1-b' })];
+    ctx.daemon.sdk.script({ text: REVIEW });
+    events.length = 0;
+    await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
+    await waitForReview(events);
+
+    expect(ctx.daemon.sdk.calls.at(-1)?.prompt).toContain('on src/app.ts:3: **blocker**: Unchecked input.');
+    // src/app.ts:3 points at the first thread; the rest have no open agent thread on their line, so they post.
+    expect(ctx.host.posted.map((p) => [p.file_path ?? null, p.line ?? null])).toEqual([
+      ['src/app.ts', 3],
+      [null, null],
+      ['src/bad.ts', 9],
+      [null, null],
+    ]);
+    const [latest] = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
+    expect(latest.findings[0].comment_id).toBe(first);
     close();
   });
 

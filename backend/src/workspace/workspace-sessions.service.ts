@@ -10,7 +10,7 @@ import {
   SessionKind,
   SessionState,
 } from '@ops-console/shared';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { ActionLogService } from '../action-log/action-log.service';
 import { SessionKinds } from '../agent/session-kinds';
 import { SessionsService, toSession } from '../agent/sessions.service';
@@ -113,7 +113,11 @@ export class WorkspaceSessionsService {
     const row =
       repoId === null
         ? undefined
-        : this.store.db.select({ path: repos.path }).from(repos).where(eq(repos.id, repoId)).get();
+        : this.store.db
+            .select({ path: repos.path })
+            .from(repos)
+            .where(and(eq(repos.id, repoId), isNull(repos.removedAt)))
+            .get();
     if (!row) throw new ApiError(404, ErrorCode.NotFound, 'no such Repo');
     return row.path;
   }

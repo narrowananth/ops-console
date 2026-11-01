@@ -7,7 +7,7 @@ import {
   type RouteView,
   type Service,
 } from '@ops-console/shared';
-import { and, asc, desc, eq, inArray, max, notInArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, max, notInArray } from 'drizzle-orm';
 import type { z } from 'zod';
 import { ApiError } from '../common/errors';
 import { alerts, repos, routes, scanRouteResults, scans, services } from '../db/schema';
@@ -34,11 +34,16 @@ export class ServicesService {
   patch(id: string, body: z.infer<typeof patchServiceSchema>): Service {
     this.row(id);
     if (body.repo_id) {
-      const repo = this.store.db.select({ id: repos.id }).from(repos).where(eq(repos.id, body.repo_id)).get();
+      const repo = this.store.db
+        .select({ id: repos.id })
+        .from(repos)
+        .where(and(eq(repos.id, body.repo_id), isNull(repos.removedAt)))
+        .get();
       if (!repo) throw new ApiError(404, ErrorCode.NotFound, 'no such Repo');
     }
     const values: Partial<typeof services.$inferInsert> = {
       ...(body.repo_id === undefined ? {} : { repoId: body.repo_id }),
+      ...(body.repo_url === undefined ? {} : { repoUrl: body.repo_url }),
       ...(body.check_interval === undefined ? {} : { checkInterval: body.check_interval }),
     };
     if (Object.keys(values).length > 0) {
@@ -58,6 +63,10 @@ export class ServicesService {
       this.store.write((tx) => tx.update(routes).set(values).where(eq(routes.id, id)).run());
     }
     return this.routeView(this.store.db.select().from(routes).where(eq(routes.id, id)).get() as RouteRow);
+  }
+
+  get(id: string): Service {
+    return this.view(this.row(id));
   }
 
   private row(id: string): ServiceRow {
@@ -99,9 +108,11 @@ export class ServicesService {
       name: row.name,
       env: row.env,
       repo_id: row.repoId,
+      repo_url: row.repoUrl,
       check_interval: row.checkInterval,
       created_at: row.createdAt,
-      routes: routeRows.map((route) => this.routeView(route)),
+      // Logs with no request hang on a blank Route; it is no Route to the operator.
+      routes: routeRows.filter((route) => route.method !== '').map((route) => this.routeView(route)),
       open_alert_count: open.length,
       last_scan_at: last ?? null,
     };

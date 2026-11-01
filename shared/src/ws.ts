@@ -126,7 +126,7 @@ export const wsEventSchema = z.discriminatedUnion('event', [
     z.object({
       alert_id: z.string(),
       severity: z.enum(Severity),
-      route: z.object({ id: z.string(), method: z.string(), path: z.string() }),
+      route: z.object({ id: z.string(), method: z.string(), path: z.string() }).nullable(),
     }),
   ),
   event('alert.updated', z.object({ alert_id: z.string(), event_count: z.number().int(), last_seen_at: z.string() })),

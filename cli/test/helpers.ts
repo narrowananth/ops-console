@@ -32,6 +32,8 @@ export async function makeRelease(version: string, arch: 'arm64' | 'x64' = 'arm6
   await cp(path.join(REPO, 'cli/bin/ops-console'), path.join(stage, 'bin/ops-console'));
   await mkdir(path.join(stage, 'node/bin'), { recursive: true });
   await symlink(process.execPath, path.join(stage, 'node/bin/node'));
+  await mkdir(path.join(stage, 'Ops Console.app/Contents/MacOS'), { recursive: true });
+  await symlink(process.execPath, path.join(stage, 'Ops Console.app/Contents/MacOS/Ops Console'));
   await mkdir(path.join(stage, 'cli'));
   await cp(path.join(REPO, 'cli/dist/ops-console.js'), path.join(stage, 'cli/ops-console.js'));
   await writeFile(path.join(stage, 'cli/package.json'), '{ "type": "module" }\n');

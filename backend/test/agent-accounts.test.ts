@@ -360,6 +360,27 @@ describe('usage read from Anthropic', () => {
     await daemon.app.get(AccountsService).pollUsage();
     expect((await accounts(daemon)).meta.active_account_id).toBe(other.id);
   });
+
+  it('drops a reading taken as another added account: that folder is signed out and the active account moves', async () => {
+    const daemon = await start();
+    const [primary] = (await accounts(daemon)).data;
+    const other = await addSignedIn(daemon, 'other');
+    const primaryDir = path.join(daemon.dataDir, 'accounts', String(primary?.id));
+    await reportUsage(daemon, 100, 61);
+    // A sign-in run under the primary's folder, such as `/login`, replaced its login with the other account's.
+    await signIn(primaryDir, 'other@example.com', 'pro');
+    daemon.usage.set(primaryDir, {
+      email: 'other@example.com',
+      fiveHour: { pct: 100, resetsAt: hoursFromNow(1) },
+      weekly: { pct: 61, resetsAt: hoursFromNow(48) },
+    });
+    await daemon.app.get(AccountsService).pollUsage();
+
+    const after = await accounts(daemon);
+    expect(after.data.find((row) => row.id === primary?.id)).toMatchObject({ signed_in: false, five_hour_pct: null });
+    expect(after.meta.active_account_id).toBe(other.id);
+    expect(existsSync(path.join(primaryDir, 'fake-auth.json'))).toBe(false);
+  });
 });
 
 describe('usage', () => {
@@ -592,6 +613,42 @@ describe('a run rejected for its limit', () => {
     expect(events.find((event) => event.event === 'session.finished')?.data).toMatchObject({
       status: 'failed',
       error_code: 'rate_limited',
+    });
+    expect(daemon.sdk.calls).toHaveLength(1);
+    close();
+  });
+});
+
+describe('a run whose account cannot sign in', () => {
+  it('marks the account signed out and resumes once on the next signed-in one', async () => {
+    const daemon = await start();
+    const { events, close } = await listen(daemon);
+    const personal = await addSignedIn(daemon, 'personal');
+    const [primary] = (await accounts(daemon)).data;
+    await api(daemon).post(`/agent-accounts/${primary?.id}/activate`);
+
+    const id = daemon.createSession();
+    daemon.sdk.script({ signInExpired: true });
+    const session = await converse(daemon, id, 'go');
+
+    expect(session).toMatchObject({ state: 'idle', account_id: personal.id });
+    expect(switched(events).at(-1)).toMatchObject({ from: primary?.id, to: personal.id, reason: 'sign_in_failed' });
+    const list = await accounts(daemon);
+    expect(list.data.find((account: { id: string }) => account.id === primary?.id)).toMatchObject({ signed_in: false });
+    expect(daemon.sdk.calls.at(-1)).toMatchObject({ prompt: 'go', configDir: personal.configDir });
+    close();
+  });
+
+  it('fails with unauthorized when no other account is signed in', async () => {
+    const daemon = await start();
+    const { events, close } = await listen(daemon);
+    const id = daemon.createSession();
+    daemon.sdk.script({ signInExpired: true });
+    expect((await converse(daemon, id, 'go')).state).toBe('failed');
+    await until(() => events.some((event) => event.event === 'session.finished'), Boolean);
+    expect(events.find((event) => event.event === 'session.finished')?.data).toMatchObject({
+      status: 'failed',
+      error_code: 'unauthorized',
     });
     expect(daemon.sdk.calls).toHaveLength(1);
     close();

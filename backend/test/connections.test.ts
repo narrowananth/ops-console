@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { WsEvent } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConnectionsModule } from '../src/connections/connections.module';
+import { ConnectionsService } from '../src/connections/connections.service';
 import { KEYCHAIN } from '../src/keychain/keychain';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { type AgentDaemon, api, listen, signIn, startAgentDaemon, until } from './agent-fixtures';
@@ -11,20 +12,29 @@ import { FakeKeychain } from './fakes/keychain';
 import { FakeProbe } from './fakes/probe';
 
 const LAUNCHER = '/opt/ops-console/bin/ops-console';
+const LAUNCH_DIR = path.resolve(import.meta.dirname, '../launch');
+const READ_ONLY_PG = path.join(LAUNCH_DIR, 'dbhub-readonly.toml');
 const running: AgentDaemon[] = [];
 afterEach(async () => {
   for (const daemon of running.splice(0)) await daemon.stop();
 });
 
-type Ctx = { daemon: AgentDaemon; tester: FakeConnectionTester; keychain: FakeKeychain; dirs: string[] };
+type Ctx = {
+  daemon: AgentDaemon;
+  tester: FakeConnectionTester;
+  probe: FakeProbe;
+  keychain: FakeKeychain;
+  dirs: string[];
+};
 type Row = Record<string, unknown> & { id: string; name: string; status: string };
 
 async function start(): Promise<Ctx> {
   const tester = new FakeConnectionTester();
+  const probe = new FakeProbe();
   const daemon = await startAgentDaemon({
     modules: [
-      McpServersModule.forRoot({ probe: new FakeProbe(), launcher: LAUNCHER }),
-      ConnectionsModule.forRoot({ tester }),
+      McpServersModule.forRoot({ probe, launcher: LAUNCHER }),
+      ConnectionsModule.forRoot({ tester, launchDir: LAUNCH_DIR }),
     ],
   });
   running.push(daemon);
@@ -32,7 +42,7 @@ async function start(): Promise<Ctx> {
   const second = path.join(daemon.dataDir, 'accounts', added.body.data.account.id);
   await signIn(second, 'second@example.com', 'pro');
   await api(daemon).post(`/agent-accounts/${added.body.data.account.id}/checks`);
-  return { daemon, tester, keychain: daemon.app.get<FakeKeychain>(KEYCHAIN), dirs: [daemon.home, second] };
+  return { daemon, tester, probe, keychain: daemon.app.get<FakeKeychain>(KEYCHAIN), dirs: [daemon.home, second] };
 }
 
 const PG = {
@@ -51,6 +61,8 @@ async function registered(configDir: string): Promise<Record<string, { command?:
   }
 }
 
+/** Claude Code registrations run after the response; this waits for them. */
+const settled = (ctx: Ctx) => ctx.daemon.app.get(ConnectionsService).settled();
 const list = async (ctx: Ctx): Promise<Row[]> => (await api(ctx.daemon).get('/connections')).body.data;
 const checks = (events: WsEvent[]) =>
   events.flatMap((event) =>
@@ -70,6 +82,7 @@ describe('creating', () => {
       secret_stored: true,
       config: { host: 'db.example.com', port: 5432 },
     });
+    await settled(ctx);
     for (const dir of ctx.dirs) {
       expect((await registered(dir))['pg-orders']).toMatchObject({
         command: LAUNCHER,
@@ -82,7 +95,8 @@ describe('creating', () => {
           '@bytebase/dbhub@latest',
           '--transport',
           'stdio',
-          '--readonly',
+          '--config',
+          READ_ONLY_PG,
         ],
       });
     }
@@ -97,14 +111,14 @@ describe('creating', () => {
     expect(checks(events)[0]).toMatchObject({ id: created.body.data.id, status: 'ok' });
   });
 
-  it('leaves no row and no secret when registering fails in an account', async () => {
+  it('answers before Claude Code registers the server, and shows a failed registration on the Connection', async () => {
     const ctx = await start();
     await writeFile(path.join(ctx.dirs[1] ?? '', 'mcp-fail-add'), '');
     const created = await api(ctx.daemon).post('/connections', PG);
-    expect(created.status).toBe(502);
-    expect(created.body.error.code).toBe('upstream_failed');
-    expect(await list(ctx)).toEqual([]);
-    expect([...ctx.keychain.values.keys()]).toEqual([]);
+    expect(created.status).toBe(201);
+    await settled(ctx);
+    expect((await list(ctx))[0]).toMatchObject({ status: 'fail' });
+    expect((await list(ctx))[0]?.status_detail).toContain('not added to Claude Code');
     for (const dir of ctx.dirs) expect((await registered(dir))['pg-orders']).toBeUndefined();
   });
 
@@ -133,15 +147,26 @@ describe('creating', () => {
 });
 
 describe('Access Level', () => {
-  it('registers write without the read-only flag and none not at all, and changing it registers again', async () => {
+  it('ships a Postgres config that reads the DSN from the env and makes every tool read-only', async () => {
+    const toml = await readFile(READ_ONLY_PG, 'utf8');
+    expect(toml).toContain(`dsn = "\${DSN}"`);
+    const tools = toml.split('[[tools]]').slice(1);
+    expect(tools.map((tool) => /name = "(\w+)"/.exec(tool)?.[1])).toEqual(['execute_sql', 'search_objects']);
+    expect(tools[0]).toContain('readonly = true');
+  });
+
+  it('registers write without the read-only config and none not at all, and changing it registers again', async () => {
     const ctx = await start();
     const { body } = await api(ctx.daemon).post('/connections', { ...PG, access: 'write' });
-    expect((await registered(ctx.dirs[0] ?? ''))['pg-orders']?.args).not.toContain('--readonly');
+    await settled(ctx);
+    expect((await registered(ctx.dirs[0] ?? ''))['pg-orders']?.args).not.toContain(READ_ONLY_PG);
 
     await api(ctx.daemon).patch(`/connections/${body.data.id}`, { access: 'read' });
-    for (const dir of ctx.dirs) expect((await registered(dir))['pg-orders']?.args).toContain('--readonly');
+    await settled(ctx);
+    for (const dir of ctx.dirs) expect((await registered(dir))['pg-orders']?.args).toContain(READ_ONLY_PG);
 
     await api(ctx.daemon).patch(`/connections/${body.data.id}`, { access: 'none' });
+    await settled(ctx);
     for (const dir of ctx.dirs) expect((await registered(dir))['pg-orders']).toBeUndefined();
     expect((await list(ctx))[0]).toMatchObject({ access: 'none' });
   });
@@ -159,8 +184,10 @@ describe('Access Level', () => {
     const config = { host: 'ch.example.com', http_port: 8123, database: 'default', user: 'default' };
     const created = await api(ctx.daemon).post('/connections', { name: 'ch', type: 'clickhouse', env: 'dev', config });
     expect(created.body.data.access).toBe('read');
+    await settled(ctx);
     expect(JSON.parse(ctx.keychain.values.get('mcp:ch') ?? '{}').CLICKHOUSE_ALLOW_WRITE_ACCESS).toBe('false');
     await api(ctx.daemon).patch(`/connections/${created.body.data.id}`, { access: 'write' });
+    await settled(ctx);
     expect(JSON.parse(ctx.keychain.values.get('mcp:ch') ?? '{}').CLICKHOUSE_ALLOW_WRITE_ACCESS).toBe('true');
   });
 
@@ -250,6 +277,7 @@ describe('editing and deleting', () => {
     });
     expect(edited.body.data.config).toMatchObject({ host: 'db2.example.com', database: 'orders', user: 'reader' });
     expect(ctx.keychain.values.get(`connection:${body.data.id}`)).toBe('new-secret-value');
+    await settled(ctx);
     const env = JSON.parse(ctx.keychain.values.get('mcp:pg-orders') ?? '{}');
     expect(env.DSN).toContain('db2.example.com');
     expect(env.DSN).toContain('new-secret-value');
@@ -260,8 +288,18 @@ describe('editing and deleting', () => {
     const { body } = await api(ctx.daemon).post('/connections', PG);
     expect((await api(ctx.daemon).delete(`/connections/${body.data.id}`)).status).toBe(204);
     expect(await list(ctx)).toEqual([]);
+    await settled(ctx);
     for (const dir of ctx.dirs) expect((await registered(dir))['pg-orders']).toBeUndefined();
     expect([...ctx.keychain.values.keys()]).toEqual([]);
+  });
+
+  it('edits and deletes without asking Claude for server health', async () => {
+    const ctx = await start();
+    const { body } = await api(ctx.daemon).post('/connections', PG);
+    const runs = ctx.probe.runs;
+    await api(ctx.daemon).patch(`/connections/${body.data.id}`, { secret: 'new-secret-value' });
+    await api(ctx.daemon).delete(`/connections/${body.data.id}`);
+    expect(ctx.probe.runs).toBe(runs);
   });
 });
 
@@ -269,6 +307,7 @@ describe('MCP servers list', () => {
   it('leaves out the server of a Connection and counts it', async () => {
     const ctx = await start();
     await api(ctx.daemon).post('/connections', PG);
+    await settled(ctx);
     const servers = await api(ctx.daemon).get('/mcp-servers');
     expect(servers.body.data.map((server: Row) => server.name)).not.toContain('pg-orders');
     expect(servers.body.meta.connection_server_count).toBe(1);

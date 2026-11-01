@@ -1,28 +1,19 @@
 import { ErrorCode, GitHost } from '@ops-console/shared';
 import { ApiError } from '../common/errors';
+import { BitbucketHost } from './bitbucket-host';
 import type { GitHostAdapter, GitHosts } from './git-host';
 import { GithubHost } from './github-host';
+import { GitlabHost } from './gitlab-host';
 
-/** GitLab and Bitbucket pull requests wait for their adapters; the interface is the same. */
-class UnsupportedHost implements GitHostAdapter {
-  constructor(private readonly name: string) {}
-
-  private fail(): never {
-    throw new ApiError(502, ErrorCode.UpstreamFailed, `${this.name} pull requests are not supported yet`);
-  }
-
-  list = async () => this.fail();
-  get = async () => this.fail();
-  postComment = async () => this.fail();
-  setResolved = async () => this.fail();
-  review = async () => this.fail();
-  merge = async () => this.fail();
-}
-
+/** Each host through its own CLI, signed in as the operator (ADR 0005): `gh`, `glab`, `bkt`. */
 export class CliGitHosts implements GitHosts {
   private readonly github = new GithubHost();
-  private readonly gitlab = new UnsupportedHost('GitLab');
-  private readonly bitbucket = new UnsupportedHost('Bitbucket');
+  private readonly gitlab = new GitlabHost();
+  private readonly bitbucket = new BitbucketHost();
+
+  supports(host: GitHost): boolean {
+    return host === GitHost.Github || host === GitHost.Gitlab || host === GitHost.Bitbucket;
+  }
 
   for(host: GitHost): GitHostAdapter {
     if (host === GitHost.Github) return this.github;

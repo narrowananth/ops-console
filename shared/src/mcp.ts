@@ -18,6 +18,8 @@ export enum HealthStatus {
   Auth = 'auth',
   Fail = 'fail',
   Off = 'off',
+  /** An MCP Server no Probe has read yet; `connection.checked` follows. */
+  Checking = 'checking',
 }
 
 export enum CheckTarget {

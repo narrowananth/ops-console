@@ -1,7 +1,7 @@
 # Base layer: daemon, install and setup
 
 **Status:** shipped
-**Design:** none for the install and CLI. The app shell follows `design/ops-console.html`: top bar with the Monitor, Workspace and Dev tools views, and the Settings drawer frame with its tabs. The views and tabs stay empty until their specs.
+**Design:** none for the install and CLI. The app shell follows `design/ops-console-sidebar.html`: a left sidebar with every page. The pages stay empty until their specs.
 
 ## Problem
 
@@ -48,7 +48,7 @@ Daemon
 
 App shell
 
-27. Opening the URL from `ops-console open` stores the token in the tab's session storage and removes it from the address bar. The shell shows the top bar (Monitor, Workspace, Dev tools) and the Settings drawer with its tabs.
+27. Opening the URL from `ops-console open` stores the token in the browser's local storage and removes it from the address bar, so closing the tab and opening the console again stays signed in. A token the daemon refuses is cleared (`persist-selections-and-runs`). The shell shows the left sidebar with every page.
 28. Without a token, or with a token the daemon refuses, the shell shows "Run `ops-console open` to sign in." A daemon that does not answer shows "The console daemon is not running. Run `ops-console start`."
 
 Release and checks
@@ -61,7 +61,7 @@ Release and checks
 - **Layout**: pnpm workspace with `frontend/`, `backend/` and `shared/`, plus `cli/` for the `ops-console` command and `install.sh` at the repo root. This spec creates the backend's `common`, `db`, `auth`, `settings`, `scheduler`, `keychain`, `claude-cli` and `mcp-client` modules; feature modules arrive with their specs.
 - **Stack**: NestJS on Node 24, React 18 with Vite, Drizzle with `better-sqlite3`, Zod at every boundary, Vitest, Biome. Coding rules stay in `CODING_STANDARDS.md`.
 - **Port**: `127.0.0.1:4545` serves UI and API. In development the backend runs on `4546` and Vite on `4545` proxies `/api` and `/ws` to it.
-- **Install folder**: `~/.ops-console`, holding `versions/<version>` and `current`. The tarball holds a Node 24 runtime, the built backend and frontend, production `node_modules` with native modules (`better-sqlite3`, `node-pty`, `@napi-rs/keyring`) built for that platform, and `bin/ops-console`, a launcher that runs the bundled Node. The system Node is never used.
+- **Install folder**: `~/.ops-console`, holding `versions/<version>` and `current`. The tarball holds a Node 24 runtime, the built backend and frontend, production `node_modules` with native modules (`better-sqlite3`, `node-pty`, `@napi-rs/keyring`) built for that platform, `bin/ops-console`, a launcher that runs the bundled Node, and `Ops Console.app`, that Node in an app bundle with the Ops Console name and logo, which launchd runs as the daemon (`05-settings-dev-tools` Behavior 19). `node/bin/node` links to the bundle's binary. The system Node is never used.
 - **Install URL**: `install.sh` is served from `raw.githubusercontent.com` until there is a domain. `OPS_CONSOLE_RELEASE_URL` points it at another release folder, which the release job and tests use.
 - **launchd**: label `dev.ops-console`, stdout and stderr to the daemon log.
 - **Data folder**: `~/Library/Application Support/ops-console`, or `OPS_CONSOLE_DATA_DIR` when set. It holds `state.db`, the runtime file and the lock file. Tests point it at a temporary folder. Updating and uninstalling leave it in place.
@@ -185,7 +185,7 @@ Server to client, after a `PATCH /api/settings` commits.
 
 ## UI
 
-- **Shell**: top bar with Monitor, Workspace and Dev tools, and the Settings drawer with the Agents, MCP servers, Connectors, Dev tools and Repos tabs, as in `design/ops-console.html`. Each view and tab shows an empty placeholder until its spec lands.
+- **Shell**: a left sidebar, as in `design/ops-console-sidebar.html`. Operate: Monitor, Workspace, Dev tools. Connect: Integrations, Connections, Repos, Setup agent. Claude: Agents & accounts. Each item is a route (`/monitor`, `/workspace`, `/devtools`, `/integrations`, `/connections`, `/repos`, `/setup`, `/agents`) with a page header: title, one line and the page's main actions. Monitor shows its open Alert count, Integrations how many need the operator, Connections and Repos how many there are. The foot holds the active Claude account's 5-hour and weekly usage, the theme switch and Collapse, which leaves icons only. Buttons, fields, cards, badges and switches are rounded. Each page shows an empty placeholder until its spec lands.
 - **No token**: one panel with "Run `ops-console open` to sign in."
 - **Daemon down**: one panel with "The console daemon is not running. Run `ops-console start`."
 - Theme tokens are ported from the design now, so later screens use them (`CODING_STANDARDS.md`, Frontend).
@@ -203,7 +203,7 @@ Server to client, after a `PATCH /api/settings` commits.
 ## ADR
 
 - **0001, rewritten: SQLite file for console state**: the console runs as a daemon on one Mac and keeps the state only it knows in one SQLite file in its data folder. Messages stay in the Claude Code transcript, pull requests on the Git host, and MCP servers in the `claude` CLI. The trade-off: no offline pull request list, and no message history apart from Claude Code's.
-- **0005, new: Claude Code is the integration layer**: every outside system is an MCP server or CLI registered with Claude Code. The console's forms collect config, secrets go to the Keychain, and the console registers the server with `claude mcp add`. Fixed reads call the same servers and CLIs directly, with no model turn. Judgment work runs as agent sessions. Considered: per-service API clients, which duplicate auth and config Claude Code already holds; and the agent running everything, which makes every refresh cost tokens and seconds, with results that can vary. The trade-off: the console depends on each MCP server's tools and the `claude` CLI's output format, and a server Claude Code cannot run is a server the console cannot use.
+- **0005, new: Claude Code is the integration layer**: every outside system is an MCP server or CLI registered with Claude Code. Connecting one hands off to the provider's own browser sign-in, with nothing typed before Connect; a secret the console holds goes to the Keychain, and the console registers the server with `claude mcp add`. Fixed reads call the same servers and CLIs directly, with no model turn. Judgment work runs as agent sessions. Considered: per-service API clients, which duplicate auth and config Claude Code already holds; and the agent running everything, which makes every refresh cost tokens and seconds, with results that can vary. The trade-off: the console depends on each MCP server's tools and the `claude` CLI's output format, and a server Claude Code cannot run is a server the console cannot use.
 
 ## Seams
 
@@ -218,7 +218,7 @@ Server to client, after a `PATCH /api/settings` commits.
 ## Out of scope
 
 - Agent runtime, Sessions, session defaults, the Agents tab, Action Log and Approvals: `02-settings-agents`.
-- MCP servers tab: `03-settings-mcp-servers`. Connectors: `04-settings-connectors`. Connections and the setup terminal: `05-settings-dev-tools`. Repos: `06-settings-repos`.
+- Integrations tab: MCP Servers in `03-settings-mcp-servers`, Connectors in `04-settings-connectors`. Connections and the setup terminal: `05-settings-dev-tools`. Repos: `06-settings-repos`.
 - Workspace, Git host adapter and pull requests: `07-workspace`. Monitor: `08-monitor-dashboard`. Dev tools view: `09-dev-tools-agent`.
 - A Linux `systemd --user` unit, a custom domain for `install.sh`, a Homebrew tap, and a Tauri or Electron window around the daemon: later specs.
 - `GLOSSARY.md`: this spec adds no terms.

@@ -4,9 +4,10 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
+import { McpServersService } from '../src/mcp/mcp-servers.service';
 import { parseRemote } from '../src/repos/git';
 import { ReposModule } from '../src/repos/repos.module';
-import { type AgentDaemon, api, signIn, startAgentDaemon } from './agent-fixtures';
+import { type AgentDaemon, api, signIn, startAgentDaemon, until } from './agent-fixtures';
 import { FakeFolderPicker } from './fakes/folder-picker';
 import { FakeProbe } from './fakes/probe';
 import { tempDir } from './helpers';
@@ -189,12 +190,22 @@ describe('branches', () => {
     const { daemon } = await start();
     const dir = await makeRepo('branchy');
     const { body } = await api(daemon).post('/repos', { path: dir });
+    // Branches sort by committer date, which `--date` leaves alone; pin it on each side of `main`'s commit.
+    const commitAt = (date: string, message: string) =>
+      execFileSync(
+        'git',
+        ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-q', '--allow-empty', '-m', message],
+        {
+          cwd: dir,
+          stdio: 'pipe',
+          env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+        },
+      );
     git(dir, 'checkout', '-q', '-b', 'older');
-    git(dir, 'commit', '-q', '--allow-empty', '-m', 'on older', '--date=2020-01-01T00:00:00');
+    commitAt('2020-01-01T00:00:00Z', 'on older');
     git(dir, 'checkout', '-q', 'main');
-    await new Promise((resolve) => setTimeout(resolve, 1100));
     git(dir, 'checkout', '-q', '-b', 'newer');
-    git(dir, 'commit', '-q', '--allow-empty', '-m', 'on newer');
+    commitAt('2099-01-01T00:00:00Z', 'on newer');
     const branches = await api(daemon).get(`/repos/${body.data.id}/branches`);
     expect(branches.body.data.map((branch: { name: string }) => branch.name)).toEqual(
       ['newer', 'main', 'older'].filter(Boolean),
@@ -234,7 +245,9 @@ describe('project scope MCP servers', () => {
       JSON.stringify({ mcpServers: { docs: { type: 'stdio', command: 'node', args: ['docs.js'], env: {} } } }),
     );
     const repo = (await api(daemon).post('/repos', { path: dir })).body.data;
-    const listed = (await api(daemon).get('/mcp-servers')).body.data.find((server: Repo) => server.name === 'docs');
+    const docs = async () =>
+      (await api(daemon).get('/mcp-servers')).body.data.find((server: Repo) => server.name === 'docs');
+    const listed = await until(docs, (server) => server?.status !== 'checking', 'the Probe');
     expect(listed).toMatchObject({
       scope: 'project',
       repo_id: repo.id,
@@ -244,11 +257,7 @@ describe('project scope MCP servers', () => {
     });
     probe.approve(daemon.home, 'docs');
     await api(daemon).post('/mcp-servers/docs/checks');
-    expect(
-      (await api(daemon).get('/mcp-servers')).body.data.find((server: Repo) => server.name === 'docs'),
-    ).toMatchObject({
-      status: 'ok',
-    });
+    await until(docs, (server) => server?.status === 'ok', 'the approval');
   });
 
   it('adds a project server to the Repo .mcp.json once, and removes it', async () => {
@@ -280,6 +289,7 @@ describe('project scope MCP servers', () => {
     expect(file.mcpServers.docs).toMatchObject({ command: 'node', args: ['docs.js'] });
 
     await api(daemon).delete('/mcp-servers/docs/credentials');
+    await daemon.app.get(McpServersService).settled();
     const after = JSON.parse((await import('node:fs')).readFileSync(path.join(repo.path, '.mcp.json'), 'utf8'));
     expect(after.mcpServers.docs).toBeUndefined();
   });

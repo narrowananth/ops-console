@@ -1,11 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post } from '@nestjs/common';
-import {
-  type Connector,
-  type ConnectorCheck,
-  ConnectorId,
-  connectConnectorSchema,
-  updateConnectorSchema,
-} from '@ops-console/shared';
+import { type Connector, type ConnectorCheck, ConnectorId, updateConnectorSchema } from '@ops-console/shared';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
 import { ConnectorsService } from './connectors.service';
@@ -29,9 +23,8 @@ export class ConnectorsController {
 
   @Post(':id/connect')
   @HttpCode(202)
-  async connect(@Param() params: unknown, @Body() body: unknown): Promise<void> {
-    const { id } = parseInput(idParams, params, 'params');
-    await this.connectors.connect(id, parseInput(connectConnectorSchema, body ?? {}, 'body').secret);
+  async connect(@Param() params: unknown): Promise<void> {
+    await this.connectors.connect(parseInput(idParams, params, 'params').id);
   }
 
   @Post(':id/checks')

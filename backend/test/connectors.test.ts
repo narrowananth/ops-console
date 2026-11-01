@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { CONNECTOR_ORDER, ConnectorId, type WsEvent } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
@@ -8,6 +9,7 @@ import { connectors } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { KEYCHAIN } from '../src/keychain/keychain';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
+import { McpServersService } from '../src/mcp/mcp-servers.service';
 import { type AgentDaemon, api, listen, signIn, startAgentDaemon, until } from './agent-fixtures';
 import { FakeConnectorTools } from './fakes/connector-tools';
 import { FakeKeychain } from './fakes/keychain';
@@ -37,17 +39,29 @@ async function start(): Promise<Ctx> {
 
 const list = async (ctx: Ctx): Promise<Row[]> => (await api(ctx.daemon).get('/connectors')).body.data;
 const one = async (ctx: Ctx, id: string): Promise<Row> => (await list(ctx)).find((row) => row.id === id) as Row;
+/** Fake `claude mcp login <name>` processes still running. */
+const logins = async (name: string): Promise<number> => {
+  try {
+    return execFileSync('pgrep', ['-f', `claude.mjs mcp login ${name}`], { encoding: 'utf8' })
+      .trim()
+      .split('\n').length;
+  } catch {
+    return 0;
+  }
+};
+const mcpServer = async (ctx: Ctx, name: string): Promise<Row | undefined> =>
+  (await api(ctx.daemon).get('/mcp-servers')).body.data.find((s: Row) => s.name === name);
 const checks = (events: WsEvent[]) =>
   events.flatMap((event) =>
     event.event === 'connection.checked' && event.data.target === 'connector' ? [event.data] : [],
   );
 
 describe('listing', () => {
-  it('returns all seven in the fixed order, off, with their default config', async () => {
+  it('returns every Connector in the fixed order, off, with their default config', async () => {
     const ctx = await start();
     const rows = await list(ctx);
     expect(rows.map((row) => row.id)).toEqual(CONNECTOR_ORDER);
-    expect(rows.every((row) => row.status === 'off' && row.secret_stored === false)).toBe(true);
+    expect(rows.every((row) => row.status === 'off' && row.sign_in === null)).toBe(true);
     expect(rows[0]).toMatchObject({
       name: 'Datadog',
       via: 'pup CLI + datadog-pup MCP',
@@ -101,6 +115,101 @@ describe('connecting', () => {
     expect(checks(events).at(-1)).toMatchObject({ id: 'github', status: 'ok' });
   });
 
+  it("shows gh's one-time code and page while the sign-in waits, and clears them when it ends", async () => {
+    const ctx = await start();
+    ctx.tools.next = 'hang';
+    await api(ctx.daemon).post('/connectors/github/connect', {});
+    const waiting = await until(
+      () => one(ctx, 'github'),
+      (row) => row.sign_in !== null && (row.sign_in as { code: string | null }).code !== null,
+      'the code',
+    );
+    expect(waiting.sign_in).toEqual({ code: 'WXYZ-1234', url: 'https://github.com/login/device' });
+
+    ctx.tools.next = 'ok';
+    await api(ctx.daemon).post('/connectors/github/connect', {});
+    const done = await until(
+      () => one(ctx, 'github'),
+      (row) => row.status === 'ok' && row.sign_in === null,
+      'the sign-in',
+    );
+    expect(done.login).toBe('octo-operator');
+  });
+
+  it('installs what GitHub needs and registers its MCP server with the gh token in the Keychain only', async () => {
+    const ctx = await start();
+    ctx.tools.missing = new Set(['gh', 'github-mcp-server']);
+    await api(ctx.daemon).post('/connectors/github/connect', {});
+    await until(
+      () => one(ctx, 'github'),
+      (row) => row.status === 'ok',
+      'the sign-in',
+    );
+    expect(ctx.tools.brewed).toEqual(['gh', 'github-mcp-server']);
+    // The account reads connected first; the server registers right after.
+    const server = await until(
+      () => mcpServer(ctx, 'github'),
+      (found) => found !== undefined,
+      'the registration',
+    );
+    expect(server).toMatchObject({
+      target: 'github-mcp-server stdio',
+      used_by: 'github',
+      env_keys: ['GITHUB_PERSONAL_ACCESS_TOKEN'],
+    });
+    expect(JSON.parse(ctx.keychain.values.get('mcp:github') ?? '{}')).toEqual({
+      GITHUB_PERSONAL_ACCESS_TOKEN: 'gho_example_token',
+    });
+  });
+
+  it('says to install Homebrew when GitHub needs an install and brew is missing', async () => {
+    const ctx = await start();
+    ctx.tools.missing = new Set(['github-mcp-server', 'brew']);
+    await api(ctx.daemon).post('/connectors/github/connect', {});
+    const row = await until(
+      () => one(ctx, 'github'),
+      (row) => row.status === 'auth',
+      'the refusal',
+    );
+    expect(row.status_detail).toContain('install Homebrew from brew.sh');
+    expect(ctx.tools.brewed).toEqual([]);
+  });
+
+  it('registers the Shopify Dev MCP server with no sign-in', async () => {
+    const ctx = await start();
+    await api(ctx.daemon).post('/connectors/shopify/connect', {});
+    await until(
+      () => one(ctx, 'shopify'),
+      (row) => row.status === 'ok',
+      'the check',
+    );
+    const server = (await api(ctx.daemon).get('/mcp-servers')).body.data.find((s: Row) => s.name === 'shopify');
+    expect(server).toMatchObject({ target: 'npx -y @shopify/dev-mcp@latest', used_by: 'shopify' });
+  });
+
+  it('turns the Shopify server back on when it was turned off in MCP servers', async () => {
+    const ctx = await start();
+    await api(ctx.daemon).post('/connectors/shopify/connect', {});
+    await until(
+      () => one(ctx, 'shopify'),
+      (row) => row.status === 'ok',
+      'the check',
+    );
+    await api(ctx.daemon).patch('/mcp-servers/shopify', { enabled: false });
+    expect((await api(ctx.daemon).post('/connectors/shopify/checks', {})).body.data).toMatchObject({
+      status: 'fail',
+      status_detail: 'shopify is turned off in MCP servers',
+    });
+
+    await api(ctx.daemon).post('/connectors/shopify/connect', {});
+    await until(
+      () => one(ctx, 'shopify'),
+      (row) => row.status === 'ok' && row.sign_in === null,
+      'the check',
+    );
+    expect(await mcpServer(ctx, 'shopify')).toMatchObject({ enabled: true, status: 'ok' });
+  });
+
   it('signs Datadog in and registers the datadog-pup server when this pup has one', async () => {
     const ctx = await start();
     await api(ctx.daemon).post('/connectors/datadog/connect', {});
@@ -110,7 +219,11 @@ describe('connecting', () => {
       'the sign-in',
     );
     expect((await one(ctx, 'datadog')).account_label).toBe('example-org');
-    const server = (await api(ctx.daemon).get('/mcp-servers')).body.data.find((s: Row) => s.name === 'datadog-pup');
+    const server = await until(
+      () => mcpServer(ctx, 'datadog-pup'),
+      (found) => found !== undefined,
+      'the registration',
+    );
     expect(server).toMatchObject({ target: 'pup mcp serve', used_by: 'datadog' });
   });
 
@@ -137,37 +250,75 @@ describe('connecting', () => {
       'the sign-in',
     );
     const server = (await api(ctx.daemon).get('/mcp-servers')).body.data.find((s: Row) => s.name === 'atlassian');
-    expect(server).toMatchObject({ transport: 'sse', status: 'ok', used_by: 'jira' });
+    expect(server).toMatchObject({ transport: 'http', status: 'ok', used_by: 'jira' });
   });
 
-  it('needs a token for GitLab and Bitbucket, keeps it in the Keychain, and signs glab in with it', async () => {
+  it('moves a Connector with its MCP server between checks', async () => {
     const ctx = await start();
-    const bare = await api(ctx.daemon).post('/connectors/gitlab/connect', {});
-    expect(bare.status).toBe(400);
-    expect(bare.body.error.code).toBe('validation_failed');
-    expect((await api(ctx.daemon).post('/connectors/github/connect', { secret: 'x' })).status).toBe(400);
+    await api(ctx.daemon).post('/connectors/jira/connect', {});
+    await until(
+      () => one(ctx, 'jira'),
+      (row) => row.status === 'ok' && row.sign_in === null,
+      'the sign-in',
+    );
+    for (const dir of ctx.dirs) ctx.probe.set(dir, 'atlassian', { status: 'failed', error: 'connection refused' });
+    await api(ctx.daemon).post('/mcp-servers/atlassian/checks', {});
+    expect(await one(ctx, 'jira')).toMatchObject({ status: 'fail' });
 
-    await api(ctx.daemon).post('/connectors/gitlab/connect', { secret: 'glpat-secret-token' });
+    for (const dir of ctx.dirs) ctx.probe.set(dir, 'atlassian', { status: 'connected' });
+    await api(ctx.daemon).post('/mcp-servers/atlassian/checks', {});
+    expect(await one(ctx, 'jira')).toMatchObject({ status: 'ok', status_detail: null });
+  });
+
+  it('signs GitLab in through the browser, installing glab first, and skips it when glab is signed in', async () => {
+    const ctx = await start();
+    ctx.tools.missing = new Set(['glab']);
+    await api(ctx.daemon).post('/connectors/gitlab/connect', {});
     await until(
       () => one(ctx, 'gitlab'),
       (row) => row.status === 'ok',
       'the sign-in',
     );
-    expect(ctx.keychain.values.get('connector:gitlab')).toBe('glpat-secret-token');
-    expect(ctx.tools.gitlabTokens).toEqual(['glpat-secret-token']);
-    expect(await one(ctx, 'gitlab')).toMatchObject({ login: 'gl-operator', secret_stored: true });
+    expect(ctx.tools.brewed).toEqual(['glab']);
+    expect(ctx.tools.gitlabLogins).toEqual(['gitlab.com']);
+    expect(await one(ctx, 'gitlab')).toMatchObject({ login: 'gl-operator', account_label: 'gitlab.com' });
 
-    ctx.tools.bitbucketTokens.set('bb-secret-token', 'bb-operator');
-    await api(ctx.daemon).post('/connectors/bitbucket/connect', { secret: 'bb-secret-token' });
+    await api(ctx.daemon).post('/connectors/gitlab/connect', {});
     await until(
+      () => one(ctx, 'gitlab'),
+      (row) => row.sign_in === null,
+      'the second connect',
+    );
+    expect(ctx.tools.gitlabLogins).toEqual(['gitlab.com']);
+  });
+
+  it('connects Bitbucket through bkt and the Atlassian server Jira shares, and Disconnect leaves it while one uses it', async () => {
+    const ctx = await start();
+    for (const dir of ctx.dirs) ctx.probe.set(dir, 'atlassian', { status: 'needs-auth' });
+    await api(ctx.daemon).post('/connectors/bitbucket/connect', {});
+    const connected = await until(
       () => one(ctx, 'bitbucket'),
       (row) => row.status === 'ok',
       'the sign-in',
     );
-    expect(await one(ctx, 'bitbucket')).toMatchObject({ login: 'bb-operator', secret_stored: true });
+    expect(connected).toMatchObject({ login: 'bb-operator', via: 'bkt CLI + Atlassian MCP' });
+    await api(ctx.daemon).post('/connectors/jira/connect', {});
+    await until(
+      () => one(ctx, 'jira'),
+      (row) => row.status === 'ok',
+      'the Jira check',
+    );
+
+    await api(ctx.daemon).delete('/connectors/bitbucket/credentials');
+    const server = async () =>
+      (await api(ctx.daemon).get('/mcp-servers')).body.data.find((s: Row) => s.name === 'atlassian');
+    expect(await server()).toMatchObject({ registered: true });
+    await api(ctx.daemon).delete('/connectors/jira/credentials');
+    await ctx.daemon.app.get(McpServersService).settled();
+    expect(await server()).toMatchObject({ registered: false });
   });
 
-  it('leaves auth with the reason when the sign-in fails, and when Bitbucket refuses the token', async () => {
+  it('leaves auth with the reason when the sign-in fails', async () => {
     const ctx = await start();
     ctx.tools.next = 'fail';
     await api(ctx.daemon).post('/connectors/github/connect', {});
@@ -177,14 +328,53 @@ describe('connecting', () => {
       'the failure',
     );
     expect(failed.status_detail).toBe('`login` failed');
+  });
 
-    await api(ctx.daemon).post('/connectors/bitbucket/connect', { secret: 'wrong-token' });
-    const refused = await until(
-      () => one(ctx, 'bitbucket'),
-      (row) => row.status === 'auth',
-      'the refusal',
-    );
-    expect(refused.status_detail).toBe('Bitbucket refused the token');
+  it("leaves auth with Claude Code's reason when an MCP Server sign-in fails", async () => {
+    const ctx = await start();
+    process.env.FAKE_MCP_LOGIN = 'fail';
+    try {
+      for (const dir of ctx.dirs) ctx.probe.set(dir, 'slack', { status: 'needs-auth' });
+      await api(ctx.daemon).post('/connectors/slack/connect', {});
+      const failed = await until(
+        () => one(ctx, 'slack'),
+        (row) => row.status === 'auth' && row.sign_in === null && row.status_detail !== null,
+        'the failure',
+      );
+      expect(failed.status_detail).toContain('Incompatible auth server');
+    } finally {
+      delete process.env.FAKE_MCP_LOGIN;
+    }
+  });
+
+  it('keeps the sign-in failure when a slower check started before it', async () => {
+    const ctx = await start();
+    process.env.FAKE_MCP_LOGIN = 'fail';
+    try {
+      for (const dir of ctx.dirs) ctx.probe.set(dir, 'slack', { status: 'needs-auth' });
+      await api(ctx.daemon).post('/connectors/slack/connect', {});
+      await until(
+        () => one(ctx, 'slack'),
+        (row) => row.sign_in === null,
+        'the first sign-in',
+      );
+      ctx.probe.delayMs = 1_500;
+      // A request is sent once something waits on it.
+      const slowCheck = api(ctx.daemon)
+        .post('/connectors/slack/checks')
+        .then((response) => response);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await api(ctx.daemon).post('/connectors/slack/connect', {});
+      await until(
+        () => one(ctx, 'slack'),
+        (row) => row.sign_in === null && String(row.status_detail ?? '').includes('Incompatible'),
+        'the failure',
+      );
+      await slowCheck;
+      expect((await one(ctx, 'slack')).status_detail).toContain('Incompatible auth server');
+    } finally {
+      delete process.env.FAKE_MCP_LOGIN;
+    }
   });
 
   it('reads a tool that does not answer as fail', async () => {
@@ -226,7 +416,7 @@ describe('config', () => {
 });
 
 describe('disconnecting', () => {
-  it('clears the token and login, removes the MCP server, and leaves the CLIs signed in', async () => {
+  it('clears the login, removes the MCP server, and leaves the CLIs signed in', async () => {
     const ctx = await start();
     ctx.tools.datadog = { signedIn: true, org: 'example-org' };
     await api(ctx.daemon).post('/connectors/datadog/connect', {});
@@ -235,22 +425,50 @@ describe('disconnecting', () => {
       (row) => row.status === 'ok',
       'the sign-in',
     );
+    await until(
+      () => mcpServer(ctx, 'datadog-pup'),
+      (found) => found?.registered === true,
+      'the registration',
+    );
     const off = await api(ctx.daemon).delete('/connectors/datadog/credentials');
     expect(off.body.data).toMatchObject({ status: 'off', login: null, account_label: null });
     const server = (await api(ctx.daemon).get('/mcp-servers')).body.data.find((s: Row) => s.name === 'datadog-pup');
     expect(server).toMatchObject({ registered: false });
     expect(ctx.tools.datadog.signedIn).toBe(true);
 
-    await api(ctx.daemon).post('/connectors/gitlab/connect', { secret: 'glpat-secret-token' });
+    await api(ctx.daemon).post('/connectors/gitlab/connect', {});
     await until(
       () => one(ctx, 'gitlab'),
       (row) => row.status === 'ok',
       'the sign-in',
     );
     const gone = await api(ctx.daemon).delete('/connectors/gitlab/credentials');
-    expect(gone.body.data).toMatchObject({ status: 'off', login: null, secret_stored: false });
-    expect(ctx.keychain.values.has('connector:gitlab')).toBe(false);
+    expect(gone.body.data).toMatchObject({ status: 'off', login: null });
     expect(ctx.tools.gitlab).toBe('gl-operator');
+  });
+
+  it('opens the sign-in of a server it just registered at once, and Disconnect stops it', async () => {
+    const ctx = await start();
+    process.env.FAKE_MCP_LOGIN = 'hang';
+    try {
+      const reads = ctx.probe.ones;
+      await api(ctx.daemon).post('/connectors/sentry/connect', {});
+      await until(
+        () => logins('sentry'),
+        (count) => count === 1,
+        'claude mcp login',
+      );
+      // No one-server read ran first: the new registration holds no sign-in.
+      expect(ctx.probe.ones).toBe(reads);
+      await api(ctx.daemon).delete('/connectors/sentry/credentials');
+      await until(
+        () => logins('sentry'),
+        (count) => count === 0,
+        'the login to stop',
+      );
+    } finally {
+      delete process.env.FAKE_MCP_LOGIN;
+    }
   });
 
   it('stops a sign-in still waiting on the browser', async () => {
@@ -280,16 +498,14 @@ describe('secrets', () => {
   it('shows no token in a response, an event or the log', async () => {
     const ctx = await start();
     const { events, close } = await listen(ctx.daemon);
-    const responses = [
-      (await api(ctx.daemon).post('/connectors/gitlab/connect', { secret: 'glpat-secret-token' })).body,
-    ];
+    const responses = [(await api(ctx.daemon).post('/connectors/github/connect', {})).body];
     await until(
-      () => one(ctx, 'gitlab'),
+      () => one(ctx, 'github'),
       (row) => row.status === 'ok',
       'the sign-in',
     );
-    responses.push(await list(ctx), (await api(ctx.daemon).post('/connectors/gitlab/checks')).body);
+    responses.push(await list(ctx), (await api(ctx.daemon).post('/connectors/github/checks')).body);
     close();
-    expect(JSON.stringify([responses, events, ctx.daemon.log])).not.toContain('glpat-secret-token');
+    expect(JSON.stringify([responses, events, ctx.daemon.log])).not.toContain('gho_example_token');
   });
 });

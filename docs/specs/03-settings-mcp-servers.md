@@ -1,7 +1,7 @@
 # Settings: MCP servers
 
 **Status:** shipped
-**Design:** Settings › MCP servers, its detail drawer (Details, Tools, Reconnect, Disconnect, Remove) and the add and edit form
+**Design:** the design's MCP servers tab and its detail, shown as a pane beside the list, (Details, Tools, Reconnect, Disconnect, Remove), merged with Connectors into Integrations. The design's add and edit form is left out: Connectors add servers (Behavior 17)
 
 ## Problem
 
@@ -12,25 +12,26 @@ This spec gives the operator one list across every account, and add, edit, authe
 ## Behavior
 
 1. Listing MCP Servers reads every Claude account's config (user and local scope), merged by name. Project-scoped servers from each Repo's `.mcp.json` join the list. Each entry shows transport, command or URL, scope, status, tool count, and the Connector using it (`used_by`) when one matches.
-2. Servers that back a Connection are left out. `meta.connection_server_count` says how many there are, and the tab links to Settings › Dev tools.
-3. Status comes from a Probe per account. A server's status is the worst across accounts (`fail`, then `auth`, then `ok`); `status_detail` names the account and the error. A disabled server reads `off`. Probe results are kept in memory for 60 seconds.
+2. Servers that back a Connection are left out. `meta.connection_server_count` says how many there are; the sidebar's Connections page lists them.
+3. Status comes from a Probe per account. A server's status is the worst across accounts (`fail`, then `auth`, then `ok`), except that `auth` counts only from the active account, and an account still `checking` does not hide another's `ok`; `status_detail` names the account and the error. A disabled server reads `off`. Probe results are kept in memory. The daemon starts the first Probes when it starts. A read never waits for a Probe: it answers in under 200 ms from the kept one, or `checking` before the first. A kept Probe older than 60 seconds, or one taken before a server was added, is run again in the background. Each server whose reading moves sends `connection.checked`, and the list reads again. Add, edit and Reconnect answer with `checking` the same way.
 4. Adding a server takes name, transport, command or URL, scope, and env vars (stdio) or headers (http, sse). Env vars go to the Keychain adapter under `mcp:<name>`. A stdio server with env vars is registered as `ops-console mcp-exec <name> -- <command>`; at launch that wrapper reads the env vars from the Keychain and starts the command with them. A stdio server with none is registered as its own command. The console runs `claude mcp add` in every account's config dir (user scope, or local scope in the folder `mcp-local` of the data folder) or writes the Repo's `.mcp.json` once (project scope, once `06-settings-repos` lands), then checks the server.
 5. If registering fails in any account, the accounts already done are rolled back, the Keychain entry is deleted, and the response is `upstream_failed`.
-6. Headers for http and sse servers are passed to `claude mcp add --header`. Claude Code sends them itself, so it keeps them in its own config file in plain text. The form says so and suggests OAuth instead: leave headers empty and Authenticate.
+6. Headers for http and sse servers are passed to `claude mcp add --header`. Claude Code sends them itself, so it keeps them in its own config file in plain text. The API takes them; the tab adds no server with headers.
 7. A name already used by a server, a removed server or a Connection is refused with `duplicate`.
 8. Editing changes transport, command or URL, scope, env vars or headers; blank fields keep their value; the name cannot change. A change registers the server again in every account and checks it.
-9. Authenticate runs `claude mcp login <name>` for each account whose Probe reads `auth`, which opens the sign-in in the browser. On success the status is `ok`. A cancelled or failed sign-in leaves it `auth`.
+9. Authenticate runs `claude mcp login <name>` in the active account when its kept reading is `auth`, which opens the sign-in in the browser. With no reading kept yet, the console first connects that one server alone in the account, which takes a second or two where a Probe starts every server. It runs in a pseudo-terminal, because `claude mcp login` refuses to start without one. Each account keeps its own token, so another account signs in once it becomes active and its Probe reads `auth`. On success the status is `ok` at once, and a one-server read brings the tools. A cancelled or failed sign-in leaves it `auth`, with Claude Code's reason when it gives one.
 10. Reconnect starts a new Probe and reloads the tools. A server registered in some accounts but not others is first registered in the missing ones, copied from an account that has it.
 11. Disable keeps the server out of every session the console starts (agent runs and terminals). Its config and login stay, and its status reads `off`. Enable undoes it.
-12. Remove runs `claude mcp logout` and `claude mcp remove -s <scope>` in every account, deletes the `mcp:<name>` Keychain entry, and stores name, scope, transport and target in `removed_mcp_servers`. The list still shows it, with `registered: false` and status `auth`.
-13. Authenticate on a removed server registers it again from that row, signs in, and deletes the row. A stdio server that needed env vars opens the edit form first, because its env vars were cleared.
+12. Remove stores name, scope, transport and target in `removed_mcp_servers` and answers at once. The list shows it with `registered: false` and status `auth`. In the background it runs `claude mcp logout` and `claude mcp remove -s <scope>` in every account at the same time, deletes the `mcp:<name>` Keychain entry, then sends `connection.checked`. If that fails, the server lists as registered again, and the event carries `fail` with "not removed: …".
+13. Authenticate on a removed server registers it again from that row, signs in, and deletes the row. A stdio server that needed env vars is refused, because its env vars were cleared; a Connector's server is added again by connecting its Connector.
 14. A server added or removed outside the console (in a terminal) shows up or drops out on the next list, unless it is in `removed_mcp_servers`.
 15. No response, event or log carries an env var value or a header value. Reads show `env_keys` (names only) and `has_headers`.
 16. Every check, sign-in and Reconnect sends `connection.checked` with target `mcp_server`.
+17. Integrations holds Connectors and MCP Servers in one list, each row labelled `Connector` or `MCP`. An MCP Server gives Claude tools; a Connector signs the operator in to a service and registers that service's server (`04-settings-connectors`). The list adds no server itself. A Connector's row stands for its server (`used_by`), connected or not, so that server has no row of its own; any other server, including one registered by hand, by a Repo's `.mcp.json` or by the Setup agent, gets an `MCP` row. Every row has the same columns: name and label with a line under it, status, and one text action (Connect, Sign in, Reconnect or Manage). A Connector that is off reads "not connected".
 
 ## Settled
 
-- **Probe**: an Agent SDK session started with one account's config dir. It asks Claude Code for each MCP Server's state, error and tools once none is pending, and stops before any model turn. No tokens are spent.
+- **Probe**: an Agent SDK session started with one account's config dir. It asks Claude Code for each MCP Server's state, error and tools once none is pending, and stops before any model turn. No tokens are spent. Around a sign-in or a Connector check it can connect one server alone instead, with the account's stored token. A stdio server that fails on that first start is started once more, since `npx -y` may still be downloading it.
 - **Listing**: the servers an account registers are read from its `.claude.json`; `claude mcp list` starts every server, so it is never used. Signed-out accounts get registrations but no Probe.
 - **Launcher**: `ops-console mcp-exec <name> -- <command>` is the stdio launch command for every server whose secrets the console holds, Connections included (`05-settings-dev-tools`). It reads the Keychain at launch, so secrets reach the server process and nothing else. Its path comes from `OPS_CONSOLE_LAUNCHER`, and defaults to the installed `~/.ops-console/current/bin/ops-console`.
 - **Env var storage**: all of a server's env vars are one JSON object under the Keychain key `mcp:<name>`.
@@ -42,10 +43,10 @@ This spec gives the operator one list across every account, and add, edit, authe
 
 ## Not required
 
-- **Fresh status**: a status can be 60 seconds old. Reconnect forces a new Probe.
+- **Fresh status**: a status can be 60 seconds old until the background Probe answers. Reconnect starts a new one.
 - **Disable outside the console**: a `claude` the operator starts in their own terminal still loads a disabled server.
 - **Header secrets**: headers live in Claude Code's config in plain text (Behavior 6). The console cannot move them to the Keychain while Claude Code sends them.
-- **One sign-in**: with several accounts, Authenticate opens one browser sign-in per account.
+- **Every account signed in at once**: Authenticate signs in the active account only. After a switch, the server reads `auth` until the operator signs in the new active account.
 
 ## Safety
 
@@ -113,7 +114,7 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`.
 | `GET /mcp-servers` | | `McpServer[]`; `meta.connection_server_count` |
 | `POST /mcp-servers` | `{ name, transport, target, scope, repo_id?, env?, headers? }` | 201 `McpServer`; `duplicate`, `upstream_failed`; `validation_failed` when project scope has no `repo_id` |
 | `PATCH /mcp-servers/:name` | `{ enabled?, transport?, target?, scope?, env?, headers? }` | `McpServer` |
-| `POST /mcp-servers/:name/checks` | | `McpServer` after a new Probe (Reconnect) |
+| `POST /mcp-servers/:name/checks` | | `McpServer` with `status: checking`; a new Probe runs in the background (Reconnect) |
 | `POST /mcp-servers/:name/auth` | | 202; `connection.checked` reports the result |
 | `DELETE /mcp-servers/:name/credentials` | | `McpServer` with `registered: false`, `status: auth` (Remove) |
 
@@ -135,10 +136,9 @@ Server to client, after a check, sign-in or Reconnect of an MCP Server, Connecto
 
 ## UI
 
-Settings › MCP servers, as designed: one row per server with name, scope and target, a status glyph (connected, needs authentication, failed, disabled), tool count, and an action (Authenticate, Reconnect or Manage). Below the list, the note on database servers links to Dev tools. The drawer shows read-only details, the tool list ("Tools are listed once the server is connected"), Reconnect, Disconnect or Enable, and Remove with a confirm that shows the `claude mcp remove` command.
+Integrations, below the Connectors (`04-settings-connectors`): one row per server with name, an `MCP` label, scope and target, a status glyph (connected, needs authentication, failed, disabled), tool count, and an action (Authenticate, Reconnect or Manage). Below the list, the note on database servers links to Connections. Picking a row opens a pane beside the list with read-only details, the tool list ("Tools are listed once the server is connected"), Reconnect, Disconnect or Enable, and Remove with a confirm that shows the `claude mcp remove` command.
 
-- Loading: rows as placeholders until the first Probe answers.
-- Empty: "No MCP servers yet" with Add server.
+- Checking: a row reads "◌ checking" until the first Probe answers.
 - Error: a row whose Probe failed shows the start error under the target.
 
 ## Rejected
@@ -155,7 +155,7 @@ Settings › MCP servers, as designed: one row per server with name, scope and t
 
 ## ADR
 
-- **0004, amended: MCP headers stay with Claude Code**: secrets live in the Keychain, except headers for http and sse MCP servers. Claude Code sends those itself and keeps them in its own config file, so the console cannot hold them. The form warns and suggests OAuth (Behavior 6). Considered: refusing secret headers, which blocks servers that only take an API key header.
+- **0004, amended: MCP headers stay with Claude Code**: secrets live in the Keychain, except headers for http and sse MCP servers. Claude Code sends those itself and keeps them in its own config file, so the console cannot hold them. The API takes them (Behavior 6); the tab adds none. Considered: refusing secret headers, which blocks servers that only take an API key header.
 
 ## Seams
 
