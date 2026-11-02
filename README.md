@@ -56,11 +56,13 @@ Needs Node 24 and pnpm (`mise install`).
 
 ```
 pnpm install
-pnpm dev               # backend on 127.0.0.1:4546, UI on http://127.0.0.1:4545
+pnpm dev               # backend on 127.0.0.1:4556, UI on http://127.0.0.1:4555
 pnpm dev:open          # open the UI signed in to the dev backend
 ```
 
-The dev backend keeps its data in `backend/.data`. On macOS launchd runs it as `Ops Console (dev).app`, so macOS
+It runs beside the installed app, which keeps 4545. The dev backend keeps its data in `backend/.data` and its
+Keychain items under the service `ops-console-dev`, so it never reads or moves the installed app's. The tab reads
+Ops Console (dev). On macOS launchd runs it as `Ops Console (dev).app`, so macOS
 asks for Full Disk Access under that name, not the terminal's. The console's Keychain items move to each new build
 of the app, so it reads them without asking. Its log streams into the `pnpm dev` terminal, and Ctrl+C stops it.
 `OPS_CONSOLE_DEV_INLINE=1 pnpm dev` runs it in the terminal instead; macOS then asks for each Keychain item.
@@ -73,13 +75,13 @@ pnpm db:generate       # write a migration after changing backend/src/db/schema.
 pnpm package           # build out/ops-console-darwin-<arch>.tar.gz on this Mac
 ```
 
-To try the install flow from your build, with `pnpm dev` still holding 4545:
+To try the install flow from your build (it replaces the installed app, and `pnpm dev` can keep running):
 
 ```
 pnpm build && pnpm package
 (cd out && shasum -a 256 ops-console-darwin-*.tar.gz > checksums.txt)
 OPS_CONSOLE_RELEASE_URL="file://$PWD/out" sh install.sh
-OPS_CONSOLE_PORT=4547 ops-console start
+ops-console stop && ops-console start
 ```
 
 Pushing a `v*` tag builds both tarballs on macOS runners, installs and runs each, then attaches them

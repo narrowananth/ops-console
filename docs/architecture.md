@@ -19,8 +19,9 @@ browser (127.0.0.1:4545)                 operator's Mac
                                           launchd keeps it running (dev.ops-console)
 ```
 
-One port serves everything. In development Vite serves the UI on 4545 and proxies `/api`, `/ws` and
-`/terminals` to the backend on 4546.
+One port serves everything. In development Vite serves the UI on 4555 and proxies `/api`, `/ws` and
+`/terminals` to the backend on 4556. The dev backend keeps its data in `backend/.data` and its Keychain items under
+the service `ops-console-dev`, so it runs beside the installed app and leaves its data alone.
 
 ## Install and run
 
@@ -42,8 +43,8 @@ session token; mode `0600`), `daemon.lock`, each Claude account's config dir and
 Session's folder. The log is `~/Library/Logs/ops-console/daemon.log`.
 
 To try an install before a release, `pnpm build`, `pnpm package` and a `checksums.txt` beside the tarball in `out/`,
-then `OPS_CONSOLE_RELEASE_URL=file://<repo>/out sh install.sh`. Run it on another port than 4545 while `pnpm dev`
-holds it.
+then `OPS_CONSOLE_RELEASE_URL=file://<repo>/out sh install.sh`. It replaces the installed app, since both use
+`~/.ops-console` and the same data folder.
 
 `bin/ops-console` also starts two helpers from the daemon bundle: `mcp-exec`, the launcher that
 reads a stdio MCP Server's env vars from the Keychain, and `mcp-setup`, the Setup agent's MCP

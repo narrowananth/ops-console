@@ -21,8 +21,10 @@ import { runSetupMcp } from './terminals/setup-mcp';
 import { TerminalsModule } from './terminals/terminals.module';
 import { WorkspaceModule } from './workspace/workspace.module';
 
+const keychain = new LoginKeychain(process.env.OPS_CONSOLE_KEYCHAIN_SERVICE || undefined);
+
 // `ops-console mcp-exec <name> -- <command>`: the launcher for a stdio server whose env vars the console holds.
-if (process.argv[2] === 'mcp-exec') process.exit(await runMcpExec(process.argv.slice(3), new LoginKeychain()));
+if (process.argv[2] === 'mcp-exec') process.exit(await runMcpExec(process.argv.slice(3), keychain));
 
 // `ops-console mcp-setup`: the MCP Server of the Dev tools setup agent.
 if (process.argv[2] === 'mcp-setup') {
@@ -49,6 +51,7 @@ const daemon = await startDaemon({
   ),
   port: env.OPS_CONSOLE_PORT,
   version,
+  keychain,
   uiDir: existsSync(uiDir) ? uiDir : null,
   migrationsDir: path.join(appDir, 'drizzle'),
   writeLog: (line) => process.stdout.write(`${line}\n`),

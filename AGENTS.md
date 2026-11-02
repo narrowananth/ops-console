@@ -75,7 +75,7 @@ pnpm workspace. Run from repo root.
 
 ```
 pnpm install
-pnpm dev               # backend :4546, frontend :4545, data in backend/.data
+pnpm dev               # backend :4556, frontend :4555, data in backend/.data; installed app keeps :4545
 pnpm dev:open          # open UI signed in to dev backend
 pnpm check             # lint + typecheck + test, every package
 pnpm db:generate       # Drizzle migration from backend/src/db/schema.ts

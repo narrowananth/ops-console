@@ -1,4 +1,5 @@
-// `pnpm dev` for the backend: tsx watching src/main.ts on port 4546, data in .data.
+// `pnpm dev` for the backend: tsx watching src/main.ts on port 4556, data in .data, Keychain items under the
+// service `ops-console-dev`, so it runs beside the installed app (4545, `ops-console`) without touching its data.
 //
 // On macOS the daemon runs as `.data/Ops Console (dev).app`, a copy of this Node in an app bundle, and launchd
 // starts it. macOS then asks for Full Disk Access for Ops Console (dev) itself, as it does for the installed app,
@@ -18,7 +19,8 @@ const tsx = path.join(backend, 'node_modules/tsx/dist/cli.mjs');
 const env = {
   OPS_CONSOLE_APP_DIR: '.',
   OPS_CONSOLE_DATA_DIR: '.data',
-  OPS_CONSOLE_PORT: '4546',
+  OPS_CONSOLE_PORT: '4556',
+  OPS_CONSOLE_KEYCHAIN_SERVICE: 'ops-console-dev',
   OPS_CONSOLE_LAUNCHER: path.join(backend, 'scripts/dev-launcher.sh'),
 };
 
@@ -126,11 +128,15 @@ async function devApp(name, id) {
 function handOverKeychain(from, to) {
   const script = path.join(backend, 'scripts/keychain-handover.mjs');
   const run = (program, mode, input) => {
-    const result = spawnSync(program, [script, mode], { cwd: backend, input, encoding: 'utf8' });
+    const result = spawnSync(program, [script, mode, env.OPS_CONSOLE_KEYCHAIN_SERVICE], {
+      cwd: backend,
+      input,
+      encoding: 'utf8',
+    });
     if (result.status !== 0) throw new Error(`${mode} failed: ${result.stderr.trim().split('\n').at(-1)}`);
     return result.stdout;
   };
-  const accounts = consoleAccounts();
+  const accounts = consoleAccounts(env.OPS_CONSOLE_KEYCHAIN_SERVICE);
   if (accounts.length === 0) return;
   const secrets = run(from, 'take', JSON.stringify(accounts));
   try {
