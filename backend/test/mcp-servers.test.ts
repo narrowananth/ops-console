@@ -411,7 +411,7 @@ describe('editing', () => {
 });
 
 describe('authenticating and reconnecting', () => {
-  it('signs in every account that needs it, the active one first, so a switch keeps the server', async () => {
+  it('signs in the active account only, then reports ok while the others still need auth', async () => {
     const ctx = await start();
     const [active, other] = ctx.dirs as [string, string];
     await api(ctx.daemon).post('/mcp-servers', {
@@ -440,7 +440,8 @@ describe('authenticating and reconnecting', () => {
     close();
     expect(await find(ctx, 'sentry')).toMatchObject({ status: 'ok' });
     expect(JSON.parse(await readFile(path.join(active, 'fake-mcp-auth.json'), 'utf8'))).toContain('sentry');
-    expect(JSON.parse(await readFile(path.join(other, 'fake-mcp-auth.json'), 'utf8'))).toContain('sentry');
+    // One browser sign-in per Connect: the other account signs in when it becomes active.
+    expect(existsSync(path.join(other, 'fake-mcp-auth.json'))).toBe(false);
   });
 
   it('reports ok as soon as the sign-in finishes, without waiting for a new Probe', async () => {
@@ -467,7 +468,7 @@ describe('authenticating and reconnecting', () => {
     expect(Date.now() - started).toBeLessThan(3_000);
   });
 
-  it('reads auth while any account still needs a sign-in, naming that account', async () => {
+  it('reads ok while only another account needs a sign-in, and auth once that account becomes active', async () => {
     const ctx = await start();
     const [active, other] = ctx.dirs as [string, string];
     await api(ctx.daemon).post('/mcp-servers', {
@@ -478,23 +479,25 @@ describe('authenticating and reconnecting', () => {
     });
     ctx.probe.set(active, 'sentry', { status: 'connected' });
     ctx.probe.set(other, 'sentry', { status: 'needs-auth' });
+    const runs = ctx.probe.runs;
     await api(ctx.daemon).post('/mcp-servers/sentry/checks');
+    // A check answers at once and probes every account in the background, one after another.
+    await expect.poll(() => ctx.probe.runs).toBe(runs + 2);
+    expect(await find(ctx, 'sentry')).toMatchObject({ status: 'ok' });
+
     const accounts = (await api(ctx.daemon).get('/agent-accounts')).body.data as {
+      id: string;
       label: string;
       is_active: boolean;
     }[];
     const second = accounts.find((account) => !account.is_active);
-    const read = await until(
-      () => find(ctx, 'sentry'),
-      (server) => server?.status === 'auth',
-      'the check',
-    );
-    expect(read).toMatchObject({
+    await api(ctx.daemon).post(`/agent-accounts/${second?.id}/activate`);
+    expect(await find(ctx, 'sentry')).toMatchObject({
       status: 'auth',
       status_detail: `${second?.label}: needs authentication`,
     });
 
-    // Reconnect signs in only the account that needs it.
+    // Reconnect signs in the account that is active now, and only that one.
     await api(ctx.daemon).post('/mcp-servers/sentry/auth');
     await expect.poll(async () => (await find(ctx, 'sentry'))?.status).toBe('ok');
     expect(existsSync(path.join(active, 'fake-mcp-auth.json'))).toBe(false);

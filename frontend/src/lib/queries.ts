@@ -310,6 +310,13 @@ export function useConnectConnector() {
   return useConnectorMutation((id: ConnectorId) => apiSend('POST', `/connectors/${id}/connect`, {}, z.undefined()));
 }
 
+/** Stops a sign-in still waiting on the browser; the Connector keeps the status it had. */
+export function useCancelConnectorSignIn() {
+  return useConnectorMutation((id: ConnectorId) =>
+    apiSend('DELETE', `/connectors/${id}/sign-in`, undefined, z.object({ data: connectorSchema })),
+  );
+}
+
 export function useDisconnectConnector() {
   return useConnectorMutation((id: ConnectorId) =>
     apiSend('DELETE', `/connectors/${id}/credentials`, undefined, z.object({ data: connectorSchema })),

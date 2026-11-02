@@ -7,6 +7,8 @@ import { App } from './app/app';
 import { takeTokenFromUrl } from './lib/session';
 
 takeTokenFromUrl();
+// `pnpm dev` runs beside the installed app: its tab says which one it is.
+if (import.meta.env.DEV) document.title = 'Ops Console (dev)';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('index.html has no #root');

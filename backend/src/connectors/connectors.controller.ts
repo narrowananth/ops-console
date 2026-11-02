@@ -33,6 +33,11 @@ export class ConnectorsController {
     return { data: await this.connectors.check(parseInput(idParams, params, 'params').id) };
   }
 
+  @Delete(':id/sign-in')
+  async cancelSignIn(@Param() params: unknown): Promise<{ data: Connector }> {
+    return { data: await this.connectors.cancelSignIn(parseInput(idParams, params, 'params').id) };
+  }
+
   @Delete(':id/credentials')
   async disconnect(@Param() params: unknown): Promise<{ data: Connector }> {
     return { data: await this.connectors.disconnect(parseInput(idParams, params, 'params').id) };

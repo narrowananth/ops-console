@@ -238,7 +238,9 @@ test('Integrations lists Connectors and MCP servers, each labelled, and opens on
   await expect(drawer.getByText('Reached through Shopify Dev MCP.')).toBeVisible();
 });
 
-test('Connect asks for nothing and shows GitHub its one-time code and sign-in page', async ({ page }) => {
+test('Connect asks for nothing, shows GitHub its one-time code and sign-in page, and Cancel stops it', async ({
+  page,
+}) => {
   const github = {
     id: 'github',
     name: 'GitHub',
@@ -258,6 +260,10 @@ test('Connect asks for nothing and shows GitHub its one-time code and sign-in pa
     github.sign_in = { code: 'WXYZ-1234', url: 'https://github.com/login/device' };
     return route.fulfill({ status: 202 });
   });
+  await page.route('**/api/connectors/github/sign-in', (route) => {
+    github.sign_in = null;
+    return route.fulfill({ json: { data: github } });
+  });
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
   await page.getByRole('navigation').getByRole('link', { name: 'Integrations' }).click();
   const drawer = page.getByRole('main');
@@ -273,6 +279,11 @@ test('Connect asks for nothing and shows GitHub its one-time code and sign-in pa
     'https://github.com/login/device',
   );
   await expect(step.getByRole('button', { name: 'Waiting…' })).toBeDisabled();
+
+  await step.getByRole('button', { name: 'Cancel' }).click();
+  await expect(step.getByRole('button', { name: 'Connect', exact: true })).toBeEnabled();
+  await expect(step).not.toContainText('WXYZ-1234');
+  await expect(step.getByRole('button', { name: 'Cancel' })).toHaveCount(0);
 });
 
 test('a client route loads the shell on a fresh page', async ({ page }) => {
