@@ -9,6 +9,7 @@ export function ConfirmDialog({
   title,
   children,
   action,
+  dismiss = 'Cancel',
   pending = false,
   disabled = false,
   error,
@@ -19,6 +20,8 @@ export function ConfirmDialog({
   children?: ReactNode;
   /** The confirm button's text, such as "Delete". */
   action: string;
+  /** The close button's text, for an action whose own name is Cancel. */
+  dismiss?: string;
   pending?: boolean;
   /** The action cannot run yet, such as with nothing picked. */
   disabled?: boolean;
@@ -66,7 +69,7 @@ export function ConfirmDialog({
       </div>
       <div className="flex justify-end gap-2 border-t border-line bg-surface/40 px-5 py-3">
         <Button ref={cancel} className="px-3 py-1.5 text-xs" disabled={pending} onClick={onCancel}>
-          Cancel
+          {dismiss}
         </Button>
         <Button variant="primary" className="px-3 py-1.5 text-xs" disabled={pending || disabled} onClick={onConfirm}>
           {pending && <Spinner />}

@@ -99,11 +99,14 @@ export function JobPath({
   status,
   reading,
   closing,
+  answered = false,
 }: {
   playbook: JobPlaybook | null;
   status: string;
   reading: StageWords;
   closing: StageWords;
+  /** The closing turn gave its answer, so a failure after it (a push, a post) is not the closing turn's. */
+  answered?: boolean;
 }) {
   const state = runState(status);
   const own = playbook && playbook.steps.length > 0;
@@ -112,7 +115,7 @@ export function JobPath({
     : [{ key: 'reading', title: state === 'running' ? reading.doing : reading.todo, state }];
   const through = own ? stepsFinished(playbook) : state === 'done';
   const last: PathwayState =
-    state === 'done'
+    state === 'done' || answered
       ? 'done'
       : !through
         ? 'pending'
@@ -132,7 +135,7 @@ export function JobPath({
 
 /**
  * Why a job failed, and Retry when it can: "Retry from step N" after a failed step, else plain Retry, which redoes
- * only what the console left undone after the steps.
+ * only what the console left undone after the steps. "Skip step N" passes over the failed step and goes on.
  */
 export function JobFailure({
   error,
@@ -143,7 +146,7 @@ export function JobFailure({
   error: string | null;
   playbook: JobPlaybook | null;
   canRetry: boolean;
-  retry: { isPending: boolean; error: Error | null; mutate: () => void };
+  retry: { isPending: boolean; error: Error | null; mutate: (skip: boolean) => void };
 }) {
   const step = failedStep(playbook);
   return (
@@ -154,10 +157,13 @@ export function JobFailure({
         </span>
       )}
       {canRetry && (
-        <Button className="px-2.5 py-1 text-xs" disabled={retry.isPending} onClick={() => retry.mutate()}>
-          {retry.isPending && <Spinner />}
-          {step === null ? 'Retry' : `Retry from step ${step}`}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button className="px-2.5 py-1 text-xs" disabled={retry.isPending} onClick={() => retry.mutate(false)}>
+            {retry.isPending && <Spinner />}
+            {step === null ? 'Retry' : `Retry from step ${step}`}
+          </Button>
+          {step !== null && <SkipStep step={step} disabled={retry.isPending} onSkip={() => retry.mutate(true)} />}
+        </div>
       )}
       {retry.error && (
         <span role="alert" className="text-accent-700">
@@ -165,5 +171,19 @@ export function JobFailure({
         </span>
       )}
     </div>
+  );
+}
+
+/** Passes over a failed step: it reads skipped by the operator, and the job goes on from the next one. */
+export function SkipStep({ step, disabled, onSkip }: { step: number; disabled: boolean; onSkip: () => void }) {
+  return (
+    <Button
+      className="px-2.5 py-1 text-xs"
+      title="Mark this step skipped and go on from the next one"
+      disabled={disabled}
+      onClick={onSkip}
+    >
+      Skip step {step}
+    </Button>
   );
 }

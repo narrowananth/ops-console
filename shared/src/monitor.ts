@@ -209,6 +209,8 @@ export const fixSchema = z.object({
   status: z.enum(FixStatus),
   jira_key: z.string().nullable(),
   jira_url: z.string().nullable(),
+  /** Why the Fix went on without a ticket while Jira was connected. */
+  ticket_skipped: z.string().nullable(),
   branch: z.string().nullable(),
   pr_number: z.number().int().nullable(),
   pr_url: z.string().nullable(),

@@ -192,13 +192,47 @@ export class AgentReviewsService {
       this.steps.seed(tx, { kind: 'agent_review', id: created.id }, copy.steps);
       return created;
     });
-    void this.execute(row.id, session, slug, pr.head_sha, reviewBrief(slug, pr, files, comments), copy.rules).catch(
-      (error) => {
-        this.logger.error(`review ${row.id} failed: ${error instanceof Error ? error.message : error}`);
-        this.finish(row.id, repoId, number, { status: AgentReviewStatus.Failed }, 0, 0);
-      },
-    );
+    this.launch(row, session, slug, pr.head_sha, reviewBrief(slug, pr, files, comments));
     return toAgentReview(row, pr.head_sha, jobPlaybook(this.store.db, 'agent_review', row));
+  }
+
+  /**
+   * A failed review runs again in its Session from its failed step, or only its closing turn when no step failed.
+   * `skip` passes over the failed step. A pull request with new commits is reviewed afresh instead.
+   */
+  async retry(id: string, skip = false): Promise<PrAgentReview> {
+    const row = this.store.db.select().from(prAgentReviews).where(eq(prAgentReviews.id, id)).get();
+    if (!row) throw new ApiError(404, ErrorCode.NotFound, 'no such Agent Review');
+    if (row.status !== AgentReviewStatus.Failed) {
+      throw new ApiError(409, ErrorCode.InvalidState, 'Only a failed Agent Review can run again');
+    }
+    const repo = this.pulls.hosted(row.repoId);
+    const slug = repo.remoteSlug as string;
+    const { pr, files, comments } = await this.pulls.adapter(repo).get(slug, row.prNumber);
+    if (pr.head_sha !== row.headSha) {
+      throw new ApiError(409, ErrorCode.InvalidState, 'The pull request has new commits; review it again');
+    }
+    const session = this.jobs.requireIdle(repo, row.prNumber);
+    const job = { kind: 'agent_review', id } as const;
+    const updated = this.store.write((tx, emit) => {
+      if (skip) this.steps.skip(tx, emit, job);
+      this.steps.reset(tx, emit, job);
+      return tx
+        .update(prAgentReviews)
+        .set({ status: AgentReviewStatus.Running })
+        .where(eq(prAgentReviews.id, id))
+        .returning()
+        .get() as typeof row;
+    });
+    this.launch(updated, session, slug, pr.head_sha, reviewBrief(slug, pr, files, comments));
+    return toAgentReview(updated, pr.head_sha, jobPlaybook(this.store.db, 'agent_review', updated));
+  }
+
+  private launch(row: typeof prAgentReviews.$inferSelect, session: string, slug: string, head: string, brief: string) {
+    void this.execute(row.id, session, slug, head, brief, row.playbookRules ?? '').catch((error) => {
+      this.logger.error(`review ${row.id} failed: ${error instanceof Error ? error.message : error}`);
+      this.finish(row.id, row.repoId, row.prNumber, { status: AgentReviewStatus.Failed }, 0, 0);
+    });
   }
 
   /** The Playbook's steps, one turn each, then the closing turn the console posts from (Behavior 16). */

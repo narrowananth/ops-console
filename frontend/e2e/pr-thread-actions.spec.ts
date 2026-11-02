@@ -401,6 +401,11 @@ test('a Comment pass that failed after its steps retries what is left; one the b
 
   const card = page.getByRole('region', { name: 'Comment pass' });
   await expect(card.getByRole('listitem', { name: 'src/cart.ts:12' })).toContainText('reply not posted');
+  // Every thread has its answer, so the failure is the console's push or post, not the agent's closing turn.
+  const path = card.getByRole('list', { name: 'Playbook steps' }).getByRole('listitem');
+  await expect(path.last()).toContainText('Report each thread done or declined');
+  await expect(path.last()).not.toHaveAttribute('aria-current', 'step');
+  await expect(card.getByRole('button', { name: /Skip step/ })).toHaveCount(0);
   await card.getByRole('button', { name: 'Retry', exact: true }).click();
   await expect.poll(() => posted.map((post) => post.path)).toEqual(['/api/comment-passes/cp3/retry']);
 
@@ -478,4 +483,91 @@ test('a reload mid-run brings back the Reply check strip and the Comment pass ca
     await expect(card.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1');
     await page.reload();
   }
+});
+
+test('a running Reply check and Comment pass each stop the pull request’s Session run; a failed one shows no Stop', async ({
+  page,
+}) => {
+  const detail = {
+    current: pullRequest({
+      agent_session_id: 'sp7',
+      reply_checks: [replyCheck('c5', 'running', [['Read the thread', 'running', null]])],
+      comment_passes: [commentPass('cp1', 'running', [['Read the threads', 'running', null]])],
+    }),
+  };
+  await routePullRequest(page, detail);
+  const stopped: string[] = [];
+  await page.route('**/api/sessions/*/stop', (route) => {
+    stopped.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ status: 204 });
+  });
+  await openPullRequest(page);
+
+  const strip = thread(page, 'Cache the rate lookup.').getByRole('region', { name: 'Reply check' });
+  await strip.getByRole('button', { name: 'Stop' }).click();
+  await expect.poll(() => stopped).toEqual(['/api/sessions/sp7/stop']);
+  const card = page.getByRole('region', { name: 'Comment pass' });
+  await card.getByRole('button', { name: 'Stop' }).click();
+  await expect.poll(() => stopped).toEqual(['/api/sessions/sp7/stop', '/api/sessions/sp7/stop']);
+
+  detail.current = pullRequest({
+    agent_session_id: 'sp7',
+    reply_checks: [replyCheck('c5', 'failed', [['Read the thread', 'failed', 'stopped by the operator']])],
+    comment_passes: [commentPass('cp1', 'failed', [['Read the threads', 'failed', 'stopped by the operator']])],
+  });
+  await page.reload();
+  await expect(card).toContainText('failed');
+  await expect(card.getByRole('button', { name: 'Stop' })).toHaveCount(0);
+  await expect(strip.getByRole('button', { name: 'Stop' })).toHaveCount(0);
+});
+
+test('Skip step on a failed Comment pass and a failed Agent Review sends the retry with skip', async ({ page }) => {
+  const detail = {
+    current: pullRequest({
+      latest_agent_review: {
+        id: 'ar1',
+        repo_id: 'r1',
+        pr_number: 7,
+        head_sha: '9c1e4b7d00000000000000000000000000000000',
+        status: 'failed',
+        verdict: null,
+        findings: [],
+        checklist: [],
+        tools: [],
+        created_at: LATER,
+        stale: false,
+        playbook: playbook('Review PR (built-in)', [['Read the change', 'failed', 'the diff would not load']]),
+      },
+      comment_passes: [
+        commentPass(
+          'cp5',
+          'failed',
+          [
+            ['Read the threads', 'done', 'One thread.'],
+            ['Make the changes', 'done', 'Guarded it.', true],
+            ['Run the tests', 'failed', 'no test runner', true],
+          ],
+          { error: 'Step 3 · Run the tests failed: no test runner', can_retry: true },
+        ),
+      ],
+    }),
+  };
+  const posted = await routePullRequest(page, detail);
+  const reviews: unknown[] = [];
+  await page.route('**/api/agent-reviews/ar1/retry', (route) => {
+    reviews.push(route.request().postDataJSON());
+    return route.fulfill({ status: 202, json: { data: detail.current.latest_agent_review } });
+  });
+  await openPullRequest(page);
+
+  const card = page.getByRole('region', { name: 'Comment pass' });
+  await card.getByRole('button', { name: 'Skip step 3' }).click();
+  await expect.poll(() => posted).toEqual([{ path: '/api/comment-passes/cp5/retry', body: { skip: true } }]);
+  await card.getByRole('button', { name: 'Retry from step 3' }).click();
+  await expect.poll(() => posted.at(-1)).toEqual({ path: '/api/comment-passes/cp5/retry', body: { skip: false } });
+
+  const review = page.getByRole('region', { name: 'Agent Review' });
+  await expect(review).toContainText('The review did not finish.');
+  await review.getByRole('button', { name: 'Skip step 1' }).click();
+  await expect.poll(() => reviews).toEqual([{ skip: true }]);
 });

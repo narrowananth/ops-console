@@ -141,8 +141,9 @@ to 25 redacted Samples, and records each Route's state. After a Scan the code fi
 each Service with no code: an imported Repo of the same name, a git folder of that name next to one,
 then a repository of that name on a connected Git host. The operator starts a Verification; it runs in
 the Alert's Session, a `repo` Session in the Service's Repo or an `anonymous` Session holding a
-clone of its Git URL. Its runs work in a scratch copy: a git worktree of that code at the default
-branch, under `scratch/` in the data directory, removed once the Report is ready. The Report also
+clone of its Git URL. Its runs work in a scratch copy: a git worktree of that code at the newest
+commit of the Verify Playbook's branch (the default branch when blank), fetched from origin first,
+under `scratch/` in the data directory, removed once the Report is ready. The Report also
 goes to a Markdown file in the Datadog Connector's reports folder. Confirming the Report starts the
 Fix in the same Session, in the checkout and in a new conversation, stage by stage (ticket, branch,
 steps, PR), each agent run ending with JSON.

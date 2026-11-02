@@ -42,5 +42,5 @@ ${reach} Do only this step. End your answer with one JSON block and nothing afte
 { "outcome": "done | skipped | failed", "summary": "what you found or did, at most ${PLAYBOOK_LIMITS.summary} characters" }
 \`\`\`
 
-Answer "skipped" when the step does not apply here or cannot run, and "failed" when it cannot be done and the job should stop.`;
+When something in this step errors (a command, a missing file, a dependency, a connection), find out why and fix it within your reach, then carry on with the step. Try another way before you give up. Answer "skipped" when the step does not apply here, or still cannot run after you tried, and say in the summary why and what you tried. Answer "failed" only when the job cannot go on without this step.`;
 }

@@ -9,6 +9,7 @@ import {
 } from '@ops-console/shared';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { STOPPED } from '../agent/runs';
 import { AgentRuntime, HOST_WRITE_DENIALS } from '../agent/runtime';
 import { parseAgentJson } from '../common/agent-json';
 import { ApiError } from '../common/errors';
@@ -115,7 +116,7 @@ export class ReplyChecksService {
   }
 
   /** From the failed step, or only the post or resolve left undone (Behavior 11). */
-  async retry(id: string): Promise<ReplyCheck> {
+  async retry(id: string, skip = false): Promise<ReplyCheck> {
     const row = this.row(id);
     if (row.status !== AgentReviewStatus.Failed || !row.canRetry) {
       throw new ApiError(409, ErrorCode.InvalidState, 'Only a failed Reply check that can retry can run again');
@@ -125,6 +126,7 @@ export class ReplyChecksService {
     const { pr, comments } = await this.pulls.adapter(repo).get(slug, row.prNumber);
     const session = this.jobs.requireIdle(repo, row.prNumber);
     const updated = this.store.write((tx, emit) => {
+      if (skip) this.steps.skip(tx, emit, { kind: 'reply_check', id });
       this.steps.reset(tx, emit, { kind: 'reply_check', id });
       const next = tx
         .update(prReplyChecks)
@@ -166,6 +168,7 @@ export class ReplyChecksService {
       if (failure) throw new JobFailed(failure, true);
       const closing = { rules, cwd, deny: HOST_WRITE_DENIALS };
       const summary = await this.runtime.runFor(session, REPLY_CHECK_PROMPT, null, closing).finished;
+      if (summary.stopped) throw new JobFailed(`The verdict was not given: ${STOPPED}`, true);
       const answer = summary.ok ? parseAgentJson(summary.text, verdictSchema) : null;
       if (!answer) throw new JobFailed('The agent did not give a verdict the console could read', true);
       row = this.update(id, { verdict: answer.verdict, reply: answer.reply });

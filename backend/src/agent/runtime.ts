@@ -108,17 +108,6 @@ type RunResult = 'done' | 'stopped' | ErrorCode.RateLimited | ErrorCode.Unauthor
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
-/** The text of a part with its fences restored, Dev tools tables included; steps and diffs have none. */
-const partText = (part: Part): string => {
-  if (part.kind === 'text') return part.text;
-  if (part.kind === 'code') return `\`\`\`${part.lang}\n${part.text}\n\`\`\``;
-  if (part.kind === 'result' || part.kind === 'comparison') {
-    const { kind, ...block } = part;
-    return `\`\`\`ops-${kind === 'result' ? 'result' : 'compare'}\n${JSON.stringify(block)}\n\`\`\``;
-  }
-  return '';
-};
-
 const firstLine = (text: string, max: number) => (text.trim().split('\n')[0] ?? '').slice(0, max);
 
 /** Runs Sessions on the Claude Agent SDK: one run per Session at a time, Sessions side by side. */
@@ -280,6 +269,7 @@ export class AgentRuntime {
       growing: null,
       sdkUuids: new Set(),
       toolRows: new Map(),
+      said: [],
       answer: null,
       waits: 0,
       createdAt: new Date().toISOString(),
@@ -491,6 +481,11 @@ export class AgentRuntime {
     if (message.type === 'assistant' && message.parent_tool_use_id === null) {
       run.sdkUuids.add(message.uuid);
       const content = contentSchema.parse(message.message.content);
+      run.said.push(
+        ...(typeof content === 'string'
+          ? [content]
+          : content.flatMap((block) => ('text' in block && block.type === 'text' ? [block.text] : []))),
+      );
       const parts =
         typeof content === 'string'
           ? blockParts({ type: 'text', text: content })
@@ -559,7 +554,7 @@ export class AgentRuntime {
     run.onFinish?.({
       ok: result === 'done',
       stopped: result === 'stopped',
-      text: run.parts.map(partText).join('\n'),
+      text: run.said.join('\n'),
     });
   }
 

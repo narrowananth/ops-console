@@ -1,4 +1,5 @@
 import { AgentReviewStatus, type CommentPass, type PassThread, ThreadOutcome } from '@ops-console/shared';
+import { StopRun } from '../agents/stop-run';
 import { Markdown } from '../components/ui/markdown';
 import { StatusPill } from '../components/ui/pathway';
 import { useRetryCommentPass } from '../lib/queries';
@@ -52,6 +53,7 @@ function PassBody({ pass }: { pass: CommentPass }) {
         <JobPath
           playbook={pass.playbook}
           status={pass.status}
+          answered={pass.threads.every((thread) => thread.outcome !== ThreadOutcome.Pending)}
           reading={{ todo: 'Read the threads', doing: 'Reading the threads' }}
           closing={{
             todo: 'Report each thread done or declined',
@@ -64,7 +66,11 @@ function PassBody({ pass }: { pass: CommentPass }) {
           error={pass.error}
           playbook={pass.playbook}
           canRetry={pass.can_retry}
-          retry={{ isPending: retry.isPending, error: retry.error, mutate: () => retry.mutate(pass.id) }}
+          retry={{
+            isPending: retry.isPending,
+            error: retry.error,
+            mutate: (skip) => retry.mutate({ id: pass.id, skip }),
+          }}
         />
       )}
       <ul aria-label="Threads" className="m-0 flex list-none flex-col gap-2.5 p-0">
@@ -76,7 +82,7 @@ function PassBody({ pass }: { pass: CommentPass }) {
   );
 }
 
-function PassHeader({ pass, prUrl }: { pass: CommentPass; prUrl: string }) {
+function PassHeader({ pass, prUrl, sessionId }: { pass: CommentPass; prUrl: string; sessionId: string | null }) {
   const sha = pass.commit_sha;
   const href = sha && commitUrl(prUrl, sha);
   return (
@@ -93,7 +99,10 @@ function PassHeader({ pass, prUrl }: { pass: CommentPass; prUrl: string }) {
       {pass.stale && (
         <span className="rounded-full bg-accent-100 px-2 py-px text-[10px] text-accent-700">older commit</span>
       )}
-      <span className="ml-auto">
+      <span className="ml-auto flex items-center gap-2">
+        {pass.status === AgentReviewStatus.Running && sessionId && (
+          <StopRun sessionId={sessionId} title="Stop the Comment pass; it fails and can retry from its step" />
+        )}
         <StatusPill state={runState(pass.status)}>{pass.status}</StatusPill>
       </span>
     </>
@@ -101,14 +110,22 @@ function PassHeader({ pass, prUrl }: { pass: CommentPass; prUrl: string }) {
 }
 
 /** The newest Comment pass open, with the older ones folded under it. */
-export function CommentPassCard({ passes, prUrl }: { passes: CommentPass[]; prUrl: string }) {
+export function CommentPassCard({
+  passes,
+  prUrl,
+  sessionId,
+}: {
+  passes: CommentPass[];
+  prUrl: string;
+  sessionId: string | null;
+}) {
   const [newest, ...older] = passes;
   if (!newest) return null;
   return (
     <section aria-label="Comment pass" className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
       <header className="flex items-center gap-2 border-b border-divider bg-surface px-3 py-2 text-xs">
         <strong>Comment pass</strong>
-        <PassHeader pass={newest} prUrl={prUrl} />
+        <PassHeader pass={newest} prUrl={prUrl} sessionId={sessionId} />
       </header>
       <PassBody pass={newest} />
       {older.length > 0 && (
@@ -124,7 +141,7 @@ export function CommentPassCard({ passes, prUrl }: { passes: CommentPass[]; prUr
             >
               <header className="flex items-center gap-2 px-3 pt-2 text-xs">
                 <span className="text-neutral-700">{new Date(pass.created_at).toLocaleString()}</span>
-                <PassHeader pass={pass} prUrl={prUrl} />
+                <PassHeader pass={pass} prUrl={prUrl} sessionId={sessionId} />
               </header>
               <PassBody pass={pass} />
             </article>

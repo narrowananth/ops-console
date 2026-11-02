@@ -3,6 +3,7 @@ import {
   AlertActor,
   AlertEventKind,
   AlertStatus,
+  branchList,
   ConnectorId,
   ErrorCode,
   FIX_STAGES,
@@ -13,6 +14,7 @@ import {
   PlaybookTrigger,
   PrState,
   SessionKind,
+  SessionState,
   Severity,
 } from '@ops-console/shared';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -25,9 +27,9 @@ import { StartupRecovery } from '../common/recovery';
 import { ConnectorsService } from '../connectors/connectors.service';
 import { alerts, fixes, reports, repos, reviews, routes, services, sessions } from '../db/schema';
 import { type Emit, STORE, type Store, type Tx } from '../db/store';
-import { JobSteps, jobPlaybook } from '../playbooks/job-steps';
+import { CANCELLED, JobSteps, jobPlaybook } from '../playbooks/job-steps';
 import { PlaybooksService } from '../playbooks/playbooks.service';
-import { cloneUrl, GIT, Git, parseRemote } from '../repos/git';
+import { type CodeBase, cloneUrl, codeBaseStep, GIT, Git, GitFailed, parseRemote } from '../repos/git';
 import { everyMinutes, Scheduler } from '../scheduler/scheduler';
 import { AnonymousSessionsService } from '../workspace/anonymous-sessions.service';
 import { PullRequestsService } from '../workspace/pull-requests.service';
@@ -61,6 +63,10 @@ type Context = {
 export class FixesService {
   private readonly logger = new Logger('monitor');
   private checking = false;
+  /** Fixes being cancelled: their run starts no further stage, step or agent turn. */
+  private readonly cancelling = new Set<string>();
+  /** The run of each Fix going now, so Cancel can wait for it to end. */
+  private readonly running = new Map<string, Promise<void>>();
 
   constructor(
     @Inject(STORE) private readonly store: Store,
@@ -106,6 +112,7 @@ export class FixesService {
         playbookId: copy.id,
         playbookName: copy.name,
         playbookRules: copy.rules,
+        playbookBranches: copy.branches,
       })
       .returning()
       .get();
@@ -124,9 +131,12 @@ export class FixesService {
     this.detach(fixId, true);
   }
 
-  retry(id: string): Fix {
+  retry(id: string, skip = false): Fix {
     const fix = this.row(id);
     if (fix.status !== FixStatus.Failed) throw new ApiError(409, ErrorCode.InvalidState, `the Fix is ${fix.status}`);
+    if (skip && fix.stage !== FixStage.Steps) {
+      throw new ApiError(409, ErrorCode.InvalidState, 'The Fix failed after its steps, so there is no step to skip');
+    }
     // A Fix that failed before its first agent turn still owes the new conversation (Behavior 26).
     const unstarted =
       fix.jiraKey === null && this.steps.rows({ kind: 'fix', id }).every((step) => step.startedAt === null);
@@ -137,6 +147,7 @@ export class FixesService {
         .where(eq(fixes.id, id))
         .returning()
         .get() as FixRow;
+      if (skip) this.steps.skip(tx, emit, { kind: 'fix', id });
       if (updated.stage === FixStage.Steps) this.steps.reset(tx, emit, { kind: 'fix', id });
       this.announce(tx, emit, updated);
       return updated;
@@ -147,15 +158,153 @@ export class FixesService {
 
   /** A run nobody awaits must not reject: a store closed by shutdown ends it, and recovery fails the Fix on the next start. */
   private detach(fixId: string, fresh: boolean): void {
-    void this.run(fixId, fresh).catch((error) =>
-      this.logger.warn(`fix ${fixId} stopped: ${error instanceof Error ? error.message : String(error)}`),
-    );
+    const going: Promise<void> = this.run(fixId, fresh)
+      .catch((error) =>
+        this.logger.warn(`fix ${fixId} stopped: ${error instanceof Error ? error.message : String(error)}`),
+      )
+      .finally(() => {
+        if (this.running.get(fixId) === going) this.running.delete(fixId);
+      });
+    this.running.set(fixId, going);
+  }
+
+  /**
+   * Cancels a running or failed Fix that has no pull request: stops its run, puts its uncommitted changes on the stash,
+   * checks out the source branch, deletes the Fix branch, and takes the Alert back to `verified` for a new Review. The
+   * Jira ticket, if any, is left as it is.
+   */
+  async cancel(id: string): Promise<Fix> {
+    const fix = this.row(id);
+    if (fix.prNumber !== null && fix.status !== FixStatus.Abandoned) {
+      throw new ApiError(
+        409,
+        ErrorCode.InvalidState,
+        'The Fix opened a pull request; close it on the Git host to abandon the Fix',
+      );
+    }
+    if (fix.status !== FixStatus.Running && fix.status !== FixStatus.Failed) {
+      throw new ApiError(409, ErrorCode.InvalidState, `the Fix is ${fix.status}`);
+    }
+    if (this.cancelling.has(id)) throw new ApiError(409, ErrorCode.InvalidState, 'The Fix is already being cancelled');
+    const found = this.found(id);
+    const place = this.placeOf(fix, found.service);
+    this.cancelling.add(id);
+    try {
+      await this.halt(fix);
+      const branch = place ? await this.restore(this.row(id), place) : null;
+      const row = this.store.write((tx, emit) => {
+        const now = new Date().toISOString();
+        const updated = tx
+          .update(fixes)
+          .set({ status: FixStatus.Abandoned, finishedAt: now })
+          .where(eq(fixes.id, id))
+          .returning()
+          .get() as FixRow;
+        if (branch && place?.sessionId) {
+          tx.update(sessions).set({ branch }).where(eq(sessions.id, place.sessionId)).run();
+        }
+        tx.update(reviews).set({ undoneAt: now }).where(eq(reviews.id, fix.reviewId)).run();
+        this.alerts.transition(
+          tx,
+          found.alert.id,
+          AlertStatus.Verified,
+          AlertEventKind.Abandoned,
+          AlertActor.Operator,
+          {
+            cancelled: true,
+          },
+        );
+        this.announce(tx, emit, updated);
+        emit('alert.reviewed', { alert_id: found.alert.id, decision: 'undone' });
+        return updated;
+      });
+      return this.view(row);
+    } finally {
+      this.cancelling.delete(id);
+    }
+  }
+
+  /** Stops the Fix's agent run until its run ends; a turn that starts between two checks is stopped on the next. */
+  private async halt(fix: FixRow): Promise<void> {
+    for (;;) {
+      const going = this.running.get(fix.id);
+      if (!going) return;
+      const sessionId = this.row(fix.id).sessionId;
+      if (sessionId && this.runtime.busy(sessionId)) this.runtime.stop(sessionId);
+      await Promise.race([going, new Promise((resolve) => setTimeout(resolve, 100))]);
+    }
+  }
+
+  /**
+   * Where the Fix's branch lives: the Session's clone, or the Service's Repo. Refused while another Session in that
+   * Repo is running, since the checkout would move under it.
+   */
+  private placeOf(
+    fix: FixRow,
+    service: ServiceRow,
+  ): { dir: string; fallback: string; sessionId: string | null } | null {
+    const session = fix.sessionId
+      ? this.store.db.select().from(sessions).where(eq(sessions.id, fix.sessionId)).get()
+      : undefined;
+    if (session?.kind === SessionKind.Anonymous) {
+      return { dir: this.anonymous.folder(session.id), fallback: 'main', sessionId: session.id };
+    }
+    const source = this.sessions.sourceOf(service);
+    if (source.kind !== 'repo') return null;
+    const busy = this.store.db
+      .select({ id: sessions.id, state: sessions.state })
+      .from(sessions)
+      .where(eq(sessions.repoId, source.repo.id))
+      .all()
+      .some(
+        (row) =>
+          row.id !== fix.sessionId &&
+          (row.state === SessionState.Working || row.state === SessionState.WaitingApproval),
+      );
+    if (busy) {
+      throw new ApiError(
+        409,
+        ErrorCode.InvalidState,
+        'A Session in this Repo is running; stop it, then cancel the Fix',
+      );
+    }
+    return { dir: source.repo.path, fallback: source.repo.defaultBranch, sessionId: session?.id ?? null };
+  }
+
+  /** Back to the source branch with the Fix's work on the stash; the branch the checkout is on after. */
+  private async restore(fix: FixRow, place: { dir: string; fallback: string }): Promise<string | null> {
+    if (!fix.branch) return null;
+    const listed = branchList(fix.playbookBranches ?? '');
+    try {
+      let current = await this.git.currentBranch(place.dir);
+      if (current === fix.branch) {
+        if (await this.git.isDirty(place.dir)) {
+          await this.git.stash(place.dir, `ops-console: cancelled Fix ${fix.branch}`);
+        }
+        const fallback = (await this.git.defaultBranch(place.dir)) ?? place.fallback;
+        const base = await this.git.codeBase(place.dir, listed.length > 0 ? listed : [place.fallback, fallback]);
+        await this.git.checkout(place.dir, base.branch, false);
+        current = base.branch;
+      }
+      if ((await this.git.branches(place.dir)).some((candidate) => candidate.name === fix.branch)) {
+        await this.git.deleteBranch(place.dir, fix.branch);
+      }
+      return current;
+    } catch (error) {
+      const message = error instanceof GitFailed && error.message ? error.message : 'git failed';
+      throw new ApiError(
+        502,
+        ErrorCode.UpstreamFailed,
+        `The Fix was stopped, but its branch was not undone: ${message}`,
+      );
+    }
   }
 
   private async run(fixId: string, fresh: boolean): Promise<void> {
     try {
       const context = await this.context(fixId, fresh);
       for (const stage of FIX_STAGES.slice(FIX_STAGES.indexOf(context.fix.stage))) {
+        if (this.cancelling.has(fixId)) throw new StageFailed(CANCELLED);
         this.setStage(fixId, stage);
         await this.stage(stage, context);
       }
@@ -169,7 +318,7 @@ export class FixesService {
     }
   }
 
-  private async context(fixId: string, fresh: boolean): Promise<Context> {
+  private found(fixId: string) {
     const found = this.store.db
       .select({ fix: fixes, alert: alerts, report: reports, review: reviews, service: services })
       .from(fixes)
@@ -181,6 +330,11 @@ export class FixesService {
       .where(eq(fixes.id, fixId))
       .get();
     if (!found) throw new StageFailed('the Fix lost its Alert');
+    return found;
+  }
+
+  private async context(fixId: string, fresh: boolean): Promise<Context> {
+    const found = this.found(fixId);
     const sessionId = await this.sessions.ensure(found.alert, found.service);
     if (found.fix.sessionId !== sessionId) {
       this.store.write((tx) => tx.update(fixes).set({ sessionId }).where(eq(fixes.id, fixId)).run());
@@ -198,6 +352,7 @@ export class FixesService {
         brief: `${this.brief(context)}\nThe console sends the work as steps, one per turn, on branch ${context.fix.branch}.`,
         rules: context.fix.playbookRules,
         fresh: this.takeFresh(context),
+        halted: () => this.cancelling.has(context.fix.id),
       });
       if (failure) throw new StageFailed(failure);
       return;
@@ -229,6 +384,7 @@ ${jira}Root cause: ${context.report.rootCause}. Proposed fix: ${context.report.p
 
   /** One agent run in the Alert's Session; the answer must carry the stage's JSON. */
   private async ask<T extends z.ZodType>(context: Context, prompt: string, schema: T): Promise<z.infer<T>> {
+    if (this.cancelling.has(context.fix.id)) throw new StageFailed(CANCELLED);
     let finished: Promise<RunSummary>;
     try {
       finished = this.runtime.runFor(context.sessionId, prompt, null, {
@@ -247,19 +403,37 @@ ${jira}Root cause: ${context.report.rootCause}. Proposed fix: ${context.report.p
 
   /**
    * The ticket exists after this stage, once: a retry finds the key and skips it (Behavior 22). With Jira not
-   * connected there is no ticket and the branch is `fix/<slug>`.
+   * connected, or the ticket not made, there is no ticket and the branch is `fix/<slug>`; the Fix goes on, and
+   * keeps why when Jira was connected. Only the operator's Stop fails the stage.
    */
   private async ticket(context: Context): Promise<void> {
     if (context.fix.jiraKey || context.fix.branch) return;
-    if (!this.jiraUp()) {
-      const branch = `fix/${context.slug}`;
-      this.store.write((tx, emit) => {
-        const row = tx.update(fixes).set({ branch }).where(eq(fixes.id, context.fix.id)).returning().get() as FixRow;
-        this.announce(tx, emit, row);
-      });
-      context.fix = this.row(context.fix.id);
-      return;
+    if (!this.jiraUp()) return this.noTicket(context, null);
+    try {
+      await this.createTicket(context);
+    } catch (error) {
+      if (error instanceof StageFailed && (error.message === STOPPED || error.message === CANCELLED)) throw error;
+      const reason = error instanceof Error && error.message ? error.message : 'Jira failed';
+      this.logger.warn(`fix ${context.fix.id} goes on without a ticket: ${reason}`);
+      this.noTicket(context, reason);
     }
+  }
+
+  private noTicket(context: Context, reason: string | null): void {
+    const branch = `fix/${context.slug}`;
+    this.store.write((tx, emit) => {
+      const row = tx
+        .update(fixes)
+        .set({ branch, ticketSkipped: reason?.slice(0, 500) ?? null })
+        .where(eq(fixes.id, context.fix.id))
+        .returning()
+        .get() as FixRow;
+      this.announce(tx, emit, row);
+    });
+    context.fix = this.row(context.fix.id);
+  }
+
+  private async createTicket(context: Context): Promise<void> {
     const jira = (await this.connectors.get(ConnectorId.Jira)).config as {
       project_key: string;
       issue_types: { bug: string; improvement: string };
@@ -302,13 +476,32 @@ Change nothing else. ${JSON_ONLY}
     if (!branch) throw new StageFailed('the Fix has no branch name');
     const session = this.store.db.select().from(sessions).where(eq(sessions.id, context.sessionId)).get();
     if (session?.kind === SessionKind.Anonymous) {
-      await this.anonymous.checkout(context.sessionId, branch);
+      const dir = this.anonymous.folder(context.sessionId);
+      const exists = (await this.git.branches(dir)).some((candidate) => candidate.name === branch);
+      const base = exists ? null : await this.base(context, dir, (await this.git.defaultBranch(dir)) ?? 'main');
+      await this.anonymous.checkout(context.sessionId, branch, base?.sha);
       return;
     }
     const source = this.sessions.sourceOf(context.service);
     if (source.kind !== 'repo') throw new StageFailed('the Fix Session lost its Repo');
     const exists = (await this.git.branches(source.repo.path)).some((candidate) => candidate.name === branch);
-    await this.workspace.checkout(context.sessionId, branch, !exists);
+    const base = exists ? null : await this.base(context, source.repo.path, source.repo.defaultBranch);
+    await this.workspace.checkout(context.sessionId, branch, !exists, base?.sha);
+  }
+
+  /**
+   * A new Fix branch starts from the newest commit of the first branch in the Playbook's Branch field that origin
+   * has, the Repo's default branch when blank; the local branch stands in when origin cannot be reached.
+   */
+  private async base(context: Context, dir: string, fallback: string): Promise<CodeBase> {
+    const listed = branchList(context.fix.playbookBranches ?? '');
+    try {
+      const base = await this.git.codeBase(dir, listed.length > 0 ? listed : [fallback]);
+      this.logger.log(`fix ${context.fix.id} branches from ${codeBaseStep(base)}`);
+      return base;
+    } catch (error) {
+      throw new StageFailed(error instanceof GitFailed && error.message ? error.message : 'git failed');
+    }
   }
 
   private async pullRequest(context: Context): Promise<void> {

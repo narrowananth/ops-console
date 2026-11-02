@@ -217,7 +217,7 @@ function Loaded(props: {
       </header>
 
       {pr.latest_agent_review && <AgentReviewCard review={pr.latest_agent_review} sessionId={pr.agent_session_id} />}
-      <CommentPassCard passes={pr.comment_passes} prUrl={pr.url} />
+      <CommentPassCard passes={pr.comment_passes} prUrl={pr.url} sessionId={pr.agent_session_id} />
 
       {pr.body.trim() !== '' && (
         <section aria-label="Description" className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">

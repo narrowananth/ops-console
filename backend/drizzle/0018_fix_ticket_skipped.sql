@@ -1,0 +1,1 @@
+ALTER TABLE `fixes` ADD `ticket_skipped` text;

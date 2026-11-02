@@ -13,6 +13,7 @@ import {
   type ReplyCheck,
   refreshPullRequestsSchema,
   resolveCommentSchema,
+  retryJobSchema,
   reviewPullRequestSchema,
   type Session,
   startCommentPassSchema,
@@ -131,6 +132,14 @@ export class PullRequestsController {
     return { data: await this.reviews.list(repo, number), meta: { next_cursor: null } };
   }
 
+  @Post('agent-reviews/:id/retry')
+  @HttpCode(202)
+  async retryReview(@Param() params: unknown, @Body() body: unknown): Promise<{ data: PrAgentReview }> {
+    const { id } = parseInput(sessionParams, params, 'params');
+    const { skip } = parseInput(retryJobSchema, body ?? {}, 'body');
+    return { data: await this.reviews.retry(id, skip) };
+  }
+
   @Post('repos/:repo/pull-requests/:number/reply-checks')
   @HttpCode(202)
   async startReplyCheck(@Param() params: unknown, @Body() body: unknown): Promise<{ data: ReplyCheck }> {
@@ -141,9 +150,10 @@ export class PullRequestsController {
 
   @Post('reply-checks/:id/retry')
   @HttpCode(202)
-  async retryReplyCheck(@Param() params: unknown): Promise<{ data: ReplyCheck }> {
+  async retryReplyCheck(@Param() params: unknown, @Body() body: unknown): Promise<{ data: ReplyCheck }> {
     const { id } = parseInput(sessionParams, params, 'params');
-    return { data: await this.checks.retry(id) };
+    const { skip } = parseInput(retryJobSchema, body ?? {}, 'body');
+    return { data: await this.checks.retry(id, skip) };
   }
 
   @Post('repos/:repo/pull-requests/:number/comment-passes')
@@ -156,8 +166,9 @@ export class PullRequestsController {
 
   @Post('comment-passes/:id/retry')
   @HttpCode(202)
-  async retryCommentPass(@Param() params: unknown): Promise<{ data: CommentPass }> {
+  async retryCommentPass(@Param() params: unknown, @Body() body: unknown): Promise<{ data: CommentPass }> {
     const { id } = parseInput(sessionParams, params, 'params');
-    return { data: await this.passes.retry(id) };
+    const { skip } = parseInput(retryJobSchema, body ?? {}, 'body');
+    return { data: await this.passes.retry(id, skip) };
   }
 }

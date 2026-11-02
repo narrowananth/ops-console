@@ -54,7 +54,19 @@ export const PLAYBOOK_LIMITS = {
   title: 80,
   instructions: 4000,
   summary: 500,
+  branches: 200,
 } as const;
+
+/** A branch name the console passes to git: no option, no `..`, no space. */
+const BRANCH_NAME = /^(?!-)(?!.*\.\.)[\w./-]+$/;
+
+/** A Playbook's Branch field as the names it lists, in order; blank lists none. */
+export function branchList(branches: string): string[] {
+  return branches
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
 
 export const playbookStepSchema = z.object({
   block: z.enum(StepBlock),
@@ -72,6 +84,11 @@ export const playbookSchema = z.object({
   builtin: z.boolean(),
   name: z.string(),
   rules: z.string(),
+  /**
+   * The branches Verify and Fix read the code from, comma-separated and tried in order: the first one origin has.
+   * Blank: the Repo's default branch.
+   */
+  branches: z.string(),
   steps: z.array(playbookStepSchema),
   /** The Triggers holding it now. A built-in lists its Trigger when no Playbook holds it. */
   triggers: z.array(z.enum(PlaybookTrigger)),
@@ -93,15 +110,30 @@ export type PlaybookList = z.infer<typeof playbookListSchema>;
 const nameSchema = z.string().trim().min(1).max(PLAYBOOK_LIMITS.name);
 const rulesSchema = z.string().max(PLAYBOOK_LIMITS.rules);
 const stepsSchema = z.array(playbookStepSchema).max(PLAYBOOK_LIMITS.steps);
+const branchesSchema = z
+  .string()
+  .trim()
+  .max(PLAYBOOK_LIMITS.branches)
+  .refine((value) => branchList(value).every((name) => BRANCH_NAME.test(name)), 'not a branch name');
 
 export const createPlaybookSchema = z
-  .object({ name: nameSchema, rules: rulesSchema.default(''), steps: stepsSchema.default([]) })
+  .object({
+    name: nameSchema,
+    rules: rulesSchema.default(''),
+    branches: branchesSchema.default(''),
+    steps: stepsSchema.default([]),
+  })
   .strict();
 
 export type CreatePlaybook = z.input<typeof createPlaybookSchema>;
 
 export const playbookPatchSchema = z
-  .object({ name: nameSchema.optional(), rules: rulesSchema.optional(), steps: stepsSchema.optional() })
+  .object({
+    name: nameSchema.optional(),
+    rules: rulesSchema.optional(),
+    branches: branchesSchema.optional(),
+    steps: stepsSchema.optional(),
+  })
   .strict();
 
 export type PlaybookPatch = z.infer<typeof playbookPatchSchema>;
@@ -132,6 +164,11 @@ export const jobPlaybookSchema = z.object({
 });
 
 export type JobPlaybook = z.infer<typeof jobPlaybookSchema>;
+
+/** A failed job's retry. `skip` first marks the failed step skipped by the operator, so the job goes on after it. */
+export const retryJobSchema = z.object({ skip: z.boolean().default(false) }).strict();
+
+export type RetryJob = z.infer<typeof retryJobSchema>;
 
 /** The Playbook a Session's rules come from, when it is not built-in. */
 export const sessionPlaybookSchema = z.object({ id: z.string(), name: z.string() });

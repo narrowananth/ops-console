@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  ErrorCode,
   type JobPlaybook,
   type Part,
   PLAYBOOK_LIMITS,
@@ -11,6 +12,7 @@ import { redact } from '../action-log/redact';
 import { STOPPED } from '../agent/runs';
 import { AgentRuntime } from '../agent/runtime';
 import { parseAgentJson } from '../common/agent-json';
+import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
 import { playbookSteps } from '../db/schema';
 import { type Emit, STORE, type Store, type Tx } from '../db/store';
@@ -20,6 +22,11 @@ import { stepOutcomeSchema, stepPrompt } from './prompts';
 export type JobRef = { kind: 'report' | 'fix' | 'agent_review' | 'reply_check' | 'comment_pass'; id: string };
 
 type StepRow = typeof playbookSteps.$inferSelect;
+
+/** The summary a step the operator skipped starts with. */
+export const CANCELLED = 'cancelled by the operator';
+
+export const SKIPPED_BY_OPERATOR = 'Skipped by the operator';
 
 const COLUMN = {
   report: playbookSteps.reportId,
@@ -75,6 +82,8 @@ export type StepRun = {
   /** Tools denied on top of merging. */
   deny?: string[];
   onPart?: (part: Part) => void;
+  /** True once the job is being cancelled: no further step starts. */
+  halted?: () => boolean;
 };
 
 /** Runs a job's copied Playbook steps one turn each, in order, and keeps their status (Behaviors 13 to 15). */
@@ -119,6 +128,7 @@ export class JobSteps {
     );
     if (from === -1) return null;
     for (const [index, row] of all.slice(from).entries()) {
+      if (options.halted?.()) return CANCELLED;
       const failure = await this.step(options, row, all.length, index === 0);
       if (failure) return failure;
     }
@@ -158,6 +168,28 @@ export class JobSteps {
     this.set(row, outcome.status, summary, { finishedAt: new Date().toISOString() });
     if (outcome.status !== PlaybookStepStatus.Failed) return null;
     return `Step ${row.position + 1} · ${row.title} failed: ${summary}`;
+  }
+
+  /** The step a failed job stopped on; none when it failed outside its steps. */
+  failed(job: JobRef): StepRow | undefined {
+    return this.rows(job).find((row) => row.status === PlaybookStepStatus.Failed);
+  }
+
+  /**
+   * The operator skips the failed step: it reads skipped, its summary keeps why it failed, and the retry that follows
+   * goes on from the next step. Refused with `invalid_state` when no step failed.
+   */
+  skip(tx: Tx, emit: Emit, job: JobRef): void {
+    const row = this.failed(job);
+    if (!row) throw new ApiError(409, ErrorCode.InvalidState, 'No step failed, so there is no step to skip');
+    const summary = `${SKIPPED_BY_OPERATOR}${row.summary ? `: ${row.summary}` : ''}`.slice(0, PLAYBOOK_LIMITS.summary);
+    const updated = tx
+      .update(playbookSteps)
+      .set({ status: PlaybookStepStatus.Skipped, summary, finishedAt: new Date().toISOString() })
+      .where(eq(playbookSteps.id, row.id))
+      .returning()
+      .get();
+    if (updated) this.announce(emit, updated);
   }
 
   /** A retry runs the failed step again, and every step after it. */

@@ -233,7 +233,7 @@ export function Thread({
           <Markdown source={comment.body} className="mt-1.5" />
         </div>
       ))}
-      {check && <ReplyCheckStrip check={check} />}
+      {check && <ReplyCheckStrip check={check} sessionId={pr.agent_session_id} />}
       <div className="border-t border-line bg-surface px-3 py-2">
         {replying ? (
           <CommentComposer

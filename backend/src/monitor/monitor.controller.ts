@@ -14,6 +14,7 @@ import {
   patchServiceSchema,
   type Report,
   type Review,
+  retryJobSchema,
   reviewAlertSchema,
   type Scan,
   type Service,
@@ -141,8 +142,9 @@ export class MonitorController {
 
   @Post('reports/:id/retry')
   @HttpCode(202)
-  retryReport(@Param() params: unknown): { data: Report } {
-    return { data: this.verifications.retry(parseInput(idParams, params, 'params').id) };
+  retryReport(@Param() params: unknown, @Body() body: unknown): { data: Report } {
+    const { skip } = parseInput(retryJobSchema, body ?? {}, 'body');
+    return { data: this.verifications.retry(parseInput(idParams, params, 'params').id, skip) };
   }
 
   @Post('alerts/:id/review')
@@ -166,7 +168,14 @@ export class MonitorController {
 
   @Post('fixes/:id/retry')
   @HttpCode(202)
-  retry(@Param() params: unknown): { data: Fix } {
-    return { data: this.fixes.retry(parseInput(idParams, params, 'params').id) };
+  retry(@Param() params: unknown, @Body() body: unknown): { data: Fix } {
+    const { skip } = parseInput(retryJobSchema, body ?? {}, 'body');
+    return { data: this.fixes.retry(parseInput(idParams, params, 'params').id, skip) };
+  }
+
+  @Post('fixes/:id/cancel')
+  @HttpCode(200)
+  async cancel(@Param() params: unknown): Promise<{ data: Fix }> {
+    return { data: await this.fixes.cancel(parseInput(idParams, params, 'params').id) };
   }
 }

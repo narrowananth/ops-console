@@ -58,7 +58,9 @@ Review with agent, Approve and Request changes, but nothing that acts on the com
 15. The closing turn returns each ticked thread as done or declined, each with a reply. A declined thread carries the
     agent's reason: it disagrees, or the comment is unclear.
 16. The console commits every change in the scratch copy as one commit, `Address review comments on #<n>` followed by
-    one line per done thread, `- <file>:<line>`, and pushes it to the pull request's branch without force.
+    one line per done thread, `- <file>:<line>`, and pushes it to the pull request's branch without force. The
+    commit skips the Repo's git hooks: the scratch copy has no installed packages for them, and the host's CI still
+    checks the push.
 17. After the push the console posts each reply in its thread as the agent; a done reply names the short commit
     sha. It resolves each done thread. Declined threads stay open.
 18. A Comment pass that changed no file, or declined every thread, makes no commit and no push, posts the replies
@@ -89,7 +91,10 @@ Review with agent, Approve and Request changes, but nothing that acts on the com
     the host's error.
 28. A reload mid-run brings back the strip and the card with each step's status, and they keep updating live.
 29. A daemon restart mid-step fails the step and its job as interrupted, as for every Playbook job.
-30. Nothing else changes: the operator's own reply in a thread the agent started still wakes the agent through Reply
+30. While a Reply check or a Comment pass runs, its strip or card shows Stop. Stop ends the agent's turn in the pull
+    request's Session. The job fails with "stopped by the operator", nothing is pushed or posted, and Retry runs the
+    stopped step again. A stop during the push or the replies is refused, since no agent turn runs then.
+31. Nothing else changes: the operator's own reply in a thread the agent started still wakes the agent through Reply
     in thread, Agent Review runs as before, and Resolve and Unresolve work as before. While a job runs on the pull
     request, that answer waits for the job to end.
 
@@ -318,14 +323,17 @@ Gains `reply_check_id` and `comment_pass_id`, null unless the step is that job's
 
 - **Thread** (`pr-thread`): Check reply sits next to Resolve when Behavior 6 holds. While a Reply check runs, a strip
   under the last comment shows "Checking the reply" with the Playbook's name and each step with its status; failed
-  reads "Reply check failed" with the error and "Retry from step N", or Retry when no step failed. Disabled while another job runs on the pull
+  reads "Reply check failed" with the error, "Retry from step N" and "Skip step N", or Retry when no step failed. Stop shows
+  while it runs (Behavior 30). Disabled while another job runs on the pull
   request, with the title "The agent is working on this PR".
 - **Pull request header**: Address comments next to Review with agent when Behavior 12 holds, with the same
   disabled state. It opens the thread list (Behavior 13) with Start and Cancel.
 - **Comment pass card**: under the Agent Review card. Header "Comment pass" with the Playbook's name as a pill, as on
   the Agent Review card, then the status, the commit's
   short sha linked to the host, "older commit" when stale. Then the steps, then each thread: `file:line`, author,
-  done or declined, and the reply. Failed shows the error and Retry when it can retry. Older passes fold under
+  done or declined, and the reply. Stop shows while it runs, as on the Agent Review card. Failed shows the error
+  and Retry when it can retry, and "Skip step N" after a failed step. A failure in the push or the replies leaves
+  the closing turn done, since every thread has its answer. Older passes fold under
   the newest.
 - **Error**: a refused start shows the host's or the API's message under the button.
 - **Playbooks page**: Check reply and Address comments in the Workspace group after Review PR, each with its
@@ -370,8 +378,8 @@ Gains `reply_check_id` and `comment_pass_id`, null unless the step is that job's
 ## Seams
 
 - **Backend + SQLite over HTTP** (fake Agent SDK, fake Git host, a local bare git remote that receives the push):
-  1 to 5, 7, 8, 10, 11, 14 to 21, 23 to 27, 29, 30.
-- **Browser** (Playwright, mocked API): 6, 9, 12, 13, 22, 28, and the screens behind 1, 2, 7, 10, 23.
+  1 to 5, 7, 8, 10, 11, 14 to 21, 23 to 27, 29 to 31.
+- **Browser** (Playwright, mocked API): 6, 9, 12, 13, 22, 28, 30, and the screens behind 1, 2, 7, 10, 23.
 
 ## Out of scope
 

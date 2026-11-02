@@ -9,6 +9,7 @@ import {
 } from '@ops-console/shared';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { STOPPED } from '../agent/runs';
 import { AgentRuntime, HOST_WRITE_DENIALS } from '../agent/runtime';
 import { parseAgentJson } from '../common/agent-json';
 import { ApiError, validationFailed } from '../common/errors';
@@ -162,7 +163,7 @@ export class CommentPassesService {
   }
 
   /** From the failed step, the push, or only the replies and resolves left undone (Behavior 21). */
-  async retry(id: string): Promise<CommentPass> {
+  async retry(id: string, skip = false): Promise<CommentPass> {
     const row = this.row(id);
     if (row.status !== AgentReviewStatus.Failed || !row.canRetry) {
       throw new ApiError(409, ErrorCode.InvalidState, 'Only a failed Comment pass that can retry can run again');
@@ -173,6 +174,7 @@ export class CommentPassesService {
     const session = this.jobs.requireIdle(repo, row.prNumber);
     const threads = storedThreads(row).map((thread) => threadOf(comments, thread.comment_id));
     const updated = this.store.write((tx, emit) => {
+      if (skip) this.steps.skip(tx, emit, { kind: 'comment_pass', id });
       this.steps.reset(tx, emit, { kind: 'comment_pass', id });
       const next = tx
         .update(prCommentPasses)
@@ -225,6 +227,7 @@ export class CommentPassesService {
     if (failure) throw new JobFailed(failure, true);
     const closing = { rules, cwd, deny: HOST_WRITE_DENIALS };
     const summary = await this.runtime.runFor(session, COMMENT_PASS_PROMPT, null, closing).finished;
+    if (summary.stopped) throw new JobFailed(`The threads were not reported: ${STOPPED}`, true);
     const answer = summary.ok ? parseAgentJson(summary.text, outcomesSchema) : null;
     const threads = storedThreads(row);
     const byId = new Map(answer?.threads.map((thread) => [thread.comment_id, thread]));

@@ -667,6 +667,17 @@ describe('Verification', () => {
     expect((await ctx.http.get(`/reports/${started.id}`)).body.data).toMatchObject({ status: 'failed' });
   });
 
+  it('reads a Report whose markdown carries its own fenced code block', async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    await linkRepo(ctx, alert.service.id);
+    const markdown = '# 500 on POST /orders\n\n## Replay\n\n```bash\ncurl -X POST localhost:8080/orders\n```\n\nDone.';
+    const started = await verify(ctx, alert.id, [json({ ...REPORT, markdown })]);
+    const report = (await ctx.http.get(`/reports/${started.id}`)).body.data;
+    expect([report.status, report.error_message]).toEqual(['ready', null]);
+    expect(await readFile(report.markdown_path, 'utf8')).toContain('```bash');
+  });
+
   it('adds a version when a verified Alert is verified again, and keeps the older ones', async () => {
     const ctx = await start();
     const alert = await failing(ctx);
@@ -945,6 +956,144 @@ describe('Fix', () => {
     expect(prompts.some((prompt) => prompt.includes('Atlassian'))).toBe(false);
   });
 
+  it('goes on without a ticket when Jira fails, names the branch fix/<slug> and keeps why', async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    await linkRepo(ctx, alert.service.id);
+    await verify(ctx, alert.id);
+    scriptRuns(ctx, { text: 'The Jira MCP server is not reachable.' }, CODED, PASSED, OPENED);
+    const callsBefore = ctx.daemon.sdk.calls.length;
+    const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
+    const fix = await until(
+      () => ctx.http.get(`/fixes/${confirm.body.data.fix.id}`).then((res) => res.body.data),
+      (found) => found.status !== 'running',
+      'the Fix to end',
+    );
+    expect(fix).toMatchObject({
+      status: 'done',
+      jira_key: null,
+      branch: 'fix/null-order-total',
+      pr_number: 41,
+      ticket_skipped: 'the agent did not answer as asked',
+    });
+    expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe('fix/null-order-total');
+    const prompts = ctx.daemon.sdk.calls.slice(callsBefore).map((call) => call.prompt);
+    expect(prompts).toHaveLength(4);
+    expect(prompts.slice(1).some((prompt) => prompt.includes('Atlassian'))).toBe(false);
+  });
+
+  it('cancels a failed Fix: stashes its changes, goes back to the source branch, drops the Fix branch, and the Alert can be fixed again', async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    await linkRepo(ctx, alert.service.id);
+    await verify(ctx, alert.id);
+    setConnector(ctx.store, ConnectorId.Jira, { status: HealthStatus.Off });
+    scriptRuns(ctx, CODED, outcome('failed', '2 failed'));
+    const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
+    const fixId = confirm.body.data.fix.id;
+    await until(
+      () => ctx.http.get(`/fixes/${fixId}`).then((res) => res.body.data.status),
+      (status) => status === 'failed',
+      'the Fix to fail',
+    );
+    expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe('fix/null-order-total');
+    await writeFile(path.join(ctx.dir, 'total.ts'), 'export const total = 0;\n');
+
+    const cancelled = await ctx.http.post(`/fixes/${fixId}/cancel`);
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body.data).toMatchObject({ status: 'abandoned' });
+    expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe('main');
+    expect(git(ctx.dir, 'status', '--porcelain').toString()).toBe('');
+    expect(git(ctx.dir, 'branch', '--list', 'fix/null-order-total').toString()).toBe('');
+    expect(git(ctx.dir, 'stash', 'list').toString()).toContain('ops-console: cancelled Fix fix/null-order-total');
+    expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.status).toBe('verified');
+    const kinds = (await ctx.http.get(`/alerts/${alert.id}/events`)).body.data.map((e: { kind: string }) => e.kind);
+    expect(kinds).toContain('abandoned');
+    expect((await ctx.http.post(`/fixes/${fixId}/cancel`)).body.error.code).toBe('invalid_state');
+
+    scriptRuns(ctx, CODED, PASSED, OPENED);
+    const again = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
+    expect(again.status).toBe(200);
+    expect(again.body.data.fix.id).not.toBe(fixId);
+  });
+
+  it('cancels a running Fix: stops its run and starts no further step', async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    await linkRepo(ctx, alert.service.id);
+    await verify(ctx, alert.id);
+    setConnector(ctx.store, ConnectorId.Jira, { status: HealthStatus.Off });
+    const callsBefore = ctx.daemon.sdk.calls.length;
+    ctx.daemon.sdk.script({ wait: gate().promise }, outcome('done', 'never reached'));
+    const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
+    const fixId = confirm.body.data.fix.id;
+    const sessionId = await until(
+      () => ctx.http.get(`/fixes/${fixId}`).then((res) => res.body.data.session_id),
+      (id) => typeof id === 'string',
+    );
+    await until(
+      () => ctx.http.get(`/sessions/${sessionId}`).then((res) => res.body.data.state),
+      (state) => state === 'working',
+    );
+
+    const cancelled = await ctx.http.post(`/fixes/${fixId}/cancel`);
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body.data).toMatchObject({ status: 'abandoned' });
+    expect((await ctx.http.get(`/sessions/${sessionId}`)).body.data.state).toBe('idle');
+    expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe('main');
+    expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.status).toBe('verified');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(ctx.daemon.sdk.calls.length - callsBefore).toBe(1);
+    expect((await ctx.http.get(`/fixes/${fixId}`)).body.data.status).toBe('abandoned');
+  });
+
+  it('refuses to cancel a Fix that opened its pull request', async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    await linkRepo(ctx, alert.service.id);
+    await verify(ctx, alert.id);
+    setConnector(ctx.store, ConnectorId.Jira, { status: HealthStatus.Off });
+    scriptRuns(ctx, CODED, PASSED, OPENED);
+    const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
+    const fixId = confirm.body.data.fix.id;
+    await until(
+      () => ctx.http.get(`/fixes/${fixId}`).then((res) => res.body.data.status),
+      (status) => status === 'done',
+    );
+    const refused = await ctx.http.post(`/fixes/${fixId}/cancel`);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.message).toBe(
+      'The Fix opened a pull request; close it on the Git host to abandon the Fix',
+    );
+  });
+
+  it('starts the Fix branch at the newest commit of the Branch origin has, not the checked-out one', async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    await linkRepo(ctx, alert.service.id);
+    const bare = path.join(await tempDir('ops-console-origin-'), 'orders-api.git');
+    git(path.dirname(bare), 'clone', '-q', '--bare', ctx.dir, bare);
+    const other = path.join(await tempDir('ops-console-other-'), 'work');
+    git(path.dirname(other), 'clone', '-q', bare, other);
+    await writeFile(path.join(other, 'README.md'), 'merged since\n');
+    git(other, 'commit', '-q', '-am', 'merged since');
+    git(other, 'push', '-q', 'origin', 'main');
+    const newest = git(other, 'rev-parse', 'HEAD').toString().trim();
+    git(ctx.dir, 'remote', 'set-url', 'origin', bare);
+    git(ctx.dir, 'checkout', '-q', '-b', 'feature');
+    await verify(ctx, alert.id);
+    setConnector(ctx.store, ConnectorId.Jira, { status: HealthStatus.Off });
+    scriptRuns(ctx, CODED, PASSED, OPENED);
+    const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
+    const fix = await until(
+      () => ctx.http.get(`/fixes/${confirm.body.data.fix.id}`).then((res) => res.body.data),
+      (found) => found.status !== 'running',
+      'the Fix to end',
+    );
+    expect(fix.status).toBe('done');
+    expect(git(ctx.dir, 'rev-parse', 'fix/null-order-total').toString().trim()).toBe(newest);
+  });
+
   it('fails at the stage that failed, keeps the Alert in fixing, and a retry does not create the ticket twice', async () => {
     const ctx = await start();
     const alert = await failing(ctx);
@@ -1160,6 +1309,59 @@ describe('Playbooks in Monitor jobs', () => {
   const appendOf = (call: { options: { systemPrompt?: unknown } } | undefined) =>
     (call?.options.systemPrompt as { append: string } | undefined)?.append ?? '';
 
+  it('reads the code at the newest commit of the first Branch origin has, fetched, and leaves the checkout alone', async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    await linkRepo(ctx, alert.service.id);
+    const bare = path.join(await tempDir('ops-console-origin-'), 'orders-api.git');
+    git(path.dirname(bare), 'clone', '-q', '--bare', ctx.dir, bare);
+    const other = path.join(await tempDir('ops-console-other-'), 'work');
+    git(path.dirname(other), 'clone', '-q', bare, other);
+    git(other, 'checkout', '-q', '-b', 'production');
+    await writeFile(path.join(other, 'README.md'), 'released\n');
+    git(other, 'commit', '-q', '-am', 'release');
+    git(other, 'push', '-q', 'origin', 'production');
+    const released = git(other, 'rev-parse', 'HEAD').toString().trim();
+    git(ctx.dir, 'remote', 'set-url', 'origin', bare);
+    await attach(ctx, 'verify', { ...DEEP, branches: 'staging, production, main' });
+
+    const started = await verify(ctx, alert.id, [json(REPORT)], [[outcome('done', 'traced')], [outcome('done', 'ok')]]);
+    const report = (await ctx.http.get(`/reports/${started.id}`)).body.data;
+    expect(report.status).toBe('ready');
+    expect(report.steps[0].text).toBe(`Code: origin/production at ${released.slice(0, 7)}, fetched from origin`);
+    expect(ctx.daemon.sdk.calls[0]?.prompt).toContain(`at origin/production, commit ${released.slice(0, 12)}`);
+    expect(ctx.daemon.sdk.calls[0]?.prompt).not.toContain('could not fetch');
+    expect(git(ctx.dir, 'branch', '--show-current').toString().trim()).toBe('main');
+    expect(git(ctx.dir, 'rev-parse', 'origin/production').toString().trim()).toBe(released);
+  });
+
+  it('uses the local branch and says it may be behind when origin cannot be reached, and fails on a Branch nowhere', async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    await linkRepo(ctx, alert.service.id);
+    git(ctx.dir, 'remote', 'set-url', 'origin', path.join(ctx.dir, 'no-such-origin'));
+    const local = git(ctx.dir, 'rev-parse', 'HEAD').toString().trim();
+    const playbook = await attach(ctx, 'verify', DEEP);
+
+    const started = await verify(ctx, alert.id, [json(REPORT)], [[outcome('done', 'traced')], [outcome('done', 'ok')]]);
+    const report = (await ctx.http.get(`/reports/${started.id}`)).body.data;
+    expect(report.status).toBe('ready');
+    expect(report.steps[0].text).toMatch(
+      new RegExp(
+        `^Code: main at ${local.slice(0, 7)}, local; could not fetch from origin \\(.+\\), so it may be behind$`,
+      ),
+    );
+    expect(ctx.daemon.sdk.calls[0]?.prompt).toContain('could not fetch main from origin');
+
+    await ctx.http.patch(`/playbooks/${playbook.id}`, { branches: 'production' });
+    const failed = await verify(ctx, alert.id, []);
+    expect((await ctx.http.get(`/reports/${failed.id}`)).body.data.error_message).toMatch(
+      /^Could not make a scratch copy: none of production is on origin or in the Repo/,
+    );
+    const refused = await ctx.http.patch(`/playbooks/${playbook.id}`, { branches: 'main, --upload-pack=x' });
+    expect([refused.status, refused.body.error.code]).toEqual([400, 'validation_failed']);
+  });
+
   it('runs each step as its own turn in a scratch copy, then the Report, and leaves the checkout alone', async () => {
     const ctx = await start();
     const alert = await failing(ctx);
@@ -1218,6 +1420,28 @@ describe('Playbooks in Monitor jobs', () => {
       'skipped',
     ]);
     listener.close();
+  });
+
+  it('Skip step marks the failed step skipped by the operator and goes on to the Report', async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    await linkRepo(ctx, alert.service.id);
+    await attach(ctx, 'verify', DEEP);
+    const started = await verify(ctx, alert.id, [], [[outcome('failed', 'no fixture folder')]]);
+    ctx.daemon.sdk.script(outcome('done', 'traced the route'));
+    ctx.daemon.sdk.script(json(REPORT));
+    expect((await ctx.http.post(`/reports/${started.id}/retry`, { skip: true })).status).toBe(202);
+    await until(
+      () => ctx.http.get(`/reports/${started.id}`).then((res) => res.body.data.status),
+      (status) => status !== 'running',
+    );
+    const report = (await ctx.http.get(`/reports/${started.id}`)).body.data;
+    expect(report.status).toBe('ready');
+    expect(report.playbook.steps.map((s: { status: string; summary: string }) => [s.status, s.summary])).toEqual([
+      ['skipped', 'Skipped by the operator: no fixture folder'],
+      ['done', 'traced the route'],
+    ]);
+    expect(ctx.daemon.sdk.calls.at(-2)?.prompt).toContain('Step 2 of 2');
   });
 
   it('stops at a failed step and keeps the scratch copy, and Retry from that step fills the same version', async () => {

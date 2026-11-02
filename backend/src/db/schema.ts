@@ -545,6 +545,8 @@ export const reports = sqliteTable(
     createdAt: text('created_at').notNull().default(nowIso),
     finishedAt: text('finished_at'),
     ...jobPlaybookColumns(),
+    /** The Playbook's Branch field as copied at start: where the code is read from. Null before Branch. */
+    playbookBranches: text('playbook_branches'),
     /** The scratch copy's folder; null once removed. */
     scratchPath: text('scratch_path'),
   },
@@ -593,7 +595,9 @@ export const fixes = sqliteTable('fixes', {
     .default('running' as FixStatus),
   jiraKey: text('jira_key'),
   jiraUrl: text('jira_url'),
-  /** `<jira_key>-<slug>`, set with the key. */
+  /** Why the ticket stage went on without a ticket while Jira was connected; null otherwise. */
+  ticketSkipped: text('ticket_skipped'),
+  /** `<jira_key>-<slug>`, set with the key; `fix/<slug>` without a ticket. */
   branch: text(),
   prNumber: integer('pr_number'),
   prUrl: text('pr_url'),
@@ -601,6 +605,8 @@ export const fixes = sqliteTable('fixes', {
   startedAt: text('started_at').notNull().default(nowIso),
   finishedAt: text('finished_at'),
   ...jobPlaybookColumns(),
+  /** The Playbook's Branch field as copied at start: where the code is read from. Null before Branch. */
+  playbookBranches: text('playbook_branches'),
 });
 
 /** The Connections a `devtools` Session may reach. No rows: every Connection with access. */
@@ -623,6 +629,8 @@ export const playbooks = sqliteTable(
     id: text().primaryKey().notNull(),
     name: text().notNull(),
     rules: text().notNull().default(''),
+    /** Comma-separated branches Verify and Fix read the code from, first one origin has; blank: the default. */
+    branches: text().notNull().default(''),
     /** `[{ block, title, instructions, writes }]`. */
     steps: text().notNull().default('[]'),
     createdAt: text('created_at').notNull().default(nowIso),

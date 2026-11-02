@@ -39,8 +39,8 @@ a mode that asks.
 ### Playbooks
 
 **Playbook**:
-The rules and ordered steps the agent follows when a Trigger starts it, written by the operator. Each Trigger holds
-one; one Playbook may be held by several.
+The rules and ordered steps the agent follows when a Trigger starts it, written by the operator, and the branches
+Verify and Fix read the code from. Each Trigger holds one; one Playbook may be held by several.
 _Avoid_: rule, pipeline, workflow
 
 **Trigger**:
@@ -55,7 +55,8 @@ One titled instruction in a Playbook, run as its own agent turn, ending done, sk
 A ready-made Playbook step the operator drags into a Playbook and then edits.
 
 **Scratch copy**:
-A throwaway copy of a Repo's code, at its default branch for a Verification or at a pull request's head commit for a
+A throwaway copy of a Repo's code, at the newest commit of the Playbook's branch for a Verification, fetched from
+origin, or at a pull request's head commit for a
 Reply check or a Comment pass, where the agent may write files and run local commands. A Playbook step that needs one carries the tag "scratch copy"; Review PR takes no such step.
 
 ### Monitor
@@ -115,7 +116,7 @@ _Avoid_: approval
 
 **Ticket**:
 The Jira issue the agent creates when the operator confirms a Report while Jira is connected. Its key starts the fix
-branch name.
+branch name. When the ticket cannot be made, the Fix goes on without one.
 
 **Fix**:
 The work that follows a confirmed Review: ticket (when Jira is connected), branch, the steps of its Playbook (code

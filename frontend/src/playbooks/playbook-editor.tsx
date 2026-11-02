@@ -113,6 +113,7 @@ export function PlaybookEditor(props: {
                   {
                     name: freeName(`Copy of ${playbook.name}`, props.items),
                     rules: playbook.rules,
+                    branches: playbook.branches,
                     steps: playbook.steps,
                   },
                   { onSuccess: (made) => props.onOpen(made.id) },
@@ -193,6 +194,26 @@ export function PlaybookEditor(props: {
             placeholder={readOnly ? 'No rules.' : 'What the agent should always do or never do on this Trigger'}
             onChange={(event) => onChange({ ...working, rules: event.target.value })}
             className={`${field} min-h-18 resize-y text-[13px]`}
+          />
+        </section>
+
+        <section aria-label="Branch">
+          <div className="mb-1.5 flex items-baseline gap-2">
+            <h2 className="m-0 text-sm">Branch</h2>
+            <span className="text-[11px] text-neutral-700">
+              Where Verify and Fix read the code: the first of these origin has, fetched first
+            </span>
+          </div>
+          <input
+            aria-label="Branch"
+            value={working.branches}
+            readOnly={readOnly}
+            maxLength={PLAYBOOK_LIMITS.branches}
+            placeholder={
+              readOnly ? "The Repo's default branch" : "production, master, main  ·  blank: the Repo's default branch"
+            }
+            onChange={(event) => onChange({ ...working, branches: event.target.value })}
+            className={`${field} font-mono text-[13px]`}
           />
         </section>
 

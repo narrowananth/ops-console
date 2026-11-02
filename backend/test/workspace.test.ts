@@ -798,6 +798,47 @@ describe('Agent Review', () => {
     close();
   });
 
+  it('skips a failed step on the operator’s word and goes on from the next one to the review', async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1)];
+    const step = (title: string) => ({ block: 'custom', title, instructions: `Check ${title}.`, writes: false });
+    const created = await ctx.http.post('/playbooks', {
+      name: 'PROD readiness',
+      rules: '',
+      steps: [step('Migrations'), step('Rollback'), step('Flags')],
+    });
+    await ctx.http.put('/playbook-triggers/review_pr', { playbook_id: created.body.data.id });
+    const { events, close } = await listen(ctx.daemon);
+    const outcome = (status: string, summary: string) => ({
+      text: `\`\`\`json\n${JSON.stringify({ outcome: status, summary })}\n\`\`\``,
+    });
+    ctx.daemon.sdk.script(outcome('done', 'no migration'));
+    ctx.daemon.sdk.script(outcome('failed', 'no rollback plan'));
+    const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
+    await waitForReview(events);
+    const id = started.body.data.id as string;
+
+    events.length = 0;
+    ctx.daemon.sdk.script(outcome('done', 'no flag'));
+    ctx.daemon.sdk.script({ text: REVIEW });
+    const retried = await ctx.http.post(`/agent-reviews/${id}/retry`, { skip: true });
+    expect(retried.status).toBe(202);
+    expect(retried.body.data).toMatchObject({ id, status: 'running' });
+    await waitForReview(events);
+    const [ready] = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
+    expect(ready).toMatchObject({ id, status: 'ready', verdict: 'Needs one fix' });
+    expect(ready.playbook.steps).toEqual([
+      { title: 'Migrations', writes: false, status: 'done', summary: 'no migration' },
+      { title: 'Rollback', writes: false, status: 'skipped', summary: 'Skipped by the operator: no rollback plan' },
+      { title: 'Flags', writes: false, status: 'done', summary: 'no flag' },
+    ]);
+    const prompts = ctx.daemon.sdk.calls.slice(2).map((call) => call.prompt);
+    expect(prompts[0]).toContain('Review pull request #1');
+    expect(prompts[0]).toContain('Step 3 of 3: Flags');
+    expect((await ctx.http.post(`/agent-reviews/${id}/retry`, { skip: true })).body.error.code).toBe('invalid_state');
+    close();
+  });
+
   it('takes no message from the operator in a pr_review Session', async () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];

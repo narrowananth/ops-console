@@ -18,6 +18,11 @@ export type Run = {
   sdkUuids: Set<string>;
   /** Action Log row per tool call. */
   toolRows: Map<string, string>;
+  /**
+   * The agent's text blocks as it wrote them, for the run's summary. Parts split fences out for display, which would
+   * cut a JSON answer whose string holds a fenced block of its own.
+   */
+  said: string[];
   /** Set while the agent waits for the operator's answer to its question. */
   answer: ((text: string) => void) | null;
   /** Approvals the run waits on. */

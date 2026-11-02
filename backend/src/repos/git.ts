@@ -16,6 +16,20 @@ export class BranchMoved extends GitFailed {
   }
 }
 
+/**
+ * Where a job reads the code: a branch at a commit. `fetched` is false when origin could not be reached and the
+ * Repo's local branch stands in; `error` is then why, and the code may be behind origin.
+ */
+export type CodeBase = { branch: string; ref: string; sha: string; fetched: boolean; error: string | null };
+
+/** The step a job shows for where its code comes from. */
+export function codeBaseStep(base: CodeBase): string {
+  const at = `${base.ref} at ${base.sha.slice(0, 7)}`;
+  return base.fetched
+    ? `Code: ${at}, fetched from origin`
+    : `Code: ${at}, local; could not fetch from origin (${base.error ?? 'no reason given'}), so it may be behind`;
+}
+
 /** Reads from a local git repository. Tests use real repositories in temporary folders. */
 export class Git {
   constructor(private readonly bin = 'git') {}
@@ -82,14 +96,50 @@ export class Git {
     }
   }
 
+  /** Deletes a local branch, merged or not; its commits stay in the reflog. Throws when git refuses. */
+  async deleteBranch(dir: string, branch: string): Promise<void> {
+    await this.must(dir, ['branch', '-D', branch]);
+  }
+
   /** Puts uncommitted changes, untracked files included, on the stash. Throws when git refuses. */
   async stash(dir: string, message: string): Promise<void> {
     await this.must(dir, ['stash', 'push', '--include-untracked', '-m', message]);
   }
 
-  /** Checks out an existing branch, or makes `branch` from the current one first. Throws when git refuses. */
-  async checkout(dir: string, branch: string, create: boolean): Promise<void> {
-    await this.must(dir, create ? ['checkout', '-b', branch] : ['checkout', branch]);
+  /**
+   * Checks out an existing branch, or makes `branch` first: from `from` when given, else from the current one. Throws
+   * when git refuses.
+   */
+  async checkout(dir: string, branch: string, create: boolean, from?: string): Promise<void> {
+    await this.must(dir, create ? ['checkout', '-b', branch, ...(from ? [from] : [])] : ['checkout', branch]);
+  }
+
+  /**
+   * The first of `names` origin has, fetched now. When none can be fetched, the first one the Repo has locally, with
+   * the fetch's error. Throws when no name is on origin or in the Repo.
+   */
+  async codeBase(dir: string, names: string[]): Promise<CodeBase> {
+    let error: string | null = null;
+    for (const branch of names) {
+      try {
+        await this.must(dir, ['fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
+          GIT_TERMINAL_PROMPT: '0',
+        });
+        const sha = await this.commitOf(dir, `refs/remotes/origin/${branch}`);
+        if (sha) return { branch, ref: `origin/${branch}`, sha, fetched: true, error: null };
+      } catch (failed) {
+        error ??= failed instanceof GitFailed && failed.message ? failed.message : 'git fetch failed';
+      }
+    }
+    for (const branch of names) {
+      const sha = await this.commitOf(dir, `refs/heads/${branch}`);
+      if (sha) return { branch, ref: branch, sha, fetched: false, error };
+    }
+    throw new GitFailed(`none of ${names.join(', ')} is on origin or in the Repo${error ? ` (${error})` : ''}`);
+  }
+
+  private async commitOf(dir: string, ref: string): Promise<string | null> {
+    return (await this.try(dir, ['rev-parse', '--verify', '-q', `${ref}^{commit}`]))?.trim() || null;
   }
 
   /** A detached worktree of `repo` at `ref`, in `dir`. Throws with git's first line when it refuses. */
@@ -109,11 +159,14 @@ export class Git {
     await this.must(dir, ['fetch', '--quiet', 'origin', `refs/heads/${branch}`], { GIT_TERMINAL_PROMPT: '0' });
   }
 
-  /** Commits every change in `dir` with `message`; the new commit, or null when nothing changed. */
+  /**
+   * Commits every change in `dir` with `message`; the new commit, or null when nothing changed. The Repo's git hooks
+   * are skipped: a scratch copy has no installed packages for them, and the host's CI still checks the push.
+   */
   async commitAll(dir: string, message: string): Promise<string | null> {
     await this.must(dir, ['add', '--all']);
     if ((await this.try(dir, ['diff', '--cached', '--quiet'])) !== null) return null;
-    await this.must(dir, ['commit', '--quiet', '-m', message]);
+    await this.must(dir, ['commit', '--quiet', '--no-verify', '-m', message]);
     return (await this.try(dir, ['rev-parse', 'HEAD']))?.trim() ?? null;
   }
 

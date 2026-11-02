@@ -703,11 +703,14 @@ export function useStartReplyCheck(repoId: string, number: number) {
   });
 }
 
+/** A failed job's retry; `skip` passes over its failed step first. */
+type JobRetry = { id: string; skip?: boolean };
+
 export function useRetryReplyCheck(repoId: string, number: number) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      apiSend('POST', `/reply-checks/${id}/retry`, undefined, z.object({ data: replyCheckSchema })),
+    mutationFn: ({ id, skip = false }: JobRetry) =>
+      apiSend('POST', `/reply-checks/${id}/retry`, { skip }, z.object({ data: replyCheckSchema })),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
   });
 }
@@ -729,8 +732,17 @@ export function useStartCommentPass(repoId: string, number: number) {
 export function useRetryCommentPass(repoId: string, number: number) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      apiSend('POST', `/comment-passes/${id}/retry`, undefined, z.object({ data: commentPassSchema })),
+    mutationFn: ({ id, skip = false }: JobRetry) =>
+      apiSend('POST', `/comment-passes/${id}/retry`, { skip }, z.object({ data: commentPassSchema })),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+  });
+}
+
+export function useRetryAgentReview(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, skip = false }: JobRetry) =>
+      apiSend('POST', `/agent-reviews/${id}/retry`, { skip }, z.object({ data: prAgentReviewSchema })),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
   });
 }
@@ -894,7 +906,8 @@ export function useUndoDismissal(id: string) {
 export function useRetryReport() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => apiSend('POST', `/reports/${id}/retry`, undefined, z.object({ data: reportSchema })),
+    mutationFn: ({ id, skip = false }: JobRetry) =>
+      apiSend('POST', `/reports/${id}/retry`, { skip }, z.object({ data: reportSchema })),
     onSuccess: () => refreshMonitor(client),
   });
 }
@@ -902,7 +915,16 @@ export function useRetryReport() {
 export function useRetryFix(id: string) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: () => apiSend('POST', `/fixes/${id}/retry`, undefined, z.object({ data: fixSchema })),
+    mutationFn: (skip: boolean) => apiSend('POST', `/fixes/${id}/retry`, { skip }, z.object({ data: fixSchema })),
+    onSuccess: () => refreshMonitor(client),
+  });
+}
+
+/** Stops a Fix, undoes its branch and takes the Alert back to `verified`. */
+export function useCancelFix(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('POST', `/fixes/${id}/cancel`, undefined, z.object({ data: fixSchema })),
     onSuccess: () => refreshMonitor(client),
   });
 }

@@ -589,6 +589,90 @@ describe('Address comments', () => {
   });
 });
 
+describe('Skip step', () => {
+  it('marks the failed step skipped by the operator and finishes the Comment pass from the next step', async () => {
+    const ctx = await start();
+    ctx.daemon.sdk.script({ text: outcome('read') });
+    ctx.daemon.sdk.script({ wait: editing(ctx, 'src/app.ts', 'export const taxRate = 1;\n') }, { text: outcome('ok') });
+    ctx.daemon.sdk.script({ text: outcome('no test runner', 'failed') });
+    const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/comment-passes`, { comment_ids: ['c3'] });
+    const id = started.body.data.id as string;
+    await jobEnded(ctx, 'comment_pass', id);
+    expect((await detail(ctx)).comment_passes[0].error).toBe('Step 3 · Run the tests failed: no test runner');
+
+    ctx.events.length = 0;
+    ctx.daemon.sdk.script({ text: outcomes([{ comment_id: 'c3', outcome: 'done', reply: 'Renamed.' }]) });
+    expect((await ctx.http.post(`/comment-passes/${id}/retry`, { skip: true })).status).toBe(202);
+    await jobEnded(ctx, 'comment_pass', id);
+    const [ready] = (await detail(ctx)).comment_passes;
+    expect(ready.status).toBe('ready');
+    expect(
+      ready.playbook.steps.map((step: { status: string; summary: string }) => [step.status, step.summary]),
+    ).toEqual([
+      ['done', 'read'],
+      ['done', 'ok'],
+      ['skipped', 'Skipped by the operator: no test runner'],
+    ]);
+    expect(git(ctx.remote, 'rev-parse', 'feature-1')).toBe(ready.commit_sha);
+    expect((await ctx.http.post(`/comment-passes/${id}/retry`, { skip: true })).body.error.code).toBe('invalid_state');
+  });
+
+  it('refuses to skip when the job failed outside its steps', async () => {
+    const ctx = await start();
+    ctx.daemon.sdk.script({ text: outcome('read') });
+    ctx.daemon.sdk.script({ text: outcome('read') });
+    ctx.daemon.sdk.script({ text: 'no verdict here' });
+    const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-checks`, { comment_id: 'c1' });
+    await jobEnded(ctx, 'reply_check', started.body.data.id);
+    const skipped = await ctx.http.post(`/reply-checks/${started.body.data.id}/retry`, { skip: true });
+    expect([skipped.status, skipped.body.error.message]).toEqual([409, 'No step failed, so there is no step to skip']);
+    expect((await detail(ctx)).reply_checks[0].status).toBe('failed');
+  });
+});
+
+describe('Stop', () => {
+  it('stops a Comment pass in a step and a Reply check in its closing turn; both fail with nothing posted and can retry', async () => {
+    const ctx = await start();
+    const firstStep = gate();
+    ctx.daemon.sdk.script({ wait: firstStep.promise }, { text: outcome('read') });
+    const pass = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/comment-passes`, { comment_ids: ['c3'] });
+    const passId = pass.body.data.id as string;
+    await until(
+      () => ctx.daemon.sdk.calls.length,
+      (count) => count > 0,
+      'the first step to start',
+    );
+    const session = (await detail(ctx)).agent_session_id as string;
+    expect((await ctx.http.post(`/sessions/${session}/stop`, {})).status).toBe(204);
+    await jobEnded(ctx, 'comment_pass', passId);
+    expect((await detail(ctx)).comment_passes[0]).toMatchObject({
+      status: 'failed',
+      can_retry: true,
+      error: 'Step 1 · Read the threads failed: stopped by the operator',
+    });
+    expect(git(ctx.remote, 'rev-parse', 'feature-1')).toBe(ctx.head);
+
+    const closing = gate();
+    ctx.daemon.sdk.script({ text: outcome('read') });
+    ctx.daemon.sdk.script({ text: outcome('read') });
+    ctx.daemon.sdk.script({ wait: closing.promise }, { text: verdict('fixed', 'Fixed.') });
+    const check = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-checks`, { comment_id: 'c1' });
+    await until(
+      () => ctx.daemon.sdk.calls.length,
+      (count) => count > 3,
+      'the closing turn to start',
+    );
+    expect((await ctx.http.post(`/sessions/${session}/stop`, {})).status).toBe(204);
+    await jobEnded(ctx, 'reply_check', check.body.data.id);
+    expect((await detail(ctx)).reply_checks[0]).toMatchObject({
+      status: 'failed',
+      can_retry: true,
+      error: 'The verdict was not given: stopped by the operator',
+    });
+    expect(ctx.host.posted).toEqual([]);
+  });
+});
+
 describe('One job per pull request', () => {
   it('refuses every other job while one runs, and the Agent Review too', async () => {
     const ctx = await start();
