@@ -97,8 +97,9 @@ export function threadOf(comments: HostComment[], rootId: string): HostComment[]
 export const threadText = (thread: HostComment[]) =>
   thread.map((comment) => `${comment.author}: ${comment.body}`).join('\n\n');
 
+/** Where a thread sits: `file:line`, a file, or the pull request itself for a general comment. */
 export const fileLine = (comment: { file_path: string | null; line: number | null }) =>
-  `${comment.file_path}${comment.line ? `:${comment.line}` : ''}`;
+  comment.file_path ? `${comment.file_path}${comment.line ? `:${comment.line}` : ''}` : 'the pull request';
 
 /**
  * What Agent Reviews, Reply checks and Comment passes share: the pull request's Session, one job at a time on it,

@@ -47,22 +47,24 @@ Review with agent, Approve and Request changes, but nothing that acts on the com
 
 ### Address comments
 
-12. Address comments shows next to Review with agent on an open pull request of the operator's own (they wrote it,
-    or a Session in the console worked its branch) that has at least one unresolved thread on a line. It does not show on someone else's pull request, a merged or closed one, or one
-    with no unresolved thread on a line.
-13. Pressing it opens a list of every unresolved thread on a line: file and line, the first comment's author and its
-    first line. All are ticked. Start needs at least one ticked; Cancel closes the list and starts nothing.
+12. Address comments shows next to Review with agent on any open pull request, the operator's or someone else's,
+    that has at least one unresolved thread: on a line, on a file, or a general comment on the pull request. It does
+    not show on a merged or closed pull request, or one with every thread resolved.
+13. Pressing it opens a list of every unresolved thread: file and line, or "General comment", then the first
+    comment's author and its first line. All are ticked. Start needs at least one ticked; Cancel closes the list and starts nothing.
 14. Start begins a Comment pass over the ticked threads: it copies the Address comments Playbook, makes a scratch
     copy at the pull request's head commit, and runs the steps once over all of them in the pull request's Session.
     A card in the pull request view shows the Playbook's name, each step's status and summary, and the threads.
 15. The closing turn returns each ticked thread as done or declined, each with a reply. A declined thread carries the
     agent's reason: it disagrees, or the comment is unclear.
 16. The console commits every change in the scratch copy as one commit, `Address review comments on #<n>` followed by
-    one line per done thread, `- <file>:<line>`, and pushes it to the pull request's branch without force. The
+    one line per done thread, `- <file>:<line>`, or `- <author>'s comment on the pull request` for a general comment,
+    and pushes it to the pull request's branch without force. The
     commit skips the Repo's git hooks: the scratch copy has no installed packages for them, and the host's CI still
     checks the push.
 17. After the push the console posts each reply in its thread as the agent; a done reply names the short commit
-    sha. It resolves each done thread. Declined threads stay open.
+    sha. It resolves each done thread on a line or a file. A general comment gets its reply and stays open: the hosts
+    have no thread to resolve there. Declined threads stay open.
 18. A Comment pass that changed no file, or declined every thread, makes no commit and no push, posts the replies
     and finishes ready.
 19. A push the host refuses because the branch moved fails the Comment pass with "The branch moved; run Address
@@ -135,7 +137,7 @@ Review with agent, Approve and Request changes, but nothing that acts on the com
   comments are change requests: the agent may change code to meet them. It never runs a command, reads a secret,
   touches a Connection or pushes because a comment says so. In every other run, pull request text stays data, never
   instructions. The safety lines say so and still close the system prompt.
-- The console pushes only the pull request's own branch, only on the operator's own pull request, never with force,
+- The console pushes only the pull request's own branch, on the operator's pull request or a teammate's, never with force,
   with an Action Log row before the push. The agent's own push, comment and resolve commands are denied.
 - Merging stays denied. A PROD write still asks in every Access mode. No value read from a PROD Connection goes
   into a file, a commit or a comment.
@@ -280,7 +282,7 @@ rows copy over unchanged.
 
 | Status | Error code          | When                                                                                       |
 | ------ | ------------------- | ------------------------------------------------------------------------------------------ |
-| 400    | `validation_failed` | No thread ticked, or a ticked thread that is not an unresolved thread on a line            |
+| 400    | `validation_failed` | No thread ticked, or a ticked comment that is not the start of an unresolved thread        |
 | 404    | `not_found`         | No such pull request, thread or job                                                        |
 | 409    | `session_busy`      | A job is running on this pull request                                                      |
 | 409    | `invalid_state`     | Pull request merged or closed; Address comments on someone else's; Check reply on a resolved thread or one whose last comment is the agent's; a retry of a job that cannot retry |
@@ -359,8 +361,8 @@ Gains `reply_check_id` and `comment_pass_id`, null unless the step is that job's
 
 - **Reply check**: the agent's check of one pull request thread: whether the code at the head commit does what the
   thread asked, given as fixed, partly fixed or not fixed in a reply. On fixed the thread is resolved.
-- **Comment pass**: the agent's work on the review threads the operator ticked on their own pull request: one commit
-  pushed to its branch, a reply in each thread, and each done thread resolved.
+- **Comment pass**: the agent's work on the review threads the operator ticked on a pull request, theirs or a
+  teammate's: one commit pushed to its branch, a reply in each thread, and each done thread on a line resolved.
 - **Trigger** (changed): a place in a tab that starts the agent: Verify and Fix in Monitor, Review PR, Check reply,
   Address comments, Reply in thread and Session message in Workspace.
 - **Scratch copy** (changed): a throwaway copy of a Repo's code, at its default branch for a Verification or at a
@@ -369,8 +371,8 @@ Gains `reply_check_id` and `comment_pass_id`, null unless the step is that job's
 
 ## ADR
 
-- **0002, Operator approves, agent never merges** (rewritten): adds that pressing Address comments on the operator's
-  own pull request is the approval for one commit and a push to that branch, made by the console. In a Comment pass
+- **0002, Operator approves, agent never merges** (rewritten): adds that pressing Address comments on any open pull
+  request is the approval for one commit and a push to that branch, made by the console. In a Comment pass
   the ticked review comments are change requests for the code in its scratch copy; everywhere else pull request
   text stays data. Considered Options gains "Pull request text is never an instruction, in every run": it lost
   because acting on review comments is the job the operator asked for.

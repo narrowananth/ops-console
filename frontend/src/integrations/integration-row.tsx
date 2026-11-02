@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { BrandIcon } from '../components/ui/brand-icon';
 import type { BrandSlug } from '../components/ui/brands';
+import type { StatusLook } from '../mcp/status';
 import { KindLabel } from './kind-label';
 
 const action =
@@ -28,7 +29,7 @@ export function IntegrationRow(props: {
   line: string;
   alert?: boolean;
   selected?: boolean;
-  status: { glyph: string; className: string };
+  status: StatusLook;
   onOpen: () => void;
   action: ReactNode;
 }) {
@@ -57,6 +58,7 @@ export function IntegrationRow(props: {
           </span>
         </span>
         <span
+          title={props.status.tip}
           className={`justify-self-end rounded-full px-2.5 py-0.75 font-mono text-xs whitespace-nowrap ${pill(props.status.className)} ${props.status.className}`}
         >
           {props.status.glyph}

@@ -128,6 +128,7 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
           </span>
           <Button
             className="ml-auto px-3 py-1.25 text-xs"
+            title="End the Setup agent and close its terminal. What it already added stays."
             onClick={() => {
               drafts.delete(terminalId);
               onClose();

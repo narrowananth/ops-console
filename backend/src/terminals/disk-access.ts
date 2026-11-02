@@ -47,6 +47,6 @@ export class MacDiskAccess implements DiskAccessGate {
 }
 
 /** `Ops Console.app` when the daemon runs as it, as the installed one does; null under `pnpm dev`. */
-function appPath(): string | null {
+export function appPath(): string | null {
   return /^(.*\.app)\/Contents\/MacOS\/[^/]+$/.exec(process.execPath)?.[1] ?? null;
 }

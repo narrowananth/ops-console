@@ -8,6 +8,8 @@ const draftSchema = z.object({
   rules: z.string(),
   // Drafts kept from before Branch have none.
   branches: z.string().default(''),
+  // Drafts kept from before the Jira ticket switch have none.
+  jira_ticket: z.boolean().default(false),
   steps: z.array(
     z.object({ block: z.enum(StepBlock), title: z.string(), instructions: z.string(), writes: z.boolean() }),
   ),
@@ -23,6 +25,7 @@ export const draftOf = (playbook: Playbook): Draft => ({
   name: playbook.name,
   rules: playbook.rules,
   branches: playbook.branches,
+  jira_ticket: playbook.jira_ticket,
   steps: playbook.steps,
 });
 
@@ -30,6 +33,7 @@ const same = (a: Draft, b: Draft) =>
   a.name === b.name &&
   a.rules === b.rules &&
   a.branches === b.branches &&
+  a.jira_ticket === b.jira_ticket &&
   a.steps.length === b.steps.length &&
   a.steps.every(
     (step, index) =>

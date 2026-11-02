@@ -5,7 +5,9 @@ import {
   useCloseSetupTerminal,
   useDiskAccess,
   useOpenDiskAccessSettings,
+  useOpenLoginItemsSettings,
   useSetupTerminal,
+  useStartAtLogin,
   useStartSetupTerminal,
 } from '../lib/queries';
 import { EXAMPLES, queueSetupLine, SetupTerminal } from './setup-terminal';
@@ -55,6 +57,8 @@ export function SetupAgentTab() {
 }
 
 /** Before the terminal starts: what to ask, and the button that starts it. */
+const LOCKED_TIP = 'Turn on Full Disk Access under Permissions first.';
+
 function Welcome(props: { locked: boolean; pending: boolean; onStart: (line?: string) => void }) {
   return (
     <section className="flex flex-col gap-6 rounded-xl border border-line bg-card px-8 py-8 shadow-sm">
@@ -71,7 +75,16 @@ function Welcome(props: { locked: boolean; pending: boolean; onStart: (line?: st
             Connectors for you.
           </p>
         </div>
-        <Button variant="primary" disabled={props.pending || props.locked} onClick={() => props.onStart()}>
+        <Button
+          variant="primary"
+          title={
+            props.locked
+              ? LOCKED_TIP
+              : 'Opens Claude in a terminal here. It only adds Connections, MCP Servers and Connectors; it removes nothing.'
+          }
+          disabled={props.pending || props.locked}
+          onClick={() => props.onStart()}
+        >
           Start setup agent
         </Button>
       </div>
@@ -82,6 +95,7 @@ function Welcome(props: { locked: boolean; pending: boolean; onStart: (line?: st
             <button
               key={example}
               type="button"
+              title={props.locked ? LOCKED_TIP : 'Start the Setup agent with this request'}
               disabled={props.pending || props.locked}
               onClick={() => props.onStart(example)}
               className="group flex cursor-pointer items-center gap-2.5 rounded-lg border border-line bg-bg px-4 py-3.5 text-left text-[13px] text-text transition-colors hover:border-accent-300 hover:bg-accent-100 disabled:cursor-not-allowed disabled:opacity-50"
@@ -152,10 +166,18 @@ function Permissions({ locked }: { locked: boolean }) {
   const state = access.data;
   if (!state || state.granted === null) return null;
   const disk = state.granted
-    ? { glyph: '● on', className: 'bg-ok/12 text-ok' }
+    ? { glyph: '● on', className: 'bg-ok/12 text-ok', tip: 'The Setup agent can read the folders it needs.' }
     : state.app_path
-      ? { glyph: '✕ off', className: 'bg-accent-100 text-accent-700' }
-      : { glyph: '○ off · dev build', className: 'bg-neutral-200 text-neutral-700' };
+      ? {
+          glyph: '✕ off',
+          className: 'bg-accent-100 text-accent-700',
+          tip: 'The Setup agent cannot start until you turn this on in System Settings.',
+        }
+      : {
+          glyph: '○ off · dev build',
+          className: 'bg-neutral-200 text-neutral-700',
+          tip: 'pnpm dev builds no app to grant it to. The Setup agent starts anyway.',
+        };
   return (
     <section
       aria-label="Permissions"
@@ -174,7 +196,9 @@ function Permissions({ locked }: { locked: boolean }) {
         <li aria-label="Full Disk Access" className="flex flex-col gap-2 rounded-lg bg-bg px-3 py-2.5">
           <div className="flex items-center gap-2">
             <strong className="flex-1">Full Disk Access</strong>
-            <span className={`rounded-full px-2 py-0.5 font-mono text-[11px] ${disk.className}`}>{disk.glyph}</span>
+            <span title={disk.tip} className={`rounded-full px-2 py-0.5 font-mono text-[11px] ${disk.className}`}>
+              {disk.glyph}
+            </span>
           </div>
           <span className="text-neutral-700">Reads every folder on this Mac.</span>
           {!state.granted && state.app_path && <GrantSteps appPath={state.app_path} />}
@@ -185,12 +209,18 @@ function Permissions({ locked }: { locked: boolean }) {
                   Open System Settings
                 </Button>
               )}
-              <Button className="px-3 py-1.25 text-xs" disabled={access.isFetching} onClick={() => access.refetch()}>
+              <Button
+                className="px-3 py-1.25 text-xs"
+                title="Read the permission again after you change it in System Settings"
+                disabled={access.isFetching}
+                onClick={() => access.refetch()}
+              >
                 Check again
               </Button>
             </div>
           )}
         </li>
+        <StartAtLoginRow />
         <li aria-label="Keychain" className="flex flex-col gap-2 rounded-lg bg-bg px-3 py-2.5">
           <div className="flex items-center gap-2">
             <strong className="flex-1">Keychain</strong>
@@ -207,6 +237,77 @@ function Permissions({ locked }: { locked: boolean }) {
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * Whether launchd starts the daemon at login, as macOS shows it under App Background Activity. Only the installed app
+ * does; `pnpm dev` runs the console while it runs.
+ */
+function StartAtLoginRow() {
+  const login = useStartAtLogin();
+  const openSettings = useOpenLoginItemsSettings();
+  const state = login.data;
+  if (!state || state.on === null) return null;
+  const look = state.dev_build
+    ? {
+        glyph: '○ off · dev build',
+        className: 'bg-neutral-200 text-neutral-700',
+        tip: 'pnpm dev runs the console only while it runs. The installed app starts at login.',
+      }
+    : state.on
+      ? {
+          glyph: '● on',
+          className: 'bg-ok/12 text-ok',
+          tip: 'Ops Console starts when you log in, and starts again if it stops.',
+        }
+      : {
+          glyph: '✕ off',
+          className: 'bg-accent-100 text-accent-700',
+          tip: 'Ops Console does not start when you log in. No scheduled Scan runs while it is stopped.',
+        };
+  return (
+    <li aria-label="Start at login" className="flex flex-col gap-2 rounded-lg bg-bg px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <strong className="flex-1">Start at login</strong>
+        <span title={look.tip} className={`rounded-full px-2 py-0.5 font-mono text-[11px] ${look.className}`}>
+          {look.glyph}
+        </span>
+      </div>
+      <span className="text-neutral-700">Runs in the background. macOS lists it under App Background Activity.</span>
+      {!state.dev_build && !state.on && (
+        <span className="text-neutral-700">
+          Switch Ops Console on under App Background Activity in Login Items, then run <code>ops-console start</code>.
+        </span>
+      )}
+      {!state.dev_build && (
+        <div className="flex gap-2">
+          <Button
+            variant={state.on ? 'secondary' : 'primary'}
+            className="px-3 py-1.25 text-xs"
+            title="Opens System Settings at Login Items & Extensions"
+            onClick={() => openSettings.mutate()}
+          >
+            Open Login Items
+          </Button>
+          {!state.on && (
+            <Button
+              className="px-3 py-1.25 text-xs"
+              title="Read it again after you change it in System Settings"
+              disabled={login.isFetching}
+              onClick={() => login.refetch()}
+            >
+              Check again
+            </Button>
+          )}
+        </div>
+      )}
+      {openSettings.error && (
+        <div role="alert" className="text-accent-700">
+          {openSettings.error.message}
+        </div>
+      )}
+    </li>
   );
 }
 

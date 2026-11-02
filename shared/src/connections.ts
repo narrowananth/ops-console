@@ -200,6 +200,14 @@ export const diskAccessSchema = z.object({ granted: z.boolean().nullable(), app_
 export type DiskAccess = z.infer<typeof diskAccessSchema>;
 
 /**
+ * Whether the daemon starts when the operator logs in: launchd's agent for the installed app, which macOS lists under
+ * App Background Activity. `on` is null off macOS; a dev build never starts at login.
+ */
+export const startAtLoginSchema = z.object({ on: z.boolean().nullable(), dev_build: z.boolean() });
+
+export type StartAtLogin = z.infer<typeof startAtLoginSchema>;
+
+/**
  * Why a setup terminal request may not reach Claude, or null when it may. Only plain requests go through: a symbol
  * first (`/login`, `!cmd`, `#`), an `@path` word or a control character would drive Claude Code itself. A line break
  * (`\n`) is the one control character allowed: a request of several lines reaches Claude as one paste. A request may be

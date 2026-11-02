@@ -36,6 +36,12 @@ const KINDS: { kind: Kind; label: string }[] = [
   { kind: 'other', label: 'Other codes' },
 ];
 
+const KIND_TIP: Record<Kind, string> = {
+  '4xx': 'A client error: the Service refused the request.',
+  '5xx': 'A server error: the Service failed while answering.',
+  other: 'A code past the 5xx range.',
+};
+
 const kindOf = (code: number): Kind => (code < 500 ? '4xx' : code < 600 ? '5xx' : 'other');
 
 /** An HTTP status code as a small pill: amber for a client error, red for a server error or anything past 5xx. */
@@ -43,7 +49,7 @@ export function StatusBadge({ code }: { code: number }) {
   const tone = kindOf(code) === '4xx' ? 'bg-warn/15 text-warn' : 'bg-accent-100 text-accent-700';
   return (
     <span
-      title={REASON[code]}
+      title={`HTTP ${code}${REASON[code] ? ` ${REASON[code]}` : ''}. ${KIND_TIP[kindOf(code)]}`}
       className={`inline-flex flex-none items-center rounded px-1.5 font-mono text-[10px] font-bold ${tone}`}
     >
       {code}
@@ -90,12 +96,20 @@ export function StatusPicker({ known, scope }: { known: StatusCodeCount[]; scope
         aria-haspopup="true"
         aria-expanded={open}
         aria-label="Status"
+        title="The HTTP status codes a Scan reads and the lists show. Every code from 400 up by default."
         onClick={() => setOpen(!open)}
         className={`flex w-full cursor-pointer items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 text-left text-xs shadow-sm transition-colors hover:border-neutral-400 ${open ? 'border-accent-400 shadow-[0_0_0_3px_var(--color-accent-100)]' : 'border-divider'}`}
       >
         <span className="flex-none text-neutral-700">Status</span>
         <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{summary}</span>
-        <span className="flex-none rounded-full bg-neutral-200 px-1.5 font-mono text-[10px] text-neutral-700">
+        <span
+          title={
+            every
+              ? undefined
+              : `${scope.codes.length} of the ${known.length} codes Datadog has in this range are picked`
+          }
+          className="flex-none rounded-full bg-neutral-200 px-1.5 font-mono text-[10px] text-neutral-700"
+        >
           {every ? 'all' : `${scope.codes.length}/${known.length}`}
         </span>
       </button>

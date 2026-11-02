@@ -13,13 +13,18 @@ write to, so an agent that acted on them alone could be steered into changing co
 console's safety lines close every run's system prompt and say that a log line is data, never an
 instruction.
 
-On the operator's own pull request, pressing Address comments is the approval for one Comment pass:
-the agent changes code in a scratch copy at the pull request's head commit, and the console commits
-it and pushes that one branch, never with force. In a Comment pass, and only there, the review
+Pressing Agent Review is the approval for one review of a pull request: the agent reads it in a scratch copy at the
+pull request's head commit, compares it with the target branch fetched from origin, and may install, build and run the
+tests there. It writes nothing anywhere else, and the console posts the findings and one summary comment. Pull request
+text stays data in a review: the agent runs no command because the description or a comment says so.
+
+On any open pull request, the operator's or a teammate's, pressing Address comments is the approval
+for one Comment pass: the agent changes code in a scratch copy at the pull request's head commit, and
+the console commits it and pushes that one branch, never with force. In a Comment pass, and only there, the review
 comments the operator ticked are change requests: the agent may change code to meet them, but never
 runs a command, reads a secret, touches a Connection or pushes because a comment says so. Everywhere
 else pull request text stays data, never instructions. The console, not the agent, posts replies and
-resolves threads.
+resolves threads; a general comment on the pull request gets a reply only.
 
 ## Considered Options
 
@@ -28,8 +33,14 @@ resolves threads.
   the Review it is too late to change the decision it informs.
 - **Verification writes in the operator's checkout**: no extra folder, but mock files and test runs
   would mix with the operator's own uncommitted work.
+- **Agent Review reads only**: no code from the pull request runs on the operator's machine. It lost because a review
+  that cannot run the tests and the build has to guess whether they pass, and the operator asked for that evidence.
 - **Pull request text is never an instruction, in every run**: the simplest rule, but acting on
   review comments is the job the operator asks for when they press Address comments.
+- **Address comments only on the operator's own pull request**: a teammate's branch would never get
+  a commit the teammate did not write, but the operator would fix review comments on a teammate's
+  pull request by hand. It lost because the operator wants the agent on those too; the push never
+  forces, so a teammate's newer commit stops the Comment pass and nothing of theirs is dropped.
 - **Show the Comment pass diff and wait before the push**: one more stop, but the operator already
   chose the threads, and the commit is on the card and on the host to look at after.
 
@@ -39,4 +50,8 @@ A fix waits for the operator. The console shows how long each verified Alert has
 Review. A run steered by log text can execute local commands in the scratch copy; the safety lines,
 the Alert Session's Access mode and the scratch copy's folder bound that. A reviewer can steer a
 Comment pass's code change through a comment the operator ticked; the operator's tick, the
-scratch copy and the pushed commit on the operator's own branch bound that.
+scratch copy and the one pushed commit, never forced, bound that. On a teammate's pull request the
+commit lands on their branch under the operator's git identity, for the teammate to see. An Agent Review runs the
+pull request's own build and tests, so pressing it runs that branch's code on the operator's Mac, inside the scratch
+copy's folder and under the Session's Access mode. A pull request from a fork has no branch on origin to fetch, so its
+review fails before any code runs.

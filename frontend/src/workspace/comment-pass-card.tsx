@@ -1,9 +1,11 @@
 import { AgentReviewStatus, type CommentPass, type PassThread, ThreadOutcome } from '@ops-console/shared';
 import { StopRun } from '../agents/stop-run';
+import { FoldTitle, useFold } from '../components/ui/fold';
 import { Markdown } from '../components/ui/markdown';
 import { StatusPill } from '../components/ui/pathway';
 import { useRetryCommentPass } from '../lib/queries';
 import { JobFailure, JobPath, PlaybookLink, runState } from '../playbooks/job-steps';
+import { threadPlace } from './pr-jobs';
 
 /** The commit's page on the host, from the pull request's own URL; null for a host whose URLs it does not know. */
 function commitUrl(prUrl: string, sha: string): string | null {
@@ -16,6 +18,12 @@ function commitUrl(prUrl: string, sha: string): string | null {
   return null;
 }
 
+const OUTCOME_TIP: Record<ThreadOutcome, string> = {
+  [ThreadOutcome.Pending]: 'The agent has not answered this thread yet',
+  [ThreadOutcome.Done]: 'The agent made the change or found it already made, replied, and resolved the thread',
+  [ThreadOutcome.Declined]: 'The agent did not change the code. Its reply says why, and the thread stays open for you.',
+};
+
 const OUTCOME_CLASS: Record<ThreadOutcome, string> = {
   [ThreadOutcome.Pending]: 'border-divider text-neutral-700',
   [ThreadOutcome.Done]: 'border-ok/40 bg-ok/10 text-ok',
@@ -26,17 +34,29 @@ function PassThreadRow({ thread, failed }: { thread: PassThread; failed: boolean
   const unposted = failed && thread.outcome !== ThreadOutcome.Pending && !thread.posted;
   const unresolved = failed && thread.outcome === ThreadOutcome.Done && thread.posted && !thread.resolved;
   return (
-    <li aria-label={`${thread.file_path}:${thread.line}`} className="flex flex-col gap-1">
+    <li aria-label={threadPlace(thread)} className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="min-w-0 truncate font-mono">
-          {thread.file_path}:{thread.line}
-        </span>
+        <span className="min-w-0 truncate font-mono">{threadPlace(thread)}</span>
         <span className="text-neutral-700">{thread.author}</span>
-        <span className={`rounded-full border px-2 py-px text-[10px] font-semibold ${OUTCOME_CLASS[thread.outcome]}`}>
+        <span
+          title={OUTCOME_TIP[thread.outcome]}
+          className={`rounded-full border px-2 py-px text-[10px] font-semibold ${OUTCOME_CLASS[thread.outcome]}`}
+        >
           {thread.outcome}
         </span>
-        {unposted && <span className="text-accent-700">reply not posted</span>}
-        {unresolved && <span className="text-accent-700">not resolved</span>}
+        {unposted && (
+          <span title="The Comment pass stopped before this reply reached the Git host" className="text-accent-700">
+            reply not posted
+          </span>
+        )}
+        {unresolved && (
+          <span
+            title="The reply is posted, but the thread is still open on the Git host. Resolve it from its thread."
+            className="text-accent-700"
+          >
+            not resolved
+          </span>
+        )}
       </div>
       <div className="text-xs text-neutral-700">{thread.excerpt}</div>
       {thread.reply && <Markdown source={thread.reply} />}
@@ -90,14 +110,27 @@ function PassHeader({ pass, prUrl, sessionId }: { pass: CommentPass; prUrl: stri
       {pass.playbook && <PlaybookLink playbook={pass.playbook} />}
       {sha &&
         (href ? (
-          <a href={href} target="_blank" rel="noreferrer" className="font-mono text-text underline">
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            title="The commit this Comment pass pushed, on the Git host"
+            className="font-mono text-text underline"
+          >
             {sha.slice(0, 7)}
           </a>
         ) : (
-          <span className="font-mono text-neutral-700">{sha.slice(0, 7)}</span>
+          <span title="The commit this Comment pass pushed" className="font-mono text-neutral-700">
+            {sha.slice(0, 7)}
+          </span>
         ))}
       {pass.stale && (
-        <span className="rounded-full bg-accent-100 px-2 py-px text-[10px] text-accent-700">older commit</span>
+        <span
+          title="The pull request has newer commits than this Comment pass"
+          className="rounded-full bg-accent-100 px-2 py-px text-[10px] text-accent-700"
+        >
+          older commit
+        </span>
       )}
       <span className="ml-auto flex items-center gap-2">
         {pass.status === AgentReviewStatus.Running && sessionId && (
@@ -120,16 +153,23 @@ export function CommentPassCard({
   sessionId: string | null;
 }) {
   const [newest, ...older] = passes;
+  const [folded, toggle] = useFold('comment-pass');
   if (!newest) return null;
   return (
     <section aria-label="Comment pass" className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
-      <header className="flex items-center gap-2 border-b border-divider bg-surface px-3 py-2 text-xs">
-        <strong>Comment pass</strong>
+      <header
+        className={`flex items-center gap-2 bg-surface px-3 py-2 text-xs ${folded ? '' : 'border-b border-divider'}`}
+      >
+        <FoldTitle label="Comment pass" folded={folded} onToggle={toggle}>
+          <strong>Comment pass</strong>
+        </FoldTitle>
         <PassHeader pass={newest} prUrl={prUrl} sessionId={sessionId} />
       </header>
-      <PassBody pass={newest} />
+      <div hidden={folded}>
+        <PassBody pass={newest} />
+      </div>
       {older.length > 0 && (
-        <details className="border-t border-divider">
+        <details hidden={folded} className="border-t border-divider">
           <summary className="cursor-pointer px-3 py-2 text-xs text-neutral-700">
             Older Comment passes · {older.length}
           </summary>

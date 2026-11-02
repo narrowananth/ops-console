@@ -1,4 +1,14 @@
-import { ConnectionType } from '@ops-console/shared';
+import { AccessLevel, ConnectionType } from '@ops-console/shared';
+
+/** The PROD tag, wherever a Connection shows it. */
+export const PROD_TIP = 'Reaches production data. The agent only reads it: a PROD Connection never gets write access.';
+
+/** What each Access Level lets the agent do on a Connection. */
+export const ACCESS_TIPS: Record<AccessLevel, string> = {
+  [AccessLevel.None]: 'The agent cannot see this database. You can still query it yourself in Dev tools.',
+  [AccessLevel.Read]: 'The agent reads only: its MCP Server starts in read-only mode.',
+  [AccessLevel.Write]: 'The agent may read and write. Each write it proposes waits for your approval.',
+};
 
 export type Field = { key: string; label: string; kind: 'text' | 'number' | 'list'; placeholder?: string };
 

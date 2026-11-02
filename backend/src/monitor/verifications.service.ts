@@ -98,11 +98,11 @@ export const REPORT_PROMPT = `Write the Report on this Alert from what you found
   "proposed_fix": "what to change and where",
   "replay": { "request": "curl command", "response": "status and body, secrets removed" },
   "diff": [{ "sign": "+ | - | space", "text": "line" }],
-  "markdown": "the full Report as Markdown, with the sections: Summary, Evidence (log lines), Root cause (file:line), Impact, How to fix (steps), How to check the fix"
+  "markdown": "the full Report as Markdown, in the sections listed below"
 }
 \`\`\`
 
-"replay" and "diff" may be null.`;
+"replay" and "diff" may be null. The Markdown has these sections, in order: Issue summary (what happens, the observed behaviour); Datadog evidence (log lines, timestamps, trace IDs, error details); Affected services (which service writes the error, which consume the logic); Root cause; Code-level findings (repository, file:line, classes, methods, execution flow); Timeline (when it started and changes around then, where evidence exists); Blast radius (services, APIs, platforms, integrations, user impact); Consumer analysis (mobile, web, internal APIs, background work); Database findings (read only); External dependency findings (Shopify and other third parties); Reproduction and validation (mocks, scenarios, results); Existing PR verification (related pull requests and earlier fixes); Recommended stable fix (exact changes and why this approach); Regression risks and test plan; Final conclusion (confirmed root cause, scope, next action). Mark each finding as verified, mocked or unverified.`;
 
 function stepOf(part: Part): ReportStep | null {
   if (part.kind === 'step') return { kind: part.text.startsWith('$ ') ? 'command' : 'step', text: part.text };

@@ -11,11 +11,13 @@ import {
 import { type DragEvent, useRef, useState } from 'react';
 import { Button, Spinner } from '../components/ui/button';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
+import { Hint } from '../components/ui/tip';
+import { Toggle } from '../components/ui/toggle';
 import { useCreatePlaybook, useDeletePlaybook, useSavePlaybook } from '../lib/queries';
 import type { Draft, DraftStep } from './drafts';
 import { type Drag, Grip, leftFor, startDrag } from './drag';
-import { ScratchTag } from './job-steps';
-import { CLOSING_TURN, chatOnly, freeName, inWords, triggerName } from './labels';
+import { SCRATCH_TIP, ScratchTag } from './job-steps';
+import { CLOSING_TURN, chatOnly, freeName, inWords, TRIGGER_TIPS, triggerName } from './labels';
 
 const small = 'px-2.5 py-1 text-xs';
 const field =
@@ -90,6 +92,7 @@ export function PlaybookEditor(props: {
               <>
                 <Button
                   className={small}
+                  title="Make a Trigger run this Playbook. Each Trigger runs one Playbook."
                   aria-expanded={menu === 'attach'}
                   onClick={() => setMenu(menu === 'attach' ? null : 'attach')}
                 >
@@ -98,6 +101,7 @@ export function PlaybookEditor(props: {
                 {playbook.triggers.length > 0 && (
                   <Button
                     className={small}
+                    title="Take this Playbook off a Trigger. That Trigger runs its built-in again."
                     aria-expanded={menu === 'detach'}
                     onClick={() => setMenu(menu === 'detach' ? null : 'detach')}
                   >
@@ -108,6 +112,7 @@ export function PlaybookEditor(props: {
             )}
             <Button
               className={small}
+              title="Make an editable copy of this Playbook. The copy runs on no Trigger until you attach it."
               disabled={duplicate.isPending}
               onClick={() =>
                 duplicate.mutate(
@@ -115,6 +120,7 @@ export function PlaybookEditor(props: {
                     name: freeName(`Copy of ${playbook.name}`, props.items),
                     rules: playbook.rules,
                     branches: playbook.branches,
+                    jira_ticket: playbook.jira_ticket,
                     steps: playbook.steps,
                   },
                   { onSuccess: (made) => props.onOpen(made.id) },
@@ -124,7 +130,11 @@ export function PlaybookEditor(props: {
               Duplicate
             </Button>
             {!readOnly && (
-              <Button className={`${small} text-accent-700`} onClick={() => setConfirmDelete(true)}>
+              <Button
+                className={`${small} text-accent-700`}
+                title="Delete this Playbook. Its Triggers go back to their built-ins. Asks first."
+                onClick={() => setConfirmDelete(true)}
+              >
                 Delete
               </Button>
             )}
@@ -141,6 +151,7 @@ export function PlaybookEditor(props: {
                 <Button
                   key={trigger}
                   className={small}
+                  title={TRIGGER_TIPS[trigger]}
                   onClick={() => {
                     setMenu(null);
                     if (menu === 'attach') props.onAttach(trigger);
@@ -182,8 +193,14 @@ export function PlaybookEditor(props: {
         <section aria-label="Rules">
           <div className="mb-1.5 flex items-baseline gap-2">
             <h2 className="m-0 text-sm">Rules</h2>
+            <Hint
+              text={`What the agent must always do or never do. Sent with every agent turn this Playbook runs, steps and chats alike. Up to ${PLAYBOOK_LIMITS.rules} characters.`}
+            />
             <span className="text-[11px] text-neutral-700">Every turn, after the console's own instructions</span>
-            <span className="ml-auto font-mono text-[11px] text-neutral-700">
+            <span
+              title="Characters used, out of the most Rules can hold"
+              className="ml-auto font-mono text-[11px] text-neutral-700"
+            >
               {working.rules.length} / {PLAYBOOK_LIMITS.rules}
             </span>
           </div>
@@ -209,6 +226,7 @@ export function PlaybookEditor(props: {
         <section aria-label="Branch">
           <div className="mb-1.5 flex items-baseline gap-2">
             <h2 className="m-0 text-sm">Branch</h2>
+            <Hint text="Branch names split by commas, tried in order. Verify and Fix read the newest commit of the first one origin has, so they see what is deployed, not your checkout. Blank: the Repo's default branch." />
             <span className="text-[11px] text-neutral-700">
               Where Verify and Fix read the code: the first of these origin has, fetched first
             </span>
@@ -226,11 +244,32 @@ export function PlaybookEditor(props: {
           />
         </section>
 
+        <section aria-label="Jira ticket" className="flex items-center gap-3">
+          <Toggle
+            label="Jira ticket"
+            title={readOnly ? 'A built-in reads only. Duplicate it to turn the Jira ticket on.' : undefined}
+            checked={working.jira_ticket}
+            disabled={readOnly}
+            onChange={(checked) => onChange({ ...working, jira_ticket: checked })}
+          />
+          <div className="flex flex-col">
+            <h2 className="m-0 text-sm">Jira ticket</h2>
+            <span className="text-[11px] text-neutral-700">
+              Fix makes a Jira ticket first, when Jira is connected, and names the branch after it. Off: the branch is
+              fix/&lt;name&gt;.
+            </span>
+          </div>
+        </section>
+
         <section aria-label="Steps">
           <div className="mb-2 flex items-baseline gap-2">
             <h2 className="m-0 text-sm">Steps</h2>
+            <Hint text="Each step runs as its own agent turn, top to bottom, and ends done, skipped or failed. A failed step stops the run; Retry or Skip it from where the run shows." />
             <span className="text-[11px] text-neutral-700">Each step is its own agent turn, in order</span>
-            <span className="ml-auto font-mono text-[11px] text-neutral-700">
+            <span
+              title="Steps used, out of the most a Playbook can hold"
+              className="ml-auto font-mono text-[11px] text-neutral-700"
+            >
               {steps.length} / {PLAYBOOK_LIMITS.steps}
             </span>
           </div>
@@ -292,7 +331,10 @@ export function PlaybookEditor(props: {
           </ol>
           {closing.length > 0 && (
             <div className="mt-2.5 flex flex-col gap-0.5 rounded-lg border border-dashed border-divider px-3 py-2 text-xs text-neutral-700">
-              <span>Then the console's own turn:</span>
+              <span className="flex items-center gap-1.5">
+                Then the console's own turn:
+                <Hint text="After your steps the console runs one more turn itself, with its own instructions. It is not a step, so you cannot move or remove it." />
+              </span>
               {closing.map((trigger) => (
                 <span key={trigger}>
                   {TRIGGER_LABELS[trigger].label}: {CLOSING_TURN[trigger]}.
@@ -307,7 +349,12 @@ export function PlaybookEditor(props: {
           <div className="flex items-center gap-2">
             <span className="text-xs text-neutral-700">Unsaved edits</span>
             <span className="flex-1" />
-            <Button className={small} disabled={save.isPending} onClick={props.onDiscard}>
+            <Button
+              className={small}
+              title="Throw the edits away and go back to the saved Playbook"
+              disabled={save.isPending}
+              onClick={props.onDiscard}
+            >
               Discard
             </Button>
             <Button
@@ -387,7 +434,7 @@ function StepCard(props: {
               className={`${field} text-[13px] font-bold`}
             />
             {step.block === StepBlock.Custom && !readOnly ? (
-              <label className="flex flex-none items-center gap-1 text-[11px] text-neutral-700">
+              <label title={SCRATCH_TIP} className="flex flex-none items-center gap-1 text-[11px] text-neutral-700">
                 <input
                   type="checkbox"
                   checked={step.writes}
@@ -414,7 +461,7 @@ function StepCard(props: {
             <button
               type="button"
               aria-label="Move up"
-              title="Move up"
+              title="Move this step up one place"
               disabled={index === 0}
               onClick={() => props.onMove(index - 1)}
               className={actionButton}
@@ -424,14 +471,20 @@ function StepCard(props: {
             <button
               type="button"
               aria-label="Move down"
-              title="Move down"
+              title="Move this step down one place"
               disabled={index === props.count - 1}
               onClick={() => props.onMove(index + 1)}
               className={actionButton}
             >
               ↓
             </button>
-            <button type="button" aria-label="Remove" title="Remove" onClick={props.onRemove} className={actionButton}>
+            <button
+              type="button"
+              aria-label="Remove"
+              title="Remove this step from the Playbook. Save to keep the change."
+              onClick={props.onRemove}
+              className={actionButton}
+            >
               ×
             </button>
           </div>

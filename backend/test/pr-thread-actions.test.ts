@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ConnectorId, HealthStatus, PrState, type WsEvent } from '@ops-console/shared';
+import { ConnectorId, HealthStatus, PlaybookTrigger, PrState, type WsEvent } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { StartupRecovery } from '../src/common/recovery';
@@ -10,10 +10,12 @@ import { ConnectorsModule } from '../src/connectors/connectors.module';
 import { actionLog, agentComments, connectors, prCommentPasses, prReplyChecks } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
+import { BUILTIN_RULES } from '../src/playbooks/builtins';
 import { ReposModule } from '../src/repos/repos.module';
 import { PullRequestsService } from '../src/workspace/pull-requests.service';
 import { WorkspaceModule } from '../src/workspace/workspace.module';
-import { type AgentDaemon, api, gate, listen, startAgentDaemon, until } from './agent-fixtures';
+import { type AgentDaemon, api, gate, listen, startAgentDaemon, stepAnswer, stepTurns, until } from './agent-fixtures';
+import type { Step } from './fakes/agent-sdk';
 import { FakeConnectorTools } from './fakes/connector-tools';
 import { FakeGitHost, hostPr } from './fakes/git-host';
 import { FakeProbe } from './fakes/probe';
@@ -49,7 +51,8 @@ type Ctx = {
 
 /**
  * GitHub connected as `octo-operator`, one imported Repo whose `origin` is a local bare repository, and pull
- * request #1 from `feature-1`, by `author`, with two threads on a line: `c1` (answered by `c2`) and `c3`.
+ * request #1 from `feature-1`, by `author`, with two threads on a line, `c1` (answered by `c2`) and `c3`, and a
+ * general comment `c4`.
  */
 async function start(author = 'octo-operator'): Promise<Ctx> {
   const host = new FakeGitHost();
@@ -142,9 +145,6 @@ async function start(author = 'octo-operator'): Promise<Ctx> {
   return { daemon, host, repoId, dir, remote, head, store, http, events };
 }
 
-const outcome = (summary: string, status = 'done') =>
-  `\`\`\`json\n{ "outcome": "${status}", "summary": "${summary}" }\n\`\`\``;
-
 const verdict = (value: string, reply: string) => `\`\`\`json\n{ "verdict": "${value}", "reply": "${reply}" }\n\`\`\``;
 
 const outcomes = (threads: { comment_id: string; outcome: string; reply: string }[]) =>
@@ -168,22 +168,36 @@ const detail = async (ctx: Ctx) => (await ctx.http.get(`/repos/${ctx.repoId}/pul
 
 const thread = (ctx: Ctx, id: string) => ctx.host.comments.get(1)?.find((comment) => comment.id === id);
 
-/** Writes `text` into a file of the scratch copy while the agent's step runs. */
-const editing = (ctx: Ctx, file: string, text: string) =>
-  (async () => {
+/** Scripts the runs in order. */
+const script = (ctx: Ctx, runs: Step[][]) => {
+  for (const run of runs) ctx.daemon.sdk.script(...run);
+};
+
+/** Writes `text` into a file of the scratch copy while the agent's `turn`-th run from now (from 0) runs. */
+const editing = (ctx: Ctx, turn: number, file: string, text: string) => {
+  const at = ctx.daemon.sdk.calls.length + turn;
+  return (async () => {
     const cwd = await until(
-      () => ctx.daemon.sdk.calls.at(-1)?.options.cwd,
+      () => ctx.daemon.sdk.calls[at]?.options.cwd,
       (dir) => typeof dir === 'string' && dir.includes('pr-scratch'),
       'the agent to run in the scratch copy',
     );
     await writeFile(path.join(cwd as string, file), text);
   })();
+};
+
+/** The index of Address comments' step that changes the code, and the one that runs the tests. */
+const IMPLEMENT = 3;
+const TESTS = 4;
 
 describe('Check reply', () => {
   it('checks the thread in a scratch copy at the head commit, posts the verdict, and resolves on fixed', async () => {
     const ctx = await start('colleague');
-    ctx.daemon.sdk.script({ text: outcome('the thread asks for config') });
-    ctx.daemon.sdk.script({ text: outcome('src/app.ts still hard-codes it') });
+    const turns = stepTurns(PlaybookTrigger.CheckReply, {
+      0: [stepAnswer('the thread asks for config')],
+      2: [stepAnswer('src/app.ts still hard-codes it')],
+    });
+    script(ctx, turns);
     ctx.daemon.sdk.script({
       text: verdict('fixed', 'Checked src/app.ts at the head commit: the rate is read from config.'),
     });
@@ -200,7 +214,7 @@ describe('Check reply', () => {
 
     const [check] = (await detail(ctx)).reply_checks;
     expect(check).toMatchObject({ status: 'ready', verdict: 'fixed', resolved: true, can_retry: false });
-    expect(check.playbook.steps.map((step: { status: string }) => step.status)).toEqual(['done', 'done']);
+    expect(check.playbook.steps.map((step: { status: string }) => step.status)).toEqual(turns.map(() => 'done'));
     const reply = ctx.host.posted.at(-1);
     expect(reply).toMatchObject({
       parent_id: 'c1',
@@ -208,14 +222,18 @@ describe('Check reply', () => {
     });
     expect(thread(ctx, 'c1')?.resolved).toBe(true);
 
-    const calls = ctx.daemon.sdk.calls.slice(-3);
+    const calls = ctx.daemon.sdk.calls;
     const scratch = path.join(ctx.daemon.dataDir, 'pr-scratch', started.body.data.id);
-    expect(calls.map((call) => call.options.cwd)).toEqual([scratch, scratch, scratch]);
-    // The agent cannot push, comment or resolve itself in any of its turns (Settled).
-    for (const call of calls)
+    // Each step, then the closing turn.
+    expect(calls.map((call) => call.options.cwd)).toEqual([...turns, 'closing'].map(() => scratch));
+    // The agent cannot push, comment or resolve itself in any of its turns (Settled), and each turn carries the
+    // built-in's rules.
+    for (const call of calls) {
       expect(call.options.disallowedTools).toEqual(
         expect.arrayContaining(['Bash(git push:*)', 'Bash(gh pr comment:*)']),
       );
+      expect((call.options.systemPrompt as { append: string }).append).toContain(BUILTIN_RULES.check_reply);
+    }
     expect(calls[0]?.prompt).toContain(`at head commit ${ctx.head}`);
     expect(calls[0]?.prompt).toContain('octo-operator: Fixed in 33f8c2b2.');
     expect(existsSync(scratch)).toBe(false);
@@ -233,8 +251,7 @@ describe('Check reply', () => {
 
   it('leaves the thread open on not fixed, and checks again only after someone replies', async () => {
     const ctx = await start();
-    ctx.daemon.sdk.script({ text: outcome('read') });
-    ctx.daemon.sdk.script({ text: outcome('read') });
+    script(ctx, stepTurns(PlaybookTrigger.CheckReply));
     ctx.daemon.sdk.script({ text: verdict('not_fixed', 'The rate is still hard-coded on line 1.') });
     const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-checks`, { comment_id: 'c1' });
     await jobEnded(ctx, 'reply_check', started.body.data.id);
@@ -244,8 +261,7 @@ describe('Check reply', () => {
     expect([again.status, again.body.error.code]).toEqual([409, 'invalid_state']);
 
     await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/comments`, { body: 'Now it is.', parent_id: 'c1' });
-    ctx.daemon.sdk.script({ text: outcome('read') });
-    ctx.daemon.sdk.script({ text: outcome('read') });
+    script(ctx, stepTurns(PlaybookTrigger.CheckReply));
     ctx.daemon.sdk.script({ text: verdict('partly_fixed', 'Read from config, but no default.') });
     const third = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-checks`, { comment_id: 'c1' });
     expect(third.status).toBe(202);
@@ -274,8 +290,8 @@ describe('Check reply', () => {
 
   it('fails a step with nothing posted and retries it in the kept scratch copy', async () => {
     const ctx = await start();
-    ctx.daemon.sdk.script({ text: outcome('read') });
-    ctx.daemon.sdk.script({ text: outcome('the file is gone', 'failed') });
+    const turns = stepTurns(PlaybookTrigger.CheckReply, { 1: [stepAnswer('the file is gone', 'failed')] });
+    script(ctx, turns.slice(0, 2));
     const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-checks`, { comment_id: 'c1' });
     const id = started.body.data.id as string;
     await jobEnded(ctx, 'reply_check', id);
@@ -283,21 +299,21 @@ describe('Check reply', () => {
     expect(failed).toMatchObject({
       status: 'failed',
       can_retry: true,
-      error: 'Step 2 · Read the code now failed: the file is gone',
+      error: 'Step 2 · Prepare the code context failed: the file is gone',
     });
     expect(ctx.host.posted).toEqual([]);
     const scratch = path.join(ctx.daemon.dataDir, 'pr-scratch', id);
     expect(existsSync(scratch)).toBe(true);
 
     ctx.events.length = 0;
-    ctx.daemon.sdk.script({ text: outcome('read it now') });
+    script(ctx, stepTurns(PlaybookTrigger.CheckReply, { 1: [stepAnswer('read it now')] }).slice(1));
     ctx.daemon.sdk.script({ text: verdict('fixed', 'Done right.') });
     const retried = await ctx.http.post(`/reply-checks/${id}/retry`);
     expect(retried.status).toBe(202);
     await jobEnded(ctx, 'reply_check', id);
     const [ready] = (await detail(ctx)).reply_checks;
     expect(ready).toMatchObject({ status: 'ready', resolved: true });
-    expect(ready.playbook.steps.map((step: { status: string }) => step.status)).toEqual(['done', 'done']);
+    expect(ready.playbook.steps.map((step: { status: string }) => step.status)).toEqual(turns.map(() => 'done'));
     expect(ctx.daemon.sdk.calls.at(-2)?.options.cwd).toBe(scratch);
     expect(existsSync(scratch)).toBe(false);
     expect((await ctx.http.post(`/reply-checks/${id}/retry`)).body.error.code).toBe('invalid_state');
@@ -305,15 +321,13 @@ describe('Check reply', () => {
 
   it('removes a failed Reply check’s scratch copy when a new one starts on the thread', async () => {
     const ctx = await start();
-    ctx.daemon.sdk.script({ text: outcome('read') });
-    ctx.daemon.sdk.script({ text: outcome('cannot read', 'failed') });
+    script(ctx, stepTurns(PlaybookTrigger.CheckReply, { 1: [stepAnswer('cannot read', 'failed')] }).slice(0, 2));
     const first = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-checks`, { comment_id: 'c1' });
     await jobEnded(ctx, 'reply_check', first.body.data.id);
     const kept = path.join(ctx.daemon.dataDir, 'pr-scratch', first.body.data.id);
     expect(existsSync(kept)).toBe(true);
 
-    ctx.daemon.sdk.script({ text: outcome('read') });
-    ctx.daemon.sdk.script({ text: outcome('read') });
+    script(ctx, stepTurns(PlaybookTrigger.CheckReply));
     ctx.daemon.sdk.script({ text: verdict('fixed', 'Fixed.') });
     const second = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-checks`, { comment_id: 'c1' });
     expect(existsSync(kept)).toBe(false);
@@ -325,8 +339,7 @@ describe('Check reply', () => {
   it('fails when the resolve fails, and a retry only resolves', async () => {
     const ctx = await start();
     ctx.host.failResolve = true;
-    ctx.daemon.sdk.script({ text: outcome('read') });
-    ctx.daemon.sdk.script({ text: outcome('read') });
+    script(ctx, stepTurns(PlaybookTrigger.CheckReply));
     ctx.daemon.sdk.script({ text: verdict('fixed', 'Fixed.') });
     const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-checks`, { comment_id: 'c1' });
     const id = started.body.data.id as string;
@@ -358,7 +371,9 @@ describe('Check reply', () => {
     expect(failed.status).toBe('failed');
     expect(failed.error).toMatch(/^Could not make a scratch copy: /);
     expect(failed.can_retry).toBe(false);
-    expect(failed.playbook.steps.map((step: { status: string }) => step.status)).toEqual(['pending', 'pending']);
+    expect(failed.playbook.steps.map((step: { status: string }) => step.status)).toEqual(
+      stepTurns(PlaybookTrigger.CheckReply).map(() => 'pending'),
+    );
   });
 
   it('runs the Playbook Check reply holds, scratch copy steps included', async () => {
@@ -368,7 +383,7 @@ describe('Check reply', () => {
       steps: [{ block: 'run_tests', title: 'Run the tests', instructions: 'Run them.', writes: true }],
     });
     await ctx.http.put('/playbook-triggers/check_reply', { playbook_id: playbook.body.data.id });
-    ctx.daemon.sdk.script({ text: outcome('tests pass') });
+    ctx.daemon.sdk.script(stepAnswer('tests pass'));
     ctx.daemon.sdk.script({ text: verdict('fixed', 'Tests pass.') });
     const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-checks`, { comment_id: 'c1' });
     expect(started.body.data.playbook).toMatchObject({
@@ -383,12 +398,17 @@ describe('Check reply', () => {
 describe('Address comments', () => {
   it('changes the code for the ticked threads, pushes one commit, replies and resolves the done ones', async () => {
     const ctx = await start();
-    ctx.daemon.sdk.script({ text: outcome('two threads') });
-    ctx.daemon.sdk.script(
-      { wait: editing(ctx, 'src/app.ts', 'export const taxRate = 1;\n') },
-      { text: outcome('renamed rate') },
+    script(
+      ctx,
+      stepTurns(PlaybookTrigger.AddressComments, {
+        0: [stepAnswer('two threads')],
+        [IMPLEMENT]: [
+          { wait: editing(ctx, IMPLEMENT, 'src/app.ts', 'export const taxRate = 1;\n') },
+          stepAnswer('renamed rate'),
+        ],
+        [TESTS]: [stepAnswer('tests pass')],
+      }),
     );
-    ctx.daemon.sdk.script({ text: outcome('tests pass') });
     ctx.daemon.sdk.script({
       text: outcomes([
         { comment_id: 'c3', outcome: 'done', reply: 'Renamed rate to taxRate.' },
@@ -442,7 +462,7 @@ describe('Address comments', () => {
       ['c3', `Done in ${pushed.slice(0, 7)}. Renamed rate to taxRate.`],
     ]);
     expect([thread(ctx, 'c1')?.resolved, thread(ctx, 'c3')?.resolved]).toEqual([false, true]);
-    expect(ctx.daemon.sdk.calls.at(-4)?.prompt).toContain('[comment_id c3] on src/app.ts:1');
+    expect(ctx.daemon.sdk.calls[0]?.prompt).toContain('[comment_id c3] on src/app.ts:1');
     expect(existsSync(path.join(ctx.daemon.dataDir, 'pr-scratch', pass.id))).toBe(false);
     // The pass is not stale at its own commit, only once the head moves past it.
     (ctx.host.prs[0] as { head_sha: string }).head_sha = pushed;
@@ -456,15 +476,51 @@ describe('Address comments', () => {
     expect(git(ctx.dir, 'status', '--porcelain')).toBe('');
   });
 
-  it('refuses someone else’s pull request, a thread it cannot take, and none ticked', async () => {
+  it('works on someone else’s pull request and a general comment: pushes, replies, and resolves only the line thread', async () => {
     const ctx = await start('colleague');
+    script(
+      ctx,
+      stepTurns(PlaybookTrigger.AddressComments, {
+        [IMPLEMENT]: [
+          { wait: editing(ctx, IMPLEMENT, 'src/app.ts', 'export const taxRate = 1;\n') },
+          stepAnswer('renamed rate'),
+        ],
+      }),
+    );
+    ctx.daemon.sdk.script({
+      text: outcomes([
+        { comment_id: 'c3', outcome: 'done', reply: 'Renamed rate to taxRate.' },
+        { comment_id: 'c4', outcome: 'done', reply: 'Thanks; renamed the rate too.' },
+      ]),
+    });
+
+    const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/comment-passes`, {
+      comment_ids: ['c3', 'c4'],
+    });
+    expect(started.status).toBe(202);
+    expect(started.body.data.threads[1]).toMatchObject({ comment_id: 'c4', file_path: null, line: null });
+    await jobEnded(ctx, 'comment_pass', started.body.data.id);
+
+    const [pass] = (await detail(ctx)).comment_passes;
+    const pushed = git(ctx.remote, 'rev-parse', 'feature-1');
+    expect(pass).toMatchObject({ status: 'ready', commit_sha: pushed });
+    expect(git(ctx.remote, 'log', '-1', '--format=%B', 'feature-1')).toBe(
+      "Address review comments on #1\n\n- src/app.ts:1\n- reviewer's comment on the pull request",
+    );
+    expect(ctx.host.posted.map((post) => post.parent_id)).toEqual(['c3', 'c4']);
+    expect([thread(ctx, 'c3')?.resolved, thread(ctx, 'c4')?.resolved]).toEqual([true, false]);
+    expect(pass.threads.map((t: { resolved: boolean }) => t.resolved)).toEqual([true, false]);
+    expect(ctx.daemon.sdk.calls[0]?.prompt).toContain('[comment_id c4] on the pull request');
+  });
+
+  it('refuses a thread it cannot take, and none ticked', async () => {
+    const ctx = await start();
     const post = (comment_ids: string[]) =>
       ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/comment-passes`, { comment_ids });
-    expect((await post(['c1'])).body.error.message).toBe('Address comments works only on your own pull requests');
-    (ctx.host.prs[0] as { author: string }).author = 'octo-operator';
     expect((await post([])).body.error.code).toBe('validation_failed');
-    expect((await post(['c4'])).body.error.code).toBe('validation_failed');
     expect((await post(['c2'])).body.error.code).toBe('validation_failed');
+    (thread(ctx, 'c1') as { resolved: boolean }).resolved = true;
+    expect((await post(['c1'])).body.error.code).toBe('validation_failed');
     ctx.host.down = 'failed';
     expect((await post(['c3'])).body.error.code).toBe('upstream_failed');
     expect(ctx.store.db.select().from(prCommentPasses).all()).toEqual([]);
@@ -472,9 +528,13 @@ describe('Address comments', () => {
 
   it('makes no commit when every thread is declined, and still replies', async () => {
     const ctx = await start();
-    ctx.daemon.sdk.script({ text: outcome('read') });
-    ctx.daemon.sdk.script({ text: outcome('nothing', 'skipped') });
-    ctx.daemon.sdk.script({ text: outcome('-', 'skipped') });
+    script(
+      ctx,
+      stepTurns(PlaybookTrigger.AddressComments, {
+        [IMPLEMENT]: [stepAnswer('nothing', 'skipped')],
+        [TESTS]: [stepAnswer('-', 'skipped')],
+      }),
+    );
     ctx.daemon.sdk.script({
       text: outcomes([{ comment_id: 'c3', outcome: 'declined', reply: 'rate is the name the API uses.' }]),
     });
@@ -497,12 +557,15 @@ describe('Address comments', () => {
     git(ctx.dir, 'checkout', '-q', 'main');
     const moved = git(ctx.remote, 'rev-parse', 'feature-1');
 
-    ctx.daemon.sdk.script({ text: outcome('read') });
-    ctx.daemon.sdk.script(
-      { wait: editing(ctx, 'src/app.ts', 'export const taxRate = 1;\n') },
-      { text: outcome('renamed') },
+    script(
+      ctx,
+      stepTurns(PlaybookTrigger.AddressComments, {
+        [IMPLEMENT]: [
+          { wait: editing(ctx, IMPLEMENT, 'src/app.ts', 'export const taxRate = 1;\n') },
+          stepAnswer('renamed'),
+        ],
+      }),
     );
-    ctx.daemon.sdk.script({ text: outcome('pass') });
     ctx.daemon.sdk.script({ text: outcomes([{ comment_id: 'c3', outcome: 'done', reply: 'Renamed.' }]) });
     const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/comment-passes`, { comment_ids: ['c3'] });
     await jobEnded(ctx, 'comment_pass', started.body.data.id);
@@ -519,12 +582,15 @@ describe('Address comments', () => {
   it('after a push, a failed reply fails the pass, and a retry posts only what is left without pushing again', async () => {
     const ctx = await start();
     ctx.host.failPosts = (comment) => comment.parent_id === 'c1';
-    ctx.daemon.sdk.script({ text: outcome('read') });
-    ctx.daemon.sdk.script(
-      { wait: editing(ctx, 'src/app.ts', 'export const taxRate = 2;\n') },
-      { text: outcome('done') },
+    script(
+      ctx,
+      stepTurns(PlaybookTrigger.AddressComments, {
+        [IMPLEMENT]: [
+          { wait: editing(ctx, IMPLEMENT, 'src/app.ts', 'export const taxRate = 2;\n') },
+          stepAnswer('done'),
+        ],
+      }),
     );
-    ctx.daemon.sdk.script({ text: outcome('pass') });
     ctx.daemon.sdk.script({
       text: outcomes([
         { comment_id: 'c1', outcome: 'done', reply: 'Reads config now.' },
@@ -564,27 +630,32 @@ describe('Address comments', () => {
 
   it('fails a step with nothing pushed, and retries from it', async () => {
     const ctx = await start();
-    ctx.daemon.sdk.script({ text: outcome('read') });
-    ctx.daemon.sdk.script({ text: outcome('cannot build', 'failed') });
+    const failing = stepTurns(PlaybookTrigger.AddressComments, { [IMPLEMENT]: [stepAnswer('cannot build', 'failed')] });
+    script(ctx, failing.slice(0, IMPLEMENT + 1));
     const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/comment-passes`, { comment_ids: ['c3'] });
     const id = started.body.data.id as string;
     await jobEnded(ctx, 'comment_pass', id);
     expect((await detail(ctx)).comment_passes[0]).toMatchObject({
       status: 'failed',
       can_retry: true,
-      error: 'Step 2 · Make the changes failed: cannot build',
+      error: 'Step 4 · Implement the agreed changes failed: cannot build',
     });
     expect(git(ctx.remote, 'rev-parse', 'feature-1')).toBe(ctx.head);
 
     ctx.events.length = 0;
-    ctx.daemon.sdk.script({ wait: editing(ctx, 'src/app.ts', 'export const taxRate = 1;\n') }, { text: outcome('ok') });
-    ctx.daemon.sdk.script({ text: outcome('pass') });
+    script(
+      ctx,
+      stepTurns(PlaybookTrigger.AddressComments, {
+        // The retry's first run is the failed step.
+        [IMPLEMENT]: [{ wait: editing(ctx, 0, 'src/app.ts', 'export const taxRate = 1;\n') }, stepAnswer('ok')],
+      }).slice(IMPLEMENT),
+    );
     ctx.daemon.sdk.script({ text: outcomes([{ comment_id: 'c3', outcome: 'done', reply: 'Renamed.' }]) });
     await ctx.http.post(`/comment-passes/${id}/retry`);
     await jobEnded(ctx, 'comment_pass', id);
     const [ready] = (await detail(ctx)).comment_passes;
     expect(ready.status).toBe('ready');
-    expect(ready.playbook.steps.map((step: { status: string }) => step.status)).toEqual(['done', 'done', 'done']);
+    expect(ready.playbook.steps.map((step: { status: string }) => step.status)).toEqual(failing.map(() => 'done'));
     expect(git(ctx.remote, 'rev-parse', 'feature-1')).toBe(ready.commit_sha);
   });
 });
@@ -592,15 +663,19 @@ describe('Address comments', () => {
 describe('Skip step', () => {
   it('marks the failed step skipped by the operator and finishes the Comment pass from the next step', async () => {
     const ctx = await start();
-    ctx.daemon.sdk.script({ text: outcome('read') });
-    ctx.daemon.sdk.script({ wait: editing(ctx, 'src/app.ts', 'export const taxRate = 1;\n') }, { text: outcome('ok') });
-    ctx.daemon.sdk.script({ text: outcome('no test runner', 'failed') });
+    const turns = stepTurns(PlaybookTrigger.AddressComments, {
+      0: [stepAnswer('read')],
+      [IMPLEMENT]: [{ wait: editing(ctx, IMPLEMENT, 'src/app.ts', 'export const taxRate = 1;\n') }, stepAnswer('ok')],
+      [TESTS]: [stepAnswer('no test runner', 'failed')],
+    });
+    script(ctx, turns.slice(0, TESTS + 1));
     const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/comment-passes`, { comment_ids: ['c3'] });
     const id = started.body.data.id as string;
     await jobEnded(ctx, 'comment_pass', id);
-    expect((await detail(ctx)).comment_passes[0].error).toBe('Step 3 · Run the tests failed: no test runner');
+    expect((await detail(ctx)).comment_passes[0].error).toBe('Step 5 · Run the tests failed: no test runner');
 
     ctx.events.length = 0;
+    script(ctx, turns.slice(TESTS + 1));
     ctx.daemon.sdk.script({ text: outcomes([{ comment_id: 'c3', outcome: 'done', reply: 'Renamed.' }]) });
     expect((await ctx.http.post(`/comment-passes/${id}/retry`, { skip: true })).status).toBe(202);
     await jobEnded(ctx, 'comment_pass', id);
@@ -608,19 +683,20 @@ describe('Skip step', () => {
     expect(ready.status).toBe('ready');
     expect(
       ready.playbook.steps.map((step: { status: string; summary: string }) => [step.status, step.summary]),
-    ).toEqual([
-      ['done', 'read'],
-      ['done', 'ok'],
-      ['skipped', 'Skipped by the operator: no test runner'],
-    ]);
+    ).toEqual(
+      turns.map((_turn, index) =>
+        index === TESTS
+          ? ['skipped', 'Skipped by the operator: no test runner']
+          : ['done', index === 0 ? 'read' : 'ok'],
+      ),
+    );
     expect(git(ctx.remote, 'rev-parse', 'feature-1')).toBe(ready.commit_sha);
     expect((await ctx.http.post(`/comment-passes/${id}/retry`, { skip: true })).body.error.code).toBe('invalid_state');
   });
 
   it('refuses to skip when the job failed outside its steps', async () => {
     const ctx = await start();
-    ctx.daemon.sdk.script({ text: outcome('read') });
-    ctx.daemon.sdk.script({ text: outcome('read') });
+    script(ctx, stepTurns(PlaybookTrigger.CheckReply));
     ctx.daemon.sdk.script({ text: 'no verdict here' });
     const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-checks`, { comment_id: 'c1' });
     await jobEnded(ctx, 'reply_check', started.body.data.id);
@@ -634,7 +710,7 @@ describe('Stop', () => {
   it('stops a Comment pass in a step and a Reply check in its closing turn; both fail with nothing posted and can retry', async () => {
     const ctx = await start();
     const firstStep = gate();
-    ctx.daemon.sdk.script({ wait: firstStep.promise }, { text: outcome('read') });
+    ctx.daemon.sdk.script({ wait: firstStep.promise }, stepAnswer('read'));
     const pass = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/comment-passes`, { comment_ids: ['c3'] });
     const passId = pass.body.data.id as string;
     await until(
@@ -648,18 +724,19 @@ describe('Stop', () => {
     expect((await detail(ctx)).comment_passes[0]).toMatchObject({
       status: 'failed',
       can_retry: true,
-      error: 'Step 1 · Read the threads failed: stopped by the operator',
+      error: 'Step 1 · Read the selected threads failed: stopped by the operator',
     });
     expect(git(ctx.remote, 'rev-parse', 'feature-1')).toBe(ctx.head);
 
     const closing = gate();
-    ctx.daemon.sdk.script({ text: outcome('read') });
-    ctx.daemon.sdk.script({ text: outcome('read') });
+    const steps = stepTurns(PlaybookTrigger.CheckReply);
+    script(ctx, steps);
     ctx.daemon.sdk.script({ wait: closing.promise }, { text: verdict('fixed', 'Fixed.') });
+    const before = ctx.daemon.sdk.calls.length;
     const check = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-checks`, { comment_id: 'c1' });
     await until(
       () => ctx.daemon.sdk.calls.length,
-      (count) => count > 3,
+      (count) => count > before + steps.length,
       'the closing turn to start',
     );
     expect((await ctx.http.post(`/sessions/${session}/stop`, {})).status).toBe(204);
@@ -677,8 +754,7 @@ describe('One job per pull request', () => {
   it('refuses every other job while one runs, and the Agent Review too', async () => {
     const ctx = await start();
     const hold = gate();
-    ctx.daemon.sdk.script({ wait: hold.promise }, { text: outcome('read') });
-    ctx.daemon.sdk.script({ text: outcome('read') });
+    script(ctx, stepTurns(PlaybookTrigger.CheckReply, { 0: [{ wait: hold.promise }, stepAnswer('read')] }));
     ctx.daemon.sdk.script({ text: verdict('fixed', 'Fixed.') });
     const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-checks`, { comment_id: 'c1' });
     await until(
@@ -718,8 +794,7 @@ describe('Reply in thread', () => {
       tx.insert(agentComments).values({ repoId: ctx.repoId, prNumber: 1, commentId: 'c9', agentReviewId: null }).run();
     });
     const hold = gate();
-    ctx.daemon.sdk.script({ wait: hold.promise }, { text: outcome('read') });
-    ctx.daemon.sdk.script({ text: outcome('read') });
+    script(ctx, stepTurns(PlaybookTrigger.CheckReply, { 0: [{ wait: hold.promise }, stepAnswer('read')] }));
     ctx.daemon.sdk.script({ text: verdict('not_fixed', 'Still hard-coded.') });
     ctx.daemon.sdk.script({ text: 'Done: I named it TAX_RATE.' });
     const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-checks`, { comment_id: 'c1' });

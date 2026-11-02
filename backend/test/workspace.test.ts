@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ConnectorId, GitHost, HealthStatus, PrReviewState, type WsEvent } from '@ops-console/shared';
+import { ConnectorId, GitHost, HealthStatus, PlaybookTrigger, PrReviewState, type WsEvent } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { StartupRecovery } from '../src/common/recovery';
@@ -11,7 +12,8 @@ import { STORE, type Store } from '../src/db/store';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { ReposModule } from '../src/repos/repos.module';
 import { WorkspaceModule } from '../src/workspace/workspace.module';
-import { type AgentDaemon, api, gate, listen, startAgentDaemon, until } from './agent-fixtures';
+import { type AgentDaemon, api, gate, listen, startAgentDaemon, stepAnswer, stepTurns, until } from './agent-fixtures';
+import type { Step } from './fakes/agent-sdk';
 import { FakeConnectorTools } from './fakes/connector-tools';
 import { FakeGitHost, hostPr } from './fakes/git-host';
 import { FakeProbe } from './fakes/probe';
@@ -604,25 +606,51 @@ describe('pull requests', () => {
   });
 });
 
-const REVIEW = [
-  '```json',
-  JSON.stringify({
-    verdict: 'Needs one fix',
-    findings: [
-      { severity: 'blocker', file: 'src/app.ts', line: 3, text: 'Unchecked input.' },
-      { severity: 'nit', file: null, line: null, text: 'Rename the helper.' },
-      { severity: 'suggestion', file: 'src/bad.ts', line: 9, text: 'Cache this.' },
-    ],
-    checklist: [{ item: 'Migration', status: 'pass', note: 'none needed' }],
-    tools: [],
-  }),
-  '```',
-].join('\n');
+const REVIEW_OUTPUT = {
+  decision: 'request_changes',
+  verdict: 'Needs one fix',
+  findings: [
+    { severity: 'high', file: 'src/app.ts', line: 3, text: 'Unchecked input.' },
+    { severity: 'info', file: null, line: null, text: 'Rename the helper.' },
+    { severity: 'medium', file: 'src/bad.ts', line: 9, text: 'Cache this.' },
+  ],
+  checklist: [{ item: 'Migration', status: 'pass', note: 'none needed' }],
+  tools: [],
+  report: '## Review summary\n\nOne input check is missing.',
+};
 
-/** The built-in Review PR step's turn, then the closing turn with the findings. */
-function scriptReview(ctx: { daemon: AgentDaemon }): void {
-  ctx.daemon.sdk.script({ text: '```json\n{ "outcome": "done", "summary": "read the diff" }\n```' });
+const REVIEW = ['```json', JSON.stringify(REVIEW_OUTPUT), '```'].join('\n');
+
+/** One run per step of the built-in Review PR, then the closing turn with the findings. */
+function scriptReview(ctx: { daemon: AgentDaemon }, turns: Record<number, Step[]> = {}): void {
+  for (const run of stepTurns(PlaybookTrigger.ReviewPr, turns)) ctx.daemon.sdk.script(...run);
   ctx.daemon.sdk.script({ text: REVIEW });
+}
+
+/** Commits `text` as src/app.ts on `feature-1` and pushes it to `origin`; the operator's checkout stays on main. */
+function pushFeature(ctx: Ctx, text: string): string {
+  git(ctx.dir, 'checkout', '-q', 'feature-1');
+  mkdirSync(path.join(ctx.dir, 'src'), { recursive: true });
+  writeFileSync(path.join(ctx.dir, 'src', 'app.ts'), text);
+  git(ctx.dir, 'add', '.');
+  git(ctx.dir, 'commit', '-q', '-m', 'change the rate');
+  git(ctx.dir, 'checkout', '-q', 'main');
+  git(ctx.dir, 'push', '-q', 'origin', 'feature-1');
+  return git(ctx.dir, 'rev-parse', 'feature-1').toString().trim();
+}
+
+/**
+ * Points `origin` at a local bare repository with `main` and `feature-1` one commit ahead, as a scratch copy needs;
+ * the console still sees the Repo on GitHub. Pull request #1 is that branch at its head.
+ */
+async function withOrigin(ctx: Ctx): Promise<{ remote: string; head: string }> {
+  const remote = path.join(await tempDir('ops-console-origin-'), 'orders-api.git');
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote]);
+  git(ctx.dir, 'remote', 'set-url', 'origin', remote);
+  git(ctx.dir, 'push', '-q', 'origin', 'main');
+  const head = pushFeature(ctx, 'export const rate = 1;\n');
+  ctx.host.prs = [hostPr(1, { branch: 'feature-1', head_sha: head })];
+  return { remote, head };
 }
 
 const waitForReview = (events: WsEvent[]) =>
@@ -646,24 +674,57 @@ describe('Agent Review', () => {
     expect(review).toMatchObject({ id: 'left-running', status: 'failed' });
   });
 
-  it("runs in the pull request's own Session, posts each finding with an Action Log row first, and records the comments", async () => {
+  it('reads a review stored with the earlier severities at the nearest level', async () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];
+    const finding = (severity: string) => ({
+      severity,
+      file: null,
+      line: null,
+      text: severity,
+      comment_id: null,
+      post_error: null,
+    });
+    ctx.store.write((tx) => {
+      tx.insert(prAgentReviews)
+        .values({
+          id: 'earlier',
+          repoId: ctx.repoId,
+          prNumber: 1,
+          headSha: 'sha-1-a',
+          status: 'ready' as never,
+          findings: JSON.stringify([finding('blocker'), finding('suggestion'), finding('nit')]),
+        })
+        .run();
+    });
+    const [review] = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
+    expect(review.findings.map((f: { severity: string; text: string }) => [f.text, f.severity])).toEqual([
+      ['blocker', 'high'],
+      ['suggestion', 'medium'],
+      ['nit', 'info'],
+    ]);
+    expect(review).toMatchObject({ decision: null, report: null, base_branch: null, base_sha: null });
+  });
+
+  it("runs in the pull request's own Session, posts each finding with an Action Log row first, and records the comments", async () => {
+    const ctx = await start();
+    const { head } = await withOrigin(ctx);
     const { events, close } = await listen(ctx.daemon);
     const rowsAtPost: number[] = [];
     ctx.host.beforePost = () => {
       rowsAtPost.push(ctx.store.db.select().from(actionLog).all().length);
     };
-    ctx.host.failPosts = (comment) => comment.file_path === 'src/bad.ts';
+    // A refused summary leaves the review ready.
+    ctx.host.failPosts = (comment) => comment.file_path === 'src/bad.ts' || comment.body.startsWith('**Agent Review**');
     scriptReview(ctx);
 
     const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
     expect(started.status).toBe(202);
-    expect(started.body.data).toMatchObject({ status: 'running', head_sha: 'sha-1-a', stale: false });
+    expect(started.body.data).toMatchObject({ status: 'running', head_sha: head, stale: false });
     await waitForReview(events);
 
     const [review] = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
-    expect(review).toMatchObject({ status: 'ready', verdict: 'Needs one fix' });
+    expect(review).toMatchObject({ status: 'ready', verdict: 'Needs one fix', error: null });
     expect(
       review.findings.map((f: { comment_id: string | null; post_error: string | null }) => [
         !!f.comment_id,
@@ -675,12 +736,12 @@ describe('Agent Review', () => {
       [false, true],
     ]);
     expect(review.checklist).toHaveLength(1);
-    expect(ctx.host.posted.map((p) => [p.file_path ?? null, p.line ?? null])).toEqual([
-      ['src/app.ts', 3],
-      [null, null],
+    expect(ctx.host.posted.map((p) => [p.file_path ?? null, p.line ?? null, p.body])).toEqual([
+      ['src/app.ts', 3, '**High**: Unchecked input.'],
+      [null, null, '**Info**: Rename the helper.'],
     ]);
-    // A row is written before each of the three posts, so each post sees one more.
-    expect(rowsAtPost).toEqual([1, 2, 3]);
+    // A row is written before each of the four posts, the summary's too, so each post sees one more.
+    expect(rowsAtPost).toEqual([1, 2, 3, 4]);
     const done = events.find((e) => e.event === 'pull_request.reviewed');
     expect(done?.data).toMatchObject({ status: 'ready', posted: 2, post_failed: 1 });
 
@@ -691,25 +752,107 @@ describe('Agent Review', () => {
     close();
   });
 
+  it('reviews in a scratch copy at the head commit against the fetched target branch, then posts the summary last', async () => {
+    const ctx = await start();
+    const { remote, head } = await withOrigin(ctx);
+    const base = git(remote, 'rev-parse', 'main').toString().trim();
+    const { events, close } = await listen(ctx.daemon);
+    // The first step reads the commit its folder is at.
+    let checkedOut = '';
+    const readHead = until(
+      () => ctx.daemon.sdk.calls[0]?.options.cwd,
+      (cwd) => typeof cwd === 'string',
+      'the first step',
+    ).then((cwd) => {
+      checkedOut = git(cwd as string, 'rev-parse', 'HEAD')
+        .toString()
+        .trim();
+    });
+    scriptReview(ctx, { 0: [{ wait: readHead }, stepAnswer('read the description')] });
+
+    const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
+    await waitForReview(events);
+    const id = started.body.data.id as string;
+
+    const scratch = path.join(ctx.daemon.dataDir, 'pr-scratch', `review-${id}`);
+    const calls = ctx.daemon.sdk.calls;
+    expect(calls.map((call) => call.options.cwd)).toEqual(
+      [...stepTurns(PlaybookTrigger.ReviewPr), 'closing'].map(() => scratch),
+    );
+    for (const call of calls) {
+      expect(call.options.disallowedTools).toEqual(
+        expect.arrayContaining(['Bash(git push:*)', 'Bash(gh pr comment:*)']),
+      );
+    }
+    expect(checkedOut).toBe(head);
+    // The copy goes once the review has ended.
+    await until(
+      () => existsSync(scratch),
+      (exists) => !exists,
+      'the scratch copy to go',
+    );
+    expect(git(ctx.dir, 'branch', '--show-current').toString().trim()).toBe('main');
+    expect(calls[0]?.prompt).toContain(`The target branch main is at ${base}`);
+    expect(calls[0]?.prompt).toContain(`This folder is a scratch copy at commit ${head}`);
+    expect(calls.at(-1)?.prompt).toMatch(/^Write your review/);
+
+    const [review] = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
+    expect(review).toMatchObject({
+      status: 'ready',
+      decision: 'request_changes',
+      base_branch: 'main',
+      base_sha: base,
+      report: REVIEW_OUTPUT.report,
+      error: null,
+    });
+    const summary = ctx.host.posted.at(-1);
+    expect(ctx.host.posted).toHaveLength(4);
+    expect([summary?.file_path ?? null, summary?.line ?? null, summary?.parent_id ?? null]).toEqual([null, null, null]);
+    expect(summary?.body).toBe(
+      `**Agent Review** · REQUEST CHANGES at ${head.slice(0, 7)} · 1 High, 1 Medium, 1 Info\n\nNeeds one fix\n\n${REVIEW_OUTPUT.report}`,
+    );
+    const detail = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1`)).body.data;
+    expect(detail.comments.find((c: { id: string }) => c.id === summary?.id)?.by_agent).toBe(true);
+    close();
+  });
+
+  it('fails the review with why when the scratch copy cannot be made, before any step', async () => {
+    const ctx = await start();
+    await withOrigin(ctx);
+    ctx.host.prs = [hostPr(1, { branch: 'feature-1', head_sha: 'f'.repeat(40) })];
+    const { events, close } = await listen(ctx.daemon);
+    await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
+    await waitForReview(events);
+    const [review] = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
+    expect(review.status).toBe('failed');
+    expect(review.error).toMatch(/^Could not make a scratch copy: \S/);
+    expect(review.playbook.steps.every((step: { status: string }) => step.status === 'pending')).toBe(true);
+    expect(ctx.daemon.sdk.calls).toEqual([]);
+    expect(ctx.host.posted).toEqual([]);
+    close();
+  });
+
   it('reads as stale after the pull request moves on, and a second review adds a row in the same Session', async () => {
     const ctx = await start();
-    ctx.host.prs = [hostPr(1)];
+    await withOrigin(ctx);
     const { events, close } = await listen(ctx.daemon);
     scriptReview(ctx);
     await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
     await waitForReview(events);
 
-    ctx.host.prs = [hostPr(1, { head_sha: 'sha-1-b' })];
+    const next = pushFeature(ctx, 'export const rate = 2;\n');
+    ctx.host.prs = [hostPr(1, { branch: 'feature-1', head_sha: next })];
     const stale = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
     expect(stale[0].stale).toBe(true);
 
     scriptReview(ctx);
     events.length = 0;
     const second = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
-    expect(second.body.data).toMatchObject({ head_sha: 'sha-1-b', stale: false });
+    expect(second.body.data).toMatchObject({ head_sha: next, stale: false });
     await waitForReview(events);
     const rows = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
     expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ status: 'ready', stale: false });
     expect(rows[1].stale).toBe(true);
     const sessions = (await ctx.http.get('/sessions?kind=pr_review')).body.data;
     expect(sessions).toHaveLength(1);
@@ -718,7 +861,7 @@ describe('Agent Review', () => {
 
   it('refuses a second review of a commit already reviewed', async () => {
     const ctx = await start();
-    ctx.host.prs = [hostPr(1)];
+    await withOrigin(ctx);
     const { events, close } = await listen(ctx.daemon);
     scriptReview(ctx);
     await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
@@ -728,31 +871,55 @@ describe('Agent Review', () => {
     expect(again.status).toBe(409);
     expect(again.body.error.code).toBe('invalid_state');
     expect(ctx.daemon.sdk.calls).toHaveLength(calls);
-    expect(ctx.host.posted).toHaveLength(3);
+    // Three findings and the summary.
+    expect(ctx.host.posted).toHaveLength(4);
     close();
   });
 
-  it('shows the agent the open threads, and does not post again on a line where its own open thread is', async () => {
+  it('shows the agent its own open findings to check again and the others’ threads, and does not post again on a line where its own open thread is', async () => {
     const ctx = await start();
-    ctx.host.prs = [hostPr(1)];
+    await withOrigin(ctx);
     const { events, close } = await listen(ctx.daemon);
     scriptReview(ctx);
     await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
     await waitForReview(events);
     const first = ctx.host.posted[0]?.id as string;
+    ctx.host.comments.get(1)?.push({
+      id: 'theirs',
+      parent_id: null,
+      author: 'reviewer',
+      body: 'Log the rejected input.',
+      file_path: 'src/app.ts',
+      line: 5,
+      resolved: false,
+      created_at: '2026-11-01T10:00:00.000Z',
+    });
 
-    ctx.host.prs = [hostPr(1, { head_sha: 'sha-1-b' })];
+    const next = pushFeature(ctx, 'export const rate = 2;\n');
+    ctx.host.prs = [hostPr(1, { branch: 'feature-1', head_sha: next })];
     scriptReview(ctx);
     events.length = 0;
+    const before = ctx.daemon.sdk.calls.length;
     await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
     await waitForReview(events);
 
-    expect(ctx.daemon.sdk.calls.at(-2)?.prompt).toContain('on src/app.ts:3: **blocker**: Unchecked input.');
-    // src/app.ts:3 points at the first thread; the rest have no open agent thread on their line, so they post.
+    const brief = ctx.daemon.sdk.calls[before]?.prompt ?? '';
+    const mine = brief.indexOf('Your findings from earlier reviews, still open:');
+    const theirs = brief.indexOf('Open comment threads by others on this pull request:');
+    expect(mine).toBeGreaterThan(-1);
+    expect(theirs).toBeGreaterThan(mine);
+    expect(brief.slice(mine, theirs)).toContain('- on src/app.ts:3: **High**: Unchecked input.');
+    expect(brief.slice(theirs)).toContain('- reviewer on src/app.ts:5: Log the rejected input.');
+    expect(brief.slice(theirs)).not.toContain('Unchecked input.');
+    // The earlier summary is in neither list.
+    expect(brief).not.toContain('**Agent Review**');
+    // src/app.ts:3 and src/bad.ts:9 point at the first review's threads; the general finding and the summary post.
     expect(ctx.host.posted.map((p) => [p.file_path ?? null, p.line ?? null])).toEqual([
       ['src/app.ts', 3],
       [null, null],
       ['src/bad.ts', 9],
+      [null, null],
+      [null, null],
       [null, null],
     ]);
     const [latest] = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
@@ -762,11 +929,14 @@ describe('Agent Review', () => {
 
   it('marks the review failed when the agent does not answer in the agreed shape, and refuses a second run mid-review', async () => {
     const ctx = await start();
-    ctx.host.prs = [hostPr(1)];
+    await withOrigin(ctx);
     const { events, close } = await listen(ctx.daemon);
     const hold = gate();
-    ctx.daemon.sdk.script({ wait: hold.promise }, { text: 'I looked at it and it is fine.' });
-    await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
+    for (const run of stepTurns(PlaybookTrigger.ReviewPr, { 0: [{ wait: hold.promise }, stepAnswer()] })) {
+      ctx.daemon.sdk.script(...run);
+    }
+    ctx.daemon.sdk.script({ text: 'I looked at it and it is fine.' });
+    const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
     const busy = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
     expect(busy.status).toBe(409);
     expect(busy.body.error.code).toBe('session_busy');
@@ -774,8 +944,16 @@ describe('Agent Review', () => {
     await waitForReview(events);
     const rows = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
     expect(rows).toHaveLength(1);
-    expect(rows[0].status).toBe('failed');
+    expect(rows[0]).toMatchObject({
+      status: 'failed',
+      error: 'The agent did not write the review in a way the console could read',
+    });
     expect(ctx.host.posted).toEqual([]);
+    await until(
+      () => existsSync(path.join(ctx.daemon.dataDir, 'pr-scratch', `review-${started.body.data.id}`)),
+      (exists) => !exists,
+      'the scratch copy to go',
+    );
     close();
   });
 
@@ -816,9 +994,14 @@ describe('Agent Review', () => {
     const [ready] = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
     expect(ready).toMatchObject({ status: 'ready', verdict: 'Needs one fix' });
     expect(ready.playbook.steps.map((s: { status: string }) => s.status)).toEqual(['done', 'skipped']);
+    expect(failed.error).toBe('Step 2 · Rollback failed: no rollback plan');
     const prompts = ctx.daemon.sdk.calls.slice(2).map((call) => call.prompt);
     expect(prompts[0]).toContain('Review pull request #1');
     expect(prompts[0]).toContain('Step 1 of 2: Migrations');
+    // No step writes, so there is no scratch copy, and the target branch on the GitHub remote cannot be fetched.
+    expect(prompts[0]).toContain('There is no scratch copy: read only');
+    expect(prompts[0]).toContain('The target branch main could not be fetched');
+    expect(ready).toMatchObject({ base_branch: 'main', base_sha: null });
     expect(prompts[2]).toMatch(/^Write your review/);
     const append = (ctx.daemon.sdk.calls.at(-1)?.options.systemPrompt as { append: string } | undefined)?.append ?? '';
     expect(append).toContain('Flag every missing migration.');
@@ -868,7 +1051,7 @@ describe('Agent Review', () => {
 
   it('takes no message from the operator in a pr_review Session', async () => {
     const ctx = await start();
-    ctx.host.prs = [hostPr(1)];
+    await withOrigin(ctx);
     const { events, close } = await listen(ctx.daemon);
     scriptReview(ctx);
     await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
@@ -882,7 +1065,7 @@ describe('Agent Review', () => {
 
   it('answers a reply in a thread the agent started, and ignores a reply in any other thread', async () => {
     const ctx = await start();
-    ctx.host.prs = [hostPr(1)];
+    await withOrigin(ctx);
     const { events, close } = await listen(ctx.daemon);
     scriptReview(ctx);
     await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
@@ -896,14 +1079,15 @@ describe('Agent Review', () => {
       parent_id: agentRoot,
     });
     expect(reply.status).toBe(201);
+    // Three findings and the summary, the operator's reply, then the answer.
     await until(
       () => ctx.host.posted.length,
-      (count) => count === 5,
+      (count) => count === 6,
       'the agent answer',
     );
     expect(ctx.daemon.sdk.calls).toHaveLength(calls + 1);
     expect(ctx.daemon.sdk.calls.at(-1)?.prompt).toContain('Can we skip the check?');
-    const answer = ctx.host.posted[4];
+    const answer = ctx.host.posted[5];
     expect(answer).toMatchObject({ body: 'Good point: I will keep the check.', parent_id: agentRoot });
     expect(
       ctx.store.db

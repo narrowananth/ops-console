@@ -41,6 +41,13 @@ const CHECKS: Record<PrChecks, string> = {
   [PrChecks.Failed]: '✕ checks failed',
 };
 
+const CHECKS_TIP: Record<PrChecks, string> = {
+  [PrChecks.None]: '',
+  [PrChecks.Running]: 'CI checks are still running on the newest commit',
+  [PrChecks.Passed]: 'Every CI check passed on the newest commit',
+  [PrChecks.Failed]: 'At least one CI check failed on the newest commit',
+};
+
 const FOLDED_KEY = 'ops-console-pr-folded';
 
 /** Projects the operator folded, kept across reloads. */
@@ -100,6 +107,11 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
               <button
                 key={label}
                 type="button"
+                title={
+                  value
+                    ? 'Pull requests you opened, and the ones on a branch a Session worked on'
+                    : 'Every open pull request in the repositories you can read on your connected Git hosts'
+                }
                 aria-pressed={mine === value}
                 onClick={() => setMine(value)}
                 className={`flex-1 cursor-pointer rounded-md border-0 py-1 text-xs transition-colors ${mine === value ? 'bg-card font-bold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
@@ -112,7 +124,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
             icon
             className="size-7.5 flex-none text-neutral-700 hover:text-text"
             aria-label="Refresh pull requests"
-            title="Read the Git hosts again"
+            title="Read the Git hosts again now. The list also refreshes on its own."
             disabled={refresh.isPending}
             onClick={() => refresh.mutate()}
           >
@@ -218,13 +230,16 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                       <span className="min-w-0 truncate font-mono">{project.slug}</span>
                       {project.repoId ? (
                         <span
-                          title="Imported: opens in the console"
+                          title="Imported as a Repo: its pull requests open here in the console"
                           className="flex-none rounded-full bg-accent-100 px-1.75 text-[10px] font-semibold text-accent-900"
                         >
                           local · {repoName(project.repoId)}
                         </span>
                       ) : (
-                        <span className="flex-none rounded-full bg-neutral-200 px-1.75 text-[10px] font-normal text-neutral-700">
+                        <span
+                          title="Not imported as a Repo: its pull requests open on the Git host. Import it in Repos to review them here."
+                          className="flex-none rounded-full bg-neutral-200 px-1.75 text-[10px] font-normal text-neutral-700"
+                        >
                           not imported
                         </span>
                       )}
@@ -254,8 +269,8 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                             <span className="flex flex-wrap gap-x-2 font-mono text-[11px] text-neutral-700">
                               <span>{pr.author}</span>
                               <span className="truncate">{pr.branch}</span>
-                              {pr.by_agent && <span>agent</span>}
-                              {CHECKS[pr.checks] && <span>{CHECKS[pr.checks]}</span>}
+                              {pr.by_agent && <span title="A Session in the console worked on this branch">agent</span>}
+                              {CHECKS[pr.checks] && <span title={CHECKS_TIP[pr.checks]}>{CHECKS[pr.checks]}</span>}
                               {pr.approved_by.length > 0 ? (
                                 <span className="text-ok">✓ approved by {pr.approved_by.join(', ')}</span>
                               ) : (
@@ -282,7 +297,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                                 href={pr.url}
                                 target="_blank"
                                 rel="noreferrer"
-                                title={`Open on ${pr.host}`}
+                                title={`Opens on ${pr.host} in a new tab: only imported GitHub and Bitbucket pull requests open in the console`}
                                 className={look}
                               >
                                 {body}

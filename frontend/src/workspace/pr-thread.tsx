@@ -5,7 +5,7 @@ import { Button, Spinner } from '../components/ui/button';
 import { Markdown } from '../components/ui/markdown';
 import { useDeleteComment, usePostComment, useResolveComment, useStartReplyCheck } from '../lib/queries';
 import { useStored } from '../lib/remember';
-import { agentBusy, BUSY_TITLE, lastOf } from './pr-jobs';
+import { agentBusy, BUSY_TITLE, CHECK_REPLY_TIP, lastOf } from './pr-jobs';
 import { ReplyCheckStrip } from './reply-check-strip';
 
 /**
@@ -49,7 +49,9 @@ export function CommentComposer(props: {
         className="min-h-16 w-full resize-y rounded-md border border-divider bg-bg px-2.5 py-2 font-body text-[13px] text-text outline-none focus:border-accent-400 focus:shadow-[0_0_0_3px_var(--color-accent-100)]"
       />
       <div className="flex items-center gap-2">
-        <span className="text-[11px] text-neutral-600">Markdown · ⌘↵ to send</span>
+        <span title="Write in Markdown. ⌘Enter or Ctrl+Enter sends." className="text-[11px] text-neutral-600">
+          Markdown · ⌘↵ to send
+        </span>
         {props.error && (
           <span role="alert" className="text-xs text-accent-700">
             {props.error.message}
@@ -64,6 +66,7 @@ export function CommentComposer(props: {
           <Button
             variant="primary"
             className="px-2.5 py-1 text-xs"
+            title="Posts on the Git host under your name"
             disabled={props.pending || body.trim() === ''}
             onClick={submit}
           >
@@ -101,6 +104,7 @@ function CommentMenu({ comment, onDelete, pending }: { comment: PrComment; onDel
       <button
         type="button"
         aria-label={`More for the comment by ${comment.author}`}
+        title="Delete this comment on the Git host"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => {
@@ -189,7 +193,10 @@ export function Thread({
             </span>
             <strong>{comment.author}</strong>
             {comment.by_agent && (
-              <span className="rounded-full bg-accent-100 px-2 py-px text-[10px] font-semibold text-accent-700">
+              <span
+                title="The agent wrote this comment on your behalf"
+                className="rounded-full bg-accent-100 px-2 py-px text-[10px] font-semibold text-accent-700"
+              >
                 agent
               </span>
             )}
@@ -205,7 +212,7 @@ export function Thread({
                 <Button
                   className="px-2 py-0.5 text-[11px]"
                   disabled={busy || startCheck.isPending}
-                  title={busy ? BUSY_TITLE : undefined}
+                  title={busy ? BUSY_TITLE : CHECK_REPLY_TIP}
                   onClick={() => startCheck.mutate(root.id)}
                 >
                   {startCheck.isPending && <Spinner />}
@@ -216,6 +223,11 @@ export function Thread({
                 <Button
                   className="px-2 py-0.5 text-[11px]"
                   disabled={resolve.isPending}
+                  title={
+                    root.resolved
+                      ? 'Open this thread again on the Git host'
+                      : 'Mark this thread resolved on the Git host. Address comments skips resolved threads.'
+                  }
                   onClick={() => resolve.mutate({ comment_id: root.id, resolved: !root.resolved })}
                 >
                   {root.resolved ? 'Unresolve' : 'Resolve'}
@@ -261,6 +273,7 @@ export function Thread({
           <button
             type="button"
             onClick={() => setReplying(true)}
+            title="Reply in this thread on the Git host"
             className="w-full cursor-pointer rounded-md border border-divider bg-card px-2.5 py-1.5 text-left text-xs text-neutral-600 hover:border-neutral-400 hover:text-text"
           >
             Reply…

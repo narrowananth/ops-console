@@ -79,11 +79,16 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
         </span>
         {!agent && draft === null && (
           <span className="ml-auto flex gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-            <button type="button" onClick={copy} className={messageAction}>
+            <button type="button" onClick={copy} title="Copy this message" className={messageAction}>
               {copied ? 'Copied' : 'Copy'}
             </button>
             {onEdit && (
-              <button type="button" onClick={() => setDraft(text)} className={messageAction}>
+              <button
+                type="button"
+                onClick={() => setDraft(text)}
+                title="Change your last message and run it again. Files the agent edited since are put back first."
+                className={messageAction}
+              >
                 Edit
               </button>
             )}
@@ -121,7 +126,7 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
             <Button
               variant="primary"
               className="px-3 py-1 text-xs"
-              title="⌘Enter reruns"
+              title="Puts back the files the agent edited since this message, then runs the edited text. ⌘Enter does the same."
               disabled={pending || draft.trim() === ''}
               onClick={rerun}
             >

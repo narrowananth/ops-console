@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { type DynamicModule, Inject, Injectable, Module } from '@nestjs/common';
-import { GitHost, SessionKind, WS_PROTOCOL, type WsEvent } from '@ops-console/shared';
+import { GitHost, type PlaybookTrigger, SessionKind, WS_PROTOCOL, type WsEvent } from '@ops-console/shared';
 import request from 'supertest';
 import WebSocket from 'ws';
 import { AgentModule } from '../src/agent/agent.module';
@@ -10,7 +10,8 @@ import { SessionKinds } from '../src/agent/session-kinds';
 import { type NewSession, SessionsService } from '../src/agent/sessions.service';
 import { repos } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
-import { FakeAgentSdk } from './fakes/agent-sdk';
+import { BUILTIN_STEPS } from '../src/playbooks/builtins';
+import { FakeAgentSdk, type Step } from './fakes/agent-sdk';
 import { FakeUsageSource } from './fakes/usage-source';
 import { startTestDaemon, type TestDaemon, tempDir } from './helpers';
 
@@ -180,4 +181,17 @@ export function gate(): { promise: Promise<void>; open: () => void } {
     open = resolve;
   });
   return { promise, open };
+}
+
+/** A step turn's answer: the outcome and summary the console reads. */
+export const stepAnswer = (summary = 'ok', outcome: 'done' | 'skipped' | 'failed' = 'done'): Step => ({
+  text: `\`\`\`json\n${JSON.stringify({ outcome, summary })}\n\`\`\``,
+});
+
+/**
+ * One scripted run per step of `trigger`'s built-in Playbook, each answering done; `turns` gives the run at a step's
+ * index instead.
+ */
+export function stepTurns(trigger: PlaybookTrigger, turns: Record<number, Step[]> = {}): Step[][] {
+  return BUILTIN_STEPS[trigger].map((_step, index) => turns[index] ?? [stepAnswer()]);
 }

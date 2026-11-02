@@ -256,15 +256,17 @@ test('a failed Reply check shows why and retries from the failed step, or only w
     .toEqual(['/api/reply-checks/rc-c1/retry', '/api/reply-checks/rc-c5/retry']);
 });
 
-test('Address comments shows only on the operator’s open pull request with an unresolved thread on a line', async ({
+test('Address comments shows on any open pull request, the operator’s or someone else’s, with an unresolved thread', async ({
   page,
 }) => {
-  const lineless = COMMENTS.filter((item) => item.id !== 'c1' && item.id !== 'c3' && item.id !== 'c5');
+  const general = COMMENTS.filter((item) => item.id === 'c4');
+  const allResolved = COMMENTS.map((item) => ({ ...item, resolved: true }));
   for (const [extra, shown] of [
     [{}, true],
-    [{ is_mine: false, author: 'someone' }, false],
+    [{ is_mine: false, author: 'someone' }, true],
+    [{ comments: general }, true],
     [{ state: 'closed' }, false],
-    [{ comments: lineless }, false],
+    [{ comments: allResolved }, false],
   ] as const) {
     await routePullRequest(page, { current: pullRequest(extra) });
     await openPullRequest(page);
@@ -276,7 +278,7 @@ test('Address comments shows only on the operator’s open pull request with an 
   }
 });
 
-test('Address comments lists every unresolved thread on a line, all ticked; Start sends the ticked ones, Cancel nothing', async ({
+test('Address comments lists every unresolved thread, general comments too, all ticked; Start sends the ticked ones, Cancel nothing', async ({
   page,
 }) => {
   const detail = { current: pullRequest() };
@@ -292,10 +294,11 @@ test('Address comments lists every unresolved thread on a line, all ticked; Star
   await page.getByRole('button', { name: 'Address comments' }).click();
   const dialog = page.getByRole('alertdialog', { name: 'Address comments' });
   const boxes = dialog.getByRole('checkbox');
-  await expect(boxes).toHaveCount(3);
+  await expect(boxes).toHaveCount(4);
   await expect(dialog.getByRole('listitem')).toHaveText([
     /src\/cart\.ts:12\s*reviewer\s*Guard the empty cart\.$/,
     /src\/tax\.ts:9\s*reviewer\s*Name this rate\.$/,
+    /General comment\s*reviewer\s*Nice work overall\.$/,
     /src\/cart\.ts:30\s*me\s*Cache the rate lookup\.$/,
   ]);
   for (const box of await boxes.all()) await expect(box).toBeChecked();
@@ -313,7 +316,7 @@ test('Address comments lists every unresolved thread on a line, all ticked; Star
   await expect(dialog).toHaveCount(0);
   await expect
     .poll(() => posted)
-    .toEqual([{ path: '/api/repos/r1/pull-requests/7/comment-passes', body: { comment_ids: ['c1', 'c5'] } }]);
+    .toEqual([{ path: '/api/repos/r1/pull-requests/7/comment-passes', body: { comment_ids: ['c1', 'c4'] } }]);
   await expect(page.getByRole('region', { name: 'Comment pass' })).toContainText('Read the threads');
   await expect(page.getByRole('button', { name: 'Address comments' })).toBeDisabled();
 });
@@ -521,7 +524,9 @@ test('a running Reply check and Comment pass each stop the pull request’s Sess
   await expect(strip.getByRole('button', { name: 'Stop' })).toHaveCount(0);
 });
 
-test('Skip step on a failed Comment pass and a failed Agent Review sends the retry with skip', async ({ page }) => {
+test('Skip step on a failed Comment pass and a failed Agent Review sends the retry with skip; the review says why it failed', async ({
+  page,
+}) => {
   const detail = {
     current: pullRequest({
       latest_agent_review: {
@@ -530,7 +535,12 @@ test('Skip step on a failed Comment pass and a failed Agent Review sends the ret
         pr_number: 7,
         head_sha: '9c1e4b7d00000000000000000000000000000000',
         status: 'failed',
+        decision: null,
         verdict: null,
+        base_branch: null,
+        base_sha: null,
+        report: null,
+        error: 'Step 1 · Read the change failed: the diff would not load',
         findings: [],
         checklist: [],
         tools: [],
@@ -567,7 +577,9 @@ test('Skip step on a failed Comment pass and a failed Agent Review sends the ret
   await expect.poll(() => posted.at(-1)).toEqual({ path: '/api/comment-passes/cp5/retry', body: { skip: false } });
 
   const review = page.getByRole('region', { name: 'Agent Review' });
-  await expect(review).toContainText('The review did not finish.');
+  await expect(review).toContainText(
+    'The review did not finish: Step 1 · Read the change failed: the diff would not load.',
+  );
   await review.getByRole('button', { name: 'Skip step 1' }).click();
   await expect.poll(() => reviews).toEqual([{ skip: true }]);
 });

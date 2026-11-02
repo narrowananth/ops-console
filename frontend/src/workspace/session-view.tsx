@@ -23,6 +23,7 @@ import { PlaybookLink } from '../playbooks/job-steps';
 import { BranchSwitcher } from './branch-switcher';
 import { ConversationMap, useFollowLatest } from './conversation';
 import { alertPath, pullRequestPath, sessionDraftKey } from './links';
+import { SESSION_STATE_TIP } from './sessions-pane';
 
 export function SessionView({ id, onGone }: { id: string; onGone: () => void }) {
   const sessions = useRepoSessions();
@@ -63,7 +64,10 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
         <span className="text-sm text-neutral-700">{repo ? `${repo.name} /` : 'No Repo /'}</span>
         <h2 className="m-0 min-w-0 flex-[1_1_200px] truncate text-base font-extrabold">{session.title}</h2>
         {session.branch && (
-          <span className="rounded-full border border-line bg-card px-2.5 py-0.5 font-mono text-xs">
+          <span
+            title="The branch this Session works on"
+            className="rounded-full border border-line bg-card px-2.5 py-0.5 font-mono text-xs"
+          >
             {session.branch}
           </span>
         )}
@@ -85,17 +89,23 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             Alert →
           </Link>
         )}
-        <StatusPill state={SESSION_STATE[session.state]}>{session.state.replace('_', ' ')}</StatusPill>
+        <span title={SESSION_STATE_TIP[session.state]}>
+          <StatusPill state={SESSION_STATE[session.state]}>{session.state.replace('_', ' ')}</StatusPill>
+        </span>
         {session.playbook && (
           <PlaybookLink
             playbook={session.playbook}
             label={`Playbook: ${session.playbook.name}`}
-            title="Rules in this Session come from this Playbook"
+            title="The agent follows this Playbook's rules in every message here. Open it to read or change them."
           />
         )}
         <Button
           className="px-2.5 py-1 text-xs"
-          title={busy ? 'Stop the agent first' : undefined}
+          title={
+            busy
+              ? 'Stop the agent first'
+              : 'Delete this Session and its conversation. The files in the Repo stay as they are.'
+          }
           disabled={busy || remove.isPending}
           onClick={() => remove.mutate(id)}
         >
@@ -183,7 +193,11 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
               {busy && <StopRun sessionId={id} className="px-4 py-1.5" />}
               <Button
                 variant="primary"
-                title="Enter sends. Shift+Enter adds a new line."
+                title={
+                  running
+                    ? 'The agent is working. Stop it to send something new.'
+                    : 'Enter sends. Shift+Enter adds a new line.'
+                }
                 className="px-4 py-1.5"
                 disabled={running || text.trim() === '' || send.isPending}
                 onClick={submit}

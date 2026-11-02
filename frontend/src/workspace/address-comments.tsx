@@ -1,9 +1,9 @@
 import type { PullRequestDetail } from '@ops-console/shared';
 import { useState } from 'react';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
-import { firstLine, openLineThreads } from './pr-jobs';
+import { firstLine, openThreads, threadPlace } from './pr-jobs';
 
-/** Address comments' list: every unresolved thread on a line, all ticked. Start sends the ticked ones. */
+/** Address comments' list: every unresolved thread, general comments too, all ticked. Start sends the ticked ones. */
 export function AddressCommentsDialog({
   pr,
   onStart,
@@ -13,7 +13,7 @@ export function AddressCommentsDialog({
   onStart: (commentIds: string[]) => void;
   onCancel: () => void;
 }) {
-  const threads = openLineThreads(pr);
+  const threads = openThreads(pr);
   const [ticked, setTicked] = useState(() => new Set(threads.map((thread) => thread.id)));
   const toggle = (id: string, on: boolean) => {
     const next = new Set(ticked);
@@ -31,7 +31,7 @@ export function AddressCommentsDialog({
     >
       <p className="m-0 mb-2">
         The agent makes the changes the ticked threads ask for, pushes one commit to {pr.branch}, replies in each thread
-        and resolves the ones it did.
+        and resolves the ones it did. A general comment gets a reply only: the host has no thread to resolve.
       </p>
       <ul aria-label="Threads" className="m-0 flex max-h-80 list-none flex-col gap-1 overflow-y-auto p-0">
         {threads.map((thread) => (
@@ -45,9 +45,7 @@ export function AddressCommentsDialog({
               />
               <span className="flex min-w-0 flex-col">
                 <span className="flex gap-2 text-xs">
-                  <span className="min-w-0 truncate font-mono text-text">
-                    {thread.file_path}:{thread.line}
-                  </span>
+                  <span className="min-w-0 truncate font-mono text-text">{threadPlace(thread)}</span>
                   <span className="flex-none">{thread.author}</span>
                 </span>
                 <span className="truncate">{firstLine(thread.body)}</span>

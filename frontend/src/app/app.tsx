@@ -1,6 +1,7 @@
 import { ErrorCode } from '@ops-console/shared';
 import { useEffect } from 'react';
 import { Empty } from '../components/ui/empty';
+import { TipLayer } from '../components/ui/tip';
 import { ApiError } from '../lib/api';
 import { useHealth } from '../lib/queries';
 import { forgetToken, sessionToken } from '../lib/session';
@@ -54,6 +55,7 @@ export function App() {
   return (
     <div className="theme-anim flex h-screen min-h-160 flex-col bg-bg font-body text-text">
       <Gate />
+      <TipLayer />
     </div>
   );
 }

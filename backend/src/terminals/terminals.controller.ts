@@ -1,8 +1,15 @@
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post } from '@nestjs/common';
-import { createTerminalSchema, type DiskAccess, type TerminalKind, terminalSecretSchema } from '@ops-console/shared';
+import {
+  createTerminalSchema,
+  type DiskAccess,
+  type StartAtLogin,
+  type TerminalKind,
+  terminalSecretSchema,
+} from '@ops-console/shared';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
 import { DISK_ACCESS, type DiskAccessGate } from './disk-access';
+import { START_AT_LOGIN, type StartAtLoginGate } from './start-at-login';
 import { TerminalsService } from './terminals.service';
 
 const idParams = z.object({ id: z.string().min(1) });
@@ -13,6 +20,7 @@ export class TerminalsController {
   constructor(
     @Inject(TerminalsService) private readonly terminals: TerminalsService,
     @Inject(DISK_ACCESS) private readonly diskAccess: DiskAccessGate,
+    @Inject(START_AT_LOGIN) private readonly startAtLogin: StartAtLoginGate,
   ) {}
 
   @Get('disk-access')
@@ -24,6 +32,17 @@ export class TerminalsController {
   @HttpCode(204)
   async openDiskAccessSettings(): Promise<void> {
     await this.diskAccess.openSettings();
+  }
+
+  @Get('start-at-login')
+  async checkStartAtLogin(): Promise<{ data: StartAtLogin }> {
+    return { data: await this.startAtLogin.check() };
+  }
+
+  @Post('start-at-login/settings')
+  @HttpCode(204)
+  async openLoginItemsSettings(): Promise<void> {
+    await this.startAtLogin.openSettings();
   }
 
   @Get()
