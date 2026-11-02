@@ -11,7 +11,7 @@ Stack and modules: [docs/architecture.md](docs/architecture.md). Terms: [GLOSSAR
 
 ## Install
 
-On macOS (arm64 or x64), with no sudo:
+On macOS 13.5 or later, on Apple silicon or Intel, with no sudo:
 
 ```
 curl -fsSL https://raw.githubusercontent.com/narrowananth/ops-console/main/install.sh | sh

@@ -47,6 +47,8 @@ function infoPlist({ version, name, id }) {
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
     <string>${version}</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.5</string>
     <key>LSUIElement</key>
     <true/>
   </dict>

@@ -18,11 +18,23 @@ fail() {
 
 os=$(uname -s)
 cpu=$(uname -m)
+# A shell running under Rosetta reads x86_64 on an Apple silicon Mac: install the arm64 build there.
+if [ "$os/$cpu" = Darwin/x86_64 ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = 1 ]; then
+  cpu=arm64
+fi
 case "$os/$cpu" in
   Darwin/arm64) arch=arm64 ;;
   Darwin/x86_64) arch=x64 ;;
-  *) fail "unsupported platform $os $cpu; ops-console runs on macOS arm64 or x64" ;;
+  *) fail "unsupported platform $os $cpu; ops-console runs on macOS on Apple silicon or Intel" ;;
 esac
+
+# The bundled Node and its native modules are built for macOS 13.5 and later.
+macos=$(sw_vers -productVersion)
+major=$(echo "$macos" | cut -d. -f1)
+minor=$(echo "$macos.0" | cut -d. -f2)
+if [ "$major" -lt 13 ] || { [ "$major" -eq 13 ] && [ "$minor" -lt 5 ]; }; then
+  fail "ops-console needs macOS 13.5 or later; this Mac runs $macos"
+fi
 
 if [ -n "${OPS_CONSOLE_RELEASE_URL:-}" ]; then
   base=$OPS_CONSOLE_RELEASE_URL
