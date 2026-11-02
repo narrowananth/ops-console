@@ -1,6 +1,6 @@
 import type { Cell, Connection, Part } from '@ops-console/shared';
 import { useEffect, useState } from 'react';
-import { TYPE_LABELS } from './fields';
+import { PROD_TIP, TYPE_LABELS } from './fields';
 
 type ResultPart = Extract<Part, { kind: 'result' }>;
 type ComparisonPart = Extract<Part, { kind: 'comparison' }>;
@@ -17,6 +17,7 @@ function CopyJson({ value }: { value: unknown }) {
   return (
     <button
       type="button"
+      title="Copy these rows as JSON to the clipboard"
       onClick={() => void navigator.clipboard.writeText(JSON.stringify(value, null, 2)).then(() => setCopied(true))}
       className="ml-auto cursor-pointer border border-neutral-700 bg-transparent px-1.5 font-mono text-[10px] text-neutral-400 hover:text-neutral-100"
     >
@@ -79,7 +80,11 @@ export function ResultView({ part, connections }: { part: ResultPart; connection
           ── {part.connection}
           {connection && ` · ${TYPE_LABELS[connection.type]}`}
         </span>
-        {connection?.is_prod && <span className="bg-accent px-1 text-[9px] font-extrabold text-neutral-900">PROD</span>}
+        {connection?.is_prod && (
+          <span title={PROD_TIP} className="bg-accent px-1 text-[9px] font-extrabold text-neutral-900">
+            PROD
+          </span>
+        )}
         <CopyJson value={json} />
       </div>
       {part.query && <div className="pl-4 whitespace-pre-wrap text-neutral-500">{part.query}</div>}
@@ -109,7 +114,7 @@ export function ComparisonView({ part }: { part: ComparisonPart }) {
       className="my-1 flex flex-col gap-1 border-l-3 border-accent py-1 pl-2"
     >
       <div className="flex items-center gap-2 font-semibold">
-        <span>
+        <span title="The agent matched the rows each Connection gave on this key: one row per field, the ones whose values differ marked.">
           ■ Compared on {part.key} = {part.value}
         </span>
         <CopyJson value={json} />

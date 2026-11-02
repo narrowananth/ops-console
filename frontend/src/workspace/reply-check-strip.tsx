@@ -12,7 +12,15 @@ export function ReplyCheckStrip({ check, sessionId }: { check: ReplyCheck; sessi
   return (
     <section aria-label="Reply check" className="flex flex-col gap-2.5 border-t border-line bg-surface px-3 py-2.5">
       <header className="flex items-center gap-2 text-xs">
-        <strong>{failed ? 'Reply check failed' : 'Checking the reply'}</strong>
+        <strong
+          title={
+            failed
+              ? 'The Reply check stopped before it replied. The reason is below.'
+              : 'The agent is checking whether the code at the newest commit does what this thread asked'
+          }
+        >
+          {failed ? 'Reply check failed' : 'Checking the reply'}
+        </strong>
         {check.playbook && <PlaybookLink playbook={check.playbook} />}
         <span className="ml-auto flex items-center gap-2">
           {check.status === AgentReviewStatus.Running && sessionId && (

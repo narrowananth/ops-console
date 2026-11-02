@@ -43,7 +43,13 @@ The agent checks a failing Route against real data: a Postgres table, a Mongo co
     the console's Keychain items move to it (the program holding them reads and removes each, the new one saves it),
     so no password prompt follows; the dev MCP launcher runs on the same binary. With `OPS_CONSOLE_DEV_INLINE=1`,
     or off macOS, the daemon is no app of its own: the row reads off · dev build, offers no System Settings, and
-    Start stays enabled. Keychain reads "asks each time": macOS asks before each saved
+    Start stays enabled. Start at login says whether launchd starts the daemon when the operator logs in, which
+    macOS lists as Ops Console under App Background Activity in Login Items & Extensions: on while the installed
+    agent's plist is in `~/Library/LaunchAgents` and `ops-console stop` has not disabled it, off otherwise, and
+    off · dev build under `pnpm dev`, which runs the console only while it runs and offers no Login Items. Off, the
+    row says to switch Ops Console on under App Background Activity, then run `ops-console start`. "Open Login Items"
+    opens that pane; it never changes the setting itself, and Start at login never locks the Setup agent. Keychain
+    reads "asks each time": macOS asks before each saved
     password, and no setting grants them ahead. Passwords another app keeps in its own Keychain access group stay out of reach either way.
     The rows name no other product. The tab checks again when the page regains focus, and on "Check again". When a
     read fails with `no permission`, the agent asks the operator to turn the permission on.
@@ -158,6 +164,8 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`.
 | `POST /terminals/:id/secrets` | `{ request_id, value }` | 204; answers the setup agent's `request_secret` |
 | `GET /terminals/disk-access` | | `{ granted, app_path }`; `app_path` null unless it runs as `Ops Console.app`, both null off macOS (Behavior 19) |
 | `POST /terminals/disk-access/settings` | | 204; opens the Full Disk Access pane, and the app in Finder |
+| `GET /terminals/start-at-login` | | `{ on, dev_build }`; `on` null off macOS, false with `dev_build` under `pnpm dev` (Behavior 19) |
+| `POST /terminals/start-at-login/settings` | | 204; opens Login Items & Extensions |
 
 ### WebSocket `/terminals/:id`
 
@@ -190,7 +198,8 @@ Connections, as designed, without Add with Claude: "Import with Setup agent →"
 - Empty: "No connections yet" with both ways to add one.
 - Setup agent, before it starts: "Tell Claude what to set up" with Start setup agent and examples to ask. Beside it,
   Permissions under the Ops Console logo, a Full Disk Access row (status, Open System Settings when installed and
-  off, Check again) and a Keychain row, then a card of what it sets up.
+  off, Check again), a Start at login row (status, Open Login Items when installed, Check again when off) and a
+  Keychain row, then a card of what it sets up.
 - Setup agent, running: a header ("Setup agent running" or "ended") with Close, the dark terminal, the masked field
   when the agent asks for a secret, and the message box with the examples as chips and Send. Enter sends.
 - Departure from the design: Add with Claude moves from Dev tools to its own page, since it also sets up MCP servers

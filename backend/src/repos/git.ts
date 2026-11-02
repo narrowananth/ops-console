@@ -162,6 +162,16 @@ export class Git {
     await this.must(dir, ['branch', '--quiet', '--track', branch, `origin/${branch}`]);
   }
 
+  /** Fetches `branch` from `origin` into `origin/<branch>` and gives the commit it is at. Throws with git's first line. */
+  async remoteHead(dir: string, branch: string): Promise<string> {
+    await this.must(dir, ['fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
+      GIT_TERMINAL_PROMPT: '0',
+    });
+    const sha = (await this.try(dir, ['rev-parse', `refs/remotes/origin/${branch}`]))?.trim();
+    if (!sha) throw new GitFailed(`no origin/${branch}`);
+    return sha;
+  }
+
   /** Fetches `branch` from `origin`, so its commits are in the repository. Throws with git's first line. */
   async fetchBranch(dir: string, branch: string): Promise<void> {
     await this.must(dir, ['fetch', '--quiet', 'origin', `refs/heads/${branch}`], { GIT_TERMINAL_PROMPT: '0' });

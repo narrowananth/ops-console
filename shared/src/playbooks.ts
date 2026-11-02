@@ -89,6 +89,8 @@ export const playbookSchema = z.object({
    * Blank: the Repo's default branch.
    */
   branches: z.string(),
+  /** Fix makes a Jira ticket first, when Jira is connected. Off: the Fix goes straight to its branch. */
+  jira_ticket: z.boolean(),
   steps: z.array(playbookStepSchema),
   /** The Triggers holding it now. A built-in lists its Trigger when no Playbook holds it. */
   triggers: z.array(z.enum(PlaybookTrigger)),
@@ -121,6 +123,7 @@ export const createPlaybookSchema = z
     name: nameSchema,
     rules: rulesSchema.default(''),
     branches: branchesSchema.default(''),
+    jira_ticket: z.boolean().default(false),
     steps: stepsSchema.default([]),
   })
   .strict();
@@ -132,6 +135,7 @@ export const playbookPatchSchema = z
     name: nameSchema.optional(),
     rules: rulesSchema.optional(),
     branches: branchesSchema.optional(),
+    jira_ticket: z.boolean().optional(),
     steps: stepsSchema.optional(),
   })
   .strict();

@@ -19,7 +19,14 @@ export function ApprovalPrompts({ sessionId }: { sessionId?: string }) {
           className="flex flex-col gap-2 rounded-xl border border-accent-300 bg-accent-100/60 px-4 py-3 shadow-sm"
         >
           <div className="flex items-center gap-2 text-[13px] font-extrabold">
-            {approval.is_prod && <span className="bg-accent px-1.5 py-px text-[10px] text-bg">PROD</span>}
+            {approval.is_prod && (
+              <span
+                title="This touches production data. It always needs your Approval, whatever the Access mode."
+                className="bg-accent px-1.5 py-px text-[10px] text-bg"
+              >
+                PROD
+              </span>
+            )}
             <span>{approval.summary}</span>
           </div>
           {approval.command && <code className="font-mono text-xs text-neutral-800">{approval.command}</code>}
@@ -28,6 +35,7 @@ export function ApprovalPrompts({ sessionId }: { sessionId?: string }) {
               variant="primary"
               className="px-2.5 py-1 text-xs"
               disabled={decide.isPending}
+              title="Let the agent run this once"
               onClick={() => decide.mutate({ id: approval.id, decision: ApprovalStatus.Approved })}
             >
               Approve
@@ -35,6 +43,7 @@ export function ApprovalPrompts({ sessionId }: { sessionId?: string }) {
             <Button
               className="px-2.5 py-1 text-xs"
               disabled={decide.isPending}
+              title="Refuse it. The agent is told no."
               onClick={() => decide.mutate({ id: approval.id, decision: ApprovalStatus.Denied })}
             >
               Deny

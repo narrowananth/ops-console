@@ -20,9 +20,16 @@ patch. They have no place to write that down, so they retype it in every Session
 
 1. The Playbooks page lists five Triggers under their tabs. Monitor: Verify and Fix. Workspace: Review PR, Reply in
    thread and Session message. Dev tools has none: a Dev tools Session runs with no Playbook rules.
-2. Each Trigger holds exactly one Playbook. A Trigger with none runs its built-in Playbook, which holds today's
-   method: Verify has the four steps it follows now, Fix has the steps Code and Tests, Review PR has one step,
-   Review, and the three chat Triggers have no rules.
+2. Each Trigger holds exactly one Playbook. A Trigger with none runs its built-in Playbook. Every built-in has rules:
+   the Trigger's own method plus the rules every job and chat shares (evidence over assumptions; verified, mocked
+   and unverified kept apart; databases read only with writes mocked; only the Connections the work needs; never
+   modify production data, push to the production branch, force-push or merge). The job built-ins have steps:
+   Verify eight (Datadog logs, logs to code, consumers, local reproduction, database, Shopify and external
+   dependencies, existing fixes, root cause and fix), Fix seven (root cause and existing fix, dependent services,
+   code standards, implement, mocked data and dependency tests, full tests and build, review the diff), Review PR
+   eight (description, production baseline and diff, codebase trace, consumers and dependencies, database, correctness
+   and risk, tests and build, findings and verdict), Check reply four and Address comments six. Reply in thread and
+   Session message have rules only.
 3. Built-in Playbooks are read-only. Duplicate makes an editable copy named "Copy of Verify (built-in)".
 4. The operator creates a Playbook from nothing or by Duplicate. A Playbook has a name, rules and ordered steps.
    Limits: name 60 characters and unique without regard to case, rules 8000, at most 12 steps, step title 80, step
@@ -45,8 +52,10 @@ patch. They have no place to write that down, so they retype it in every Session
    step, Attach to and Detach on a Playbook, and each Trigger's dropdown of Built-in and the operator's Playbooks.
 10. A step that writes files or runs commands carries the tag "scratch copy". The blocks Replay the request locally,
     Make mock data, Run the tests and Test a lasting fix carry it, whatever the step's text says; Custom step has a checkbox for it. Editing a step's text keeps its tag.
-11. Review PR reads only. Attaching a Playbook that has a tagged step to it is refused: "Review PR reads only: remove
-    Make mock data first." Adding a tagged step to a Playbook that Review PR holds is refused the same way on Save.
+11. Review PR may hold tagged steps; the built-in's "Run the tests and build" is one. With any, the Agent Review makes
+    a scratch copy at the pull request's head commit, runs every step and its closing turn there, and removes it when
+    the review ends. A copy that cannot be made fails the review with "Could not make a scratch copy:" and git's
+    message. Without a tagged step it reads only, as before.
 12. Save writes the Playbook; Discard drops the edits. Unsaved edits stay in the browser until Save or Discard,
     through page switches, reloads and reopening the console, and the Playbook's row shows a dot while they exist.
 
@@ -121,8 +130,8 @@ patch. They have no place to write that down, so they retype it in every Session
     and disabled MCP Servers still hold, and a Verification still writes to no Connection.
 29. Every job and chat turn carries the mock data rule: mock data is made up, shaped like the real data, and no
     value read from a PROD Connection is written to a file, a commit, a PR or its comments, a Ticket or a Report.
-30. With every Trigger on its built-in, Verification, Fix and Agent Review give the same output as before, and Fix
-    progress shows Ticket, Branch, Code, Tests, PR.
+30. With every Trigger on its built-in, Fix progress shows Ticket (skipped: the built-in makes no Jira ticket),
+    Branch, the seven built-in steps by title, and PR.
 31. Two jobs at once each run their own copy; editing or moving a Playbook while both run changes neither.
 32. A daemon restart mid-step fails the step and its job as interrupted, as start-up recovery does today.
 33. Reports and Agent Reviews made before this change show no Playbook. A Fix made before it shows its Code and Tests
@@ -136,8 +145,11 @@ patch. They have no place to write that down, so they retype it in every Session
   Playbook. No scope by Service or Repo and no pick at run time; rules for one Repo belong in its `CLAUDE.md`,
   which runs already load.
 - **Many Triggers per Playbook**: one edit reaches each Trigger that holds it.
-- **Built-in in code**: the five built-in Playbooks and the ten Step blocks ship with the console and are not rows,
-  so an update can improve them. A Trigger with no row holds its built-in.
+- **Built-in in code**: the seven built-in Playbooks, their rules included, and the ten Step blocks ship with the
+  console and are not rows, so an update can improve them. A Trigger with no row holds its built-in.
+- **Jira ticket switch**: a Playbook's own flag, off by default and on no built-in. Fix copies it at start; off, the
+  Fix makes no ticket even with Jira connected, and the ticket stage reads "No ticket: the Fix Playbook makes no Jira
+  ticket.".
 - **Job Triggers and chat Triggers**: Verify, Fix and Review PR start jobs with an end; only jobs run steps. The rest
   are chats and use rules only.
 - **Steps are turns**: one turn per step, in the job's Session, so progress shows per step and Retry starts at the
@@ -147,7 +159,8 @@ patch. They have no place to write that down, so they retype it in every Session
 - **Step outcome**: `done`, `skipped` or `failed`, plus a summary. `skipped` goes on, `failed` stops. Fix's old Tests
   check (`passed: false` fails) becomes the built-in Tests step answering `failed`.
 - **Fix stages**: `ticket`, `branch`, `steps`, `pr`. The stage `steps` covers the Playbook's steps, in order.
-- **Scratch copy tag**: a step's own flag, set by its block or the Custom step checkbox. It is what Review PR checks.
+- **Scratch copy tag**: a step's own flag, set by its block or the Custom step checkbox. Review PR makes its scratch
+  copy only when a step has it.
 - **Copy at start**: jobs copy the Playbook; chats read it per turn because they never end.
 - **Scratch copy at the default branch**: the deployed code is closest to the default branch. The operator's
   uncommitted work is not in the copy.
@@ -158,8 +171,8 @@ patch. They have no place to write that down, so they retype it in every Session
 
 - **Resume after a daemon restart**: a step running at restart fails as interrupted. Resuming from the step joins
   the resume work in `persist-selections-and-runs` Behaviors 12 to 23.
-- **Agent Review Retry from a step**: a failed Agent Review runs whole again. It reads only, so a rerun costs time,
-  not risk.
+- **Agent Review Retry from a step**: a failed Agent Review runs whole again. Its scratch copy is made afresh, so a
+  rerun costs time, not risk.
 - **Saving your own Step blocks**: a step lives in its Playbook; Duplicate copies a whole Playbook.
 - **Two pages editing one Playbook**: the last Save wins.
 - **Enforcing the mock data rule**: it is an instruction, not a check. The operator sees a PR's diff before merging,
@@ -369,9 +382,8 @@ Server to client, each time a job's step changes status.
 
 - **Sidebar**: Playbooks under Claude, after Agents & accounts, at `/playbooks`.
 - **Left column, Triggers**: grouped under Monitor and Workspace. Each is a drop target with a dropdown showing
-  its Playbook or "Built-in". The dropdown lists Built-in and the operator's Playbooks A to Z with their step counts;
-  on Review PR a Playbook with a tagged step is listed with its refusal, and picking it shows the refusal. A drag
-  over a Trigger outlines it; a drag of a Playbook with a tagged step over Review PR shows it refused.
+  its Playbook or "Built-in". The dropdown lists Built-in and the operator's Playbooks A to Z with their step counts.
+  A drag over a Trigger outlines it.
 - **Confirms**: Delete and Replace (Behaviors 5 and 6) ask in a modal over a dimmed page, with Cancel focused first.
   Escape, Cancel or a click on the dimmed page closes it.
 - **Left column, Playbooks**: the operator's Playbooks A to Z with the Triggers each holds, then the five built-ins

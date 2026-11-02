@@ -38,6 +38,7 @@ function RepoRow({ repo }: { repo: Repo }) {
             <Button
               variant="primary"
               className="px-2.5 py-1 text-xs"
+              title="Hide the Sessions with the Repo. They come back if you import this folder again."
               disabled={remove.isPending}
               onClick={() => remove.mutate({ id: repo.id, sessions: RemovedRepoSessions.Keep })}
             >
@@ -45,6 +46,7 @@ function RepoRow({ repo }: { repo: Repo }) {
             </Button>
             <Button
               className="px-2.5 py-1 text-xs"
+              title="Delete the Sessions and their conversations for good. The folder on disk stays as it is."
               disabled={remove.isPending}
               onClick={() => remove.mutate({ id: repo.id, sessions: RemovedRepoSessions.Delete })}
             >
@@ -71,7 +73,11 @@ function RepoRow({ repo }: { repo: Repo }) {
           </Button>
         </div>
       ) : (
-        <Button className="px-2.5 py-1 text-xs" onClick={() => setConfirming(true)}>
+        <Button
+          className="px-2.5 py-1 text-xs"
+          title="Take this Repo off the console. The folder on disk and its git history stay as they are. Asks first."
+          onClick={() => setConfirming(true)}
+        >
           Remove
         </Button>
       )}
@@ -97,6 +103,7 @@ export function ReposTab() {
         <button
           type="button"
           disabled={pick.isPending || importRepo.isPending}
+          title="Pick the top folder of a git repository. Sessions then run in it, on its branches."
           onClick={browse}
           className="flex cursor-pointer flex-col items-start gap-0.5 border border-divider bg-card px-3 py-2.5 text-left text-text hover:bg-neutral-200 disabled:cursor-wait"
         >

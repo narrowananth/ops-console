@@ -9,6 +9,7 @@ import {
   FixStatus,
   HealthStatus,
   PlaybookStepStatus,
+  PlaybookTrigger,
   PrState,
   RunStatus,
   ScanStatus,
@@ -38,11 +39,12 @@ import {
 import { STORE, type Store } from '../src/db/store';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { fingerprint, maskSignature, normalizePath } from '../src/monitor/fingerprint';
+import { NO_TICKET_IN_PLAYBOOK } from '../src/monitor/fixes.service';
 import { MonitorModule } from '../src/monitor/monitor.module';
 import { latestSlot, nextSlot, ScansService } from '../src/monitor/scans.service';
 import { ReposModule } from '../src/repos/repos.module';
 import { WorkspaceModule } from '../src/workspace/workspace.module';
-import { type AgentDaemon, api, gate, listen, startAgentDaemon, until } from './agent-fixtures';
+import { type AgentDaemon, api, gate, listen, startAgentDaemon, stepTurns, until } from './agent-fixtures';
 import type { Step } from './fakes/agent-sdk';
 import { FakeCodeHosts } from './fakes/code-hosts';
 import { FakeConnectorTools } from './fakes/connector-tools';
@@ -163,8 +165,8 @@ async function linkRepo(ctx: Ctx, serviceId: string): Promise<string> {
 /** A step turn's answer. */
 const outcome = (status: 'done' | 'skipped' | 'failed', summary = 'ok'): Step => json({ outcome: status, summary });
 
-/** The four steps of the built-in Verify, each its own turn. */
-const VERIFY_STEPS: Step[][] = [1, 2, 3, 4].map(() => [outcome('done')]);
+/** The steps of the built-in Verify, each its own turn. */
+const VERIFY_STEPS: Step[][] = stepTurns(PlaybookTrigger.Verify);
 
 /** Scripts each step turn, then the closing turn that writes the Report. */
 async function verify(ctx: Ctx, alertId: string, closing: Step[] = [json(REPORT)], steps = VERIFY_STEPS) {
@@ -736,12 +738,11 @@ describe('Review', () => {
     const ctx = await start();
     const { alert } = await verified(ctx);
     const sessionId = (await ctx.http.get(`/alerts/${alert.id}`)).body.data.session_id;
-    ctx.daemon.sdk.script(json({ key: 'ORD-7', url: 'https://example.atlassian.net/browse/ORD-7' }));
     const sent = await ctx.http.post(`/sessions/${sessionId}/messages`, { text: '  Do It ' });
     expect(sent.status).toBe(202);
     expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.status).toBe('fixing');
     expect(ctx.store.db.select().from(reviews).all()[0]).toMatchObject({ decision: 'confirmed', kind: 'bug' });
-    // The scripted run answers with no ticket, so the Fix fails; wait for it before the daemon stops.
+    // No step run is scripted, so the Fix fails at its first step; wait for it before the daemon stops.
     await until(
       () => ctx.store.db.select().from(fixes).all()[0]?.status,
       (status) => status === 'failed',
@@ -887,11 +888,32 @@ describe('Fix', () => {
     for (const answer of answers) ctx.daemon.sdk.script(answer);
   }
 
+  /** One run per step of the built-in Fix. */
+  function scriptSteps(ctx: Ctx, turns: Record<number, Step[]> = {}) {
+    for (const run of stepTurns(PlaybookTrigger.Fix, turns)) ctx.daemon.sdk.script(...run);
+  }
+
+  /** Attaches a Fix Playbook that makes the Jira ticket, with the steps Code and Tests. */
+  async function ticketed(ctx: Ctx): Promise<string> {
+    const steps = ['Code', 'Tests'].map((title) => ({
+      block: 'custom',
+      title,
+      instructions: `Do ${title}.`,
+      writes: true,
+    }));
+    const created = await ctx.http.post('/playbooks', { name: 'Ticketed fix', jira_ticket: true, steps });
+    expect(created.status).toBe(201);
+    expect((await ctx.http.put('/playbook-triggers/fix', { playbook_id: created.body.data.id })).status).toBe(200);
+    return created.body.data.id;
+  }
+
   it('runs ticket, branch, the steps Code and Tests, and pr, then moves the Alert to pr_open', async () => {
     const ctx = await start();
     const alert = await failing(ctx);
     await linkRepo(ctx, alert.service.id);
     await verify(ctx, alert.id);
+    const playbookId = await ticketed(ctx);
+    const before = ctx.daemon.sdk.calls.length;
     scriptRuns(ctx, TICKET, CODED, PASSED, OPENED, MOVED);
     const listener = await listen(ctx.daemon);
     const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
@@ -920,7 +942,7 @@ describe('Fix', () => {
     listener.close();
     const kinds = (await ctx.http.get(`/alerts/${alert.id}/events`)).body.data.map((e: { kind: string }) => e.kind);
     expect(kinds).toEqual(expect.arrayContaining(['confirmed', 'ticket_created', 'fix_advanced', 'pr_opened']));
-    const prompts = ctx.daemon.sdk.calls.slice(5).map((call) => call.prompt);
+    const prompts = ctx.daemon.sdk.calls.slice(before).map((call) => call.prompt);
     expect(prompts[0]).toContain('Atlassian MCP');
     expect(prompts[0]).toContain('priority Medium');
     expect(prompts[3]).toContain('pull request description rule');
@@ -928,8 +950,8 @@ describe('Fix', () => {
     expect(prompts[3]).toContain('- Tests: 12 passed');
     expect(prompts[3]).toContain('https://example.atlassian.net/browse/ORD-7');
     expect(fix.playbook).toMatchObject({
-      id: null,
-      name: 'Fix (built-in)',
+      id: playbookId,
+      name: 'Ticketed fix',
       steps: [
         { title: 'Code', status: 'done', summary: 'defaulted the total' },
         { title: 'Tests', status: 'done', summary: '12 passed' },
@@ -937,11 +959,44 @@ describe('Fix', () => {
     });
   });
 
+  it('makes no Jira ticket with the built-in, Jira connected, and runs its steps on fix/<slug>', async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    await linkRepo(ctx, alert.service.id);
+    await verify(ctx, alert.id);
+    const before = ctx.daemon.sdk.calls.length;
+    scriptSteps(ctx, { 0: [outcome('done', 'the root cause holds')] });
+    scriptRuns(ctx, OPENED);
+    const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
+    const fix = await until(
+      () => ctx.http.get(`/fixes/${confirm.body.data.fix.id}`).then((res) => res.body.data),
+      (found) => found.status !== 'running',
+      'the Fix to end',
+    );
+    expect(fix).toMatchObject({
+      status: 'done',
+      jira_key: null,
+      branch: 'fix/null-order-total',
+      ticket_skipped: NO_TICKET_IN_PLAYBOOK,
+      pr_number: 41,
+      playbook: { id: null, name: 'Fix (built-in)' },
+    });
+    expect(fix.playbook.steps.map((step: { status: string }) => step.status)).toEqual(
+      stepTurns(PlaybookTrigger.Fix).map(() => 'done'),
+    );
+    expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe('fix/null-order-total');
+    const prompts = ctx.daemon.sdk.calls.slice(before).map((call) => call.prompt);
+    expect(prompts).toHaveLength(fix.playbook.steps.length + 1);
+    expect(prompts.some((prompt) => prompt.includes('Atlassian'))).toBe(false);
+    expect(prompts.at(-1)).toContain('- Confirm the root cause and look for an existing fix: the root cause holds');
+  });
+
   it('skips the ticket with Jira off and names the branch fix/<slug>', async () => {
     const ctx = await start();
     const alert = await failing(ctx);
     await linkRepo(ctx, alert.service.id);
     await verify(ctx, alert.id);
+    await ticketed(ctx);
     setConnector(ctx.store, ConnectorId.Jira, { status: HealthStatus.Off });
     const callsBefore = ctx.daemon.sdk.calls.length;
     scriptRuns(ctx, CODED, PASSED, OPENED);
@@ -952,7 +1007,13 @@ describe('Fix', () => {
       (found) => found.status !== 'running',
       'the Fix to end',
     );
-    expect(fix).toMatchObject({ status: 'done', jira_key: null, branch: 'fix/null-order-total', pr_number: 41 });
+    expect(fix).toMatchObject({
+      status: 'done',
+      jira_key: null,
+      branch: 'fix/null-order-total',
+      pr_number: 41,
+      ticket_skipped: null,
+    });
     expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.status).toBe('pr_open');
     expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe('fix/null-order-total');
     const prompts = ctx.daemon.sdk.calls.slice(callsBefore).map((call) => call.prompt);
@@ -965,6 +1026,7 @@ describe('Fix', () => {
     const alert = await failing(ctx);
     await linkRepo(ctx, alert.service.id);
     await verify(ctx, alert.id);
+    await ticketed(ctx);
     scriptRuns(ctx, { text: 'The Jira MCP server is not reachable.' }, CODED, PASSED, OPENED);
     const callsBefore = ctx.daemon.sdk.calls.length;
     const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
@@ -991,8 +1053,9 @@ describe('Fix', () => {
     const alert = await failing(ctx);
     await linkRepo(ctx, alert.service.id);
     await verify(ctx, alert.id);
-    setConnector(ctx.store, ConnectorId.Jira, { status: HealthStatus.Off });
-    scriptRuns(ctx, CODED, outcome('failed', '2 failed'));
+    for (const run of stepTurns(PlaybookTrigger.Fix, { 1: [outcome('failed', 'a consumer breaks')] }).slice(0, 2)) {
+      ctx.daemon.sdk.script(...run);
+    }
     const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
     const fixId = confirm.body.data.fix.id;
     await until(
@@ -1015,7 +1078,8 @@ describe('Fix', () => {
     expect(kinds).toContain('abandoned');
     expect((await ctx.http.post(`/fixes/${fixId}/cancel`)).body.error.code).toBe('invalid_state');
 
-    scriptRuns(ctx, CODED, PASSED, OPENED);
+    scriptSteps(ctx);
+    scriptRuns(ctx, OPENED);
     const again = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
     expect(again.status).toBe(200);
     expect(again.body.data.fix.id).not.toBe(fixId);
@@ -1026,7 +1090,6 @@ describe('Fix', () => {
     const alert = await failing(ctx);
     await linkRepo(ctx, alert.service.id);
     await verify(ctx, alert.id);
-    setConnector(ctx.store, ConnectorId.Jira, { status: HealthStatus.Off });
     const callsBefore = ctx.daemon.sdk.calls.length;
     ctx.daemon.sdk.script({ wait: gate().promise }, outcome('done', 'never reached'));
     const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
@@ -1056,8 +1119,8 @@ describe('Fix', () => {
     const alert = await failing(ctx);
     await linkRepo(ctx, alert.service.id);
     await verify(ctx, alert.id);
-    setConnector(ctx.store, ConnectorId.Jira, { status: HealthStatus.Off });
-    scriptRuns(ctx, CODED, PASSED, OPENED);
+    scriptSteps(ctx);
+    scriptRuns(ctx, OPENED);
     const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
     const fixId = confirm.body.data.fix.id;
     await until(
@@ -1086,8 +1149,8 @@ describe('Fix', () => {
     git(ctx.dir, 'remote', 'set-url', 'origin', bare);
     git(ctx.dir, 'checkout', '-q', '-b', 'feature');
     await verify(ctx, alert.id);
-    setConnector(ctx.store, ConnectorId.Jira, { status: HealthStatus.Off });
-    scriptRuns(ctx, CODED, PASSED, OPENED);
+    scriptSteps(ctx);
+    scriptRuns(ctx, OPENED);
     const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
     const fix = await until(
       () => ctx.http.get(`/fixes/${confirm.body.data.fix.id}`).then((res) => res.body.data),
@@ -1103,6 +1166,7 @@ describe('Fix', () => {
     const alert = await failing(ctx);
     await linkRepo(ctx, alert.service.id);
     await verify(ctx, alert.id);
+    await ticketed(ctx);
     scriptRuns(ctx, TICKET, CODED, outcome('failed', '2 failed'));
     const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
     const fixId = confirm.body.data.fix.id;
@@ -1137,21 +1201,24 @@ describe('Fix', () => {
     const [alert] = await alertList(ctx);
     await linkRepo(ctx, alert.service.id);
     await verify(ctx, alert.id);
+    await ticketed(ctx);
+    const before = ctx.daemon.sdk.calls.length;
     scriptRuns(ctx, TICKET);
     await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'improvement' });
     await until(
       () => ctx.daemon.sdk.calls.length,
-      (count) => count >= 6,
+      (count) => count > before,
     );
-    expect(ctx.daemon.sdk.calls[5]?.prompt).toContain('priority High');
-    expect(ctx.daemon.sdk.calls[5]?.prompt).toContain('issue type "Improvement"');
+    expect(ctx.daemon.sdk.calls[before]?.prompt).toContain('priority High');
+    expect(ctx.daemon.sdk.calls[before]?.prompt).toContain('issue type "Improvement"');
   });
 
   async function prOpen(ctx: Ctx) {
     const alert = await failing(ctx);
     const repoId = await linkRepo(ctx, alert.service.id);
     await verify(ctx, alert.id);
-    scriptRuns(ctx, TICKET, CODED, PASSED, OPENED, MOVED);
+    scriptSteps(ctx);
+    scriptRuns(ctx, OPENED);
     const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
     const fixId = confirm.body.data.fix.id as string;
     // `done` is the Fix's last write; the daemon must not stop before it.
@@ -1239,7 +1306,7 @@ describe('restart', () => {
     const hold = gate();
     first.daemon.sdk.script({ wait: hold.promise });
     const confirm = await first.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
-    // The ticket run, after five Verification turns, is blocked on the gate once it has recorded its new
+    // The first step's run, after the Verification's turns, is blocked on the gate once it has recorded its new
     // conversation; stopping before that write would leave it writing to a closed store.
     const fixSession = () =>
       first.store.db
@@ -1248,15 +1315,15 @@ describe('restart', () => {
         .innerJoin(sessions, eq(sessions.id, fixes.sessionId))
         .get()?.sdk;
     await until(
-      () => (first.daemon.sdk.calls.length >= 6 ? fixSession() : null),
+      () => (first.daemon.sdk.calls.length > VERIFY_STEPS.length + 1 ? fixSession() : null),
       (sdk) => typeof sdk === 'string',
-      'the ticket run to reach the gate',
+      'the first step to reach the gate',
     );
     await first.daemon.stop();
     running.pop();
     const second = await start({ dataDir, datadog: first.datadog });
     const fix = (await second.http.get(`/fixes/${confirm.body.data.fix.id}`)).body.data;
-    expect(fix).toMatchObject({ status: 'failed', stage: 'ticket', error_message: 'interrupted' });
+    expect(fix).toMatchObject({ status: 'failed', stage: 'steps', error_message: 'interrupted' });
     expect((await second.http.get(`/alerts/${alert.id}`)).body.data.status).toBe('fixing');
   });
 });

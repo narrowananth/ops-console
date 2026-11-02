@@ -60,6 +60,8 @@ type Context = {
   fresh: boolean;
 };
 
+/** Why a Fix has no ticket when its Playbook's Jira ticket switch is off. */
+export const NO_TICKET_IN_PLAYBOOK = 'the Fix Playbook makes no Jira ticket';
 @Injectable()
 export class FixesService {
   private readonly logger = new Logger('monitor');
@@ -114,6 +116,7 @@ export class FixesService {
         playbookName: copy.name,
         playbookRules: copy.rules,
         playbookBranches: copy.branches,
+        playbookJiraTicket: copy.jiraTicket,
       })
       .returning()
       .get();
@@ -403,12 +406,13 @@ ${jira}Root cause: ${context.report.rootCause}. Proposed fix: ${context.report.p
   }
 
   /**
-   * The ticket exists after this stage, once: a retry finds the key and skips it (Behavior 22). With Jira not
-   * connected, or the ticket not made, there is no ticket and the branch is `fix/<slug>`; the Fix goes on, and
-   * keeps why when Jira was connected. Only the operator's Stop fails the stage.
+   * The ticket exists after this stage, once: a retry finds the key and skips it (Behavior 22). With the Playbook's
+   * Jira ticket switch off (the default), Jira not connected, or the ticket not made, there is no ticket and the
+   * branch is `fix/<slug>`; the Fix goes on, and keeps why. Only the operator's Stop fails the stage.
    */
   private async ticket(context: Context): Promise<void> {
     if (context.fix.jiraKey || context.fix.branch) return;
+    if (!context.fix.playbookJiraTicket) return this.noTicket(context, NO_TICKET_IN_PLAYBOOK);
     if (!this.jiraUp()) return this.noTicket(context, null);
     try {
       await this.createTicket(context);

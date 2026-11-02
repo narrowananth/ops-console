@@ -6,6 +6,15 @@ import { alertPath, pullRequestPath, sessionPath } from '../workspace/links';
 
 const NEEDS_YOU: SessionState[] = [SessionState.WaitingInput, SessionState.WaitingApproval];
 
+/** What a run's state chip means. */
+const STATE_TIPS: Record<SessionState, string> = {
+  [SessionState.Idle]: 'The agent is between turns.',
+  [SessionState.Working]: 'The agent is working on it now.',
+  [SessionState.WaitingInput]: 'The agent asked you something. Open it to answer.',
+  [SessionState.WaitingApproval]: 'The agent waits for your yes or no on an action. Open it to answer.',
+  [SessionState.Failed]: 'The run failed. Open it to read why.',
+};
+
 /** Where a running Session's work shows, and what to call it there. */
 function placeOf(
   session: Session,
@@ -99,7 +108,11 @@ export function RunningTasks({ collapsed }: { collapsed: boolean }) {
                 const needsYou = NEEDS_YOU.includes(session.state);
                 return (
                   <li key={session.id} className="flex items-center gap-2 rounded-md px-2.5 py-2 hover:bg-text/6">
-                    <Link to={place.to} className="min-w-0 flex-1 text-text no-underline">
+                    <Link
+                      to={place.to}
+                      title="Open where this run shows"
+                      className="min-w-0 flex-1 text-text no-underline"
+                    >
                       <span className="block truncate text-[13px] font-semibold">{place.what}</span>
                       <span className="block truncate text-[11px] text-neutral-700">
                         {place.where}
@@ -112,6 +125,7 @@ export function RunningTasks({ collapsed }: { collapsed: boolean }) {
                       </Link>
                     )}
                     <span
+                      title={STATE_TIPS[session.state]}
                       className={`flex-none rounded-full px-2 py-px font-mono text-[11px] ${
                         needsYou ? 'bg-accent-100 text-accent-700' : 'bg-neutral-200 text-neutral-700'
                       }`}

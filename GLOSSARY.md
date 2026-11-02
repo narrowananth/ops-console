@@ -39,8 +39,9 @@ a mode that asks.
 ### Playbooks
 
 **Playbook**:
-The rules and ordered steps the agent follows when a Trigger starts it, written by the operator, and the branches
-Verify and Fix read the code from. Each Trigger holds one; one Playbook may be held by several.
+The rules and ordered steps the agent follows when a Trigger starts it, written by the operator, the branches
+Verify and Fix read the code from, and whether a Fix makes a Ticket. Each Trigger holds one; one Playbook may be held
+by several. Each Trigger without one runs its built-in.
 _Avoid_: rule, pipeline, workflow
 
 **Trigger**:
@@ -57,7 +58,7 @@ A ready-made Playbook step the operator drags into a Playbook and then edits.
 **Scratch copy**:
 A throwaway copy of a Repo's code, at the newest commit of the Playbook's branch for a Verification, fetched from
 origin, or at a pull request's head commit for a
-Reply check or a Comment pass, where the agent may write files and run local commands. A Playbook step that needs one carries the tag "scratch copy"; Review PR takes no such step.
+Reply check, a Comment pass or an Agent Review, where the agent may write files and run local commands. A Playbook step that needs one carries the tag "scratch copy".
 
 ### Monitor
 
@@ -115,12 +116,13 @@ The operator's decision on a Report: confirm as a bug or improvement, or dismiss
 _Avoid_: approval
 
 **Ticket**:
-The Jira issue the agent creates when the operator confirms a Report while Jira is connected. Its key starts the fix
-branch name. When the ticket cannot be made, the Fix goes on without one.
+The Jira issue the agent creates when the operator confirms a Report, while Jira is connected and the Fix Playbook
+asks for one (the built-in does not). Its key starts the fix branch name. When the ticket cannot be made, the Fix goes
+on without one.
 
 **Fix**:
-The work that follows a confirmed Review: ticket (when Jira is connected), branch, the steps of its Playbook (code
-change and tests by default), push and PR, run by the agent in the Alert's Session. A merged PR resolves the Alert; a PR closed unmerged abandons the Fix.
+The work that follows a confirmed Review: ticket (when its Playbook asks and Jira is connected), branch, the steps of
+its Playbook (code change, mocked tests, the full suite and a diff review by default), push and PR, run by the agent in the Alert's Session. A merged PR resolves the Alert; a PR closed unmerged abandons the Fix.
 
 ### Workspace
 
@@ -142,16 +144,18 @@ repository into it. A Verification or Fix for a Service with no local Repo runs 
 Service's Git URL.
 
 **Agent Review**:
-The agent's written review of a pull request: findings, a PROD readiness checklist and a verdict,
-tied to the commit it read. Each finding is also posted to the Git host as a comment. A newer commit makes it stale.
+The agent's written review of a pull request: a verdict (approve, request changes or comment), findings rated
+critical, high, medium, low or info, a PROD readiness checklist and a full report, tied to the commit it read and the
+target branch commit it compared with. Each finding is posted to the Git host on its line, and the verdict and report
+as one comment. A newer commit makes it stale.
 
 **Reply check**:
 The agent's check of one pull request thread: whether the code at the head commit does what the thread asked, given
 as fixed, partly fixed or not fixed in a reply. On fixed the thread is resolved.
 
 **Comment pass**:
-The agent's work on the review threads the operator ticked on their own pull request: one commit pushed to its branch,
-a reply in each thread, and each done thread resolved.
+The agent's work on the review threads the operator ticked on a pull request, theirs or a teammate's: one commit pushed
+to its branch, a reply in each thread, and each done thread on a line or a file resolved.
 _Avoid_: fix (a Fix follows an Alert's Review)
 
 ### Dev tools
@@ -197,6 +201,15 @@ message, ticket, PR.
 _Avoid_: audit trail, history
 
 ### Console
+
+**Start at login**:
+launchd starting the installed console when the operator logs in, and again if it stops. macOS lists it as Ops
+Console under App Background Activity. A dev build never starts at login.
+
+**Tip**:
+The words a control, status or label shows on hover or keyboard focus: what it means, what pressing it makes the
+agent do, or why it is off.
+_Avoid_: tooltip
 
 **Remembered view**:
 What the operator picked, ticked, typed or opened on a page, kept until they change it, through page switches,

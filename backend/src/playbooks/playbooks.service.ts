@@ -16,13 +16,21 @@ import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import { fixes, playbooks, playbookTriggers, reports, reviews, type sessions } from '../db/schema';
 import { STORE, type Store, type Tx } from '../db/store';
-import { BUILTIN_STEPS, builtinId, builtinName, STEP_BLOCKS, WRITING_BLOCKS } from './blocks';
+import { builtinId, builtinName, STEP_BLOCKS, WRITING_BLOCKS } from './blocks';
+import { BUILTIN_RULES, BUILTIN_STEPS } from './builtins';
 
 type PlaybookRow = typeof playbooks.$inferSelect;
 type SessionRow = typeof sessions.$inferSelect;
 
 /** What a job copies when it starts: the Playbook its Trigger holds, or the built-in. */
-export type PlaybookCopy = { id: string | null; name: string; rules: string; branches: string; steps: PlaybookStep[] };
+export type PlaybookCopy = {
+  id: string | null;
+  name: string;
+  rules: string;
+  branches: string;
+  jiraTicket: boolean;
+  steps: PlaybookStep[];
+};
 
 const stepsOf = (row: PlaybookRow): PlaybookStep[] => {
   const parsed = z.array(playbookStepSchema).safeParse(JSON.parse(row.steps));
@@ -63,6 +71,7 @@ export class PlaybooksService {
           name: input.name,
           rules: input.rules,
           branches: input.branches,
+          jiraTicket: input.jira_ticket,
           steps: JSON.stringify(tagged(input.steps)),
         })
         .returning()
@@ -76,13 +85,13 @@ export class PlaybooksService {
       const current = this.row(tx, id);
       if (patch.name !== undefined) this.requireFreeName(tx, patch.name, id);
       const steps = patch.steps ? tagged(patch.steps) : null;
-      if (steps && this.triggersOf(tx, id).includes(PlaybookTrigger.ReviewPr)) this.requireReadOnly(steps);
       return tx
         .update(playbooks)
         .set({
           name: patch.name ?? current.name,
           rules: patch.rules ?? current.rules,
           branches: patch.branches ?? current.branches,
+          jiraTicket: patch.jira_ticket ?? current.jiraTicket,
           steps: steps ? JSON.stringify(steps) : current.steps,
           updatedAt: new Date().toISOString(),
         })
@@ -111,8 +120,7 @@ export class PlaybooksService {
       if (playbookId.startsWith('builtin:')) {
         throw new ApiError(409, ErrorCode.InvalidState, 'A built-in Playbook stays on its own Trigger');
       }
-      const row = this.row(tx, playbookId);
-      if (trigger === PlaybookTrigger.ReviewPr) this.requireReadOnly(stepsOf(row));
+      this.row(tx, playbookId);
       tx.insert(playbookTriggers)
         .values({ trigger, playbookId })
         .onConflictDoUpdate({ target: playbookTriggers.trigger, set: { playbookId } })
@@ -129,12 +137,22 @@ export class PlaybooksService {
       .innerJoin(playbooks, eq(playbooks.id, playbookTriggers.playbookId))
       .where(eq(playbookTriggers.trigger, trigger))
       .get();
-    if (!found) return { id: null, name: builtinName(trigger), rules: '', branches: '', steps: BUILTIN_STEPS[trigger] };
+    if (!found) {
+      return {
+        id: null,
+        name: builtinName(trigger),
+        rules: BUILTIN_RULES[trigger],
+        branches: '',
+        jiraTicket: false,
+        steps: BUILTIN_STEPS[trigger],
+      };
+    }
     return {
       id: found.playbook.id,
       name: found.playbook.name,
       rules: found.playbook.rules,
       branches: found.playbook.branches,
+      jiraTicket: found.playbook.jiraTicket,
       steps: stepsOf(found.playbook),
     };
   }
@@ -187,8 +205,9 @@ export class PlaybooksService {
       id: builtinId(trigger),
       builtin: true,
       name: builtinName(trigger),
-      rules: '',
+      rules: BUILTIN_RULES[trigger],
       branches: '',
+      jira_ticket: false,
       steps: BUILTIN_STEPS[trigger],
       triggers: taken.has(trigger) ? [] : [trigger],
       updated_at: null,
@@ -202,6 +221,7 @@ export class PlaybooksService {
       name: row.name,
       rules: row.rules,
       branches: row.branches,
+      jira_ticket: row.jiraTicket,
       steps: stepsOf(row),
       triggers: held.get(row.id) ?? [],
       updated_at: row.updatedAt,
@@ -217,15 +237,6 @@ export class PlaybooksService {
       if (row) map.set(row.playbookId, [...(map.get(row.playbookId) ?? []), trigger]);
     }
     return map;
-  }
-
-  private triggersOf(tx: Tx, id: string): PlaybookTrigger[] {
-    return tx
-      .select({ trigger: playbookTriggers.trigger })
-      .from(playbookTriggers)
-      .where(eq(playbookTriggers.playbookId, id))
-      .all()
-      .map((row) => row.trigger);
   }
 
   private row(tx: Tx, id: string): PlaybookRow {
@@ -246,13 +257,5 @@ export class PlaybooksService {
       )
       .get();
     if (taken) throw new ApiError(409, ErrorCode.Duplicate, `Another Playbook is named ${name}`);
-  }
-
-  /** Review PR reads only: no step with the scratch copy tag reaches it (Behavior 11). */
-  private requireReadOnly(steps: PlaybookStep[]): void {
-    const writing = steps.find((step) => step.writes);
-    if (writing) {
-      throw new ApiError(409, ErrorCode.InvalidState, `Review PR reads only: remove ${writing.title} first.`);
-    }
   }
 }

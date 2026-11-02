@@ -31,6 +31,15 @@ function readFolded(): string[] {
   }
 }
 
+/** What each Session state means, on its badge. */
+export const SESSION_STATE_TIP: Record<SessionState, string> = {
+  [SessionState.Idle]: 'Idle: waiting for your next message',
+  [SessionState.Working]: 'Working: the agent is running',
+  [SessionState.WaitingInput]: 'Waiting on you: the agent asked a question. Your next message answers it.',
+  [SessionState.WaitingApproval]: 'Waiting on you: the agent needs your Approval to go on',
+  [SessionState.Failed]: 'Failed: the last run stopped with an error. Send a message to go on.',
+};
+
 const isRunning = (session: Session) =>
   session.state === SessionState.Working || session.state === SessionState.WaitingApproval;
 
@@ -44,7 +53,7 @@ function RowStop({ session }: { session: Session }) {
     <button
       type="button"
       aria-label={`Stop ${session.title}`}
-      title={stop.isError ? stop.error.message : 'Stop the agent where it is'}
+      title={stop.isError ? stop.error.message : 'Stop the agent where it is. The conversation stays.'}
       disabled={stop.isPending}
       onClick={() => stop.mutate()}
       className="absolute top-1.5 right-2 flex cursor-pointer items-center gap-1 rounded-full border border-line bg-card px-2 py-0.5 font-mono text-[10px] text-accent-700 opacity-0 shadow-sm group-hover:opacity-100 focus-visible:opacity-100 hover:border-accent-400 disabled:cursor-wait"
@@ -65,7 +74,7 @@ function NewSession({ repo, onCreated }: { repo: Repo; onCreated: (id: string) =
       <div className="flex gap-1.5">
         <Dropdown
           label={`Branch for a new Session in ${repo.name}`}
-          title={chosen}
+          title={`The new Session works on ${chosen || 'this branch'} in ${repo.name}`}
           value={chosen}
           options={ascending(branches.data ?? [], (b) => b.name).map((b) => ({
             value: b.name,
@@ -82,6 +91,7 @@ function NewSession({ repo, onCreated }: { repo: Repo; onCreated: (id: string) =
           variant="primary"
           className="px-3.5 py-1.5 text-xs"
           disabled={chosen === '' || create.isPending}
+          title={chosen === '' ? 'Pick a branch first' : `Start a Session on ${chosen}`}
           onClick={() => create.mutate({ repo_id: repo.id, branch: chosen }, { onSuccess: (s) => onCreated(s.id) })}
         >
           Start
@@ -120,6 +130,7 @@ function SessionRow({
         <span className="flex items-baseline gap-2">
           <span className="min-w-0 flex-1 truncate font-bold">{session.title}</span>
           <span
+            title={SESSION_STATE_TIP[session.state]}
             className={`flex-none rounded-full px-1.75 font-mono text-[10px] ${session.state === SessionState.Idle ? 'bg-neutral-200 text-neutral-700' : 'bg-accent-100 text-accent-700'}`}
           >
             {session.state.replace('_', ' ')}
@@ -171,15 +182,22 @@ function RepoGroup({
           </span>
           <RepoIcon host={repo.host} size="xs" />
           <strong className="flex-none font-mono text-[13px]">{repo.name}</strong>
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-neutral-700">{repo.branch}</span>
+          <span
+            title="The branch checked out in this Repo's folder now"
+            className="min-w-0 flex-1 truncate font-mono text-[11px] text-neutral-700"
+          >
+            {repo.branch}
+          </span>
           {running > 0 && <span className="flex-none font-mono text-[11px] text-accent-700">{running} running</span>}
-          <span className="flex-none font-mono text-[11px] text-neutral-700">{sessions.length}</span>
+          <span title="Sessions in this Repo" className="flex-none font-mono text-[11px] text-neutral-700">
+            {sessions.length}
+          </span>
         </button>
         {!repo.missing && (
           <button
             type="button"
             aria-label={`New Session in ${repo.name}`}
-            title="New Session"
+            title="New Session: pick a branch and talk to the agent in this Repo"
             aria-pressed={starting && !folded}
             onClick={() => {
               if (folded) onFold();
@@ -256,13 +274,20 @@ function AnonymousGroup({
             ∅
           </span>
           <strong className="flex-none text-[13px]">No Repo</strong>
-          <span className="min-w-0 flex-1 truncate text-[11px] text-neutral-700">anonymous</span>
-          <span className="flex-none font-mono text-[11px] text-neutral-700">{sessions.length}</span>
+          <span
+            title="Anonymous Sessions work in a folder of their own, not in an imported Repo. The agent may clone a repository there."
+            className="min-w-0 flex-1 truncate text-[11px] text-neutral-700"
+          >
+            anonymous
+          </span>
+          <span title="Anonymous Sessions" className="flex-none font-mono text-[11px] text-neutral-700">
+            {sessions.length}
+          </span>
         </span>
         <button
           type="button"
           aria-label="New anonymous Session"
-          title="New anonymous Session: no Repo, its own folder"
+          title="New anonymous Session: no Repo, a folder of its own. Ask the agent to clone a repository or anything else."
           disabled={create.isPending}
           onClick={() => create.mutate({}, { onSuccess: (session) => onSelect(session.id) })}
           className="flex size-6.5 flex-none cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent text-base font-extrabold text-accent hover:bg-accent-100"

@@ -1,6 +1,7 @@
 import {
   AgentReviewStatus,
   PlaybookTrigger,
+  PrChecks,
   PrReviewEvent,
   PrReviewState,
   PrState,
@@ -11,6 +12,7 @@ import { z } from 'zod';
 import { Button, Spinner } from '../components/ui/button';
 import { DiffStat } from '../components/ui/diff';
 import { Empty } from '../components/ui/empty';
+import { FoldTitle, useFold } from '../components/ui/fold';
 import { Markdown } from '../components/ui/markdown';
 import {
   useMergePullRequest,
@@ -27,9 +29,28 @@ import { AddressCommentsDialog } from './address-comments';
 import { AgentReviewCard } from './agent-review-card';
 import { CommentPassCard } from './comment-pass-card';
 import { PrFileView, useViewed } from './pr-file';
-import { agentBusy, BUSY_TITLE, openLineThreads } from './pr-jobs';
+import { ADDRESS_TIP, AGENT_REVIEW_TIP, agentBusy, BUSY_TITLE, openThreads } from './pr-jobs';
 import { PrSessions } from './pr-sessions';
 import { CommentComposer, Thread } from './pr-thread';
+
+const STATE_TIP: Record<PrState, string> = {
+  [PrState.Open]: 'Open: waiting for review and merge',
+  [PrState.Merged]: 'Merged into the target branch',
+  [PrState.Closed]: 'Closed without merging',
+};
+
+const CHECKS_TIP: Record<PrChecks, string> = {
+  [PrChecks.None]: 'No CI checks reported on the newest commit',
+  [PrChecks.Running]: 'CI checks are still running on the newest commit',
+  [PrChecks.Passed]: 'Every CI check passed on the newest commit',
+  [PrChecks.Failed]: 'At least one CI check failed on the newest commit. Open it on the host to see which.',
+};
+
+const REVIEW_TIP: Record<PrReviewState, string> = {
+  [PrReviewState.None]: 'Nobody has approved or asked for changes yet',
+  [PrReviewState.Approved]: 'A reviewer approved it',
+  [PrReviewState.ChangesRequested]: 'A reviewer asked for changes',
+};
 
 export function PullRequestView({ repoId, number }: { repoId: string; number: number }) {
   const pull = usePullRequest(repoId, number);
@@ -58,6 +79,7 @@ function Loaded(props: {
   );
   const [confirmMerge, setConfirmMerge] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [descriptionFolded, toggleDescription] = useFold('description');
   const viewed = useViewed(pr);
   const reviewPlaybook = useTriggerPlaybook(PlaybookTrigger.ReviewPr);
   const addressPlaybook = useTriggerPlaybook(PlaybookTrigger.AddressComments);
@@ -68,7 +90,7 @@ function Loaded(props: {
   const reviewed = pr.latest_agent_review?.status === AgentReviewStatus.Ready && !pr.latest_agent_review.stale;
   const roots = pr.comments.filter((comment) => comment.parent_id === null);
   const open = pr.state === PrState.Open;
-  const canAddress = open && pr.is_mine && openLineThreads(pr).length > 0;
+  const canAddress = open && openThreads(pr).length > 0;
   const error = review.error ?? merge.error ?? agent.error ?? address.error;
 
   return (
@@ -78,26 +100,32 @@ function Loaded(props: {
           #{pr.number} {pr.title}
         </h2>
         <div className="flex flex-wrap gap-x-3 font-mono text-xs text-neutral-700">
-          <a href={pr.url} target="_blank" rel="noreferrer" className="text-text underline">
+          <a
+            href={pr.url}
+            target="_blank"
+            rel="noreferrer"
+            title={`Open #${pr.number} on ${pr.host} in a new tab`}
+            className="text-text underline"
+          >
             Open on the host
           </a>
-          <span>
+          <span title={`Merging brings ${pr.branch} into ${pr.base_branch}`}>
             {pr.branch} → {pr.base_branch}
           </span>
-          <span>{pr.author}</span>
-          <span>{pr.state}</span>
-          <span>
+          <span title="Author">{pr.author}</span>
+          <span title={STATE_TIP[pr.state]}>{pr.state}</span>
+          <span title="Lines added and removed across every file">
             +{pr.additions} −{pr.deletions}
           </span>
-          <span>checks {pr.checks}</span>
+          <span title={CHECKS_TIP[pr.checks]}>checks {pr.checks}</span>
           {pr.approved_by.length > 0 ? (
             <span className="font-semibold text-ok" title={`Approved by ${pr.approved_by.join(', ')}`}>
               ✓ approved by {pr.approved_by.join(', ')}
             </span>
           ) : (
-            <span>review {pr.review_state.replace('_', ' ')}</span>
+            <span title={REVIEW_TIP[pr.review_state]}>review {pr.review_state.replace('_', ' ')}</span>
           )}
-          <span>
+          <span title="Comments on the Git host, and how many of their threads are resolved">
             {pr.comment_count} comments · {pr.resolved_count} resolved
           </span>
         </div>
@@ -106,13 +134,17 @@ function Loaded(props: {
             <>
               <Button
                 disabled={review.isPending}
-                title={`${viewed.count} of ${pr.files.length} files viewed`}
+                title={`Approve this pull request on the Git host as you. ${viewed.count} of ${pr.files.length} files viewed.`}
                 onClick={() => review.mutate({ event: PrReviewEvent.Approve })}
                 className="px-3 py-1 text-xs"
               >
                 Approve
               </Button>
-              <Button className="px-3 py-1 text-xs" onClick={() => setChanges(changes === null ? '' : null)}>
+              <Button
+                className="px-3 py-1 text-xs"
+                title="Say what needs to change. It posts a review on the Git host that asks the author for changes."
+                onClick={() => setChanges(changes === null ? '' : null)}
+              >
                 Request changes
               </Button>
             </>
@@ -126,7 +158,7 @@ function Loaded(props: {
                 ? BUSY_TITLE
                 : reviewed
                   ? 'The agent already reviewed this commit. Push a change to review again.'
-                  : undefined
+                  : AGENT_REVIEW_TIP
             }
             onClick={() => agent.mutate()}
           >
@@ -143,7 +175,7 @@ function Loaded(props: {
             <Button
               className="px-3 py-1 text-xs"
               disabled={address.isPending || busy}
-              title={busy ? BUSY_TITLE : undefined}
+              title={busy ? BUSY_TITLE : ADDRESS_TIP}
               onClick={() => setPicking(true)}
             >
               {address.isPending && <Spinner />}
@@ -154,7 +186,11 @@ function Loaded(props: {
             <Button
               className="ml-auto px-3 py-1 text-xs"
               disabled={pr.review_state !== PrReviewState.Approved}
-              title={pr.review_state === PrReviewState.Approved ? 'Merge' : 'Merge needs an approved review'}
+              title={
+                pr.review_state === PrReviewState.Approved
+                  ? 'Merge this pull request on the Git host. You confirm first.'
+                  : 'Merge needs an approved review. Approve it here or on the Git host first.'
+              }
               onClick={() => setConfirmMerge(true)}
             >
               Merge
@@ -167,6 +203,7 @@ function Loaded(props: {
                 variant="primary"
                 className="px-2.5 py-1 text-xs"
                 disabled={merge.isPending}
+                title={`Merge ${pr.branch} into ${pr.base_branch} on the Git host now`}
                 onClick={() => merge.mutate(undefined, { onSettled: () => setConfirmMerge(false) })}
               >
                 Merge
@@ -189,6 +226,7 @@ function Loaded(props: {
             />
             <Button
               className="px-2.5 py-1 text-xs"
+              title="Post this as a review that requests changes on the Git host"
               disabled={changes.trim() === '' || review.isPending}
               onClick={() =>
                 review.mutate(
@@ -223,11 +261,17 @@ function Loaded(props: {
 
       {pr.body.trim() !== '' && (
         <section aria-label="Description" className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
-          <header className="flex items-center gap-2 border-b border-divider bg-surface px-4 py-2 text-xs">
-            <strong>Description</strong>
+          <header
+            className={`flex items-center gap-2 bg-surface px-4 py-2 text-xs ${descriptionFolded ? '' : 'border-b border-divider'}`}
+          >
+            <FoldTitle label="Description" folded={descriptionFolded} onToggle={toggleDescription}>
+              <strong>Description</strong>
+            </FoldTitle>
             <span className="text-neutral-700">by {pr.author}</span>
           </header>
-          <Markdown source={pr.body} className="px-4 py-3" />
+          <div hidden={descriptionFolded}>
+            <Markdown source={pr.body} className="px-4 py-3" />
+          </div>
         </section>
       )}
 
@@ -239,7 +283,10 @@ function Loaded(props: {
             deletions={pr.files.reduce((sum, file) => sum + file.deletions, 0)}
           />
           {pr.files.length > 0 && (
-            <span className="ml-auto flex items-center gap-2 tracking-normal normal-case">
+            <span
+              title="Files you ticked Viewed, kept in this browser. A file whose change changes reads unviewed again."
+              className="ml-auto flex items-center gap-2 tracking-normal normal-case"
+            >
               <span className={viewed.count === pr.files.length ? 'font-semibold text-ok' : ''}>
                 {viewed.count} / {pr.files.length} viewed
               </span>

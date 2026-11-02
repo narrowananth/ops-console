@@ -10,29 +10,36 @@ import {
 import { useEffect, useState } from 'react';
 import { BrandIcon, CONNECTION_BRAND } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
+import { Hint } from '../components/ui/tip';
 import { useCreateConnection, useDeleteConnection, useTestConnection, useUpdateConnection } from '../lib/queries';
-import { FIELDS, SECRET_LABELS, TYPE_LABELS, toConfig } from './fields';
+import { ACCESS_TIPS, FIELDS, PROD_TIP, SECRET_LABELS, TYPE_LABELS, toConfig } from './fields';
 
 const input = 'w-full border border-divider bg-card px-2 py-1.5 font-mono text-[13px] text-text';
 
 function Segmented<T extends string>({
   label,
+  hint,
   options,
   value,
   onChange,
 }: {
   label: string;
-  options: { value: T; label: string; disabled?: boolean }[];
+  hint: string;
+  /** `title` shows on hover: what the option does, or why it is off. */
+  options: { value: T; label: string; disabled?: boolean; title?: string }[];
   value: T;
   onChange: (value: T) => void;
 }) {
   return (
     <fieldset className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0">
-      <legend className="p-0 text-xs font-extrabold">{label}</legend>
+      <legend className="flex items-center gap-1.5 p-0 text-xs font-extrabold">
+        {label} <Hint text={hint} />
+      </legend>
       <div className="flex w-max gap-0.5 rounded-lg bg-neutral-200 p-1">
         {options.map((option) => (
           <label
             key={option.value}
+            title={option.title}
             className={`rounded-md px-3.5 py-1.5 text-xs transition-colors has-focus-visible:outline-2 has-focus-visible:outline-accent ${option.disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${
               value === option.value
                 ? 'bg-card font-bold text-text shadow-sm'
@@ -55,12 +62,6 @@ function Segmented<T extends string>({
     </fieldset>
   );
 }
-
-const ACCESS_HINT: Record<AccessLevel, string> = {
-  [AccessLevel.None]: 'Claude cannot see this database. You can still query it from Dev tools.',
-  [AccessLevel.Read]: 'The server starts in read-only mode.',
-  [AccessLevel.Write]: 'Claude can write; each write it proposes waits for your approval.',
-};
 
 /** Add (no `connection`) or edit one Connection. Blank fields on edit keep their value. */
 export function ConnectionForm({
@@ -120,7 +121,12 @@ export function ConnectionForm({
         <BrandIcon brand={CONNECTION_BRAND[type]} size="sm" />
         <strong className="text-[13px]">{connection ? connection.name : `New ${TYPE_LABELS[type]} connection`}</strong>
         {(connection?.is_prod || env === ConnectionEnv.Prod) && (
-          <span className="rounded-full bg-accent-100 px-2 py-px text-[10px] font-extrabold text-accent-700">PROD</span>
+          <span
+            title={PROD_TIP}
+            className="rounded-full bg-accent-100 px-2 py-px text-[10px] font-extrabold text-accent-700"
+          >
+            PROD
+          </span>
         )}
       </div>
       <div className="flex flex-col gap-3 px-5 py-4">
@@ -142,6 +148,7 @@ export function ConnectionForm({
         </div>
         <Segmented
           label="Environment"
+          hint="Which data this Connection reaches. prod is production: the agent only reads it, and it shows PROD everywhere."
           value={env}
           onChange={(next) => {
             setEnv(next);
@@ -149,7 +156,11 @@ export function ConnectionForm({
             if (next === ConnectionEnv.Prod && access === AccessLevel.Write)
               setAccess(READ_ONLY_TYPES.includes(type) ? AccessLevel.Read : AccessLevel.None);
           }}
-          options={Object.values(ConnectionEnv).map((value) => ({ value, label: value }))}
+          options={Object.values(ConnectionEnv).map((value) => ({
+            value,
+            label: value,
+            title: value === ConnectionEnv.Prod ? PROD_TIP : undefined,
+          }))}
         />
         {FIELDS[type].map((field) => {
           const current = connection?.config[field.key];
@@ -204,17 +215,34 @@ export function ConnectionForm({
         <div className="flex flex-col gap-1">
           <Segmented
             label="Claude access"
+            hint="The Access Level: what the agent may do on this Connection. The console enforces it when the MCP Server starts."
             value={access}
             onChange={setAccess}
             options={[
-              { value: AccessLevel.None, label: 'Off' },
-              { value: AccessLevel.Read, label: 'Read-only', disabled: !READ_ONLY_TYPES.includes(type) },
-              { value: AccessLevel.Write, label: 'Read / write', disabled: !hasServer || env === ConnectionEnv.Prod },
+              { value: AccessLevel.None, label: 'Off', title: ACCESS_TIPS[AccessLevel.None] },
+              {
+                value: AccessLevel.Read,
+                label: 'Read-only',
+                disabled: !READ_ONLY_TYPES.includes(type),
+                title: READ_ONLY_TYPES.includes(type)
+                  ? ACCESS_TIPS[AccessLevel.Read]
+                  : `${TYPE_LABELS[type]} has no read-only MCP Server.`,
+              },
+              {
+                value: AccessLevel.Write,
+                label: 'Read / write',
+                disabled: !hasServer || env === ConnectionEnv.Prod,
+                title: !hasServer
+                  ? `No MCP Server is picked for ${TYPE_LABELS[type]} yet.`
+                  : env === ConnectionEnv.Prod
+                    ? 'A PROD Connection never gets write access.'
+                    : ACCESS_TIPS[AccessLevel.Write],
+              },
             ]}
           />
           <span className="text-[11px] text-neutral-700">
             {hasServer
-              ? ACCESS_HINT[access]
+              ? ACCESS_TIPS[access]
               : `No MCP server is picked for ${TYPE_LABELS[type]} yet; it can be saved with access Off.`}
             {!READ_ONLY_TYPES.includes(type) && hasServer && ' This type has no read-only server.'}
             {env === ConnectionEnv.Prod && hasServer && ' A PROD Connection is read-only: Read / write is off.'}
@@ -250,11 +278,20 @@ export function ConnectionForm({
               <Button onClick={() => setConfirming(false)}>Cancel</Button>
             </>
           ) : (
-            <Button className="border-accent text-accent-700" onClick={() => setConfirming(true)}>
+            <Button
+              className="border-accent text-accent-700"
+              title={`Delete ${connection.name}. Asks first.`}
+              onClick={() => setConfirming(true)}
+            >
               Delete…
             </Button>
           ))}
         <Button
+          title={
+            needsSecret && secret === ''
+              ? `Enter the ${secretInfo.label} first`
+              : 'Try to reach the database with these settings. Saves nothing.'
+          }
           disabled={test.isPending || (needsSecret && secret === '')}
           onClick={() => {
             create.reset();
@@ -268,6 +305,13 @@ export function ConnectionForm({
         <Button
           variant="primary"
           className="ml-auto"
+          title={
+            name === ''
+              ? 'Give it a Name first'
+              : needsSecret && secret === ''
+                ? `Enter the ${secretInfo.label} first`
+                : undefined
+          }
           disabled={create.isPending || update.isPending || name === '' || (needsSecret && secret === '')}
           onClick={save}
         >

@@ -134,6 +134,13 @@
       "when": 1793603652334,
       "tag": "0018_fix_ticket_skipped",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1793644028796,
+      "tag": "0019_playbook_rules_and_review_verdicts",
+      "breakpoints": true
     }
   ]
 }

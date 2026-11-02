@@ -70,7 +70,7 @@ Claude accounts
 
 ## Settled
 
-- **Runtime**: `@anthropic-ai/claude-agent-sdk` `query()` with `resume` set to the stored SDK session id. The run's `env` carries the account's `CLAUDE_CONFIG_DIR`.
+- **Runtime**: `@anthropic-ai/claude-agent-sdk` `query()` with `resume` set to the stored SDK session id. The run's `env` carries the account's `CLAUDE_CONFIG_DIR`, and `CLAUDE_CODE_MCP_STARTUP_WAIT_MS` of 30 s: Claude Code would otherwise let the model in while slow servers (Firebase starts through `npx` in about 10 s) still connect, and the turn would see them as missing.
 - **Transcript reads**: `getSessionMessages()` with the run's working directory, under the Session's account. Documented in the SDK.
 - **Moving a transcript**: copying the session file into another config dir's `projects/` before `resume` is the documented way to resume elsewhere.
 - **Parts**: `text`, `step`, `diff`, `code`, `question`. `result` and `comparison` belong to `10-dev-tools-compare`.

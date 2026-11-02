@@ -64,14 +64,14 @@ Anonymous Sessions
 
 - **Git host adapter**: one interface over `github`, `gitlab`, `bitbucket` and `local`, reached through the hosts' CLIs (`gh`, `bkt`, `glab`), per ADR 0005. Listing and reading PRs is a fixed read with no model turn. `local` has no pull requests. Tests use a fake. GitHub (`gh api`) and Bitbucket Cloud (`bkt api`) do everything; GitLab (`glab api`) lists merge requests only (Behavior 29), and the list opens them on GitLab.
 - **`by_agent` on a pull request**: a `repo` Session works on the PR's branch. The console keeps no record of who ran `gh pr create`, so the Session is the evidence.
-- **Agent Review output**: the agent ends with one JSON block holding `verdict`, `findings`, `checklist` and `tools`. Anything else marks the review `failed` and posts nothing.
+- **Agent Review output**: the agent ends with one JSON block holding `decision`, `verdict`, `findings`, `checklist`, `tools` and `report`. Anything else marks the review `failed` with why and posts nothing. After the findings, the console posts one comment on the pull request: `**Agent Review** · <verdict> at <commit> · <counts>`, the verdict sentence and the report. A refused summary post leaves the review ready.
 - **Starting runs**: the console starts the `pr_review` Session's runs itself. An Agent Review or a thread answer while that Session's run is going is refused with `session_busy`; a thread answer then goes unanswered.
 - **Pull request cache**: per Repo and state, per owner and state, and per pull request detail, in the daemon's memory. Posting, resolving or deleting a comment, reviewing, merging and an Agent Review drop the Repo's lists and details and its owner's list. Only one background read per entry runs at a time. The branch list reads the open list through the same cache, and lists no open PR marks when the host fails.
 - **Aggregate list**: with no `repo_id`, a Repo whose host Connector is not connected is skipped. With a `repo_id` it answers `connector_not_connected`.
 - **Pull request identity**: Repo and number for an imported Repo; host, slug and number otherwise. No `pull_requests` or `pr_comments` table.
 - **Stored here**: Agent Reviews and the ids of comments the agent posted. Everything else about a PR comes from the host.
 - **Session rules in code**: a `repo` Session has a Repo and a branch; a `pr_review` Session has a Repo and a PR number; an `anonymous` Session has no Repo and may have a branch; other kinds have neither. SQLite cannot add these as `CHECK`s to an existing table, so the session service enforces them.
-- **Agent Review content**: findings, a PROD readiness checklist, the Connections the agent queried, and a verdict.
+- **Agent Review content**: a verdict, findings, a PROD readiness checklist, the Connections the agent used, the full report, and the target branch and commit it compared with. Reviews stored with `blocker`, `suggestion` and `nit` read as `high`, `medium` and `info`.
 - **Reactions**: not read. PR comment likes are dropped from the design.
 
 ## Not required
@@ -102,7 +102,12 @@ CREATE TABLE pr_agent_reviews (
   pr_number   INTEGER NOT NULL,
   head_sha    TEXT NOT NULL,                     -- the commit that was reviewed
   status      TEXT NOT NULL DEFAULT 'running',   -- AgentReviewStatus
+  decision    TEXT,                              -- ReviewVerdict; null on older reviews
   verdict     TEXT,
+  base_branch TEXT,                              -- the target branch compared with
+  base_sha    TEXT,                              -- its commit then; null when it could not be fetched
+  report      TEXT,                              -- the full review as Markdown
+  error       TEXT,                              -- why a failed review stopped
   findings    TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(findings)),   -- [{ severity, file, line, text, comment_id, post_error }]
   checklist   TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(checklist)),  -- [{ item, status, note }]
   tools       TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(tools)),      -- [{ connection, query, result }]
@@ -123,7 +128,8 @@ CREATE TABLE agent_comments (
 | Enum | Values | Columns |
 | ---- | ------ | ------- |
 | `AgentReviewStatus` | `running`, `ready`, `failed` | `pr_agent_reviews.status` |
-| `FindingSeverity` | `blocker`, `suggestion`, `nit` | `findings[].severity` |
+| `FindingSeverity` | `critical`, `high`, `medium`, `low`, `info` | `findings[].severity` |
+| `ReviewVerdict` | `approve`, `request_changes`, `comment` | `pr_agent_reviews.decision` |
 | `PrState` | `open`, `merged`, `closed` | API only |
 | `PrReviewState` | `none`, `approved`, `changes_requested` | API only |
 | `PrChecks` | `none`, `running`, `passed`, `failed` | API only |
@@ -268,10 +274,12 @@ Adds `branch: string | null`.
   or reads "none". New Session, on an open pull request in an imported Repo, starts a `repo` Session on that branch
   (`from_origin: true`) and opens it, its draft reading "On pull request #N (title): " for the operator to say what to
   change. A failed start shows why beside it.
-- The latest Agent Review sits in a card: the commit's short id, a stale badge, its status, the verdict, each finding
-  with its `file:line` and "Not posted to the host:" with `post_error` when its post failed, the PROD readiness
-  checklist and the Connections queried. A `running` review has Stop beside its status. A `failed` review reads "The
-  review did not finish. Start it again."
+- The latest Agent Review sits in a card: the commit's short id, a stale badge, the verdict chip (APPROVE, REQUEST
+  CHANGES or COMMENT), its status, the verdict sentence, "Reviewed <commit> against <branch> at <commit>" and when,
+  a count per severity, each finding worst first with its severity, `file:line` and "Not posted to the host:" with
+  `post_error` when its post failed, the PROD readiness checklist, the Connections used, and the full report folded
+  under "Full report". A `running` review has Stop beside its status. A `failed` review reads "The review did not
+  finish: <why>."
 - The description sits in a card, and it and every comment are drawn as Markdown (headings, lists, tables, code).
   Comment threads follow, agent comments marked `agent`; with none: "No comments yet. Hover a line in a file and press
   + to comment on it." A thread on a line has Resolve or Unresolve, and every thread has Reply. A comment the operator

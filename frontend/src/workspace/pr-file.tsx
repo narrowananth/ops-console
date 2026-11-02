@@ -97,6 +97,7 @@ function FileMenu(props: {
       <button
         type="button"
         aria-label={`More for ${props.name}`}
+        title="Side by side, the whole file, or the file on the Git host"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
@@ -207,6 +208,7 @@ export function PrFileView({
         <button
           type="button"
           aria-expanded={open}
+          title={open ? 'Fold this file' : 'Show the change in this file'}
           onClick={() => setOpen(!open)}
           className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-0 bg-transparent px-1 py-1 text-left font-mono text-xs text-text"
         >
@@ -217,7 +219,7 @@ export function PrFileView({
         </button>
         {roots.length > 0 && (
           <span
-            title={`${roots.length} comment ${roots.length === 1 ? 'thread' : 'threads'} on this file`}
+            title={`${roots.length} comment ${roots.length === 1 ? 'thread' : 'threads'} on lines of this file. Open the file to read them.`}
             className="flex flex-none items-center gap-1 rounded-full bg-diff-hunk px-1.75 py-px font-body text-[11px] font-semibold text-diff-hunk-text"
           >
             <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden>
@@ -234,6 +236,7 @@ export function PrFileView({
         )}
         <DiffStat additions={file.additions} deletions={file.deletions} />
         <label
+          title="Tick when you have read this file. It folds, and stays ticked in this browser until its change changes."
           className={`flex flex-none cursor-pointer items-center gap-1.5 rounded-md border px-2 py-0.5 font-body text-xs ${viewed ? 'border-ok/40 bg-ok/10 text-ok' : 'border-divider bg-card text-neutral-700 hover:text-text'}`}
         >
           <input

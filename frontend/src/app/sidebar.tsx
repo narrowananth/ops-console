@@ -86,7 +86,7 @@ export const PAGES = [
 const NEEDS_ATTENTION: HealthStatus[] = [HealthStatus.Auth, HealthStatus.Fail];
 
 /** The badge after a sidebar item: what is waiting there. */
-function useBadges(): Record<string, { text: string; tone: 'alert' | 'attention' | 'count' } | undefined> {
+function useBadges(): Record<string, { text: string; tip: string; tone: 'alert' | 'attention' | 'count' } | undefined> {
   const alerts = useAlerts().data ?? [];
   const connectors = useConnectors().data?.data ?? [];
   const servers = useMcpServers().data?.data ?? [];
@@ -99,10 +99,18 @@ function useBadges(): Record<string, { text: string; tone: 'alert' | 'attention'
     connectors.filter((connector) => NEEDS_ATTENTION.includes(connector.status)).length +
     servers.filter((server) => server.used_by === null && NEEDS_ATTENTION.includes(server.status)).length;
   return {
-    '/monitor': open > 0 ? { text: String(open), tone: 'alert' } : undefined,
-    '/integrations': attention > 0 ? { text: String(attention), tone: 'attention' } : undefined,
-    '/connections': connections?.length ? { text: String(connections.length), tone: 'count' } : undefined,
-    '/repos': repos?.length ? { text: String(repos.length), tone: 'count' } : undefined,
+    '/monitor':
+      open > 0 ? { text: String(open), tip: `${open} Alerts not yet resolved or dismissed`, tone: 'alert' } : undefined,
+    '/integrations':
+      attention > 0
+        ? { text: String(attention), tip: `${attention} need you: sign in again or reconnect`, tone: 'attention' }
+        : undefined,
+    '/connections': connections?.length
+      ? { text: String(connections.length), tip: `${connections.length} Connections`, tone: 'count' }
+      : undefined,
+    '/repos': repos?.length
+      ? { text: String(repos.length), tip: `${repos.length} imported Repos`, tone: 'count' }
+      : undefined,
   };
 }
 
@@ -159,6 +167,7 @@ export function Sidebar() {
                       {!collapsed && <span className="min-w-0 flex-1 truncate">{page.label}</span>}
                       {!collapsed && badge && (
                         <span
+                          title={badge.tip}
                           className={`min-w-5 text-center font-mono text-[11px] font-semibold ${BADGE[badge.tone]}`}
                         >
                           {badge.text}
@@ -230,6 +239,7 @@ function ActiveAccount() {
     <NavLink
       to="/agents"
       aria-label="Active Claude account"
+      title="The Claude account the agent runs under, and how much of its usage is used. Opens Agents & accounts."
       className="block rounded-lg border border-line bg-card px-3.5 py-3 text-xs text-text no-underline shadow-sm hover:text-text"
     >
       <div className="mb-1 flex items-center justify-between gap-2">

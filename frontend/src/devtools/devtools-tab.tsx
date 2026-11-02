@@ -7,7 +7,7 @@ import { useAddress } from '../lib/remember';
 import { ascending } from '../lib/sort';
 import { statusGlyph } from '../mcp/status';
 import { ConnectionForm } from './connection-form';
-import { hostOf, TYPE_BLURBS, TYPE_LABELS } from './fields';
+import { ACCESS_TIPS, hostOf, PROD_TIP, TYPE_BLURBS, TYPE_LABELS } from './fields';
 
 type View = { kind: 'list' } | { kind: 'pick' } | { kind: 'new'; type: ConnectionType } | { kind: 'edit'; id: string };
 
@@ -42,7 +42,10 @@ function Row({ connection, onOpen }: { connection: Connection; onOpen: () => voi
           <span className="flex items-center gap-2 font-mono text-[13px] font-semibold">
             {connection.name}
             {connection.is_prod && (
-              <span className="rounded-full bg-accent-100 px-2 py-px font-sans text-[10px] font-extrabold text-accent-700">
+              <span
+                title={PROD_TIP}
+                className="rounded-full bg-accent-100 px-2 py-px font-sans text-[10px] font-extrabold text-accent-700"
+              >
                 PROD
               </span>
             )}
@@ -51,8 +54,12 @@ function Row({ connection, onOpen }: { connection: Connection; onOpen: () => voi
             {failed ? connection.status_detail : `${TYPE_LABELS[connection.type]} · ${hostOf(connection.config)}`}
           </span>
         </span>
-        <span className={`font-mono text-xs ${status.className}`}>{status.glyph}</span>
-        <span className="text-right text-xs text-neutral-700">{ACCESS_LABEL[connection.access]}</span>
+        <span title={status.tip} className={`font-mono text-xs ${status.className}`}>
+          {status.glyph}
+        </span>
+        <span title={ACCESS_TIPS[connection.access]} className="text-right text-xs text-neutral-700">
+          {ACCESS_LABEL[connection.access]}
+        </span>
       </button>
     </li>
   );

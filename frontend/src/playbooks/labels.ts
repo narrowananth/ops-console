@@ -1,11 +1,22 @@
-import {
-  JOB_TRIGGERS,
-  PLAYBOOK_LIMITS,
-  type Playbook,
-  type PlaybookStep,
-  PlaybookTrigger,
-  TRIGGER_LABELS,
-} from '@ops-console/shared';
+import { JOB_TRIGGERS, PLAYBOOK_LIMITS, type Playbook, PlaybookTrigger, TRIGGER_LABELS } from '@ops-console/shared';
+
+/** What each Trigger starts, shown on hover wherever the Trigger is named. */
+export const TRIGGER_TIPS: Record<PlaybookTrigger, string> = {
+  [PlaybookTrigger.Verify]:
+    'Verify on a Monitor Alert. The agent follows the failure through the code in a scratch copy and writes a Report.',
+  [PlaybookTrigger.Fix]:
+    'Fix on a Monitor Alert, after you confirm its Report. The agent changes the code on a new branch, pushes it and opens a PR.',
+  [PlaybookTrigger.ReviewPr]:
+    'Agent Review on a pull request. The agent posts each finding on its line, then one comment with the verdict and report.',
+  [PlaybookTrigger.CheckReply]:
+    'Check reply on a pull request thread. The agent reads the code at the head commit and replies fixed, partly fixed or not fixed.',
+  [PlaybookTrigger.AddressComments]:
+    'Address comments on the threads you tick. The agent pushes one commit to the pull request branch and replies in each thread.',
+  [PlaybookTrigger.ThreadReply]:
+    'Each question you ask the agent in a pull request thread. It answers in the thread and changes no code. Rules only; steps never run.',
+  [PlaybookTrigger.SessionMessage]:
+    'Each message you send in a Session. The agent follows these rules; steps never run on a chat.',
+};
 
 /** "Monitor · Verify". */
 export const triggerName = (trigger: PlaybookTrigger) =>
@@ -51,10 +62,3 @@ export const CLOSING_TURN: Partial<Record<PlaybookTrigger, string>> = {
 /** Held only by chats, which use the rules and never run steps. */
 export const chatOnly = (triggers: PlaybookTrigger[]) =>
   triggers.length > 0 && triggers.every((trigger) => !JOB_TRIGGERS.includes(trigger));
-
-/** Review PR reads only, so a Playbook with a step tagged "scratch copy" cannot go on it. */
-export function reviewRefusal(trigger: PlaybookTrigger, steps: PlaybookStep[]): string | null {
-  const writing = steps.find((step) => step.writes);
-  if (trigger !== PlaybookTrigger.ReviewPr || !writing) return null;
-  return `${TRIGGER_LABELS[trigger].label} reads only: remove ${writing.title} first.`;
-}

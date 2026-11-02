@@ -34,7 +34,7 @@ export function SettingsChips({
         variant={variant}
         opens={opens}
         heading="Model for this session"
-        title="Model for this session"
+        title="The Claude model this Session uses. A change applies from its next run."
         defaultValue={defaults?.model}
       />
       <Dropdown
@@ -46,7 +46,7 @@ export function SettingsChips({
         variant={variant}
         opens={opens}
         heading="Effort"
-        title="How much the agent thinks"
+        title="How long the agent thinks before it acts. More effort is slower."
         defaultValue={defaults?.effort}
       />
       <Dropdown
@@ -58,7 +58,7 @@ export function SettingsChips({
         variant={variant}
         opens={opens}
         heading="Access"
-        title="What the agent may do without asking"
+        title="Access mode: what the agent may do without asking you. A PROD write asks in every mode."
         defaultValue={defaults?.access_mode}
       />
     </div>

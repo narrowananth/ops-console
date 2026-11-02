@@ -6,6 +6,7 @@ import {
   ConnectorId,
   ErrorCode,
   type Finding,
+  FindingSeverity,
   GitHost,
   HealthStatus,
   type JobPlaybook,
@@ -83,15 +84,31 @@ function changedNumbers<T extends HostPullRequest>(
 
 const sameSlug = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
+/** Severities reviews stored before the five levels, read as the nearest level. */
+const LEGACY_SEVERITY: Record<string, FindingSeverity> = {
+  blocker: FindingSeverity.High,
+  suggestion: FindingSeverity.Medium,
+  nit: FindingSeverity.Info,
+};
+
 export function toAgentReview(row: ReviewRow, headSha: string | null, playbook: JobPlaybook | null): PrAgentReview {
+  const findings = (JSON.parse(row.findings) as Finding[]).map((finding) => ({
+    ...finding,
+    severity: LEGACY_SEVERITY[finding.severity] ?? finding.severity,
+  }));
   return {
     id: row.id,
     repo_id: row.repoId,
     pr_number: row.prNumber,
     head_sha: row.headSha,
     status: row.status,
+    decision: row.decision,
     verdict: row.verdict,
-    findings: JSON.parse(row.findings) as Finding[],
+    base_branch: row.baseBranch,
+    base_sha: row.baseSha,
+    report: row.report,
+    error: row.error,
+    findings,
     checklist: JSON.parse(row.checklist),
     tools: JSON.parse(row.tools),
     created_at: row.createdAt,
@@ -277,19 +294,6 @@ export class PullRequestsService implements OpenPrBranches {
         toCommentPass(row, pr.head_sha, jobPlaybook(this.store.db, 'comment_pass', row)),
       ),
     };
-  }
-
-  /** The operator wrote it, or a Session of the agent's worked on its branch. */
-  mine(repo: RepoRow, pr: HostPullRequest): boolean {
-    const login = this.login(repo.host);
-    if (login !== null && pr.author === login) return true;
-    return (
-      this.store.db
-        .select({ id: sessions.id })
-        .from(sessions)
-        .where(and(eq(sessions.repoId, repo.id), eq(sessions.kind, SessionKind.Repo), eq(sessions.branch, pr.branch)))
-        .get() !== undefined
-    );
   }
 
   /** One file of the pull request at `ref`, read from the host. */
