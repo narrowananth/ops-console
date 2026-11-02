@@ -1418,7 +1418,9 @@ describe('Playbooks migration', () => {
     await cp(MIGRATIONS_DIR, older, { recursive: true });
     const journalFile = path.join(older, 'meta', '_journal.json');
     const journal = JSON.parse(await readFile(journalFile, 'utf8'));
-    journal.entries = journal.entries.filter((entry: { tag: string }) => entry.tag !== '0015_playbooks');
+    // The database as it was before Playbooks: every migration from 0015 on is left out.
+    const cut = journal.entries.findIndex((entry: { tag: string }) => entry.tag === '0015_playbooks');
+    journal.entries = journal.entries.slice(0, cut);
     await writeFile(journalFile, JSON.stringify(journal));
     const before = await startTestDaemon({ dataDir, migrationsDir: older });
     await before.stop();

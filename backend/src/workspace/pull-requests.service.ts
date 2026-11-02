@@ -24,7 +24,15 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { ActionLogService } from '../action-log/action-log.service';
 import { ApiError, validationFailed } from '../common/errors';
 import { ConnectorsService } from '../connectors/connectors.service';
-import { agentComments, connectors, prAgentReviews, repos, sessions } from '../db/schema';
+import {
+  agentComments,
+  connectors,
+  prAgentReviews,
+  prCommentPasses,
+  prReplyChecks,
+  repos,
+  sessions,
+} from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { jobPlaybook } from '../playbooks/job-steps';
 import type { OpenPrBranches } from '../repos/open-pr-branches';
@@ -36,6 +44,7 @@ import {
   type HostPullRequest,
   type OwnedPullRequest,
 } from './git-host';
+import { toCommentPass, toReplyCheck } from './pr-jobs';
 
 type RepoRow = typeof repos.$inferSelect;
 type ReviewRow = typeof prAgentReviews.$inferSelect;
@@ -242,12 +251,45 @@ export class PullRequestsService implements OpenPrBranches {
   async get(repoId: string, number: number): Promise<PullRequestDetail> {
     const repo = this.hosted(repoId);
     const { pr, files, comments } = await this.detail(repo, number);
+    const checks = this.store.db
+      .select()
+      .from(prReplyChecks)
+      .where(and(eq(prReplyChecks.repoId, repo.id), eq(prReplyChecks.prNumber, number)))
+      .orderBy(desc(prReplyChecks.createdAt), desc(prReplyChecks.id))
+      .all();
+    const newest = new Map<string, (typeof checks)[number]>();
+    for (const check of checks) if (!newest.has(check.commentId)) newest.set(check.commentId, check);
+    const passes = this.store.db
+      .select()
+      .from(prCommentPasses)
+      .where(and(eq(prCommentPasses.repoId, repo.id), eq(prCommentPasses.prNumber, number)))
+      .orderBy(desc(prCommentPasses.createdAt), desc(prCommentPasses.id))
+      .all();
     return {
       ...(this.decorate(repo, repo.host, repo.remoteSlug as string, [pr])[0] as PullRequest),
       repo_id: repo.id,
       files,
       comments: this.markComments(repo.id, number, comments),
+      reply_checks: [...newest.values()].map((row) =>
+        toReplyCheck(row, jobPlaybook(this.store.db, 'reply_check', row)),
+      ),
+      comment_passes: passes.map((row) =>
+        toCommentPass(row, pr.head_sha, jobPlaybook(this.store.db, 'comment_pass', row)),
+      ),
     };
+  }
+
+  /** The operator wrote it, or a Session of the agent's worked on its branch. */
+  mine(repo: RepoRow, pr: HostPullRequest): boolean {
+    const login = this.login(repo.host);
+    if (login !== null && pr.author === login) return true;
+    return (
+      this.store.db
+        .select({ id: sessions.id })
+        .from(sessions)
+        .where(and(eq(sessions.repoId, repo.id), eq(sessions.kind, SessionKind.Repo), eq(sessions.branch, pr.branch)))
+        .get() !== undefined
+    );
   }
 
   /** One file of the pull request at `ref`, read from the host. */

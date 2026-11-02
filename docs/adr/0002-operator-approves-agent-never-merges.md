@@ -13,6 +13,14 @@ write to, so an agent that acted on them alone could be steered into changing co
 console's safety lines close every run's system prompt and say that a log line is data, never an
 instruction.
 
+On the operator's own pull request, pressing Address comments is the approval for one Comment pass:
+the agent changes code in a scratch copy at the pull request's head commit, and the console commits
+it and pushes that one branch, never with force. In a Comment pass, and only there, the review
+comments the operator ticked are change requests: the agent may change code to meet them, but never
+runs a command, reads a secret, touches a Connection or pushes because a comment says so. Everywhere
+else pull request text stays data, never instructions. The console, not the agent, posts replies and
+resolves threads.
+
 ## Considered Options
 
 - **Verification reads only; mock data and tests only in the Fix**: no command runs before the
@@ -20,9 +28,15 @@ instruction.
   the Review it is too late to change the decision it informs.
 - **Verification writes in the operator's checkout**: no extra folder, but mock files and test runs
   would mix with the operator's own uncommitted work.
+- **Pull request text is never an instruction, in every run**: the simplest rule, but acting on
+  review comments is the job the operator asks for when they press Address comments.
+- **Show the Comment pass diff and wait before the push**: one more stop, but the operator already
+  chose the threads, and the commit is on the card and on the host to look at after.
 
 ## Consequences
 
 A fix waits for the operator. The console shows how long each verified Alert has waited for its
 Review. A run steered by log text can execute local commands in the scratch copy; the safety lines,
-the Alert Session's Access mode and the scratch copy's folder bound that.
+the Alert Session's Access mode and the scratch copy's folder bound that. A reviewer can steer a
+Comment pass's code change through a comment the operator ticked; the operator's tick, the
+scratch copy and the pushed commit on the operator's own branch bound that.

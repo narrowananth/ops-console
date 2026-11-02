@@ -9,6 +9,8 @@ export type Run = {
   workingDir: string;
   /** The Playbook rules this run follows; null for none. */
   rules: string | null;
+  /** Tools denied on top of merging. */
+  deny: string[];
   parts: Part[];
   /** The text part growing from stream deltas, until its block arrives whole. */
   growing: number | null;

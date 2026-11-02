@@ -5,6 +5,8 @@ export enum PlaybookTrigger {
   Verify = 'verify',
   Fix = 'fix',
   ReviewPr = 'review_pr',
+  CheckReply = 'check_reply',
+  AddressComments = 'address_comments',
   ThreadReply = 'thread_reply',
   SessionMessage = 'session_message',
 }
@@ -17,12 +19,16 @@ export const JOB_TRIGGERS: readonly PlaybookTrigger[] = [
   PlaybookTrigger.Verify,
   PlaybookTrigger.Fix,
   PlaybookTrigger.ReviewPr,
+  PlaybookTrigger.CheckReply,
+  PlaybookTrigger.AddressComments,
 ];
 
 export const TRIGGER_LABELS: Record<PlaybookTrigger, { tab: string; label: string }> = {
   [PlaybookTrigger.Verify]: { tab: 'Monitor', label: 'Verify' },
   [PlaybookTrigger.Fix]: { tab: 'Monitor', label: 'Fix' },
   [PlaybookTrigger.ReviewPr]: { tab: 'Workspace', label: 'Review PR' },
+  [PlaybookTrigger.CheckReply]: { tab: 'Workspace', label: 'Check reply' },
+  [PlaybookTrigger.AddressComments]: { tab: 'Workspace', label: 'Address comments' },
   [PlaybookTrigger.ThreadReply]: { tab: 'Workspace', label: 'Reply in thread' },
   [PlaybookTrigger.SessionMessage]: { tab: 'Workspace', label: 'Session message' },
 };

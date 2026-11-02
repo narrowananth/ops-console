@@ -17,7 +17,7 @@ import { type Emit, STORE, type Store, type Tx } from '../db/store';
 import { stepOutcomeSchema, stepPrompt } from './prompts';
 
 /** The job a step belongs to. */
-export type JobRef = { kind: 'report' | 'fix' | 'agent_review'; id: string };
+export type JobRef = { kind: 'report' | 'fix' | 'agent_review' | 'reply_check' | 'comment_pass'; id: string };
 
 type StepRow = typeof playbookSteps.$inferSelect;
 
@@ -25,9 +25,17 @@ const COLUMN = {
   report: playbookSteps.reportId,
   fix: playbookSteps.fixId,
   agent_review: playbookSteps.agentReviewId,
+  reply_check: playbookSteps.replyCheckId,
+  comment_pass: playbookSteps.commentPassId,
 } as const;
 
-const KEY = { report: 'reportId', fix: 'fixId', agent_review: 'agentReviewId' } as const;
+const KEY = {
+  report: 'reportId',
+  fix: 'fixId',
+  agent_review: 'agentReviewId',
+  reply_check: 'replyCheckId',
+  comment_pass: 'commentPassId',
+} as const;
 
 type Db = Store['db'];
 
@@ -64,6 +72,8 @@ export type StepRun = {
   cwd?: string;
   /** Starts a new agent conversation for the first step. */
   fresh?: boolean;
+  /** Tools denied on top of merging. */
+  deny?: string[];
   onPart?: (part: Part) => void;
 };
 
@@ -124,6 +134,7 @@ export class JobSteps {
         rules: options.rules,
         ...(options.cwd ? { cwd: options.cwd } : {}),
         fresh: first && options.fresh === true,
+        ...(options.deny ? { deny: options.deny } : {}),
       });
       const summary = await finished;
       const parsed = summary.ok ? parseAgentJson(summary.text, stepOutcomeSchema) : null;
@@ -187,6 +198,8 @@ export class JobSteps {
       report_id: row.reportId,
       fix_id: row.fixId,
       agent_review_id: row.agentReviewId,
+      reply_check_id: row.replyCheckId,
+      comment_pass_id: row.commentPassId,
       position: row.position,
       status: row.status,
       summary: row.summary,

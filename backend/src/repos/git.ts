@@ -9,6 +9,13 @@ export const GIT = Symbol('GIT');
 
 export class GitFailed extends Error {}
 
+/** The remote branch has commits the push does not. */
+export class BranchMoved extends GitFailed {
+  constructor(branch: string) {
+    super(`${branch} moved on the remote`);
+  }
+}
+
 /** Reads from a local git repository. Tests use real repositories in temporary folders. */
 export class Git {
   constructor(private readonly bin = 'git') {}
@@ -97,10 +104,46 @@ export class Git {
     if (common) await this.try(common, ['worktree', 'prune']);
   }
 
-  /** The first line of git's own message; it names the problem and holds no secrets. */
-  private async must(dir: string, args: string[]): Promise<void> {
+  /** Fetches `branch` from `origin`, so its commits are in the repository. Throws with git's first line. */
+  async fetchBranch(dir: string, branch: string): Promise<void> {
+    await this.must(dir, ['fetch', '--quiet', 'origin', `refs/heads/${branch}`], { GIT_TERMINAL_PROMPT: '0' });
+  }
+
+  /** Commits every change in `dir` with `message`; the new commit, or null when nothing changed. */
+  async commitAll(dir: string, message: string): Promise<string | null> {
+    await this.must(dir, ['add', '--all']);
+    if ((await this.try(dir, ['diff', '--cached', '--quiet'])) !== null) return null;
+    await this.must(dir, ['commit', '--quiet', '-m', message]);
+    return (await this.try(dir, ['rev-parse', 'HEAD']))?.trim() ?? null;
+  }
+
+  /** The commit `dir` is at. */
+  async head(dir: string): Promise<string | null> {
+    return (await this.try(dir, ['rev-parse', 'HEAD']))?.trim() || null;
+  }
+
+  /**
+   * Pushes the commit `dir` is at to `branch` on `origin`, never with force. A branch that moved on the remote throws
+   * `BranchMoved`.
+   */
+  async pushHead(dir: string, branch: string): Promise<void> {
     try {
-      await run(this.bin, ['-C', dir, ...args], { maxBuffer: 10 * 1024 * 1024 });
+      await run(this.bin, ['-C', dir, 'push', '--quiet', 'origin', `HEAD:refs/heads/${branch}`], {
+        maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      });
+    } catch (error) {
+      const { stderr } = error as { stderr?: unknown };
+      const text = typeof stderr === 'string' ? stderr.trim() : '';
+      if (/\[rejected\]|non-fast-forward|fetch first/.test(text)) throw new BranchMoved(branch);
+      throw new GitFailed(text.split('\n')[0] ?? '');
+    }
+  }
+
+  /** The first line of git's own message; it names the problem and holds no secrets. */
+  private async must(dir: string, args: string[], env: Record<string, string> = {}): Promise<void> {
+    try {
+      await run(this.bin, ['-C', dir, ...args], { maxBuffer: 10 * 1024 * 1024, env: { ...process.env, ...env } });
     } catch (error) {
       const { stderr } = error as { stderr?: unknown };
       throw new GitFailed(typeof stderr === 'string' ? (stderr.trim().split('\n')[0] ?? '') : '');

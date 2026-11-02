@@ -1,0 +1,481 @@
+import { readFileSync } from 'node:fs';
+import { expect, type Page, test } from '@playwright/test';
+import { DAEMON_FILE } from './global-setup';
+
+const daemon: { url: string; token: string } = JSON.parse(readFileSync(DAEMON_FILE, 'utf8'));
+const NOW = '2026-11-01T09:00:00.000Z';
+const LATER = '2026-11-01T10:00:00.000Z';
+const BUSY = 'The agent is working on this PR';
+const PUSHED = '33f8c2b2a1d04e5f60718293a4b5c6d7e8f90a1b';
+
+// The Git host and the agent are fakes in the daemon, so the pull request and its jobs answer with fixtures.
+
+const comment = (id: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  parent_id: null as string | null,
+  author: 'reviewer',
+  by_agent: false,
+  is_mine: false,
+  body: 'A comment',
+  file_path: 'src/cart.ts' as string | null,
+  line: 12 as number | null,
+  resolved: false,
+  created_at: NOW,
+  reply_count: 0,
+  ...extra,
+});
+
+/** Five threads: one a reply answered, one resolved, one the agent answered last, one on no line, one the agent started. */
+const COMMENTS = [
+  comment('c1', { body: 'Guard the empty cart.\nIt throws on checkout.' }),
+  comment('c1r', { parent_id: 'c1', author: 'me', is_mine: true, body: 'Fixed in 33f8c2b2', created_at: LATER }),
+  comment('c2', { file_path: 'src/tax.ts', line: 4, body: 'Round the tax.', resolved: true }),
+  comment('c3', { file_path: 'src/tax.ts', line: 9, body: 'Name this rate.' }),
+  comment('c3r', { parent_id: 'c3', author: 'me', by_agent: true, is_mine: true, body: 'Fixed.', created_at: LATER }),
+  comment('c4', { file_path: null, line: null, body: 'Nice work overall.' }),
+  comment('c5', { author: 'me', by_agent: true, is_mine: true, line: 30, body: 'Cache the rate lookup.' }),
+  comment('c5r', { parent_id: 'c5', author: 'reviewer', body: 'Done, cached for an hour.', created_at: LATER }),
+];
+
+type Step = [title: string, status: string, summary: string | null, writes?: boolean];
+
+const playbook = (name: string, steps: Step[]) => ({
+  id: null,
+  name,
+  steps: steps.map(([title, status, summary, writes = false]) => ({ title, status, summary, writes })),
+});
+
+const replyCheck = (commentId: string, status: string, steps: Step[], extra: Record<string, unknown> = {}) => ({
+  id: `rc-${commentId}`,
+  repo_id: 'r1',
+  pr_number: 7,
+  comment_id: commentId,
+  head_sha: '9c1e4b7d00000000000000000000000000000000',
+  status,
+  verdict: null,
+  reply: null,
+  resolved: false,
+  error: null,
+  can_retry: false,
+  created_at: LATER,
+  playbook: playbook('Check reply (built-in)', steps),
+  ...extra,
+});
+
+const passThread = (commentId: string, file: string, line: number, outcome: string, reply: string | null) => ({
+  comment_id: commentId,
+  file_path: file,
+  line,
+  author: 'reviewer',
+  excerpt: 'Guard the empty cart.',
+  outcome,
+  reply,
+  posted: outcome !== 'pending',
+  resolved: outcome === 'done',
+});
+
+const commentPass = (id: string, status: string, steps: Step[], extra: Record<string, unknown> = {}) => ({
+  id,
+  repo_id: 'r1',
+  pr_number: 7,
+  head_sha: '9c1e4b7d00000000000000000000000000000000',
+  status,
+  commit_sha: null,
+  threads: [passThread('c1', 'src/cart.ts', 12, 'pending', null)],
+  error: null,
+  can_retry: false,
+  stale: false,
+  created_at: LATER,
+  playbook: playbook('Address comments (built-in)', steps),
+  ...extra,
+});
+
+const pullRequest = (extra: Record<string, unknown> = {}) => ({
+  repo_id: 'r1',
+  host: 'github',
+  slug: 'example/checkout-api',
+  number: 7,
+  url: 'https://github.com/example/checkout-api/pull/7',
+  title: 'Guard empty carts',
+  author: 'me',
+  branch: 'fix/empty-cart',
+  base_branch: 'main',
+  head_sha: '9c1e4b7d00000000000000000000000000000000',
+  state: 'open',
+  review_state: 'none',
+  approved_by: [],
+  checks: 'passed',
+  additions: 3,
+  deletions: 1,
+  body: '',
+  opened_at: NOW,
+  merged_at: null,
+  is_mine: true,
+  by_agent: false,
+  comment_count: 5,
+  resolved_count: 1,
+  agent_session_id: null,
+  latest_agent_review: null,
+  files: [],
+  comments: COMMENTS,
+  reply_checks: [] as unknown[],
+  comment_passes: [] as unknown[],
+  ...extra,
+});
+
+type Posted = { path: string; body: unknown };
+
+/**
+ * Answers the pull request with `detail`, read on every request so a test can change it, and each job start or
+ * retry with `answer`, recording what was sent.
+ */
+async function routePullRequest(
+  page: Page,
+  detail: { current: ReturnType<typeof pullRequest> },
+  answer: (path: string) => { status: number; json: unknown } = () => ({ status: 202, json: { data: {} } }),
+) {
+  const posted: Posted[] = [];
+  // No Playbook of the operator's on any Trigger, so every button names the built-in.
+  await page.route('**/api/playbooks', (route) => route.fulfill({ json: { data: { items: [], blocks: [] } } }));
+  await page.route('**/api/repos/r1/pull-requests/7', (route) => route.fulfill({ json: { data: detail.current } }));
+  await page.route(
+    /\/api\/(repos\/r1\/pull-requests\/7\/(reply-checks|comment-passes)|(reply-checks|comment-passes)\/[\w-]+\/retry)$/,
+    (route) => {
+      const path = new URL(route.request().url()).pathname;
+      posted.push({ path, body: route.request().postDataJSON() });
+      return route.fulfill(answer(path));
+    },
+  );
+  return posted;
+}
+
+const openPullRequest = (page: Page) => page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1/7#token=${daemon.token}`);
+
+const thread = (page: Page, text: string) =>
+  page.getByRole('region', { name: 'Comments' }).getByRole('listitem').filter({ hasText: text });
+
+test('Check reply shows on an unresolved thread on a line whose last comment is not the agent’s, and starts a Reply check', async ({
+  page,
+}) => {
+  const detail = { current: pullRequest() };
+  const posted = await routePullRequest(page, detail, () => {
+    detail.current = {
+      ...detail.current,
+      reply_checks: [
+        replyCheck('c1', 'running', [
+          ['Read the thread', 'done', 'The thread asks for a guard on an empty cart.'],
+          ['Read the code now', 'running', null],
+        ]),
+      ],
+    };
+    return { status: 202, json: { data: detail.current.reply_checks[0] } };
+  });
+  await openPullRequest(page);
+
+  const answered = thread(page, 'Guard the empty cart.');
+  await expect(answered.getByRole('button', { name: 'Check reply' })).toBeVisible();
+  await expect(thread(page, 'Cache the rate lookup.').getByRole('button', { name: 'Check reply' })).toBeVisible();
+  await expect(thread(page, 'Round the tax.').getByRole('button', { name: 'Check reply' })).toHaveCount(0);
+  await expect(thread(page, 'Name this rate.').getByRole('button', { name: 'Check reply' })).toHaveCount(0);
+  await expect(thread(page, 'Nice work overall.').getByRole('button', { name: 'Check reply' })).toHaveCount(0);
+
+  await answered.getByRole('button', { name: 'Check reply' }).click();
+  await expect
+    .poll(() => posted)
+    .toEqual([{ path: '/api/repos/r1/pull-requests/7/reply-checks', body: { comment_id: 'c1' } }]);
+
+  const strip = answered.getByRole('region', { name: 'Reply check' });
+  await expect(strip).toContainText('Checking the reply');
+  await expect(strip).toContainText('Check reply (built-in)');
+  const steps = strip.getByRole('list', { name: 'Playbook steps' }).getByRole('listitem');
+  await expect(steps).toHaveCount(3);
+  await expect(steps.nth(0)).toContainText('The thread asks for a guard on an empty cart.');
+  await expect(steps.nth(1)).toHaveAttribute('aria-current', 'step');
+  await expect(steps.nth(2)).toContainText('verdict and the reply');
+  // While it runs the button stays, disabled like every other job button on the pull request.
+  const button = answered.getByRole('button', { name: 'Check reply' });
+  await expect(button).toBeDisabled();
+  await expect(button).toHaveAttribute('title', 'The agent is working on this PR');
+});
+
+test('Check reply hides on a merged or closed pull request', async ({ page }) => {
+  for (const state of ['closed', 'merged']) {
+    await routePullRequest(page, { current: pullRequest({ state }) });
+    await openPullRequest(page);
+    await expect(thread(page, 'Guard the empty cart.')).toContainText('Fixed in 33f8c2b2');
+    await expect(page.getByRole('button', { name: 'Check reply' })).toHaveCount(0);
+    await page.unrouteAll();
+    // The next goto differs only after the #, which would keep this page and its cached pull request.
+    await page.goto('about:blank');
+  }
+});
+
+test('a failed Reply check shows why and retries from the failed step, or only what was left after the steps', async ({
+  page,
+}) => {
+  const detail = {
+    current: pullRequest({
+      reply_checks: [
+        replyCheck(
+          'c1',
+          'failed',
+          [
+            ['Read the thread', 'done', 'The thread asks for a guard on an empty cart.'],
+            ['Read the code now', 'failed', 'The head commit has no src/cart.ts.'],
+          ],
+          { error: 'Step 2 · Read the code now failed: The head commit has no src/cart.ts.', can_retry: true },
+        ),
+        replyCheck(
+          'c5',
+          'failed',
+          [
+            ['Read the thread', 'done', null],
+            ['Read the code now', 'done', null],
+          ],
+          { error: 'Could not resolve the thread: the host refused.', can_retry: true },
+        ),
+      ],
+    }),
+  };
+  const posted = await routePullRequest(page, detail);
+  await openPullRequest(page);
+
+  const strip = thread(page, 'Guard the empty cart.').getByRole('region', { name: 'Reply check' });
+  await expect(strip).toContainText('Reply check failed');
+  await expect(strip.getByRole('alert')).toHaveText(
+    'Step 2 · Read the code now failed: The head commit has no src/cart.ts.',
+  );
+  await strip.getByRole('button', { name: 'Retry from step 2' }).click();
+  await expect.poll(() => posted.map((post) => post.path)).toEqual(['/api/reply-checks/rc-c1/retry']);
+
+  const resolveFailed = thread(page, 'Cache the rate lookup.').getByRole('region', { name: 'Reply check' });
+  await expect(resolveFailed).toContainText('Could not resolve the thread: the host refused.');
+  await resolveFailed.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect
+    .poll(() => posted.map((post) => post.path))
+    .toEqual(['/api/reply-checks/rc-c1/retry', '/api/reply-checks/rc-c5/retry']);
+});
+
+test('Address comments shows only on the operator’s open pull request with an unresolved thread on a line', async ({
+  page,
+}) => {
+  const lineless = COMMENTS.filter((item) => item.id !== 'c1' && item.id !== 'c3' && item.id !== 'c5');
+  for (const [extra, shown] of [
+    [{}, true],
+    [{ is_mine: false, author: 'someone' }, false],
+    [{ state: 'closed' }, false],
+    [{ comments: lineless }, false],
+  ] as const) {
+    await routePullRequest(page, { current: pullRequest(extra) });
+    await openPullRequest(page);
+    await expect(page.getByRole('button', { name: 'Agent Review' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Address comments' })).toHaveCount(shown ? 1 : 0);
+    await page.unrouteAll();
+    // The next goto differs only after the #, which would keep this page and its cached pull request.
+    await page.goto('about:blank');
+  }
+});
+
+test('Address comments lists every unresolved thread on a line, all ticked; Start sends the ticked ones, Cancel nothing', async ({
+  page,
+}) => {
+  const detail = { current: pullRequest() };
+  const posted = await routePullRequest(page, detail, () => {
+    detail.current = {
+      ...detail.current,
+      comment_passes: [commentPass('cp1', 'running', [['Read the threads', 'running', null]])],
+    };
+    return { status: 202, json: { data: detail.current.comment_passes[0] } };
+  });
+  await openPullRequest(page);
+
+  await page.getByRole('button', { name: 'Address comments' }).click();
+  const dialog = page.getByRole('alertdialog', { name: 'Address comments' });
+  const boxes = dialog.getByRole('checkbox');
+  await expect(boxes).toHaveCount(3);
+  await expect(dialog.getByRole('listitem')).toHaveText([
+    /src\/cart\.ts:12\s*reviewer\s*Guard the empty cart\.$/,
+    /src\/tax\.ts:9\s*reviewer\s*Name this rate\.$/,
+    /src\/cart\.ts:30\s*me\s*Cache the rate lookup\.$/,
+  ]);
+  for (const box of await boxes.all()) await expect(box).toBeChecked();
+
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(posted).toEqual([]);
+
+  await page.getByRole('button', { name: 'Address comments' }).click();
+  for (const box of await boxes.all()) await box.uncheck();
+  await expect(dialog.getByRole('button', { name: 'Start' })).toBeDisabled();
+  await boxes.nth(0).check();
+  await boxes.nth(2).check();
+  await dialog.getByRole('button', { name: 'Start' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect
+    .poll(() => posted)
+    .toEqual([{ path: '/api/repos/r1/pull-requests/7/comment-passes', body: { comment_ids: ['c1', 'c5'] } }]);
+  await expect(page.getByRole('region', { name: 'Comment pass' })).toContainText('Read the threads');
+  await expect(page.getByRole('button', { name: 'Address comments' })).toBeDisabled();
+});
+
+test('the Comment pass card shows its Playbook, steps, commit and each thread, folds older passes and retries', async ({
+  page,
+}) => {
+  const done: Step[] = [
+    ['Read the threads', 'done', 'Two threads; one asks for a rename the code already has.'],
+    ['Make the changes', 'done', 'Guarded the empty cart in src/cart.ts.', true],
+    ['Run the tests', 'done', '42 tests pass.', true],
+  ];
+  const detail = {
+    current: pullRequest({
+      comment_passes: [
+        commentPass('cp2', 'ready', done, {
+          commit_sha: PUSHED,
+          stale: true,
+          threads: [
+            passThread('c1', 'src/cart.ts', 12, 'done', 'Guarded the empty cart in 33f8c2b.'),
+            passThread('c3', 'src/tax.ts', 9, 'declined', 'The rate is already named TAX_RATE.'),
+          ],
+        }),
+        commentPass(
+          'cp1',
+          'failed',
+          [
+            ['Read the threads', 'done', null],
+            ['Make the changes', 'failed', 'src/cart.ts is not in this commit.', true],
+            ['Run the tests', 'pending', null, true],
+          ],
+          { error: 'Step 2 · Make the changes failed: src/cart.ts is not in this commit.', can_retry: true },
+        ),
+      ],
+    }),
+  };
+  const posted = await routePullRequest(page, detail);
+  await openPullRequest(page);
+
+  const card = page.getByRole('region', { name: 'Comment pass' });
+  await expect(card).toContainText('Address comments (built-in)');
+  await expect(card.getByRole('link', { name: '33f8c2b', exact: true })).toHaveAttribute(
+    'href',
+    `https://github.com/example/checkout-api/commit/${PUSHED}`,
+  );
+  await expect(card).toContainText('older commit');
+  const steps = card.getByRole('list', { name: 'Playbook steps' }).first().getByRole('listitem');
+  await expect(steps).toHaveCount(4);
+  await expect(steps.nth(1)).toContainText('Guarded the empty cart in src/cart.ts.');
+  await expect(steps.nth(3)).toContainText('done or declined');
+  const threads = card.getByRole('list', { name: 'Threads' }).first();
+  await expect(threads.getByRole('listitem', { name: 'src/cart.ts:12' })).toContainText(
+    /reviewer\s*done.*Guarded the empty cart in 33f8c2b\./,
+  );
+  await expect(threads.getByRole('listitem', { name: 'src/tax.ts:9' })).toContainText(
+    /reviewer\s*declined.*The rate is already named TAX_RATE\./,
+  );
+
+  const older = card.getByRole('article');
+  await expect(older).toBeHidden();
+  await card.getByText('Older Comment passes · 1').click();
+  await expect(older).toContainText('Step 2 · Make the changes failed: src/cart.ts is not in this commit.');
+  await older.getByRole('button', { name: 'Retry from step 2' }).click();
+  await expect.poll(() => posted.map((post) => post.path)).toEqual(['/api/comment-passes/cp1/retry']);
+});
+
+test('a Comment pass that failed after its steps retries what is left; one the branch moved under offers no Retry', async ({
+  page,
+}) => {
+  const steps: Step[] = [['Read the threads', 'done', null]];
+  const detail = {
+    current: pullRequest({
+      comment_passes: [
+        commentPass('cp3', 'failed', steps, {
+          commit_sha: PUSHED,
+          error: 'Could not post a reply in src/cart.ts:12: the host refused.',
+          can_retry: true,
+          threads: [{ ...passThread('c1', 'src/cart.ts', 12, 'done', 'Guarded it.'), posted: false, resolved: false }],
+        }),
+      ],
+    }),
+  };
+  const posted = await routePullRequest(page, detail);
+  await openPullRequest(page);
+
+  const card = page.getByRole('region', { name: 'Comment pass' });
+  await expect(card.getByRole('listitem', { name: 'src/cart.ts:12' })).toContainText('reply not posted');
+  await card.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect.poll(() => posted.map((post) => post.path)).toEqual(['/api/comment-passes/cp3/retry']);
+
+  detail.current = pullRequest({
+    comment_passes: [
+      commentPass('cp4', 'failed', steps, { error: 'The branch moved; run Address comments again.', can_retry: false }),
+    ],
+  });
+  await page.reload();
+  await expect(card).toContainText('The branch moved; run Address comments again.');
+  await expect(card.getByRole('button', { name: /Retry/ })).toHaveCount(0);
+});
+
+test('while a job runs, Review with agent, every Check reply and Address comments wait, and a refused start says why', async ({
+  page,
+}) => {
+  const detail = {
+    current: pullRequest({
+      comment_passes: [commentPass('cp1', 'running', [['Read the threads', 'running', null]])],
+    }),
+  };
+  await routePullRequest(page, detail, (path) =>
+    path.endsWith('/reply-checks')
+      ? { status: 409, json: { error: { code: 'session_busy', message: BUSY } } }
+      : { status: 502, json: { error: { code: 'upstream_failed', message: 'GitHub did not answer.' } } },
+  );
+  await openPullRequest(page);
+
+  const buttons = [
+    page.getByRole('button', { name: 'Agent Review' }),
+    page.getByRole('button', { name: 'Address comments' }),
+    thread(page, 'Guard the empty cart.').getByRole('button', { name: 'Check reply' }),
+    thread(page, 'Cache the rate lookup.').getByRole('button', { name: 'Check reply' }),
+  ];
+  for (const button of buttons) {
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveAttribute('title', BUSY);
+  }
+
+  // The job finished here, but another tab started one the page has not heard of yet.
+  detail.current = pullRequest();
+  await page.reload();
+  for (const button of buttons) await expect(button).toBeEnabled();
+  const answered = thread(page, 'Guard the empty cart.');
+  await answered.getByRole('button', { name: 'Check reply' }).click();
+  await expect(answered.getByRole('alert')).toHaveText(BUSY);
+
+  await page.getByRole('button', { name: 'Address comments' }).click();
+  await page.getByRole('alertdialog', { name: 'Address comments' }).getByRole('button', { name: 'Start' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'GitHub did not answer.' })).toBeVisible();
+});
+
+test('a reload mid-run brings back the Reply check strip and the Comment pass card with each step', async ({
+  page,
+}) => {
+  const detail = {
+    current: pullRequest({
+      reply_checks: [replyCheck('c5', 'running', [['Read the thread', 'done', 'It asks for a cache.']])],
+      comment_passes: [
+        commentPass('cp1', 'running', [
+          ['Read the threads', 'done', 'One thread.'],
+          ['Make the changes', 'running', null, true],
+        ]),
+      ],
+    }),
+  };
+  await routePullRequest(page, detail);
+  await openPullRequest(page);
+  for (const pass of [1, 2]) {
+    const strip = thread(page, 'Cache the rate lookup.').getByRole('region', { name: 'Reply check' });
+    await expect(strip.getByRole('listitem').first(), `pass ${pass}`).toContainText('It asks for a cache.');
+    await expect(strip.getByRole('listitem').nth(1)).toHaveAttribute('aria-current', 'step');
+    const card = page.getByRole('region', { name: 'Comment pass' });
+    await expect(card.getByRole('listitem').nth(1)).toHaveAttribute('aria-current', 'step');
+    await expect(card.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1');
+    await page.reload();
+  }
+});

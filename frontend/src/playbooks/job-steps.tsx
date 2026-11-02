@@ -1,5 +1,6 @@
 import { type JobPlaybook, PlaybookStepStatus, type PlaybookTrigger } from '@ops-console/shared';
 import { Link } from 'react-router-dom';
+import { Button, Spinner } from '../components/ui/button';
 import { Pathway, PathwayProgress, type PathwayState, type PathwayStep } from '../components/ui/pathway';
 import { usePlaybooks } from '../lib/queries';
 import { holderOf } from './labels';
@@ -125,6 +126,44 @@ export function JobPath({
     <div className="flex flex-col gap-3">
       {state !== 'done' && <PathwayProgress steps={steps} />}
       <Pathway label={own ? 'Playbook steps' : 'Progress'} steps={steps} />
+    </div>
+  );
+}
+
+/**
+ * Why a job failed, and Retry when it can: "Retry from step N" after a failed step, else plain Retry, which redoes
+ * only what the console left undone after the steps.
+ */
+export function JobFailure({
+  error,
+  playbook,
+  canRetry,
+  retry,
+}: {
+  error: string | null;
+  playbook: JobPlaybook | null;
+  canRetry: boolean;
+  retry: { isPending: boolean; error: Error | null; mutate: () => void };
+}) {
+  const step = failedStep(playbook);
+  return (
+    <div className="flex flex-col items-start gap-2 rounded-lg border border-accent-200 bg-accent-100/60 px-3 py-2 text-xs">
+      {error && (
+        <span role="alert" className="text-accent-900">
+          {error}
+        </span>
+      )}
+      {canRetry && (
+        <Button className="px-2.5 py-1 text-xs" disabled={retry.isPending} onClick={() => retry.mutate()}>
+          {retry.isPending && <Spinner />}
+          {step === null ? 'Retry' : `Retry from step ${step}`}
+        </Button>
+      )}
+      {retry.error && (
+        <span role="alert" className="text-accent-700">
+          {retry.error.message}
+        </span>
+      )}
     </div>
   );
 }

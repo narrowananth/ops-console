@@ -70,6 +70,25 @@ export const MERGE_DENIALS = [
   'mcp__gitlab__merge_merge_request',
 ];
 
+/**
+ * A Reply check or Comment pass hands its outcome to the console, which pushes, replies and resolves; the agent's own
+ * tools for that are denied (ADR 0002).
+ */
+export const HOST_WRITE_DENIALS = [
+  'Bash(git push:*)',
+  'Bash(gh pr comment:*)',
+  'Bash(gh pr review:*)',
+  'Bash(gh api:*)',
+  'Bash(glab mr note:*)',
+  'Bash(glab api:*)',
+  'Bash(bkt api:*)',
+  'Bash(bkt pr comment:*)',
+  'mcp__github__add_issue_comment',
+  'mcp__github__create_pull_request_review',
+  'mcp__github__add_comment_to_pending_review',
+  'mcp__gitlab__create_merge_request_note',
+];
+
 /** How a run the console starts itself differs from an operator's message. */
 export type RunOptions = {
   /** Runs in this folder instead of the Session's own. */
@@ -80,6 +99,8 @@ export type RunOptions = {
   fresh?: boolean;
   /** Resumes the conversation from this transcript entry, dropping what came after it. */
   resumeAt?: string;
+  /** Tools denied on top of merging. */
+  deny?: string[];
 };
 
 type RunResult = 'done' | 'stopped' | ErrorCode.RateLimited | ErrorCode.Unauthorized | ErrorCode.UpstreamFailed;
@@ -268,6 +289,7 @@ export class AgentRuntime {
       abort: new AbortController(),
       stopped: false,
       resumeAt: options.resumeAt ?? null,
+      deny: options.deny ?? [],
     };
     this.runs.add(run);
     if (options.fresh) this.sessions.write(sessionId, { sdkSessionId: null });
@@ -384,7 +406,7 @@ export class AgentRuntime {
       env: claudeEnv(configDir),
       includePartialMessages: true,
       abortController: run.abort,
-      disallowedTools: MERGE_DENIALS,
+      disallowedTools: [...MERGE_DENIALS, ...run.deny],
       systemPrompt: { type: 'preset', preset: 'claude_code', append: systemAppend(instructions, run.rules) },
       // Servers the operator disabled stay out of the run.
       settings: {

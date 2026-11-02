@@ -44,8 +44,8 @@ one; one Playbook may be held by several.
 _Avoid_: rule, pipeline, workflow
 
 **Trigger**:
-A place in a tab that starts the agent: Verify and Fix in Monitor, Review PR, Reply in thread and Session message in
-Workspace.
+A place in a tab that starts the agent: Verify and Fix in Monitor, Review PR, Check reply, Address comments, Reply in
+thread and Session message in Workspace.
 _Avoid_: action (the Action Log means each command the agent runs)
 
 **Playbook step**:
@@ -55,8 +55,8 @@ One titled instruction in a Playbook, run as its own agent turn, ending done, sk
 A ready-made Playbook step the operator drags into a Playbook and then edits.
 
 **Scratch copy**:
-A throwaway copy of a Service's code, at its default branch, where a Verification may write files and run local
-commands. A Playbook step that needs one carries the tag "scratch copy"; Review PR takes no such step.
+A throwaway copy of a Repo's code, at its default branch for a Verification or at a pull request's head commit for a
+Reply check or a Comment pass, where the agent may write files and run local commands. A Playbook step that needs one carries the tag "scratch copy"; Review PR takes no such step.
 
 ### Monitor
 
@@ -143,6 +143,15 @@ Service's Git URL.
 **Agent Review**:
 The agent's written review of a pull request: findings, a PROD readiness checklist and a verdict,
 tied to the commit it read. Each finding is also posted to the Git host as a comment. A newer commit makes it stale.
+
+**Reply check**:
+The agent's check of one pull request thread: whether the code at the head commit does what the thread asked, given
+as fixed, partly fixed or not fixed in a reply. On fixed the thread is resolved.
+
+**Comment pass**:
+The agent's work on the review threads the operator ticked on their own pull request: one commit pushed to its branch,
+a reply in each thread, and each done thread resolved.
+_Avoid_: fix (a Fix follows an Alert's Review)
 
 ### Dev tools
 

@@ -31,13 +31,15 @@ async function create(http: Http, name: string, extra: object = {}) {
 const list = (http: Http) => http.get('/playbooks').then((res) => res.body.data);
 
 describe('Playbooks and Triggers', () => {
-  it('lists the five built-ins, each on its Trigger, and the ten Step blocks', async () => {
+  it('lists the seven built-ins, each on its Trigger, and the ten Step blocks', async () => {
     const { http } = await start();
     const { items, blocks } = await list(http);
     expect(items.map((p: { id: string; triggers: string[] }) => [p.id, p.triggers])).toEqual([
       ['builtin:verify', ['verify']],
       ['builtin:fix', ['fix']],
       ['builtin:review_pr', ['review_pr']],
+      ['builtin:check_reply', ['check_reply']],
+      ['builtin:address_comments', ['address_comments']],
       ['builtin:thread_reply', ['thread_reply']],
       ['builtin:session_message', ['session_message']],
     ]);
@@ -51,6 +53,12 @@ describe('Playbooks and Triggers', () => {
     ]);
     expect(steps('builtin:fix')).toEqual(['Code', 'Tests']);
     expect(steps('builtin:review_pr')).toEqual(['Review']);
+    expect(steps('builtin:check_reply')).toEqual(['Read the thread', 'Read the code now']);
+    expect(steps('builtin:address_comments')).toEqual(['Read the threads', 'Make the changes', 'Run the tests']);
+    const tags = (id: string) =>
+      items.find((p: { id: string }) => p.id === id).steps.map((s: { writes: boolean }) => s.writes);
+    expect(tags('builtin:check_reply')).toEqual([false, false]);
+    expect(tags('builtin:address_comments')).toEqual([false, true, true]);
     expect(steps('builtin:session_message')).toEqual([]);
     expect(blocks.map((b: { title: string; writes: boolean }) => [b.title, b.writes])).toEqual([
       ['Trace the log through the code', false],
@@ -130,7 +138,7 @@ describe('Playbooks and Triggers', () => {
     expect((await http.delete(`/playbooks/${safe.id}`)).status).toBe(204);
     const { items } = await list(http);
     expect(items.map((p: { id: string }) => p.id)).not.toContain(safe.id);
-    expect(items.filter((p: { triggers: string[] }) => p.triggers.length === 1)).toHaveLength(5);
+    expect(items.filter((p: { triggers: string[] }) => p.triggers.length === 1)).toHaveLength(7);
     expect((await http.delete(`/playbooks/${safe.id}`)).body.error.code).toBe('not_found');
   });
 
@@ -153,6 +161,12 @@ describe('Playbooks and Triggers', () => {
     expect(untagged.body.error.message).toBe('Review PR reads only: remove Make mock data first.');
     const rules = await http.patch(`/playbooks/${prod.id}`, { rules: 'Check the migrations first.' });
     expect(rules.body.data).toMatchObject({ rules: 'Check the migrations first.', triggers: ['review_pr'] });
+
+    // Check reply and Address comments take a scratch copy step (Behavior 5).
+    for (const trigger of ['check_reply', 'address_comments']) {
+      const held = await http.put(`/playbook-triggers/${trigger}`, { playbook_id: mock.id });
+      expect(held.status).toBe(200);
+    }
   });
 });
 

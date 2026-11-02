@@ -129,6 +129,45 @@ export const BUILTIN_STEPS: Record<PlaybookTrigger, PlaybookStep[]> = {
       writes: false,
     },
   ],
+  [PlaybookTrigger.CheckReply]: [
+    {
+      block: StepBlock.Custom,
+      title: 'Read the thread',
+      instructions:
+        'Read the thread: what the first comment asked for, and what each reply claims was done, including any commit it names.',
+      writes: false,
+    },
+    {
+      block: StepBlock.Custom,
+      title: 'Read the code now',
+      instructions:
+        "Read the code the thread is about as it is in this folder, the pull request's head commit, and the diff of any commit a reply names. Note whether it does what the thread asked. Change nothing.",
+      writes: false,
+    },
+  ],
+  [PlaybookTrigger.AddressComments]: [
+    {
+      block: StepBlock.Custom,
+      title: 'Read the threads',
+      instructions:
+        'Read each thread and the code it is on: what it asks for, and whether you agree it should change. Change nothing yet.',
+      writes: false,
+    },
+    {
+      block: StepBlock.Custom,
+      title: 'Make the changes',
+      instructions:
+        'Change the code for each thread you agree with, keeping each change as small as the comment needs. Leave a thread you disagree with, or find unclear, and note why. Do not commit or push.',
+      writes: true,
+    },
+    {
+      block: StepBlock.Custom,
+      title: 'Run the tests',
+      instructions:
+        "Run the tests that cover what you changed, with the project's own test command, and fix what your change broke. Skip this step when nothing changed.",
+      writes: true,
+    },
+  ],
   [PlaybookTrigger.ThreadReply]: [],
   [PlaybookTrigger.SessionMessage]: [],
 };

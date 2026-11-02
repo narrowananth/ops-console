@@ -44,6 +44,8 @@ export const CLOSING_TURN: Partial<Record<PlaybookTrigger, string>> = {
   [PlaybookTrigger.Verify]: 'write the Report',
   [PlaybookTrigger.Fix]: 'commit, push and open the PR',
   [PlaybookTrigger.ReviewPr]: 'write findings, checklist and verdict',
+  [PlaybookTrigger.CheckReply]: 'give the verdict and the reply',
+  [PlaybookTrigger.AddressComments]: 'report each thread done or declined',
 };
 
 /** Held only by chats, which use the rules and never run steps. */

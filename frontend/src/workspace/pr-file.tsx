@@ -165,14 +165,7 @@ export function PrFileView({
       return (
         <>
           {here.map((root) => (
-            <Thread
-              key={root.id}
-              repoId={pr.repo_id}
-              number={pr.number}
-              root={root}
-              replies={pr.comments.filter((comment) => comment.parent_id === root.id)}
-              showPlace={false}
-            />
+            <Thread key={root.id} pr={pr} root={root} showPlace={false} />
           ))}
           {drafting === line && (
             <CommentComposer

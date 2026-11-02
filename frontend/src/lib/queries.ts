@@ -17,6 +17,7 @@ import {
   type CreateScan,
   checkoutResultSchema,
   claudeAccountSchema,
+  commentPassSchema,
   connectionCheckSchema,
   connectionListSchema,
   connectionSchema,
@@ -44,6 +45,7 @@ import {
   pullRequestListSchema,
   type RemovedRepoSessions,
   type ReviewAlert,
+  replyCheckSchema,
   repoListSchema,
   reportSchema,
   repoSchema,
@@ -80,6 +82,7 @@ export const queryKeys = {
   sessions: ['sessions'] as const,
   branches: (repoId: string) => ['branches', repoId] as const,
   pulls: ['pull-requests'] as const,
+  pullRequest: (repoId: string, number: number) => ['pull-requests', 'detail', repoId, number] as const,
   monitor: ['monitor'] as const,
   alert: (id: string) => ['monitor', 'alert', id] as const,
   session: (id: string) => ['sessions', id] as const,
@@ -598,7 +601,7 @@ export function useRefreshPullRequests() {
 
 export function usePullRequest(repoId: string, number: number) {
   return useQuery({
-    queryKey: [...queryKeys.pulls, 'detail', repoId, number],
+    queryKey: queryKeys.pullRequest(repoId, number),
     queryFn: () =>
       apiGet(`/repos/${repoId}/pull-requests/${number}`, z.object({ data: pullRequestDetailSchema })).then(
         (b) => b.data,
@@ -683,6 +686,52 @@ export function useStartAgentReview(repoId: string, number: number) {
         z.object({ data: prAgentReviewSchema }),
       ),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
+  });
+}
+
+export function useStartReplyCheck(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (commentId: string) =>
+      apiSend(
+        'POST',
+        `/repos/${repoId}/pull-requests/${number}/reply-checks`,
+        { comment_id: commentId },
+        z.object({ data: replyCheckSchema }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+  });
+}
+
+export function useRetryReplyCheck(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiSend('POST', `/reply-checks/${id}/retry`, undefined, z.object({ data: replyCheckSchema })),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+  });
+}
+
+export function useStartCommentPass(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (commentIds: string[]) =>
+      apiSend(
+        'POST',
+        `/repos/${repoId}/pull-requests/${number}/comment-passes`,
+        { comment_ids: commentIds },
+        z.object({ data: commentPassSchema }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+  });
+}
+
+export function useRetryCommentPass(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiSend('POST', `/comment-passes/${id}/retry`, undefined, z.object({ data: commentPassSchema })),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
   });
 }
 

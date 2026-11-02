@@ -11,7 +11,6 @@ import {
   type PrAgentReview,
   type PrComment,
   type PrFile,
-  SessionKind,
   toolUseSchema,
 } from '@ops-console/shared';
 import { and, desc, eq } from 'drizzle-orm';
@@ -22,11 +21,12 @@ import { AgentRuntime } from '../agent/runtime';
 import { SessionsService } from '../agent/sessions.service';
 import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
-import { agentComments, prAgentReviews, sessions } from '../db/schema';
+import { agentComments, prAgentReviews } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { JobSteps, jobPlaybook } from '../playbooks/job-steps';
 import { PlaybooksService } from '../playbooks/playbooks.service';
 import type { HostComment, HostPullRequest } from './git-host';
+import { PrJobs } from './pr-jobs';
 import { PullRequestsService, toAgentReview } from './pull-requests.service';
 
 const outputSchema = z.object({
@@ -117,6 +117,7 @@ export class AgentReviewsService {
     @Inject(ActionLogService) private readonly actionLog: ActionLogService,
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
     @Inject(JobSteps) private readonly steps: JobSteps,
+    @Inject(PrJobs) private readonly jobs: PrJobs,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
     recovery.register('pull request agent reviews', () => this.recover());
@@ -172,8 +173,7 @@ export class AgentReviewsService {
         ErrorCode.InvalidState,
         'The agent already reviewed this commit; push a change to review again',
       );
-    const session = this.reviewSession(repoId, number, `${repo.name} #${number} review`);
-    if (this.runtime.busy(session)) throw new ApiError(409, ErrorCode.SessionBusy, "the session's run is still going");
+    const session = this.jobs.requireIdle(repo, number);
     const copy = this.playbooks.copyFor(PlaybookTrigger.ReviewPr);
     const row = this.store.write((tx) => {
       const created = tx
@@ -238,7 +238,8 @@ export class AgentReviewsService {
     const { pr, comments } = await this.pulls.adapter(repo).get(slug, number);
     const thread = comments.filter((comment) => comment.id === root || comment.parent_id === root);
     const rootComment = thread.find((comment) => comment.id === root);
-    const session = this.reviewSession(repoId, number, `${repo.name} #${number} review`);
+    // A job on the pull request holds its Session between steps; the answer waits for it to end.
+    const session = await this.jobs.whenIdle(repo, number);
     const { rules } = this.playbooks.forSession(this.sessions.get(session));
     const text = `The operator replied in a review thread you started on pull request #${number} of ${slug}${
       rootComment?.file_path ? `, on ${rootComment.file_path}${rootComment.line ? `:${rootComment.line}` : ''}` : ''
@@ -420,18 +421,5 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
         )
         .get() !== undefined
     );
-  }
-
-  /** The pull request's one `pr_review` Session, made on first use. */
-  private reviewSession(repoId: string, number: number, title: string): string {
-    const existing = this.store.db
-      .select({ id: sessions.id })
-      .from(sessions)
-      .where(and(eq(sessions.repoId, repoId), eq(sessions.prNumber, number), eq(sessions.kind, SessionKind.PrReview)))
-      .get();
-    if (existing) return existing.id;
-    const created = this.sessions.create({ kind: SessionKind.PrReview, repoId, prNumber: number });
-    this.sessions.update(created.id, { title });
-    return created.id;
   }
 }

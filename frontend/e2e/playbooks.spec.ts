@@ -63,15 +63,23 @@ test.beforeEach(async ({ request }) => {
   await reset(request);
 });
 
-test('Playbooks lists the five Triggers under their tabs, the built-ins and the ten Step blocks', async ({ page }) => {
+test('Playbooks lists the seven Triggers under their tabs, the built-ins and the ten Step blocks', async ({ page }) => {
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
   await page.getByRole('navigation').getByRole('link', { name: 'Playbooks' }).click();
-  const { triggers, playbooks, blocks } = regions(page);
+  const { triggers, playbooks, blocks, editor } = regions(page);
 
   await expect(triggers).toContainText(
-    /Monitor\s*Verify.*Fix.*Workspace\s*Review PR.*Reply in thread.*Session message/,
+    /Monitor\s*Verify.*Fix.*Workspace\s*Review PR.*Check reply.*Address comments.*Reply in thread.*Session message/,
   );
-  for (const trigger of ['Verify', 'Fix', 'Review PR', 'Reply in thread', 'Session message']) {
+  for (const trigger of [
+    'Verify',
+    'Fix',
+    'Review PR',
+    'Check reply',
+    'Address comments',
+    'Reply in thread',
+    'Session message',
+  ]) {
     await expect(triggers.getByRole('listitem', { name: trigger, exact: true })).toContainText('Built-in');
   }
   await expect(playbooks).toContainText('No Playbooks yet. Duplicate a built-in or start a new one.');
@@ -103,6 +111,16 @@ test('Playbooks lists the five Triggers under their tabs, the built-ins and the 
   await expect(instructions).toBeHidden();
   await blocks.getByRole('listitem', { name: 'Make mock data' }).hover();
   await expect(instructions).toBeVisible();
+
+  for (const [name, count, closing] of [
+    ['Check reply', 2, 'Check reply: give the verdict and the reply.'],
+    ['Address comments', 3, 'Address comments: report each thread done or declined.'],
+  ] as const) {
+    const builtin = playbooks.getByRole('button', { name: new RegExp(`^${name} \\(built-in\\)`) });
+    await expect(builtin).toContainText(`built-in · ${count} steps`);
+    await builtin.click();
+    await expect(editor).toContainText(closing);
+  }
 });
 
 test('a block dragged or added into Steps is a copy to edit; steps reorder and leave by drag or button; Save writes them', async ({
@@ -590,6 +608,8 @@ const pullRequest = (review: unknown) => ({
   latest_agent_review: review,
   files: [],
   comments: [],
+  reply_checks: [],
+  comment_passes: [],
 });
 
 test('Review with agent names the Review PR Playbook, and the Agent Review shows its name and steps', async ({
