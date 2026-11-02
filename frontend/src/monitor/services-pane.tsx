@@ -26,7 +26,11 @@ function Tiers({ alerts }: { alerts: Alert[] }) {
         const count = alerts.filter((alert) => alert.severity === severity).length;
         if (count === 0) return null;
         return (
-          <span key={severity} className="flex items-center gap-1 font-mono text-[10px] text-neutral-700">
+          <span
+            key={severity}
+            title={`${count} open ${severity} ${count === 1 ? 'Alert' : 'Alerts'}`}
+            className="flex items-center gap-1 font-mono text-[10px] text-neutral-700"
+          >
             <span aria-hidden className={`size-1.5 rounded-full ${TIER_DOT[severity]}`} />
             {count}
             <span className="sr-only">{severity}</span>
@@ -94,6 +98,13 @@ export function ServicesPane({
     const names = shown.map((row) => row.name);
     setTicked(allTicked ? ticked.filter((name) => !names.includes(name)) : [...new Set([...ticked, ...names])]);
   };
+  const scanTip = !connected
+    ? 'Connect Datadog in Integrations'
+    : running
+      ? 'A Scan is running. Wait for it to finish.'
+      : toScan.length === 0 && !selected && scanCount === 0
+        ? 'No Services to Scan in this range'
+        : 'Read the failing requests in Datadog now, group them into Alerts and mark each Route healthy, failing or rapid. The schedule also scans on its own.';
   const box = 'absolute top-2.5 left-2.5 z-1 size-3.5 cursor-pointer accent-accent';
 
   return (
@@ -101,14 +112,24 @@ export function ServicesPane({
       <div className="flex flex-col gap-2 border-b border-divider px-3 py-3">
         <div className="flex items-baseline justify-between px-0.5">
           <h2 className="m-0 text-[13px] font-extrabold">Services</h2>
-          <span className="text-[11px] text-neutral-700">Datadog requests failing, HTTP 400+</span>
+          <span
+            className="text-[11px] text-neutral-700"
+            title="Each Service in Datadog with failing requests in the range, across every env. Pick one to see its logs; tick it to Scan it."
+          >
+            Datadog requests failing, HTTP 400+
+          </span>
         </div>
-        <fieldset aria-label="Range" className="m-0 flex gap-0.5 rounded-lg border-0 bg-neutral-200 p-0.75">
+        <fieldset
+          aria-label="Range"
+          title="How far back the list, the counts and the next Scan read in Datadog"
+          className="m-0 flex gap-0.5 rounded-lg border-0 bg-neutral-200 p-0.75"
+        >
           {SCAN_RANGES.map((value) => (
             <button
               key={value}
               type="button"
               aria-pressed={scope.range === value}
+              title={`Read the last ${value} of Datadog logs`}
               onClick={() => scope.pickRange(value)}
               className={`flex-1 cursor-pointer rounded-md border-0 py-1 font-mono text-[11px] transition-colors ${scope.range === value ? 'bg-card font-bold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
             >
@@ -145,6 +166,7 @@ export function ServicesPane({
             <input
               type="checkbox"
               aria-label="Tick every Service to Scan"
+              title="Tick every Service shown, so the Scan button reads all of them"
               checked={allTicked}
               ref={(input) => {
                 if (input) input.indeterminate = someTicked;
@@ -170,6 +192,7 @@ export function ServicesPane({
                 <input
                   type="checkbox"
                   aria-label={`Scan ${row.name}`}
+                  title={`Tick to add ${row.name} to the next Scan. Clicking the name only shows its logs.`}
                   checked={toScan.includes(row.name)}
                   onChange={() => tick(row.name)}
                   className={box}
@@ -184,7 +207,11 @@ export function ServicesPane({
                     <span className="min-w-0 truncate text-[12px] font-semibold">{row.name}</span>
                     <span
                       className="ml-auto flex-none font-mono text-[11px] text-neutral-700"
-                      title={row.errors === null ? 'None in this range' : `${row.errors} failing requests`}
+                      title={
+                        row.errors === null
+                          ? 'No failing requests in this range. It is listed for its open Alerts from earlier Scans.'
+                          : `${row.errors} failing requests in the last ${scope.range}`
+                      }
                     >
                       {row.errors === null ? '0' : compact.format(row.errors)}
                     </span>
@@ -225,7 +252,7 @@ export function ServicesPane({
           variant="primary"
           className="w-full justify-center py-1.5 text-xs"
           disabled={!connected || scan.isPending || running || (toScan.length === 0 && !selected && scanCount === 0)}
-          title={connected ? undefined : 'Connect Datadog in Integrations'}
+          title={scanTip}
           onClick={() =>
             scan.mutate({
               service_id: null,
@@ -251,6 +278,7 @@ export function ServicesPane({
           <button
             type="button"
             onClick={() => setTicked([])}
+            title="Clear the ticks. The Scan then reads the picked Service, or every listed one."
             className="cursor-pointer self-start border-0 bg-transparent p-0 text-[11px] text-neutral-700 underline hover:text-text"
           >
             Untick {toScan.length === 1 ? toScan[0] : `all ${toScan.length}`}

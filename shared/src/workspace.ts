@@ -9,10 +9,23 @@ export enum AgentReviewStatus {
   Failed = 'failed',
 }
 
+/** How much a review finding matters, worst first. */
 export enum FindingSeverity {
-  Blocker = 'blocker',
-  Suggestion = 'suggestion',
-  Nit = 'nit',
+  Critical = 'critical',
+  High = 'high',
+  Medium = 'medium',
+  Low = 'low',
+  Info = 'info',
+}
+
+/** Severities worst first, for counts and sorting. */
+export const FINDING_SEVERITIES: FindingSeverity[] = Object.values(FindingSeverity);
+
+/** An Agent Review's overall answer. */
+export enum ReviewVerdict {
+  Approve = 'approve',
+  RequestChanges = 'request_changes',
+  Comment = 'comment',
 }
 
 export enum PrState {
@@ -66,7 +79,17 @@ export const prAgentReviewSchema = z.object({
   pr_number: z.number().int(),
   head_sha: z.string(),
   status: z.enum(AgentReviewStatus),
+  /** Null until ready, and on reviews from before verdicts. */
+  decision: z.enum(ReviewVerdict).nullable(),
+  /** The verdict in one sentence. */
   verdict: z.string().nullable(),
+  /** The production branch the change was compared with, and the commit it was at. Null when it could not be read. */
+  base_branch: z.string().nullable(),
+  base_sha: z.string().nullable(),
+  /** The full review as Markdown; also posted on the pull request. */
+  report: z.string().nullable(),
+  /** Why a failed review stopped; null when it gave no reason. */
+  error: z.string().nullable(),
   findings: z.array(findingSchema),
   checklist: z.array(checklistItemSchema),
   tools: z.array(toolUseSchema),
@@ -174,8 +197,9 @@ export enum ThreadOutcome {
 
 export const passThreadSchema = z.object({
   comment_id: z.string(),
-  file_path: z.string(),
-  line: z.number().int(),
+  /** Null for a general comment on the pull request; `line` also for one on a whole file. */
+  file_path: z.string().nullable(),
+  line: z.number().int().nullable(),
   author: z.string(),
   /** The first line of the thread's first comment. */
   excerpt: z.string(),
@@ -187,7 +211,7 @@ export const passThreadSchema = z.object({
 
 export type PassThread = z.infer<typeof passThreadSchema>;
 
-/** One Comment pass over the threads the operator ticked on their own pull request. */
+/** One Comment pass over the threads the operator ticked on a pull request. */
 export const commentPassSchema = z.object({
   id: z.string(),
   repo_id: z.string(),

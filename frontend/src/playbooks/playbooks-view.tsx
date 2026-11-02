@@ -11,13 +11,14 @@ import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { Dropdown, type DropdownOption } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
 import { item } from '../components/ui/item';
+import { Hint } from '../components/ui/tip';
 import { useCreatePlaybook, usePlaybooks, useSetTrigger } from '../lib/queries';
 import { useAddress } from '../lib/remember';
 import { ascending } from '../lib/sort';
 import { type Draft, type DraftStep, draftOf, useDrafts } from './drafts';
 import { type Drag, Grip, leftFor, startDrag } from './drag';
 import { ScratchTag } from './job-steps';
-import { builtinFor, freeName, holderOf, reviewRefusal } from './labels';
+import { builtinFor, freeName, holderOf, TRIGGER_TIPS } from './labels';
 import { PlaybookEditor } from './playbook-editor';
 
 function Caption({ children }: { children: ReactNode }) {
@@ -45,7 +46,7 @@ export function NewPlaybookButton() {
         onClick={() =>
           list.data &&
           create.mutate(
-            { name: freeName('New Playbook', list.data.items), rules: '', branches: '', steps: [] },
+            { name: freeName('New Playbook', list.data.items), rules: '', branches: '', jira_ticket: false, steps: [] },
             { onSuccess: (made) => setAddress({ playbook: made.id }) },
           )
         }
@@ -136,7 +137,10 @@ export function PlaybooksView() {
         aria-label="Step blocks"
         className="flex w-67 flex-none flex-col gap-1.5 overflow-y-auto border-l border-line bg-surface/40 px-3 py-4"
       >
-        <Caption>Step blocks</Caption>
+        <Caption>
+          Step blocks{' '}
+          <Hint text="Ready-made steps. Drag one into Steps or press + to add a copy you can then edit. Hover a block to read what it tells the agent." />
+        </Caption>
         <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
           {blocks.map((block) => (
             <li
@@ -156,7 +160,13 @@ export function PlaybooksView() {
                 <button
                   type="button"
                   aria-label={`Add ${block.title} to steps`}
-                  title={open.builtin ? 'Duplicate the built-in to edit it' : 'Add to steps'}
+                  title={
+                    open.builtin
+                      ? 'A built-in reads only. Duplicate it to edit the copy.'
+                      : full
+                        ? `A Playbook holds ${PLAYBOOK_LIMITS.steps} steps at most. Remove one first.`
+                        : 'Add to the end of Steps'
+                  }
                   disabled={open.builtin || full}
                   onClick={() => addStep(block)}
                   className="size-5.5 flex-none cursor-pointer rounded-sm border-0 bg-transparent p-0 font-extrabold text-accent hover:bg-accent-100 disabled:cursor-not-allowed disabled:opacity-40"
@@ -173,7 +183,7 @@ export function PlaybooksView() {
         </ul>
         <p className="mx-1 mt-1.5 mb-0 text-[11px] text-neutral-700">
           Drag a block into Steps, or press +. The dropped copy is yours to edit. <ScratchTag /> steps write files or
-          run commands, so Review PR refuses them.
+          run commands in a scratch copy, never in your own checkout.
         </p>
       </aside>
     </div>
@@ -204,41 +214,33 @@ function TriggersColumn(props: {
 }) {
   const { items, openId, drafts, drag, setDrag, onOpen, onAttach, onDetach } = props;
   const [over, setOver] = useState<PlaybookTrigger | null>(null);
-  const [refusal, setRefusal] = useState<string | null>(null);
   const own = ascending(
     items.filter((playbook) => !playbook.builtin),
     (playbook) => playbook.name,
   );
   const builtins = items.filter((playbook) => playbook.builtin);
-  const beginDrag = (event: DragEvent, next: Drag) => {
-    setRefusal(null);
-    startDrag(event, next, setDrag);
-  };
+  const beginDrag = (event: DragEvent, next: Drag) => startDrag(event, next, setDrag);
 
   const choices = (trigger: PlaybookTrigger): DropdownOption<string>[] => [
     { value: BUILT_IN, label: 'Built-in', description: stepCount(builtinFor(items, trigger)) },
     ...own.map((playbook) => ({
       value: playbook.id,
       label: playbook.name,
-      description: reviewRefusal(trigger, playbook.steps) ?? stepCount(playbook),
+      description: stepCount(playbook),
     })),
   ];
-  /** Built-in detaches; a Playbook attaches, unless Review PR refuses it (Behavior 11). */
+  /** Built-in detaches; a Playbook attaches. */
   const pick = (trigger: PlaybookTrigger, id: string) => {
     if (id === BUILT_IN) return onDetach(trigger);
     const playbook = own.find((candidate) => candidate.id === id);
-    if (!playbook) return;
-    const refused = reviewRefusal(trigger, playbook.steps);
-    setRefusal(refused);
-    if (!refused) onAttach(trigger, playbook);
+    if (playbook) onAttach(trigger, playbook);
   };
 
   const slot = (trigger: PlaybookTrigger) => {
     const holder = holderOf(items, trigger);
-    const refused = drag?.kind === 'playbook' ? reviewRefusal(trigger, drag.playbook.steps) : null;
     // A chip let go on its own Trigger stays; anywhere else it detaches.
     const ownChip = drag?.kind === 'chip' && drag.trigger === trigger;
-    const accepts = (drag?.kind === 'playbook' && refused === null) || ownChip;
+    const accepts = drag?.kind === 'playbook' || ownChip;
     return (
       <li
         key={trigger}
@@ -253,7 +255,6 @@ function TriggersColumn(props: {
         onDragOver={(event) => {
           if (drag?.kind !== 'playbook' && !ownChip) return;
           setOver(trigger);
-          if (refused) setRefusal(refused);
           if (accepts) {
             event.preventDefault();
             event.dataTransfer.dropEffect = 'move';
@@ -269,13 +270,13 @@ function TriggersColumn(props: {
           holder ? 'cursor-grab' : ''
         } ${
           over === trigger && drag?.kind === 'playbook'
-            ? refused
-              ? 'cursor-no-drop border-neutral-400 bg-neutral-200'
-              : 'border-accent-400 bg-accent-100'
+            ? 'border-accent-400 bg-accent-100'
             : 'border-dashed border-divider'
         }`}
       >
-        <b className="min-w-0 flex-1 truncate">{TRIGGER_LABELS[trigger].label}</b>
+        <b title={TRIGGER_TIPS[trigger]} className="min-w-0 flex-1 truncate">
+          {TRIGGER_LABELS[trigger].label}
+        </b>
         <Dropdown
           label={`${TRIGGER_LABELS[trigger].label} runs`}
           value={holder?.id ?? BUILT_IN}
@@ -295,6 +296,7 @@ function TriggersColumn(props: {
         type="button"
         draggable={!playbook.builtin}
         aria-current={playbook.id === openId ? 'true' : undefined}
+        title={playbook.builtin ? undefined : 'Open it, or drag it onto a Trigger'}
         onClick={() => onOpen(playbook.id)}
         onDragStart={(event) => beginDrag(event, { kind: 'playbook', playbook })}
         onDragEnd={() => {
@@ -318,7 +320,7 @@ function TriggersColumn(props: {
           <span
             role="img"
             aria-label="Unsaved edits"
-            title="Unsaved edits"
+            title="Unsaved edits. Save or Discard them in the Playbook."
             className="size-1.75 flex-none rounded-full bg-accent"
           />
         )}
@@ -332,7 +334,10 @@ function TriggersColumn(props: {
       className="flex w-80 flex-none flex-col gap-1 overflow-y-auto border-r border-line px-3 py-4"
     >
       <section aria-label="Triggers">
-        <Caption>Triggers</Caption>
+        <Caption>
+          Triggers{' '}
+          <Hint text="The places in Monitor and Workspace that start the agent. Each runs one Playbook: its built-in, or one of yours you pick here." />
+        </Caption>
         <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
           {TABS.map((tab) => (
             <li key={tab} className="flex flex-col gap-1.5">
@@ -343,9 +348,9 @@ function TriggersColumn(props: {
             </li>
           ))}
         </ul>
-        {(refusal ?? props.error) && (
+        {props.error && (
           <p role="alert" className="mx-2 mt-1.5 mb-0 text-xs text-accent-700">
-            {refusal ?? props.error}
+            {props.error}
           </p>
         )}
         <p className="mx-2 mt-1.5 mb-0 text-xs text-neutral-700">
@@ -353,7 +358,10 @@ function TriggersColumn(props: {
         </p>
       </section>
       <section aria-label="Playbooks" className="mt-2">
-        <Caption>Playbooks</Caption>
+        <Caption>
+          Playbooks{' '}
+          <Hint text="Your own Playbooks: rules and steps you write. Drag one onto a Trigger to make that Trigger run it." />
+        </Caption>
         {own.length === 0 ? (
           <p className="mx-2 my-1 text-xs text-neutral-700">
             No Playbooks yet. Duplicate a built-in or start a new one.
@@ -361,7 +369,10 @@ function TriggersColumn(props: {
         ) : (
           <ul className="m-0 flex list-none flex-col gap-0.5 p-0">{own.map(row)}</ul>
         )}
-        <Caption>Built-in</Caption>
+        <Caption>
+          Built-in{' '}
+          <Hint text="The console's own Playbook for each Trigger. It runs when the Trigger holds none of yours. It reads only: Duplicate it to change it." />
+        </Caption>
         <ul className="m-0 flex list-none flex-col gap-0.5 p-0">{builtins.map(row)}</ul>
       </section>
     </aside>

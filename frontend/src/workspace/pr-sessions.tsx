@@ -32,12 +32,15 @@ export function PrSessions({ pr }: { pr: PullRequest }) {
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
-      <span className="text-neutral-700">Sessions on {pr.branch}:</span>
+      <span title="Your Sessions checked out on this pull request's branch" className="text-neutral-700">
+        Sessions on {pr.branch}:
+      </span>
       {onBranch.length === 0 && <span className="text-neutral-700">none</span>}
       {onBranch.map((session) => (
         <Link
           key={session.id}
           to={sessionPath(session.id)}
+          title="Open this Session"
           className="rounded-full border border-line bg-card px-2.5 py-0.5 text-text no-underline hover:border-accent-300 hover:bg-accent-100"
         >
           {session.title} · {session.state.replace('_', ' ')}
@@ -50,7 +53,7 @@ export function PrSessions({ pr }: { pr: PullRequest }) {
           title={
             repoId === null
               ? 'Import this repository in Repos to start a Session on it'
-              : 'Start a Session on this branch and tell the agent what to change'
+              : 'Start a Session on this branch and tell the agent what to change. A branch only on origin is fetched first.'
           }
           onClick={start}
         >

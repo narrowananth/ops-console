@@ -28,6 +28,7 @@ import {
   type ReplyVerdict,
   type ReportKind,
   type ReviewDecision,
+  type ReviewVerdict,
   type RouteState,
   type RunStatus,
   type ScanStatus,
@@ -263,7 +264,15 @@ export const prAgentReviews = sqliteTable(
       .$type<AgentReviewStatus>()
       .notNull()
       .default('running' as AgentReviewStatus),
+    decision: text().$type<ReviewVerdict>(),
     verdict: text(),
+    /** The production branch the change was compared with, and its commit then. */
+    baseBranch: text('base_branch'),
+    baseSha: text('base_sha'),
+    /** The full review as Markdown. */
+    report: text(),
+    /** Why a failed review stopped, for the operator. */
+    error: text(),
     findings: text().notNull().default('[]'),
     checklist: text().notNull().default('[]'),
     tools: text().notNull().default('[]'),
@@ -313,7 +322,7 @@ export const prReplyChecks = sqliteTable(
   ],
 );
 
-/** One Comment pass over the threads the operator ticked on their own pull request. */
+/** One Comment pass over the threads the operator ticked on a pull request. */
 export const prCommentPasses = sqliteTable(
   'pr_comment_passes',
   {
@@ -607,6 +616,8 @@ export const fixes = sqliteTable('fixes', {
   ...jobPlaybookColumns(),
   /** The Playbook's Branch field as copied at start: where the code is read from. Null before Branch. */
   playbookBranches: text('playbook_branches'),
+  /** The Playbook's Jira ticket switch as copied at start. */
+  playbookJiraTicket: bool('playbook_jira_ticket').notNull().default(false),
 });
 
 /** The Connections a `devtools` Session may reach. No rows: every Connection with access. */
@@ -631,6 +642,8 @@ export const playbooks = sqliteTable(
     rules: text().notNull().default(''),
     /** Comma-separated branches Verify and Fix read the code from, first one origin has; blank: the default. */
     branches: text().notNull().default(''),
+    /** Fix makes a Jira ticket first, when Jira is connected. */
+    jiraTicket: bool('jira_ticket').notNull().default(false),
     /** `[{ block, title, instructions, writes }]`. */
     steps: text().notNull().default('[]'),
     createdAt: text('created_at').notNull().default(nowIso),

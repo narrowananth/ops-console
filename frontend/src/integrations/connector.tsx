@@ -3,13 +3,23 @@ import { useState } from 'react';
 import { BrandIcon, CONNECTOR_BRAND } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { useConnectConnector, useDisconnectConnector } from '../lib/queries';
-import { statusGlyph } from '../mcp/status';
+import { type StatusLook, statusGlyph } from '../mcp/status';
 import { IntegrationRow, rowAction, rowActionAttention } from './integration-row';
 
 /** The row and the pane read the same: signing in, not connected, or the check's status. */
-function connectorStatus(connector: Connector): { glyph: string; className: string } {
-  if (connector.sign_in) return { glyph: '◌ signing in', className: 'text-neutral-700' };
-  if (connector.status === HealthStatus.Off) return { glyph: '○ not connected', className: 'text-neutral-700' };
+function connectorStatus(connector: Connector): StatusLook {
+  if (connector.sign_in)
+    return {
+      glyph: '◌ signing in',
+      className: 'text-neutral-700',
+      tip: 'Waiting for you to finish signing in, in the browser tab that opened.',
+    };
+  if (connector.status === HealthStatus.Off)
+    return {
+      glyph: '○ not connected',
+      className: 'text-neutral-700',
+      tip: 'Not set up yet. Connect signs you in and adds its MCP Server when it has one.',
+    };
   return statusGlyph[connector.status];
 }
 
@@ -30,7 +40,9 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
       <div className="flex items-center gap-2.5 border-b border-line px-5 py-2.5">
         <BrandIcon brand={CONNECTOR_BRAND[connector.id]} size="sm" />
         <strong className="text-[13px]">{connector.name}</strong>
-        <span className={`ml-auto font-mono text-xs ${status.className}`}>{status.glyph}</span>
+        <span title={status.tip} className={`ml-auto font-mono text-xs ${status.className}`}>
+          {status.glyph}
+        </span>
         <Button className="px-2.5 py-1 text-xs" onClick={onBack}>
           Close
         </Button>
@@ -69,7 +81,11 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
         ) : (
           <div className="mx-5 flex items-center gap-3 border-t border-line py-3.5">
             <div className="flex-1 text-xs text-neutral-700">Stops the console using {connector.name}.</div>
-            <Button className="border-accent text-accent-700" onClick={() => setConfirming(true)}>
+            <Button
+              className="border-accent text-accent-700"
+              title={`Sign out of ${connector.name} and stop the console using it. Asks first.`}
+              onClick={() => setConfirming(true)}
+            >
               Disconnect…
             </Button>
           </div>
@@ -116,6 +132,13 @@ function SignInStep(props: { connector: Connector; pending: boolean; onConnect: 
         <Button
           variant={connected ? 'secondary' : 'primary'}
           className="shrink-0"
+          title={
+            signIn
+              ? 'Finish signing in, in the browser tab that opened'
+              : connected
+                ? `Sign in to ${connector.name} again, for another account or a sign-in that lapsed`
+                : undefined
+          }
           disabled={props.pending || signIn !== null}
           onClick={props.onConnect}
         >

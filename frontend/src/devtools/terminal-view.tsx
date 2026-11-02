@@ -29,12 +29,13 @@ import {
   useUpdateSession,
 } from '../lib/queries';
 import { ascending } from '../lib/sort';
+import { ACCESS_TIPS, PROD_TIP } from './fields';
 import { ComparisonView, ResultView } from './result-tables';
 
 const ACCESS: Record<AccessLevel, string> = {
-  [AccessLevel.None]: 'Access Level none: set it in Connections',
-  [AccessLevel.Read]: 'read-only',
-  [AccessLevel.Write]: 'read / write',
+  [AccessLevel.None]: 'The agent cannot see this Connection: its Access Level is none. Change it in Connections.',
+  [AccessLevel.Read]: `${ACCESS_TIPS[AccessLevel.Read]} Tick it to ask only the ticked Connections.`,
+  [AccessLevel.Write]: `${ACCESS_TIPS[AccessLevel.Write]} Tick it to ask only the ticked Connections.`,
 };
 
 const WELCOME = [
@@ -139,7 +140,10 @@ function SyncedTools({
             <BrandIcon brand={CONNECTION_BRAND[connection.type]} size="sm" />
             <span className="min-w-0 flex-1 truncate font-mono text-xs">{connection.name}</span>
             {connection.is_prod && (
-              <span className="rounded-full bg-accent-100 px-1.75 py-px text-[9px] font-extrabold text-accent-700">
+              <span
+                title={PROD_TIP}
+                className="rounded-full bg-accent-100 px-1.75 py-px text-[9px] font-extrabold text-accent-700"
+              >
                 PROD
               </span>
             )}

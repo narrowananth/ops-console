@@ -111,6 +111,19 @@ describe('ops-console open', () => {
     expect(result.stdout).not.toContain(token);
   });
 
+  it('opens it signed in in the browser app named, for a second browser', async () => {
+    const m = await installed();
+    await opsConsole(m, 'start');
+    const { token } = JSON.parse(await readFile(path.join(m.dataDir, 'runtime.json'), 'utf8'));
+
+    const result = await opsConsole(m, 'open', 'Firefox');
+
+    expect(result.code).toBe(0);
+    expect(await m.opened()).toEqual([`-a Firefox http://127.0.0.1:${m.env.OPS_CONSOLE_PORT}/#token=${token}`]);
+    expect(result.stdout).toContain('in Firefox');
+    expect(result.stdout).not.toContain(token);
+  });
+
   it('tells the operator to start the daemon when it is stopped', async () => {
     const m = await installed();
     const result = await opsConsole(m, 'open');

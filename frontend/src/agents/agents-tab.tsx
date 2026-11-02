@@ -47,11 +47,13 @@ function ago(iso: string): string {
 
 function UsageBar({
   label,
+  tip,
   pct,
   resetsAt,
   accentAt,
 }: {
   label: string;
+  tip: string;
   pct: number | null;
   resetsAt: string | null;
   accentAt: number;
@@ -59,7 +61,9 @@ function UsageBar({
   const hot = pct !== null && pct >= accentAt;
   return (
     <div className="grid grid-cols-[48px_minmax(0,1fr)_160px] items-center gap-2.5">
-      <span className="text-[11px] text-neutral-700">{label}</span>
+      <span title={tip} className="text-[11px] text-neutral-700">
+        {label}
+      </span>
       <span className="block h-1.5 overflow-hidden rounded-full bg-neutral-200" aria-hidden>
         <span
           className={`block h-1.5 rounded-full ${hot ? 'bg-accent' : 'bg-text'}`}
@@ -103,10 +107,18 @@ function AccountRow({
           <strong className="font-mono text-[13px]">{account.label}</strong>
           {account.plan && <span className="text-xs text-neutral-700">{account.plan}</span>}
           {current && (
-            <span className="rounded-full bg-ok/12 px-2 py-px text-[10px] font-extrabold text-ok">ACTIVE</span>
+            <span
+              title="The agent runs under this account now"
+              className="rounded-full bg-ok/12 px-2 py-px text-[10px] font-extrabold text-ok"
+            >
+              ACTIVE
+            </span>
           )}
           {isPick && (
-            <span className="rounded-full bg-accent-100 px-2 py-px text-[10px] font-extrabold text-accent-700">
+            <span
+              title="Smart usage ranks this account first: it has the most weekly quota left per day until its reset"
+              className="rounded-full bg-accent-100 px-2 py-px text-[10px] font-extrabold text-accent-700"
+            >
               SMART PICK
             </span>
           )}
@@ -117,8 +129,20 @@ function AccountRow({
           </div>
         ) : (
           <>
-            <UsageBar label="5-hour" pct={account.five_hour_pct} resetsAt={account.five_hour_resets_at} accentAt={90} />
-            <UsageBar label="Weekly" pct={account.weekly_pct} resetsAt={account.weekly_resets_at} accentAt={80} />
+            <UsageBar
+              label="5-hour"
+              tip="How much of this account's 5-hour usage window is used. It empties again at the reset."
+              pct={account.five_hour_pct}
+              resetsAt={account.five_hour_resets_at}
+              accentAt={90}
+            />
+            <UsageBar
+              label="Weekly"
+              tip="How much of this account's weekly usage is used. It empties again at the weekly reset."
+              pct={account.weekly_pct}
+              resetsAt={account.weekly_resets_at}
+              accentAt={80}
+            />
           </>
         )}
         {error && (
@@ -155,15 +179,25 @@ function AccountRow({
         ) : (
           <>
             {!current && (
-              <Button className="px-3 py-1.25 text-xs" onClick={onUse}>
+              <Button
+                className="px-3 py-1.25 text-xs"
+                title="Make this the active account. The agent runs under it from now on."
+                onClick={onUse}
+              >
                 Use
               </Button>
             )}
-            <Button className="px-3 py-1.25 text-xs" disabled={login.isPending} onClick={startLogin}>
+            <Button
+              className="px-3 py-1.25 text-xs"
+              title="Sign in to this account again, in your browser"
+              disabled={login.isPending}
+              onClick={startLogin}
+            >
               Re-login
             </Button>
             <Button
               className="px-3 py-1.25 text-xs"
+              title="Sign this account out. It stays in the list so you can sign in again."
               disabled={logout.isPending}
               onClick={() => logout.mutate(account.id)}
             >
@@ -176,7 +210,7 @@ function AccountRow({
             icon
             className="size-7 text-neutral-700 hover:text-accent-700"
             aria-label={`Remove ${account.label}`}
-            title="Remove account"
+            title="Remove this account from the console. You can add it again later."
             disabled={remove.isPending}
             onClick={() => remove.mutate(account.id)}
           >
@@ -250,6 +284,7 @@ function Switches({
           <label className="flex items-center gap-1 font-mono text-xs">
             <input
               aria-label="Auto-switch threshold"
+              title="At this share of the 5-hour window, Sessions move to the next account. 50 to 100."
               type="number"
               min={50}
               max={100}

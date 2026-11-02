@@ -1,5 +1,6 @@
-import { PR_DESCRIPTION_RULE } from '@ops-console/shared';
+import { PlaybookTrigger, PR_DESCRIPTION_RULE } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
+import { BUILTIN_RULES, BUILTIN_STEPS } from '../src/playbooks/builtins';
 import { type AgentDaemon, api, converse, startAgentDaemon } from './agent-fixtures';
 
 const running: AgentDaemon[] = [];
@@ -26,7 +27,7 @@ const step = (title: string, writes = false, block = 'custom') => ({
 async function create(http: Http, name: string, extra: object = {}) {
   const created = await http.post('/playbooks', { name, ...extra });
   expect(created.status).toBe(201);
-  return created.body.data as { id: string; name: string };
+  return created.body.data as { id: string; name: string; jira_ticket: boolean };
 }
 
 const list = (http: Http) => http.get('/playbooks').then((res) => res.body.data);
@@ -44,23 +45,29 @@ describe('Playbooks and Triggers', () => {
       ['builtin:thread_reply', ['thread_reply']],
       ['builtin:session_message', ['session_message']],
     ]);
-    const steps = (id: string) =>
-      items.find((p: { id: string }) => p.id === id).steps.map((s: { title: string }) => s.title);
-    expect(steps('builtin:verify')).toEqual([
-      'Map the log to the code',
-      'Replay the request',
-      'Cross-check Connections',
-      'Decide',
-    ]);
-    expect(steps('builtin:fix')).toEqual(['Code', 'Tests']);
-    expect(steps('builtin:review_pr')).toEqual(['Review']);
-    expect(steps('builtin:check_reply')).toEqual(['Read the thread', 'Read the code now']);
-    expect(steps('builtin:address_comments')).toEqual(['Read the threads', 'Make the changes', 'Run the tests']);
+    // Each built-in carries its rules and steps, and Duplicate saves it within the limits.
+    for (const trigger of Object.values(PlaybookTrigger)) {
+      const builtin = items.find((p: { id: string }) => p.id === `builtin:${trigger}`);
+      expect(builtin.rules).not.toBe('');
+      expect(builtin).toMatchObject({
+        rules: BUILTIN_RULES[trigger],
+        steps: BUILTIN_STEPS[trigger],
+        jira_ticket: false,
+      });
+      const copy = await http.post('/playbooks', {
+        name: `${trigger} copy`,
+        rules: builtin.rules,
+        branches: builtin.branches,
+        steps: builtin.steps,
+      });
+      expect([copy.status, copy.body.data?.steps]).toEqual([201, builtin.steps]);
+    }
     const tags = (id: string) =>
       items.find((p: { id: string }) => p.id === id).steps.map((s: { writes: boolean }) => s.writes);
-    expect(tags('builtin:check_reply')).toEqual([false, false]);
-    expect(tags('builtin:address_comments')).toEqual([false, true, true]);
-    expect(steps('builtin:session_message')).toEqual([]);
+    // Review PR runs its tests in a scratch copy; the chats have no steps.
+    expect(tags('builtin:review_pr')).toContain(true);
+    expect(tags('builtin:thread_reply')).toEqual([]);
+    expect(tags('builtin:session_message')).toEqual([]);
     expect(blocks.map((b: { title: string; writes: boolean }) => [b.title, b.writes])).toEqual([
       ['Trace the log through the code', false],
       ['Find the Repo that owns it', false],
@@ -88,7 +95,17 @@ describe('Playbooks and Triggers', () => {
   it('holds the limits, and a name once without regard to case', async () => {
     const { http } = await start();
     const empty = await create(http, 'Checkout deep check');
-    expect(empty).toMatchObject({ rules: '', steps: [], triggers: [], builtin: false });
+    expect(empty).toMatchObject({ rules: '', steps: [], triggers: [], builtin: false, jira_ticket: false });
+    const ticketed = await create(http, 'Ticketed fix', { jira_ticket: true });
+    expect(ticketed).toMatchObject({ jira_ticket: true });
+    await http.patch(`/playbooks/${ticketed.id}`, { rules: 'Keep it small.' });
+    await http.patch(`/playbooks/${empty.id}`, { jira_ticket: true });
+    const saved = (await list(http)).items;
+    const ticket = (id: string) => saved.find((p: { id: string }) => p.id === id).jira_ticket;
+    expect([ticket(ticketed.id), ticket(empty.id)]).toEqual([true, true]);
+    expect((await http.patch(`/playbooks/${empty.id}`, { jira_ticket: 'yes' })).body.error.code).toBe(
+      'validation_failed',
+    );
     const refused = [
       await http.post('/playbooks', { name: 'x'.repeat(61) }),
       await http.post('/playbooks', { name: 'a', rules: 'r'.repeat(8001) }),
@@ -143,27 +160,25 @@ describe('Playbooks and Triggers', () => {
     expect((await http.delete(`/playbooks/${safe.id}`)).body.error.code).toBe('not_found');
   });
 
-  it('refuses a scratch copy step on Review PR, on attach and on save', async () => {
+  it('takes a scratch copy step on Review PR, on attach and on save', async () => {
     const { http } = await start();
     const mock = await create(http, 'Mocks', { steps: [step('Trace'), step('Make mock data', true)] });
     const attach = await http.put('/playbook-triggers/review_pr', { playbook_id: mock.id });
-    expect([attach.status, attach.body.error.code, attach.body.error.message]).toEqual([
-      409,
-      'invalid_state',
-      'Review PR reads only: remove Make mock data first.',
-    ]);
+    expect(attach.status).toBe(200);
+    expect(attach.body.data.find((p: { id: string }) => p.id === mock.id).triggers).toEqual(['review_pr']);
     const prod = await create(http, 'PROD readiness', { steps: [step('Check')] });
     await http.put('/playbook-triggers/review_pr', { playbook_id: prod.id });
     const save = await http.patch(`/playbooks/${prod.id}`, { steps: [step('Check'), step('Run the tests', true)] });
-    expect(save.body.error.message).toBe('Review PR reads only: remove Run the tests first.');
-    const untagged = await http.patch(`/playbooks/${prod.id}`, {
-      steps: [{ ...step('Make mock data', false, 'make_mock_data') }],
+    expect(save.status).toBe(200);
+    expect(save.body.data).toMatchObject({
+      triggers: ['review_pr'],
+      steps: [
+        { title: 'Check', writes: false },
+        { title: 'Run the tests', writes: true },
+      ],
     });
-    expect(untagged.body.error.message).toBe('Review PR reads only: remove Make mock data first.');
-    const rules = await http.patch(`/playbooks/${prod.id}`, { rules: 'Check the migrations first.' });
-    expect(rules.body.data).toMatchObject({ rules: 'Check the migrations first.', triggers: ['review_pr'] });
 
-    // Check reply and Address comments take a scratch copy step (Behavior 5).
+    // Check reply and Address comments take one too (Behavior 5).
     for (const trigger of ['check_reply', 'address_comments']) {
       const held = await http.put(`/playbook-triggers/${trigger}`, { playbook_id: mock.id });
       expect(held.status).toBe(200);
@@ -179,7 +194,8 @@ describe('Playbooks in chats', () => {
     const { daemon, http } = await start();
     const session = daemon.createSession();
     await converse(daemon, session, 'hello');
-    expect(append(daemon)).not.toContain("The operator's rules");
+    // The built-in's rules, when no Playbook holds the Trigger.
+    expect(append(daemon)).toContain(`The operator's rules for this work:\n${BUILTIN_RULES.session_message}`);
     expect(append(daemon)).toMatch(/No value read from a PROD Connection goes into a file/);
     expect(append(daemon)).toContain(PR_DESCRIPTION_RULE);
     expect((await http.get(`/sessions/${session}`)).body.data.playbook).toBeNull();
@@ -188,6 +204,7 @@ describe('Playbooks in chats', () => {
     await http.put('/playbook-triggers/session_message', { playbook_id: safe.id });
     await converse(daemon, session, 'again');
     const text = append(daemon);
+    expect(text).not.toContain(BUILTIN_RULES.session_message);
     expect(text.indexOf('Never touch the orders table.')).toBeGreaterThan(-1);
     expect(text.indexOf('Never touch the orders table.')).toBeLessThan(text.indexOf('Console safety rules'));
     expect(text.indexOf(PR_DESCRIPTION_RULE)).toBeLessThan(text.indexOf('Never touch the orders table.'));

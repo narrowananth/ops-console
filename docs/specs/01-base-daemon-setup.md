@@ -23,7 +23,7 @@ CLI
 5. `ops-console start` writes `~/Library/LaunchAgents/dev.ops-console.plist` (`RunAtLoad`, `KeepAlive`) pointing at `current`, enables and bootstraps it in `gui/<uid>`, and returns once the daemon answers `GET /api/health`. If the daemon does not answer within 15 seconds, it boots the agent out again, prints the last 20 log lines and exits non-zero. With the daemon already running, it says so and exits 0.
 6. `ops-console stop` boots the agent out and disables it, so it stays stopped across logins until the next `start`.
 7. `ops-console status` prints running or stopped, and for a running daemon its pid, version, port and health. It exits 0 when running and 3 when stopped.
-8. `ops-console open` opens `http://127.0.0.1:4545/#token=<token>` with the token from the runtime file. With the daemon stopped, it says to run `ops-console start` and exits 1.
+8. `ops-console open` opens `http://127.0.0.1:4545/#token=<token>` with the token from the runtime file, in the default browser, or with `ops-console open <app>` in that browser app, so a second browser signs in too. It never prints the token. Every signed-in browser works on the one daemon at once. With the daemon stopped, it says to run `ops-console start` and exits 1.
 9. `ops-console logs` follows the daemon log.
 10. `ops-console update` runs the installer for the latest version and restarts the daemon if it was running. Migrations apply on that start (Behavior 17).
 11. `ops-console uninstall` stops the daemon, removes the plist, `~/.ops-console` and the `~/.local/bin` link, and prints the data and log folders it left in place.
@@ -56,6 +56,7 @@ App shell
 28d. The theme switch moves between light and dark, and Collapse leaves icons only, each naming its page on hover. The browser keeps both. The first theme follows the system's.
 28e. A page scrolls inside its own body, never past the app: an absolutely placed element inside a scroll box, such as a label only screen readers read, stays within that box.
 28f. Running, above the account in the sidebar foot, counts the Sessions of every kind whose run goes, `waiting_input` and `waiting_approval` included, and is tinted while any waits on the operator. It opens a list, most recently active first: each run's Session title (a `pr_review` run reads "Pull request #N"), its Repo ("No Repo", "Dev tools") and branch, its state or "needs you", and an Alert link for a Monitor Session. A run opens where its work shows: the Session in Workspace, the pull request for a `pr_review`, Dev tools for a `devtools`. Moving to another page, Escape or a click outside closes the list. With none running it reads "No agent running".
+28g. Each control, status, badge and count whose meaning its words leave open explains itself in a tip: what it means, what pressing it makes the agent do, or why it is off and what turns it on. A label with no control beside it gets a "?" that shows its tip. The tip shows after a short rest of the pointer or at once on keyboard focus, sits inside the window, and closes on leaving, a click, a scroll or Escape. Screen readers read it as the element's description.
 
 Release and checks
 

@@ -43,6 +43,11 @@ export function WorkspaceView() {
             <button
               key={id}
               type="button"
+              title={
+                id === 'sessions'
+                  ? 'Your conversations with the agent, grouped by Repo'
+                  : 'Open pull requests on your Git hosts: review, comment, and let the agent review or address comments'
+              }
               role="tab"
               aria-selected={tab === id}
               onClick={() => setTab(id)}

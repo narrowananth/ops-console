@@ -8,6 +8,26 @@ import { ago, shown as inMonitor } from './scan-scope';
 import { SEVERITY_LABEL, SeverityBadge } from './severity';
 import { StatusBadge } from './status-picker';
 
+/** What each Alert status means and what comes next, shown on hover of its chip. */
+export const STATUS_TIP: Record<AlertStatus, string> = {
+  [AlertStatus.Open]: 'Open: a Scan raised it. Verify it to have the agent explain it from the code.',
+  [AlertStatus.Verifying]: 'Verifying: the agent is following the log through the code and writing a Report.',
+  [AlertStatus.Verified]:
+    'Verified: the Report is ready. Read it, then confirm it as a bug or improvement, or dismiss it.',
+  [AlertStatus.Fixing]: 'Fixing: the agent is changing the code on a fix branch and testing it.',
+  [AlertStatus.PrOpen]: 'PR open: the Fix is pushed and waits for review. Merging the PR resolves the Alert.',
+  [AlertStatus.Resolved]: 'Resolved: the PR was merged. A new failure after a healthy Scan reopens it as a Regression.',
+  [AlertStatus.Dismissed]:
+    'Dismissed: you set it aside. A new failure after a healthy Scan reopens it as a Regression.',
+};
+
+const TAB_TIP: Record<Severity | 'all', string> = {
+  all: 'Every Alert in view, highest tier first',
+  high: 'Only High Alerts: errors reached the rapid threshold in one 10-minute stretch',
+  medium: 'Only Medium Alerts: errors per hour reached the failing threshold',
+  low: 'Only Low Alerts: failing below the Medium and High thresholds',
+};
+
 const CLOSED = [AlertStatus.Resolved, AlertStatus.Dismissed];
 
 /** Rows drawn at a time. A Scan can raise more than a thousand Alerts; drawing them all makes every click slow. */
@@ -37,15 +57,25 @@ function Row({
           <SeverityBadge severity={alert.severity} />
           {showService && <strong className="min-w-0 truncate text-[12px]">{alert.service.name}</strong>}
           {alert.http_status !== null && <StatusBadge code={alert.http_status} />}
-          <span className="ml-auto flex-none whitespace-nowrap text-neutral-700">
+          <span
+            className="ml-auto flex-none whitespace-nowrap text-neutral-700"
+            title={`Seen ${alert.event_count} ${alert.event_count === 1 ? 'time' : 'times'}, last ${ago(alert.last_seen_at)}`}
+          >
             ×{alert.event_count} · {ago(alert.last_seen_at)}
           </span>
         </span>
         <span className="line-clamp-2 font-mono text-[12px] break-all">{alert.log_line || alert.title}</span>
         <span className="flex items-center gap-2 text-[11px] text-neutral-700">
-          {where && <span className="truncate font-mono">{where}</span>}
+          {where && (
+            <span className="truncate font-mono" title={`The Route that failed: ${where}`}>
+              {where}
+            </span>
+          )}
           {alert.status !== AlertStatus.Open && (
-            <span className="ml-auto flex-none rounded-full bg-neutral-200 px-1.75 font-mono text-[10px]">
+            <span
+              title={STATUS_TIP[alert.status]}
+              className="ml-auto flex-none rounded-full bg-neutral-200 px-1.75 font-mono text-[10px]"
+            >
               {alert.status.replace('_', ' ')}
             </span>
           )}
@@ -113,6 +143,7 @@ export function LogsPane({
             type="button"
             role="tab"
             aria-selected={tier === value}
+            title={TAB_TIP[value]}
             onClick={() => setTier(value)}
             className={`cursor-pointer rounded-md border-0 px-2.5 py-1 text-xs transition-colors ${tier === value ? 'bg-text font-bold text-bg' : 'bg-transparent text-neutral-700 hover:bg-neutral-200 hover:text-text'}`}
           >
@@ -120,7 +151,10 @@ export function LogsPane({
             <span className="font-mono text-[11px] opacity-75">{value === 'all' ? inScope.length : counts[value]}</span>
           </button>
         ))}
-        <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-[11px] text-neutral-700">
+        <label
+          className="ml-auto flex cursor-pointer items-center gap-1.5 text-[11px] text-neutral-700"
+          title="Also show resolved and dismissed Alerts"
+        >
           <input
             type="checkbox"
             checked={showClosed}

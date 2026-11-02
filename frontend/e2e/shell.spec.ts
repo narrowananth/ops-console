@@ -105,6 +105,46 @@ test('pnpm dev runs as Ops Console (dev), and asks for Full Disk Access under th
   await expect(disk.getByRole('button', { name: 'Open System Settings' })).toBeVisible();
 });
 
+test('Start at login reads off until Ops Console is on under App Background Activity, and opens Login Items', async ({
+  page,
+}) => {
+  let on = false;
+  let opened = 0;
+  await page.route('**/api/terminals/start-at-login', (route) =>
+    route.fulfill({ json: { data: { on, dev_build: false } } }),
+  );
+  await page.route('**/api/terminals/start-at-login/settings', (route) => {
+    opened += 1;
+    return route.fulfill({ status: 204 });
+  });
+  await page.goto(`${daemon.url}/#token=${daemon.token}`);
+  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+
+  const login = page.getByRole('region', { name: 'Permissions' }).getByRole('listitem', { name: 'Start at login' });
+  await expect(login).toContainText('✕ off');
+  await expect(login).toContainText('App Background Activity');
+  await expect(login).toContainText('ops-console start');
+  await login.getByRole('button', { name: 'Open Login Items' }).click();
+  await expect.poll(() => opened).toBe(1);
+
+  on = true;
+  await login.getByRole('button', { name: 'Check again' }).click();
+  await expect(login).toContainText('● on');
+  await expect(login.getByRole('button', { name: 'Check again' })).toHaveCount(0);
+  await expect(login.getByRole('button', { name: 'Open Login Items' })).toBeVisible();
+});
+
+test('a dev build never starts at login and offers no Login Items', async ({ page }) => {
+  await page.route('**/api/terminals/start-at-login', (route) =>
+    route.fulfill({ json: { data: { on: false, dev_build: true } } }),
+  );
+  await page.goto(`${daemon.url}/#token=${daemon.token}`);
+  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  const login = page.getByRole('main').getByRole('listitem', { name: 'Start at login' });
+  await expect(login).toContainText('off · dev build');
+  await expect(login.getByRole('button')).toHaveCount(0);
+});
+
 test('a daemon that is no app reads off · dev build and the Setup agent still starts', async ({ page }) => {
   await page.route('**/api/terminals/disk-access', (route) =>
     route.fulfill({ json: { data: { granted: false, app_path: null } } }),
@@ -320,4 +360,24 @@ test('Shift+Enter adds a line to the Setup agent request; Enter sends the lines 
     .poll(() => sent.filter((m) => (m as { type: string }).type === 'line'))
     .toEqual([{ type: 'line', text: 'add vajro-test-db\nread only' }]);
   await expect(box).toHaveValue('');
+});
+
+test('a control explains itself on hover and on keyboard focus, then keeps its title', async ({ page }) => {
+  await page.goto(`${daemon.url}/#token=${daemon.token}`);
+  const collapse = page.getByRole('button', { name: 'Collapse sidebar' });
+  const tip = page.getByRole('tooltip');
+
+  await collapse.hover();
+  await expect(tip).toHaveText('Collapse sidebar');
+  await expect(collapse).toHaveAccessibleDescription('Collapse sidebar');
+  await page.mouse.move(600, 400);
+  await expect(tip).toHaveCount(0);
+  await expect(collapse).toHaveAttribute('title', 'Collapse sidebar');
+
+  await collapse.focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  await expect(tip).toHaveText('Collapse sidebar');
+  await page.keyboard.press('Escape');
+  await expect(tip).toHaveCount(0);
 });

@@ -51,7 +51,7 @@ export function commentPassBrief(slug: string, pr: HostPullRequest, threads: Hos
     const root = thread[0] as HostComment;
     return `[comment_id ${root.id}] on ${fileLine(root)}:\n${threadText(thread)}`;
   });
-  return `Address review comments on the operator's pull request #${pr.number} of ${slug}: "${pr.title}", ${pr.branch} into ${pr.base_branch}, at head commit ${pr.head_sha}. This folder is a scratch copy at that commit: change code only here.
+  return `Address review comments on pull request #${pr.number} of ${slug}: "${pr.title}", ${pr.branch} into ${pr.base_branch}, at head commit ${pr.head_sha}. This folder is a scratch copy at that commit: change code only here.
 
 The operator ticked these threads. Each one is a change request, as the console safety rules say:
 
@@ -72,9 +72,10 @@ List every ticked thread once.`;
 /** The commit's message: the pull request, then a line per done thread (Behavior 16). */
 export function commitMessage(number: number, threads: StoredThread[]): string {
   const done = threads.filter((thread) => thread.outcome === ThreadOutcome.Done);
-  return [`Address review comments on #${number}`, '', ...done.map((thread) => `- ${thread.file_path}:${thread.line}`)]
-    .join('\n')
-    .trim();
+  const lines = done.map((thread) =>
+    thread.file_path ? `- ${fileLine(thread)}` : `- ${thread.author}'s comment on the pull request`,
+  );
+  return [`Address review comments on #${number}`, '', ...lines].join('\n').trim();
 }
 
 /** Address comments: the agent changes code for the ticked threads; the console commits, pushes, replies, resolves. */
@@ -97,21 +98,11 @@ export class CommentPassesService {
     const slug = repo.remoteSlug as string;
     const { pr, comments } = await this.pulls.adapter(repo).get(slug, number);
     if (pr.state !== PrState.Open) throw new ApiError(409, ErrorCode.InvalidState, 'The pull request is not open');
-    if (!this.pulls.mine(repo, pr)) {
-      throw new ApiError(409, ErrorCode.InvalidState, 'Address comments works only on your own pull requests');
-    }
     const threads = commentIds.map((id) => threadOf(comments, id));
     for (const [index, thread] of threads.entries()) {
       const root = thread[0];
-      if (
-        !root ||
-        root.id !== commentIds[index] ||
-        root.parent_id !== null ||
-        root.resolved ||
-        !root.file_path ||
-        !root.line
-      ) {
-        throw validationFailed(`invalid body: ${commentIds[index]} is not an unresolved thread on a line`);
+      if (!root || root.id !== commentIds[index] || root.parent_id !== null || root.resolved) {
+        throw validationFailed(`invalid body: ${commentIds[index]} is not an unresolved thread`);
       }
     }
     const session = this.jobs.requireIdle(repo, number);
@@ -126,8 +117,8 @@ export class CommentPassesService {
       const root = thread[0] as HostComment;
       return {
         comment_id: root.id,
-        file_path: root.file_path as string,
-        line: root.line as number,
+        file_path: root.file_path,
+        line: root.line,
         author: root.author,
         excerpt: root.body.split('\n')[0]?.slice(0, 200) ?? '',
         outcome: ThreadOutcome.Pending,
@@ -283,7 +274,8 @@ export class CommentPassesService {
           continue;
         }
       }
-      if (thread.outcome === ThreadOutcome.Done && !thread.resolved) {
+      // A general comment has no thread to resolve on the hosts; its reply is the answer.
+      if (thread.outcome === ThreadOutcome.Done && !thread.resolved && thread.file_path !== null) {
         try {
           await this.jobs.resolve(repo, row.prNumber, session, thread.comment_id);
           thread.resolved = true;

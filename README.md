@@ -21,12 +21,16 @@ ops-console open
 
 `OPS_CONSOLE_VERSION=<version>` installs a given release instead of the latest.
 
+launchd starts the console at login and again if it stops. macOS lists it as Ops Console under System Settings ›
+General › Login Items & Extensions › App Background Activity; keep it switched on there. Several browsers can use
+it at once: `ops-console open "Google Chrome"` signs in a browser other than the default.
+
 | Command | What |
 |---|---|
 | `ops-console start` | Start the daemon under launchd and keep it running |
 | `ops-console stop` | Stop it until the next `start` |
 | `ops-console status` | Running or stopped, with pid, version, port and health |
-| `ops-console open` | Open the console in the browser, signed in |
+| `ops-console open [app]` | Open the console signed in, in the default browser or the browser app named |
 | `ops-console logs` | Follow the daemon log |
 | `ops-console update` | Install the latest release; restarts a running daemon |
 | `ops-console uninstall` | Remove the install; data and logs stay |
@@ -67,6 +71,15 @@ of the app, so it reads them without asking. Its log streams into the `pnpm dev`
 pnpm check             # lint, typecheck and tests in every package
 pnpm db:generate       # write a migration after changing backend/src/db/schema.ts
 pnpm package           # build out/ops-console-darwin-<arch>.tar.gz on this Mac
+```
+
+To try the install flow from your build, with `pnpm dev` still holding 4545:
+
+```
+pnpm build && pnpm package
+(cd out && shasum -a 256 ops-console-darwin-*.tar.gz > checksums.txt)
+OPS_CONSOLE_RELEASE_URL="file://$PWD/out" sh install.sh
+OPS_CONSOLE_PORT=4547 ops-console start
 ```
 
 Pushing a `v*` tag builds both tarballs on macOS runners, installs and runs each, then attaches them

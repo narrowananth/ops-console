@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { type DiskAccess, WS_PROTOCOL } from '@ops-console/shared';
+import { type DiskAccess, type StartAtLogin, WS_PROTOCOL } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { ConnectionsModule } from '../src/connections/connections.module';
@@ -11,6 +11,7 @@ import { ConnectorsModule } from '../src/connectors/connectors.module';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import type { DiskAccessGate } from '../src/terminals/disk-access';
 import type { KeychainItem, LocalKeychain } from '../src/terminals/local-sources';
+import type { StartAtLoginGate } from '../src/terminals/start-at-login';
 import { TerminalsModule } from '../src/terminals/terminals.module';
 import { TerminalsService } from '../src/terminals/terminals.service';
 import { type AgentDaemon, api, startAgentDaemon, until } from './agent-fixtures';
@@ -507,5 +508,37 @@ describe('Full Disk Access for the Setup agent', () => {
     diskAccess.granted = true;
     const after = await api(ctx.daemon).get('/terminals/disk-access');
     expect(after.body.data).toEqual({ granted: true, app_path: '/Applications/Ops Console.app' });
+  });
+});
+
+/** launchd's agent as the operator switches it under App Background Activity; tests never open System Settings. */
+class FakeStartAtLogin implements StartAtLoginGate {
+  state: StartAtLogin = { on: false, dev_build: false };
+  opened = 0;
+
+  async check(): Promise<StartAtLogin> {
+    return this.state;
+  }
+
+  async openSettings(): Promise<void> {
+    this.opened += 1;
+  }
+}
+
+describe('Start at login', () => {
+  it('reports it off, opens Login Items, and reports it on once switched on', async () => {
+    const startAtLogin = new FakeStartAtLogin();
+    const ctx = await start({ startAtLogin });
+    const before = await api(ctx.daemon).get('/terminals/start-at-login');
+    expect(before.status).toBe(200);
+    expect(before.body.data).toEqual({ on: false, dev_build: false });
+
+    const opened = await api(ctx.daemon).post('/terminals/start-at-login/settings');
+    expect(opened.status).toBe(204);
+    expect(startAtLogin.opened).toBe(1);
+
+    startAtLogin.state = { on: true, dev_build: false };
+    const after = await api(ctx.daemon).get('/terminals/start-at-login');
+    expect(after.body.data).toEqual({ on: true, dev_build: false });
   });
 });

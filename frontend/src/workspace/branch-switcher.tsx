@@ -42,7 +42,10 @@ export function BranchSwitcher({ session, all, repo }: { session: Session; all: 
         aria-expanded={open}
         aria-label={`Branch ${session.branch}`}
         disabled={block !== null}
-        title={block ?? 'Switch branch'}
+        title={
+          block ??
+          `Switch branch. ${dirty ? 'Changed: uncommitted edits are stashed before switching.' : 'Clean: no uncommitted edits.'}`
+        }
         onClick={() => setOpen(!open)}
         className={`flex max-w-70 items-center gap-1.5 rounded-full border px-3 py-1 text-xs text-text transition-colors enabled:cursor-pointer enabled:hover:bg-neutral-200 ${
           open ? 'border-divider bg-neutral-200' : 'border-line bg-card'
@@ -94,7 +97,10 @@ export function BranchSwitcher({ session, all, repo }: { session: Session; all: 
                   >
                     <span className="min-w-0 flex-1 truncate">{branch.name}</span>
                     {branch.has_open_pr && (
-                      <span className="rounded-full bg-neutral-200 px-1.5 font-sans text-[10px] whitespace-nowrap text-neutral-700">
+                      <span
+                        title="This branch has an open pull request"
+                        className="rounded-full bg-neutral-200 px-1.5 font-sans text-[10px] whitespace-nowrap text-neutral-700"
+                      >
                         open PR
                       </span>
                     )}
@@ -119,6 +125,7 @@ export function BranchSwitcher({ session, all, repo }: { session: Session; all: 
             />
             <Button
               className="px-2.5 py-1.25 text-xs"
+              title="Make a new branch from the current one and switch this Session to it"
               disabled={name.trim() === '' || checkout.isPending}
               onClick={() => go(name.trim(), true)}
             >

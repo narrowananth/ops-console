@@ -32,11 +32,18 @@ Claude Code binary. The system Node is never used. The Node binary sits inside `
 macOS names the daemon Ops Console when the operator grants it Full Disk Access; `node/bin/node`
 links to it for the CLI and the MCP helpers.
 
-`ops-console start` writes a LaunchAgent plist that runs `current/Ops Console.app` on
-`current/app/main.js`. The data folder is `~/Library/Application Support/ops-console`
+`ops-console start` writes a LaunchAgent plist (`RunAtLoad`, `KeepAlive`) that runs `current/Ops Console.app` on
+`current/app/main.js`, so launchd starts the daemon at login and again if it stops. macOS lists it as Ops Console
+under App Background Activity in Login Items & Extensions; switched off there, it does not start at login. The Setup agent's
+Permissions show it as Start at login, read from the plist and `launchctl print-disabled`. `OPS_CONSOLE_PORT` at
+`start` goes into the plist. The data folder is `~/Library/Application Support/ops-console`
 (`OPS_CONSOLE_DATA_DIR` overrides it) and holds `state.db`, `runtime.json` (pid, port, version,
 session token; mode `0600`), `daemon.lock`, each Claude account's config dir and each Anonymous
 Session's folder. The log is `~/Library/Logs/ops-console/daemon.log`.
+
+To try an install before a release, `pnpm build`, `pnpm package` and a `checksums.txt` beside the tarball in `out/`,
+then `OPS_CONSOLE_RELEASE_URL=file://<repo>/out sh install.sh`. Run it on another port than 4545 while `pnpm dev`
+holds it.
 
 `bin/ops-console` also starts two helpers from the daemon bundle: `mcp-exec`, the launcher that
 reads a stdio MCP Server's env vars from the Keychain, and `mcp-setup`, the Setup agent's MCP
@@ -83,13 +90,13 @@ agent Session.
 | `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks; secrets via Keychain |
 | `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash and checkout |
 | `agent` | Sessions and their kinds, Claude Agent SDK runs, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors |
-| `playbooks` | Playbooks and the Trigger each one holds, the built-ins and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each (registered by `agent`) |
+| `playbooks` | Playbooks and the Trigger each one holds, the built-ins (each Trigger's method, steps and shared rules on evidence, data, Connections and git) and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each (registered by `agent`) |
 | `accounts` | Claude accounts, their usage, Auto-switch and Smart usage |
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
-| `workspace` | `repo`, `pr_review` and `anonymous` Sessions; branch checkout with stash; pull requests, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews; Reply checks and Comment passes, one job per pull request at a time, each in a scratch copy at the pull request's head commit, with the console committing, pushing, replying and resolving |
+| `workspace` | `repo`, `pr_review` and `anonymous` Sessions; branch checkout with stash; pull requests, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews, Reply checks and Comment passes, one job per pull request at a time, each in a scratch copy at the pull request's head commit; an Agent Review also fetches the target branch to compare with, may run the tests and build, and the console posts its findings and one summary comment; for the others the console commits, pushes, replies and resolves |
 | `monitor` | Services, Routes, Scans and Alerts through `pup`; finding a Service's code; the Alert's Session; Verification and Reports; the operator's Review; the Fix from ticket to merged PR |
 | `devtools` | `devtools` Sessions scoped to Connections; ties MCP calls to their Connection; the PROD-write rule; the instructions that make the agent hand over Results and a Comparison |
-| `terminals` | node-pty terminals behind an authenticated WebSocket; the Setup agent, its MCP tools, local file, folder, URL and Keychain reads with secrets masked, and the Full Disk Access gate |
+| `terminals` | node-pty terminals behind an authenticated WebSocket; the Setup agent, its MCP tools, local file, folder, URL and Keychain reads with secrets masked; the Full Disk Access and Start at login gates |
 
 ## Frontend areas
 
@@ -102,16 +109,17 @@ agent Session.
 | `devtools` | Dev tools page (terminal-style `devtools` Sessions scoped to Connections, Results, Comparison) and the Connections page and form |
 | `integrations` | Integrations page: Connectors and MCP Servers |
 | `repos` | Repos page |
-| `setup` | Setup agent page with its xterm terminal |
+| `setup` | Setup agent page with its xterm terminal, and Permissions: Full Disk Access, Start at login, Keychain |
 | `playbooks` | Playbooks page: Triggers, Playbooks, the editor with drag and drop, Step blocks; unsaved edits kept as a Remembered view; a job's Playbook steps |
 | `agents` | Agents & accounts page, Session transcript, model, effort and Access mode chips, Approval prompts, Report rendering |
-| `mcp`, `components/ui` | MCP status labels; shared controls |
+| `mcp`, `components/ui` | MCP status labels; shared controls, the folding card title, and the Tip layer that shows every element's `title` as a styled Tip on hover and keyboard focus |
 
 ## Data flow
 
 **REST.** Every `/api` call carries `Authorization: Bearer <token>`. Bodies and responses are Zod
 schemas in `shared/`. `ops-console open` passes the token in the URL fragment; the UI moves it into
-local storage and drops it on `unauthorized`.
+local storage and drops it on `unauthorized`. Any number of browsers on the Mac that hold the token work at once
+on the one daemon (`ops-console open <app>` signs another browser in): each keeps its own Remembered view, and `/ws` events reach all of them.
 
 **WebSocket.** `/ws` sends server-to-client events only, with the token as the second subprotocol.
 `Store.write` runs one transaction and sends its events after the commit. The UI turns each event into
@@ -146,12 +154,14 @@ commit of the Verify Playbook's branch (the default branch when blank), fetched 
 under `scratch/` in the data directory, removed once the Report is ready. The Report also
 goes to a Markdown file in the Datadog Connector's reports folder. Confirming the Report starts the
 Fix in the same Session, in the checkout and in a new conversation, stage by stage (ticket, branch,
-steps, PR), each agent run ending with JSON.
+steps, PR), each agent run ending with JSON. The ticket stage runs only when the Fix Playbook's Jira ticket switch is
+on and Jira is connected; otherwise the branch is `fix/<name>`.
 
 **Playbooks.** Each Trigger holds one Playbook, or its built-in. A job (Verification, Fix, Agent
-Review) copies its Trigger's Playbook when it starts and runs each step as its own turn, ending
+Review, Reply check, Comment pass) copies its Trigger's Playbook when it starts and runs each step as its own turn, ending
 done, skipped or failed; a failed step stops the job. After the last step the console's own closing
-turn writes the Report or the review, and a Fix goes on to its PR. Chats (Session message, Reply in thread, Ask) read their
+turn writes the Report or the review, and a Fix goes on to its PR. A step tagged scratch copy may write files and
+run commands, only in the job's scratch copy. Chats (Session message, Reply in thread, Ask) read their
 Playbook's rules at each turn. An Alert's Session uses the rules its latest job copied.
 
 **Workspace pull requests.** Lists span every repository of every owner the operator can read on
@@ -214,3 +224,9 @@ Where the build departs from `design/ops-console.html` on purpose:
 - **Merge** is a button for the operator only; the agent has no merge tool.
 - **Connectors** add Sentry and drop Kafka.
 - **Dev tools** adds a Comparison under the per-Connection Results, and Copy JSON on each.
+- **Agent Review card** shows a verdict (approve, request changes, comment), findings rated critical to info with a
+  count of each, the commits it read and compared with, and the full report, in place of the design's blockers,
+  suggestions and nits.
+- **Tips** on every control, status and count whose words leave its meaning open, and a "?" beside such labels.
+- **Folding cards**: each card with a title folds to it, and stays folded for that kind of card.
+- **Permissions** on the Setup agent page add Start at login.

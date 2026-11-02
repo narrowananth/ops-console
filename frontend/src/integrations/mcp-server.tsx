@@ -9,7 +9,7 @@ import {
   useUpdateMcpServer,
 } from '../lib/queries';
 import { ascending } from '../lib/sort';
-import { statusGlyph } from '../mcp/status';
+import { type StatusLook, statusGlyph } from '../mcp/status';
 import { IntegrationRow, rowAction, rowActionAttention } from './integration-row';
 
 const mono = 'font-mono';
@@ -47,6 +47,19 @@ function RowAction({ server, onManage }: { server: McpServer; onManage: () => vo
   );
 }
 
+const REMOVED: StatusLook = {
+  glyph: '◐ removed',
+  className: 'text-accent-700',
+  tip: 'No longer registered in Claude Code. The agent cannot use it until it is added again.',
+};
+
+/** What a Details row means, for the rows whose name leaves it open. */
+const DETAIL_TIPS: Record<string, string> = {
+  Scope:
+    "Where Claude Code keeps it: user is every project on this machine, project lives in a Repo's .mcp.json file, local is this project only.",
+  Transport: 'How Claude Code talks to it: stdio runs a command on this machine; http and sse call a URL.',
+};
+
 /** An MCP Server in the Integrations list. */
 export function ServerRow({ server, selected, onOpen }: { server: McpServer; selected: boolean; onOpen: () => void }) {
   const failed = server.status === HealthStatus.Fail && server.status_detail;
@@ -60,7 +73,7 @@ export function ServerRow({ server, selected, onOpen }: { server: McpServer; sel
       line={failed ? (server.status_detail ?? '') : `${server.scope} · ${server.target}${tools}`}
       alert={Boolean(failed)}
       selected={selected}
-      status={server.registered ? statusGlyph[server.status] : { glyph: '◐ removed', className: 'text-accent-700' }}
+      status={server.registered ? statusGlyph[server.status] : REMOVED}
       onOpen={onOpen}
       action={<RowAction server={server} onManage={onOpen} />}
     />
@@ -106,7 +119,9 @@ export function McpDetail({ server, onBack }: { server: McpServer; onBack: () =>
           key={key}
           className="grid grid-cols-[130px_minmax(0,1fr)] gap-3 border-b border-line px-5 py-2 text-[13px]"
         >
-          <span className="text-neutral-700">{key}</span>
+          <span title={DETAIL_TIPS[key]} className="text-neutral-700">
+            {key}
+          </span>
           <span className={`${mono} text-xs break-all`}>{value}</span>
         </div>
       ))}

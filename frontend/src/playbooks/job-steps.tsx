@@ -5,10 +5,17 @@ import { Pathway, PathwayProgress, type PathwayState, type PathwayStep } from '.
 import { usePlaybooks } from '../lib/queries';
 import { holderOf } from './labels';
 
+/** What the "scratch copy" tag means, wherever a step carries it. */
+export const SCRATCH_TIP =
+  'This step may write files and run local commands, in a throwaway scratch copy of the code. Your own checkout stays as it is.';
+
 /** The tag on a step that writes files or runs commands. */
 export function ScratchTag() {
   return (
-    <span className="flex-none rounded-full border border-warn/50 px-1.75 text-[10px] font-normal whitespace-nowrap text-warn">
+    <span
+      title={SCRATCH_TIP}
+      className="flex-none rounded-full border border-warn/50 px-1.75 text-[10px] font-normal whitespace-nowrap text-warn"
+    >
       scratch copy
     </span>
   );
@@ -33,9 +40,21 @@ export function PlaybookLink({
   title?: string;
 }) {
   const text = label ?? playbook.name;
-  if (playbook.id === null) return <span className={pill}>{text}</span>;
+  if (playbook.id === null)
+    return (
+      <span
+        title={title ?? 'The rules and steps this run followed: a built-in Playbook, or one since deleted.'}
+        className={pill}
+      >
+        {text}
+      </span>
+    );
   return (
-    <Link to={`/playbooks?playbook=${encodeURIComponent(playbook.id)}`} title={title} className={pill}>
+    <Link
+      to={`/playbooks?playbook=${encodeURIComponent(playbook.id)}`}
+      title={title ?? 'The rules and steps this run followed. Open it on the Playbooks page.'}
+      className={pill}
+    >
       {text}
     </Link>
   );
@@ -158,7 +177,16 @@ export function JobFailure({
       )}
       {canRetry && (
         <div className="flex flex-wrap gap-2">
-          <Button className="px-2.5 py-1 text-xs" disabled={retry.isPending} onClick={() => retry.mutate(false)}>
+          <Button
+            className="px-2.5 py-1 text-xs"
+            title={
+              step === null
+                ? 'Run again. Only what the console left undone after the steps runs again.'
+                : `Run again from step ${step}. The steps before it keep their results.`
+            }
+            disabled={retry.isPending}
+            onClick={() => retry.mutate(false)}
+          >
             {retry.isPending && <Spinner />}
             {step === null ? 'Retry' : `Retry from step ${step}`}
           </Button>
@@ -179,7 +207,7 @@ export function SkipStep({ step, disabled, onSkip }: { step: number; disabled: b
   return (
     <Button
       className="px-2.5 py-1 text-xs"
-      title="Mark this step skipped and go on from the next one"
+      title={`Mark step ${step} skipped and go on from the next one. That step does not run again.`}
       disabled={disabled}
       onClick={onSkip}
     >

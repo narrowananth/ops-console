@@ -38,7 +38,9 @@ async function make(request: APIRequestContext, name: string, steps: Step[] = []
 async function saved(request: APIRequestContext, id: string) {
   const list = await request.get(`${daemon.url}/api/playbooks`, { headers: auth });
   const { data } = (await list.json()) as {
-    data: { items: { id: string; name: string; rules: string; branches: string; steps: Step[] }[] };
+    data: {
+      items: { id: string; name: string; rules: string; branches: string; jira_ticket: boolean; steps: Step[] }[];
+    };
   };
   return data.items.find((item) => item.id === id);
 }
@@ -83,7 +85,7 @@ test('Playbooks lists the seven Triggers under their tabs, the built-ins and the
     await expect(triggers.getByRole('listitem', { name: trigger, exact: true })).toContainText('Built-in');
   }
   await expect(playbooks).toContainText('No Playbooks yet. Duplicate a built-in or start a new one.');
-  await expect(playbooks.getByRole('button', { name: /^Verify \(built-in\)/ })).toContainText('built-in · 4 steps');
+  await expect(playbooks.getByRole('button', { name: /^Verify \(built-in\)/ })).toContainText('built-in · 8 steps');
   await expect(playbooks.getByRole('button', { name: /^Session message \(built-in\)/ })).toContainText(
     'built-in · rules only',
   );
@@ -113,8 +115,8 @@ test('Playbooks lists the seven Triggers under their tabs, the built-ins and the
   await expect(instructions).toBeVisible();
 
   for (const [name, count, closing] of [
-    ['Check reply', 2, 'Check reply: give the verdict and the reply.'],
-    ['Address comments', 3, 'Address comments: report each thread done or declined.'],
+    ['Check reply', 4, 'Check reply: give the verdict and the reply.'],
+    ['Address comments', 6, 'Address comments: report each thread done or declined.'],
   ] as const) {
     const builtin = playbooks.getByRole('button', { name: new RegExp(`^${name} \\(built-in\\)`) });
     await expect(builtin).toContainText(`built-in · ${count} steps`);
@@ -225,7 +227,7 @@ test('unsaved edits stay through a page switch, a reload and a new tab until Sav
   expect((await saved(request, id))?.rules).toBe('Read only.');
 });
 
-test('Branch saves the branches Verify and Fix read the code from; a name git would take as an option is refused', async ({
+test('Branch and the Jira ticket switch save what Verify and Fix read; a name git would take as an option is refused', async ({
   page,
   request,
 }) => {
@@ -233,13 +235,19 @@ test('Branch saves the branches Verify and Fix read the code from; a name git wo
   await open(page, id);
   const { editor } = regions(page);
   const branch = editor.getByRole('textbox', { name: 'Branch' });
+  const ticket = editor.getByRole('switch', { name: 'Jira ticket' });
   await expect(branch).toHaveValue('');
   await expect(branch).toHaveAttribute('placeholder', /blank: the Repo's default branch/);
+  await expect(ticket).toHaveAttribute('aria-checked', 'false');
 
   await branch.fill('production, master, main');
+  await ticket.click();
+  await expect(ticket).toHaveAttribute('aria-checked', 'true');
   await editor.getByRole('button', { name: 'Save' }).click();
   await expect(editor.getByRole('button', { name: 'Save' })).toHaveCount(0);
-  expect((await saved(request, id))?.branches).toBe('production, master, main');
+  expect(await saved(request, id)).toMatchObject({ branches: 'production, master, main', jira_ticket: true });
+  await page.reload();
+  await expect(ticket).toHaveAttribute('aria-checked', 'true');
 
   await branch.fill('--upload-pack=x');
   await editor.getByRole('button', { name: 'Save' }).click();
@@ -289,7 +297,7 @@ test('a built-in reads only and Duplicate makes an editable copy; New Playbook s
   await editor.getByRole('button', { name: 'Duplicate' }).click();
   await expect(editor.getByRole('textbox', { name: 'Name' })).toHaveValue('Copy of Verify (built-in)');
   await expect(editor.getByRole('textbox', { name: 'Name' })).not.toHaveAttribute('readonly', '');
-  await expect(editor.getByRole('textbox', { name: 'Step title' })).toHaveCount(4);
+  await expect(editor.getByRole('textbox', { name: 'Step title' })).toHaveCount(8);
   await expect(editor.getByRole('button', { name: 'Delete' })).toBeVisible();
   expect(page.url()).toMatch(/playbook=[0-9a-f-]{36}/);
 
@@ -301,7 +309,7 @@ test('a built-in reads only and Duplicate makes an editable copy; New Playbook s
   expect(names.data.items.filter((item: { builtin: boolean }) => !item.builtin)).toHaveLength(2);
 });
 
-test('a Playbook goes on a Trigger by drag, dropdown or Attach to and comes off by drag, dropdown or Detach; Review PR refuses writes', async ({
+test('a Playbook goes on a Trigger by drag, dropdown or Attach to and comes off by drag, dropdown or Detach; Review PR takes writes', async ({
   page,
   request,
 }) => {
@@ -330,11 +338,11 @@ test('a Playbook goes on a Trigger by drag, dropdown or Attach to and comes off 
   await expect(slot('Verify')).toContainText('Checkout deep check');
   await expect(row('Checkout deep check')).toContainText('Verify');
 
+  // A step tagged scratch copy runs in Review PR's scratch copy, so Review PR takes the Playbook.
   await row('Checkout deep check').dragTo(slot('Review PR'));
-  await expect(triggers.getByRole('alert')).toHaveText('Review PR reads only: remove Make mock data first.');
-  await expect(slot('Review PR')).toContainText('Built-in');
-  await pick('Review PR', 'Checkout deep check');
-  await expect(triggers.getByRole('alert')).toHaveText('Review PR reads only: remove Make mock data first.');
+  await expect(slot('Review PR')).toContainText('Checkout deep check');
+  await expect(triggers.getByRole('alert')).toHaveCount(0);
+  await pick('Review PR', 'Built-in');
   await expect(slot('Review PR')).toContainText('Built-in');
 
   await attach('Workspace · Session message');
@@ -415,6 +423,7 @@ const builtinsList = (held: { id: string; name: string; triggers: string[] }[]) 
       builtin: false,
       rules: '',
       branches: '',
+      jira_ticket: false,
       steps: [],
       updated_at: NOW,
     })),
@@ -676,7 +685,37 @@ const pullRequest = (review: unknown) => ({
   comment_passes: [],
 });
 
-test('Review with agent names the Review PR Playbook, and the Agent Review shows its name and steps', async ({
+const agentReview = (extra: Record<string, unknown>) => ({
+  id: 'ar1',
+  repo_id: 'r1',
+  pr_number: 7,
+  head_sha: '9c1e4b7d00000000000000000000000000000000',
+  status: 'ready',
+  decision: null,
+  verdict: null,
+  base_branch: null,
+  base_sha: null,
+  report: null,
+  error: null,
+  findings: [],
+  checklist: [],
+  tools: [],
+  created_at: NOW,
+  stale: false,
+  playbook: null,
+  ...extra,
+});
+
+const finding = (severity: string, file: string | null, line: number | null, text: string) => ({
+  severity,
+  file,
+  line,
+  text,
+  comment_id: null,
+  post_error: null,
+});
+
+test('Review with agent names the Review PR Playbook, and the Agent Review shows its name, steps, verdict, findings worst first and full report', async ({
   page,
 }) => {
   await page.route('**/api/playbooks', (route) =>
@@ -685,23 +724,25 @@ test('Review with agent names the Review PR Playbook, and the Agent Review shows
   await page.route('**/api/repos/r1/pull-requests/7', (route) =>
     route.fulfill({
       json: {
-        data: pullRequest({
-          id: 'ar1',
-          repo_id: 'r1',
-          pr_number: 7,
-          head_sha: '9c1e4b7d00000000000000000000000000000000',
-          status: 'ready',
-          verdict: 'Ready once the cache has a TTL.',
-          findings: [],
-          checklist: [],
-          tools: [],
-          created_at: NOW,
-          stale: true,
-          playbook: jobPlaybook('pb-prod', 'PROD readiness', [
-            ['Find who else uses it', 'done', 'Only checkout-api reads tax rates.'],
-            ['Check PROD readiness', 'done', 'No migration; the cache needs a TTL.'],
-          ]),
-        }),
+        data: pullRequest(
+          agentReview({
+            decision: 'request_changes',
+            verdict: 'Ready once the cache has a TTL.',
+            base_branch: 'production',
+            base_sha: '4a7f2c9e00000000000000000000000000000000',
+            report: '## Tax cache\n\nThe rate cache never expires.',
+            findings: [
+              finding('low', 'src/tax.ts', 9, 'Name this rate.'),
+              finding('critical', 'src/cart.ts', 12, 'An empty cart throws on checkout.'),
+              finding('medium', null, null, 'No test covers the empty cart.'),
+            ],
+            stale: true,
+            playbook: jobPlaybook('pb-prod', 'PROD readiness', [
+              ['Find who else uses it', 'done', 'Only checkout-api reads tax rates.'],
+              ['Check PROD readiness', 'done', 'No migration; the cache needs a TTL.'],
+            ]),
+          }),
+        ),
       },
     }),
   );
@@ -718,6 +759,23 @@ test('Review with agent names the Review PR Playbook, and the Agent Review shows
   await expect(steps.nth(2)).toContainText('findings, checklist and verdict');
   await expect(steps.nth(1)).toContainText('Check PROD readiness');
   await expect(steps.nth(1)).toContainText('No migration; the cache needs a TTL.');
+
+  await expect(card.getByText('REQUEST CHANGES', { exact: true })).toBeVisible();
+  await expect(card).toContainText('Reviewed 9c1e4b7 against production at 4a7f2c9');
+  const reviewedAt = await page.evaluate((at) => new Date(at).toLocaleString(), NOW);
+  await expect(card).toContainText(reviewedAt);
+  await expect(card.getByRole('group', { name: 'Findings by severity' })).toHaveText(
+    /^1 Critical\s*0 High\s*1 Medium\s*1 Low\s*0 Info$/,
+  );
+  await expect(card).toContainText(
+    /Critical src\/cart\.ts:12\s*An empty cart throws on checkout\.\s*Medium\s*No test covers the empty cart\.\s*Low src\/tax\.ts:9\s*Name this rate\./,
+  );
+
+  const report = card.getByRole('heading', { name: 'Tax cache' });
+  await expect(report).toBeHidden();
+  await card.getByText('Full report', { exact: true }).click();
+  await expect(report).toBeVisible();
+  await expect(card.getByText('The rate cache never expires.')).toBeVisible();
 });
 
 test("a running Report, Fix and Agent Review each stop their Session's run", async ({ page }) => {
@@ -753,20 +811,7 @@ test("a running Report, Fix and Agent Review each stop their Session's run", asy
     route.fulfill({
       json: {
         data: {
-          ...pullRequest({
-            id: 'ar1',
-            repo_id: 'r1',
-            pr_number: 7,
-            head_sha: '9c1e4b7d00000000000000000000000000000000',
-            status: 'running',
-            verdict: null,
-            findings: [],
-            checklist: [],
-            tools: [],
-            created_at: NOW,
-            stale: false,
-            playbook: null,
-          }),
+          ...pullRequest(agentReview({ status: 'running' })),
           agent_session_id: 'sr7',
         },
       },
@@ -825,4 +870,30 @@ test('a Session names the Playbook its rules come from and links to it', async (
   await page.getByRole('link', { name: 'Playbook: Safe DB fix' }).click();
   await expect(regions(page).editor.getByRole('textbox', { name: 'Rules' })).toHaveValue('Never write to PROD.');
   expect(page.url()).toContain(`/playbooks?playbook=${id}`);
+});
+
+test('the Agent Review folds to its header from the chevron, and stays folded after a reload', async ({ page }) => {
+  await page.route('**/api/repos/r1/pull-requests/7', (route) =>
+    route.fulfill({
+      json: {
+        data: pullRequest(agentReview({ verdict: 'Ready once the cache has a TTL.' })),
+      },
+    }),
+  );
+  await page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1/7#token=${daemon.token}`);
+
+  const card = page.getByRole('region', { name: 'Agent Review' });
+  const fold = card.getByRole('button', { name: 'Fold Agent Review' });
+  await expect(card.getByText('Ready once the cache has a TTL.')).toBeVisible();
+  await expect(fold).toHaveAttribute('aria-expanded', 'true');
+
+  await fold.click();
+  await expect(fold).toHaveAttribute('aria-expanded', 'false');
+  await expect(card.getByText('Ready once the cache has a TTL.')).toBeHidden();
+  await expect(card.getByText('ready', { exact: true })).toBeVisible();
+
+  await page.reload();
+  await expect(fold).toHaveAttribute('aria-expanded', 'false');
+  await fold.click();
+  await expect(card.getByText('Ready once the cache has a TTL.')).toBeVisible();
 });

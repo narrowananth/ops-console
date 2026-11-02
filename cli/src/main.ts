@@ -19,7 +19,7 @@ const USAGE = `Usage: ops-console <command>
   start       Start the daemon and keep it running
   stop        Stop the daemon until the next start
   status      Show whether the daemon runs
-  open        Open the console in the browser
+  open [app]  Open the console in the browser, or in the browser app named
   logs        Follow the daemon log
   update      Install the latest version
   uninstall   Remove ops-console, keeping data and logs
@@ -94,8 +94,10 @@ async function open(): Promise<number> {
     return 1;
   }
   const url = `http://127.0.0.1:${running.port}/#token=${running.token}`;
-  console.log(`Opening http://127.0.0.1:${running.port}`);
-  return spawnSync('open', [url], { stdio: 'inherit' }).status ?? 1;
+  // A second browser signs in the same way, by name; the token never shows in the terminal.
+  const browser = process.argv[3];
+  console.log(`Opening http://127.0.0.1:${running.port}${browser ? ` in ${browser}` : ''}`);
+  return spawnSync('open', browser ? ['-a', browser, url] : [url], { stdio: 'inherit' }).status ?? 1;
 }
 
 function logs(): Promise<number> {

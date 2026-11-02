@@ -60,6 +60,7 @@ import {
   serviceSchema,
   sessionDefaultsSchema,
   sessionSchema,
+  startAtLoginSchema,
   statusCodeCountSchema,
   terminalListSchema,
   type UpdateConnection,
@@ -89,6 +90,7 @@ export const queryKeys = {
   session: (id: string) => ['sessions', id] as const,
   messages: (id: string) => ['messages', id] as const,
   diskAccess: ['disk-access'] as const,
+  startAtLogin: ['start-at-login'] as const,
   terminals: ['terminals'] as const,
   playbooks: ['playbooks'] as const,
 };
@@ -399,6 +401,20 @@ export function useDiskAccess() {
 export function useOpenDiskAccessSettings() {
   return useMutation({
     mutationFn: () => apiSend('POST', '/terminals/disk-access/settings', undefined, z.undefined()),
+  });
+}
+
+export function useStartAtLogin() {
+  return useQuery({
+    queryKey: queryKeys.startAtLogin,
+    queryFn: () => apiGet('/terminals/start-at-login', z.object({ data: startAtLoginSchema })).then((r) => r.data),
+    refetchOnWindowFocus: 'always',
+  });
+}
+
+export function useOpenLoginItemsSettings() {
+  return useMutation({
+    mutationFn: () => apiSend('POST', '/terminals/start-at-login/settings', undefined, z.undefined()),
   });
 }
 

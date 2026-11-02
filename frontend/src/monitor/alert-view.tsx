@@ -15,14 +15,17 @@ import {
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
+import { REPORT_KIND_TIP } from '../agents/report-document';
 import { StopRun } from '../agents/stop-run';
 import { Button, Spinner } from '../components/ui/button';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { DiffLines } from '../components/ui/diff';
 import { Dropdown } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
+import { FoldTitle, useFold } from '../components/ui/fold';
 import { Markdown } from '../components/ui/markdown';
 import { Pathway, PathwayProgress, type PathwayState, type PathwayStep, StatusPill } from '../components/ui/pathway';
+import { Hint } from '../components/ui/tip';
 import {
   useAlert,
   useAlertEvents,
@@ -50,8 +53,22 @@ import {
 } from '../playbooks/job-steps';
 import { withPlaybook } from '../playbooks/labels';
 import { sessionPath } from '../workspace/links';
+import { STATUS_TIP } from './logs-pane';
 import { CodeSource } from './repo-link';
 import { SeverityBadge } from './severity';
+
+const REPORT_STATUS_TIP: Record<RunStatus, string> = {
+  [RunStatus.Running]: 'The agent is verifying the Alert. Each Playbook step runs as its own turn.',
+  [RunStatus.Ready]: 'The Report is written. Review it below: Fix it, or dismiss it.',
+  [RunStatus.Failed]: 'The Verification stopped before the Report was written. Retry it or verify again.',
+};
+
+const FIX_STATUS_TIP: Record<FixStatus, string> = {
+  [FixStatus.Running]: 'The agent is working through the Fix stages.',
+  [FixStatus.Done]: 'The PR is open. Merging it resolves the Alert.',
+  [FixStatus.Failed]: 'A stage failed. Retry from it, or cancel the Fix.',
+  [FixStatus.Abandoned]: 'The Fix was cancelled, or its PR was closed unmerged. The Alert is back at its Review.',
+};
 
 function SampleList({ samples }: { samples: Sample[] }) {
   const [asJson, setAsJson] = useStored('monitor.samples-json', z.boolean(), false);
@@ -59,9 +76,11 @@ function SampleList({ samples }: { samples: Sample[] }) {
     <section aria-label="Samples">
       <div className="flex items-center gap-2 py-1.5">
         <strong className="text-[13px]">Samples ({samples.length})</strong>
+        <Hint text="Datadog log events kept on this Alert. Secret values and request body values are redacted." />
         <button
           type="button"
           aria-pressed={asJson}
+          title={asJson ? 'Show each Sample as its time, level and message' : 'Show the Samples as raw JSON'}
           onClick={() => setAsJson((on) => !on)}
           className="ml-auto cursor-pointer border border-divider bg-transparent px-2 py-0.5 text-[11px] text-text"
         >
@@ -100,11 +119,20 @@ function ReportPanel({
   const [picked, setPicked] = useStored(`monitor.report.${alertId}`, z.string().nullable(), null);
   const versions = reports.data ?? [report];
   const shown = versions.find((row) => row.id === picked) ?? report;
+  const [folded, toggle] = useFold('report');
   return (
     <section aria-label="Report" className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
-      <header className="flex items-center gap-2 border-b border-divider bg-surface px-4 py-2 text-xs">
-        <strong>Report v{shown.version}</strong>
-        {shown.kind && <span className="rounded-full bg-neutral-200 px-2 py-px">{shown.kind}</span>}
+      <header
+        className={`flex items-center gap-2 bg-surface px-4 py-2 text-xs ${folded ? '' : 'border-b border-divider'}`}
+      >
+        <FoldTitle label="Report" folded={folded} onToggle={toggle}>
+          <strong>Report v{shown.version}</strong>
+        </FoldTitle>
+        {shown.kind && (
+          <span title={REPORT_KIND_TIP[shown.kind]} className="rounded-full bg-neutral-200 px-2 py-px">
+            {shown.kind}
+          </span>
+        )}
         {versions.length > 1 && (
           <Dropdown
             label="Report version"
@@ -120,17 +148,23 @@ function ReportPanel({
         )}
         <span className="ml-auto flex items-center gap-2">
           {sessionId && (
-            <Link to={sessionPath(sessionId)} className="text-xs">
+            <Link
+              to={sessionPath(sessionId)}
+              className="text-xs"
+              title="Open the Alert's Session in Workspace to read every agent turn"
+            >
               Open the Session →
             </Link>
           )}
           {shown.status === RunStatus.Running && sessionId && (
             <StopRun sessionId={sessionId} title="Stop the Verification; it fails and can retry from its step" />
           )}
-          <StatusPill state={runState(shown.status)}>{shown.status}</StatusPill>
+          <span title={REPORT_STATUS_TIP[shown.status]}>
+            <StatusPill state={runState(shown.status)}>{shown.status}</StatusPill>
+          </span>
         </span>
       </header>
-      <div className="flex flex-col gap-3 px-4 py-3 text-[13px]">
+      <div hidden={folded} className="flex flex-col gap-3 px-4 py-3 text-[13px]">
         {shown.status !== RunStatus.Ready && (
           <>
             {shown.status === RunStatus.Failed && (
@@ -164,7 +198,12 @@ function ReportPanel({
             )}
             {shown.diff && (
               <details>
-                <summary className="cursor-pointer text-xs text-neutral-700">Proposed diff</summary>
+                <summary
+                  className="cursor-pointer text-xs text-neutral-700"
+                  title="The code change the agent proposes. Nothing is changed until you start a Fix."
+                >
+                  Proposed diff
+                </summary>
                 <div className="mt-1.5 overflow-hidden rounded-lg border border-divider bg-card">
                   <DiffLines lines={shown.diff} />
                 </div>
@@ -172,14 +211,22 @@ function ReportPanel({
             )}
             {shown.replay && (
               <details>
-                <summary className="cursor-pointer text-xs text-neutral-700">Replay</summary>
+                <summary
+                  className="cursor-pointer text-xs text-neutral-700"
+                  title="The request the agent replayed locally against its scratch copy, and the answer it got"
+                >
+                  Replay
+                </summary>
                 <pre className="m-0 mt-1.5 overflow-auto font-mono text-xs">{shown.replay.request}</pre>
                 <pre className="m-0 overflow-auto font-mono text-xs text-neutral-700">{shown.replay.response}</pre>
               </details>
             )}
             {shown.steps.length > 0 && (
               <details>
-                <summary className="cursor-pointer text-xs text-neutral-700">
+                <summary
+                  className="cursor-pointer text-xs text-neutral-700"
+                  title="Each tool call and message from the Verification, in order"
+                >
                   Agent steps ({shown.steps.length})
                 </summary>
                 <div className="mt-1.5">
@@ -204,7 +251,10 @@ function VerificationPath({ report }: { report: Report }) {
       {report.playbook && (
         <div className="flex items-center gap-2 text-xs">
           <span className="text-neutral-700">Playbook</span>
-          <PlaybookLink playbook={report.playbook} />
+          <PlaybookLink
+            playbook={report.playbook}
+            title="The Playbook this Verification follows. Its rules and steps were copied when it started."
+          />
         </div>
       )}
       <JobPath
@@ -264,6 +314,7 @@ const outLink = 'font-semibold text-text';
 function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: (skip: boolean) => void; retrying: boolean }) {
   const cancel = useCancelFix(fix.id);
   const [asking, setAsking] = useState(false);
+  const [fixFolded, toggleFix] = useFold('fix');
   const cancellable = (fix.status === FixStatus.Running || fix.status === FixStatus.Failed) && fix.pr_number === null;
   const at = FIX_STAGES.indexOf(fix.stage);
   const stageState = (index: number): PathwayState =>
@@ -285,7 +336,12 @@ function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: (skip: boo
         </span>
       )}
       <div className="flex flex-wrap gap-2">
-        <Button className="px-2.5 py-1 text-xs" disabled={retrying} onClick={() => onRetry(false)}>
+        <Button
+          className="px-2.5 py-1 text-xs"
+          title="Run the failed stage again and carry on from there. Work already done is kept."
+          disabled={retrying}
+          onClick={() => onRetry(false)}
+        >
           {retrying && <Spinner />}
           {fix.stage === FixStage.Steps && failed !== null
             ? `Retry from step ${failed}`
@@ -320,6 +376,9 @@ function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: (skip: boo
         {
           key: stage,
           title: 'Ticket',
+          aside: (
+            <Hint text="The Jira issue for this Fix. Made only when Jira is connected and the Fix Playbook's Jira ticket switch is on. Its key starts the branch name." />
+          ),
           state: noJira ? 'skipped' : state,
           children: (fix.jira_key || noJira || failedHere) && (
             <>
@@ -350,7 +409,10 @@ function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: (skip: boo
           children: (fix.branch || failedHere) && (
             <>
               {fix.branch && (
-                <span className="self-start rounded-full bg-neutral-200 px-2 py-0.5 font-mono text-text">
+                <span
+                  title="The branch the agent made for this Fix. It is pushed with the commit."
+                  className="self-start rounded-full bg-neutral-200 px-2 py-0.5 font-mono text-text"
+                >
                   {fix.branch}
                 </span>
               )}
@@ -386,12 +448,26 @@ function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: (skip: boo
       className="flex flex-col gap-3.5 rounded-xl border border-line bg-card px-5 py-4 shadow-sm"
     >
       <div className="flex flex-wrap items-center gap-2 text-[13px]">
-        <strong className="font-heading text-sm">Fix</strong>
-        <StatusPill state={FIX_STATE[fix.status]}>{fix.status}</StatusPill>
-        {fix.playbook && <PlaybookLink playbook={fix.playbook} label={`Playbook: ${fix.playbook.name}`} />}
+        <FoldTitle label="Fix" folded={fixFolded} onToggle={toggleFix}>
+          <strong className="font-heading text-sm">Fix</strong>
+        </FoldTitle>
+        <span title={FIX_STATUS_TIP[fix.status]}>
+          <StatusPill state={FIX_STATE[fix.status]}>{fix.status}</StatusPill>
+        </span>
+        {fix.playbook && (
+          <PlaybookLink
+            playbook={fix.playbook}
+            label={`Playbook: ${fix.playbook.name}`}
+            title="The Playbook this Fix follows. Its rules and steps were copied when it started."
+          />
+        )}
         <span className="ml-auto flex items-center gap-3">
           {fix.session_id && (
-            <Link to={sessionPath(fix.session_id)} className="text-xs">
+            <Link
+              to={sessionPath(fix.session_id)}
+              className="text-xs"
+              title="Open the Alert's Session in Workspace to read every agent turn"
+            >
               Open the Session →
             </Link>
           )}
@@ -435,8 +511,12 @@ function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: (skip: boo
           </p>
         </ConfirmDialog>
       )}
-      <PathwayProgress steps={steps} />
-      <Pathway label="Fix progress" steps={steps} />
+      {!fixFolded && (
+        <>
+          <PathwayProgress steps={steps} />
+          <Pathway label="Fix progress" steps={steps} />
+        </>
+      )}
     </section>
   );
 }
@@ -458,6 +538,7 @@ export function AlertView({ id }: { id: string }) {
   const data = alert.data;
   const jira = connectors.data?.data.find((connector) => connector.id === 'jira');
   const jiraUp = jira?.status === 'ok';
+  const ticket = jiraUp && fixPlaybook?.jira_ticket === true;
   const report = data.latest_report;
   const verifying = data.status === AlertStatus.Verifying;
   // Shown greyed while the agent verifies, so a second click cannot start another run.
@@ -467,6 +548,7 @@ export function AlertView({ id }: { id: string }) {
   // Only the newest Report can run again from its failed step.
   const retryFrom = report?.status === RunStatus.Failed ? failedStep(report.playbook) : null;
   const kind = report?.kind ?? ReportKind.Bug;
+  const fixSteps = `${ticket ? 'a Jira ticket, ' : ''}a branch, the Fix Playbook's steps, a push and a pull request. Nothing merges by itself.`;
   const other = kind === ReportKind.Bug ? ReportKind.Improvement : ReportKind.Bug;
 
   return (
@@ -474,26 +556,36 @@ export function AlertView({ id }: { id: string }) {
       <header>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <SeverityBadge severity={data.severity} />
-          <span className="text-neutral-700">{data.status.replace('_', ' ')}</span>
+          <span className="text-neutral-700" title={STATUS_TIP[data.status]}>
+            {data.status.replace('_', ' ')}
+          </span>
           {data.regression_count > 0 && (
-            <span className="rounded-full bg-accent-100 px-2 py-px text-accent-700">
+            <span
+              title={`It failed again after a healthy Scan ${data.regression_count} ${data.regression_count === 1 ? 'time' : 'times'}, and reopened`}
+              className="rounded-full bg-accent-100 px-2 py-px text-accent-700"
+            >
               regression ×{data.regression_count}
             </span>
           )}
           {data.waiting_since && (
-            <span className="text-neutral-700">waiting since {new Date(data.waiting_since).toLocaleString()}</span>
+            <span className="text-neutral-700" title="When the Report became ready. It waits for your Review.">
+              waiting since {new Date(data.waiting_since).toLocaleString()}
+            </span>
           )}
         </div>
         <h1 className="m-0 mt-1 text-lg break-words">{data.title}</h1>
         <div className="flex flex-wrap items-center gap-x-2 font-mono text-xs text-neutral-700">
           <span className="font-bold text-text">{data.service.name}</span>
-          <span>{data.service.env}</span>
+          <span title="The Datadog env these logs came from. no env means the logs carry no env tag.">
+            {data.service.env}
+          </span>
           <span>·</span>
           <span>{data.route ? `${data.route.method} ${data.route.path}` : 'no HTTP route'}</span>
           {data.route && (
             <button
               type="button"
               className="cursor-pointer border-0 bg-transparent p-0 font-sans text-[11px] text-accent hover:underline"
+              title="This Route never raises an Alert again. Use it for a Route that is expected to fail."
               disabled={patchRoute.isPending}
               onClick={() => data.route && patchRoute.mutate({ id: data.route.id, ignored: true })}
             >
@@ -508,7 +600,12 @@ export function AlertView({ id }: { id: string }) {
         <pre className="m-0 mt-2 rounded-lg bg-neutral-900 p-3 font-mono text-xs whitespace-pre-wrap break-all text-neutral-100">
           {data.log_line}
         </pre>
-        <div className="mt-1 font-mono text-[11px] break-all text-neutral-700">{data.datadog_query}</div>
+        <div
+          className="mt-1 font-mono text-[11px] break-all text-neutral-700"
+          title="The Datadog log search that finds these failures. Paste it into Datadog Logs to see them there."
+        >
+          {data.datadog_query}
+        </div>
       </header>
 
       {error && (
@@ -524,6 +621,13 @@ export function AlertView({ id }: { id: string }) {
           <Button
             variant="primary"
             disabled={verify.isPending || verifying || !hasCode}
+            title={
+              !hasCode
+                ? 'Give the code first: pick a local Repo or a Git URL above'
+                : verifying
+                  ? 'The agent is verifying. Stop it in the Report to start again.'
+                  : 'The agent follows the log through the code in a scratch copy, reads databases only, replays the request where it can, and writes a Report. It changes no code.'
+            }
             onClick={() => verify.mutate()}
           >
             {(verify.isPending || verifying) && <Spinner />}
@@ -540,6 +644,7 @@ export function AlertView({ id }: { id: string }) {
             <>
               <Button
                 disabled={retryReport.isPending || verify.isPending}
+                title="Run the failed step again and go on from there. Steps already done are kept."
                 onClick={() => retryReport.mutate({ id: report.id })}
               >
                 {retryReport.isPending && <Spinner />}
@@ -568,6 +673,7 @@ export function AlertView({ id }: { id: string }) {
             <Button
               variant="primary"
               disabled={review.isPending}
+              title={`Confirm the Report as ${kind === ReportKind.Bug ? 'a bug' : 'an improvement'} and start the Fix: ${fixSteps}`}
               onClick={() => review.mutate({ decision: ReviewDecision.Confirmed, kind })}
             >
               {review.isPending && <Spinner />}
@@ -575,6 +681,7 @@ export function AlertView({ id }: { id: string }) {
             </Button>
             <Button
               disabled={review.isPending}
+              title={`Confirm it as ${other === ReportKind.Bug ? 'a bug' : 'an improvement'} instead, then start the same Fix`}
               onClick={() => review.mutate({ decision: ReviewDecision.Confirmed, kind: other })}
             >
               {withPlaybook(`Fix as ${other}`, fixPlaybook)}
@@ -582,6 +689,7 @@ export function AlertView({ id }: { id: string }) {
             <Button
               variant="ghost"
               disabled={review.isPending}
+              title="Set the Alert aside with no Fix. You can undo it, and a new failure after a healthy Scan reopens it."
               onClick={() => review.mutate({ decision: ReviewDecision.Dismissed, kind: null })}
             >
               Dismiss
@@ -589,8 +697,12 @@ export function AlertView({ id }: { id: string }) {
           </div>
           <span className="text-xs text-neutral-700">
             {data.service.repo_id ? 'In a Session on the local Repo' : 'In an anonymous Session with a clone'}:{' '}
-            {jiraUp ? 'a Jira ticket, then ' : ''}a branch, the code change, tests, a push and a pull request.
-            {jiraUp ? '' : ' Jira is not connected, so the branch is fix/<name>.'}
+            {ticket ? 'a Jira ticket, then ' : ''}a branch, the Fix Playbook's steps, a push and a pull request.
+            {ticket
+              ? ''
+              : jiraUp
+                ? ' The Fix Playbook makes no Jira ticket, so the branch is fix/<name>.'
+                : ' Jira is not connected, so the branch is fix/<name>.'}
           </span>
         </section>
       )}
@@ -601,6 +713,7 @@ export function AlertView({ id }: { id: string }) {
           <Button
             variant="ghost"
             className="px-2 py-0.5 text-xs"
+            title="Take back the dismissal. The Alert goes back to its Report for a Review."
             disabled={undo.isPending}
             onClick={() => undo.mutate()}
           >
@@ -614,7 +727,8 @@ export function AlertView({ id }: { id: string }) {
       <SampleList samples={data.samples} />
 
       <section aria-label="Events">
-        <strong className="text-[13px]">Events</strong>
+        <strong className="text-[13px]">Events</strong>{' '}
+        <Hint text="Everything that happened to this Alert, oldest first, and who did it" />
         <ol className="m-0 mt-1 list-none p-0 font-mono text-xs">
           {(events.data ?? []).map((event) => (
             <li key={event.id}>
