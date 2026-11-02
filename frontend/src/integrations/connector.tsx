@@ -2,7 +2,7 @@ import { CONNECTOR_NAMES, type Connector, ConnectorId, HealthStatus } from '@ops
 import { useState } from 'react';
 import { BrandIcon, CONNECTOR_BRAND } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
-import { useConnectConnector, useDisconnectConnector } from '../lib/queries';
+import { useCancelConnectorSignIn, useConnectConnector, useDisconnectConnector } from '../lib/queries';
 import { type StatusLook, statusGlyph } from '../mcp/status';
 import { IntegrationRow, rowAction, rowActionAttention } from './integration-row';
 
@@ -30,9 +30,10 @@ const NO_SIGN_IN: ConnectorId[] = [ConnectorId.Shopify];
 export function ConnectorDrawer({ connector, onBack }: { connector: Connector; onBack: () => void }) {
   const connect = useConnectConnector();
   const disconnect = useDisconnectConnector();
+  const cancel = useCancelConnectorSignIn();
   const [confirming, setConfirming] = useState(false);
   const connected = connector.status !== HealthStatus.Off;
-  const error = connect.error ?? disconnect.error;
+  const error = connect.error ?? disconnect.error ?? cancel.error;
   const status = connectorStatus(connector);
 
   return (
@@ -52,7 +53,13 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
           <div className="text-[15px] font-extrabold">Connect {connector.name} to Ops Console</div>
           <div className="text-xs text-neutral-700">Reached through {connector.via}.</div>
         </div>
-        <SignInStep connector={connector} pending={connect.isPending} onConnect={() => connect.mutate(connector.id)} />
+        <SignInStep
+          connector={connector}
+          pending={connect.isPending}
+          cancelling={cancel.isPending}
+          onConnect={() => connect.mutate(connector.id)}
+          onCancel={() => cancel.mutate(connector.id)}
+        />
         {error && (
           <div role="alert" className="text-xs text-accent-700">
             {error.message}
@@ -95,7 +102,13 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
 }
 
 /** Connect hands off to the provider's own sign-in page; nothing is typed here. */
-function SignInStep(props: { connector: Connector; pending: boolean; onConnect: () => void }) {
+function SignInStep(props: {
+  connector: Connector;
+  pending: boolean;
+  cancelling: boolean;
+  onConnect: () => void;
+  onCancel: () => void;
+}) {
   const { connector } = props;
   const signIn = connector.sign_in;
   const connected = connector.status === HealthStatus.Ok;
@@ -144,6 +157,16 @@ function SignInStep(props: { connector: Connector; pending: boolean; onConnect: 
         >
           {signIn ? 'Waiting…' : connected ? 'Reconnect' : 'Connect'}
         </Button>
+        {signIn && (
+          <Button
+            className="shrink-0"
+            title="Stop waiting for this sign-in. Connect starts it again."
+            disabled={props.cancelling}
+            onClick={props.onCancel}
+          >
+            Cancel
+          </Button>
+        )}
       </div>
       {signIn && (signIn.code || signIn.url) && (
         <div className="flex flex-wrap items-center gap-3 rounded-md bg-neutral-200 px-3.5 py-3">

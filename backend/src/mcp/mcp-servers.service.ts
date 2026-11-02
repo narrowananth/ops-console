@@ -225,29 +225,24 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /**
-   * Authenticate, waiting for the sign-ins and the check; `signal` stops the sign-in. Connectors follow the result. A
-   * server `added` just now holds no sign-in in any account, so each account's browser sign-in opens without reading
-   * it first, the active account's first.
+   * Authenticate, waiting for the sign-in and the check; `signal` stops the sign-in. Connectors follow the result. A
+   * server `added` just now holds no sign-in yet, so the active account's browser sign-in opens without reading it
+   * first.
    */
   async authenticateAndCheck(
     name: string,
     options: { signal?: AbortSignal; added?: boolean } = {},
   ): Promise<McpServer> {
     await this.authenticatePrepare(name);
-    const accounts = options.added ? this.signedInAccounts() : await this.signInAccounts(name);
+    const accounts = options.added ? this.activeAccounts() : await this.signInAccounts(name);
     return this.signIn(name, accounts, options.signal);
-  }
-
-  /** Every signed-in account, the active one first. */
-  private signedInAccounts(): Account[] {
-    const active = this.accounts.activeId();
-    const all = this.accounts.all().filter((account) => account.signedIn);
-    return [...all.filter((account) => account.id === active), ...all.filter((account) => account.id !== active)];
   }
 
   /** The active account, else the first signed in. */
   private activeAccounts(): Account[] {
-    return this.signedInAccounts().slice(0, 1);
+    const all = this.accounts.all().filter((account) => account.signedIn);
+    const active = all.find((account) => account.id === this.accounts.activeId()) ?? all[0];
+    return active ? [active] : [];
   }
 
   /**
@@ -261,20 +256,21 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /**
-   * Each signed-in account whose Probe reads `auth`, the active one first. Each account keeps its own token, and a run
-   * moves to another account when the active one runs low, so every account signs in: one browser sign-in each.
+   * The active account, when its Probe reads `auth`. The others sign in when they become active: each account keeps
+   * its own token, and signing in all of them would open one browser sign-in per account on every Connect.
    */
   private async signInAccounts(name: string): Promise<Account[]> {
-    const local = await this.localDir();
-    const views = (await this.views(false)).filter((view) => view.account.signedIn);
+    const [account] = this.activeAccounts();
+    if (!account) return [];
+    const pick = (views: Awaited<ReturnType<typeof this.views>>) =>
+      views.find((view) => view.account.id === account.id);
+    let view = pick(await this.views(false));
     // No kept reading yet: connect this one server alone, not every server in the account.
-    const unread = views.filter((view) => view.state(name)?.status === HealthStatus.Checking);
-    await Promise.all(unread.map((view) => this.probeServer(view.account, local, name)));
-    const read = unread.length > 0 ? (await this.views(false)).filter((view) => view.account.signedIn) : views;
-    const waiting = new Set(
-      read.filter((view) => view.state(name)?.status === HealthStatus.Auth).map((view) => view.account.id),
-    );
-    return this.signedInAccounts().filter((account) => waiting.has(account.id));
+    if (view?.state(name)?.status === HealthStatus.Checking) {
+      await this.probeServer(account, await this.localDir(), name);
+      view = pick(await this.views(false));
+    }
+    return view?.state(name)?.status === HealthStatus.Auth ? [account] : [];
   }
 
   /** Reads one server in one account into the kept Probe: it connects alone in a second or two. */
@@ -862,9 +858,11 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
           const state = view.state(name);
           return state ? [state] : [];
         });
-      // Any account's `auth` counts: a run moves to another account when the active one runs low.
+      // Only the active account's `auth` counts: the others sign in when they become active.
+      const active = this.activeAccounts()[0]?.id ?? null;
       const worst =
-        states.find((s) => s.status === HealthStatus.Fail) ?? states.find((s) => s.status === HealthStatus.Auth);
+        states.find((s) => s.status === HealthStatus.Fail) ??
+        states.find((s) => s.status === HealthStatus.Auth && (active === null || s.account === active));
       // An account still `checking` waits on its Probe; one that answered connected speaks for the server meanwhile.
       const reading = worst ??
         states.find((s) => s.status === HealthStatus.Ok) ??

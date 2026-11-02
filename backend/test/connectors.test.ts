@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import { CONNECTOR_ORDER, ConnectorId, type WsEvent } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
@@ -251,6 +253,10 @@ describe('connecting', () => {
     );
     const server = (await api(ctx.daemon).get('/mcp-servers')).body.data.find((s: Row) => s.name === 'atlassian');
     expect(server).toMatchObject({ transport: 'http', status: 'ok', used_by: 'jira' });
+    // One browser sign-in per Connect: only the active account signs in.
+    const [active, other] = ctx.dirs as [string, string];
+    expect(existsSync(path.join(active, 'fake-mcp-auth.json'))).toBe(true);
+    expect(existsSync(path.join(other, 'fake-mcp-auth.json'))).toBe(false);
   });
 
   it('moves a Connector with its MCP server between checks', async () => {
@@ -278,6 +284,26 @@ describe('connecting', () => {
       'the passing check',
     );
     expect(back).toMatchObject({ status: 'ok', status_detail: null });
+  });
+
+  it('reads Slack connected while only an account that is not active needs its sign-in', async () => {
+    const ctx = await start();
+    await api(ctx.daemon).post('/connectors/slack/connect', {});
+    await until(
+      () => one(ctx, 'slack'),
+      (row) => row.status === 'ok' && row.sign_in === null,
+      'the sign-in',
+    );
+    const [, other] = ctx.dirs as [string, string];
+    ctx.probe.set(other, 'slack', { status: 'needs-auth' });
+    const runs = ctx.probe.runs;
+    await api(ctx.daemon).post('/mcp-servers/slack/checks', {});
+    await until(
+      async () => ctx.probe.runs,
+      (count) => count >= runs + 2,
+      'the check in both accounts',
+    );
+    expect(await one(ctx, 'slack')).toMatchObject({ status: 'ok', status_detail: null });
   });
 
   it('signs GitLab in through the browser, installing glab first, and skips it when glab is signed in', async () => {
@@ -473,6 +499,62 @@ describe('disconnecting', () => {
       await api(ctx.daemon).delete('/connectors/sentry/credentials');
       await until(
         () => logins('sentry'),
+        (count) => count === 0,
+        'the login to stop',
+      );
+    } finally {
+      delete process.env.FAKE_MCP_LOGIN;
+    }
+  });
+
+  it('Cancel stops a sign-in still waiting on the browser and leaves the Connector as it was', async () => {
+    const ctx = await start();
+    ctx.tools.next = 'hang';
+    await api(ctx.daemon).post('/connectors/github/connect', {});
+    await until(
+      () => one(ctx, 'github'),
+      (row) => row.sign_in !== null,
+      'the sign-in',
+    );
+    const cancelled = await api(ctx.daemon).delete('/connectors/github/sign-in');
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body.data).toMatchObject({ status: 'off', status_detail: null, sign_in: null });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await one(ctx, 'github')).toMatchObject({ status: 'off', sign_in: null });
+
+    // Nothing to stop: the Connector answers as it is.
+    expect((await api(ctx.daemon).delete('/connectors/github/sign-in')).body.data).toMatchObject({ status: 'off' });
+  });
+
+  it("Cancel stops Claude Code's MCP sign-in and keeps a connected Connector connected", async () => {
+    const ctx = await start();
+    await api(ctx.daemon).post('/connectors/jira/connect', {});
+    await until(
+      () => one(ctx, 'jira'),
+      (row) => row.status === 'ok' && row.sign_in === null,
+      'the first sign-in',
+    );
+    for (const dir of ctx.dirs) ctx.probe.set(dir, 'atlassian', { status: 'needs-auth' });
+    await rm(path.join(ctx.dirs[0] ?? '', 'fake-mcp-auth.json'), { force: true });
+    // The sign-in expired: a check reads it before the operator presses Connect again.
+    await api(ctx.daemon).post('/mcp-servers/atlassian/checks', {});
+    await until(
+      async () => (await api(ctx.daemon).get('/mcp-servers')).body.data.find((s: Row) => s.name === 'atlassian'),
+      (server) => server?.status === 'auth',
+      'the expired sign-in',
+    );
+    process.env.FAKE_MCP_LOGIN = 'hang';
+    try {
+      await api(ctx.daemon).post('/connectors/jira/connect', {});
+      await until(
+        () => logins('atlassian'),
+        (count) => count === 1,
+        'claude mcp login',
+      );
+      const cancelled = await api(ctx.daemon).delete('/connectors/jira/sign-in');
+      expect(cancelled.body.data).toMatchObject({ status: 'ok', sign_in: null });
+      await until(
+        () => logins('atlassian'),
         (count) => count === 0,
         'the login to stop',
       );

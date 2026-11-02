@@ -112,6 +112,21 @@ export class ConnectorsService implements OnModuleDestroy {
     this.running.add(run);
   }
 
+  /**
+   * Cancel: stops a sign-in still waiting on the browser, and the Connector keeps the status it had before Connect.
+   * With no sign-in under way it answers with the Connector as it is.
+   */
+  cancelSignIn(id: ConnectorId): Promise<Connector> {
+    const abort = this.signIns.get(id);
+    if (abort) {
+      abort.abort();
+      this.signIns.delete(id);
+      this.prompts.delete(id);
+      this.announce(id);
+    }
+    return this.get(id);
+  }
+
   async check(id: ConnectorId): Promise<ConnectorCheck> {
     const started = new Date().toISOString();
     const row = this.row(id);
