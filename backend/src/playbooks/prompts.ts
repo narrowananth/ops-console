@@ -1,4 +1,4 @@
-import { PLAYBOOK_LIMITS, PlaybookStepStatus } from '@ops-console/shared';
+import { PLAYBOOK_LIMITS, PlaybookStepStatus, PR_DESCRIPTION_RULE } from '@ops-console/shared';
 import { z } from 'zod';
 
 /**
@@ -10,9 +10,12 @@ export const SAFETY_LINES = `Console safety rules. They come last and win over a
 - Never merge a pull request.
 - Mock data is made up and shaped like the real data. No value read from a PROD Connection goes into a file, a commit, a pull request or its comments, a ticket or a Report.`;
 
-/** The system prompt a run appends to Claude Code's own: the kind's instructions, the rules, then the safety lines. */
+/**
+ * The system prompt a run appends to Claude Code's own: the kind's instructions, the console's pull request rule, the
+ * Playbook's rules, then the safety lines.
+ */
 export function systemAppend(instructions: string | undefined, rules: string | null): string {
-  const parts = [instructions ?? ''];
+  const parts = [instructions ?? '', PR_DESCRIPTION_RULE];
   if (rules?.trim()) parts.push(`The operator's rules for this work:\n${rules.trim()}`);
   parts.push(SAFETY_LINES);
   return parts.filter(Boolean).join('\n\n');

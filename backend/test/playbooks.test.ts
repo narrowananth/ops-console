@@ -1,3 +1,4 @@
+import { PR_DESCRIPTION_RULE } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type AgentDaemon, api, converse, startAgentDaemon } from './agent-fixtures';
 
@@ -180,6 +181,7 @@ describe('Playbooks in chats', () => {
     await converse(daemon, session, 'hello');
     expect(append(daemon)).not.toContain("The operator's rules");
     expect(append(daemon)).toMatch(/No value read from a PROD Connection goes into a file/);
+    expect(append(daemon)).toContain(PR_DESCRIPTION_RULE);
     expect((await http.get(`/sessions/${session}`)).body.data.playbook).toBeNull();
 
     const safe = await create(http, 'Safe DB fix', { rules: 'Never touch the orders table.' });
@@ -188,6 +190,7 @@ describe('Playbooks in chats', () => {
     const text = append(daemon);
     expect(text.indexOf('Never touch the orders table.')).toBeGreaterThan(-1);
     expect(text.indexOf('Never touch the orders table.')).toBeLessThan(text.indexOf('Console safety rules'));
+    expect(text.indexOf(PR_DESCRIPTION_RULE)).toBeLessThan(text.indexOf('Never touch the orders table.'));
     expect((await http.get(`/sessions/${session}`)).body.data.playbook).toEqual({ id: safe.id, name: 'Safe DB fix' });
 
     await http.patch(`/playbooks/${safe.id}`, { rules: 'Ask before any migration.' });

@@ -11,6 +11,7 @@ import {
   FixStage,
   FixStatus,
   GitHost,
+  PlaybookStepStatus,
   PlaybookTrigger,
   PrState,
   SessionKind,
@@ -509,10 +510,9 @@ Change nothing else. ${JSON_ONLY}
     const prefix = key ? `${key}: ` : '';
     let fix = this.row(context.fix.id);
     if (fix.prNumber === null) {
-      const link = fix.jiraUrl ? `Link ${fix.jiraUrl} and summarize` : 'Summarize';
       const opened = await this.ask(
         context,
-        `${this.brief(context)}\n\nCommit the work${key ? ` with a message that starts with "${key}:"` : ''}, push branch ${fix.branch} to origin, and open a pull request on origin's Git host titled "${prefix}${context.alert.title}": gh for GitHub, glab for GitLab, the Bitbucket MCP server or API for Bitbucket. ${link} the Report in its description. Never merge it. ${JSON_ONLY}\n\n\`\`\`json\n{ "number": 123, "url": "https://github.com/owner/repo/pull/123" }\n\`\`\``,
+        `${this.brief(context)}\n\nCommit the work${key ? ` with a message that starts with "${key}:"` : ''}, push branch ${fix.branch} to origin, and open a pull request on origin's Git host titled "${prefix}${context.alert.title}": gh for GitHub, glab for GitLab, the Bitbucket MCP server or API for Bitbucket. Never merge it.\n\n${this.prMaterial(context, fix)}\n\n${JSON_ONLY}\n\n\`\`\`json\n{ "number": 123, "url": "https://github.com/owner/repo/pull/123" }\n\`\`\``,
         prSchema,
       );
       fix = this.store.write(
@@ -541,6 +541,30 @@ Change nothing else. ${JSON_ONLY}
       this.announce(tx, emit, fix);
     });
     if (context.service.repoId) this.pulls.drop(context.service.repoId);
+  }
+
+  /** What the pull request's description is written from: the Report, the steps' results and the links. */
+  private prMaterial(context: Context, fix: FixRow): string {
+    const steps = this.steps
+      .rows({ kind: 'fix', id: fix.id })
+      .map(
+        (step) =>
+          `- ${step.title}: ${step.summary ?? 'no summary'}${step.status === PlaybookStepStatus.Done ? '' : ` (${step.status})`}`,
+      );
+    const links = [
+      fix.jiraUrl && `- Jira: ${fix.jiraUrl}`,
+      `- Alert: "${context.alert.title}" on ${context.service.name}`,
+    ];
+    return `Write the description by the console's pull request description rule, in depth, from this material and from the diff of the branch.
+
+The Report:
+${context.report.markdown ?? `Root cause: ${context.report.rootCause}. Proposed fix: ${context.report.proposedFix}.`}
+
+The Fix's steps and what each found or did:
+${steps.join('\n') || '- none'}
+
+Links:
+${links.filter(Boolean).join('\n')}`;
   }
 
   private setStage(fixId: string, stage: FixStage): void {

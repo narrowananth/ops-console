@@ -247,6 +247,16 @@ test('Branch saves the branches Verify and Fix read the code from; a name git wo
   expect((await saved(request, id))?.branches).toBe('production, master, main');
 });
 
+test('every Playbook shows the console pull request description rule under its Rules', async ({ page, request }) => {
+  const id = await make(request, 'PR depth');
+  await open(page, id);
+  const { editor } = regions(page);
+  const rules = editor.getByRole('region', { name: 'Rules' });
+  await rules.getByText("Every run also gets the console's pull request description rule").click();
+  await expect(rules).toContainText('Testing: the commands you ran and their results');
+  await expect(rules).toContainText('Never a one-line description.');
+});
+
 test('a failed Save shows why under Save and keeps the edits', async ({ page, request }) => {
   await make(request, 'Alpha checks');
   const id = await make(request, 'Beta checks');
@@ -790,6 +800,7 @@ const session = (id: string, kind: string, playbook: { id: string; name: string 
   branch: null,
   pr_number: null,
   connection_ids: null,
+  alert_id: null,
   state: 'idle',
   last_message_preview: null,
   created_at: NOW,

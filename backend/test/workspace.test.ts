@@ -90,6 +90,33 @@ describe('Sessions in a Repo', () => {
     expect(created.body.data.model).toBeTruthy();
   });
 
+  it("starts on a branch only origin has, as a pull request's, made a local branch tracking it", async () => {
+    const ctx = await start();
+    const origin = path.join(await tempDir('ops-console-origin-'), 'orders-api.git');
+    execFileSync('git', ['init', '-q', '--bare', origin]);
+    git(ctx.dir, 'remote', 'set-url', 'origin', origin);
+    git(ctx.dir, 'push', '-q', 'origin', 'main', 'feature-1:pr-branch');
+
+    const refused = await ctx.http.post('/sessions', { repo_id: ctx.repoId, branch: 'pr-branch' });
+    expect(refused.body.error.code).toBe('validation_failed');
+    const created = await ctx.http.post('/sessions', { repo_id: ctx.repoId, branch: 'pr-branch', from_origin: true });
+    expect(created.status).toBe(201);
+    expect(created.body.data).toMatchObject({ kind: 'repo', branch: 'pr-branch', alert_id: null });
+    expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'pr-branch@{upstream}').toString().trim()).toBe(
+      'origin/pr-branch',
+    );
+    expect(git(ctx.dir, 'branch', '--show-current').toString().trim()).toBe('main');
+
+    const gone = await ctx.http.post('/sessions', { repo_id: ctx.repoId, branch: 'no-such', from_origin: true });
+    expect(gone.status).toBe(502);
+    expect(gone.body.error.code).toBe('upstream_failed');
+    const log = (await ctx.http.get('/action-log?kind=git')).body.data as { command: string; outcome: string }[];
+    expect(log.map((row) => [row.command, row.outcome]).sort()).toEqual([
+      ['git fetch origin no-such && git branch --track no-such origin/no-such', 'failed'],
+      ['git fetch origin pr-branch && git branch --track pr-branch origin/pr-branch', 'ok'],
+    ]);
+  });
+
   it('runs the agent in the Repo folder, in two Repos side by side, and refuses a second message mid-run', async () => {
     const ctx = await start();
     const other = await makeRepo('billing', 'git@github.com:acme/billing.git');

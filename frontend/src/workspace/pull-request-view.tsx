@@ -28,6 +28,7 @@ import { AgentReviewCard } from './agent-review-card';
 import { CommentPassCard } from './comment-pass-card';
 import { PrFileView, useViewed } from './pr-file';
 import { agentBusy, BUSY_TITLE, openLineThreads } from './pr-jobs';
+import { PrSessions } from './pr-sessions';
 import { CommentComposer, Thread } from './pr-thread';
 
 export function PullRequestView({ repoId, number }: { repoId: string; number: number }) {
@@ -176,6 +177,7 @@ function Loaded(props: {
             </span>
           )}
         </div>
+        <PrSessions pr={pr} />
         {changes !== null && (
           <div className="flex gap-1.5">
             <input

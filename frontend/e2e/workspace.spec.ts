@@ -31,6 +31,7 @@ const session = (id: string, repoId: string, title: string, state = 'idle', bran
   branch,
   pr_number: null,
   connection_ids: null,
+  alert_id: null,
   state,
   last_message_preview: null,
   created_at: NOW,
@@ -216,6 +217,39 @@ test('every message the operator sent copies; the last one edits, reverts the fi
   ]);
   await expect(page.getByRole('status')).toHaveText(/Put back 1 file \(\+4 −2\): src\/engage\.ts/);
   await expect(box).toHaveCount(0);
+});
+
+test('a Session opens at its newest message', async ({ page }) => {
+  const said = (n: number) => ({
+    id: `m${n}`,
+    role: n % 2 === 0 ? 'user' : 'agent',
+    status: 'done',
+    parts: [{ kind: 'text', text: `message ${n}` }],
+    created_at: NOW,
+  });
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform')] } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) =>
+    route.fulfill({ json: { data: Array.from({ length: 40 }, (_, n) => said(n)) } }),
+  );
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  await expect(page.getByText('message 39', { exact: true })).toBeInViewport();
+  await expect(page.getByText('message 0', { exact: true })).not.toBeInViewport();
+
+  // The map has a mark per message, the ones in view current; a mark scrolls to its message.
+  const marks = page.getByRole('navigation', { name: 'Conversation map' }).getByRole('button');
+  await expect(marks).toHaveCount(40);
+  await expect(marks.nth(39)).toHaveAttribute('aria-current', 'location');
+  await expect(marks.nth(0)).toHaveAccessibleName('You: message 0');
+  await marks.nth(0).click();
+  await expect(page.getByText('message 0', { exact: true })).toBeInViewport();
+  await expect(marks.nth(0)).toHaveAttribute('aria-current', 'location');
+  await expect(marks.nth(39)).not.toHaveAttribute('aria-current', 'location');
 });
 
 test("the agent's tool steps show as a path, the last one turning while the message streams", async ({ page }) => {

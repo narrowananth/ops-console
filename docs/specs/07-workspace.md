@@ -11,7 +11,7 @@ The operator works with the agent inside a Repo: one Session per piece of work, 
 
 Sessions in a Repo
 
-1. Creating a `repo` Session needs a Repo and one of its local branches; a branch the Repo does not have is `validation_failed`. A request with no `kind` makes a `repo` Session. Model, effort and access mode come from the session defaults unless the request sets them (`02-settings-agents`).
+1. Creating a `repo` Session needs a Repo and one of its local branches; a branch the Repo does not have is `validation_failed`. With `from_origin: true` such a branch, as a pull request's, is fetched from origin and made a local branch tracking it, without a checkout; that step writes an Action Log row of kind `git` first, and a branch origin does not have is `upstream_failed`. A request with no `kind` makes a `repo` Session. Model, effort and access mode come from the session defaults unless the request sets them (`02-settings-agents`).
 2. Sessions in different Repos run side by side. A second message to a Session whose run is still going is refused with `session_busy` (`02-settings-agents`).
 3. Removing a Repo that has Sessions asks the operator, in the Repo's row, to keep or delete them. Kept, the Repo
    and its Sessions leave every list, a run still going finishes unseen, and importing the same folder again brings
@@ -151,7 +151,7 @@ Every route under `/repos/:repo/pull-requests` answers `invalid_state` for a Rep
 
 ### `POST /sessions` (extends `02-settings-agents`)
 
-Adds `repo_id` and `branch`, required for kind `repo`, which is also the kind of a body with no `kind`. Kind `anonymous` takes neither, and an optional `title`. `pr_review` is never accepted. Errors: `validation_failed` when a `repo` Session misses either or names a branch the Repo does not have; `not_found` for an unknown Repo.
+Adds `repo_id` and `branch`, required for kind `repo`, which is also the kind of a body with no `kind`. An optional `from_origin` (Behavior 1) makes a branch only origin has. Kind `anonymous` takes neither, and an optional `title`. `pr_review` is never accepted. Errors: `validation_failed` when a `repo` Session misses either or names a branch the Repo does not have; `not_found` for an unknown Repo.
 
 ### `GET /repos/:id/branches` (extends `06-settings-repos`)
 
@@ -230,7 +230,11 @@ Adds `branch: string | null`.
 - A "No Repo" group above the Repos lists anonymous Sessions; its `+` starts one at once.
 - Session view: a header with the Repo's name (or "No Repo"), the title, the branch, the state and Delete, which is
   disabled while the Session runs or waits on the operator; a failed Delete shows why. An empty conversation says what
-  to ask. The composer holds the Model, Effort and Access chips, the branch switcher on a `repo` Session, and Send.
+  to ask. Beside the branch, "PR #N →" opens the open pull request on the Session's branch, and "Alert →" the
+  Monitor Alert whose Verification or Fix runs in the Session. The conversation opens at its newest message and follows new and streaming messages while the operator is
+  at the end; scrolled up to read, it stays where they left it. A map on its left edge has a mark per message, the operator's
+  longer and darker, and tints the marks of the messages in view. Hovering a mark names its message's first line;
+  clicking it scrolls there. The composer holds the Model, Effort and Access chips, the branch switcher on a `repo` Session, and Send.
   While a run goes, `waiting_input` included, Stop sits before Send and ends it (`02-settings-agents` Behavior 11a).
   The agent's tool steps show as a compact path; while its message streams, the last step turns. The state in the
   header is a pill: tinted and pulsing while a run goes, red when failed.
@@ -260,6 +264,10 @@ Adds `branch: string | null`.
   Merge is enabled only when approved, and asks "Merge #N on the host?" with Merge and Keep open. Agent Review reads
   "Starting…" while the request is out, and is greyed, reading "Agent reviewing…", while the latest review is
   `running`, and "Reviewed at this commit" while the latest is `ready` and not stale.
+- Under the buttons, "Sessions on <branch>:" links each `repo` Session on the pull request's branch, with its state,
+  or reads "none". New Session, on an open pull request in an imported Repo, starts a `repo` Session on that branch
+  (`from_origin: true`) and opens it, its draft reading "On pull request #N (title): " for the operator to say what to
+  change. A failed start shows why beside it.
 - The latest Agent Review sits in a card: the commit's short id, a stale badge, its status, the verdict, each finding
   with its `file:line` and "Not posted to the host:" with `post_error` when its post failed, the PROD readiness
   checklist and the Connections queried. A `running` review has Stop beside its status. A `failed` review reads "The

@@ -4,6 +4,7 @@ import {
   PLAYBOOK_TRIGGERS,
   type Playbook,
   type PlaybookTrigger,
+  PR_DESCRIPTION_RULE,
   StepBlock,
   TRIGGER_LABELS,
 } from '@ops-console/shared';
@@ -195,6 +196,14 @@ export function PlaybookEditor(props: {
             onChange={(event) => onChange({ ...working, rules: event.target.value })}
             className={`${field} min-h-18 resize-y text-[13px]`}
           />
+          <details className="mt-1.5 text-[11px] text-neutral-700">
+            <summary className="cursor-pointer">
+              Every run also gets the console's pull request description rule, before these rules
+            </summary>
+            <p className="m-0 mt-1 whitespace-pre-wrap rounded-lg border border-line bg-surface/40 px-3 py-2">
+              {PR_DESCRIPTION_RULE}
+            </p>
+          </details>
         </section>
 
         <section aria-label="Branch">

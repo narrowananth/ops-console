@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { type ConnectionTestResult, ConnectionType, HealthStatus } from '@ops-console/shared';
+import { materialize } from '../mcp/launcher';
 import { type Launch, pingFor } from './launch';
 
 export const CONNECTION_TESTER = Symbol('CONNECTION_TESTER');
@@ -19,13 +20,14 @@ export class McpConnectionTester implements ConnectionTester {
     const ping = pingFor(type);
     if (!ping) return { status: HealthStatus.Fail, latency_ms: null, detail: `no MCP server for ${type}` };
     const [command = '', ...args] = launch.target.split(' ');
+    const ready = await materialize(launch.env, args);
     const client = new Client({ name: 'ops-console', version: this.version });
     const started = Date.now();
     const timer = setTimeout(() => void client.close(), TIMEOUT_MS);
     const transport = new StdioClientTransport({
       command,
-      args,
-      env: { ...getDefaultEnvironment(), ...launch.env },
+      args: ready.args,
+      env: { ...getDefaultEnvironment(), ...ready.env },
       stderr: 'pipe',
     });
     let stderr = '';
@@ -49,6 +51,7 @@ export class McpConnectionTester implements ConnectionTester {
     } finally {
       clearTimeout(timer);
       await client.close().catch(() => {});
+      await ready.cleanup();
     }
   }
 }

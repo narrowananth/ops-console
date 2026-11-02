@@ -165,8 +165,8 @@ What the agent may do on a Connection: none, read, or read and write. Enforced w
 launches, not only shown.
 
 **PROD**:
-The Environment tag on a Connection that reaches production data. Always visible, and every write
-asks the operator first.
+The Environment tag on a Connection that reaches production data. Always visible, and the agent only
+reads it: a PROD Connection is never given write access.
 
 **MCP Server**:
 A server registered in Claude Code that gives the agent tools (Slack, Atlassian, a database). The

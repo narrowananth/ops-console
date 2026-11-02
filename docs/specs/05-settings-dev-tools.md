@@ -5,14 +5,15 @@
 
 ## Problem
 
-The agent checks a failing Route against real data: a Postgres table, a Mongo collection, a Redis key. The operator has to give it those databases without pasting passwords into chat or Claude's config, and has to know that a PROD database stays read only unless they say otherwise. Today that means writing MCP Server commands by hand, once per Claude account.
+The agent checks a failing Route against real data: a Postgres table, a Mongo collection, a Redis key. The operator has to give it those databases without pasting passwords into chat or Claude's config, and has to know that a PROD database stays read only. Today that means writing MCP Server commands by hand, once per Claude account.
 
 ## Behavior
 
 1. Creating a Connection stores its non-secret fields, puts its secret in the Keychain adapter under the Connection id, and registers an MCP Server of the same name in every account through the launcher (`03-settings-mcp-servers`). The launch arguments come from the type and the Access Level. Create, edit and delete answer within 200 ms: the row and the Keychain change first, and the `claude mcp` calls, near a second per account, run after the response in one queue, in order. A registration that fails marks the Connection's check failed, "not added to Claude Code: …". The first check runs once the server is registered. A deleted Connection's name is free at once, before its server is gone.
 2. Access Level `read` launches the server in read-only mode. `write` launches it with writes allowed. `none` registers no MCP Server, so the agent never sees it, and no Dev tools scope can name it (`09-dev-tools-agent` Behavior 2).
 3. Changing the Access Level registers the server again in every account with the new launch arguments, or removes it for `none`.
-4. A Connection with env `prod` reports `is_prod: true` on every read. A new Connection, PROD included, gets Access Level `read` unless the request sets another; a type with no read-only server gets `none`.
+4. A Connection with env `prod` reports `is_prod: true` on every read. A new Connection, PROD included, gets Access Level `read` unless the request sets another; a type with no read-only server gets `none`. A PROD Connection is never written: `write` on one, by create, by update, or by moving a `write` Connection to `prod`, is `validation_failed`.
+4a. A Firebase Connection's secret is a service-account key, as its JSON or that JSON in base64, for the Connection's own `project_id`; any other secret, or a key for another project, is `validation_failed`. `services` names products from `realtime_database`, `firestore`, `auth` and `storage`, read loosely (`realtime-database`, `Firestore`).
 5. Testing an unsaved Connection launches its server with the given secret held in memory, runs one read (a ping or a list of databases), and returns status, latency and the error. Nothing is stored.
 6. Checking a saved Connection does the same with the stored secret and records `status`, `latency_ms` and `last_checked_at`. A server that does not start or times out reads `fail` with the error, such as `connect ETIMEDOUT`. A server that exits at start reads `fail` with the error line it printed, secrets hidden. A test or check gives up after 30 seconds.
 7. Editing keeps blank fields as they were. A new secret replaces the Keychain entry. The type cannot change. Any change to name, Access Level, config or secret registers the server again; a new name removes the server under the old one. A change to env alone registers nothing.
@@ -21,7 +22,7 @@ The agent checks a failing Route against real data: a Postgres table, a Mongo co
 10. No response, log row or event carries a secret. Reads show `secret_stored`.
 11. The Setup agent has its own page, Setup agent, after Repos. Integrations shows "Add with Setup agent →" and
     Connections "Import with Setup agent →"; each opens it. Start setup agent starts a setup terminal: `claude --agent dev-tools-setup --model <model> --effort <effort> --mcp-config <its folder's MCP config> --strict-mcp-config --allowedTools <its setup tools> --tools "" --disable-slash-commands` in node-pty, with the active account's config dir and the model and effort from `session_defaults` (`ultrathink` runs as `max`, the CLI's top level), streamed over an authenticated WebSocket. The agent has no built-in tool, no slash command and no MCP Server but the console's own; it reaches the machine only through the console's setup tools. Those tools are allowed up front: the daemon already masks secrets and only adds, and in auto mode Claude Code would otherwise turn down a read of a credential file such as `~/.my.cnf`. It runs with `CLAUDE_CODE_NO_FLICKER=0`, Claude Code's classic renderer, so the page's terminal keeps scrollback; the full-screen renderer draws on the alternate screen, which has none.
-12. A line the operator types into the setup terminal goes through the daemon first. Values after `password`, `pass`, `pwd`, `token`, `secret` or `key`, and the password in a `user:password@` URI, are kept as pending secrets in the daemon's memory. Claude sees `{{secret:<n>}}` in their place, and the echo shows them masked. Only plain requests reach Claude. The page and the daemon both refuse a line that starts with a symbol (`/login`, `!cmd`, `#`), holds an `@path` word or a control character, or runs past 2,000 characters, and the daemon never writes it to the pty. The page shows why. A line break pasted into the page's box becomes a space. An empty line passes, since Enter alone confirms a prompt. The socket takes no raw keystrokes.
+12. A line the operator types into the setup terminal goes through the daemon first. Values after `password`, `pass`, `pwd`, `token`, `secret` or `key`, and the password in a `user:password@` URI, are kept as pending secrets in the daemon's memory. Claude sees `{{secret:<n>}}` in their place, and the echo shows them masked. Only plain requests reach Claude. The page and the daemon both refuse a line that starts with a symbol (`/login`, `!cmd`, `#`), or holds an `@path` word or a control character other than a line break, and the daemon never writes it to the pty. The page shows why. A request may be any length; the page's box grows with it up to half the window, then scrolls. In the page's box Shift+Enter adds a line and Enter sends. A request of several lines, typed or pasted, reaches Claude as one bracketed paste and then Enter, so no line submits on its own. An empty line passes, since Enter alone confirms a prompt. The socket takes no raw keystrokes.
 13. The setup agent works out the type, host, env and Access Level from the line, tests the connection and saves it through the console's tools. The tools take `{{secret:<n>}}` and resolve it inside the daemon. The secret never reaches Claude's transcript.
 14. When the setup agent needs a secret the operator did not give, it asks through the console's tools, and the Setup agent page shows a masked field. The value becomes a pending secret, and the agent gets only its placeholder.
 15. The setup agent can also connect a Connector, add a remote MCP Server by URL and authenticate an MCP Server, through the same code as those endpoints. The daemon refuses a `stdio` MCP Server from it: that would be a command the daemon runs. The agent turns down any request that is not setting one of these up. It can also import connections from files on the machine, from URLs and from the Keychain (`11-dev-tools-import`).
@@ -36,9 +37,14 @@ The agent checks a failing Route against real data: a Postgres table, a Mongo co
     are disabled, and the row says to drag Ops Console into the list, then run `ops-console stop` and `ops-console start`.
     "Open System Settings" opens the Full Disk Access pane and shows the app in Finder to drag into the list; the
     daemon takes the permission on its next start. A new bundled Node means a new signature, and macOS asks again.
-    Under `pnpm dev` the daemon is no app of its own: the row reads off · dev build, offers no System Settings, and
-    Start stays enabled. Keychain reads "asks each time": macOS asks before each saved password, and no setting
-    grants them ahead. Passwords another app keeps in its own Keychain access group stay out of reach either way.
+    `pnpm dev` does the same with `Ops Console (dev).app`, a bundle around the Node that runs it, with its own id,
+    started by launchd: macOS asks for the dev daemon's permissions under that name, never lends it those of the
+    terminal or editor that ran `pnpm dev`, and the row says to run `pnpm dev` again. Before a new build starts,
+    the console's Keychain items move to it (the program holding them reads and removes each, the new one saves it),
+    so no password prompt follows; the dev MCP launcher runs on the same binary. With `OPS_CONSOLE_DEV_INLINE=1`,
+    or off macOS, the daemon is no app of its own: the row reads off · dev build, offers no System Settings, and
+    Start stays enabled. Keychain reads "asks each time": macOS asks before each saved
+    password, and no setting grants them ahead. Passwords another app keeps in its own Keychain access group stay out of reach either way.
     The rows name no other product. The tab checks again when the page regains focus, and on "Check again". When a
     read fails with `no permission`, the agent asks the operator to turn the permission on.
 20. The Connections page keeps what it shows in the address: `?connection=new` for the type picker, `new:<type>` for
@@ -61,7 +67,7 @@ The agent checks a failing Route against real data: a Postgres table, a Mongo co
   | `mongodb` | `database`, may be blank | connection string |
   | `redis` | `host`, `port`, `db_index` | password, optional |
   | `clickhouse` | `host`, `http_port`, `database`, `user` | password, optional |
-  | `firebase` | `project_id`, `services` | service account JSON |
+  | `firebase` | `project_id`, `services` | service-account key, JSON or base64 |
   | `kafka` | `bootstrap_servers`, `sasl_mechanism`, `schema_registry_url`, `kafbat_url` | SASL password, optional |
 
 - **Read-only enforcement**: `/ship` picks, per type, an MCP Server that enforces read-only at launch (a flag, a config file or a read-only transaction). A type with no such server cannot be set to `read` until it has one. The Access Level is never only a label (GLOSSARY). The picks:
@@ -72,15 +78,16 @@ The agent checks a failing Route against real data: a Postgres table, a Mongo co
   | `mongodb` | `mongodb-mcp-server`, `MDB_MCP_CONNECTION_STRING` in env | `--readOnly` flag |
   | `clickhouse` | `mcp-clickhouse` | read-only unless `CLICKHOUSE_ALLOW_WRITE_ACCESS=true` |
   | `redis` | `redis-mcp-server` | none: `read` is refused, the default is `none` |
-  | `firebase`, `kafka` | none picked yet | saved with Access Level `none` only |
+  | `firebase` | `firebase-tools mcp`, the key in a file `GOOGLE_APPLICATION_CREDENTIALS` names and the project in `.firebaserc`, both in the launcher's private folder (ADR 0004) | `--tools` loads only the read tools of the project and its `services`; `write` loads them whole with `--only core,<services>` |
+  | `kafka` | none picked yet | saved with Access Level `none` only |
 
 - **Keychain keys**: the Connection's own secret is `connection:<id>`. The env vars its server reads at launch (the Postgres DSN, for one) are derived from it and sit under `mcp:<name>` for the launcher.
-- **Launch**: every Connection server starts through `ops-console mcp-exec <name> -- <command>`, which reads the secret at launch.
+- **Launch**: every Connection server starts through `ops-console mcp-exec <name> -- <command>`, which reads the secret at launch. A stored env key `@file:<name>` is a file, not an env var: `mcp-exec`, and the Connection test, write it to a private temp folder (700, the file 600), put that folder in place of `{{files}}` in the args and env values, and remove it when the server exits.
 - **Setup agent**: a Claude Code agent definition the console ships, with one MCP Server, `ops-console`. Its tools are `test_connection`, `save_connection`, `connect_connector`, `authenticate_mcp_server` and `request_secret`, plus the import tools and `add_mcp_server` from `11-dev-tools-import`. The REST endpoints and these tools run the same code.
 - **Terminal**: node-pty behind its own WebSocket, `/terminals/:id`. The setup terminal is its only kind. The macOS helper in `node-pty` ships without the execute bit, so the daemon sets it before the first spawn.
 - **Setup terminal folder**: each terminal runs in its own folder under the data folder, which holds the agent definition and the MCP config. The console marks the folder trusted, and the account onboarded, in the account's `.claude.json`, because Claude Code's folder prompt defaults to "No, exit". A `line` writes the text, then Enter 80 ms later, because Claude Code's prompt reads both together as a paste.
 - **Setup tools**: `ops-console mcp-setup` is the stdio MCP Server the agent runs. It posts each tool call to `POST /terminals/:id/tools/:tool` on the daemon, which resolves placeholders and runs the same code as the REST endpoints.
-- **PROD writes**: on a PROD Connection with `write`, every write the agent proposes waits for the operator's Approval (`02-settings-agents`). The PROD-write rule that tells a write from a read is in `09-dev-tools-agent`.
+- **PROD writes**: a PROD Connection is read-only or `none` (Behavior 4). The Approval that holds a write on a PROD Connection (`02-settings-agents`), and the rule that tells a write from a read (`09-dev-tools-agent`), stay for a PROD Connection saved with `write` before this rule.
 - **Design departure**: secrets go to the Keychain, not `~/.ops-console/secrets` (ADR 0004).
 
 ## Not required
@@ -191,8 +198,9 @@ Connections, as designed, without Add with Claude: "Import with Setup agent →"
 - Error: a failed test shows its error under the form; a refused save shows for 3 seconds; a failed Connection shows
   its reason in the row in place of type and host, and in its form. A Setup agent that fails to start shows why
   under the panel.
-- PROD: the PROD badge on the row and the form; with Read / write, the hint says every write on a PROD database
-  waits for the operator's approval.
+- PROD: the PROD badge on the row and the form. With PROD picked, Read / write is greyed out and the hint says a PROD
+  Connection is read-only; picking PROD while Read / write is on moves access to Read-only, or Off for a type with
+  no read-only server.
 
 ## Rejected
 

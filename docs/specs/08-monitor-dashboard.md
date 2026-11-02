@@ -397,6 +397,7 @@ All server to client.
   tagged "Failed", a skipped one is dashed. Each stage shows what it made under its title: the Jira key, or on a skipped
   ticket "No Jira connected." or why the ticket was not made; the branch; each Playbook step's summary; the PR link. The failed stage holds the
   error and the retry. "Open the Session →" goes to the Session in Workspace; while the Fix runs, Stop sits beside it.
+  The Report's header has the same link to the Alert's Session, where the Verification runs.
   Cancel Fix sits there too while the Fix runs or failed before its pull request; its dialog says what is undone,
   with "Keep it" and "Cancel the Fix".
 

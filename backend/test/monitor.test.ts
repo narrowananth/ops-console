@@ -781,7 +781,7 @@ describe('Verification without a local Repo', () => {
     expect(detail.latest_report).toMatchObject({ status: 'ready', kind: 'bug' });
     expect(detail.latest_report.steps[0].text).toBe(`$ git clone file://${origin}`);
     const session = (await ctx.http.get(`/sessions/${detail.session_id}`)).body.data;
-    expect(session).toMatchObject({ kind: 'anonymous', repo_id: null, branch: 'main' });
+    expect(session).toMatchObject({ kind: 'anonymous', repo_id: null, branch: 'main', alert_id: alert.id });
     const prompt = ctx.daemon.sdk.calls[0]?.prompt ?? '';
     expect(prompt).toContain(`a fresh clone of file://${origin}`);
   });
@@ -923,6 +923,10 @@ describe('Fix', () => {
     const prompts = ctx.daemon.sdk.calls.slice(5).map((call) => call.prompt);
     expect(prompts[0]).toContain('Atlassian MCP');
     expect(prompts[0]).toContain('priority Medium');
+    expect(prompts[3]).toContain('pull request description rule');
+    expect(prompts[3]).toContain('- Code: defaulted the total');
+    expect(prompts[3]).toContain('- Tests: 12 passed');
+    expect(prompts[3]).toContain('https://example.atlassian.net/browse/ORD-7');
     expect(fix.playbook).toMatchObject({
       id: null,
       name: 'Fix (built-in)',

@@ -26,7 +26,7 @@ export const SECRET_LABELS: Record<ConnectionType, { label: string; optional: bo
   [ConnectionType.Mongodb]: { label: 'Connection string', optional: false },
   [ConnectionType.Redis]: { label: 'Password', optional: true },
   [ConnectionType.Clickhouse]: { label: 'Password', optional: true },
-  [ConnectionType.Firebase]: { label: 'Service account JSON', optional: false, multiline: true },
+  [ConnectionType.Firebase]: { label: 'Service account key (JSON or base64)', optional: false, multiline: true },
   [ConnectionType.Kafka]: { label: 'SASL password', optional: true },
 };
 
@@ -50,8 +50,13 @@ export const FIELDS: Record<ConnectionType, Field[]> = {
     { key: 'user', label: 'User', kind: 'text', placeholder: 'default' },
   ],
   [ConnectionType.Firebase]: [
-    { key: 'project_id', label: 'Project id', kind: 'text' },
-    { key: 'services', label: 'Services (comma separated)', kind: 'list' },
+    { key: 'project_id', label: 'Project id', kind: 'text', placeholder: 'my-project-123' },
+    {
+      key: 'services',
+      label: 'Services (comma separated)',
+      kind: 'list',
+      placeholder: 'realtime_database, firestore, auth, storage',
+    },
   ],
   [ConnectionType.Kafka]: [
     { key: 'bootstrap_servers', label: 'Bootstrap servers', kind: 'text' },

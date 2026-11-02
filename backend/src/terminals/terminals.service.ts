@@ -35,6 +35,9 @@ import { maskLine, PLACEHOLDER } from './secret-masking';
 import { SETUP_AGENT, SETUP_SERVER, SETUP_TOOLS, writeSetupFiles } from './setup-agent';
 
 const ENTER_DELAY_MS = 80;
+/** Bracketed paste: what a terminal sends around pasted text, so Claude Code takes its line breaks as text. */
+const PASTE_START = '\x1b[200~';
+const PASTE_END = '\x1b[201~';
 const REPLAY_BYTES = 64 * 1024;
 
 const keychainItemSchema = z.object({
@@ -193,8 +196,9 @@ export class TerminalsService implements OnModuleDestroy {
       return;
     }
     const masked = maskLine(text, (value) => this.keep(terminal, value));
+    // Several lines go as one bracketed paste, its breaks as a terminal pastes them, so no line submits on its own.
+    terminal.pty.write(masked.includes('\n') ? `${PASTE_START}${masked.replace(/\n/g, '\r')}${PASTE_END}` : masked);
     // Claude Code's prompt reads text and Enter arriving together as one paste, so Enter follows on its own.
-    terminal.pty.write(masked);
     setTimeout(() => this.terminals.get(id)?.pty.write('\r'), ENTER_DELAY_MS);
   }
 

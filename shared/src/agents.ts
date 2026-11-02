@@ -154,6 +154,8 @@ export const sessionSchema = z.object({
   pr_number: z.number().int().nullable(),
   /** `devtools` Sessions: the Connections the agent may reach; empty means every Connection with access. Null for other kinds. */
   connection_ids: z.array(z.string()).nullable(),
+  /** The Monitor Alert whose Verification or Fix runs in it; null for any other Session. */
+  alert_id: z.string().nullable(),
   state: z.enum(SessionState),
   last_message_preview: z.string().nullable(),
   created_at: z.string(),

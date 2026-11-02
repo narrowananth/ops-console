@@ -89,7 +89,13 @@ patch. They have no place to write that down, so they retype it in every Session
 ### Rules
 
 23. Rules go into the system prompt of every turn the Trigger starts, after Claude Code's own and the console's
-    instructions for that kind of run, and before the console's safety lines.
+    instructions for that kind of run, and before the console's safety lines. The console's pull request description
+    rule comes just before them, in every turn, Playbook or not, so a Playbook's rules add to it. It asks for a
+    description in depth whenever the agent opens a pull request or writes its description: summary, problem or root
+    cause with file and line, changes by file and the choices behind them, testing done and not done, risk and
+    rollback, and links; in the Repo's pull request template when it has one; never one line. The Playbook editor
+    shows it under Rules. A Fix's pull request turn also gets the Report, each step's result and the links to write
+    it from.
 
 ### Scratch copy for a Verification
 

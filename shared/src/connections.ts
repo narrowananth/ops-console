@@ -29,7 +29,40 @@ export enum TerminalKind {
 
 const port = z.number().int().min(1).max(65535);
 
-/** Non-secret fields by type; the secret goes to the Keychain. */
+/** The Firebase products a Firebase Connection reaches. */
+export enum FirebaseService {
+  RealtimeDatabase = 'realtime_database',
+  Firestore = 'firestore',
+  Auth = 'auth',
+  Storage = 'storage',
+}
+
+/** Names the setup agent or the operator may write for each product. */
+const FIREBASE_NAMES: Record<string, FirebaseService> = {
+  realtime_database: FirebaseService.RealtimeDatabase,
+  realtimedatabase: FirebaseService.RealtimeDatabase,
+  rtdb: FirebaseService.RealtimeDatabase,
+  database: FirebaseService.RealtimeDatabase,
+  firestore: FirebaseService.Firestore,
+  auth: FirebaseService.Auth,
+  authentication: FirebaseService.Auth,
+  storage: FirebaseService.Storage,
+};
+
+/** A product's name, read loosely (`realtime-database`, `Realtime Database`), as a `FirebaseService`. */
+const firebaseService = z.string().transform((name, ctx) => {
+  const service =
+    FIREBASE_NAMES[
+      name
+        .trim()
+        .toLowerCase()
+        .replace(/[\s-]+/g, '_')
+    ];
+  if (service) return service;
+  ctx.addIssue({ code: 'custom', message: `one of ${Object.values(FirebaseService).join(', ')}` });
+  return z.NEVER;
+});
+
 export const connectionConfigSchemas = {
   [ConnectionType.Postgres]: z.strictObject({
     host: z.string().min(1),
@@ -45,7 +78,10 @@ export const connectionConfigSchemas = {
     database: z.string().min(1),
     user: z.string().min(1),
   }),
-  [ConnectionType.Firebase]: z.strictObject({ project_id: z.string().min(1), services: z.array(z.string().min(1)) }),
+  [ConnectionType.Firebase]: z.strictObject({
+    project_id: z.string().min(1),
+    services: z.array(firebaseService).min(1),
+  }),
   [ConnectionType.Kafka]: z.strictObject({
     bootstrap_servers: z.string().min(1),
     sasl_mechanism: z.string(),
@@ -60,13 +96,15 @@ export const SERVER_TYPES: ConnectionType[] = [
   ConnectionType.Mongodb,
   ConnectionType.Redis,
   ConnectionType.Clickhouse,
+  ConnectionType.Firebase,
 ];
 
-/** Types whose server enforces read-only at launch (a flag or a read-only transaction). */
+/** Types whose server enforces read-only at launch (a flag, a read-only transaction, or only the read tools loaded). */
 export const READ_ONLY_TYPES: ConnectionType[] = [
   ConnectionType.Postgres,
   ConnectionType.Mongodb,
   ConnectionType.Clickhouse,
+  ConnectionType.Firebase,
 ];
 
 /** Types whose secret is required. */
@@ -161,17 +199,14 @@ export const diskAccessSchema = z.object({ granted: z.boolean().nullable(), app_
 
 export type DiskAccess = z.infer<typeof diskAccessSchema>;
 
-/** The longest line the setup terminal passes to Claude. */
-export const SETUP_LINE_MAX = 2000;
-
 /**
- * Why a setup terminal line may not reach Claude, or null when it may. Only plain requests go through: a symbol
- * first (`/login`, `!cmd`, `#`), an `@path` word or a control character would drive Claude Code itself.
- * A line longer than `SETUP_LINE_MAX` is refused too. An empty line passes: Enter alone confirms a prompt.
+ * Why a setup terminal request may not reach Claude, or null when it may. Only plain requests go through: a symbol
+ * first (`/login`, `!cmd`, `#`), an `@path` word or a control character would drive Claude Code itself. A line break
+ * (`\n`) is the one control character allowed: a request of several lines reaches Claude as one paste. A request may be
+ * any length. An empty one passes: Enter alone confirms a prompt.
  */
 export function refuseSetupLine(text: string): string | null {
-  if (text.length > SETUP_LINE_MAX) return `Keep a request under ${SETUP_LINE_MAX} characters.`;
-  if (/\p{Cc}/u.test(text)) return 'Type plain text: control keys and line breaks do not reach Claude.';
+  if (/(?!\n)\p{Cc}/u.test(text)) return 'Type plain text: control keys do not reach Claude.';
   const first = text.trimStart()[0];
   if (first !== undefined && !/[\p{L}\p{N}]/u.test(first)) {
     return 'Start with a word. A line starting with / ! # or another symbol runs a Claude Code command.';

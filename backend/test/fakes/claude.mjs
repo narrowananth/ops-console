@@ -20,7 +20,16 @@ if (group === '--agent') {
   console.log(`setup agent on ${flag('--model')} at ${flag('--effort')} effort`);
   console.log(`setup agent allows ${flag('--allowedTools')}`);
   console.log('setup agent ready');
+  // A bracketed paste arrives as several lines, its own breaks among them; it is heard as one.
+  let pasted = null;
   createInterface({ input: process.stdin }).on('line', async (line) => {
+    if (pasted !== null || line.startsWith('\x1b[200~')) {
+      pasted = [...(pasted ?? []), line.replace('\x1b[200~', '')];
+      if (!line.includes('\x1b[201~')) return;
+      console.log(`heard pasted: ${pasted.join(' | ').replace('\x1b[201~', '')}`);
+      pasted = null;
+      return;
+    }
     const call = /^tool (\w+) (.*)$/.exec(line);
     if (!call) {
       console.log(`heard: ${line}`);

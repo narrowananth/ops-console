@@ -1,7 +1,8 @@
-import { AccessLevel, ConnectionType } from '@ops-console/shared';
+import { AccessLevel, ConnectionEnv, ConnectionType } from '@ops-console/shared';
+import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConnectionsModule } from '../src/connections/connections.module';
-import { actionLog } from '../src/db/schema';
+import { actionLog, connections } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { DevtoolsModule } from '../src/devtools/devtools.module';
 import { isWrite, sqlReads } from '../src/devtools/write-classifier';
@@ -282,7 +283,14 @@ describe('PROD writes', () => {
 
   async function writeAttempt(access: 'read' | 'write', decide: 'approved' | 'denied' | null, step: Step = update) {
     const daemon = await start();
-    await connect(daemon, { ...MONGO_PROD, access });
+    // The console refuses write on PROD; a Connection saved with it before that rule is made dev, then moved.
+    const made = await connect(daemon, { ...MONGO_PROD, access, ...(access === 'write' ? { env: 'dev' } : {}) });
+    if (access === 'write')
+      daemon.app
+        .get<Store>(STORE)
+        .write((tx) =>
+          tx.update(connections).set({ env: ConnectionEnv.Prod }).where(eq(connections.id, made.id)).run(),
+        );
     const session = await newSession(daemon, { access_mode: 'full' });
     daemon.sdk.script(access === 'read' && 'tool' in step ? { ...step, fails: 'server is read-only' } : step);
     await api(daemon).post(`/sessions/${session.id}/messages`, { text: 'change it' });

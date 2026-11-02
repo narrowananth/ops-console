@@ -53,6 +53,7 @@ export function toSession(row: SessionRow): Session {
     branch: row.branch,
     pr_number: row.prNumber,
     connection_ids: null,
+    alert_id: row.alertId,
     state: row.state,
     last_message_preview: row.lastMessagePreview,
     created_at: row.createdAt,

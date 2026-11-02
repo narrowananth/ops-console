@@ -49,6 +49,7 @@ import {
   useTriggerPlaybook,
 } from '../playbooks/job-steps';
 import { withPlaybook } from '../playbooks/labels';
+import { sessionPath } from '../workspace/links';
 import { CodeSource } from './repo-link';
 import { SeverityBadge } from './severity';
 
@@ -118,6 +119,11 @@ function ReportPanel({
           />
         )}
         <span className="ml-auto flex items-center gap-2">
+          {sessionId && (
+            <Link to={sessionPath(sessionId)} className="text-xs">
+              Open the Session →
+            </Link>
+          )}
           {shown.status === RunStatus.Running && sessionId && (
             <StopRun sessionId={sessionId} title="Stop the Verification; it fails and can retry from its step" />
           )}
@@ -385,7 +391,7 @@ function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: (skip: boo
         {fix.playbook && <PlaybookLink playbook={fix.playbook} label={`Playbook: ${fix.playbook.name}`} />}
         <span className="ml-auto flex items-center gap-3">
           {fix.session_id && (
-            <Link to={`/workspace?session=${fix.session_id}`} className="text-xs">
+            <Link to={sessionPath(fix.session_id)} className="text-xs">
               Open the Session →
             </Link>
           )}

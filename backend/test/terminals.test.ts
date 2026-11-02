@@ -129,6 +129,27 @@ describe('the setup terminal', () => {
     expect(all).not.toContain('s3cr3t-pw');
   });
 
+  it('sends a request of several lines as one paste, then Enter, with its secrets masked', async () => {
+    const ctx = await start();
+    await waitFor(ctx, 'setup agent ready');
+    send(ctx, { type: 'line', text: 'add the firebase project vajro-test-db\nread only\nthe password is hunter2' });
+    const all = await waitFor(
+      ctx,
+      'heard pasted: add the firebase project vajro-test-db | read only | the password is {{secret:1}}',
+    );
+    expect(all).not.toContain('hunter2');
+    expect(all).not.toMatch(/heard: (read only|add the firebase)/);
+  });
+
+  it('passes a request of any length', async () => {
+    const ctx = await start();
+    await waitFor(ctx, 'setup agent ready');
+    const body = Array.from({ length: 20 }, (_, n) => `line ${n} ${'x'.repeat(500)}`);
+    send(ctx, { type: 'line', text: `add these notes\n${body.join('\n')}` });
+    await waitFor(ctx, `heard pasted: add these notes | ${body.join(' | ')}`);
+    expect(ctx.messages.filter((m) => m.type === 'refused')).toHaveLength(0);
+  });
+
   it('passes only plain requests: raw keys, Claude Code commands and control characters never reach the pty', async () => {
     const ctx = await start();
     await waitFor(ctx, 'setup agent ready');
@@ -140,7 +161,7 @@ describe('the setup terminal', () => {
       '# remember this',
       'show @~/.ssh/id_rsa',
       'add pg\r!whoami',
-      `add ${'x'.repeat(2000)}`,
+      'add pg\n\x1b[201~!whoami',
     ]) {
       send(ctx, { type: 'line', text });
     }
@@ -148,7 +169,7 @@ describe('the setup terminal', () => {
     await waitFor(ctx, 'heard: add pg for reader@db.example.com');
     const refused = ctx.messages.filter((m) => m.type === 'refused');
     expect(refused).toHaveLength(7);
-    expect(output(ctx)).not.toMatch(/heard: .*(login|logout|whoami|remember|ssh|xxxx)/);
+    expect(output(ctx)).not.toMatch(/heard: .*(login|logout|whoami|remember|ssh)/);
   });
 
   it('resolves placeholders inside the daemon: the tools get the secret, Claude never does', async () => {

@@ -172,3 +172,16 @@ export type RetryJob = z.infer<typeof retryJobSchema>;
 
 /** The Playbook a Session's rules come from, when it is not built-in. */
 export const sessionPlaybookSchema = z.object({ id: z.string(), name: z.string() });
+
+/**
+ * The console's rule for pull request descriptions. Every agent run gets it, a Session's chat, a Fix, a PR job, before
+ * the Playbook's rules, so a Playbook can add to it.
+ */
+export const PR_DESCRIPTION_RULE = `Pull request descriptions. Whenever you open a pull request, or are asked to write or update its description, write it in depth for a reviewer who has not seen this work:
+- Summary: what changes and why, in two to four sentences.
+- Problem or root cause: what was wrong or missing, where (file and line), and how it showed (the error, the Alert, the ticket).
+- Changes: each file or area touched and what changed in it, and any design choice a reviewer could question, with why.
+- Testing: the commands you ran and their results, tests added or changed, and what was not tested and why.
+- Risk and rollback: what could break, who or what is affected, and how to undo it.
+- Links: the Jira ticket, the Alert or Report, related pull requests.
+Use the Repo's pull request template when it has one (such as .github/pull_request_template.md) and fill each of its sections to the same depth. Leave out a section only when it does not apply. Never a one-line description.`;

@@ -154,6 +154,14 @@ export class Git {
     if (common) await this.try(common, ['worktree', 'prune']);
   }
 
+  /** Fetches `branch` from `origin` and makes it a local branch tracking it. Throws with git's first line. */
+  async trackBranch(dir: string, branch: string): Promise<void> {
+    await this.must(dir, ['fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
+      GIT_TERMINAL_PROMPT: '0',
+    });
+    await this.must(dir, ['branch', '--quiet', '--track', branch, `origin/${branch}`]);
+  }
+
   /** Fetches `branch` from `origin`, so its commits are in the repository. Throws with git's first line. */
   async fetchBranch(dir: string, branch: string): Promise<void> {
     await this.must(dir, ['fetch', '--quiet', 'origin', `refs/heads/${branch}`], { GIT_TERMINAL_PROMPT: '0' });

@@ -56,7 +56,10 @@ pnpm dev               # backend on 127.0.0.1:4546, UI on http://127.0.0.1:4545
 pnpm dev:open          # open the UI signed in to the dev backend
 ```
 
-The dev backend keeps its data in `backend/.data`.
+The dev backend keeps its data in `backend/.data`. On macOS launchd runs it as `Ops Console (dev).app`, so macOS
+asks for Full Disk Access under that name, not the terminal's. The console's Keychain items move to each new build
+of the app, so it reads them without asking. Its log streams into the `pnpm dev` terminal, and Ctrl+C stops it.
+`OPS_CONSOLE_DEV_INLINE=1 pnpm dev` runs it in the terminal instead; macOS then asks for each Keychain item.
 
 ## Check
 

@@ -171,12 +171,21 @@ describe('Access Level', () => {
     expect((await list(ctx))[0]).toMatchObject({ access: 'none' });
   });
 
-  it('makes a PROD Connection read unless the request says write', async () => {
+  it('makes a PROD Connection read-only and refuses write on it, also when one moves to PROD', async () => {
     const ctx = await start();
     const prod = await api(ctx.daemon).post('/connections', { ...PG, env: 'prod' });
     expect(prod.body.data).toMatchObject({ is_prod: true, access: 'read' });
     const write = await api(ctx.daemon).post('/connections', { ...PG, name: 'pg-2', env: 'prod', access: 'write' });
-    expect(write.body.data).toMatchObject({ is_prod: true, access: 'write' });
+    expect(write.status).toBe(400);
+    expect(write.body.error.message).toContain('a PROD Connection is read-only');
+    const dev = await api(ctx.daemon).post('/connections', { ...PG, name: 'pg-3', env: 'dev', access: 'write' });
+    expect(dev.body.data.access).toBe('write');
+    const moved = await api(ctx.daemon).patch(`/connections/${dev.body.data.id}`, { env: 'prod' });
+    expect(moved.status).toBe(400);
+    expect((await api(ctx.daemon).patch(`/connections/${prod.body.data.id}`, { access: 'write' })).status).toBe(400);
+    expect(
+      (await api(ctx.daemon).patch(`/connections/${dev.body.data.id}`, { env: 'prod', access: 'read' })).status,
+    ).toBe(200);
   });
 
   it('turns write on for ClickHouse through its env and keeps read the default', async () => {
@@ -227,6 +236,80 @@ describe('Access Level', () => {
         })
       ).status,
     ).toBe(201);
+  });
+});
+
+describe('Firebase', () => {
+  // A made-up key: the fields Firebase reads, no real private key.
+  const key = (project: string) =>
+    JSON.stringify({
+      type: 'service_account',
+      project_id: project,
+      client_email: `reader@${project}.iam.gserviceaccount.example.com`,
+      private_key: '-----BEGIN PRIVATE KEY-----\nnot-a-key\n-----END PRIVATE KEY-----\n',
+    });
+  const FIREBASE = {
+    name: 'shop-firebase',
+    type: 'firebase',
+    env: 'prod',
+    config: { project_id: 'shop-123', services: ['realtime-database', 'Firestore'] },
+  };
+
+  it('runs firebase mcp with only the read tools, the key and project as files, and the key taken as base64', async () => {
+    const ctx = await start();
+    const created = await api(ctx.daemon).post('/connections', {
+      ...FIREBASE,
+      secret: Buffer.from(key('shop-123')).toString('base64'),
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.data).toMatchObject({
+      access: 'read',
+      is_prod: true,
+      config: { project_id: 'shop-123', services: ['realtime_database', 'firestore'] },
+    });
+    await settled(ctx);
+    const args = (await registered(ctx.dirs[0] ?? ''))['shop-firebase']?.args as string[];
+    expect(args.slice(3)).toEqual([
+      'npx',
+      '-y',
+      'firebase-tools@latest',
+      'mcp',
+      '--dir',
+      '{{files}}',
+      '--tools',
+      expect.stringContaining('realtimedatabase_get_data'),
+    ]);
+    const tools = (args.at(-1) ?? '').split(',');
+    expect(tools).toContain('firestore_query_collection');
+    expect(
+      tools.filter((tool) =>
+        /set_data|add_document|update_document|delete|create|deploy|update_environment/.test(tool),
+      ),
+    ).toEqual([]);
+    const env = JSON.parse(ctx.keychain.values.get('mcp:shop-firebase') ?? '{}');
+    expect(env).toEqual({
+      '@file:key.json': key('shop-123'),
+      '@file:.firebaserc': JSON.stringify({ projects: { default: 'shop-123' } }),
+      GOOGLE_APPLICATION_CREDENTIALS: '{{files}}/key.json',
+    });
+  });
+
+  it('refuses a secret that is no key, a key for another project, a product it does not know, and write on PROD', async () => {
+    const ctx = await start();
+    const post = (body: Record<string, unknown>) => api(ctx.daemon).post('/connections', { ...FIREBASE, ...body });
+    expect((await post({ secret: 'hunter2' })).body.error.message).toContain('a Firebase service-account key');
+    expect((await post({ secret: key('other-9') })).body.error.message).toContain(
+      'the key is for project other-9, not shop-123',
+    );
+    expect(
+      (await post({ secret: key('shop-123'), config: { project_id: 'shop-123', services: ['hosting'] } })).status,
+    ).toBe(400);
+    expect((await post({ secret: key('shop-123'), access: 'write' })).status).toBe(400);
+    const dev = await post({ name: 'shop-dev', env: 'dev', secret: key('shop-123'), access: 'write' });
+    expect(dev.status).toBe(201);
+    await settled(ctx);
+    const args = (await registered(ctx.dirs[0] ?? ''))['shop-dev']?.args as string[];
+    expect(args.slice(-2)).toEqual(['--only', 'core,database,firestore']);
   });
 });
 

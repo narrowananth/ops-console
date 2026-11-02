@@ -229,6 +229,8 @@ export const createRepoSessionSchema = z.strictObject({
   kind: z.literal(SessionKind.Repo).optional(),
   repo_id: z.string().min(1),
   branch: z.string().trim().min(1),
+  /** A branch only origin has, as a pull request's, is fetched and made a local branch tracking it. */
+  from_origin: z.boolean().optional(),
   model: z.enum(Model).optional(),
   effort: z.enum(Effort).optional(),
   access_mode: z.enum(AccessMode).optional(),

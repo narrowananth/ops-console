@@ -1,4 +1,5 @@
 import { ConnectionType } from '@ops-console/shared';
+import { FIREBASE_READS } from '../connections/launch';
 
 const SQL_WRITE =
   /\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|merge|call|copy|vacuum|reindex|into|pg_terminate_backend|pg_cancel_backend)\b/i;
@@ -25,6 +26,7 @@ const text = (input: Record<string, unknown>, ...keys: string[]): string => {
 
 /** Tools that only read, per MCP server. A tool not listed is a write: a new tool asks before it is trusted. */
 const READ_TOOLS: Partial<Record<ConnectionType, ReadonlySet<string>>> = {
+  [ConnectionType.Firebase]: FIREBASE_READS,
   [ConnectionType.Postgres]: new Set(['search_objects']),
   [ConnectionType.Clickhouse]: new Set(['list_databases', 'list_tables']),
   [ConnectionType.Mongodb]: new Set([

@@ -55,6 +55,7 @@ import {
   type Session,
   type SessionDefaults,
   type SessionPatch,
+  SessionState,
   scanSchema,
   serviceSchema,
   sessionDefaultsSchema,
@@ -464,6 +465,19 @@ export function useRepoSessions() {
   });
 }
 
+/** Every Session of every kind whose run goes, `waiting_input` included, most recently active first. */
+export function useRunningSessions() {
+  return useQuery({
+    queryKey: [...queryKeys.sessions, 'running'],
+    queryFn: () =>
+      apiGet('/sessions?limit=100', z.object({ data: z.array(sessionSchema) })).then((b) =>
+        b.data
+          .filter((session) => session.state !== SessionState.Idle && session.state !== SessionState.Failed)
+          .sort((a, b) => b.last_active_at.localeCompare(a.last_active_at)),
+      ),
+  });
+}
+
 export function useCreateAnonymousSession() {
   const client = useQueryClient();
   return useMutation({
@@ -478,7 +492,7 @@ export function useCreateAnonymousSession() {
 export function useCreateRepoSession() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: { repo_id: string; branch: string }) =>
+    mutationFn: (input: { repo_id: string; branch: string; from_origin?: boolean }) =>
       apiSend('POST', '/sessions', input, z.object({ data: sessionSchema })).then((body) => body.data),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.sessions }),
   });
@@ -582,6 +596,15 @@ function pullRequestsQuery(filter: PullRequestFilter) {
 
 export function usePullRequests(filter: PullRequestFilter) {
   return useQuery(pullRequestsQuery(filter));
+}
+
+/** One Repo's open pull requests, from the same daemon cache as the list; read when `repoId` is set. */
+export function useRepoPullRequests(repoId: string | null) {
+  return useQuery({
+    queryKey: [...queryKeys.pulls, 'repo', repoId],
+    queryFn: () => apiGet(`/pull-requests?repo_id=${repoId}`, pullRequestListSchema),
+    enabled: repoId !== null,
+  });
 }
 
 /**

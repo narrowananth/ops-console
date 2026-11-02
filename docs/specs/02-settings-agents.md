@@ -212,7 +212,7 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 { "kind": "question", "text": "string", "options": ["string"] }
 ```
 
-`Session`: every `sessions` column except `sdk_session_id`, plus the fields later specs add: `repo_id`, `branch` and `pr_number` (`07-workspace`), `connection_ids` (`09-dev-tools-agent`). `alert_id` stays out of it.
+`Session`: every `sessions` column except `sdk_session_id`, plus the fields later specs add: `repo_id`, `branch` and `pr_number` (`07-workspace`), `connection_ids` (`09-dev-tools-agent`), and `alert_id`: the Monitor Alert whose Verification or Fix runs in it, null for any other Session (`08-monitor-dashboard`).
 
 `Message`, read from the transcript: `id` (the transcript entry id), `role` (`user | agent`), `status` (`streaming | done | failed`), `parts: Part[]`, `created_at`.
 
