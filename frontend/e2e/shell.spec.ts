@@ -78,6 +78,8 @@ test('the installed app starts the Setup agent only once Full Disk Access is on'
   const permissions = drawer.getByRole('region', { name: 'Permissions' });
   const disk = permissions.getByRole('listitem', { name: 'Full Disk Access' });
   await expect(disk).toContainText('✕ off');
+  await expect(disk).toContainText('Drag Ops Console from the Finder window');
+  await expect(disk).toContainText('ops-console stop');
   await expect(permissions.getByRole('listitem', { name: 'Keychain' })).toContainText('asks each time');
   await expect(permissions.getByRole('img', { name: 'Ops Console logo' })).toBeVisible();
   await expect(drawer.getByRole('button', { name: 'Start setup agent' })).toBeDisabled();
@@ -90,7 +92,20 @@ test('the installed app starts the Setup agent only once Full Disk Access is on'
   await expect(drawer.getByRole('button', { name: 'Start setup agent' })).toBeEnabled();
 });
 
-test('under pnpm dev Full Disk Access reads off · dev build and the Setup agent still starts', async ({ page }) => {
+test('pnpm dev runs as Ops Console (dev), and asks for Full Disk Access under that name', async ({ page }) => {
+  await page.route('**/api/terminals/disk-access', (route) =>
+    route.fulfill({ json: { data: { granted: false, app_path: '/repo/backend/.data/Ops Console (dev).app' } } }),
+  );
+  await page.goto(`${daemon.url}/#token=${daemon.token}`);
+  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  const disk = page.getByRole('main').getByRole('listitem', { name: 'Full Disk Access' });
+  await expect(disk).toContainText('✕ off');
+  await expect(disk).toContainText('Drag Ops Console (dev) from the Finder window');
+  await expect(disk).toContainText('stop pnpm dev and run it again');
+  await expect(disk.getByRole('button', { name: 'Open System Settings' })).toBeVisible();
+});
+
+test('a daemon that is no app reads off · dev build and the Setup agent still starts', async ({ page }) => {
   await page.route('**/api/terminals/disk-access', (route) =>
     route.fulfill({ json: { data: { granted: false, app_path: null } } }),
   );
@@ -281,4 +296,28 @@ test('a stored choice that no longer reads falls back to the default', async ({ 
   await page.evaluate(() => localStorage.setItem('ops-console:workspace.pr-mine', '"not a boolean"'));
   await page.reload();
   await expect(page.getByRole('button', { name: 'Mine', exact: true })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('Shift+Enter adds a line to the Setup agent request; Enter sends the lines as one request', async ({ page }) => {
+  const sent: unknown[] = [];
+  await page.route('**/api/terminals', (route) => route.fulfill({ json: { data: [{ id: 't1', kind: 'setup' }] } }));
+  await page.routeWebSocket('**/terminals/t1', (ws) =>
+    ws.onMessage((message) => sent.push(JSON.parse(String(message)))),
+  );
+  await page.goto(`${daemon.url}/#token=${daemon.token}`);
+  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  const box = page.getByRole('main').getByRole('textbox', { name: 'Message to Claude' });
+
+  await box.click();
+  await box.pressSequentially('add vajro-test-db');
+  await box.press('Shift+Enter');
+  await box.pressSequentially('read only');
+  await expect(box).toHaveValue('add vajro-test-db\nread only');
+  expect(sent.filter((m) => (m as { type: string }).type === 'line')).toEqual([]);
+
+  await box.press('Enter');
+  await expect
+    .poll(() => sent.filter((m) => (m as { type: string }).type === 'line'))
+    .toEqual([{ type: 'line', text: 'add vajro-test-db\nread only' }]);
+  await expect(box).toHaveValue('');
 });

@@ -16,7 +16,8 @@ export function SetupAgentTab() {
   const close = useCloseSetupTerminal();
   const terminal = useSetupTerminal().data ?? null;
   const access = useDiskAccess().data;
-  // The installed app starts only with Full Disk Access on; under `pnpm dev` there is no app entry to switch on.
+  // Ops Console starts only with Full Disk Access on. Under `OPS_CONSOLE_DEV_INLINE=1 pnpm dev`, or off macOS, the
+  // daemon is no app of its own and there is no entry to switch on.
   const locked = access?.granted === false && access.app_path !== null;
   const begin = (line?: string) => {
     if (line) queueSetupLine(line);
@@ -176,12 +177,7 @@ function Permissions({ locked }: { locked: boolean }) {
             <span className={`rounded-full px-2 py-0.5 font-mono text-[11px] ${disk.className}`}>{disk.glyph}</span>
           </div>
           <span className="text-neutral-700">Reads every folder on this Mac.</span>
-          {!state.granted && state.app_path && (
-            <span className="text-neutral-700">
-              Drag Ops Console from the Finder window into the list and switch it on, then run{' '}
-              <code>ops-console stop</code> and <code>ops-console start</code>.
-            </span>
-          )}
+          {!state.granted && state.app_path && <GrantSteps appPath={state.app_path} />}
           {!state.granted && (
             <div className="flex gap-2">
               {state.app_path && (
@@ -211,5 +207,28 @@ function Permissions({ locked }: { locked: boolean }) {
         </div>
       )}
     </section>
+  );
+}
+
+/** The installed app restarts with `ops-console`; the one `pnpm dev` builds, with `pnpm dev`. */
+function GrantSteps({ appPath }: { appPath: string }) {
+  const app =
+    appPath
+      .split('/')
+      .pop()
+      ?.replace(/\.app$/, '') ?? 'Ops Console';
+  return (
+    <span className="text-neutral-700">
+      Drag {app} from the Finder window into the list and switch it on, then{' '}
+      {app.endsWith('(dev)') ? (
+        <>
+          stop <code>pnpm dev</code> and run it again.
+        </>
+      ) : (
+        <>
+          run <code>ops-console stop</code> and <code>ops-console start</code>.
+        </>
+      )}
+    </span>
   );
 }

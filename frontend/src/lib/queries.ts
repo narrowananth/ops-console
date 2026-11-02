@@ -17,6 +17,7 @@ import {
   type CreateScan,
   checkoutResultSchema,
   claudeAccountSchema,
+  commentPassSchema,
   connectionCheckSchema,
   connectionListSchema,
   connectionSchema,
@@ -44,6 +45,7 @@ import {
   pullRequestListSchema,
   type RemovedRepoSessions,
   type ReviewAlert,
+  replyCheckSchema,
   repoListSchema,
   reportSchema,
   repoSchema,
@@ -53,6 +55,7 @@ import {
   type Session,
   type SessionDefaults,
   type SessionPatch,
+  SessionState,
   scanSchema,
   serviceSchema,
   sessionDefaultsSchema,
@@ -80,6 +83,7 @@ export const queryKeys = {
   sessions: ['sessions'] as const,
   branches: (repoId: string) => ['branches', repoId] as const,
   pulls: ['pull-requests'] as const,
+  pullRequest: (repoId: string, number: number) => ['pull-requests', 'detail', repoId, number] as const,
   monitor: ['monitor'] as const,
   alert: (id: string) => ['monitor', 'alert', id] as const,
   session: (id: string) => ['sessions', id] as const,
@@ -461,6 +465,19 @@ export function useRepoSessions() {
   });
 }
 
+/** Every Session of every kind whose run goes, `waiting_input` included, most recently active first. */
+export function useRunningSessions() {
+  return useQuery({
+    queryKey: [...queryKeys.sessions, 'running'],
+    queryFn: () =>
+      apiGet('/sessions?limit=100', z.object({ data: z.array(sessionSchema) })).then((b) =>
+        b.data
+          .filter((session) => session.state !== SessionState.Idle && session.state !== SessionState.Failed)
+          .sort((a, b) => b.last_active_at.localeCompare(a.last_active_at)),
+      ),
+  });
+}
+
 export function useCreateAnonymousSession() {
   const client = useQueryClient();
   return useMutation({
@@ -475,7 +492,7 @@ export function useCreateAnonymousSession() {
 export function useCreateRepoSession() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: { repo_id: string; branch: string }) =>
+    mutationFn: (input: { repo_id: string; branch: string; from_origin?: boolean }) =>
       apiSend('POST', '/sessions', input, z.object({ data: sessionSchema })).then((body) => body.data),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.sessions }),
   });
@@ -581,6 +598,15 @@ export function usePullRequests(filter: PullRequestFilter) {
   return useQuery(pullRequestsQuery(filter));
 }
 
+/** One Repo's open pull requests, from the same daemon cache as the list; read when `repoId` is set. */
+export function useRepoPullRequests(repoId: string | null) {
+  return useQuery({
+    queryKey: [...queryKeys.pulls, 'repo', repoId],
+    queryFn: () => apiGet(`/pull-requests?repo_id=${repoId}`, pullRequestListSchema),
+    enabled: repoId !== null,
+  });
+}
+
 /**
  * Reads the Workspace's first pull request list as the app opens. The daemon's first read of every host repository
  * takes seconds; started here, it is in memory by the time the operator opens the Workspace.
@@ -598,7 +624,7 @@ export function useRefreshPullRequests() {
 
 export function usePullRequest(repoId: string, number: number) {
   return useQuery({
-    queryKey: [...queryKeys.pulls, 'detail', repoId, number],
+    queryKey: queryKeys.pullRequest(repoId, number),
     queryFn: () =>
       apiGet(`/repos/${repoId}/pull-requests/${number}`, z.object({ data: pullRequestDetailSchema })).then(
         (b) => b.data,
@@ -683,6 +709,64 @@ export function useStartAgentReview(repoId: string, number: number) {
         z.object({ data: prAgentReviewSchema }),
       ),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
+  });
+}
+
+export function useStartReplyCheck(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (commentId: string) =>
+      apiSend(
+        'POST',
+        `/repos/${repoId}/pull-requests/${number}/reply-checks`,
+        { comment_id: commentId },
+        z.object({ data: replyCheckSchema }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+  });
+}
+
+/** A failed job's retry; `skip` passes over its failed step first. */
+type JobRetry = { id: string; skip?: boolean };
+
+export function useRetryReplyCheck(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, skip = false }: JobRetry) =>
+      apiSend('POST', `/reply-checks/${id}/retry`, { skip }, z.object({ data: replyCheckSchema })),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+  });
+}
+
+export function useStartCommentPass(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (commentIds: string[]) =>
+      apiSend(
+        'POST',
+        `/repos/${repoId}/pull-requests/${number}/comment-passes`,
+        { comment_ids: commentIds },
+        z.object({ data: commentPassSchema }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+  });
+}
+
+export function useRetryCommentPass(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, skip = false }: JobRetry) =>
+      apiSend('POST', `/comment-passes/${id}/retry`, { skip }, z.object({ data: commentPassSchema })),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+  });
+}
+
+export function useRetryAgentReview(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, skip = false }: JobRetry) =>
+      apiSend('POST', `/agent-reviews/${id}/retry`, { skip }, z.object({ data: prAgentReviewSchema })),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
   });
 }
 
@@ -845,7 +929,8 @@ export function useUndoDismissal(id: string) {
 export function useRetryReport() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => apiSend('POST', `/reports/${id}/retry`, undefined, z.object({ data: reportSchema })),
+    mutationFn: ({ id, skip = false }: JobRetry) =>
+      apiSend('POST', `/reports/${id}/retry`, { skip }, z.object({ data: reportSchema })),
     onSuccess: () => refreshMonitor(client),
   });
 }
@@ -853,7 +938,16 @@ export function useRetryReport() {
 export function useRetryFix(id: string) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: () => apiSend('POST', `/fixes/${id}/retry`, undefined, z.object({ data: fixSchema })),
+    mutationFn: (skip: boolean) => apiSend('POST', `/fixes/${id}/retry`, { skip }, z.object({ data: fixSchema })),
+    onSuccess: () => refreshMonitor(client),
+  });
+}
+
+/** Stops a Fix, undoes its branch and takes the Alert back to `verified`. */
+export function useCancelFix(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('POST', `/fixes/${id}/cancel`, undefined, z.object({ data: fixSchema })),
     onSuccess: () => refreshMonitor(client),
   });
 }

@@ -4,6 +4,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useAgentAccounts, useAlerts, useConnections, useConnectors, useMcpServers, useRepos } from '../lib/queries';
 import { shown } from '../monitor/scan-scope';
 import { lastAddress } from './last-address';
+import { RunningTasks } from './running-tasks';
 import { useUi } from './ui-store';
 
 export function Logo({ size = 28 }: { size?: number }) {
@@ -172,6 +173,7 @@ export function Sidebar() {
         ))}
       </nav>
       <div className="flex flex-none flex-col gap-3 p-3.5">
+        <RunningTasks collapsed={collapsed} />
         {!collapsed && <ActiveAccount />}
         <div className={`flex gap-2 ${collapsed ? 'flex-col' : ''}`}>
           <button

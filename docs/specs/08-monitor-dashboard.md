@@ -33,7 +33,7 @@ Verification and Review
 15. A second Verification on a `verifying` Alert is refused with `invalid_state`. Verifying a `verified` Alert creates Report version + 1; older versions stay readable.
 16. An Alert in `verified` reports `waiting_since`, the time it entered that status (ADR 0002).
 17. Confirming a `verified` Alert as `bug` or `improvement` creates a Review and a Fix and moves the Alert to `fixing`. Confirming in any other status is refused with `invalid_state`.
-18. Confirming does not need Jira. With the Jira Connector not connected, the Fix skips the ticket and names the branch `fix/<report slug>`.
+18. Confirming does not need Jira. With the Jira Connector not connected, the Fix skips the ticket and names the branch `fix/<report slug>`. With Jira connected but the ticket not made (the Atlassian MCP server down, an answer the console cannot read), the Fix does the same and goes on, and keeps why; the ticket stage shows it. Only the operator's Stop fails the ticket stage.
 19. Dismissing a `verified` Alert creates a Review with decision `dismissed` and moves the Alert to `dismissed`. Undo clears the Review and returns the Alert to `verified`.
 20. In a Session linked to an Alert, a message whose whole text is `go`, `yes`, `start`, `do it` or `ok` (any case), sent while the Alert is `verified`, confirms it with the `kind` of the latest ready Report. In any other state it is an ordinary message.
 
@@ -65,6 +65,7 @@ The Monitor screen
 35. The logs list shows the Alerts of the picked Service, or of every Service, with a picked code. `resolved` and `dismissed` Alerts show only with Closed ticked. Rows go highest tier first, newest sighting first within a tier, and are drawn 100 at a time; the open Alert stays drawn even past the rows shown.
 36. A Scan that ended `rate_limited` or `failed` shows under the Scan button with the time of the last `ok` Scan, or "No good Scan yet."
 37. The picked Service and Alert are kept in the address, and the Monitor's other choices in the browser, as `persist-selections-and-runs` Behaviors 1 to 11 set out.
+38. Cancel Fix, on a `running` or `failed` Fix with no pull request, asks first. Confirmed, it stops the Fix's run, and no further stage, step or agent turn starts. When the checkout is on the Fix branch, its uncommitted changes go on the git stash and the source branch (the Playbook's Branch field, else the Repo's default branch) is checked out. The Fix branch is deleted. The Fix becomes `abandoned`, the Review is undone, and the Alert returns to `verified` with an `abandoned` event, so the Review actions show again. A Jira ticket is left as it is. Cancel is refused while another Session in the Repo is running, and on a Fix with a pull request, which is abandoned by closing the pull request (Behavior 24).
 
 ## Settled
 
@@ -244,6 +245,7 @@ CREATE TABLE fixes (
   status         TEXT NOT NULL DEFAULT 'running',  -- FixStatus
   jira_key       TEXT,                           -- set when the ticket stage ends
   jira_url       TEXT,
+  ticket_skipped TEXT,                           -- why no ticket was made while Jira was connected
   branch         TEXT,                           -- '<jira_key>-<slug>', or 'fix/<slug>' without Jira
   pr_number      INTEGER,                        -- in the Alert's Service's Repo
   pr_url         TEXT,
@@ -358,6 +360,7 @@ Errors added here:
 | `DELETE /alerts/:id/review` | | 204; undoes a dismissal; `invalid_state` otherwise |
 | `GET /fixes/:id` | | `Fix` |
 | `POST /fixes/:id/retry` | | 202; `invalid_state` unless `failed` |
+| `POST /fixes/:id/cancel` | | `Fix`, `abandoned` (Behavior 38); `invalid_state` unless `running` or `failed` without a pull request, or while another Session in the Repo runs; `upstream_failed` when git refuses |
 
 ### WebSocket events
 
@@ -391,9 +394,12 @@ All server to client.
 - Review, while `verified` with a Report kind: Fix with agent (the Report's kind), Fix as the other kind, and Dismiss. A line says where the Fix runs and whether a Jira ticket comes first; without Jira it says the branch is `fix/<name>`. A dismissed Alert says it is checked again at the next Scan, with Undo.
 - Fix progress: a path down the card with a node per stage joined by a line, under a bar that counts the stages
   passed. A done node is ticked, the running one turns and is tagged "In progress", a failed one is crossed and
-  tagged "Failed", a skipped one is dashed. Each stage shows what it made under its title: the Jira key, or "No Jira
-  connected." on a skipped ticket; the branch; each Playbook step's summary; the PR link. The failed stage holds the
+  tagged "Failed", a skipped one is dashed. Each stage shows what it made under its title: the Jira key, or on a skipped
+  ticket "No Jira connected." or why the ticket was not made; the branch; each Playbook step's summary; the PR link. The failed stage holds the
   error and the retry. "Open the Session →" goes to the Session in Workspace; while the Fix runs, Stop sits beside it.
+  The Report's header has the same link to the Alert's Session, where the Verification runs.
+  Cancel Fix sits there too while the Fix runs or failed before its pull request; its dialog says what is undone,
+  with "Keep it" and "Cancel the Fix".
 
 ## Rejected
 

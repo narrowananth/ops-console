@@ -1,6 +1,5 @@
 import {
   refuseSetupLine,
-  SETUP_LINE_MAX,
   type TerminalServerMessage,
   terminalServerMessageSchema,
   WS_PROTOCOL,
@@ -181,26 +180,26 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
           aria-label="Message to Claude"
           disabled={ended}
           value={line}
-          maxLength={SETUP_LINE_MAX}
           placeholder={
             ended
               ? 'The terminal ended. Close it and open it again.'
-              : 'Ask Claude to set something up, e.g. import my local databases. Enter alone confirms a prompt.'
+              : 'Ask Claude to set something up, e.g. import my local databases. Shift+Enter adds a line; Enter alone confirms a prompt.'
           }
           aria-invalid={refused !== null}
           aria-describedby={refused === null ? undefined : 'setup-line-refused'}
           onChange={(event) => {
-            // A request is one line: a pasted line break becomes a space.
-            setLine(event.target.value.replace(/\r?\n/g, ' '));
+            // Line breaks stay, as plain \n: a request of several lines reaches Claude as one paste.
+            setLine(event.target.value.replace(/\r\n?/g, '\n'));
             setRefused(null);
           }}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') {
+            // Shift+Enter adds a line; Enter alone sends.
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
               submit();
             }
           }}
-          className="block max-h-40 min-h-16 w-full resize-none border-0 bg-transparent px-4 pt-3.5 pb-1.5 text-sm text-text outline-none"
+          className="block field-sizing-content max-h-[50vh] min-h-16 w-full resize-none overflow-y-auto border-0 bg-transparent px-4 pt-3.5 pb-1.5 text-sm text-text outline-none"
         />
         <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-1.5 pb-2.5">
           {EXAMPLES.map((example) => (
@@ -216,7 +215,7 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
           ))}
           <Button
             variant="primary"
-            title="Enter sends."
+            title="Enter sends; Shift+Enter adds a line."
             className="ml-auto px-4 py-1.5"
             disabled={ended}
             onClick={submit}

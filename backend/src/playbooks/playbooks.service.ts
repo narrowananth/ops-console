@@ -22,7 +22,7 @@ type PlaybookRow = typeof playbooks.$inferSelect;
 type SessionRow = typeof sessions.$inferSelect;
 
 /** What a job copies when it starts: the Playbook its Trigger holds, or the built-in. */
-export type PlaybookCopy = { id: string | null; name: string; rules: string; steps: PlaybookStep[] };
+export type PlaybookCopy = { id: string | null; name: string; rules: string; branches: string; steps: PlaybookStep[] };
 
 const stepsOf = (row: PlaybookRow): PlaybookStep[] => {
   const parsed = z.array(playbookStepSchema).safeParse(JSON.parse(row.steps));
@@ -62,6 +62,7 @@ export class PlaybooksService {
           id: crypto.randomUUID(),
           name: input.name,
           rules: input.rules,
+          branches: input.branches,
           steps: JSON.stringify(tagged(input.steps)),
         })
         .returning()
@@ -81,6 +82,7 @@ export class PlaybooksService {
         .set({
           name: patch.name ?? current.name,
           rules: patch.rules ?? current.rules,
+          branches: patch.branches ?? current.branches,
           steps: steps ? JSON.stringify(steps) : current.steps,
           updatedAt: new Date().toISOString(),
         })
@@ -127,11 +129,12 @@ export class PlaybooksService {
       .innerJoin(playbooks, eq(playbooks.id, playbookTriggers.playbookId))
       .where(eq(playbookTriggers.trigger, trigger))
       .get();
-    if (!found) return { id: null, name: builtinName(trigger), rules: '', steps: BUILTIN_STEPS[trigger] };
+    if (!found) return { id: null, name: builtinName(trigger), rules: '', branches: '', steps: BUILTIN_STEPS[trigger] };
     return {
       id: found.playbook.id,
       name: found.playbook.name,
       rules: found.playbook.rules,
+      branches: found.playbook.branches,
       steps: stepsOf(found.playbook),
     };
   }
@@ -185,6 +188,7 @@ export class PlaybooksService {
       builtin: true,
       name: builtinName(trigger),
       rules: '',
+      branches: '',
       steps: BUILTIN_STEPS[trigger],
       triggers: taken.has(trigger) ? [] : [trigger],
       updated_at: null,
@@ -197,6 +201,7 @@ export class PlaybooksService {
       builtin: false,
       name: row.name,
       rules: row.rules,
+      branches: row.branches,
       steps: stepsOf(row),
       triggers: held.get(row.id) ?? [],
       updated_at: row.updatedAt,

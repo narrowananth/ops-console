@@ -63,11 +63,14 @@ export class AnonymousSessionsService {
   }
 
   /** Checks out `branch` in the Session's clone, making it from the current one when it does not exist. */
-  async checkout(sessionId: string, branch: string): Promise<SessionRow> {
+  async checkout(sessionId: string, branch: string, from?: string): Promise<SessionRow> {
     const dir = this.folder(sessionId);
     const exists = (await this.git.branches(dir)).some((candidate) => candidate.name === branch);
-    await this.logged(sessionId, dir, `git checkout ${exists ? '' : '-b '}${branch}`, () =>
-      this.git.checkout(dir, branch, !exists),
+    await this.logged(
+      sessionId,
+      dir,
+      `git checkout ${exists ? '' : '-b '}${branch}${!exists && from ? ` ${from}` : ''}`,
+      () => this.git.checkout(dir, branch, !exists, from),
     );
     return this.sessions.write(sessionId, { branch });
   }

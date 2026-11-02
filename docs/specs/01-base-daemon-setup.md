@@ -55,6 +55,7 @@ App shell
 28c. The sidebar foot shows the active Claude account, or the first signed-in one, with its 5-hour and weekly usage, and links to Agents & accounts. With no signed-in account it shows nothing.
 28d. The theme switch moves between light and dark, and Collapse leaves icons only, each naming its page on hover. The browser keeps both. The first theme follows the system's.
 28e. A page scrolls inside its own body, never past the app: an absolutely placed element inside a scroll box, such as a label only screen readers read, stays within that box.
+28f. Running, above the account in the sidebar foot, counts the Sessions of every kind whose run goes, `waiting_input` and `waiting_approval` included, and is tinted while any waits on the operator. It opens a list, most recently active first: each run's Session title (a `pr_review` run reads "Pull request #N"), its Repo ("No Repo", "Dev tools") and branch, its state or "needs you", and an Alert link for a Monitor Session. A run opens where its work shows: the Session in Workspace, the pull request for a `pr_review`, Dev tools for a `devtools`. Moving to another page, Escape or a click outside closes the list. With none running it reads "No agent running".
 
 Release and checks
 

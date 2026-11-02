@@ -25,6 +25,7 @@ import {
   type Model,
   type PlaybookStepStatus,
   type PlaybookTrigger,
+  type ReplyVerdict,
   type ReportKind,
   type ReviewDecision,
   type RouteState,
@@ -277,6 +278,76 @@ export const prAgentReviews = sqliteTable(
   ],
 );
 
+/** One Reply check: the agent's verdict on one pull request thread. */
+export const prReplyChecks = sqliteTable(
+  'pr_reply_checks',
+  {
+    id: text().primaryKey().notNull(),
+    repoId: text('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    prNumber: integer('pr_number').notNull(),
+    /** The thread's root comment on the Git host. */
+    commentId: text('comment_id').notNull(),
+    headSha: text('head_sha').notNull(),
+    status: text()
+      .$type<AgentReviewStatus>()
+      .notNull()
+      .default('running' as AgentReviewStatus),
+    verdict: text().$type<ReplyVerdict>(),
+    reply: text(),
+    /** Set once the reply is on the host; a retry does not post it again. */
+    replyCommentId: text('reply_comment_id'),
+    resolved: bool('resolved').notNull().default(false),
+    error: text(),
+    canRetry: bool('can_retry').notNull().default(false),
+    /** The scratch copy's folder; null once removed. */
+    scratchPath: text('scratch_path'),
+    createdAt: text('created_at').notNull().default(nowIso),
+    ...jobPlaybookColumns(),
+  },
+  (table) => [
+    index('pr_reply_checks_thread_idx').on(table.repoId, table.prNumber, table.commentId, sql`${table.createdAt} DESC`),
+    check('pr_reply_checks_status', sql`${table.status} IN ('running', 'ready', 'failed')`),
+    check('pr_reply_checks_verdict', sql`${table.verdict} IN ('fixed', 'partly_fixed', 'not_fixed')`),
+  ],
+);
+
+/** One Comment pass over the threads the operator ticked on their own pull request. */
+export const prCommentPasses = sqliteTable(
+  'pr_comment_passes',
+  {
+    id: text().primaryKey().notNull(),
+    repoId: text('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    prNumber: integer('pr_number').notNull(),
+    headSha: text('head_sha').notNull(),
+    branch: text().notNull(),
+    status: text()
+      .$type<AgentReviewStatus>()
+      .notNull()
+      .default('running' as AgentReviewStatus),
+    /** Where a retry picks up: the steps and closing turn, the commit and push, or the replies and resolves. */
+    stage: text().$type<'steps' | 'push' | 'post'>().notNull().default('steps'),
+    /** Null until pushed, and when there was nothing to commit. */
+    commitSha: text('commit_sha'),
+    /** `PassThread[]` without `posted`, plus the reply's comment id once on the host. */
+    threads: text().notNull(),
+    error: text(),
+    canRetry: bool('can_retry').notNull().default(false),
+    scratchPath: text('scratch_path'),
+    createdAt: text('created_at').notNull().default(nowIso),
+    ...jobPlaybookColumns(),
+  },
+  (table) => [
+    index('pr_comment_passes_pr_idx').on(table.repoId, table.prNumber, sql`${table.createdAt} DESC`),
+    check('pr_comment_passes_status', sql`${table.status} IN ('running', 'ready', 'failed')`),
+    check('pr_comment_passes_stage', sql`${table.stage} IN ('steps', 'push', 'post')`),
+    check('pr_comment_passes_threads_json', sql`json_valid(${table.threads})`),
+  ],
+);
+
 /** Comments the agent posted on the Git host. Everything else about a pull request's comments comes from the host. */
 export const agentComments = sqliteTable(
   'agent_comments',
@@ -474,6 +545,8 @@ export const reports = sqliteTable(
     createdAt: text('created_at').notNull().default(nowIso),
     finishedAt: text('finished_at'),
     ...jobPlaybookColumns(),
+    /** The Playbook's Branch field as copied at start: where the code is read from. Null before Branch. */
+    playbookBranches: text('playbook_branches'),
     /** The scratch copy's folder; null once removed. */
     scratchPath: text('scratch_path'),
   },
@@ -522,7 +595,9 @@ export const fixes = sqliteTable('fixes', {
     .default('running' as FixStatus),
   jiraKey: text('jira_key'),
   jiraUrl: text('jira_url'),
-  /** `<jira_key>-<slug>`, set with the key. */
+  /** Why the ticket stage went on without a ticket while Jira was connected; null otherwise. */
+  ticketSkipped: text('ticket_skipped'),
+  /** `<jira_key>-<slug>`, set with the key; `fix/<slug>` without a ticket. */
   branch: text(),
   prNumber: integer('pr_number'),
   prUrl: text('pr_url'),
@@ -530,6 +605,8 @@ export const fixes = sqliteTable('fixes', {
   startedAt: text('started_at').notNull().default(nowIso),
   finishedAt: text('finished_at'),
   ...jobPlaybookColumns(),
+  /** The Playbook's Branch field as copied at start: where the code is read from. Null before Branch. */
+  playbookBranches: text('playbook_branches'),
 });
 
 /** The Connections a `devtools` Session may reach. No rows: every Connection with access. */
@@ -552,6 +629,8 @@ export const playbooks = sqliteTable(
     id: text().primaryKey().notNull(),
     name: text().notNull(),
     rules: text().notNull().default(''),
+    /** Comma-separated branches Verify and Fix read the code from, first one origin has; blank: the default. */
+    branches: text().notNull().default(''),
     /** `[{ block, title, instructions, writes }]`. */
     steps: text().notNull().default('[]'),
     createdAt: text('created_at').notNull().default(nowIso),
@@ -576,7 +655,7 @@ export const playbookTriggers = sqliteTable(
     index('playbook_triggers_playbook_idx').on(table.playbookId),
     check(
       'playbook_triggers_trigger',
-      sql`${table.trigger} IN ('verify', 'fix', 'review_pr', 'thread_reply', 'session_message')`,
+      sql`${table.trigger} IN ('verify', 'fix', 'review_pr', 'check_reply', 'address_comments', 'thread_reply', 'session_message')`,
     ),
   ],
 );
@@ -589,6 +668,8 @@ export const playbookSteps = sqliteTable(
     reportId: text('report_id').references(() => reports.id, { onDelete: 'cascade' }),
     fixId: text('fix_id').references(() => fixes.id, { onDelete: 'cascade' }),
     agentReviewId: text('agent_review_id').references(() => prAgentReviews.id, { onDelete: 'cascade' }),
+    replyCheckId: text('reply_check_id').references(() => prReplyChecks.id, { onDelete: 'cascade' }),
+    commentPassId: text('comment_pass_id').references(() => prCommentPasses.id, { onDelete: 'cascade' }),
     position: integer().notNull(),
     title: text().notNull(),
     instructions: text().notNull(),
@@ -609,10 +690,16 @@ export const playbookSteps = sqliteTable(
     uniqueIndex('playbook_steps_review_idx')
       .on(table.agentReviewId, table.position)
       .where(sql`${table.agentReviewId} IS NOT NULL`),
+    uniqueIndex('playbook_steps_reply_check_idx')
+      .on(table.replyCheckId, table.position)
+      .where(sql`${table.replyCheckId} IS NOT NULL`),
+    uniqueIndex('playbook_steps_comment_pass_idx')
+      .on(table.commentPassId, table.position)
+      .where(sql`${table.commentPassId} IS NOT NULL`),
     check('playbook_steps_status', sql`${table.status} IN ('pending', 'running', 'done', 'skipped', 'failed')`),
     check(
       'playbook_steps_one_job',
-      sql`(${table.reportId} IS NOT NULL) + (${table.fixId} IS NOT NULL) + (${table.agentReviewId} IS NOT NULL) = 1`,
+      sql`(${table.reportId} IS NOT NULL) + (${table.fixId} IS NOT NULL) + (${table.agentReviewId} IS NOT NULL) + (${table.replyCheckId} IS NOT NULL) + (${table.commentPassId} IS NOT NULL) = 1`,
     ),
     check('playbook_steps_writes_bool', sql`${table.writes} IN (0, 1)`),
   ],

@@ -39,6 +39,7 @@ const SESSION = {
   branch: null,
   pr_number: null,
   connection_ids: [],
+  alert_id: null,
   state: 'idle',
   last_message_preview: null,
   created_at: NOW,
@@ -211,4 +212,30 @@ test('a terminal whose agent is working stops, and its tab deletes only once it 
   await expect.poll(() => stops).toEqual(['POST']);
   await expect(page.getByRole('button', { name: 'stop', exact: true })).toHaveCount(0);
   await expect(remove).toBeEnabled();
+});
+
+test('a PROD Connection can only be read: Read / write greys out, and picking PROD drops it to Read-only', async ({
+  page,
+}) => {
+  await page.route('**/api/connections', (route) => route.fulfill({ json: { data: [], meta: { next_cursor: null } } }));
+  await page.goto(`${daemon.url}/connections#token=${daemon.token}`);
+  await page.getByRole('button', { name: '+ Add connection' }).click();
+  await page.getByRole('button', { name: /^Postgres/ }).click();
+
+  const access = page.getByRole('group', { name: 'Claude access' });
+  await access.getByText('Read / write').click();
+  await expect(access.getByRole('radio', { name: 'Read / write' })).toBeChecked();
+  await page.getByRole('group', { name: 'Environment' }).getByText('prod').click();
+  await expect(access.getByRole('radio', { name: 'Read-only' })).toBeChecked();
+  await expect(access.getByRole('radio', { name: 'Read / write' })).toBeDisabled();
+  await expect(page.getByText('A PROD Connection is read-only: Read / write is off.')).toBeVisible();
+
+  // Firebase has a read-only server now.
+  await page.getByRole('button', { name: '← Back' }).click();
+  await page.getByRole('button', { name: '+ Add connection' }).click();
+  await page.getByRole('button', { name: /^Firebase/ }).click();
+  await expect(
+    page.getByRole('group', { name: 'Claude access' }).getByRole('radio', { name: 'Read-only' }),
+  ).toBeChecked();
+  await expect(page.getByLabel('Service account key (JSON or base64)')).toBeVisible();
 });

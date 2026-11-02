@@ -59,6 +59,8 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
   /** Every read fails like this while set. */
   down: 'rate_limited' | 'failed' | null = null;
   failPosts: ((comment: NewHostComment) => boolean) | null = null;
+  /** Resolving fails while set. */
+  failResolve = false;
   rejectMerge = false;
   /** Runs just before a comment reaches the host. */
   beforePost: (comment: NewHostComment) => void = () => {};
@@ -155,6 +157,7 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
 
   async setResolved(_slug: string, number: number, commentId: string, resolved: boolean): Promise<void> {
     this.check();
+    if (this.failResolve) throw new ApiError(502, ErrorCode.UpstreamFailed, 'the host refused to resolve');
     for (const comment of this.comments.get(number) ?? []) if (comment.id === commentId) comment.resolved = resolved;
   }
 

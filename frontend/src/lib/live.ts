@@ -75,8 +75,12 @@ export function useLiveEvents(): void {
       ) {
         refetch(queryKeys.monitor);
       }
+      if (event.event === 'pull_request.job_changed') {
+        refetch(queryKeys.pullRequest(event.data.repo_id, event.data.number));
+      }
       if (event.event === 'playbook_step.updated') {
-        if (event.data.agent_review_id !== null) refetch(queryKeys.pulls);
+        const { agent_review_id, reply_check_id, comment_pass_id } = event.data;
+        if (agent_review_id !== null || reply_check_id !== null || comment_pass_id !== null) refetch(queryKeys.pulls);
         else refetch(queryKeys.monitor);
       }
     });

@@ -63,7 +63,7 @@ Every outside system is an MCP server or a CLI registered with Claude Code (ADR 
 hands off to the provider's browser sign-in, a secret the console must hold goes to the Keychain,
 and the console runs `claude mcp add` in every Claude account. Fixed reads run the CLIs with no
 model turn: `pup` for Scans, `gh`, `glab` and `bkt` for pull requests, `git ls-remote` when looking
-for a Service's code. Judgment work (Verification, Fix, Agent Review, Dev tools questions) runs as an
+for a Service's code. Judgment work (Verification, Fix, Agent Review, Reply check, Comment pass, Dev tools questions) runs as an
 agent Session.
 
 ## Backend modules
@@ -86,7 +86,7 @@ agent Session.
 | `playbooks` | Playbooks and the Trigger each one holds, the built-ins and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each (registered by `agent`) |
 | `accounts` | Claude accounts, their usage, Auto-switch and Smart usage |
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
-| `workspace` | `repo`, `pr_review` and `anonymous` Sessions; branch checkout with stash; pull requests, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews |
+| `workspace` | `repo`, `pr_review` and `anonymous` Sessions; branch checkout with stash; pull requests, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews; Reply checks and Comment passes, one job per pull request at a time, each in a scratch copy at the pull request's head commit, with the console committing, pushing, replying and resolving |
 | `monitor` | Services, Routes, Scans and Alerts through `pup`; finding a Service's code; the Alert's Session; Verification and Reports; the operator's Review; the Fix from ticket to merged PR |
 | `devtools` | `devtools` Sessions scoped to Connections; ties MCP calls to their Connection; the PROD-write rule; the instructions that make the agent hand over Results and a Comparison |
 | `terminals` | node-pty terminals behind an authenticated WebSocket; the Setup agent, its MCP tools, local file, folder, URL and Keychain reads with secrets masked, and the Full Disk Access gate |
@@ -128,8 +128,8 @@ query refetches, batched over 40 ms. Events (`shared/src/ws.ts`):
 `/terminals/:id` is a raw stream to one terminal behind the same token check.
 
 **Start-up recovery.** Before the port opens: Sessions left `working`, `waiting_input` or
-`waiting_approval` fail and their Approvals expire; a running Agent Review, Report, Fix or Scan fails
-(`interrupted` for a Scan and a Fix).
+`waiting_approval` fail and their Approvals expire; a running Agent Review, Report, Fix, Reply check, Comment pass or Scan
+fails (`interrupted` for a Scan, a Fix, a Reply check and a Comment pass); only failed jobs keep their scratch copy.
 
 **Scheduler.** `monitor-scan` runs on a 6-hour grid from the Datadog Connector's daily scan time and
 starts a Scan of every Service for each Check interval whose slot came due. `monitor-pr-watch` reads
@@ -141,8 +141,9 @@ to 25 redacted Samples, and records each Route's state. After a Scan the code fi
 each Service with no code: an imported Repo of the same name, a git folder of that name next to one,
 then a repository of that name on a connected Git host. The operator starts a Verification; it runs in
 the Alert's Session, a `repo` Session in the Service's Repo or an `anonymous` Session holding a
-clone of its Git URL. Its runs work in a scratch copy: a git worktree of that code at the default
-branch, under `scratch/` in the data directory, removed once the Report is ready. The Report also
+clone of its Git URL. Its runs work in a scratch copy: a git worktree of that code at the newest
+commit of the Verify Playbook's branch (the default branch when blank), fetched from origin first,
+under `scratch/` in the data directory, removed once the Report is ready. The Report also
 goes to a Markdown file in the Datadog Connector's reports folder. Confirming the Report starts the
 Fix in the same Session, in the checkout and in a new conversation, stage by stage (ticket, branch,
 steps, PR), each agent run ending with JSON.
@@ -169,7 +170,7 @@ default.
 
 Settings the operator changed, Claude accounts, Sessions and the Connections a `devtools` Session
 names, the Action Log and Approvals, MCP Servers the operator removed or disabled, Connectors (config
-and last check), Connections (no secrets), Repos, Agent Reviews, the ids of comments the agent
+and last check), Connections (no secrets), Repos, Agent Reviews, Reply checks, Comment passes, the ids of comments the agent
 posted, Services, Routes, Scans and their Route results, Alerts and their events, Reports, Reviews
 and Fixes, Playbooks, the Trigger each one holds, and each job's copy of its Playbook steps. Pull requests stay on the Git host. Session messages stay in the Claude Code transcript, in
 the config dir of the Session's Claude account.

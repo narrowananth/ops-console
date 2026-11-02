@@ -62,6 +62,7 @@ export function toFix(row: FixRow, playbook: JobPlaybook | null): Fix {
     status: row.status,
     jira_key: row.jiraKey,
     jira_url: row.jiraUrl,
+    ticket_skipped: row.ticketSkipped,
     branch: row.branch,
     pr_number: row.prNumber,
     pr_url: row.prUrl,

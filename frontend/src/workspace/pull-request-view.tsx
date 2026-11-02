@@ -18,12 +18,17 @@ import {
   usePullRequest,
   useReviewPullRequest,
   useStartAgentReview,
+  useStartCommentPass,
 } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { useTriggerPlaybook } from '../playbooks/job-steps';
 import { withPlaybook } from '../playbooks/labels';
+import { AddressCommentsDialog } from './address-comments';
 import { AgentReviewCard } from './agent-review-card';
+import { CommentPassCard } from './comment-pass-card';
 import { PrFileView, useViewed } from './pr-file';
+import { agentBusy, BUSY_TITLE, openLineThreads } from './pr-jobs';
+import { PrSessions } from './pr-sessions';
 import { CommentComposer, Thread } from './pr-thread';
 
 export function PullRequestView({ repoId, number }: { repoId: string; number: number }) {
@@ -31,10 +36,11 @@ export function PullRequestView({ repoId, number }: { repoId: string; number: nu
   const review = useReviewPullRequest(repoId, number);
   const merge = useMergePullRequest(repoId, number);
   const agent = useStartAgentReview(repoId, number);
+  const address = useStartCommentPass(repoId, number);
 
   if (pull.isPending) return <Empty>Reading the pull request…</Empty>;
   if (pull.isError) return <Empty>Could not read the pull request: {pull.error.message}</Empty>;
-  return <Loaded pr={pull.data} review={review} merge={merge} agent={agent} />;
+  return <Loaded pr={pull.data} review={review} merge={merge} agent={agent} address={address} />;
 }
 
 function Loaded(props: {
@@ -42,24 +48,28 @@ function Loaded(props: {
   review: ReturnType<typeof useReviewPullRequest>;
   merge: ReturnType<typeof useMergePullRequest>;
   agent: ReturnType<typeof useStartAgentReview>;
+  address: ReturnType<typeof useStartCommentPass>;
 }) {
-  const { pr, review, merge, agent } = props;
+  const { pr, review, merge, agent, address } = props;
   const [changes, setChanges] = useStored(
     `workspace.draft.${pr.repo_id}#${pr.number}.changes`,
     z.string().nullable(),
     null,
   );
   const [confirmMerge, setConfirmMerge] = useState(false);
+  const [picking, setPicking] = useState(false);
   const viewed = useViewed(pr);
   const reviewPlaybook = useTriggerPlaybook(PlaybookTrigger.ReviewPr);
+  const addressPlaybook = useTriggerPlaybook(PlaybookTrigger.AddressComments);
   const comment = usePostComment(pr.repo_id, pr.number);
-  // One review at a time: a second would run the agent again on the same change.
   const reviewing = pr.latest_agent_review?.status === AgentReviewStatus.Running;
+  const busy = agentBusy(pr);
   // Its findings are already on the host; the next review waits for a new commit.
   const reviewed = pr.latest_agent_review?.status === AgentReviewStatus.Ready && !pr.latest_agent_review.stale;
   const roots = pr.comments.filter((comment) => comment.parent_id === null);
   const open = pr.state === PrState.Open;
-  const error = review.error ?? merge.error ?? agent.error;
+  const canAddress = open && pr.is_mine && openLineThreads(pr).length > 0;
+  const error = review.error ?? merge.error ?? agent.error ?? address.error;
 
   return (
     <div className="flex flex-col gap-4 px-5 py-4">
@@ -110,10 +120,10 @@ function Loaded(props: {
           <Button
             variant="primary"
             className="px-3 py-1 text-xs"
-            disabled={agent.isPending || reviewing || reviewed}
+            disabled={agent.isPending || busy || reviewed}
             title={
-              reviewing
-                ? 'The agent is still reviewing this pull request'
+              busy
+                ? BUSY_TITLE
                 : reviewed
                   ? 'The agent already reviewed this commit. Push a change to review again.'
                   : undefined
@@ -129,6 +139,17 @@ function Loaded(props: {
                   ? 'Reviewed at this commit'
                   : withPlaybook('Agent Review', reviewPlaybook)}
           </Button>
+          {canAddress && (
+            <Button
+              className="px-3 py-1 text-xs"
+              disabled={address.isPending || busy}
+              title={busy ? BUSY_TITLE : undefined}
+              onClick={() => setPicking(true)}
+            >
+              {address.isPending && <Spinner />}
+              {withPlaybook('Address comments', addressPlaybook)}
+            </Button>
+          )}
           {open && !confirmMerge && (
             <Button
               className="ml-auto px-3 py-1 text-xs"
@@ -156,6 +177,7 @@ function Loaded(props: {
             </span>
           )}
         </div>
+        <PrSessions pr={pr} />
         {changes !== null && (
           <div className="flex gap-1.5">
             <input
@@ -184,9 +206,20 @@ function Loaded(props: {
             {error.message}
           </div>
         )}
+        {picking && (
+          <AddressCommentsDialog
+            pr={pr}
+            onCancel={() => setPicking(false)}
+            onStart={(commentIds) => {
+              setPicking(false);
+              address.mutate(commentIds);
+            }}
+          />
+        )}
       </header>
 
       {pr.latest_agent_review && <AgentReviewCard review={pr.latest_agent_review} sessionId={pr.agent_session_id} />}
+      <CommentPassCard passes={pr.comment_passes} prUrl={pr.url} sessionId={pr.agent_session_id} />
 
       {pr.body.trim() !== '' && (
         <section aria-label="Description" className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
@@ -240,12 +273,7 @@ function Loaded(props: {
           <ul className="m-0 flex list-none flex-col gap-2 p-0">
             {roots.map((root) => (
               <li key={root.id}>
-                <Thread
-                  repoId={pr.repo_id}
-                  number={pr.number}
-                  root={root}
-                  replies={pr.comments.filter((comment) => comment.parent_id === root.id)}
-                />
+                <Thread pr={pr} root={root} />
               </li>
             ))}
           </ul>

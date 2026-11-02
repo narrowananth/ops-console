@@ -3,8 +3,11 @@ import { OPEN_PR_BRANCHES } from '../repos/open-pr-branches';
 import { AgentReviewsService } from './agent-reviews.service';
 import { AnonymousSessionsService } from './anonymous-sessions.service';
 import { CliGitHosts } from './cli-git-hosts';
+import { CommentPassesService } from './comment-passes.service';
 import { GIT_HOSTS, type GitHosts } from './git-host';
+import { PrJobs } from './pr-jobs';
 import { PullRequestsService } from './pull-requests.service';
+import { ReplyChecksService } from './reply-checks.service';
 import { PullRequestsController, WorkspaceSessionsController } from './workspace.controller';
 import { WorkspaceSessionsService } from './workspace-sessions.service';
 
@@ -20,6 +23,9 @@ export class WorkspaceModule {
         { provide: GIT_HOSTS, useValue: config.hosts ?? new CliGitHosts() },
         PullRequestsService,
         AgentReviewsService,
+        PrJobs,
+        ReplyChecksService,
+        CommentPassesService,
         WorkspaceSessionsService,
         AnonymousSessionsService,
         { provide: OPEN_PR_BRANCHES, useExisting: PullRequestsService },

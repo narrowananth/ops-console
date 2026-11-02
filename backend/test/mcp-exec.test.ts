@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { launcherArgv, runMcpExec, unwrapLauncher } from '../src/mcp/launcher';
@@ -32,6 +32,28 @@ describe('ops-console mcp-exec', () => {
     expect(JSON.parse(await readFile(out, 'utf8'))).toEqual({ secret: 'hunter2-secret', args: ['one', 'two words'] });
     // The secret reached the child only: this process never got it.
     expect(process.env.PGPASSWORD).toBeUndefined();
+  });
+
+  it('writes @file entries to a private folder while the command runs, fills {{files}}, and removes it after', async () => {
+    const keychain = new FakeKeychain();
+    await keychain.set(
+      'mcp:fb',
+      JSON.stringify({ '@file:key.json': '{"k":1}', KEY_PATH: '{{files}}/key.json', '@file:../escape': 'no' }),
+    );
+    const dir = await tempDir();
+    const out = path.join(dir, 'out.json');
+    const script = path.join(dir, 'files.mjs');
+    await writeFile(
+      script,
+      `import { readFileSync, statSync, readdirSync, writeFileSync } from 'node:fs'; import path from 'node:path';
+const file = process.env.KEY_PATH; const folder = process.argv[2];
+writeFileSync(${JSON.stringify(out)}, JSON.stringify({ key: readFileSync(file, 'utf8'), mode: (statSync(file).mode & 0o777).toString(8), folderMode: (statSync(folder).mode & 0o777).toString(8), same: path.dirname(file) === folder, names: readdirSync(folder), folder }));`,
+    );
+    expect(await runMcpExec(['fb', '--', process.execPath, script, '{{files}}'], keychain)).toBe(0);
+    const seen = JSON.parse(await readFile(out, 'utf8'));
+    expect(seen).toMatchObject({ key: '{"k":1}', mode: '600', folderMode: '700', same: true, names: ['key.json'] });
+    // The folder, key included, is gone once the command ends.
+    await expect(stat(seen.folder)).rejects.toThrow();
   });
 
   it('runs the command without extra env when the Keychain holds nothing', async () => {

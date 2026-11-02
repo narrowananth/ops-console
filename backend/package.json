@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "OPS_CONSOLE_APP_DIR=. OPS_CONSOLE_DATA_DIR=.data OPS_CONSOLE_PORT=4546 OPS_CONSOLE_LAUNCHER=$PWD/scripts/dev-launcher.sh tsx watch src/main.ts",
+    "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
     "db:generate": "drizzle-kit generate",
     "typecheck": "tsc -p tsconfig.json",

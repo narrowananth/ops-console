@@ -1,5 +1,6 @@
-import { type EditedMessage, SessionState } from '@ops-console/shared';
+import { type EditedMessage, SessionKind, SessionState } from '@ops-console/shared';
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { z } from 'zod';
 import { ApprovalPrompts } from '../agents/approval-prompts';
 import { SessionChips } from '../agents/session-chips';
@@ -12,6 +13,7 @@ import {
   useDeleteSession,
   useEditMessage,
   useMessages,
+  useRepoPullRequests,
   useRepoSessions,
   useRepos,
   useSendMessage,
@@ -19,6 +21,8 @@ import {
 import { useStored } from '../lib/remember';
 import { PlaybookLink } from '../playbooks/job-steps';
 import { BranchSwitcher } from './branch-switcher';
+import { ConversationMap, useFollowLatest } from './conversation';
+import { alertPath, pullRequestPath, sessionDraftKey } from './links';
 
 export function SessionView({ id, onGone }: { id: string; onGone: () => void }) {
   const sessions = useRepoSessions();
@@ -29,9 +33,12 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const editMessage = useEditMessage(id);
   // What the last edit did to the files, until the operator closes it or sends again.
   const [reverted, setReverted] = useState<EditedMessage | null>(null);
-  const [text, setText] = useStored(`workspace.draft.session.${id}`, z.string(), '');
+  const [text, setText] = useStored(sessionDraftKey(id), z.string(), '');
+  const latest = useFollowLatest();
   const session = sessions.data?.find((candidate) => candidate.id === id);
   const gone = sessions.isSuccess && session === undefined;
+  const pulls = useRepoPullRequests(session?.kind === SessionKind.Repo ? session.repo_id : null);
+  const pull = pulls.data?.data.find((candidate) => candidate.branch === session?.branch);
   useEffect(() => {
     if (gone) onGone();
   }, [gone, onGone]);
@@ -60,6 +67,24 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             {session.branch}
           </span>
         )}
+        {pull?.repo_id && (
+          <Link
+            to={pullRequestPath(pull.repo_id, pull.number)}
+            title={`Open pull request #${pull.number}: ${pull.title}`}
+            className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
+          >
+            PR #{pull.number} →
+          </Link>
+        )}
+        {session.alert_id && (
+          <Link
+            to={alertPath(session.alert_id)}
+            title="Open the Monitor Alert this Session verifies and fixes"
+            className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
+          >
+            Alert →
+          </Link>
+        )}
         <StatusPill state={SESSION_STATE[session.state]}>{session.state.replace('_', ' ')}</StatusPill>
         {session.playbook && (
           <PlaybookLink
@@ -82,35 +107,45 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
           </span>
         )}
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {messages.isPending ? (
-          <Empty>Reading the conversation…</Empty>
-        ) : messages.isError ? (
-          <Empty>Could not read the conversation: {messages.error.message}</Empty>
-        ) : messages.data.length === 0 ? (
-          <Empty>
-            {repo
-              ? `Nothing said yet. Tell the agent what to do on ${session.branch}.`
-              : 'Nothing said yet. This Session has no Repo: it works in a folder of its own. Ask it to clone a repo, or to do anything else.'}
-          </Empty>
-        ) : (
-          <ul className="m-0 list-none px-0 py-2">
-            {messages.data.map((message) => (
-              <MessageView
-                key={message.id}
-                message={message}
-                onEdit={
-                  message.id === lastAsked && !busy
-                    ? (edited) =>
-                        editMessage
-                          .mutateAsync({ messageId: message.id, text: edited })
-                          .then((result) => setReverted(result))
-                    : undefined
-                }
-              />
-            ))}
-          </ul>
-        )}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <section
+          ref={latest.setScroller}
+          onScroll={latest.onScroll}
+          aria-label="Conversation"
+          className="relative min-h-0 flex-1 overflow-y-auto"
+        >
+          <div ref={latest.setContent}>
+            {messages.isPending ? (
+              <Empty>Reading the conversation…</Empty>
+            ) : messages.isError ? (
+              <Empty>Could not read the conversation: {messages.error.message}</Empty>
+            ) : messages.data.length === 0 ? (
+              <Empty>
+                {repo
+                  ? `Nothing said yet. Tell the agent what to do on ${session.branch}.`
+                  : 'Nothing said yet. This Session has no Repo: it works in a folder of its own. Ask it to clone a repo, or to do anything else.'}
+              </Empty>
+            ) : (
+              <ul className="m-0 list-none px-0 py-2">
+                {messages.data.map((message) => (
+                  <MessageView
+                    key={message.id}
+                    message={message}
+                    onEdit={
+                      message.id === lastAsked && !busy
+                        ? (edited) =>
+                            editMessage
+                              .mutateAsync({ messageId: message.id, text: edited })
+                              .then((result) => setReverted(result))
+                        : undefined
+                    }
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+        <ConversationMap messages={messages.data ?? []} scroller={latest.scroller} content={latest.content} />
       </div>
       <div className="flex flex-col gap-2 px-6 pb-4.5">
         <ApprovalPrompts sessionId={id} />

@@ -39,13 +39,13 @@ a mode that asks.
 ### Playbooks
 
 **Playbook**:
-The rules and ordered steps the agent follows when a Trigger starts it, written by the operator. Each Trigger holds
-one; one Playbook may be held by several.
+The rules and ordered steps the agent follows when a Trigger starts it, written by the operator, and the branches
+Verify and Fix read the code from. Each Trigger holds one; one Playbook may be held by several.
 _Avoid_: rule, pipeline, workflow
 
 **Trigger**:
-A place in a tab that starts the agent: Verify and Fix in Monitor, Review PR, Reply in thread and Session message in
-Workspace.
+A place in a tab that starts the agent: Verify and Fix in Monitor, Review PR, Check reply, Address comments, Reply in
+thread and Session message in Workspace.
 _Avoid_: action (the Action Log means each command the agent runs)
 
 **Playbook step**:
@@ -55,8 +55,9 @@ One titled instruction in a Playbook, run as its own agent turn, ending done, sk
 A ready-made Playbook step the operator drags into a Playbook and then edits.
 
 **Scratch copy**:
-A throwaway copy of a Service's code, at its default branch, where a Verification may write files and run local
-commands. A Playbook step that needs one carries the tag "scratch copy"; Review PR takes no such step.
+A throwaway copy of a Repo's code, at the newest commit of the Playbook's branch for a Verification, fetched from
+origin, or at a pull request's head commit for a
+Reply check or a Comment pass, where the agent may write files and run local commands. A Playbook step that needs one carries the tag "scratch copy"; Review PR takes no such step.
 
 ### Monitor
 
@@ -115,7 +116,7 @@ _Avoid_: approval
 
 **Ticket**:
 The Jira issue the agent creates when the operator confirms a Report while Jira is connected. Its key starts the fix
-branch name.
+branch name. When the ticket cannot be made, the Fix goes on without one.
 
 **Fix**:
 The work that follows a confirmed Review: ticket (when Jira is connected), branch, the steps of its Playbook (code
@@ -144,6 +145,15 @@ Service's Git URL.
 The agent's written review of a pull request: findings, a PROD readiness checklist and a verdict,
 tied to the commit it read. Each finding is also posted to the Git host as a comment. A newer commit makes it stale.
 
+**Reply check**:
+The agent's check of one pull request thread: whether the code at the head commit does what the thread asked, given
+as fixed, partly fixed or not fixed in a reply. On fixed the thread is resolved.
+
+**Comment pass**:
+The agent's work on the review threads the operator ticked on their own pull request: one commit pushed to its branch,
+a reply in each thread, and each done thread resolved.
+_Avoid_: fix (a Fix follows an Alert's Review)
+
 ### Dev tools
 
 **Connection**:
@@ -155,8 +165,8 @@ What the agent may do on a Connection: none, read, or read and write. Enforced w
 launches, not only shown.
 
 **PROD**:
-The Environment tag on a Connection that reaches production data. Always visible, and every write
-asks the operator first.
+The Environment tag on a Connection that reaches production data. Always visible, and the agent only
+reads it: a PROD Connection is never given write access.
 
 **MCP Server**:
 A server registered in Claude Code that gives the agent tools (Slack, Atlassian, a database). The

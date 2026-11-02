@@ -44,7 +44,13 @@ export class WorkspaceSessionsService {
     const folder = this.folder(input.repo_id);
     const branches = await this.git.branches(folder);
     if (!branches.some((branch) => branch.name === input.branch)) {
-      throw validationFailed(`invalid body: branch ${input.branch} is not in this Repo`);
+      if (!input.from_origin) throw validationFailed(`invalid body: branch ${input.branch} is not in this Repo`);
+      await this.logged(
+        null,
+        folder,
+        `git fetch origin ${input.branch} && git branch --track ${input.branch} origin/${input.branch}`,
+        () => this.git.trackBranch(folder, input.branch),
+      );
     }
     return toSession(
       this.sessions.create({
@@ -59,7 +65,12 @@ export class WorkspaceSessionsService {
   }
 
   /** Stashes uncommitted changes, then checks out `branch`, or makes it from the current one with `create`. */
-  async checkout(sessionId: string, branch: string, create: boolean): Promise<{ session: Session; stashed: boolean }> {
+  async checkout(
+    sessionId: string,
+    branch: string,
+    create: boolean,
+    from?: string,
+  ): Promise<{ session: Session; stashed: boolean }> {
     const session = this.sessions.get(sessionId);
     if (session.kind !== SessionKind.Repo || session.repoId === null) {
       throw new ApiError(409, ErrorCode.InvalidState, 'Only a repo Session has a branch');
@@ -83,14 +94,22 @@ export class WorkspaceSessionsService {
       );
       stashed = true;
     }
-    await this.logged(sessionId, folder, `git checkout ${create ? '-b ' : ''}${branch}`, () =>
-      this.git.checkout(folder, branch, create),
+    await this.logged(
+      sessionId,
+      folder,
+      `git checkout ${create ? '-b ' : ''}${branch}${create && from ? ` ${from}` : ''}`,
+      () => this.git.checkout(folder, branch, create, from),
     );
     return { session: toSession(this.sessions.write(sessionId, { branch })), stashed };
   }
 
   /** The Action Log row exists before git runs; a refusal from git becomes `upstream_failed`. */
-  private async logged(sessionId: string, folder: string, command: string, action: () => Promise<void>): Promise<void> {
+  private async logged(
+    sessionId: string | null,
+    folder: string,
+    command: string,
+    action: () => Promise<void>,
+  ): Promise<void> {
     const row = this.actionLog.start({
       sessionId,
       kind: ActionKind.Git,

@@ -117,6 +117,16 @@ export const wsEventSchema = z.discriminatedUnion('event', [
       post_failed: z.number().int(),
     }),
   ),
+  event(
+    'pull_request.job_changed',
+    z.object({
+      repo_id: z.string(),
+      number: z.number().int(),
+      kind: z.enum(['reply_check', 'comment_pass']),
+      id: z.string(),
+      status: z.enum(['running', 'ready', 'failed']),
+    }),
+  ),
   event('scan.started', z.object({ scan_id: z.string(), service_id: z.string().nullable() })),
   event(
     'scan.finished',
@@ -168,6 +178,8 @@ export const wsEventSchema = z.discriminatedUnion('event', [
       report_id: z.string().nullable(),
       fix_id: z.string().nullable(),
       agent_review_id: z.string().nullable(),
+      reply_check_id: z.string().nullable(),
+      comment_pass_id: z.string().nullable(),
       position: z.number().int(),
       status: z.enum(PlaybookStepStatus),
       summary: z.string().nullable(),

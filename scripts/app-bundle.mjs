@@ -9,35 +9,38 @@ export const APP_NAME = 'Ops Console';
 const BUNDLE_ID = 'dev.ops-console';
 const ICON = path.resolve(import.meta.dirname, '../cli/assets/ops-console.icns');
 
-/** Builds `<dir>/Ops Console.app` around `node` and returns the path of its executable. */
-export async function buildAppBundle({ node, dir, version }) {
-  const app = path.join(dir, `${APP_NAME}.app`);
+/**
+ * Builds `<dir>/<name>.app` around `node` and returns the path of its executable. `pnpm dev` builds its own,
+ * under another name and id, so macOS keeps its permissions apart from the installed app's.
+ */
+export async function buildAppBundle({ node, dir, version, name = APP_NAME, id = BUNDLE_ID }) {
+  const app = path.join(dir, `${name}.app`);
   const contents = path.join(app, 'Contents');
   await mkdir(path.join(contents, 'MacOS'), { recursive: true });
   await mkdir(path.join(contents, 'Resources'), { recursive: true });
-  const executable = path.join(contents, 'MacOS', APP_NAME);
+  const executable = path.join(contents, 'MacOS', name);
   await copyFile(node, executable);
   await copyFile(ICON, path.join(contents, 'Resources', 'ops-console.icns'));
-  await writeFile(path.join(contents, 'Info.plist'), infoPlist(version));
+  await writeFile(path.join(contents, 'Info.plist'), infoPlist({ version, name, id }));
   // Node's own signature names Node; an ad-hoc one names the bundle. A new Node means a new signature, and
   // macOS asks for Full Disk Access again.
   execFileSync('codesign', ['--force', '--sign', '-', app], { stdio: 'inherit' });
   return executable;
 }
 
-function infoPlist(version) {
+function infoPlist({ version, name, id }) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
   <dict>
     <key>CFBundleExecutable</key>
-    <string>${APP_NAME}</string>
+    <string>${name}</string>
     <key>CFBundleIdentifier</key>
-    <string>${BUNDLE_ID}</string>
+    <string>${id}</string>
     <key>CFBundleName</key>
-    <string>${APP_NAME}</string>
+    <string>${name}</string>
     <key>CFBundleDisplayName</key>
-    <string>${APP_NAME}</string>
+    <string>${name}</string>
     <key>CFBundleIconFile</key>
     <string>ops-console</string>
     <key>CFBundlePackageType</key>

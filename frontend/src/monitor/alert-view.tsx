@@ -12,10 +12,12 @@ import {
   RunStatus,
   type Sample,
 } from '@ops-console/shared';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
 import { StopRun } from '../agents/stop-run';
 import { Button, Spinner } from '../components/ui/button';
+import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { DiffLines } from '../components/ui/diff';
 import { Dropdown } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
@@ -25,6 +27,7 @@ import {
   useAlert,
   useAlertEvents,
   useAlertReports,
+  useCancelFix,
   useConnectors,
   usePatchRoute,
   useRetryFix,
@@ -41,10 +44,12 @@ import {
   PlaybookLink,
   runState,
   ScratchTag,
+  SkipStep,
   stepTally,
   useTriggerPlaybook,
 } from '../playbooks/job-steps';
 import { withPlaybook } from '../playbooks/labels';
+import { sessionPath } from '../workspace/links';
 import { CodeSource } from './repo-link';
 import { SeverityBadge } from './severity';
 
@@ -114,6 +119,11 @@ function ReportPanel({
           />
         )}
         <span className="ml-auto flex items-center gap-2">
+          {sessionId && (
+            <Link to={sessionPath(sessionId)} className="text-xs">
+              Open the Session →
+            </Link>
+          )}
           {shown.status === RunStatus.Running && sessionId && (
             <StopRun sessionId={sessionId} title="Stop the Verification; it fails and can retry from its step" />
           )}
@@ -248,9 +258,13 @@ const outLink = 'font-semibold text-text';
 
 /**
  * The Fix as a path: Ticket, Branch, each step of its Playbook by title, and PR, each with what it made. The ticket
- * shows as skipped when Jira was not connected. A failed stage carries the error and Retry.
+ * shows as skipped, with why, when Jira was not connected or the ticket was not made. A failed stage carries the error
+ * and Retry.
  */
-function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: () => void; retrying: boolean }) {
+function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: (skip: boolean) => void; retrying: boolean }) {
+  const cancel = useCancelFix(fix.id);
+  const [asking, setAsking] = useState(false);
+  const cancellable = (fix.status === FixStatus.Running || fix.status === FixStatus.Failed) && fix.pr_number === null;
   const at = FIX_STAGES.indexOf(fix.stage);
   const stageState = (index: number): PathwayState =>
     fix.status === FixStatus.Done || index < at
@@ -270,12 +284,17 @@ function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: () => void
           {fix.error_message}
         </span>
       )}
-      <Button className="px-2.5 py-1 text-xs" disabled={retrying} onClick={onRetry}>
-        {retrying && <Spinner />}
-        {fix.stage === FixStage.Steps && failed !== null
-          ? `Retry from step ${failed}`
-          : `Retry from ${STAGE_LABEL[fix.stage]}`}
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button className="px-2.5 py-1 text-xs" disabled={retrying} onClick={() => onRetry(false)}>
+          {retrying && <Spinner />}
+          {fix.stage === FixStage.Steps && failed !== null
+            ? `Retry from step ${failed}`
+            : `Retry from ${STAGE_LABEL[fix.stage]}`}
+        </Button>
+        {fix.stage === FixStage.Steps && failed !== null && (
+          <SkipStep step={failed} disabled={retrying} onSkip={() => onRetry(true)} />
+        )}
+      </div>
     </div>
   );
 
@@ -309,7 +328,13 @@ function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: () => void
                   {fix.jira_key} →
                 </a>
               )}
-              {noJira && <span>No Jira connected.</span>}
+              {noJira && (
+                <span>
+                  {fix.ticket_skipped
+                    ? `No ticket: ${fix.ticket_skipped}. The Fix went on without one.`
+                    : 'No Jira connected.'}
+                </span>
+              )}
               {failedHere}
             </>
           ),
@@ -364,17 +389,52 @@ function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: () => void
         <strong className="font-heading text-sm">Fix</strong>
         <StatusPill state={FIX_STATE[fix.status]}>{fix.status}</StatusPill>
         {fix.playbook && <PlaybookLink playbook={fix.playbook} label={`Playbook: ${fix.playbook.name}`} />}
-        {fix.session_id && (
-          <span className="ml-auto flex items-center gap-3">
-            <Link to={`/workspace?session=${fix.session_id}`} className="text-xs">
+        <span className="ml-auto flex items-center gap-3">
+          {fix.session_id && (
+            <Link to={sessionPath(fix.session_id)} className="text-xs">
               Open the Session →
             </Link>
-            {fix.status === FixStatus.Running && (
-              <StopRun sessionId={fix.session_id} title="Stop the Fix; it fails and can retry from where it stopped" />
-            )}
-          </span>
-        )}
+          )}
+          {fix.session_id && fix.status === FixStatus.Running && (
+            <StopRun sessionId={fix.session_id} title="Stop the Fix; it fails and can retry from where it stopped" />
+          )}
+          {cancellable && (
+            <Button
+              className="px-2.5 py-1 text-xs"
+              title="Stop the Fix, undo its branch and go back to the Review"
+              onClick={() => {
+                cancel.reset();
+                setAsking(true);
+              }}
+            >
+              Cancel Fix
+            </Button>
+          )}
+        </span>
       </div>
+      {asking && (
+        <ConfirmDialog
+          title="Cancel this Fix?"
+          action="Cancel the Fix"
+          dismiss="Keep it"
+          pending={cancel.isPending}
+          error={cancel.error?.message ?? null}
+          onCancel={() => setAsking(false)}
+          onConfirm={() => cancel.mutate(undefined, { onSuccess: () => setAsking(false) })}
+        >
+          <p className="m-0">
+            The agent stops. Its uncommitted changes go on the git stash
+            {fix.branch ? (
+              <>
+                , branch <code>{fix.branch}</code> is deleted
+              </>
+            ) : null}
+            , and the Repo goes back to the source branch. The Alert returns to the Review, so you can start a new Fix
+            or dismiss it.
+            {fix.jira_key ? ` Jira ${fix.jira_key} stays as it is.` : ''}
+          </p>
+        </ConfirmDialog>
+      )}
       <PathwayProgress steps={steps} />
       <Pathway label="Fix progress" steps={steps} />
     </section>
@@ -477,10 +537,20 @@ export function AlertView({ id }: { id: string }) {
                   )}
           </Button>
           {report && retryFrom !== null && !verifying && (
-            <Button disabled={retryReport.isPending || verify.isPending} onClick={() => retryReport.mutate(report.id)}>
-              {retryReport.isPending && <Spinner />}
-              Retry from step {retryFrom}
-            </Button>
+            <>
+              <Button
+                disabled={retryReport.isPending || verify.isPending}
+                onClick={() => retryReport.mutate({ id: report.id })}
+              >
+                {retryReport.isPending && <Spinner />}
+                Retry from step {retryFrom}
+              </Button>
+              <SkipStep
+                step={retryFrom}
+                disabled={retryReport.isPending || verify.isPending}
+                onSkip={() => retryReport.mutate({ id: report.id, skip: true })}
+              />
+            </>
           )}
           <span className="text-xs text-neutral-700">
             {hasCode
@@ -539,7 +609,7 @@ export function AlertView({ id }: { id: string }) {
         </div>
       )}
 
-      {data.fix && <FixProgress fix={data.fix} retrying={retry.isPending} onRetry={() => retry.mutate()} />}
+      {data.fix && <FixProgress fix={data.fix} retrying={retry.isPending} onRetry={(skip) => retry.mutate(skip)} />}
 
       <SampleList samples={data.samples} />
 

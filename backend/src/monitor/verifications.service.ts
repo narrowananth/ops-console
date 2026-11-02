@@ -5,6 +5,7 @@ import {
   AlertActor,
   AlertEventKind,
   AlertStatus,
+  branchList,
   ErrorCode,
   type Part,
   PlaybookTrigger,
@@ -27,7 +28,7 @@ import { reports, routes, services } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { JobSteps, jobPlaybook } from '../playbooks/job-steps';
 import { PlaybooksService } from '../playbooks/playbooks.service';
-import { GIT, Git, GitFailed } from '../repos/git';
+import { type CodeBase, codeBaseStep, GIT, Git, GitFailed } from '../repos/git';
 import { AnonymousSessionsService } from '../workspace/anonymous-sessions.service';
 import { AlertSessions, type CodeSource } from './alert-sessions';
 import { AlertsService } from './alerts.service';
@@ -55,15 +56,24 @@ export function cleanSlug(slug: string): string {
 }
 
 /** What the agent is told about the Alert before its first step: its logs and where the code is. */
-export function verificationBrief(alert: AlertRow, service: ServiceRow, route: RouteRow, source: CodeSource): string {
+export function verificationBrief(
+  alert: AlertRow,
+  service: ServiceRow,
+  route: RouteRow,
+  source: CodeSource,
+  base: CodeBase | null = null,
+): string {
   const samples = samplesOf(alert)
     .slice(0, 5)
     .map((sample) => `- ${sample.timestamp} ${sample.status}: ${sample.message}`)
     .join('\n');
-  const where =
-    source.kind === 'repo'
-      ? `this folder, a scratch copy of the local Repo ${source.name} at its default branch`
-      : `this folder, a scratch copy of a fresh clone of ${source.name}`;
+  const copied = source.kind === 'repo' ? `the local Repo ${source.name}` : `a fresh clone of ${source.name}`;
+  const at = base ? ` at ${base.ref}, commit ${base.sha.slice(0, 12)}` : '';
+  const where = `this folder, a scratch copy of ${copied}${at}`;
+  const behind =
+    base && !base.fetched
+      ? `\nThe console could not fetch ${base.branch} from origin (${base.error ?? 'no reason given'}), so this is the local branch and may be behind production. Say so in the Report.\n`
+      : '';
   const what = route.method ? `route ${route.method} ${route.path}` : 'logs with no HTTP route';
   return `Find the cause of a failure Datadog logged, in the code in ${where}. The console throws this folder away afterwards: write files and run local commands here only when a step allows it.
 
@@ -73,7 +83,7 @@ Events: ${alert.eventCount} since ${alert.firstSeenAt}; Datadog query: ${alert.d
 
 Newest log lines:
 ${samples}
-
+${behind}
 The console sends the work as steps, one per turn.`;
 }
 
@@ -155,6 +165,7 @@ export class VerificationsService {
           playbookId: copy.id,
           playbookName: copy.name,
           playbookRules: copy.rules,
+          playbookBranches: copy.branches,
         })
         .returning()
         .get();
@@ -174,7 +185,7 @@ export class VerificationsService {
   }
 
   /** Runs a failed Report again from its failed step, in its scratch copy, into the same version (Behavior 17). */
-  retry(reportId: string): Report {
+  retry(reportId: string, skip = false): Report {
     const report = this.store.db.select().from(reports).where(eq(reports.id, reportId)).get();
     if (!report) throw new ApiError(404, ErrorCode.NotFound, 'no such Report');
     const newest = this.store.db
@@ -194,6 +205,7 @@ export class VerificationsService {
         .where(eq(reports.id, reportId))
         .returning()
         .get() as ReportRow;
+      if (skip) this.steps.skip(tx, emit, { kind: 'report', id: reportId });
       this.steps.reset(tx, emit, { kind: 'report', id: reportId });
       this.alerts.transition(
         tx,
@@ -224,11 +236,12 @@ export class VerificationsService {
     const reportSteps: ReportStep[] = z.array(stepSchema).parse(JSON.parse(report.steps));
     const onPart = (part: Part) => this.step(reportId, reportSteps, part);
     const sessionId = await this.sessions.ensure(alert, service, (text) => onPart({ kind: 'step', text }));
-    const scratch = retry ? (report.scratchPath as string) : await this.makeScratch(report, source, sessionId);
+    const made = retry ? null : await this.makeScratch(report, source, sessionId, onPart);
+    const scratch = made?.dir ?? (report.scratchPath as string);
     const job = { kind: 'report', id: reportId } as const;
     const hasSteps = this.steps.rows(job).length > 0;
     const rules = report.playbookRules;
-    const brief = verificationBrief(alert, service, route, source);
+    const brief = verificationBrief(alert, service, route, source, made?.base ?? null);
     const failure = await this.steps.run({ job, sessionId, brief, rules, cwd: scratch, fresh: !retry, onPart });
     if (failure) throw new VerificationFailed(failure);
     const closing = hasSteps || retry ? REPORT_PROMPT : `${brief}\n\n${REPORT_PROMPT}`;
@@ -241,10 +254,17 @@ export class VerificationsService {
   }
 
   /**
-   * A git worktree of the code at the commit its default branch points to locally, in the data directory. Earlier
-   * Reports' copies go first (Behavior 25). The operator's checkout keeps its branch and uncommitted work.
+   * A git worktree of the code, in the data directory, at the newest commit of the first branch in the Playbook's
+   * Branch field that origin has: the Repo's default branch when the field is blank. When origin cannot be reached the
+   * local branch stands in, and the Report says so. Earlier Reports' copies go first (Behavior 25). The operator's
+   * checkout keeps its branch and uncommitted work.
    */
-  private async makeScratch(report: ReportRow, source: CodeSource, sessionId: string): Promise<string> {
+  private async makeScratch(
+    report: ReportRow,
+    source: CodeSource,
+    sessionId: string,
+    onPart: (part: Part) => void,
+  ): Promise<{ dir: string; base: CodeBase }> {
     await this.dropScratch(
       this.store.db
         .select()
@@ -253,18 +273,24 @@ export class VerificationsService {
         .all(),
     );
     const repo = source.kind === 'repo' ? source.repo.path : this.anonymous.folder(sessionId);
-    const branch =
-      source.kind === 'repo' ? source.repo.defaultBranch : ((await this.git.defaultBranch(repo)) ?? 'main');
+    const listed = branchList(report.playbookBranches ?? '');
+    const names =
+      listed.length > 0
+        ? listed
+        : [source.kind === 'repo' ? source.repo.defaultBranch : ((await this.git.defaultBranch(repo)) ?? 'main')];
     const dir = path.join(this.dataDir, 'scratch', report.id);
+    let base: CodeBase;
     try {
+      base = await this.git.codeBase(repo, names);
+      onPart({ kind: 'step', text: codeBaseStep(base) });
       await mkdir(path.dirname(dir), { recursive: true, mode: 0o700 });
-      await this.git.addWorktree(repo, dir, branch);
+      await this.git.addWorktree(repo, dir, base.sha);
     } catch (error) {
       const message = error instanceof GitFailed && error.message ? error.message : 'git failed';
       throw new VerificationFailed(`Could not make a scratch copy: ${message}`);
     }
     this.store.write((tx) => tx.update(reports).set({ scratchPath: dir }).where(eq(reports.id, report.id)).run());
-    return dir;
+    return { dir, base };
   }
 
   private async dropScratch(rows: ReportRow[]): Promise<void> {

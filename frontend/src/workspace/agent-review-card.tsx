@@ -1,12 +1,14 @@
 import { AgentReviewStatus, type PrAgentReview } from '@ops-console/shared';
 import { StopRun } from '../agents/stop-run';
 import { StatusPill } from '../components/ui/pathway';
-import { JobPath, PlaybookLink, runState } from '../playbooks/job-steps';
+import { useRetryAgentReview } from '../lib/queries';
+import { JobFailure, JobPath, PlaybookLink, runState } from '../playbooks/job-steps';
 
 const MARK = { pass: '✓', warn: '!', fail: '✕', na: '–' } as const;
 
 /** The agent's written review, tied to the commit it read. */
 export function AgentReviewCard({ review, sessionId }: { review: PrAgentReview; sessionId: string | null }) {
+  const retry = useRetryAgentReview(review.repo_id, review.pr_number);
   return (
     <section aria-label="Agent Review" className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
       <header className="flex items-center gap-2 border-b border-divider bg-surface px-3 py-2 text-xs">
@@ -25,9 +27,20 @@ export function AgentReviewCard({ review, sessionId }: { review: PrAgentReview; 
       </header>
       <div className="flex flex-col gap-3 px-3 py-2.5 text-[13px]">
         {review.status === AgentReviewStatus.Failed && (
-          <p role="alert" className="m-0 text-accent-700">
-            The review did not finish. Start it again.
-          </p>
+          <JobFailure
+            error={
+              review.stale
+                ? 'The review did not finish, and the pull request has new commits. Review it again.'
+                : 'The review did not finish.'
+            }
+            playbook={review.playbook}
+            canRetry={!review.stale}
+            retry={{
+              isPending: retry.isPending,
+              error: retry.error,
+              mutate: (skip) => retry.mutate({ id: review.id, skip }),
+            }}
+          />
         )}
         {(review.status !== AgentReviewStatus.Ready || (review.playbook && review.playbook.steps.length > 0)) && (
           <JobPath

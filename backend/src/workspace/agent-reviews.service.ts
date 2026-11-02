@@ -11,7 +11,6 @@ import {
   type PrAgentReview,
   type PrComment,
   type PrFile,
-  SessionKind,
   toolUseSchema,
 } from '@ops-console/shared';
 import { and, desc, eq } from 'drizzle-orm';
@@ -22,11 +21,12 @@ import { AgentRuntime } from '../agent/runtime';
 import { SessionsService } from '../agent/sessions.service';
 import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
-import { agentComments, prAgentReviews, sessions } from '../db/schema';
+import { agentComments, prAgentReviews } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { JobSteps, jobPlaybook } from '../playbooks/job-steps';
 import { PlaybooksService } from '../playbooks/playbooks.service';
 import type { HostComment, HostPullRequest } from './git-host';
+import { PrJobs } from './pr-jobs';
 import { PullRequestsService, toAgentReview } from './pull-requests.service';
 
 const outputSchema = z.object({
@@ -117,6 +117,7 @@ export class AgentReviewsService {
     @Inject(ActionLogService) private readonly actionLog: ActionLogService,
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
     @Inject(JobSteps) private readonly steps: JobSteps,
+    @Inject(PrJobs) private readonly jobs: PrJobs,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
     recovery.register('pull request agent reviews', () => this.recover());
@@ -172,8 +173,7 @@ export class AgentReviewsService {
         ErrorCode.InvalidState,
         'The agent already reviewed this commit; push a change to review again',
       );
-    const session = this.reviewSession(repoId, number, `${repo.name} #${number} review`);
-    if (this.runtime.busy(session)) throw new ApiError(409, ErrorCode.SessionBusy, "the session's run is still going");
+    const session = this.jobs.requireIdle(repo, number);
     const copy = this.playbooks.copyFor(PlaybookTrigger.ReviewPr);
     const row = this.store.write((tx) => {
       const created = tx
@@ -192,13 +192,47 @@ export class AgentReviewsService {
       this.steps.seed(tx, { kind: 'agent_review', id: created.id }, copy.steps);
       return created;
     });
-    void this.execute(row.id, session, slug, pr.head_sha, reviewBrief(slug, pr, files, comments), copy.rules).catch(
-      (error) => {
-        this.logger.error(`review ${row.id} failed: ${error instanceof Error ? error.message : error}`);
-        this.finish(row.id, repoId, number, { status: AgentReviewStatus.Failed }, 0, 0);
-      },
-    );
+    this.launch(row, session, slug, pr.head_sha, reviewBrief(slug, pr, files, comments));
     return toAgentReview(row, pr.head_sha, jobPlaybook(this.store.db, 'agent_review', row));
+  }
+
+  /**
+   * A failed review runs again in its Session from its failed step, or only its closing turn when no step failed.
+   * `skip` passes over the failed step. A pull request with new commits is reviewed afresh instead.
+   */
+  async retry(id: string, skip = false): Promise<PrAgentReview> {
+    const row = this.store.db.select().from(prAgentReviews).where(eq(prAgentReviews.id, id)).get();
+    if (!row) throw new ApiError(404, ErrorCode.NotFound, 'no such Agent Review');
+    if (row.status !== AgentReviewStatus.Failed) {
+      throw new ApiError(409, ErrorCode.InvalidState, 'Only a failed Agent Review can run again');
+    }
+    const repo = this.pulls.hosted(row.repoId);
+    const slug = repo.remoteSlug as string;
+    const { pr, files, comments } = await this.pulls.adapter(repo).get(slug, row.prNumber);
+    if (pr.head_sha !== row.headSha) {
+      throw new ApiError(409, ErrorCode.InvalidState, 'The pull request has new commits; review it again');
+    }
+    const session = this.jobs.requireIdle(repo, row.prNumber);
+    const job = { kind: 'agent_review', id } as const;
+    const updated = this.store.write((tx, emit) => {
+      if (skip) this.steps.skip(tx, emit, job);
+      this.steps.reset(tx, emit, job);
+      return tx
+        .update(prAgentReviews)
+        .set({ status: AgentReviewStatus.Running })
+        .where(eq(prAgentReviews.id, id))
+        .returning()
+        .get() as typeof row;
+    });
+    this.launch(updated, session, slug, pr.head_sha, reviewBrief(slug, pr, files, comments));
+    return toAgentReview(updated, pr.head_sha, jobPlaybook(this.store.db, 'agent_review', updated));
+  }
+
+  private launch(row: typeof prAgentReviews.$inferSelect, session: string, slug: string, head: string, brief: string) {
+    void this.execute(row.id, session, slug, head, brief, row.playbookRules ?? '').catch((error) => {
+      this.logger.error(`review ${row.id} failed: ${error instanceof Error ? error.message : error}`);
+      this.finish(row.id, row.repoId, row.prNumber, { status: AgentReviewStatus.Failed }, 0, 0);
+    });
   }
 
   /** The Playbook's steps, one turn each, then the closing turn the console posts from (Behavior 16). */
@@ -238,7 +272,8 @@ export class AgentReviewsService {
     const { pr, comments } = await this.pulls.adapter(repo).get(slug, number);
     const thread = comments.filter((comment) => comment.id === root || comment.parent_id === root);
     const rootComment = thread.find((comment) => comment.id === root);
-    const session = this.reviewSession(repoId, number, `${repo.name} #${number} review`);
+    // A job on the pull request holds its Session between steps; the answer waits for it to end.
+    const session = await this.jobs.whenIdle(repo, number);
     const { rules } = this.playbooks.forSession(this.sessions.get(session));
     const text = `The operator replied in a review thread you started on pull request #${number} of ${slug}${
       rootComment?.file_path ? `, on ${rootComment.file_path}${rootComment.line ? `:${rootComment.line}` : ''}` : ''
@@ -420,18 +455,5 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
         )
         .get() !== undefined
     );
-  }
-
-  /** The pull request's one `pr_review` Session, made on first use. */
-  private reviewSession(repoId: string, number: number, title: string): string {
-    const existing = this.store.db
-      .select({ id: sessions.id })
-      .from(sessions)
-      .where(and(eq(sessions.repoId, repoId), eq(sessions.prNumber, number), eq(sessions.kind, SessionKind.PrReview)))
-      .get();
-    if (existing) return existing.id;
-    const created = this.sessions.create({ kind: SessionKind.PrReview, repoId, prNumber: number });
-    this.sessions.update(created.id, { title });
-    return created.id;
   }
 }

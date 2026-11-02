@@ -140,10 +140,81 @@ export const pullRequestSchema = z.object({
 
 export type PullRequest = z.infer<typeof pullRequestSchema>;
 
+export enum ReplyVerdict {
+  Fixed = 'fixed',
+  PartlyFixed = 'partly_fixed',
+  NotFixed = 'not_fixed',
+}
+
+/** One Reply check: the agent's verdict on one thread, posted as a reply. */
+export const replyCheckSchema = z.object({
+  id: z.string(),
+  repo_id: z.string(),
+  pr_number: z.number().int(),
+  /** The thread's root comment. */
+  comment_id: z.string(),
+  head_sha: z.string(),
+  status: z.enum(AgentReviewStatus),
+  verdict: z.enum(ReplyVerdict).nullable(),
+  reply: z.string().nullable(),
+  resolved: z.boolean(),
+  error: z.string().nullable(),
+  can_retry: z.boolean(),
+  created_at: z.string(),
+  playbook: jobPlaybookSchema.nullable(),
+});
+
+export type ReplyCheck = z.infer<typeof replyCheckSchema>;
+
+export enum ThreadOutcome {
+  Pending = 'pending',
+  Done = 'done',
+  Declined = 'declined',
+}
+
+export const passThreadSchema = z.object({
+  comment_id: z.string(),
+  file_path: z.string(),
+  line: z.number().int(),
+  author: z.string(),
+  /** The first line of the thread's first comment. */
+  excerpt: z.string(),
+  outcome: z.enum(ThreadOutcome),
+  reply: z.string().nullable(),
+  posted: z.boolean(),
+  resolved: z.boolean(),
+});
+
+export type PassThread = z.infer<typeof passThreadSchema>;
+
+/** One Comment pass over the threads the operator ticked on their own pull request. */
+export const commentPassSchema = z.object({
+  id: z.string(),
+  repo_id: z.string(),
+  pr_number: z.number().int(),
+  head_sha: z.string(),
+  status: z.enum(AgentReviewStatus),
+  /** Null until pushed, and when there was nothing to commit. */
+  commit_sha: z.string().nullable(),
+  threads: z.array(passThreadSchema),
+  error: z.string().nullable(),
+  can_retry: z.boolean(),
+  /** The pull request's head is neither the commit it started from nor the one it pushed. */
+  stale: z.boolean(),
+  created_at: z.string(),
+  playbook: jobPlaybookSchema.nullable(),
+});
+
+export type CommentPass = z.infer<typeof commentPassSchema>;
+
 export const pullRequestDetailSchema = pullRequestSchema.extend({
   repo_id: z.string(),
   files: z.array(prFileSchema),
   comments: z.array(prCommentSchema),
+  /** The newest Reply check of each thread. */
+  reply_checks: z.array(replyCheckSchema),
+  /** Newest first. */
+  comment_passes: z.array(commentPassSchema),
 });
 
 export type PullRequestDetail = z.infer<typeof pullRequestDetailSchema>;
@@ -158,6 +229,8 @@ export const createRepoSessionSchema = z.strictObject({
   kind: z.literal(SessionKind.Repo).optional(),
   repo_id: z.string().min(1),
   branch: z.string().trim().min(1),
+  /** A branch only origin has, as a pull request's, is fetched and made a local branch tracking it. */
+  from_origin: z.boolean().optional(),
   model: z.enum(Model).optional(),
   effort: z.enum(Effort).optional(),
   access_mode: z.enum(AccessMode).optional(),
@@ -216,6 +289,10 @@ export const postCommentSchema = z.object({
 });
 
 export const resolveCommentSchema = z.object({ resolved: z.boolean() });
+
+export const startReplyCheckSchema = z.object({ comment_id: z.string().min(1) });
+
+export const startCommentPassSchema = z.object({ comment_ids: z.array(z.string().min(1)).min(1) });
 
 export const reviewPullRequestSchema = z.object({
   event: z.enum(PrReviewEvent),

@@ -38,7 +38,7 @@ async function make(request: APIRequestContext, name: string, steps: Step[] = []
 async function saved(request: APIRequestContext, id: string) {
   const list = await request.get(`${daemon.url}/api/playbooks`, { headers: auth });
   const { data } = (await list.json()) as {
-    data: { items: { id: string; name: string; rules: string; steps: Step[] }[] };
+    data: { items: { id: string; name: string; rules: string; branches: string; steps: Step[] }[] };
   };
   return data.items.find((item) => item.id === id);
 }
@@ -63,15 +63,23 @@ test.beforeEach(async ({ request }) => {
   await reset(request);
 });
 
-test('Playbooks lists the five Triggers under their tabs, the built-ins and the ten Step blocks', async ({ page }) => {
+test('Playbooks lists the seven Triggers under their tabs, the built-ins and the ten Step blocks', async ({ page }) => {
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
   await page.getByRole('navigation').getByRole('link', { name: 'Playbooks' }).click();
-  const { triggers, playbooks, blocks } = regions(page);
+  const { triggers, playbooks, blocks, editor } = regions(page);
 
   await expect(triggers).toContainText(
-    /Monitor\s*Verify.*Fix.*Workspace\s*Review PR.*Reply in thread.*Session message/,
+    /Monitor\s*Verify.*Fix.*Workspace\s*Review PR.*Check reply.*Address comments.*Reply in thread.*Session message/,
   );
-  for (const trigger of ['Verify', 'Fix', 'Review PR', 'Reply in thread', 'Session message']) {
+  for (const trigger of [
+    'Verify',
+    'Fix',
+    'Review PR',
+    'Check reply',
+    'Address comments',
+    'Reply in thread',
+    'Session message',
+  ]) {
     await expect(triggers.getByRole('listitem', { name: trigger, exact: true })).toContainText('Built-in');
   }
   await expect(playbooks).toContainText('No Playbooks yet. Duplicate a built-in or start a new one.');
@@ -103,6 +111,16 @@ test('Playbooks lists the five Triggers under their tabs, the built-ins and the 
   await expect(instructions).toBeHidden();
   await blocks.getByRole('listitem', { name: 'Make mock data' }).hover();
   await expect(instructions).toBeVisible();
+
+  for (const [name, count, closing] of [
+    ['Check reply', 2, 'Check reply: give the verdict and the reply.'],
+    ['Address comments', 3, 'Address comments: report each thread done or declined.'],
+  ] as const) {
+    const builtin = playbooks.getByRole('button', { name: new RegExp(`^${name} \\(built-in\\)`) });
+    await expect(builtin).toContainText(`built-in · ${count} steps`);
+    await builtin.click();
+    await expect(editor).toContainText(closing);
+  }
 });
 
 test('a block dragged or added into Steps is a copy to edit; steps reorder and leave by drag or button; Save writes them', async ({
@@ -205,6 +223,38 @@ test('unsaved edits stay through a page switch, a reload and a new tab until Sav
   await again.reload();
   await expect(reopened.editor.getByRole('textbox', { name: 'Rules' })).toHaveValue('Read only.');
   expect((await saved(request, id))?.rules).toBe('Read only.');
+});
+
+test('Branch saves the branches Verify and Fix read the code from; a name git would take as an option is refused', async ({
+  page,
+  request,
+}) => {
+  const id = await make(request, 'Prod first');
+  await open(page, id);
+  const { editor } = regions(page);
+  const branch = editor.getByRole('textbox', { name: 'Branch' });
+  await expect(branch).toHaveValue('');
+  await expect(branch).toHaveAttribute('placeholder', /blank: the Repo's default branch/);
+
+  await branch.fill('production, master, main');
+  await editor.getByRole('button', { name: 'Save' }).click();
+  await expect(editor.getByRole('button', { name: 'Save' })).toHaveCount(0);
+  expect((await saved(request, id))?.branches).toBe('production, master, main');
+
+  await branch.fill('--upload-pack=x');
+  await editor.getByRole('button', { name: 'Save' }).click();
+  await expect(editor.getByRole('alert')).toBeVisible();
+  expect((await saved(request, id))?.branches).toBe('production, master, main');
+});
+
+test('every Playbook shows the console pull request description rule under its Rules', async ({ page, request }) => {
+  const id = await make(request, 'PR depth');
+  await open(page, id);
+  const { editor } = regions(page);
+  const rules = editor.getByRole('region', { name: 'Rules' });
+  await rules.getByText("Every run also gets the console's pull request description rule").click();
+  await expect(rules).toContainText('Testing: the commands you ran and their results');
+  await expect(rules).toContainText('Never a one-line description.');
 });
 
 test('a failed Save shows why under Save and keeps the edits', async ({ page, request }) => {
@@ -360,7 +410,14 @@ const jobPlaybook = (id: string | null, name: string, steps: [string, string, st
 
 const builtinsList = (held: { id: string; name: string; triggers: string[] }[]) => ({
   data: {
-    items: held.map((playbook) => ({ ...playbook, builtin: false, rules: '', steps: [], updated_at: NOW })),
+    items: held.map((playbook) => ({
+      ...playbook,
+      builtin: false,
+      rules: '',
+      branches: '',
+      steps: [],
+      updated_at: NOW,
+    })),
     blocks: [],
   },
 });
@@ -448,6 +505,7 @@ const ALERTS = {
     status: 'failed',
     jira_key: null,
     jira_url: null,
+    ticket_skipped: null,
     branch: 'fix/orders-empty-cart',
     pr_number: null,
     pr_url: null,
@@ -562,6 +620,30 @@ test('Monitor names the Playbook on Verify and Fix, shows its steps on the Repor
   await expect(fix.getByRole('button', { name: 'Retry from step 2' })).toBeVisible();
 });
 
+test('Cancel Fix asks first, then sends the cancel; Keep it sends nothing', async ({ page }) => {
+  const cancelled: string[] = [];
+  await routeAlerts(page, Object.values(ALERTS));
+  await page.route('**/api/playbooks', (route) => route.fulfill({ json: builtinsList([]) }));
+  await page.route('**/api/fixes/*/cancel', (route) => {
+    cancelled.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ json: { data: { ...(ALERTS.fixing.fix as object), status: 'abandoned' } } });
+  });
+  await page.goto(`${daemon.url}/monitor?service=checkout-api&alert=a4#token=${daemon.token}`);
+  const fix = page.getByRole('region', { name: 'Fix', exact: true });
+
+  await fix.getByRole('button', { name: 'Cancel Fix' }).click();
+  const dialog = page.getByRole('alertdialog', { name: 'Cancel this Fix?' });
+  await expect(dialog).toContainText('branch fix/orders-empty-cart is deleted');
+  await dialog.getByRole('button', { name: 'Keep it' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(cancelled).toEqual([]);
+
+  await fix.getByRole('button', { name: 'Cancel Fix' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel the Fix' }).click();
+  await expect.poll(() => cancelled).toEqual(['/api/fixes/fix1/cancel']);
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+});
+
 const pullRequest = (review: unknown) => ({
   repo_id: 'r1',
   host: 'github',
@@ -590,6 +672,8 @@ const pullRequest = (review: unknown) => ({
   latest_agent_review: review,
   files: [],
   comments: [],
+  reply_checks: [],
+  comment_passes: [],
 });
 
 test('Review with agent names the Review PR Playbook, and the Agent Review shows its name and steps', async ({
@@ -651,6 +735,7 @@ test("a running Report, Fix and Agent Review each stop their Session's run", asy
     status: 'running',
     jira_key: null,
     jira_url: null,
+    ticket_skipped: null,
     branch: 'fix/orders-empty-cart',
     pr_number: null,
     pr_url: null,
@@ -715,6 +800,7 @@ const session = (id: string, kind: string, playbook: { id: string; name: string 
   branch: null,
   pr_number: null,
   connection_ids: null,
+  alert_id: null,
   state: 'idle',
   last_message_preview: null,
   created_at: NOW,

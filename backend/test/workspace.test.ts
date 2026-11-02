@@ -90,6 +90,33 @@ describe('Sessions in a Repo', () => {
     expect(created.body.data.model).toBeTruthy();
   });
 
+  it("starts on a branch only origin has, as a pull request's, made a local branch tracking it", async () => {
+    const ctx = await start();
+    const origin = path.join(await tempDir('ops-console-origin-'), 'orders-api.git');
+    execFileSync('git', ['init', '-q', '--bare', origin]);
+    git(ctx.dir, 'remote', 'set-url', 'origin', origin);
+    git(ctx.dir, 'push', '-q', 'origin', 'main', 'feature-1:pr-branch');
+
+    const refused = await ctx.http.post('/sessions', { repo_id: ctx.repoId, branch: 'pr-branch' });
+    expect(refused.body.error.code).toBe('validation_failed');
+    const created = await ctx.http.post('/sessions', { repo_id: ctx.repoId, branch: 'pr-branch', from_origin: true });
+    expect(created.status).toBe(201);
+    expect(created.body.data).toMatchObject({ kind: 'repo', branch: 'pr-branch', alert_id: null });
+    expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'pr-branch@{upstream}').toString().trim()).toBe(
+      'origin/pr-branch',
+    );
+    expect(git(ctx.dir, 'branch', '--show-current').toString().trim()).toBe('main');
+
+    const gone = await ctx.http.post('/sessions', { repo_id: ctx.repoId, branch: 'no-such', from_origin: true });
+    expect(gone.status).toBe(502);
+    expect(gone.body.error.code).toBe('upstream_failed');
+    const log = (await ctx.http.get('/action-log?kind=git')).body.data as { command: string; outcome: string }[];
+    expect(log.map((row) => [row.command, row.outcome]).sort()).toEqual([
+      ['git fetch origin no-such && git branch --track no-such origin/no-such', 'failed'],
+      ['git fetch origin pr-branch && git branch --track pr-branch origin/pr-branch', 'ok'],
+    ]);
+  });
+
   it('runs the agent in the Repo folder, in two Repos side by side, and refuses a second message mid-run', async () => {
     const ctx = await start();
     const other = await makeRepo('billing', 'git@github.com:acme/billing.git');
@@ -795,6 +822,47 @@ describe('Agent Review', () => {
     expect(prompts[2]).toMatch(/^Write your review/);
     const append = (ctx.daemon.sdk.calls.at(-1)?.options.systemPrompt as { append: string } | undefined)?.append ?? '';
     expect(append).toContain('Flag every missing migration.');
+    close();
+  });
+
+  it('skips a failed step on the operator’s word and goes on from the next one to the review', async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1)];
+    const step = (title: string) => ({ block: 'custom', title, instructions: `Check ${title}.`, writes: false });
+    const created = await ctx.http.post('/playbooks', {
+      name: 'PROD readiness',
+      rules: '',
+      steps: [step('Migrations'), step('Rollback'), step('Flags')],
+    });
+    await ctx.http.put('/playbook-triggers/review_pr', { playbook_id: created.body.data.id });
+    const { events, close } = await listen(ctx.daemon);
+    const outcome = (status: string, summary: string) => ({
+      text: `\`\`\`json\n${JSON.stringify({ outcome: status, summary })}\n\`\`\``,
+    });
+    ctx.daemon.sdk.script(outcome('done', 'no migration'));
+    ctx.daemon.sdk.script(outcome('failed', 'no rollback plan'));
+    const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
+    await waitForReview(events);
+    const id = started.body.data.id as string;
+
+    events.length = 0;
+    ctx.daemon.sdk.script(outcome('done', 'no flag'));
+    ctx.daemon.sdk.script({ text: REVIEW });
+    const retried = await ctx.http.post(`/agent-reviews/${id}/retry`, { skip: true });
+    expect(retried.status).toBe(202);
+    expect(retried.body.data).toMatchObject({ id, status: 'running' });
+    await waitForReview(events);
+    const [ready] = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
+    expect(ready).toMatchObject({ id, status: 'ready', verdict: 'Needs one fix' });
+    expect(ready.playbook.steps).toEqual([
+      { title: 'Migrations', writes: false, status: 'done', summary: 'no migration' },
+      { title: 'Rollback', writes: false, status: 'skipped', summary: 'Skipped by the operator: no rollback plan' },
+      { title: 'Flags', writes: false, status: 'done', summary: 'no flag' },
+    ]);
+    const prompts = ctx.daemon.sdk.calls.slice(2).map((call) => call.prompt);
+    expect(prompts[0]).toContain('Review pull request #1');
+    expect(prompts[0]).toContain('Step 3 of 3: Flags');
+    expect((await ctx.http.post(`/agent-reviews/${id}/retry`, { skip: true })).body.error.code).toBe('invalid_state');
     close();
   });
 

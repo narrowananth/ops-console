@@ -9,6 +9,8 @@ export type Run = {
   workingDir: string;
   /** The Playbook rules this run follows; null for none. */
   rules: string | null;
+  /** Tools denied on top of merging. */
+  deny: string[];
   parts: Part[];
   /** The text part growing from stream deltas, until its block arrives whole. */
   growing: number | null;
@@ -16,6 +18,11 @@ export type Run = {
   sdkUuids: Set<string>;
   /** Action Log row per tool call. */
   toolRows: Map<string, string>;
+  /**
+   * The agent's text blocks as it wrote them, for the run's summary. Parts split fences out for display, which would
+   * cut a JSON answer whose string holds a fenced block of its own.
+   */
+  said: string[];
   /** Set while the agent waits for the operator's answer to its question. */
   answer: ((text: string) => void) | null;
   /** Approvals the run waits on. */

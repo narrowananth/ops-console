@@ -6,6 +6,8 @@ import { useStored } from '../lib/remember';
 const draftSchema = z.object({
   name: z.string(),
   rules: z.string(),
+  // Drafts kept from before Branch have none.
+  branches: z.string().default(''),
   steps: z.array(
     z.object({ block: z.enum(StepBlock), title: z.string(), instructions: z.string(), writes: z.boolean() }),
   ),
@@ -20,12 +22,14 @@ const NONE: Record<string, Draft> = {};
 export const draftOf = (playbook: Playbook): Draft => ({
   name: playbook.name,
   rules: playbook.rules,
+  branches: playbook.branches,
   steps: playbook.steps,
 });
 
 const same = (a: Draft, b: Draft) =>
   a.name === b.name &&
   a.rules === b.rules &&
+  a.branches === b.branches &&
   a.steps.length === b.steps.length &&
   a.steps.every(
     (step, index) =>

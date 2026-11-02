@@ -1,10 +1,12 @@
-import type { PrComment } from '@ops-console/shared';
+import { type PrComment, PrState, type PullRequestDetail } from '@ops-console/shared';
 import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Button, Spinner } from '../components/ui/button';
 import { Markdown } from '../components/ui/markdown';
-import { useDeleteComment, usePostComment, useResolveComment } from '../lib/queries';
+import { useDeleteComment, usePostComment, useResolveComment, useStartReplyCheck } from '../lib/queries';
 import { useStored } from '../lib/remember';
+import { agentBusy, BUSY_TITLE, lastOf } from './pr-jobs';
+import { ReplyCheckStrip } from './reply-check-strip';
 
 /**
  * A box to write a comment in. ⌘/Ctrl+Enter sends it. `onCancel` adds a Cancel button, for a box opened on a line.
@@ -145,26 +147,33 @@ function CommentMenu({ comment, onDelete, pending }: { comment: PrComment; onDel
   );
 }
 
-/** One comment thread: its comments, Resolve for a thread on a line, ⋯ to delete your own, and a reply box. */
+/**
+ * One comment thread: its comments, Resolve and Check reply for a thread on a line, ⋯ to delete your own, the
+ * thread's running or failed Reply check, and a reply box.
+ */
 export function Thread({
-  repoId,
-  number,
+  pr,
   root,
-  replies,
   showPlace = true,
 }: {
-  repoId: string;
-  number: number;
+  pr: PullRequestDetail;
   root: PrComment;
-  replies: PrComment[];
   /** Name the file and line; off when the thread already sits under its line. */
   showPlace?: boolean;
 }) {
+  const { repo_id: repoId, number } = pr;
   const post = usePostComment(repoId, number);
   const resolve = useResolveComment(repoId, number);
   const remove = useDeleteComment(repoId, number);
+  const startCheck = useStartReplyCheck(repoId, number);
   const [replying, setReplying] = useStored(`workspace.replying.${repoId}#${number}.${root.id}`, z.boolean(), false);
+  const replies = pr.comments.filter((comment) => comment.parent_id === root.id);
   const inline = root.file_path !== null;
+  const check = pr.reply_checks.find((item) => item.comment_id === root.id);
+  const canCheck =
+    pr.state === PrState.Open && inline && root.line !== null && !root.resolved && !lastOf(root, replies).by_agent;
+  const busy = agentBusy(pr);
+  const error = startCheck.error ?? resolve.error ?? remove.error;
   return (
     <div
       className={`overflow-hidden rounded-lg border border-divider bg-card font-body shadow-sm ${root.resolved ? 'opacity-70' : ''}`}
@@ -192,6 +201,17 @@ export function Thread({
               </span>
             )}
             <span className="ml-auto flex flex-none items-center gap-1.5">
+              {comment.id === root.id && canCheck && (
+                <Button
+                  className="px-2 py-0.5 text-[11px]"
+                  disabled={busy || startCheck.isPending}
+                  title={busy ? BUSY_TITLE : undefined}
+                  onClick={() => startCheck.mutate(root.id)}
+                >
+                  {startCheck.isPending && <Spinner />}
+                  Check reply
+                </Button>
+              )}
               {comment.id === root.id && inline && (
                 <Button
                   className="px-2 py-0.5 text-[11px]"
@@ -213,6 +233,7 @@ export function Thread({
           <Markdown source={comment.body} className="mt-1.5" />
         </div>
       ))}
+      {check && <ReplyCheckStrip check={check} sessionId={pr.agent_session_id} />}
       <div className="border-t border-line bg-surface px-3 py-2">
         {replying ? (
           <CommentComposer
@@ -246,9 +267,9 @@ export function Thread({
           </button>
         )}
       </div>
-      {(resolve.error ?? remove.error) && (
+      {error && (
         <div role="alert" className="px-3 pb-2 text-xs text-accent-700">
-          {(resolve.error ?? remove.error)?.message}
+          {error.message}
         </div>
       )}
     </div>

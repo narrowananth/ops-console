@@ -70,6 +70,25 @@ export const MERGE_DENIALS = [
   'mcp__gitlab__merge_merge_request',
 ];
 
+/**
+ * A Reply check or Comment pass hands its outcome to the console, which pushes, replies and resolves; the agent's own
+ * tools for that are denied (ADR 0002).
+ */
+export const HOST_WRITE_DENIALS = [
+  'Bash(git push:*)',
+  'Bash(gh pr comment:*)',
+  'Bash(gh pr review:*)',
+  'Bash(gh api:*)',
+  'Bash(glab mr note:*)',
+  'Bash(glab api:*)',
+  'Bash(bkt api:*)',
+  'Bash(bkt pr comment:*)',
+  'mcp__github__add_issue_comment',
+  'mcp__github__create_pull_request_review',
+  'mcp__github__add_comment_to_pending_review',
+  'mcp__gitlab__create_merge_request_note',
+];
+
 /** How a run the console starts itself differs from an operator's message. */
 export type RunOptions = {
   /** Runs in this folder instead of the Session's own. */
@@ -80,23 +99,14 @@ export type RunOptions = {
   fresh?: boolean;
   /** Resumes the conversation from this transcript entry, dropping what came after it. */
   resumeAt?: string;
+  /** Tools denied on top of merging. */
+  deny?: string[];
 };
 
 type RunResult = 'done' | 'stopped' | ErrorCode.RateLimited | ErrorCode.Unauthorized | ErrorCode.UpstreamFailed;
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-
-/** The text of a part with its fences restored, Dev tools tables included; steps and diffs have none. */
-const partText = (part: Part): string => {
-  if (part.kind === 'text') return part.text;
-  if (part.kind === 'code') return `\`\`\`${part.lang}\n${part.text}\n\`\`\``;
-  if (part.kind === 'result' || part.kind === 'comparison') {
-    const { kind, ...block } = part;
-    return `\`\`\`ops-${kind === 'result' ? 'result' : 'compare'}\n${JSON.stringify(block)}\n\`\`\``;
-  }
-  return '';
-};
 
 const firstLine = (text: string, max: number) => (text.trim().split('\n')[0] ?? '').slice(0, max);
 
@@ -259,6 +269,7 @@ export class AgentRuntime {
       growing: null,
       sdkUuids: new Set(),
       toolRows: new Map(),
+      said: [],
       answer: null,
       waits: 0,
       createdAt: new Date().toISOString(),
@@ -268,6 +279,7 @@ export class AgentRuntime {
       abort: new AbortController(),
       stopped: false,
       resumeAt: options.resumeAt ?? null,
+      deny: options.deny ?? [],
     };
     this.runs.add(run);
     if (options.fresh) this.sessions.write(sessionId, { sdkSessionId: null });
@@ -384,7 +396,7 @@ export class AgentRuntime {
       env: claudeEnv(configDir),
       includePartialMessages: true,
       abortController: run.abort,
-      disallowedTools: MERGE_DENIALS,
+      disallowedTools: [...MERGE_DENIALS, ...run.deny],
       systemPrompt: { type: 'preset', preset: 'claude_code', append: systemAppend(instructions, run.rules) },
       // Servers the operator disabled stay out of the run.
       settings: {
@@ -469,6 +481,11 @@ export class AgentRuntime {
     if (message.type === 'assistant' && message.parent_tool_use_id === null) {
       run.sdkUuids.add(message.uuid);
       const content = contentSchema.parse(message.message.content);
+      run.said.push(
+        ...(typeof content === 'string'
+          ? [content]
+          : content.flatMap((block) => ('text' in block && block.type === 'text' ? [block.text] : []))),
+      );
       const parts =
         typeof content === 'string'
           ? blockParts({ type: 'text', text: content })
@@ -537,7 +554,7 @@ export class AgentRuntime {
     run.onFinish?.({
       ok: result === 'done',
       stopped: result === 'stopped',
-      text: run.parts.map(partText).join('\n'),
+      text: run.said.join('\n'),
     });
   }
 

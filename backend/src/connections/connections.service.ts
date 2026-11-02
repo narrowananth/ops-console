@@ -21,7 +21,7 @@ import { STORE, type Store } from '../db/store';
 import { KEYCHAIN, type Keychain } from '../keychain/keychain';
 import { ConnectionServers, McpServersService } from '../mcp/mcp-servers.service';
 import { CONNECTION_TESTER, type ConnectionTester } from './connection-tester';
-import { hasServer, type Launch, launchFor, supportsReadOnly } from './launch';
+import { hasServer, type Launch, launchFor, parseServiceAccount, supportsReadOnly } from './launch';
 
 type Row = typeof connections.$inferSelect;
 
@@ -75,8 +75,9 @@ export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
   async create(body: CreateConnection): Promise<Connection> {
     const config = this.validConfig(body.type, body.config);
     if (SECRET_REQUIRED.includes(body.type) && !body.secret) throw validationFailed('invalid body: secret');
+    this.checkKey(body.type, config, body.secret ?? null);
     if (await this.taken(body.name)) throw new ApiError(409, ErrorCode.Duplicate, `${body.name} is already used`);
-    const access = this.accessFor(body.type, body.access);
+    const access = this.accessFor(body.type, body.access, body.env);
     const id = crypto.randomUUID();
     if (body.secret) await this.keychain.set(secretKey(id), body.secret);
     this.store.write((tx) => {
@@ -99,11 +100,12 @@ export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
         ? (JSON.parse(row.config) as Record<string, unknown>)
         : this.validConfig(row.type, mergeConfig(JSON.parse(row.config) as Record<string, unknown>, body.config));
     const access = body.access ?? row.access;
-    if (body.access !== undefined) this.accessFor(row.type, body.access);
+    if (body.access !== undefined || body.env !== undefined) this.accessFor(row.type, access, body.env ?? row.env);
     const name = body.name ?? row.name;
     if (name !== row.name && (await this.taken(name)))
       throw new ApiError(409, ErrorCode.Duplicate, `${name} is already used`);
     const secret = body.secret ?? (await this.keychain.get(secretKey(id)));
+    if (body.secret !== undefined || body.config !== undefined) this.checkKey(row.type, config, secret);
     const changed = [body.name, body.access, body.config, body.secret].some((value) => value !== undefined);
     if (body.secret) await this.keychain.set(secretKey(id), body.secret);
     if (changed) {
@@ -175,6 +177,7 @@ export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
     secret: string | null,
   ): Promise<ConnectionTestResult> {
     const config = this.validConfig(type, rawConfig);
+    this.checkKey(type, config, secret);
     const launch = launchFor({ type, config, secret, access: AccessLevel.Read, launchDir: this.launchDir });
     if (!launch) return { status: HealthStatus.Fail, latency_ms: null, detail: `no MCP server for ${type}` };
     return this.tester.run(type, launch);
@@ -213,8 +216,23 @@ export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
     else await this.mcp.registerConnectionServer(name, launch.target, launch.env);
   }
 
-  private accessFor(type: ConnectionType, requested: AccessLevel | undefined): AccessLevel {
+  /** A Firebase secret is a service-account key for the Connection's own project. */
+  private checkKey(type: ConnectionType, config: Record<string, unknown>, secret: string | null): void {
+    if (type !== ConnectionType.Firebase || !secret) return;
+    const key = parseServiceAccount(secret);
+    if (!key) throw validationFailed('invalid body: secret (a Firebase service-account key, as JSON or base64)');
+    if (key.project_id !== config.project_id)
+      throw validationFailed(
+        `invalid body: secret (the key is for project ${key.project_id}, not ${String(config.project_id)})`,
+      );
+  }
+
+  /** PROD is never written: a PROD Connection is read-only or has no access. */
+  private accessFor(type: ConnectionType, requested: AccessLevel | undefined, env: ConnectionEnv): AccessLevel {
     const access = requested ?? (supportsReadOnly(type) ? AccessLevel.Read : AccessLevel.None);
+    if (access === AccessLevel.Write && env === ConnectionEnv.Prod) {
+      throw validationFailed('invalid body: access (a PROD Connection is read-only)');
+    }
     if (access === AccessLevel.Read && !supportsReadOnly(type)) {
       throw validationFailed(`invalid body: access (no read-only server for ${type})`);
     }

@@ -5,6 +5,8 @@ export enum PlaybookTrigger {
   Verify = 'verify',
   Fix = 'fix',
   ReviewPr = 'review_pr',
+  CheckReply = 'check_reply',
+  AddressComments = 'address_comments',
   ThreadReply = 'thread_reply',
   SessionMessage = 'session_message',
 }
@@ -17,12 +19,16 @@ export const JOB_TRIGGERS: readonly PlaybookTrigger[] = [
   PlaybookTrigger.Verify,
   PlaybookTrigger.Fix,
   PlaybookTrigger.ReviewPr,
+  PlaybookTrigger.CheckReply,
+  PlaybookTrigger.AddressComments,
 ];
 
 export const TRIGGER_LABELS: Record<PlaybookTrigger, { tab: string; label: string }> = {
   [PlaybookTrigger.Verify]: { tab: 'Monitor', label: 'Verify' },
   [PlaybookTrigger.Fix]: { tab: 'Monitor', label: 'Fix' },
   [PlaybookTrigger.ReviewPr]: { tab: 'Workspace', label: 'Review PR' },
+  [PlaybookTrigger.CheckReply]: { tab: 'Workspace', label: 'Check reply' },
+  [PlaybookTrigger.AddressComments]: { tab: 'Workspace', label: 'Address comments' },
   [PlaybookTrigger.ThreadReply]: { tab: 'Workspace', label: 'Reply in thread' },
   [PlaybookTrigger.SessionMessage]: { tab: 'Workspace', label: 'Session message' },
 };
@@ -48,7 +54,19 @@ export const PLAYBOOK_LIMITS = {
   title: 80,
   instructions: 4000,
   summary: 500,
+  branches: 200,
 } as const;
+
+/** A branch name the console passes to git: no option, no `..`, no space. */
+const BRANCH_NAME = /^(?!-)(?!.*\.\.)[\w./-]+$/;
+
+/** A Playbook's Branch field as the names it lists, in order; blank lists none. */
+export function branchList(branches: string): string[] {
+  return branches
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
 
 export const playbookStepSchema = z.object({
   block: z.enum(StepBlock),
@@ -66,6 +84,11 @@ export const playbookSchema = z.object({
   builtin: z.boolean(),
   name: z.string(),
   rules: z.string(),
+  /**
+   * The branches Verify and Fix read the code from, comma-separated and tried in order: the first one origin has.
+   * Blank: the Repo's default branch.
+   */
+  branches: z.string(),
   steps: z.array(playbookStepSchema),
   /** The Triggers holding it now. A built-in lists its Trigger when no Playbook holds it. */
   triggers: z.array(z.enum(PlaybookTrigger)),
@@ -87,15 +110,30 @@ export type PlaybookList = z.infer<typeof playbookListSchema>;
 const nameSchema = z.string().trim().min(1).max(PLAYBOOK_LIMITS.name);
 const rulesSchema = z.string().max(PLAYBOOK_LIMITS.rules);
 const stepsSchema = z.array(playbookStepSchema).max(PLAYBOOK_LIMITS.steps);
+const branchesSchema = z
+  .string()
+  .trim()
+  .max(PLAYBOOK_LIMITS.branches)
+  .refine((value) => branchList(value).every((name) => BRANCH_NAME.test(name)), 'not a branch name');
 
 export const createPlaybookSchema = z
-  .object({ name: nameSchema, rules: rulesSchema.default(''), steps: stepsSchema.default([]) })
+  .object({
+    name: nameSchema,
+    rules: rulesSchema.default(''),
+    branches: branchesSchema.default(''),
+    steps: stepsSchema.default([]),
+  })
   .strict();
 
 export type CreatePlaybook = z.input<typeof createPlaybookSchema>;
 
 export const playbookPatchSchema = z
-  .object({ name: nameSchema.optional(), rules: rulesSchema.optional(), steps: stepsSchema.optional() })
+  .object({
+    name: nameSchema.optional(),
+    rules: rulesSchema.optional(),
+    branches: branchesSchema.optional(),
+    steps: stepsSchema.optional(),
+  })
   .strict();
 
 export type PlaybookPatch = z.infer<typeof playbookPatchSchema>;
@@ -127,5 +165,23 @@ export const jobPlaybookSchema = z.object({
 
 export type JobPlaybook = z.infer<typeof jobPlaybookSchema>;
 
+/** A failed job's retry. `skip` first marks the failed step skipped by the operator, so the job goes on after it. */
+export const retryJobSchema = z.object({ skip: z.boolean().default(false) }).strict();
+
+export type RetryJob = z.infer<typeof retryJobSchema>;
+
 /** The Playbook a Session's rules come from, when it is not built-in. */
 export const sessionPlaybookSchema = z.object({ id: z.string(), name: z.string() });
+
+/**
+ * The console's rule for pull request descriptions. Every agent run gets it, a Session's chat, a Fix, a PR job, before
+ * the Playbook's rules, so a Playbook can add to it.
+ */
+export const PR_DESCRIPTION_RULE = `Pull request descriptions. Whenever you open a pull request, or are asked to write or update its description, write it in depth for a reviewer who has not seen this work:
+- Summary: what changes and why, in two to four sentences.
+- Problem or root cause: what was wrong or missing, where (file and line), and how it showed (the error, the Alert, the ticket).
+- Changes: each file or area touched and what changed in it, and any design choice a reviewer could question, with why.
+- Testing: the commands you ran and their results, tests added or changed, and what was not tested and why.
+- Risk and rollback: what could break, who or what is affected, and how to undo it.
+- Links: the Jira ticket, the Alert or Report, related pull requests.
+Use the Repo's pull request template when it has one (such as .github/pull_request_template.md) and fill each of its sections to the same depth. Leave out a section only when it does not apply. Never a one-line description.`;

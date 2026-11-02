@@ -57,7 +57,10 @@ patch. They have no place to write that down, so they retype it in every Session
     Fix and Agent Review show the name and steps they ran.
 14. Each step is its own agent turn in the job's Session, in order. The turn carries the step's instructions and asks
     the agent to end with its outcome: done, skipped or failed, and a summary of at most 500 characters. The job view
-    shows each step as pending, running, done, skipped or failed, with its summary, live.
+    shows each step as pending, running, done, skipped or failed, with its summary, live. When something in the step
+    errors, the turn tells the agent to find out why and fix it within the step's reach, and to try another way. It
+    answers skipped, with why and what it tried, only when the step still cannot run, and failed only when the job
+    cannot go on without the step.
 15. A skipped step lets the job go on: a step about a database the agent cannot reach can be skipped. A failed step
     stops the job, which fails with "Step 3 · Make mock data failed:" and the summary. An agent error, an answer the
     console cannot read and the operator stopping the run each fail the running step; a stopped step's summary is
@@ -67,8 +70,10 @@ patch. They have no place to write that down, so they retype it in every Session
     today's shape.
 17. A failed Verification offers "Retry from step 3": it runs again from the failed step in the same Session, with
     the same copy, into the same Report version. Verify again starts a new Report version with the Playbook Verify
-    holds now. A failed Fix retries from its failed stage or step. A failed Agent Review runs whole again when the
-    operator asks for a review.
+    holds now. A failed Fix retries from its failed stage or step. A failed Agent Review retries from its failed step,
+    or its closing turn when no step failed, while the pull request is on the same commit.
+    Next to "Retry from step N", every failed job with a failed step offers "Skip step N": the step reads skipped,
+    its summary "Skipped by the operator:" and why it failed, and the job goes on from the next step.
 18. The buttons that start a job name a Playbook that is not built-in: "Verify with agent · Checkout deep check".
     With the built-in they read as today.
 
@@ -84,19 +89,30 @@ patch. They have no place to write that down, so they retype it in every Session
 ### Rules
 
 23. Rules go into the system prompt of every turn the Trigger starts, after Claude Code's own and the console's
-    instructions for that kind of run, and before the console's safety lines.
+    instructions for that kind of run, and before the console's safety lines. The console's pull request description
+    rule comes just before them, in every turn, Playbook or not, so a Playbook's rules add to it. It asks for a
+    description in depth whenever the agent opens a pull request or writes its description: summary, problem or root
+    cause with file and line, changes by file and the choices behind them, testing done and not done, risk and
+    rollback, and links; in the Repo's pull request template when it has one; never one line. The Playbook editor
+    shows it under Rules. A Fix's pull request turn also gets the Report, each step's result and the links to write
+    it from.
 
 ### Scratch copy for a Verification
 
-24. A Verification runs in a scratch copy of the code: a git worktree of the Service's Repo, or of its clone, at the
-    commit its default branch points to locally, kept in the data directory. The agent may write files there (mock
+24. A Verification runs in a scratch copy of the code: a git worktree of the Service's Repo, or of its clone, kept in
+    the data directory. It is at the newest commit of the first branch in the Playbook's Branch field that origin has
+    (`production, master, main`, tried in order), fetched from origin first; a blank Branch means the Repo's default
+    branch. The Report's first step reads "Code: origin/production at 1a2b3c4, fetched from origin", and the brief
+    names the branch and commit. When origin cannot be reached, the first of those branches the Repo has locally
+    stands in, and the step and the brief say it may be behind. The agent may write files there (mock
     data, a test) and run local commands. The operator's checkout keeps its branch and its uncommitted changes.
 25. The scratch copy is removed when its Report is ready, or when the Alert's next Verification starts. A failed
     Report keeps it for Retry. At start-up the daemon removes every scratch copy whose Report is neither running
     nor failed.
 26. A Fix runs in the Repo's checkout, as today, and starts a new agent conversation there. Its brief carries the
-    Report, so nothing written in the scratch copy reaches the Fix branch.
-27. If the scratch copy cannot be made (the default branch is missing locally, git fails), the Verification fails
+    Report, so nothing written in the scratch copy reaches the Fix branch. A new Fix branch starts at the same kind
+    of base: the newest commit of the Fix Playbook's Branch, fetched, not the branch checked out.
+27. If the scratch copy cannot be made (no listed branch is on origin or in the Repo, git fails), the Verification fails
     before step 1 with "Could not make a scratch copy:" and git's message.
 
 ### Safety and what must not regress
@@ -170,6 +186,8 @@ CREATE TABLE playbooks (
   id TEXT PRIMARY KEY NOT NULL,
   name TEXT NOT NULL COLLATE NOCASE UNIQUE,
   rules TEXT NOT NULL DEFAULT '',
+  -- Comma-separated branches Verify and Fix read the code from, tried in order; blank: the Repo's default branch.
+  branches TEXT NOT NULL DEFAULT '',
   -- [{ "block": "make_mock_data | custom | ...", "title": "...", "instructions": "...", "writes": true }]
   steps TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL,
@@ -210,11 +228,13 @@ CREATE UNIQUE INDEX playbook_steps_review_idx ON playbook_steps (agent_review_id
 ALTER TABLE reports ADD COLUMN playbook_id TEXT REFERENCES playbooks(id) ON DELETE SET NULL;
 ALTER TABLE reports ADD COLUMN playbook_name TEXT;
 ALTER TABLE reports ADD COLUMN playbook_rules TEXT;
+ALTER TABLE reports ADD COLUMN playbook_branches TEXT;
 -- The scratch copy's folder; null once removed.
 ALTER TABLE reports ADD COLUMN scratch_path TEXT;
 ALTER TABLE fixes ADD COLUMN playbook_id TEXT REFERENCES playbooks(id) ON DELETE SET NULL;
 ALTER TABLE fixes ADD COLUMN playbook_name TEXT;
 ALTER TABLE fixes ADD COLUMN playbook_rules TEXT;
+ALTER TABLE fixes ADD COLUMN playbook_branches TEXT;
 ALTER TABLE pr_agent_reviews ADD COLUMN playbook_id TEXT REFERENCES playbooks(id) ON DELETE SET NULL;
 ALTER TABLE pr_agent_reviews ADD COLUMN playbook_name TEXT;
 ALTER TABLE pr_agent_reviews ADD COLUMN playbook_rules TEXT;
@@ -250,6 +270,7 @@ Migration:
   "builtin": false,
   "name": "string, 1 to 60",
   "rules": "string, up to 8000",
+  "branches": "comma-separated branch names, up to 200; blank: the Repo's default branch",
   "steps": [Step],
   "triggers": ["verify | fix | review_pr | thread_reply | session_message"],
   "updated_at": "ISO 8601 | null"
@@ -306,14 +327,26 @@ Body: `{ "playbook_id": "uuid | null" }`. Null detaches. 200 `[Playbook]`, the l
 Unchanged bodies. The Job they start copies the Trigger's Playbook; the `Report`, `Fix` and `PrAgentReview` they
 return carry `playbook`.
 
+### Retry
+
+`POST /reports/:id/retry`, `POST /fixes/:id/retry`, `POST /agent-reviews/:id/retry`, and the Reply check and Comment
+pass retries. Body, optional: `{ "skip": false }`. `skip` true first marks the failed step skipped by the operator,
+so the job goes on from the next step. `invalid_state` when `skip` is true and no step failed.
+
 ### `POST /reports/:id/retry`
 
-New. Runs a failed Report again from its failed step, in its scratch copy. 202 `Report` in `running`.
+Runs a failed Report again from its failed step, in its scratch copy. 202 `Report` in `running`.
 `invalid_state` unless the Report failed, is the Alert's newest, and kept its scratch copy.
 
 ### `POST /fixes/:id/retry`
 
-Unchanged body. Retries from the failed stage, or the failed step when the stage is `steps`.
+Retries from the failed stage, or the failed step when the stage is `steps`.
+
+### `POST /agent-reviews/:id/retry`
+
+Runs a failed Agent Review again from its failed step, or only its closing turn when no step failed. 202
+`PrAgentReview` in `running`. `invalid_state` unless it failed and the pull request is still on its commit;
+`session_busy` while another job runs on the pull request.
 
 ### WebSocket `playbook_step.updated`
 

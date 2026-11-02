@@ -45,7 +45,7 @@ export function NewPlaybookButton() {
         onClick={() =>
           list.data &&
           create.mutate(
-            { name: freeName('New Playbook', list.data.items), rules: '', steps: [] },
+            { name: freeName('New Playbook', list.data.items), rules: '', branches: '', steps: [] },
             { onSuccess: (made) => setAddress({ playbook: made.id }) },
           )
         }

@@ -59,7 +59,7 @@ function Segmented<T extends string>({
 const ACCESS_HINT: Record<AccessLevel, string> = {
   [AccessLevel.None]: 'Claude cannot see this database. You can still query it from Dev tools.',
   [AccessLevel.Read]: 'The server starts in read-only mode.',
-  [AccessLevel.Write]: 'Claude can write. On a PROD database every write needs your typed confirm.',
+  [AccessLevel.Write]: 'Claude can write; each write it proposes waits for your approval.',
 };
 
 /** Add (no `connection`) or edit one Connection. Blank fields on edit keep their value. */
@@ -143,7 +143,12 @@ export function ConnectionForm({
         <Segmented
           label="Environment"
           value={env}
-          onChange={setEnv}
+          onChange={(next) => {
+            setEnv(next);
+            // PROD is never written: Read / write falls back to Read-only, or Off where there is none.
+            if (next === ConnectionEnv.Prod && access === AccessLevel.Write)
+              setAccess(READ_ONLY_TYPES.includes(type) ? AccessLevel.Read : AccessLevel.None);
+          }}
           options={Object.values(ConnectionEnv).map((value) => ({ value, label: value }))}
         />
         {FIELDS[type].map((field) => {
@@ -204,7 +209,7 @@ export function ConnectionForm({
             options={[
               { value: AccessLevel.None, label: 'Off' },
               { value: AccessLevel.Read, label: 'Read-only', disabled: !READ_ONLY_TYPES.includes(type) },
-              { value: AccessLevel.Write, label: 'Read / write', disabled: !hasServer },
+              { value: AccessLevel.Write, label: 'Read / write', disabled: !hasServer || env === ConnectionEnv.Prod },
             ]}
           />
           <span className="text-[11px] text-neutral-700">
@@ -212,6 +217,7 @@ export function ConnectionForm({
               ? ACCESS_HINT[access]
               : `No MCP server is picked for ${TYPE_LABELS[type]} yet; it can be saved with access Off.`}
             {!READ_ONLY_TYPES.includes(type) && hasServer && ' This type has no read-only server.'}
+            {env === ConnectionEnv.Prod && hasServer && ' A PROD Connection is read-only: Read / write is off.'}
           </span>
         </div>
         {test.data && (
