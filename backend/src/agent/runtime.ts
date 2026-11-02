@@ -46,6 +46,13 @@ import { SessionKinds } from './session-kinds';
 import { emitSessionUpdated, NEW_SESSION_TITLE, type SessionRow, SessionsService } from './sessions.service';
 import { Transcripts } from './transcripts';
 
+/**
+ * Claude Code starts a run's MCP servers in the background and lets the model in before they connect; a server
+ * that takes seconds to start (Firebase through npx) then reads as "still connecting" for the whole turn. Runs
+ * wait for them, up to Claude Code's own connect timeout.
+ */
+const MCP_STARTUP_WAIT_MS = '30000';
+
 const PERMISSION_MODES: Record<AccessMode, PermissionMode> = {
   [AccessMode.Supervised]: 'default',
   [AccessMode.AcceptEdits]: 'acceptEdits',
@@ -393,7 +400,7 @@ export class AgentRuntime {
       ...(resume === null ? {} : { resume, ...(run.resumeAt === null ? {} : { resumeSessionAt: run.resumeAt }) }),
       // Each message gets a file checkpoint, so editing it can put the agent's file edits back (Behavior 8a).
       enableFileCheckpointing: true,
-      env: claudeEnv(configDir),
+      env: { ...claudeEnv(configDir), CLAUDE_CODE_MCP_STARTUP_WAIT_MS: MCP_STARTUP_WAIT_MS },
       includePartialMessages: true,
       abortController: run.abort,
       disallowedTools: [...MERGE_DENIALS, ...run.deny],

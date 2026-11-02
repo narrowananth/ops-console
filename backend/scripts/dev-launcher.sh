@@ -5,4 +5,5 @@
 dir=$(dirname "$0")
 node="$dir/../.data/Ops Console (dev).app/Contents/MacOS/Ops Console (dev)"
 [ -x "$node" ] || node=node
-exec "$node" "$dir/../node_modules/tsx/dist/cli.mjs" "$dir/../src/main.ts" "$@"
+# Claude starts it from the session's folder, so tsx is told where the backend's tsconfig is (Nest's decorators).
+exec "$node" "$dir/../node_modules/tsx/dist/cli.mjs" --tsconfig "$dir/../tsconfig.json" "$dir/../src/main.ts" "$@"

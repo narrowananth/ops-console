@@ -80,6 +80,11 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   private readonly probes = new Map<string, Probed>();
   /** Probes under way, by account and folder. */
   private readonly probing = new Map<string, Promise<Probed>>();
+  /**
+   * Probes start every server in a config, many through `npx`: run side by side for each account, they slow each
+   * other past the Probe's wait. They run one after another.
+   */
+  private probeTurn: Promise<unknown> = Promise.resolve();
   /** Env vars of launcher servers as the Keychain holds them, by server. */
   private readonly envs = new Map<string, Record<string, string>>();
   /** Servers a background Remove is taking out; they list as removed while their config still holds them. */
@@ -221,22 +226,28 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
 
   /**
    * Authenticate, waiting for the sign-ins and the check; `signal` stops the sign-in. Connectors follow the result. A
-   * server `added` just now holds no sign-in yet, so the active account's browser sign-in opens without reading it first.
+   * server `added` just now holds no sign-in in any account, so each account's browser sign-in opens without reading
+   * it first, the active account's first.
    */
   async authenticateAndCheck(
     name: string,
     options: { signal?: AbortSignal; added?: boolean } = {},
   ): Promise<McpServer> {
     await this.authenticatePrepare(name);
-    const accounts = options.added ? this.activeAccounts() : await this.signInAccounts(name);
+    const accounts = options.added ? this.signedInAccounts() : await this.signInAccounts(name);
     return this.signIn(name, accounts, options.signal);
+  }
+
+  /** Every signed-in account, the active one first. */
+  private signedInAccounts(): Account[] {
+    const active = this.accounts.activeId();
+    const all = this.accounts.all().filter((account) => account.signedIn);
+    return [...all.filter((account) => account.id === active), ...all.filter((account) => account.id !== active)];
   }
 
   /** The active account, else the first signed in. */
   private activeAccounts(): Account[] {
-    const all = this.accounts.all().filter((account) => account.signedIn);
-    const active = all.find((account) => account.id === this.accounts.activeId()) ?? all[0];
-    return active ? [active] : [];
+    return this.signedInAccounts().slice(0, 1);
   }
 
   /**
@@ -250,21 +261,20 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /**
-   * The active account, when its Probe reads `auth`. The others sign in when they become active: each account keeps
-   * its own token, so signing in all of them opens one browser sign-in per account.
+   * Each signed-in account whose Probe reads `auth`, the active one first. Each account keeps its own token, and a run
+   * moves to another account when the active one runs low, so every account signs in: one browser sign-in each.
    */
   private async signInAccounts(name: string): Promise<Account[]> {
-    const active = this.accounts.activeId();
-    const pick = (views: Awaited<ReturnType<typeof this.views>>) =>
-      views.find((view) => view.account.id === active) ?? views.find((view) => view.account.signedIn);
-    let view = pick(await this.views(false));
-    if (!view) return [];
+    const local = await this.localDir();
+    const views = (await this.views(false)).filter((view) => view.account.signedIn);
     // No kept reading yet: connect this one server alone, not every server in the account.
-    if (view.state(name)?.status === HealthStatus.Checking) {
-      await this.probeServer(view.account, await this.localDir(), name);
-      view = pick(await this.views(false));
-    }
-    return view?.state(name)?.status === HealthStatus.Auth ? [view.account] : [];
+    const unread = views.filter((view) => view.state(name)?.status === HealthStatus.Checking);
+    await Promise.all(unread.map((view) => this.probeServer(view.account, local, name)));
+    const read = unread.length > 0 ? (await this.views(false)).filter((view) => view.account.signedIn) : views;
+    const waiting = new Set(
+      read.filter((view) => view.state(name)?.status === HealthStatus.Auth).map((view) => view.account.id),
+    );
+    return this.signedInAccounts().filter((account) => waiting.has(account.id));
   }
 
   /** Reads one server in one account into the kept Probe: it connects alone in a second or two. */
@@ -741,7 +751,9 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     const run = (async () => {
       let result: Probed;
       try {
-        const servers = await this.probe.run(account.configDir, cwd);
+        const turn = this.probeTurn.then(() => this.probe.run(account.configDir, cwd));
+        this.probeTurn = turn.catch(() => {});
+        const servers = await turn;
         result = {
           servers: new Map(servers.map((server) => [server.name, server])),
           at: Date.now(),
@@ -850,11 +862,9 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
           const state = view.state(name);
           return state ? [state] : [];
         });
-      // Only the active account's `auth` counts: the others sign in when they become active.
-      const active = this.accounts.activeId();
+      // Any account's `auth` counts: a run moves to another account when the active one runs low.
       const worst =
-        states.find((s) => s.status === HealthStatus.Fail) ??
-        states.find((s) => s.status === HealthStatus.Auth && (active === null || s.account === active));
+        states.find((s) => s.status === HealthStatus.Fail) ?? states.find((s) => s.status === HealthStatus.Auth);
       // An account still `checking` waits on its Probe; one that answered connected speaks for the server meanwhile.
       const reading = worst ??
         states.find((s) => s.status === HealthStatus.Ok) ??

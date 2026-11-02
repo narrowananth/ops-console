@@ -9,6 +9,9 @@ import type { OneServer, Probe, ProbedServer } from '../../src/mcp/probe';
  */
 export class FakeProbe implements Probe {
   runs = 0;
+  /** The most Probes that ran at the same time. */
+  mostAtOnce = 0;
+  private running = 0;
   /** How long each Probe takes, as Claude Code starting its servers does. */
   delayMs = 0;
   private readonly scripted = new Map<string, Partial<ProbedServer>>();
@@ -39,7 +42,13 @@ export class FakeProbe implements Probe {
 
   async run(configDir: string, cwd: string): Promise<ProbedServer[]> {
     this.runs += 1;
-    if (this.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+    this.running += 1;
+    this.mostAtOnce = Math.max(this.mostAtOnce, this.running);
+    try {
+      if (this.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+    } finally {
+      this.running -= 1;
+    }
     if (this.broken.has(configDir)) throw new Error('Claude did not answer');
     const project = (await readProject(cwd)).filter(({ name }) => this.approved.has(`${configDir}\n${name}`));
     return [...(await readRegistered(configDir, cwd)), ...project].map(({ name }) => this.read(configDir, name));
