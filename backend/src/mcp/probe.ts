@@ -26,7 +26,10 @@ export interface Probe {
   one(configDir: string, server: OneServer): Promise<ProbedServer>;
 }
 
-const TIMEOUT_MS = 30_000;
+/** How long servers get to connect; a server still starting then reads `pending`, the rest as they stand. */
+const WAIT_MS = 30_000;
+/** Ends a session that does not answer at all, such as one stuck before init. */
+const TIMEOUT_MS = WAIT_MS + 15_000;
 const POLL_MS = 500;
 
 /**
@@ -74,9 +77,10 @@ export class SdkProbe implements Probe {
     });
     try {
       await session.initializationResult();
+      const deadline = Date.now() + WAIT_MS;
       for (;;) {
         const servers = await session.mcpServerStatus();
-        if (servers.every((server) => server.status !== 'pending') || abort.signal.aborted) {
+        if (servers.every((server) => server.status !== 'pending') || Date.now() >= deadline) {
           return servers.map((server) => ({
             name: server.name,
             status: server.status,

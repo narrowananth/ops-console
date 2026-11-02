@@ -59,6 +59,12 @@ describe('runs', () => {
     });
   });
 
+  it('waits for its MCP servers to connect before the first turn', async () => {
+    const daemon = await start();
+    await converse(daemon, daemon.createSession(), 'read /apps/1 from example-dev');
+    expect(daemon.sdk.calls[0]?.options.env).toMatchObject({ CLAUDE_CODE_MCP_STARTUP_WAIT_MS: '30000' });
+  });
+
   it('resumes the same SDK session for later messages', async () => {
     const daemon = await start();
     const id = daemon.createSession();
