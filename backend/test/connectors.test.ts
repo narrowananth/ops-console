@@ -262,12 +262,22 @@ describe('connecting', () => {
       'the sign-in',
     );
     for (const dir of ctx.dirs) ctx.probe.set(dir, 'atlassian', { status: 'failed', error: 'connection refused' });
+    // A check answers at once and probes in the background, every account one after another.
     await api(ctx.daemon).post('/mcp-servers/atlassian/checks', {});
-    expect(await one(ctx, 'jira')).toMatchObject({ status: 'fail' });
+    await until(
+      () => one(ctx, 'jira'),
+      (row) => row.status === 'fail',
+      'the failed check',
+    );
 
     for (const dir of ctx.dirs) ctx.probe.set(dir, 'atlassian', { status: 'connected' });
     await api(ctx.daemon).post('/mcp-servers/atlassian/checks', {});
-    expect(await one(ctx, 'jira')).toMatchObject({ status: 'ok', status_detail: null });
+    const back = await until(
+      () => one(ctx, 'jira'),
+      (row) => row.status === 'ok',
+      'the passing check',
+    );
+    expect(back).toMatchObject({ status: 'ok', status_detail: null });
   });
 
   it('signs GitLab in through the browser, installing glab first, and skips it when glab is signed in', async () => {

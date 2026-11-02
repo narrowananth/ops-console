@@ -101,11 +101,23 @@ describe('listing', () => {
     });
     ctx.probe.set(ctx.dirs[0] ?? '', 'sentry', { status: 'needs-auth' });
     await api(ctx.daemon).post('/mcp-servers/sentry/checks');
-    expect(await find(ctx, 'sentry')).toMatchObject({ status: 'auth' });
+    expect(
+      await until(
+        () => find(ctx, 'sentry'),
+        (server) => server?.status === 'auth',
+        'the check',
+      ),
+    ).toMatchObject({ status: 'auth' });
 
     ctx.probe.set(ctx.dirs[1] ?? '', 'sentry', { status: 'failed', error: 'spawn ENOENT' });
     await api(ctx.daemon).post('/mcp-servers/sentry/checks');
-    expect(await find(ctx, 'sentry')).toMatchObject({
+    expect(
+      await until(
+        () => find(ctx, 'sentry'),
+        (server) => server?.status === 'fail',
+        'the failed check',
+      ),
+    ).toMatchObject({
       status: 'fail',
       status_detail: 'second@example.com: spawn ENOENT',
       tools: [],
@@ -227,7 +239,13 @@ describe('listing', () => {
     });
     ctx.probe.breakAccount(ctx.dirs[1] ?? '');
     await api(ctx.daemon).post('/mcp-servers/tools/checks');
-    expect(await find(ctx, 'tools')).toMatchObject({
+    expect(
+      await until(
+        () => find(ctx, 'tools'),
+        (server) => server?.status === 'fail',
+        'the failed check',
+      ),
+    ).toMatchObject({
       status: 'fail',
       status_detail: 'second@example.com: Claude did not answer',
     });
@@ -404,7 +422,13 @@ describe('authenticating and reconnecting', () => {
     });
     for (const dir of ctx.dirs) ctx.probe.set(dir, 'sentry', { status: 'needs-auth' });
     await api(ctx.daemon).post('/mcp-servers/sentry/checks');
-    expect(await find(ctx, 'sentry')).toMatchObject({ status: 'auth' });
+    expect(
+      await until(
+        () => find(ctx, 'sentry'),
+        (server) => server?.status === 'auth',
+        'the check',
+      ),
+    ).toMatchObject({ status: 'auth' });
 
     const { events, close } = await listen(ctx.daemon);
     expect((await api(ctx.daemon).post('/mcp-servers/sentry/auth')).status).toBe(202);
@@ -460,7 +484,12 @@ describe('authenticating and reconnecting', () => {
       is_active: boolean;
     }[];
     const second = accounts.find((account) => !account.is_active);
-    expect(await find(ctx, 'sentry')).toMatchObject({
+    const read = await until(
+      () => find(ctx, 'sentry'),
+      (server) => server?.status === 'auth',
+      'the check',
+    );
+    expect(read).toMatchObject({
       status: 'auth',
       status_detail: `${second?.label}: needs authentication`,
     });
