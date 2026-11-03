@@ -290,7 +290,16 @@ describe("the agent's questions", () => {
     await stateOf(daemon, id, 'waiting_input');
     const messages = await api(daemon).get(`/sessions/${id}/messages`);
     expect(messages.body.data.at(-1).parts).toEqual([
-      { kind: 'question', text: 'Which branch should the fix go on?', options: ['main', 'fix/webhook'] },
+      {
+        kind: 'question',
+        text: 'Which branch should the fix go on?',
+        header: 'Branch',
+        multi_select: false,
+        options: [
+          { label: 'main', description: 'Straight to main' },
+          { label: 'fix/webhook', description: 'A new branch' },
+        ],
+      },
     ]);
     expect((await api(daemon).get('/approvals')).body.data).toEqual([]);
 

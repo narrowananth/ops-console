@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
 import { ApprovalPrompts } from '../agents/approval-prompts';
+import { QuestionPanel, trailingQuestions } from '../agents/question-panel';
 import { SessionChips } from '../agents/session-chips';
 import { StopRun } from '../agents/stop-run';
 import { MessageView } from '../agents/transcript';
@@ -57,6 +58,11 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   // Only the last thing the operator asked can be edited and run again.
   const lastAsked = messages.data?.findLast((message) => message.role === 'user')?.id;
   const empty = text.trim() === '' && attachments.ready.length === 0;
+  const lastMessage = messages.data?.at(-1);
+  const questions =
+    session.state === SessionState.WaitingInput && lastMessage?.role === 'agent'
+      ? trailingQuestions(lastMessage.parts)
+      : [];
   const submit = () => {
     if (empty || running || attachments.uploading) return;
     setReverted(null);
@@ -169,6 +175,15 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
       </div>
       <div className="flex flex-col gap-2 px-6 pb-4.5">
         <ApprovalPrompts sessionId={id} />
+        {questions.length > 0 && (
+          <QuestionPanel
+            // A new question set starts at its first question.
+            key={questions.map((question) => question.text).join('\n')}
+            questions={questions}
+            pending={send.isPending}
+            onSend={(answer) => send.mutate(answer)}
+          />
+        )}
         {reverted && <RevertNote result={reverted} onClose={() => setReverted(null)} />}
         {/* biome-ignore lint/a11y/noStaticElementInteractions: dropping files is a shortcut; Attach files does the same */}
         <div

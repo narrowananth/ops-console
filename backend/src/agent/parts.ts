@@ -27,7 +27,14 @@ const entrySchema = z.object({
 export const EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
 
 export const questionInputSchema = z.object({
-  questions: z.array(z.object({ question: z.string(), options: z.array(z.object({ label: z.string() })) })),
+  questions: z.array(
+    z.object({
+      question: z.string(),
+      header: z.string().optional(),
+      multiSelect: z.boolean().optional(),
+      options: z.array(z.object({ label: z.string(), description: z.string().optional() })),
+    }),
+  ),
 });
 
 /** Rows and characters per cell a Result shows (`10-dev-tools-compare`). */
@@ -138,7 +145,9 @@ function toolParts(name: string, input: Record<string, unknown>, label?: ServerL
       return parsed.data.questions.map((question) => ({
         kind: 'question',
         text: question.question,
-        options: question.options.map((option) => option.label),
+        header: question.header ?? '',
+        multi_select: question.multiSelect ?? false,
+        options: question.options.map((option) => ({ label: option.label, description: option.description ?? '' })),
       }));
     }
   }

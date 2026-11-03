@@ -31,9 +31,19 @@ function PartView({ part }: { part: Part }) {
     );
   }
   return (
-    <div className="rounded-lg bg-accent-100 px-3.5 py-2.5 text-[13px] text-accent-900">
+    <div className="flex flex-col gap-1 rounded-lg bg-accent-100 px-3.5 py-2.5 text-[13px] text-accent-900">
+      {part.header && <span className="text-[10px] font-bold tracking-wide uppercase">{part.header}</span>}
       <strong>{part.text}</strong>
-      {part.options.length > 0 && <div className="text-xs text-neutral-700">{part.options.join(' · ')}</div>}
+      {part.options.length > 0 && (
+        <ul className="m-0 flex list-none flex-col gap-0.5 p-0 text-xs text-neutral-700">
+          {part.options.map((option) => (
+            <li key={option.label}>
+              <span className="font-semibold">{option.label}</span>
+              {option.description && ` — ${option.description}`}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

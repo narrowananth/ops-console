@@ -97,7 +97,15 @@ export const partSchema = z.discriminatedUnion('kind', [
     lines: z.array(z.object({ sign: z.enum(['+', '-', ' ']), text: z.string() })),
   }),
   z.object({ kind: z.literal('code'), lang: z.string(), text: z.string() }),
-  z.object({ kind: z.literal('question'), text: z.string(), options: z.array(z.string()) }),
+  z.object({
+    kind: z.literal('question'),
+    text: z.string(),
+    /** The short label the agent gave the question, such as `Fix approach`. */
+    header: z.string().default(''),
+    /** More than one option may be picked. */
+    multi_select: z.boolean().default(false),
+    options: z.array(z.object({ label: z.string(), description: z.string().default('') })),
+  }),
   /** The rows one Connection gave for one question (`10-dev-tools-compare`). */
   z.object({
     kind: z.literal('result'),
