@@ -1,9 +1,17 @@
 import { execFile } from 'node:child_process';
-import { realpath, rm } from 'node:fs/promises';
+import { readFile, realpath, rm, stat } from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
-import { GitHost } from '@ops-console/shared';
+import { GitHost, type SessionDiff, type SessionDiffFile, SessionDiffStatus } from '@ops-console/shared';
 
 const run = promisify(execFile);
+
+/** Lines a file's diff keeps; a lockfile's thousands are cut, with the file marked truncated. */
+const DIFF_LINES = 3000;
+/** Untracked files read into a diff; past this, a build folder git does not ignore would flood it. */
+const UNTRACKED_FILES = 200;
+/** An untracked file bigger than this shows as a file without its lines. */
+const UNTRACKED_BYTES = 512 * 1024;
 
 export const GIT = Symbol('GIT');
 
@@ -46,6 +54,51 @@ export class Git {
     if (branch?.trim()) return branch.trim();
     const sha = await this.try(dir, ['rev-parse', '--short', 'HEAD']);
     return sha?.trim() || null;
+  }
+
+  /** The branch checked out; null on a detached HEAD or outside a repository. */
+  async branchName(dir: string): Promise<string | null> {
+    return (await this.try(dir, ['symbolic-ref', '--short', '-q', 'HEAD']))?.trim() || null;
+  }
+
+  /**
+   * Everything the checked-out branch changes against where it forked from the default branch, on origin when origin
+   * has it: its commits, then staged, unstaged and untracked files. On the default branch itself, the commits not
+   * pushed yet and the uncommitted changes. `fallback` is the default branch when origin names none.
+   */
+  async changes(dir: string, fallback: string): Promise<SessionDiff> {
+    const branch = await this.branchName(dir);
+    const named = (await this.try(dir, ['symbolic-ref', '--short', '-q', 'refs/remotes/origin/HEAD']))?.trim();
+    const main = named ? named.replace(/^origin\//, '') : fallback;
+    const base =
+      main === null
+        ? null
+        : (await this.commitOf(dir, `refs/remotes/origin/${main}`))
+          ? `origin/${main}`
+          : (await this.commitOf(dir, `refs/heads/${main}`))
+            ? main
+            : null;
+    const head = await this.commitOf(dir, 'HEAD');
+    const fork = base && head ? ((await this.try(dir, ['merge-base', base, 'HEAD']))?.trim() ?? head) : head;
+    const files: SessionDiffFile[] = fork
+      ? parseDiff(
+          (await this.try(dir, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '-M', fork])) ??
+            '',
+        )
+      : [];
+    const untracked =
+      (await this.try(dir, ['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '-z'])) ?? '';
+    for (const name of untracked.split('\0').filter(Boolean).slice(0, UNTRACKED_FILES)) {
+      files.push(await untrackedFile(path.join(dir, name), name));
+    }
+    files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return {
+      branch,
+      base: fork ? (base ?? 'HEAD') : null,
+      files,
+      additions: files.reduce((sum, file) => sum + file.additions, 0),
+      deletions: files.reduce((sum, file) => sum + file.deletions, 0),
+    };
   }
 
   /** `origin/HEAD` when set, else the current branch. */
@@ -253,4 +306,92 @@ export function parseRemote(url: string | null): { host: GitHost; slug: string |
           ? GitHost.Bitbucket
           : null;
   return host === null ? { host: GitHost.Local, slug: null } : { host, slug };
+}
+
+/** A `git diff` split per file: its status, counts and lines, hunk headers kept for line numbers. */
+export function parseDiff(diff: string): SessionDiffFile[] {
+  const files: SessionDiffFile[] = [];
+  let file: SessionDiffFile | null = null;
+  let inHunk = false;
+  for (const line of diff.split('\n')) {
+    const header = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
+    if (header) {
+      file = {
+        name: header[2] ?? '',
+        old_name: null,
+        status: SessionDiffStatus.Modified,
+        additions: 0,
+        deletions: 0,
+        binary: false,
+        lines: [],
+        truncated: false,
+      };
+      files.push(file);
+      inHunk = false;
+      continue;
+    }
+    if (file === null) continue;
+    if (!inHunk) {
+      if (line.startsWith('new file mode')) file.status = SessionDiffStatus.Added;
+      else if (line.startsWith('deleted file mode')) file.status = SessionDiffStatus.Deleted;
+      else if (line.startsWith('rename from ')) {
+        file.status = SessionDiffStatus.Renamed;
+        file.old_name = line.slice('rename from '.length);
+      } else if (line.startsWith('rename to ')) file.name = line.slice('rename to '.length);
+      else if (line.startsWith('+++ b/')) file.name = line.slice('+++ b/'.length);
+      else if (line.startsWith('Binary files ')) file.binary = true;
+    }
+    if (line.startsWith('@@')) {
+      inHunk = true;
+      push(file, { sign: ' ', text: line });
+      continue;
+    }
+    if (!inHunk || line === '' || line.startsWith('\\')) continue;
+    const sign = line[0] === '+' ? '+' : line[0] === '-' ? '-' : ' ';
+    if (sign === '+') file.additions++;
+    if (sign === '-') file.deletions++;
+    push(file, { sign, text: line.slice(1) });
+  }
+  return files;
+}
+
+function push(file: SessionDiffFile, line: SessionDiffFile['lines'][number]): void {
+  if (file.lines.length < DIFF_LINES) file.lines.push(line);
+  else file.truncated = true;
+}
+
+/** A file git does not track yet, as an added file: every line `+`, none for a big or binary one. */
+async function untrackedFile(full: string, name: string): Promise<SessionDiffFile> {
+  const file: SessionDiffFile = {
+    name,
+    old_name: null,
+    status: SessionDiffStatus.Added,
+    additions: 0,
+    deletions: 0,
+    binary: false,
+    lines: [],
+    truncated: false,
+  };
+  const size = await stat(full).then(
+    (info) => (info.isFile() ? info.size : null),
+    () => null,
+  );
+  if (size === null) return file;
+  if (size > UNTRACKED_BYTES) {
+    file.truncated = true;
+    return file;
+  }
+  const bytes = await readFile(full).catch(() => null);
+  if (bytes === null) return file;
+  if (bytes.includes(0)) {
+    file.binary = true;
+    return file;
+  }
+  const text = bytes.toString('utf8');
+  if (text === '') return file;
+  const lines = text.replace(/\n$/, '').split('\n');
+  file.additions = lines.length;
+  push(file, { sign: ' ', text: `@@ -0,0 +1,${lines.length} @@` });
+  for (const line of lines) push(file, { sign: '+', text: line });
+  return file;
 }

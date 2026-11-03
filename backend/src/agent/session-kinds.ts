@@ -16,6 +16,8 @@ export type SessionKindHandler = {
   deniedServers?: (session: SessionRow) => string[];
   /** What a step shows for an MCP server: its Connection and Access Level. */
   serverLabel?: (server: string) => string | null;
+  /** Runs after each run ends, such as reading which branch the agent left the Repo on. Its errors are ignored. */
+  afterRun?: (session: SessionRow) => Promise<void>;
   /** Appended to Claude Code's system prompt on this kind's runs. */
   instructions?: string;
 };

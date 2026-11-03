@@ -59,6 +59,7 @@ import {
   scanSchema,
   serviceSchema,
   sessionDefaultsSchema,
+  sessionDiffSchema,
   sessionSchema,
   startAtLoginSchema,
   statusCodeCountSchema,
@@ -91,6 +92,7 @@ export const queryKeys = {
   alert: (id: string) => ['monitor', 'alert', id] as const,
   session: (id: string) => ['sessions', id] as const,
   messages: (id: string) => ['messages', id] as const,
+  sessionDiff: (id: string) => ['session-diff', id] as const,
   diskAccess: ['disk-access'] as const,
   startAtLogin: ['start-at-login'] as const,
   terminals: ['terminals'] as const,
@@ -639,6 +641,19 @@ export function useEditMessage(sessionId: string) {
         z.object({ data: editedMessageSchema }),
       ).then((body) => body.data),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) }),
+  });
+}
+
+/**
+ * What a repo Session's branch changes, read from the Repo folder. Read again when a run ends; while one goes and
+ * `follow` is set, every few seconds, so edits show as the agent makes them.
+ */
+export function useSessionDiff(sessionId: string, enabled: boolean, follow: boolean) {
+  return useQuery({
+    queryKey: queryKeys.sessionDiff(sessionId),
+    queryFn: () => apiGet(`/sessions/${sessionId}/diff`, z.object({ data: sessionDiffSchema })).then((d) => d.data),
+    enabled,
+    refetchInterval: follow ? 4000 : false,
   });
 }
 

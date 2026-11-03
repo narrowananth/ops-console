@@ -300,6 +300,78 @@ describe('branches', () => {
     expect((await ctx.http.post(`/sessions/${two}/checkout`, { branch: 'feature-1' })).status).toBe(200);
     expect((await ctx.http.get(`/action-log?kind=git`)).body.data).toHaveLength(1);
   });
+  it('follows a branch the agent checked out in its run, and leaves a detached HEAD alone', async () => {
+    const ctx = await start();
+    const id = await newSession(ctx);
+    const hold = gate();
+    ctx.daemon.sdk.script({ wait: hold.promise }, { text: 'pushed the fix' });
+    await ctx.http.post(`/sessions/${id}/messages`, { text: 'fix it on a branch' });
+    // What the agent does from its shell in the run.
+    git(ctx.dir, 'checkout', '-q', '-b', 'fix/login');
+    hold.open();
+    await until(
+      () => ctx.http.get(`/sessions/${id}`).then((res) => res.body.data.branch),
+      (branch) => branch === 'fix/login',
+      'the Session on fix/login',
+    );
+
+    git(ctx.dir, 'checkout', '-q', '--detach');
+    ctx.daemon.sdk.script({ text: 'looked' });
+    await ctx.http.post(`/sessions/${id}/messages`, { text: 'look' });
+    await until(
+      () => ctx.http.get(`/sessions/${id}`).then((res) => res.body.data.state),
+      (state) => state === 'idle',
+    );
+    expect((await ctx.http.get(`/sessions/${id}`)).body.data.branch).toBe('fix/login');
+  });
+});
+
+describe('Session diff', () => {
+  it("shows the branch's commits and its staged, unstaged and untracked files against where it forked", async () => {
+    const ctx = await start();
+    const id = await newSession(ctx);
+    git(ctx.dir, 'checkout', '-q', '-b', 'fix/login');
+    await writeFile(path.join(ctx.dir, 'src.ts'), 'one\ntwo\n');
+    git(ctx.dir, 'add', '.');
+    git(ctx.dir, 'commit', '-q', '-m', 'add src');
+    await writeFile(path.join(ctx.dir, 'README.md'), 'hello\nworld\n');
+    git(ctx.dir, 'mv', 'src.ts', 'app.ts');
+    await writeFile(path.join(ctx.dir, 'notes.md'), 'new\n');
+
+    const res = await ctx.http.get(`/sessions/${id}/diff`);
+    expect(res.status).toBe(200);
+    const diff = res.body.data;
+    expect(diff.branch).toBe('fix/login');
+    expect(diff.base).toBe('main');
+    expect(
+      diff.files.map((file: { name: string; status: string; additions: number; deletions: number }) => [
+        file.name,
+        file.status,
+        file.additions,
+        file.deletions,
+      ]),
+    ).toEqual([
+      ['README.md', 'modified', 1, 0],
+      ['app.ts', 'added', 2, 0],
+      ['notes.md', 'added', 1, 0],
+    ]);
+    expect(diff.files[0].lines).toEqual([
+      { sign: ' ', text: '@@ -1 +1,2 @@' },
+      { sign: ' ', text: 'hello' },
+      { sign: '+', text: 'world' },
+    ]);
+    expect([diff.additions, diff.deletions]).toEqual([4, 0]);
+    // Reading the diff catches the Session up with the branch checked out.
+    expect((await ctx.http.get(`/sessions/${id}`)).body.data.branch).toBe('fix/login');
+  });
+
+  it('has no diff for a Session without a Repo', async () => {
+    const ctx = await start();
+    const made = await ctx.http.post('/sessions', { kind: 'anonymous' });
+    const res = await ctx.http.get(`/sessions/${made.body.data.id}/diff`);
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('invalid_state');
+  });
 });
 
 describe('pull requests', () => {

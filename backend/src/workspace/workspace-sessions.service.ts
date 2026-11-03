@@ -7,6 +7,7 @@ import {
   createRepoSessionSchema,
   ErrorCode,
   type Session,
+  type SessionDiff,
   SessionKind,
   SessionState,
 } from '@ops-console/shared';
@@ -33,6 +34,7 @@ export class WorkspaceSessionsService {
       workingDir: (session) => this.folder(session.repoId),
       acceptsMessages: true,
       create: (body) => this.create(parseInput(createRepoSessionSchema, body, 'body')),
+      afterRun: (session) => this.followBranch(session.id).then(() => {}),
     });
     kinds.register(SessionKind.PrReview, {
       workingDir: (session) => this.folder(session.repoId),
@@ -103,6 +105,39 @@ export class WorkspaceSessionsService {
     return { session: toSession(this.sessions.write(sessionId, { branch })), stashed };
   }
 
+  /**
+   * What the Session's branch changes, read from the Repo folder now. Reading it also catches the Session up with a
+   * branch the agent checked out itself.
+   */
+  async diff(sessionId: string): Promise<SessionDiff> {
+    const session = this.sessions.get(sessionId);
+    if (session.kind !== SessionKind.Repo || session.repoId === null) {
+      throw new ApiError(409, ErrorCode.InvalidState, 'Only a repo Session has a diff');
+    }
+    const repo = this.repo(session.repoId);
+    const changes = await this.git.changes(repo.path, repo.defaultBranch);
+    if (changes.branch !== null && changes.branch !== session.branch) this.follow(session.id, changes.branch);
+    return changes;
+  }
+
+  /**
+   * Writes the branch checked out in the Repo onto the Session, as after a run in which the agent made and switched to
+   * a branch for its fix. A detached HEAD leaves the Session's branch as it was.
+   */
+  async followBranch(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (session.kind !== SessionKind.Repo || session.repoId === null) return;
+    const branch = await this.git.branchName(this.folder(session.repoId));
+    if (branch !== null && branch !== session.branch) this.follow(session.id, branch);
+  }
+
+  /** Only an idle or failed Session moves: a running one may be mid-checkout. */
+  private follow(sessionId: string, branch: string): void {
+    const now = this.sessions.get(sessionId);
+    if (now.state !== SessionState.Idle && now.state !== SessionState.Failed) return;
+    this.sessions.write(sessionId, { branch });
+  }
+
   /** The Action Log row exists before git runs; a refusal from git becomes `upstream_failed`. */
   private async logged(
     sessionId: string | null,
@@ -129,15 +164,19 @@ export class WorkspaceSessionsService {
   }
 
   private folder(repoId: string | null): string {
+    return this.repo(repoId).path;
+  }
+
+  private repo(repoId: string | null): { path: string; defaultBranch: string } {
     const row =
       repoId === null
         ? undefined
         : this.store.db
-            .select({ path: repos.path })
+            .select({ path: repos.path, defaultBranch: repos.defaultBranch })
             .from(repos)
             .where(and(eq(repos.id, repoId), isNull(repos.removedAt)))
             .get();
     if (!row) throw new ApiError(404, ErrorCode.NotFound, 'no such Repo');
-    return row.path;
+    return row;
   }
 }
