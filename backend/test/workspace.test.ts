@@ -330,7 +330,7 @@ describe('Session diff', () => {
   it("shows the branch's commits and its staged, unstaged and untracked files against where it forked", async () => {
     const ctx = await start();
     const id = await newSession(ctx);
-    git(ctx.dir, 'checkout', '-q', '-b', 'fix/login');
+    expect((await ctx.http.post(`/sessions/${id}/checkout`, { branch: 'fix/login', create: true })).status).toBe(200);
     await writeFile(path.join(ctx.dir, 'src.ts'), 'one\ntwo\n');
     git(ctx.dir, 'add', '.');
     git(ctx.dir, 'commit', '-q', '-m', 'add src');
@@ -361,8 +361,29 @@ describe('Session diff', () => {
       { sign: '+', text: 'world' },
     ]);
     expect([diff.additions, diff.deletions]).toEqual([4, 0]);
-    // Reading the diff catches the Session up with the branch checked out.
-    expect((await ctx.http.get(`/sessions/${id}`)).body.data.branch).toBe('fix/login');
+  });
+
+  it("shows only a Session's own branch while the folder has another Session's checked out", async () => {
+    const ctx = await start();
+    const idle = await newSession(ctx);
+    git(ctx.dir, 'checkout', '-q', '-b', 'feature/old');
+    await writeFile(path.join(ctx.dir, 'old.ts'), 'old\n');
+    git(ctx.dir, 'add', '.');
+    git(ctx.dir, 'commit', '-q', '-m', 'add old');
+    git(ctx.dir, 'checkout', '-q', 'main');
+    const other = await newSession(ctx, 'feature/old');
+    // Another Session's agent moved the folder to its branch and left work in it.
+    git(ctx.dir, 'checkout', '-q', '-b', 'fix/other');
+    await writeFile(path.join(ctx.dir, 'other.ts'), 'other\n');
+
+    const onMain = (await ctx.http.get(`/sessions/${idle}/diff`)).body.data;
+    expect([onMain.branch, onMain.files]).toEqual(['main', []]);
+    const onOld = (await ctx.http.get(`/sessions/${other}/diff`)).body.data;
+    expect(onOld.branch).toBe('feature/old');
+    expect(onOld.files.map((file: { name: string }) => file.name)).toEqual(['old.ts']);
+    // Neither Session moved to the branch checked out.
+    expect((await ctx.http.get(`/sessions/${idle}`)).body.data.branch).toBe('main');
+    expect((await ctx.http.get(`/sessions/${other}`)).body.data.branch).toBe('feature/old');
   });
 
   it('has no diff for a Session without a Repo', async () => {

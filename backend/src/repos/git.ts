@@ -62,39 +62,47 @@ export class Git {
   }
 
   /**
-   * Everything the checked-out branch changes against where it forked from the default branch, on origin when origin
-   * has it: its commits, then staged, unstaged and untracked files. On the default branch itself, the commits not
-   * pushed yet and the uncommitted changes. `fallback` is the default branch when origin names none.
+   * Everything `branch` changes against where it forked from the default branch, on origin when origin has it: its
+   * commits, and while it is the branch checked out, the staged, unstaged and untracked files too. On the default
+   * branch itself, the commits not pushed yet. `fallback` is the default branch when origin names none.
    */
-  async changes(dir: string, fallback: string): Promise<SessionDiff> {
-    const branch = await this.branchName(dir);
+  async changes(dir: string, fallback: string, branch: string): Promise<SessionDiff> {
     const named = (await this.try(dir, ['symbolic-ref', '--short', '-q', 'refs/remotes/origin/HEAD']))?.trim();
     const main = named ? named.replace(/^origin\//, '') : fallback;
-    const base =
-      main === null
-        ? null
-        : (await this.commitOf(dir, `refs/remotes/origin/${main}`))
-          ? `origin/${main}`
-          : (await this.commitOf(dir, `refs/heads/${main}`))
-            ? main
-            : null;
-    const head = await this.commitOf(dir, 'HEAD');
-    const fork = base && head ? ((await this.try(dir, ['merge-base', base, 'HEAD']))?.trim() ?? head) : head;
+    const base = (await this.commitOf(dir, `refs/remotes/origin/${main}`))
+      ? `origin/${main}`
+      : (await this.commitOf(dir, `refs/heads/${main}`))
+        ? main
+        : null;
+    // Repo Sessions share the folder: the working tree is this branch's only while it is the one checked out.
+    const checkedOut = (await this.branchName(dir)) === branch;
+    const head = await this.commitOf(dir, `refs/heads/${branch}`);
+    const fork = base && head ? ((await this.try(dir, ['merge-base', base, head]))?.trim() ?? head) : head;
     const files: SessionDiffFile[] = fork
       ? parseDiff(
-          (await this.try(dir, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '-M', fork])) ??
-            '',
+          (await this.try(dir, [
+            '-c',
+            'core.quotePath=false',
+            'diff',
+            '--no-color',
+            '--no-ext-diff',
+            '-M',
+            fork,
+            ...(checkedOut || !head ? [] : [head]),
+          ])) ?? '',
         )
       : [];
-    const untracked =
-      (await this.try(dir, ['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '-z'])) ?? '';
+    const untracked = checkedOut
+      ? ((await this.try(dir, ['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '-z'])) ??
+        '')
+      : '';
     for (const name of untracked.split('\0').filter(Boolean).slice(0, UNTRACKED_FILES)) {
       files.push(await untrackedFile(path.join(dir, name), name));
     }
     files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     return {
       branch,
-      base: fork ? (base ?? 'HEAD') : null,
+      base: fork ? (base ?? branch) : null,
       files,
       additions: files.reduce((sum, file) => sum + file.additions, 0),
       deletions: files.reduce((sum, file) => sum + file.deletions, 0),

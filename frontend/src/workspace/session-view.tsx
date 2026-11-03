@@ -56,8 +56,8 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const sessionState = session?.state;
   const working = sessionState === SessionState.Working || sessionState === SessionState.WaitingApproval;
   const diff = useSessionDiff(id, hasDiff, diffOpen && working);
-  // The branch checked out now: the agent may have made one for its fix since the Session started.
-  const branch = diff.data?.branch ?? session?.branch ?? null;
+  // While the agent works, the branch it has checked out: it may make one for its fix. After the run the Session follows it.
+  const branch = (working ? diff.data?.branch : null) ?? session?.branch ?? null;
   // A pull request the agent opened or named here wins over the one on the Session's branch.
   const named = pullRequestNamedIn(messages.data ?? []);
   const listed =

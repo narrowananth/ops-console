@@ -424,12 +424,12 @@ test('Scroll to end shows when scrolled up and jumps to the newest message', asy
   await expect(button).toHaveCount(0);
 });
 
-test('the Diff panel shows the branch the agent moved to and its files, folds them and resizes', async ({ page }) => {
+test("the Diff panel shows the Session's branch and its files, folds them and resizes", async ({ page }) => {
   await page.route('**/api/repos', (route) =>
     route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
   );
   await page.route(/\/api\/sessions\?kind=repo/, (route) =>
-    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform')] } }),
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform', 'idle', 'fix/login')] } }),
   );
   await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
   await page.route('**/api/sessions/s1/diff', (route) =>

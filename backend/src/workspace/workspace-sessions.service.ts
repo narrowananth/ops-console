@@ -106,8 +106,9 @@ export class WorkspaceSessionsService {
   }
 
   /**
-   * What the Session's branch changes, read from the Repo folder now. Reading it also catches the Session up with a
-   * branch the agent checked out itself.
+   * What the Session's own branch changes, read from the Repo folder now. The folder may have another Session's branch
+   * checked out; that branch's changes are not this Session's, so they do not show and do not move it. While the
+   * Session runs, the branch checked out is its agent's doing, as when it makes a branch for its fix.
    */
   async diff(sessionId: string): Promise<SessionDiff> {
     const session = this.sessions.get(sessionId);
@@ -115,9 +116,10 @@ export class WorkspaceSessionsService {
       throw new ApiError(409, ErrorCode.InvalidState, 'Only a repo Session has a diff');
     }
     const repo = this.repo(session.repoId);
-    const changes = await this.git.changes(repo.path, repo.defaultBranch);
-    if (changes.branch !== null && changes.branch !== session.branch) this.follow(session.id, changes.branch);
-    return changes;
+    const running = session.state !== SessionState.Idle && session.state !== SessionState.Failed;
+    const branch = (running ? await this.git.branchName(repo.path) : null) ?? session.branch;
+    if (branch === null) return { branch: null, base: null, files: [], additions: 0, deletions: 0 };
+    return this.git.changes(repo.path, repo.defaultBranch, branch);
   }
 
   /**
