@@ -95,6 +95,51 @@ test('a Repo shows its 3 newest Sessions and folds, so the next Repo stays in re
   await expect(page.getByRole('region', { name: 'analytics' }).getByRole('listitem')).toHaveCount(0);
 });
 
+test('Collapse all and Expand all fold every Repo; a search keeps the matching Repos and Sessions, open', async ({
+  page,
+}) => {
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'analytics'), repo('r2', 'apis')], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          session('s1', 'r1', 'fix login'),
+          session('s2', 'r1', 'audit queries'),
+          session('s3', 'r1', 'add metrics'),
+          session('s4', 'r1', 'old idea'),
+          session('s7', 'r2', 'check domain', 'idle', 'feature/dns'),
+        ],
+      },
+    }),
+  );
+  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+  const analytics = page.getByRole('region', { name: 'analytics' });
+  const apis = page.getByRole('region', { name: 'apis' });
+
+  await page.getByRole('button', { name: 'Collapse all' }).click();
+  await expect(analytics.getByRole('listitem')).toHaveCount(0);
+  await expect(apis.getByRole('listitem')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Expand all' }).click();
+  await expect(analytics.getByRole('listitem')).toHaveCount(3);
+  await expect(apis.getByRole('listitem')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Collapse all' }).click();
+
+  const search = page.getByRole('searchbox', { name: 'Search Sessions' });
+  await search.fill('dns');
+  await expect(analytics).toHaveCount(0);
+  await expect(apis.getByRole('listitem')).toHaveText([/check domain/]);
+  await search.fill('Analytics');
+  await expect(apis).toHaveCount(0);
+  await expect(analytics.getByRole('listitem')).toHaveCount(4);
+  await expect(analytics.getByRole('button', { name: /Show \d more/ })).toHaveCount(0);
+  await search.fill('nothing like it');
+  await expect(page.getByText('No Repo or Session matches “nothing like it”.')).toBeVisible();
+  await search.fill('');
+  await expect(analytics.getByRole('listitem')).toHaveCount(0);
+});
+
 test('removing a Repo with Sessions asks whether to keep or delete them', async ({ page }) => {
   const removed: string[] = [];
   await page.route('**/api/repos', (route) =>
@@ -217,6 +262,66 @@ test('every message the operator sent copies; the last one edits, reverts the fi
   ]);
   await expect(page.getByRole('status')).toHaveText(/Put back 1 file \(\+4 −2\): src\/engage\.ts/);
   await expect(box).toHaveCount(0);
+});
+
+test('files picked, pasted or dropped on the message box upload, show as chips and go with the message', async ({
+  page,
+}) => {
+  const uploads: string[] = [];
+  let sent: { text: string } | null = null;
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform')] } }),
+  );
+  await page.route(/\/api\/sessions\/s1\/attachments/, (route) => {
+    const name = new URL(route.request().url()).searchParams.get('name') ?? '';
+    uploads.push(name);
+    return route.fulfill({
+      status: 201,
+      json: { data: { name, path: `/data/attachments/s1/${uploads.length}.bin`, size: 2048 } },
+    });
+  });
+  await page.route('**/api/sessions/s1/messages', (route) => {
+    if (route.request().method() === 'POST') {
+      sent = route.request().postDataJSON();
+      return route.fulfill({ status: 202, json: { data: { message_id: 'm1' } } });
+    }
+    return route.fulfill({ json: { data: [] } });
+  });
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const box = page.getByRole('textbox', { name: 'Message' });
+  await page
+    .locator('input[type=file]')
+    .setInputFiles({ name: 'app.log', mimeType: 'text/plain', buffer: Buffer.from('boom') });
+  await box.evaluate((element) => {
+    const data = new DataTransfer();
+    data.items.add(new File(['png'], 'shot.png', { type: 'image/png' }));
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  await box.evaluate((element) => {
+    const data = new DataTransfer();
+    data.items.add(new File(['{}'], 'order.json', { type: 'application/json' }));
+    element.dispatchEvent(new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true }));
+    element.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+  });
+  const chips = page.getByRole('list', { name: 'Attached files' }).getByRole('listitem');
+  await expect(chips).toHaveCount(3);
+  await expect(chips.nth(1)).toContainText('2 KB');
+  expect(uploads).toEqual(['app.log', 'shot.png', 'order.json']);
+  await expect(box).toHaveValue('');
+
+  await page.getByRole('button', { name: 'Remove order.json' }).click();
+  await box.fill('why does this fail?');
+  await box.press('Enter');
+  await expect
+    .poll(() => sent?.text)
+    .toBe(
+      'why does this fail?\n\nAttached files (open each with the Read tool):\n- app.log: /data/attachments/s1/1.bin\n- shot.png: /data/attachments/s1/2.bin',
+    );
+  await expect(chips).toHaveCount(0);
 });
 
 test('a Session opens at its newest message', async ({ page }) => {

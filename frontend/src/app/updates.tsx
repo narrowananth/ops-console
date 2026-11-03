@@ -171,7 +171,7 @@ export function VersionLine({ collapsed }: { collapsed: boolean }) {
         className={
           collapsed
             ? 'relative inline-flex h-8.5 w-full cursor-pointer items-center justify-center border border-line bg-card font-mono text-[10px] text-text hover:bg-neutral-200'
-            : 'flex w-full cursor-pointer items-center gap-1.5 border-0 bg-transparent px-0.5 text-left text-[11px] text-neutral-700 hover:text-text'
+            : 'flex w-full cursor-pointer items-center justify-center gap-1.5 border-0 bg-transparent px-0.5 text-[11px] text-neutral-700 hover:text-text'
         }
       >
         {collapsed ? (

@@ -1,4 +1,4 @@
-import { type EditedMessage, SessionKind, SessionState } from '@ops-console/shared';
+import { type EditedMessage, SessionKind, SessionState, withAttachments } from '@ops-console/shared';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
@@ -20,6 +20,7 @@ import {
 } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { PlaybookLink } from '../playbooks/job-steps';
+import { AttachButton, AttachmentChips, filesIn, useAttachments } from './attachments';
 import { BranchSwitcher } from './branch-switcher';
 import { ConversationMap, useFollowLatest } from './conversation';
 import { alertPath, pullRequestPath, sessionDraftKey } from './links';
@@ -35,6 +36,9 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   // What the last edit did to the files, until the operator closes it or sends again.
   const [reverted, setReverted] = useState<EditedMessage | null>(null);
   const [text, setText] = useStored(sessionDraftKey(id), z.string(), '');
+  const attachments = useAttachments(id);
+  // A drag carrying files is over the message box.
+  const [dropping, setDropping] = useState(false);
   const latest = useFollowLatest();
   const session = sessions.data?.find((candidate) => candidate.id === id);
   const gone = sessions.isSuccess && session === undefined;
@@ -52,10 +56,16 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const busy = running || session.state === SessionState.WaitingInput;
   // Only the last thing the operator asked can be edited and run again.
   const lastAsked = messages.data?.findLast((message) => message.role === 'user')?.id;
+  const empty = text.trim() === '' && attachments.ready.length === 0;
   const submit = () => {
-    if (text.trim() === '' || running) return;
+    if (empty || running || attachments.uploading) return;
     setReverted(null);
-    send.mutate(text, { onSuccess: () => setText('') });
+    send.mutate(withAttachments(text, attachments.ready), {
+      onSuccess: () => {
+        setText('');
+        attachments.clear();
+      },
+    });
   };
 
   return (
@@ -160,7 +170,26 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
       <div className="flex flex-col gap-2 px-6 pb-4.5">
         <ApprovalPrompts sessionId={id} />
         {reverted && <RevertNote result={reverted} onClose={() => setReverted(null)} />}
-        <div className="rounded-lg border border-divider bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)]">
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: dropping files is a shortcut; Attach files does the same */}
+        <div
+          onDragOver={(event) => {
+            if (running || !event.dataTransfer.types.includes('Files')) return;
+            event.preventDefault();
+            setDropping(true);
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false);
+          }}
+          onDrop={(event) => {
+            setDropping(false);
+            const files = filesIn(event.dataTransfer);
+            if (running || files.length === 0) return;
+            event.preventDefault();
+            attachments.add(files);
+          }}
+          className={`rounded-lg border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)] ${dropping ? 'border-dashed border-accent-400 bg-accent-100' : 'border-divider'}`}
+        >
+          <AttachmentChips pending={attachments.pending} onRemove={attachments.remove} />
           <textarea
             aria-label="Message"
             value={text}
@@ -173,15 +202,23 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                   : 'Ask anything — e.g. clone github.com/owner/repo and find why the orders job fails'
             }
             onChange={(event) => setText(event.target.value)}
+            onPaste={(event) => {
+              // A pasted screenshot or copied file attaches; pasted text goes in as text.
+              const files = filesIn(event.clipboardData);
+              if (files.length === 0) return;
+              event.preventDefault();
+              attachments.add(files);
+            }}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 submit();
               }
             }}
-            className="block max-h-50 min-h-16 w-full resize-none border-0 bg-transparent px-4 pt-3.5 pb-1.5 text-sm text-text outline-none"
+            className="block field-sizing-content max-h-[50vh] min-h-28 w-full resize-none overflow-y-auto border-0 bg-transparent px-4 pt-3.5 pb-1.5 text-sm leading-relaxed text-text outline-none"
           />
           <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-1.5 pb-2.5">
+            <AttachButton onFiles={attachments.add} disabled={running} />
             <SessionChips session={session} variant="chip" />
             {repo && <BranchSwitcher session={session} all={sessions.data ?? []} repo={repo} />}
             {send.isError && (
@@ -196,10 +233,12 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 title={
                   running
                     ? 'The agent is working. Stop it to send something new.'
-                    : 'Enter sends. Shift+Enter adds a new line.'
+                    : attachments.uploading
+                      ? 'Waiting for the attached files to upload'
+                      : 'Enter sends. Shift+Enter adds a new line.'
                 }
                 className="px-4 py-1.5"
-                disabled={running || text.trim() === '' || send.isPending}
+                disabled={running || empty || attachments.uploading || send.isPending}
                 onClick={submit}
               >
                 Send

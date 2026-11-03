@@ -37,6 +37,7 @@ import { STORE, type Store } from '../db/store';
 import { PlaybooksService } from '../playbooks/playbooks.service';
 import { systemAppend } from '../playbooks/prompts';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
+import { Attachments } from './attachments';
 import { ConnectionLookup } from './connection-lookup';
 import { MessageInterceptors } from './message-interceptors';
 import { blockParts, contentSchema, EDIT_TOOLS, questionInputSchema, stepText, toMessages } from './parts';
@@ -73,6 +74,8 @@ const SDK_EFFORT: Record<Effort, EffortLevel> = {
 export const MERGE_DENIALS = [
   'Bash(gh pr merge:*)',
   'Bash(glab mr merge:*)',
+  'Bash(bkt pr merge:*)',
+  'Bash(bkt pr auto-merge:*)',
   'mcp__github__merge_pull_request',
   'mcp__gitlab__merge_merge_request',
 ];
@@ -133,6 +136,7 @@ export class AgentRuntime {
     @Inject(SessionKinds) private readonly kinds: SessionKinds,
     @Inject(ProdWriteRule) private readonly prodWrites: ProdWriteRule,
     @Inject(Transcripts) private readonly transcripts: Transcripts,
+    @Inject(Attachments) private readonly attachments: Attachments,
     @Inject(MessageInterceptors) private readonly interceptors: MessageInterceptors,
     @Inject(ConnectionLookup) private readonly connections: ConnectionLookup,
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
@@ -391,8 +395,11 @@ export class AgentRuntime {
     if (session.accountId !== account.id) this.sessions.write(run.sessionId, { accountId: account.id });
     const instructions = this.kinds.get(session.kind)?.instructions;
 
+    const attached = this.attachments.existingFolder(run.sessionId);
     const options: Options = {
       cwd: run.workingDir,
+      // The operator's attached files sit outside the working folder; the agent reads them without asking.
+      ...(attached === null ? {} : { additionalDirectories: [attached] }),
       model: session.model,
       effort: SDK_EFFORT[session.effort],
       permissionMode: PERMISSION_MODES[session.accessMode],

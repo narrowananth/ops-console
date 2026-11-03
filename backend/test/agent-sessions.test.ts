@@ -1,6 +1,7 @@
-import { readdir, realpath, rm } from 'node:fs/promises';
+import { readdir, readFile, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { AccessMode, Effort, SessionKind } from '@ops-console/shared';
+import { AccessMode, Effort, SessionKind, splitAttachments, withAttachments } from '@ops-console/shared';
+import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AgentRuntime } from '../src/agent/runtime';
 import { type AgentDaemon, api, converse, gate, listen, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
@@ -261,6 +262,40 @@ describe('runs', () => {
     expect(all.body.data.map((session: { id: string }) => session.id)).toEqual([review, newer, older]);
     const repo = await api(daemon).get('/sessions?kind=repo&q=webhook');
     expect(repo.body.data.map((session: { id: string }) => session.id)).toEqual([older]);
+  });
+});
+
+describe('attachments', () => {
+  it('saves a file in the data folder, and the message naming it lets the agent read that folder', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    const saved = await request(daemon.url)
+      .post(`/api/sessions/${id}/attachments?name=${encodeURIComponent('../shot one.png')}`)
+      .set(daemon.auth)
+      .set('Content-Type', 'application/octet-stream')
+      .send(Buffer.from('png bytes'));
+    expect(saved.status).toBe(201);
+    const folder = path.join(daemon.dataDir, 'attachments', id);
+    expect(saved.body.data).toMatchObject({ name: 'shot one.png', size: 9 });
+    expect(path.dirname(saved.body.data.path)).toBe(folder);
+    expect(await readFile(saved.body.data.path, 'utf8')).toBe('png bytes');
+
+    const text = withAttachments('why does this page break?', [saved.body.data]);
+    await converse(daemon, id, text);
+    expect(daemon.sdk.calls[0]).toMatchObject({ prompt: text });
+    expect(daemon.sdk.calls[0]?.options.additionalDirectories).toEqual([folder]);
+    const messages = await api(daemon).get(`/sessions/${id}/messages`);
+    expect(splitAttachments(messages.body.data[0].parts[0].text)).toEqual({
+      text: 'why does this page break?',
+      attachments: [{ name: 'shot one.png', path: saved.body.data.path }],
+    });
+
+    const missing = await request(daemon.url)
+      .post('/api/sessions/nope/attachments?name=a.txt')
+      .set(daemon.auth)
+      .set('Content-Type', 'application/octet-stream')
+      .send(Buffer.from('x'));
+    expect(missing.status).toBe(404);
   });
 });
 

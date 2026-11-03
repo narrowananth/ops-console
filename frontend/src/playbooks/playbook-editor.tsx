@@ -211,7 +211,7 @@ export function PlaybookEditor(props: {
             maxLength={PLAYBOOK_LIMITS.rules}
             placeholder={readOnly ? 'No rules.' : 'What the agent should always do or never do on this Trigger'}
             onChange={(event) => onChange({ ...working, rules: event.target.value })}
-            className={`${field} min-h-18 resize-y text-[13px]`}
+            className={`${field} field-sizing-content max-h-[50vh] min-h-28 resize-y overflow-y-auto text-[13px] leading-relaxed`}
           />
           <details className="mt-1.5 text-[11px] text-neutral-700">
             <summary className="cursor-pointer">
@@ -453,7 +453,7 @@ function StepCard(props: {
             maxLength={PLAYBOOK_LIMITS.instructions}
             placeholder="Write what the agent does in this step."
             onChange={(event) => props.onChange({ instructions: event.target.value })}
-            className={`${field} min-h-16 resize-y text-xs`}
+            className={`${field} field-sizing-content max-h-[50vh] min-h-24 resize-y overflow-y-auto text-xs leading-relaxed`}
           />
         </div>
         {!readOnly && (

@@ -148,6 +148,7 @@ function SessionRow({
 function RepoGroup({
   repo,
   sessions,
+  searching,
   folded,
   onFold,
   selected,
@@ -155,6 +156,8 @@ function RepoGroup({
 }: {
   repo: Repo;
   sessions: Session[];
+  /** A search is on: every matching Session shows, with no "Show N more". */
+  searching: boolean;
   folded: boolean;
   onFold: () => void;
   selected: string | null;
@@ -163,9 +166,10 @@ function RepoGroup({
   const [all, setAll] = useStored(`workspace.sessions-all.${repo.id}`, z.boolean(), false);
   const [starting, setStarting] = useStored(`workspace.starting.${repo.id}`, z.boolean(), sessions.length === 0);
   // Past the first few, a running or selected Session still shows: it is the one the operator is after.
-  const shown = all
-    ? sessions
-    : sessions.filter((session, index) => index < SHOWN || isRunning(session) || session.id === selected);
+  const shown =
+    all || searching
+      ? sessions
+      : sessions.filter((session, index) => index < SHOWN || isRunning(session) || session.id === selected);
   const hidden = sessions.length - shown.length;
   const running = sessions.filter(isRunning).length;
   return (
@@ -231,7 +235,7 @@ function RepoGroup({
               />
             ))}
           </ul>
-          {(hidden > 0 || all) && sessions.length > SHOWN && (
+          {!searching && (hidden > 0 || all) && sessions.length > SHOWN && (
             <button
               type="button"
               onClick={() => setAll(!all)}
@@ -249,18 +253,21 @@ function RepoGroup({
 /** Sessions with no imported Repo: each works in its own folder, and may clone a repo into it. */
 function AnonymousGroup({
   sessions,
+  searching,
   selected,
   onSelect,
 }: {
   sessions: Session[];
+  searching: boolean;
   selected: string | null;
   onSelect: (id: string) => void;
 }) {
   const create = useCreateAnonymousSession();
   const [all, setAll] = useStored('workspace.sessions-all.anonymous', z.boolean(), false);
-  const shown = all
-    ? sessions
-    : sessions.filter((session, index) => index < SHOWN || isRunning(session) || session.id === selected);
+  const shown =
+    all || searching
+      ? sessions
+      : sessions.filter((session, index) => index < SHOWN || isRunning(session) || session.id === selected);
   const hidden = sessions.length - shown.length;
   return (
     <section aria-label="No Repo" className="px-2 pb-1.5">
@@ -311,7 +318,7 @@ function AnonymousGroup({
           />
         ))}
       </ul>
-      {(hidden > 0 || all) && sessions.length > SHOWN && (
+      {!searching && (hidden > 0 || all) && sessions.length > SHOWN && (
         <button
           type="button"
           onClick={() => setAll(!all)}
@@ -324,36 +331,127 @@ function AnonymousGroup({
   );
 }
 
+/** Whether a search matches: case-insensitive, anywhere in the text. An empty search matches everything. */
+const matcher =
+  (q: string) =>
+  (...texts: (string | null)[]) => {
+    const needle = q.trim().toLowerCase();
+    return needle === '' || texts.some((text) => text?.toLowerCase().includes(needle));
+  };
+
+/**
+ * A Repo whose name or checked-out branch matches keeps all its Sessions; any other Repo keeps only the Sessions whose
+ * title or branch matches, and drops out when none do.
+ */
+function searchGroup(sessions: Session[], groupHit: boolean, matches: ReturnType<typeof matcher>) {
+  return groupHit ? sessions : sessions.filter((session) => matches(session.title, session.branch));
+}
+
 export function SessionsPane({ selected, onSelect }: { selected: string | null; onSelect: (id: string) => void }) {
   const repos = useRepos();
   const sessions = useRepoSessions();
+  const [q, setQ] = useStored('workspace.session-search', z.string(), '');
   // Folded Repos are remembered in this browser.
   const [folded, setFolded] = useState(readFolded);
   if (repos.isPending || sessions.isPending) return <Empty>Reading Sessions…</Empty>;
   if (repos.isError || sessions.isError) return <Empty>Could not read Sessions.</Empty>;
-  const anonymous = sessions.data.filter((session) => session.kind === SessionKind.Anonymous);
-  const fold = (id: string) => {
-    const next = folded.includes(id) ? folded.filter((other) => other !== id) : [...folded, id];
+  const searching = q.trim() !== '';
+  const matches = matcher(q);
+  const saveFolded = (next: string[]) => {
     localStorage.setItem(FOLDED_KEY, JSON.stringify(next));
     setFolded(next);
   };
+  const fold = (id: string) =>
+    saveFolded(folded.includes(id) ? folded.filter((other) => other !== id) : [...folded, id]);
+  const anonymous = searchGroup(
+    sessions.data.filter((session) => session.kind === SessionKind.Anonymous),
+    matches('No Repo', 'anonymous'),
+    matches,
+  );
+  const groups = ascending(repos.data.data, (repo) => repo.name)
+    .map((repo) => ({
+      repo,
+      sessions: searchGroup(
+        sessions.data.filter((session) => session.repo_id === repo.id),
+        matches(repo.name, repo.branch),
+        matches,
+      ),
+      hit: matches(repo.name, repo.branch),
+    }))
+    .filter((group) => group.hit || group.sessions.length > 0);
+  const showAnonymous = !searching || matches('No Repo', 'anonymous') || anonymous.length > 0;
+  // A search opens every match.
+  const isFolded = (id: string) => !searching && folded.includes(id);
+  const allFolded = groups.length > 0 && groups.every((group) => isFolded(group.repo.id));
   return (
     <div className="pb-3">
-      <AnonymousGroup sessions={anonymous} selected={selected} onSelect={onSelect} />
-      {ascending(repos.data.data, (repo) => repo.name).map((repo) => (
-        <RepoGroup
-          key={repo.id}
-          repo={repo}
-          sessions={sessions.data.filter((session) => session.repo_id === repo.id)}
-          folded={folded.includes(repo.id)}
-          onFold={() => fold(repo.id)}
-          selected={selected}
-          onSelect={onSelect}
-        />
-      ))}
-      {repos.data.data.length === 0 && (
-        <p className="m-0 px-4 pt-2 pb-3 text-xs text-neutral-700">Import a Repo in Repos to work on its branches.</p>
+      {repos.data.data.length > 0 && (
+        <div className="flex flex-col gap-2 border-b border-divider px-3 pt-1 pb-2.5">
+          <div className="relative">
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 16 16"
+              aria-hidden
+              className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-neutral-600"
+            >
+              <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M10.5 10.5 14 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+            <input
+              type="search"
+              aria-label="Search Sessions"
+              title="Matches a Repo's name or checked-out branch, or a Session's title or branch"
+              value={q}
+              placeholder="Search repo, branch, Session"
+              onChange={(event) => setQ(event.target.value)}
+              className="w-full rounded-md border border-divider bg-card py-1.5 pr-2.5 pl-7.5 text-xs text-text outline-none focus:border-accent-400 focus:shadow-[0_0_0_3px_var(--color-accent-100)]"
+            />
+          </div>
+          <div className="flex items-center gap-2 px-0.5 text-[11px] text-neutral-700">
+            <span>
+              <strong className="font-semibold text-text">{groups.length}</strong>{' '}
+              {groups.length === 1 ? 'Repo' : 'Repos'}
+              {searching && ' match'}
+            </span>
+            {groups.length > 1 && (
+              <button
+                type="button"
+                disabled={searching}
+                title={searching ? 'A search opens every match' : undefined}
+                onClick={() => saveFolded(allFolded ? [] : groups.map((group) => group.repo.id))}
+                className="ml-auto flex cursor-pointer items-center gap-1 rounded border-0 bg-transparent px-1 py-0.5 text-[11px] text-neutral-700 hover:bg-neutral-200 hover:text-text disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent"
+              >
+                <span aria-hidden className={`text-[9px] transition-transform ${allFolded ? '' : 'rotate-90'}`}>
+                  ▶
+                </span>
+                {allFolded ? 'Expand all' : 'Collapse all'}
+              </button>
+            )}
+          </div>
+        </div>
       )}
+      <div className="pt-1.5">
+        {showAnonymous && (
+          <AnonymousGroup sessions={anonymous} searching={searching} selected={selected} onSelect={onSelect} />
+        )}
+        {groups.map((group) => (
+          <RepoGroup
+            key={group.repo.id}
+            repo={group.repo}
+            sessions={group.sessions}
+            searching={searching}
+            folded={isFolded(group.repo.id)}
+            onFold={() => fold(group.repo.id)}
+            selected={selected}
+            onSelect={onSelect}
+          />
+        ))}
+        {searching && groups.length === 0 && !showAnonymous && <Empty>No Repo or Session matches “{q.trim()}”.</Empty>}
+        {repos.data.data.length === 0 && (
+          <p className="m-0 px-4 pt-2 pb-3 text-xs text-neutral-700">Import a Repo in Repos to work on its branches.</p>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,10 +1,11 @@
-import type { Message, Part } from '@ops-console/shared';
+import { type Message, type Part, splitAttachments } from '@ops-console/shared';
 import { useState } from 'react';
 import { Button, Spinner } from '../components/ui/button';
 import { DiffLines } from '../components/ui/diff';
 import { Markdown } from '../components/ui/markdown';
 import { Pathway, type PathwayState } from '../components/ui/pathway';
 import { ComparisonView, ResultView } from '../devtools/result-tables';
+import { COPY_FAILED, copyLabel, useCopy } from '../lib/clipboard';
 import { asReport, ReportDocument } from './report-document';
 
 /** One part of a Session's transcript: text, a tool step, a diff, a code block, a question or a Dev tools table. */
@@ -47,13 +48,7 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  const copy = () =>
-    void navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
+  const [copied, copy] = useCopy();
   const rerun = () => {
     if (!onEdit || draft === null || draft.trim() === '' || pending) return;
     setPending(true);
@@ -79,8 +74,13 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
         </span>
         {!agent && draft === null && (
           <span className="ml-auto flex gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-            <button type="button" onClick={copy} title="Copy this message" className={messageAction}>
-              {copied ? 'Copied' : 'Copy'}
+            <button
+              type="button"
+              onClick={() => copy(text)}
+              title={copied === 'failed' ? COPY_FAILED : 'Copy this message'}
+              className={messageAction}
+            >
+              {copyLabel(copied, 'Copy')}
             </button>
             {onEdit && (
               <button
@@ -96,7 +96,11 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
         )}
       </div>
       {draft === null ? (
-        <MessageParts message={message} />
+        agent ? (
+          <MessageParts message={message} />
+        ) : (
+          <SentText text={text} />
+        )
       ) : (
         <div className="flex flex-col gap-2">
           <textarea
@@ -113,7 +117,7 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
                 rerun();
               }
             }}
-            className="min-h-20 w-full resize-y rounded-md border border-divider bg-card px-3 py-2 text-sm text-text outline-none focus:border-accent-400"
+            className="field-sizing-content max-h-[50vh] min-h-28 w-full resize-y overflow-y-auto rounded-md border border-divider bg-card px-3 py-2 text-sm leading-relaxed text-text outline-none focus:border-accent-400"
           />
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-neutral-700">
@@ -142,6 +146,29 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
         </div>
       )}
     </li>
+  );
+}
+
+/** The operator's message: its text, then a chip per attached file, named, with its saved path on hover. */
+function SentText({ text }: { text: string }) {
+  const sent = splitAttachments(text);
+  return (
+    <>
+      {sent.text && <Markdown source={sent.text} />}
+      {sent.attachments.length > 0 && (
+        <ul aria-label="Attached files" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+          {sent.attachments.map((file) => (
+            <li
+              key={file.path}
+              title={file.path}
+              className="max-w-64 truncate rounded-md border border-line bg-bg px-2 py-1 font-mono text-[11px] text-neutral-700"
+            >
+              📎 {file.name}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }
 
