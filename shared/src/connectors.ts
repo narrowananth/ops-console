@@ -11,6 +11,7 @@ export enum ConnectorId {
   Slack = 'slack',
   Sentry = 'sentry',
   Shopify = 'shopify',
+  Slashdocs = 'slashdocs',
 }
 
 export const CONNECTOR_ORDER: ConnectorId[] = Object.values(ConnectorId);
@@ -24,6 +25,7 @@ export const CONNECTOR_NAMES: Record<ConnectorId, string> = {
   [ConnectorId.Slack]: 'Slack',
   [ConnectorId.Sentry]: 'Sentry',
   [ConnectorId.Shopify]: 'Shopify',
+  [ConnectorId.Slashdocs]: 'slashdocs',
 };
 
 /** How the console reaches the service (ADR 0005). */
@@ -36,14 +38,21 @@ export const CONNECTOR_VIA: Record<ConnectorId, string> = {
   [ConnectorId.Slack]: 'Slack MCP',
   [ConnectorId.Sentry]: 'Sentry MCP',
   [ConnectorId.Shopify]: 'Shopify Dev MCP',
+  [ConnectorId.Slashdocs]: 'slashdocs CLI',
 };
+
+/**
+ * An OAuth app the service registered for MCP clients, for a server that offers no dynamic client registration. Its
+ * one allowed redirect is `http://localhost:<callback_port>/callback`.
+ */
+export type McpOAuthClient = { client_id: string; callback_port: number };
 
 /**
  * The MCP Server each Connector registers when it connects. Jira and Bitbucket share Atlassian's; Disconnect removes a
  * server once no connected Connector rides it.
  */
 export const CONNECTOR_SERVERS: Partial<
-  Record<ConnectorId, { name: string; transport: McpTransport; target: string }>
+  Record<ConnectorId, { name: string; transport: McpTransport; target: string; oauth?: McpOAuthClient }>
 > = {
   [ConnectorId.Datadog]: { name: 'datadog-pup', transport: McpTransport.Stdio, target: 'pup mcp serve' },
   [ConnectorId.Github]: { name: 'github', transport: McpTransport.Stdio, target: 'github-mcp-server stdio' },
@@ -53,7 +62,13 @@ export const CONNECTOR_SERVERS: Partial<
     transport: McpTransport.Http,
     target: 'https://mcp.atlassian.com/v1/mcp',
   },
-  [ConnectorId.Slack]: { name: 'slack', transport: McpTransport.Http, target: 'https://mcp.slack.com/mcp' },
+  // Slack's server takes only its partner apps: this is the one Claude Code's Slack plugin signs in with.
+  [ConnectorId.Slack]: {
+    name: 'slack',
+    transport: McpTransport.Http,
+    target: 'https://mcp.slack.com/mcp',
+    oauth: { client_id: '1601185624273.8899143856786', callback_port: 3118 },
+  },
   [ConnectorId.Sentry]: { name: 'sentry', transport: McpTransport.Http, target: 'https://mcp.sentry.dev/mcp' },
   [ConnectorId.Shopify]: { name: 'shopify', transport: McpTransport.Stdio, target: 'npx -y @shopify/dev-mcp@latest' },
 };
@@ -89,6 +104,8 @@ export const connectorConfigSchemas = {
   [ConnectorId.Slack]: z.strictObject({ workspace: z.string(), alert_channel: z.string(), review_dm_to: z.string() }),
   [ConnectorId.Sentry]: z.strictObject({ org: z.string().nullable() }),
   [ConnectorId.Shopify]: z.strictObject({}),
+  /** The slashdocs server to sign in to; blank uses the CLI's active one. */
+  [ConnectorId.Slashdocs]: z.strictObject({ server: z.string() }),
 } satisfies Record<ConnectorId, z.ZodType>;
 
 export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknown>> = {
@@ -115,6 +132,7 @@ export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknow
   [ConnectorId.Slack]: { workspace: '', alert_channel: '', review_dm_to: '' },
   [ConnectorId.Sentry]: { org: null },
   [ConnectorId.Shopify]: {},
+  [ConnectorId.Slashdocs]: { server: '' },
 };
 
 export const connectorSchema = z.object({

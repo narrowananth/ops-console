@@ -9,6 +9,8 @@ export class FakeConnectorTools implements ConnectorTools {
   github: string | null = null;
   gitlab: string | null = null;
   bitbucket: string | null = null;
+  slashdocs: { email: string; name: string | null } | null = null;
+  readonly slashdocsLogins: (string | null)[] = [];
   /** The next sign-in fails, or waits for its signal to abort. */
   next: 'ok' | 'fail' | 'hang' = 'ok';
   /** What `gh` prints for the browser step. */
@@ -63,6 +65,17 @@ export class FakeConnectorTools implements ConnectorTools {
   async bitbucketLogin(signal: AbortSignal, _onPrompt: (prompt: SignInPrompt) => void): Promise<void> {
     await this.login(signal);
     this.bitbucket = 'bb-operator';
+  }
+
+  async slashdocsUser() {
+    this.check();
+    return this.slashdocs;
+  }
+
+  async slashdocsLogin(server: string | null, signal: AbortSignal, _onPrompt: (prompt: SignInPrompt) => void) {
+    this.slashdocsLogins.push(server);
+    await this.login(signal);
+    this.slashdocs = { email: 'operator@example.com', name: 'Operator' };
   }
 
   async githubToken(): Promise<string | null> {

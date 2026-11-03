@@ -286,6 +286,49 @@ test('Connect asks for nothing, shows GitHub its one-time code and sign-in page,
   await expect(step.getByRole('button', { name: 'Cancel' })).toHaveCount(0);
 });
 
+test('slashdocs asks for its server, saves it, then connects through its CLI', async ({ page }) => {
+  const slashdocs = {
+    id: 'slashdocs',
+    name: 'slashdocs',
+    via: 'slashdocs CLI',
+    status: 'off',
+    status_detail: null,
+    account_label: null as string | null,
+    login: null as string | null,
+    config: { server: '' },
+    last_checked_at: null,
+    sign_in: null,
+  };
+  const calls: string[] = [];
+  await page.route('**/api/connectors', (route) =>
+    route.fulfill({ json: { data: [slashdocs], meta: { next_cursor: null } } }),
+  );
+  await page.route('**/api/connectors/slashdocs', (route) => {
+    calls.push(`PATCH ${JSON.stringify(route.request().postDataJSON())}`);
+    slashdocs.config = route.request().postDataJSON().config;
+    return route.fulfill({ json: { data: slashdocs } });
+  });
+  await page.route('**/api/connectors/slashdocs/connect', (route) => {
+    calls.push('connect');
+    Object.assign(slashdocs, { status: 'ok', login: 'operator@example.com', account_label: 'slashdocs.example.com' });
+    return route.fulfill({ status: 202 });
+  });
+  await page.goto(`${daemon.url}/#token=${daemon.token}`);
+  await page.getByRole('navigation').getByRole('link', { name: 'Integrations' }).click();
+  const drawer = page.getByRole('main');
+  await drawer
+    .getByRole('listitem', { name: 'slashdocs' })
+    .getByRole('button', { name: 'Connect', exact: true })
+    .click();
+
+  await drawer.getByRole('textbox', { name: 'slashdocs server' }).fill('slashdocs.example.com');
+  const step = drawer.getByRole('region', { name: 'Sign in' });
+  await step.getByRole('button', { name: 'Connect', exact: true }).click();
+
+  await expect(step).toContainText('Signed in as operator@example.com · slashdocs.example.com.');
+  expect(calls).toEqual(['PATCH {"config":{"server":"slashdocs.example.com"}}', 'connect']);
+});
+
 test('a client route loads the shell on a fresh page', async ({ page }) => {
   await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
   await expect(page.getByRole('link', { name: 'Workspace' })).toHaveClass(/font-extrabold/);

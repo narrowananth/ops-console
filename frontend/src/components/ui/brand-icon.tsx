@@ -19,6 +19,7 @@ export const CONNECTOR_BRAND: Record<ConnectorId, BrandSlug> = {
   [ConnectorId.Slack]: 'slack',
   [ConnectorId.Sentry]: 'sentry',
   [ConnectorId.Shopify]: 'shopify',
+  [ConnectorId.Slashdocs]: 'slashdocs',
 };
 
 /** Words in an MCP Server's name or command that say whose it is; the first match wins. */
@@ -32,6 +33,7 @@ const SERVER_HINTS: [RegExp, BrandSlug][] = [
   [/slack/, 'slack'],
   [/sentry/, 'sentry'],
   [/shopify/, 'shopify'],
+  [/slashdocs/, 'slashdocs'],
   [/mongo/, 'mongodb'],
   [/postgres|\bpg[-_]|\bpg$/, 'postgresql'],
   [/mysql/, 'mysql'],

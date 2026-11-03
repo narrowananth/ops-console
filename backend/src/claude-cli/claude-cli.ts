@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { ErrorCode } from '@ops-console/shared';
+import { ErrorCode, type McpOAuthClient } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import { loadPty } from '../terminals/pty';
@@ -30,7 +30,13 @@ export type McpServerConfig = z.infer<typeof serverConfigSchema>;
 /** What `claude mcp add` takes. Secrets never go on its command line: Claude Code would keep them in its config. */
 export type McpServerToAdd = (
   | { name: string; transport: 'stdio'; command: string; args: string[] }
-  | { name: string; transport: 'http' | 'sse'; url: string; headers: Record<string, string> }
+  | {
+      name: string;
+      transport: 'http' | 'sse';
+      url: string;
+      headers: Record<string, string>;
+      oauth?: McpOAuthClient | null;
+    }
 ) & { scope: McpScope };
 
 /** Which account's config `claude mcp` edits; `cwd` is the directory a `local` scope server belongs to. */
@@ -102,6 +108,9 @@ export class ClaudeCli {
             '--transport',
             server.transport,
             ...Object.entries(server.headers).flatMap(([key, value]) => ['--header', `${key}: ${value}`]),
+            ...(server.oauth
+              ? ['--client-id', server.oauth.client_id, '--callback-port', String(server.oauth.callback_port)]
+              : []),
             server.name,
             server.url,
           ];
