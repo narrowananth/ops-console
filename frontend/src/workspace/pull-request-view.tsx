@@ -112,7 +112,7 @@ function Loaded(props: {
   return (
     <div className="flex flex-col gap-4 px-5 py-4">
       <header className="flex flex-col gap-2">
-        <h2 className="m-0 text-[17px] font-extrabold">
+        <h2 className="m-0 text-[17px] font-semibold">
           #{pr.number} {pr.title}
         </h2>
         <div className="flex flex-wrap gap-x-3 font-mono text-xs text-neutral-700">
@@ -303,7 +303,7 @@ function Loaded(props: {
       )}
 
       <section aria-label="Files" className="flex flex-col gap-2">
-        <div className="flex items-center gap-3 text-[11px] tracking-[0.08em] text-neutral-700 uppercase">
+        <div className="flex items-center gap-3 text-xs tracking-[0.08em] text-neutral-700 uppercase">
           Files · {pr.files.length}
           <DiffStat
             additions={pr.files.reduce((sum, file) => sum + file.additions, 0)}
@@ -338,7 +338,7 @@ function Loaded(props: {
       </section>
 
       <section aria-label="Comments" className="flex flex-col gap-2">
-        <div className="text-[11px] tracking-[0.08em] text-neutral-700 uppercase">Comments · {pr.comments.length}</div>
+        <div className="text-xs tracking-[0.08em] text-neutral-700 uppercase">Comments · {pr.comments.length}</div>
         {roots.length === 0 ? (
           <div className="text-[13px] text-neutral-700">
             No comments yet. Hover a line in a file and press + to comment on it.

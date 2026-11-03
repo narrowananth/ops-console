@@ -111,7 +111,7 @@ export function McpDetail({ server, onBack }: { server: McpServer; onBack: () =>
           Close
         </Button>
       </div>
-      <div className="border-b border-line px-5 pt-3.5 pb-1.5 text-[11px] tracking-[0.08em] text-neutral-700 uppercase">
+      <div className="border-b border-line px-5 pt-3.5 pb-1.5 text-xs tracking-[0.08em] text-neutral-700 uppercase">
         Details
       </div>
       {rows.map(([key, value]) => (
@@ -125,10 +125,10 @@ export function McpDetail({ server, onBack }: { server: McpServer; onBack: () =>
           <span className={`${mono} text-xs break-all`}>{value}</span>
         </div>
       ))}
-      <div className="px-5 pt-3.5 pb-1.5 text-[11px] tracking-[0.08em] text-neutral-700 uppercase">Tools</div>
+      <div className="px-5 pt-3.5 pb-1.5 text-xs tracking-[0.08em] text-neutral-700 uppercase">Tools</div>
       <div className="flex flex-wrap gap-1.5 border-b border-line px-5 pb-4">
         {ascending(server.tools, (tool) => tool).map((tool) => (
-          <span key={tool} className={`${mono} border border-divider px-2 py-0.5 text-[11px]`}>
+          <span key={tool} className={`${mono} border border-divider px-2 py-0.5 text-xs`}>
             {tool}
           </span>
         ))}
@@ -140,7 +140,7 @@ export function McpDetail({ server, onBack }: { server: McpServer; onBack: () =>
         <>
           <div className={section}>
             <div className="flex-1">
-              <div className="font-extrabold">Reconnect</div>
+              <div className="font-semibold">Reconnect</div>
               <div className="text-xs text-neutral-700">Checks the server again in every Claude account.</div>
             </div>
             <Button
@@ -153,7 +153,7 @@ export function McpDetail({ server, onBack }: { server: McpServer; onBack: () =>
           </div>
           <div className={section}>
             <div className="flex-1">
-              <div className="font-extrabold">{server.enabled ? 'Disconnect' : 'Enable'}</div>
+              <div className="font-semibold">{server.enabled ? 'Disconnect' : 'Enable'}</div>
               <div className="text-xs text-neutral-700">
                 Stop using it in new Claude sessions. Config and login are kept.
               </div>
@@ -171,7 +171,7 @@ export function McpDetail({ server, onBack }: { server: McpServer; onBack: () =>
       {server.registered &&
         (confirming ? (
           <div className="mx-5 mb-4 flex flex-col gap-2.5 rounded-lg bg-accent-100 px-4 py-3.5">
-            <div className="font-extrabold text-accent-900">Remove {server.name}?</div>
+            <div className="font-semibold text-accent-900">Remove {server.name}?</div>
             <div className="text-xs text-accent-900">
               Runs <span className={mono}>{`claude mcp remove "${server.name}" -s ${server.scope}`}</span>. Every Claude
               account loses access until it is authenticated again. The server stays in the MCP servers list.
@@ -190,7 +190,7 @@ export function McpDetail({ server, onBack }: { server: McpServer; onBack: () =>
         ) : (
           <div className={section}>
             <div className="flex-1">
-              <div className="font-extrabold text-accent-700">Remove server</div>
+              <div className="font-semibold text-accent-700">Remove server</div>
               <div className="text-xs text-neutral-700">
                 Signs out and clears its credentials. It stays in this list so you can authenticate it again.
               </div>

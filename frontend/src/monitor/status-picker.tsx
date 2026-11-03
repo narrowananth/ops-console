@@ -50,7 +50,7 @@ export function StatusBadge({ code }: { code: number }) {
   return (
     <span
       title={`HTTP ${code}${REASON[code] ? ` ${REASON[code]}` : ''}. ${KIND_TIP[kindOf(code)]}`}
-      className={`inline-flex flex-none items-center rounded px-1.5 font-mono text-[10px] font-bold ${tone}`}
+      className={`inline-flex flex-none items-center rounded px-1.5 font-mono text-xs font-semibold ${tone}`}
     >
       {code}
     </span>
@@ -101,14 +101,14 @@ export function StatusPicker({ known, scope }: { known: StatusCodeCount[]; scope
         className={`flex w-full cursor-pointer items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 text-left text-xs shadow-sm transition-colors hover:border-neutral-400 ${open ? 'border-accent-400 shadow-[0_0_0_3px_var(--color-accent-100)]' : 'border-divider'}`}
       >
         <span className="flex-none text-neutral-700">Status</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{summary}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-xs">{summary}</span>
         <span
           title={
             every
               ? undefined
               : `${scope.codes.length} of the ${known.length} codes Datadog has in this range are picked`
           }
-          className="flex-none rounded-full bg-neutral-200 px-1.5 font-mono text-[10px] text-neutral-700"
+          className="flex-none rounded-full bg-neutral-200 px-1.5 font-mono text-xs text-neutral-700"
         >
           {every ? 'all' : `${scope.codes.length}/${known.length}`}
         </span>
@@ -126,7 +126,7 @@ export function StatusPicker({ known, scope }: { known: StatusCodeCount[]; scope
             <span className="flex-1 text-xs font-semibold">Every code from 400 up</span>
           </label>
           {known.length === 0 && (
-            <p className="m-0 px-2.5 py-1.5 text-[11px] text-neutral-700">No failing requests in this range.</p>
+            <p className="m-0 px-2.5 py-1.5 text-xs text-neutral-700">No failing requests in this range.</p>
           )}
           {KINDS.map(({ kind, label }) => {
             const codes = known.filter((entry) => kindOf(entry.code) === kind);
@@ -134,7 +134,7 @@ export function StatusPicker({ known, scope }: { known: StatusCodeCount[]; scope
             const ticked = codes.every((entry) => isOn(entry.code));
             return (
               <div key={kind} className="border-t border-line pt-1">
-                <label className="flex cursor-pointer items-center gap-2.5 px-2.5 py-1 text-[11px] font-bold tracking-[0.04em] text-neutral-700 uppercase">
+                <label className="flex cursor-pointer items-center gap-2.5 px-2.5 py-1 text-xs font-semibold tracking-[0.04em] text-neutral-700 uppercase">
                   <input
                     type="checkbox"
                     checked={ticked}
@@ -161,9 +161,7 @@ export function StatusPicker({ known, scope }: { known: StatusCodeCount[]; scope
                     />
                     <StatusBadge code={entry.code} />
                     <span className="min-w-0 flex-1 truncate text-xs">{REASON[entry.code] ?? 'Other'}</span>
-                    <span className="flex-none font-mono text-[11px] text-neutral-700">
-                      {compact.format(entry.count)}
-                    </span>
+                    <span className="flex-none font-mono text-xs text-neutral-700">{compact.format(entry.count)}</span>
                   </label>
                 ))}
               </div>

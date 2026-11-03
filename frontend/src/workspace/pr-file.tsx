@@ -212,7 +212,7 @@ export function PrFileView({
           onClick={() => setOpen(!open)}
           className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-0 bg-transparent px-1 py-1 text-left font-mono text-xs text-text"
         >
-          <span aria-hidden className={`text-[9px] text-neutral-600 transition-transform ${open ? 'rotate-90' : ''}`}>
+          <span aria-hidden className={`text-xs text-neutral-600 transition-transform ${open ? 'rotate-90' : ''}`}>
             ▶
           </span>
           <span className={`min-w-0 truncate font-semibold ${viewed ? 'text-neutral-700' : ''}`}>{file.name}</span>
@@ -220,7 +220,7 @@ export function PrFileView({
         {roots.length > 0 && (
           <span
             title={`${roots.length} comment ${roots.length === 1 ? 'thread' : 'threads'} on lines of this file. Open the file to read them.`}
-            className="flex flex-none items-center gap-1 rounded-full bg-diff-hunk px-1.75 py-px font-body text-[11px] font-semibold text-diff-hunk-text"
+            className="flex flex-none items-center gap-1 rounded-full bg-diff-hunk px-1.75 py-px font-body text-xs font-semibold text-diff-hunk-text"
           >
             <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden>
               <path

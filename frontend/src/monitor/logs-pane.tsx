@@ -53,9 +53,9 @@ function Row({
         onClick={onSelect}
         className={`flex w-full flex-col gap-1 px-3 py-2.5 text-left ${item(selected)}`}
       >
-        <span className="flex items-center gap-2 text-[11px]">
+        <span className="flex items-center gap-2 text-xs">
           <SeverityBadge severity={alert.severity} />
-          {showService && <strong className="min-w-0 truncate text-[12px]">{alert.service.name}</strong>}
+          {showService && <strong className="min-w-0 truncate text-xs">{alert.service.name}</strong>}
           {alert.http_status !== null && <StatusBadge code={alert.http_status} />}
           <span
             className="ml-auto flex-none whitespace-nowrap text-neutral-700"
@@ -64,8 +64,8 @@ function Row({
             ×{alert.event_count} · {ago(alert.last_seen_at)}
           </span>
         </span>
-        <span className="line-clamp-2 font-mono text-[12px] break-all">{alert.log_line || alert.title}</span>
-        <span className="flex items-center gap-2 text-[11px] text-neutral-700">
+        <span className="line-clamp-2 font-mono text-xs break-all">{alert.log_line || alert.title}</span>
+        <span className="flex items-center gap-2 text-xs text-neutral-700">
           {where && (
             <span className="truncate font-mono" title={`The Route that failed: ${where}`}>
               {where}
@@ -74,7 +74,7 @@ function Row({
           {alert.status !== AlertStatus.Open && (
             <span
               title={STATUS_TIP[alert.status]}
-              className="ml-auto flex-none rounded-full bg-neutral-200 px-1.75 font-mono text-[10px]"
+              className="ml-auto flex-none rounded-full bg-neutral-200 px-1.75 font-mono text-xs"
             >
               {alert.status.replace('_', ' ')}
             </span>
@@ -133,8 +133,8 @@ export function LogsPane({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-baseline gap-2 border-b border-divider px-4 pt-3 pb-2">
-        <h2 className="m-0 min-w-0 truncate text-[13px] font-extrabold">{service ?? 'All Services'}</h2>
-        <span className="flex-none text-[11px] text-neutral-700">logs</span>
+        <h2 className="m-0 min-w-0 truncate text-[13px] font-semibold">{service ?? 'All Services'}</h2>
+        <span className="flex-none text-xs text-neutral-700">logs</span>
       </div>
       <div role="tablist" aria-label="Severity" className="flex gap-1 border-b border-divider px-3 py-2">
         {(['all', ...SEVERITIES] as const).map((value) => (
@@ -145,14 +145,14 @@ export function LogsPane({
             aria-selected={tier === value}
             title={TAB_TIP[value]}
             onClick={() => setTier(value)}
-            className={`cursor-pointer rounded-md border-0 px-2.5 py-1 text-xs transition-colors ${tier === value ? 'bg-text font-bold text-bg' : 'bg-transparent text-neutral-700 hover:bg-neutral-200 hover:text-text'}`}
+            className={`cursor-pointer rounded-md border-0 px-2.5 py-1 text-xs transition-colors ${tier === value ? 'bg-text font-semibold text-bg' : 'bg-transparent text-neutral-700 hover:bg-neutral-200 hover:text-text'}`}
           >
             {value === 'all' ? 'All' : SEVERITY_LABEL[value]}{' '}
-            <span className="font-mono text-[11px] opacity-75">{value === 'all' ? inScope.length : counts[value]}</span>
+            <span className="font-mono text-xs opacity-75">{value === 'all' ? inScope.length : counts[value]}</span>
           </button>
         ))}
         <label
-          className="ml-auto flex cursor-pointer items-center gap-1.5 text-[11px] text-neutral-700"
+          className="ml-auto flex cursor-pointer items-center gap-1.5 text-xs text-neutral-700"
           title="Also show resolved and dismissed Alerts"
         >
           <input

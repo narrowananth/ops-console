@@ -44,13 +44,13 @@ function Row({ connection, onOpen }: { connection: Connection; onOpen: () => voi
             {connection.is_prod && (
               <span
                 title={PROD_TIP}
-                className="rounded-full bg-accent-100 px-2 py-px font-sans text-[10px] font-extrabold text-accent-700"
+                className="rounded-full bg-accent-100 px-2 py-px font-sans text-xs font-semibold text-accent-700"
               >
                 PROD
               </span>
             )}
           </span>
-          <span className={`block truncate font-mono text-[11px] ${failed ? 'text-accent-700' : 'text-neutral-700'}`}>
+          <span className={`block truncate font-mono text-xs ${failed ? 'text-accent-700' : 'text-neutral-700'}`}>
             {failed ? connection.status_detail : `${TYPE_LABELS[connection.type]} · ${hostOf(connection.config)}`}
           </span>
         </span>
@@ -106,7 +106,7 @@ export function DevToolsTab() {
               >
                 <BrandIcon brand={CONNECTION_BRAND[type]} size="lg" />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-extrabold">{TYPE_LABELS[type]}</span>
+                  <span className="block text-sm font-semibold">{TYPE_LABELS[type]}</span>
                   <span className="block text-xs text-neutral-700">{TYPE_BLURBS[type]}</span>
                 </span>
                 <span aria-hidden className="text-neutral-500 transition-colors group-hover:text-accent">

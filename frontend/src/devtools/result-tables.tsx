@@ -30,7 +30,7 @@ function CopyJson({ value }: { value: unknown }) {
       type="button"
       title={copied === 'failed' ? COPY_FAILED : 'Copy these rows as JSON to the clipboard'}
       onClick={() => copy(JSON.stringify(value, null, 2))}
-      className="ml-auto cursor-pointer border border-neutral-700 bg-transparent px-1.5 font-mono text-[10px] text-neutral-400 hover:text-neutral-100"
+      className="ml-auto cursor-pointer border border-neutral-700 bg-transparent px-1.5 font-mono text-xs text-neutral-400 hover:text-neutral-100"
     >
       {copyLabel(copied, 'Copy JSON')}
     </button>
@@ -101,7 +101,7 @@ export function ResultView({ part, connections }: { part: ResultPart; connection
           {connection && ` · ${TYPE_LABELS[connection.type]}`}
         </span>
         {connection?.is_prod && (
-          <span title={PROD_TIP} className="bg-accent px-1 text-[9px] font-extrabold text-neutral-900">
+          <span title={PROD_TIP} className="bg-accent px-1 text-xs font-semibold text-neutral-900">
             PROD
           </span>
         )}

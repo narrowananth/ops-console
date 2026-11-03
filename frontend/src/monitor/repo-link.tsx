@@ -41,7 +41,7 @@ export function CodeSource({ service }: { service: ServiceRef }) {
       className="flex flex-col gap-2 rounded-xl border border-line bg-card px-4 py-3 text-xs shadow-sm"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <strong className="w-20 flex-none text-[12px]">Local Repo</strong>
+        <strong className="w-20 flex-none text-xs">Local Repo</strong>
         <Dropdown
           label={`Repo for ${service.name}`}
           caption="Repo"
@@ -62,7 +62,7 @@ export function CodeSource({ service }: { service: ServiceRef }) {
           if (changed) save();
         }}
       >
-        <label htmlFor={`repo-url-${service.id}`} className="w-20 flex-none text-[12px] font-bold">
+        <label htmlFor={`repo-url-${service.id}`} className="w-20 flex-none text-xs font-semibold">
           Git URL
         </label>
         <input
@@ -77,7 +77,7 @@ export function CodeSource({ service }: { service: ServiceRef }) {
           Save
         </Button>
       </form>
-      <p className="m-0 text-[11px] text-neutral-700">
+      <p className="m-0 text-xs text-neutral-700">
         {service.repo_id
           ? 'The agent works in the local Repo.'
           : service.repo_url
@@ -87,7 +87,7 @@ export function CodeSource({ service }: { service: ServiceRef }) {
               : `Not found by itself. Pick the local Repo with ${service.name}'s code, or give its Git URL once; it is kept.`}
       </p>
       {unlinked && find.data && find.data.tried.length > 0 && (
-        <details className="text-[11px] text-neutral-700">
+        <details className="text-xs text-neutral-700">
           <summary className="cursor-pointer">Where it looked ({find.data.tried.length})</summary>
           <ul className="m-0 mt-1 flex list-disc flex-col gap-0.5 pl-5 font-mono">
             {find.data.tried.map((place) => (
@@ -105,12 +105,12 @@ export function CodeSource({ service }: { service: ServiceRef }) {
         </Button>
       )}
       {find.error && (
-        <span role="alert" className="text-[11px] text-accent-700">
+        <span role="alert" className="text-xs text-accent-700">
           {find.error.message}
         </span>
       )}
       {patch.error && (
-        <span role="alert" className="text-[11px] text-accent-700">
+        <span role="alert" className="text-xs text-accent-700">
           {patch.error.message}
         </span>
       )}

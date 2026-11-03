@@ -63,12 +63,12 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
       </div>
       <div className="flex flex-col gap-3 px-5 py-4">
         <div>
-          <div className="text-[15px] font-extrabold">Connect {connector.name} to Ops Console</div>
+          <div className="text-[15px] font-semibold">Connect {connector.name} to Ops Console</div>
           <div className="text-xs text-neutral-700">Reached through {connector.via}.</div>
         </div>
         {asksServer && (
           <label className="flex flex-col gap-1 text-xs">
-            <span className="font-bold">slashdocs server</span>
+            <span className="font-semibold">slashdocs server</span>
             <input
               value={server}
               onChange={(event) => setServer(event.target.value)}
@@ -95,7 +95,7 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
       {connected &&
         (confirming ? (
           <div className="mx-5 mb-4 flex flex-col gap-2.5 rounded-lg bg-accent-100 px-4 py-3.5">
-            <div className="font-extrabold text-accent-900">Disconnect {connector.name}?</div>
+            <div className="font-semibold text-accent-900">Disconnect {connector.name}?</div>
             <div className="text-xs text-accent-900">
               Signs out and stops Claude from using it. Monitor and tasks that rely on it pause. Your own terminal stays
               signed in to the CLI.
@@ -158,7 +158,7 @@ function SignInStep(props: {
           1
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-extrabold">
+          <div className="text-[13px] font-semibold">
             {noSignIn ? `Add ${connector.name}` : `Sign in to ${connector.name}`}
           </div>
           <div className="text-xs text-neutral-700">{detail}</div>
@@ -198,8 +198,8 @@ function SignInStep(props: {
         <div className="flex flex-wrap items-center gap-3 rounded-md bg-neutral-200 px-3.5 py-3">
           {signIn.code && (
             <div className="flex flex-col">
-              <span className="text-[11px] text-neutral-700">Enter this code (already copied)</span>
-              <span className="font-mono text-lg font-extrabold tracking-widest">{signIn.code}</span>
+              <span className="text-xs text-neutral-700">Enter this code (already copied)</span>
+              <span className="font-mono text-lg font-semibold tracking-widest">{signIn.code}</span>
             </div>
           )}
           {signIn.url && (
@@ -207,7 +207,7 @@ function SignInStep(props: {
               href={signIn.url}
               target="_blank"
               rel="noreferrer"
-              className="ml-auto inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 font-heading text-sm font-bold text-white no-underline shadow-sm hover:bg-accent-600 hover:text-white"
+              className="ml-auto inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 font-heading text-sm font-semibold text-white no-underline shadow-sm hover:bg-accent-600 hover:text-white"
             >
               Open {connector.name} ↗
             </a>

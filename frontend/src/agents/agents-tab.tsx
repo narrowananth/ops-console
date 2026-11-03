@@ -61,7 +61,7 @@ function UsageBar({
   const hot = pct !== null && pct >= accentAt;
   return (
     <div className="grid grid-cols-[48px_minmax(0,1fr)_160px] items-center gap-2.5">
-      <span title={tip} className="text-[11px] text-neutral-700">
+      <span title={tip} className="text-xs text-neutral-700">
         {label}
       </span>
       <span className="block h-1.5 overflow-hidden rounded-full bg-neutral-200" aria-hidden>
@@ -70,7 +70,7 @@ function UsageBar({
           style={{ width: `${Math.min(pct ?? 0, 100)}%` }}
         />
       </span>
-      <span className={`font-mono text-[11px] ${hot ? 'text-accent-700' : 'text-neutral-800'}`}>
+      <span className={`font-mono text-xs ${hot ? 'text-accent-700' : 'text-neutral-800'}`}>
         {pct === null ? 'no usage yet' : `${Math.round(pct)}% · ${resetsIn(resetsAt)}`}
       </span>
     </div>
@@ -100,7 +100,7 @@ function AccountRow({
       aria-label={account.label}
       className={`grid grid-cols-[24px_auto_minmax(0,1fr)_auto] items-center gap-3 px-5 py-4 ${current ? 'bg-ok/5' : ''}`}
     >
-      <span className="font-mono text-[11px] text-neutral-700">{String(number).padStart(2, '0')}</span>
+      <span className="font-mono text-xs text-neutral-700">{String(number).padStart(2, '0')}</span>
       <BrandIcon brand="claude" />
       <div className="flex min-w-0 flex-col gap-1.25">
         <div className="flex flex-wrap items-center gap-2">
@@ -109,7 +109,7 @@ function AccountRow({
           {current && (
             <span
               title="The agent runs under this account now"
-              className="rounded-full bg-ok/12 px-2 py-px text-[10px] font-extrabold text-ok"
+              className="rounded-full bg-ok/12 px-2 py-px text-xs font-semibold text-ok"
             >
               ACTIVE
             </span>
@@ -117,7 +117,7 @@ function AccountRow({
           {isPick && (
             <span
               title="Smart usage ranks this account first: it has the most weekly quota left per day until its reset"
-              className="rounded-full bg-accent-100 px-2 py-px text-[10px] font-extrabold text-accent-700"
+              className="rounded-full bg-accent-100 px-2 py-px text-xs font-semibold text-accent-700"
             >
               SMART PICK
             </span>
@@ -151,7 +151,7 @@ function AccountRow({
           </div>
         )}
         {account.signed_in && (
-          <div className="text-[11px] text-neutral-700">
+          <div className="text-xs text-neutral-700">
             {[account.smart_note, account.usage_seen_at && `usage seen ${ago(account.usage_seen_at)}`]
               .filter(Boolean)
               .join(' · ')}
@@ -274,7 +274,7 @@ function Switches({
     <>
       <div className="flex items-center gap-4 px-5 py-4">
         <div className="flex-1">
-          <div className="font-extrabold">Auto-switch accounts</div>
+          <div className="font-semibold">Auto-switch accounts</div>
           <div className="text-xs text-neutral-700">
             When the active account reaches {setting.threshold}% of its usage window, the session moves to the next
             account with headroom. Context carries over.
@@ -305,7 +305,7 @@ function Switches({
       </div>
       <div className="flex items-center gap-4 border-t border-line px-5 py-4">
         <div className="flex-1">
-          <div className="font-extrabold">Smart usage</div>
+          <div className="font-semibold">Smart usage</div>
           <div className="text-xs text-neutral-700">
             Uses the account whose weekly quota would otherwise go unused first: weekly % left ÷ days until weekly
             reset. Accounts with a full 5-hour window are skipped.
@@ -400,7 +400,7 @@ export function AgentsTab() {
     <div className="text-sm">
       {list.length > 0 && !ready && (
         <div className="mb-8 rounded-xl border border-accent-200 bg-accent-100 px-5 py-4 text-accent-900">
-          <div className="font-extrabold">Sign in to a Claude account</div>
+          <div className="font-semibold">Sign in to a Claude account</div>
           <div className="text-xs">
             The agent runs under a Claude account. Sign in below; the settings appear once one account is signed in.
           </div>
@@ -461,7 +461,7 @@ export function AgentsTab() {
                     </svg>
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="font-bold">{row.label}</div>
+                    <div className="font-semibold">{row.label}</div>
                     <div className="text-xs text-neutral-700">{row.description}</div>
                   </div>
                   <Dropdown

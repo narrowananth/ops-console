@@ -51,7 +51,7 @@ export function WorkspaceView() {
               role="tab"
               aria-selected={tab === id}
               onClick={() => setTab(id)}
-              className={`flex-1 cursor-pointer rounded-md border-0 px-3.5 py-1.5 text-center text-[13px] transition-colors ${tab === id ? 'bg-card font-bold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
+              className={`flex-1 cursor-pointer rounded-md border-0 px-3.5 py-1.5 text-center text-[13px] transition-colors ${tab === id ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
             >
               {label}
             </button>

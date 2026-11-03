@@ -83,7 +83,7 @@ export function AgentReviewCard({ review, sessionId }: { review: PrAgentReview; 
         {review.stale && (
           <span
             title="The pull request has newer commits than this review read. Run Agent Review again to review them."
-            className="rounded-full bg-accent-100 px-2 py-px text-[10px] text-accent-700"
+            className="rounded-full bg-accent-100 px-2 py-px text-xs text-accent-700"
           >
             stale
           </span>
@@ -92,7 +92,7 @@ export function AgentReviewCard({ review, sessionId }: { review: PrAgentReview; 
         {review.decision && (
           <span
             title={VERDICT[review.decision].tip}
-            className={`rounded-full border px-2 py-px text-[10px] font-bold tracking-[0.04em] ${VERDICT[review.decision].className}`}
+            className={`rounded-full border px-2 py-px text-xs font-semibold tracking-[0.04em] ${VERDICT[review.decision].className}`}
           >
             {VERDICT[review.decision].label}
           </span>
@@ -132,7 +132,7 @@ export function AgentReviewCard({ review, sessionId }: { review: PrAgentReview; 
             }}
           />
         )}
-        {review.verdict && <p className="m-0 font-bold">{review.verdict}</p>}
+        {review.verdict && <p className="m-0 font-semibold">{review.verdict}</p>}
         {review.status === AgentReviewStatus.Ready && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-700">
             <span>
@@ -163,7 +163,7 @@ export function AgentReviewCard({ review, sessionId }: { review: PrAgentReview; 
                   <span
                     key={severity}
                     title={SEVERITY[severity].tip}
-                    className={`rounded-full px-2 py-px text-[10px] font-semibold ${count > 0 ? SEVERITY[severity].className : 'bg-neutral-100 text-neutral-500'}`}
+                    className={`rounded-full px-2 py-px text-xs font-semibold ${count > 0 ? SEVERITY[severity].className : 'bg-neutral-100 text-neutral-500'}`}
                   >
                     {count} {SEVERITY[severity].label}
                   </span>
@@ -180,7 +180,7 @@ export function AgentReviewCard({ review, sessionId }: { review: PrAgentReview; 
                 <li key={`${finding.file}:${finding.line}:${finding.text}`}>
                   <span
                     title={SEVERITY[finding.severity].tip}
-                    className={`rounded-full px-2 py-px text-[10px] font-bold ${SEVERITY[finding.severity].className}`}
+                    className={`rounded-full px-2 py-px text-xs font-semibold ${SEVERITY[finding.severity].className}`}
                   >
                     {SEVERITY[finding.severity].label}
                   </span>
@@ -206,7 +206,7 @@ export function AgentReviewCard({ review, sessionId }: { review: PrAgentReview; 
         )}
         {review.checklist.length > 0 && (
           <div>
-            <div className="flex items-center gap-1.5 text-[10px] tracking-[0.08em] text-neutral-700 uppercase">
+            <div className="flex items-center gap-1.5 text-xs tracking-[0.08em] text-neutral-700 uppercase">
               PROD readiness
               <Hint text="Is the change safe to ship? Correctness, security, database safety, API compatibility, performance, logging, deployment and rollback. ✓ passed, ! needs a look, ✕ failed, – does not apply." />
             </div>
@@ -222,7 +222,7 @@ export function AgentReviewCard({ review, sessionId }: { review: PrAgentReview; 
         )}
         {review.tools.length > 0 && (
           <div>
-            <div className="flex items-center gap-1.5 text-[10px] tracking-[0.08em] text-neutral-700 uppercase">
+            <div className="flex items-center gap-1.5 text-xs tracking-[0.08em] text-neutral-700 uppercase">
               Connections queried
               <Hint text="Every Connection and repository the agent used to check the change, what it looked at, and what that showed." />
             </div>

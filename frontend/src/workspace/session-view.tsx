@@ -23,8 +23,8 @@ import { useStored } from '../lib/remember';
 import { PlaybookLink } from '../playbooks/job-steps';
 import { AttachButton, AttachmentChips, filesIn, useAttachments } from './attachments';
 import { BranchSwitcher } from './branch-switcher';
-import { ConversationMap, useFollowLatest } from './conversation';
-import { alertPath, pullRequestPath, sessionDraftKey } from './links';
+import { ConversationMap, ScrollToEnd, useFollowLatest } from './conversation';
+import { alertPath, pullRequestNamedIn, pullRequestPath, sessionDraftKey } from './links';
 import { SESSION_STATE_TIP } from './sessions-pane';
 
 export function SessionView({ id, onGone }: { id: string; onGone: () => void }) {
@@ -44,10 +44,30 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const session = sessions.data?.find((candidate) => candidate.id === id);
   const gone = sessions.isSuccess && session === undefined;
   const pulls = useRepoPullRequests(session?.kind === SessionKind.Repo ? session.repo_id : null);
-  const pull = pulls.data?.data.find((candidate) => candidate.branch === session?.branch);
+  // What the operator typed while the agent was working; it goes out when the run ends.
+  const [queued, setQueued] = useState<string | null>(null);
+  const sessionState = session?.state;
+  const working = sessionState === SessionState.Working || sessionState === SessionState.WaitingApproval;
+  // A pull request the agent opened or named here wins over the one on the Session's branch.
+  const named = pullRequestNamedIn(messages.data ?? []);
+  const pull =
+    pulls.data?.data.find((candidate) => candidate.number === named?.number) ??
+    pulls.data?.data.find((candidate) => candidate.branch === session?.branch);
   useEffect(() => {
     if (gone) onGone();
   }, [gone, onGone]);
+  const { mutate: sendQueued, isPending: sending } = send;
+  useEffect(() => {
+    if (queued === null || working || sessionState === undefined || sending) return;
+    sendQueued(queued, {
+      onSuccess: () => setQueued(null),
+      // Not sent: the words go back into the box instead of vanishing.
+      onError: () => {
+        setText((current) => (current.trim() === '' ? queued : `${queued}\n\n${current}`));
+        setQueued(null);
+      },
+    });
+  }, [queued, working, sessionState, sending, sendQueued, setText]);
 
   if (sessions.isPending) return <Empty>Reading the Session…</Empty>;
   if (session === undefined) return null;
@@ -64,8 +84,14 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
       ? trailingQuestions(lastMessage.parts)
       : [];
   const submit = () => {
-    if (empty || running || attachments.uploading) return;
+    if (empty || queued !== null || attachments.uploading) return;
     setReverted(null);
+    if (running) {
+      setQueued(withAttachments(text, attachments.ready));
+      setText('');
+      attachments.clear();
+      return;
+    }
     send.mutate(withAttachments(text, attachments.ready), {
       onSuccess: () => {
         setText('');
@@ -78,7 +104,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center gap-2.5 border-b border-line px-6 py-3">
         <span className="text-sm text-neutral-700">{repo ? `${repo.name} /` : 'No Repo /'}</span>
-        <h2 className="m-0 min-w-0 flex-[1_1_200px] truncate text-base font-extrabold">{session.title}</h2>
+        <h2 className="m-0 min-w-0 flex-[1_1_200px] truncate text-base font-semibold">{session.title}</h2>
         {session.branch && (
           <span
             title="The branch this Session works on"
@@ -87,7 +113,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             {session.branch}
           </span>
         )}
-        {pull?.repo_id && (
+        {pull?.repo_id ? (
           <Link
             to={pullRequestPath(pull.repo_id, pull.number)}
             title={`Open pull request #${pull.number}: ${pull.title}`}
@@ -95,6 +121,18 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
           >
             PR #{pull.number} →
           </Link>
+        ) : (
+          named && (
+            <a
+              href={named.url}
+              target="_blank"
+              rel="noreferrer"
+              title={`Open pull request #${named.number} on the Git host`}
+              className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
+            >
+              PR #{named.number} ↗
+            </a>
+          )
         )}
         {session.alert_id && (
           <Link
@@ -172,6 +210,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
           </div>
         </section>
         <ConversationMap messages={messages.data ?? []} scroller={latest.scroller} content={latest.content} />
+        <ScrollToEnd show={!latest.atEnd} onClick={latest.scrollToEnd} />
       </div>
       <div className="flex flex-col gap-2 px-6 pb-4.5">
         <ApprovalPrompts sessionId={id} />
@@ -184,11 +223,20 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             onSend={(answer) => send.mutate(answer)}
           />
         )}
+        {queued !== null && (
+          <QueuedNote
+            text={queued}
+            onCancel={() => {
+              setText((current) => (current.trim() === '' ? queued : `${queued}\n\n${current}`));
+              setQueued(null);
+            }}
+          />
+        )}
         {reverted && <RevertNote result={reverted} onClose={() => setReverted(null)} />}
         {/* biome-ignore lint/a11y/noStaticElementInteractions: dropping files is a shortcut; Attach files does the same */}
         <div
           onDragOver={(event) => {
-            if (running || !event.dataTransfer.types.includes('Files')) return;
+            if (!event.dataTransfer.types.includes('Files')) return;
             event.preventDefault();
             setDropping(true);
           }}
@@ -198,7 +246,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
           onDrop={(event) => {
             setDropping(false);
             const files = filesIn(event.dataTransfer);
-            if (running || files.length === 0) return;
+            if (files.length === 0) return;
             event.preventDefault();
             attachments.add(files);
           }}
@@ -208,10 +256,9 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
           <textarea
             aria-label="Message"
             value={text}
-            disabled={running}
             placeholder={
               running
-                ? 'The agent is working…'
+                ? 'The agent is working. Type the next message: it sends when the run ends.'
                 : repo
                   ? `Ask anything in ${repo.name} — e.g. add a retry to the orders webhook and write a test`
                   : 'Ask anything — e.g. clone github.com/owner/repo and find why the orders job fails'
@@ -233,7 +280,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             className="block field-sizing-content max-h-[50vh] min-h-28 w-full resize-none overflow-y-auto border-0 bg-transparent px-4 pt-3.5 pb-1.5 text-sm leading-relaxed text-text outline-none"
           />
           <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-1.5 pb-2.5">
-            <AttachButton onFiles={attachments.add} disabled={running} />
+            <AttachButton onFiles={attachments.add} />
             <SessionChips session={session} variant="chip" />
             {repo && <BranchSwitcher session={session} all={sessions.data ?? []} repo={repo} />}
             {send.isError && (
@@ -247,16 +294,16 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 variant="primary"
                 title={
                   running
-                    ? 'The agent is working. Stop it to send something new.'
+                    ? 'The agent is working. The message waits and sends when the run ends.'
                     : attachments.uploading
                       ? 'Waiting for the attached files to upload'
                       : 'Enter sends. Shift+Enter adds a new line.'
                 }
                 className="px-4 py-1.5"
-                disabled={running || empty || attachments.uploading || send.isPending}
+                disabled={empty || queued !== null || attachments.uploading || send.isPending}
                 onClick={submit}
               >
-                Send
+                {running ? 'Queue' : 'Send'}
               </Button>
             </span>
           </div>
@@ -273,6 +320,23 @@ const SESSION_STATE: Record<SessionState, PathwayState> = {
   [SessionState.WaitingApproval]: 'running',
   [SessionState.Failed]: 'failed',
 };
+
+/** The message waiting for the run to end, with a way to take it back. */
+function QueuedNote({ text, onCancel }: { text: string; onCancel: () => void }) {
+  return (
+    <div role="status" className="flex items-start gap-2 rounded-lg border border-line bg-card px-3 py-2 text-xs">
+      <span className="flex-none font-semibold text-neutral-700">Queued</span>
+      <span className="line-clamp-3 min-w-0 flex-1 whitespace-pre-wrap text-text">{text}</span>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="cursor-pointer border-0 bg-transparent p-0 text-xs text-accent-700 hover:text-accent-600"
+      >
+        Take back
+      </button>
+    </div>
+  );
+}
 
 /** What editing the last message did to the files: the ones put back, or why none were. */
 function RevertNote({ result, onClose }: { result: EditedMessage; onClose: () => void }) {

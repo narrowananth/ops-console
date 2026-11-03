@@ -130,13 +130,13 @@ export function Sidebar() {
   useLocation();
   return (
     <aside
-      className={`flex min-h-0 flex-none flex-col border-r border-line bg-surface transition-[width] duration-200 ${
+      className={`flex min-h-0 flex-none font-brand flex-col border-r border-line bg-surface transition-[width] duration-200 ${
         collapsed ? 'w-17' : 'w-62'
       }`}
     >
       <div className={`flex h-17 flex-none items-center gap-2.5 ${collapsed ? 'justify-center' : 'px-5'}`}>
         <Logo />
-        {!collapsed && <div className="font-heading text-[17px] font-extrabold tracking-[-0.02em]">Ops Console</div>}
+        {!collapsed && <div className="font-brand text-[17px] font-extrabold tracking-[-0.02em]">Ops Console</div>}
       </div>
       <nav aria-label="Ops Console" className="min-h-0 flex-1 overflow-auto px-3 pb-3">
         {groups.map((group) => (

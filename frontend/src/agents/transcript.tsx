@@ -25,14 +25,14 @@ function PartView({ part }: { part: Part }) {
   if (part.kind === 'diff') {
     return (
       <div className="overflow-hidden rounded-md border border-line font-mono text-xs">
-        <div className="border-b border-line bg-surface px-2 py-1 font-bold">{part.file}</div>
+        <div className="border-b border-line bg-surface px-2 py-1 font-semibold">{part.file}</div>
         <DiffLines lines={part.lines} />
       </div>
     );
   }
   return (
     <div className="flex flex-col gap-1 rounded-lg bg-accent-100 px-3.5 py-2.5 text-[13px] text-accent-900">
-      {part.header && <span className="text-[10px] font-bold tracking-wide uppercase">{part.header}</span>}
+      {part.header && <span className="text-xs font-semibold tracking-wide uppercase">{part.header}</span>}
       <strong>{part.text}</strong>
       {part.options.length > 0 && (
         <ul className="m-0 flex list-none flex-col gap-0.5 p-0 text-xs text-neutral-700">
@@ -77,7 +77,7 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
       className={`group mx-5 my-2 flex flex-col gap-1.5 rounded-xl px-5 py-3.5 ${agent ? '' : 'border border-line bg-surface'}`}
     >
       <div className="flex min-h-5 items-center gap-1">
-        <span className="text-[10px] tracking-[0.08em] text-neutral-700 uppercase">
+        <span className="text-xs tracking-[0.08em] text-neutral-700 uppercase">
           {agent ? 'Agent' : 'You'}
           {message.status === 'streaming' && ' · working'}
           {message.status === 'failed' && ' · failed'}
@@ -171,7 +171,7 @@ function SentText({ text }: { text: string }) {
             <li
               key={file.path}
               title={file.path}
-              className="max-w-64 truncate rounded-md border border-line bg-bg px-2 py-1 font-mono text-[11px] text-neutral-700"
+              className="max-w-64 truncate rounded-md border border-line bg-bg px-2 py-1 font-mono text-xs text-neutral-700"
             >
               📎 {file.name}
             </li>
@@ -218,4 +218,4 @@ function MessageParts({ message }: { message: Message }) {
 }
 
 const messageAction =
-  'cursor-pointer rounded-sm border-0 bg-transparent px-1.5 py-0.5 text-[11px] font-semibold text-neutral-700 hover:bg-neutral-200 hover:text-text';
+  'cursor-pointer rounded-sm border-0 bg-transparent px-1.5 py-0.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-200 hover:text-text';

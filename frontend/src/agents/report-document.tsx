@@ -71,7 +71,7 @@ export function ReportDocument({ report }: { report: AgentReport }) {
         {report.kind && (
           <span
             title={isKind(report.kind) ? REPORT_KIND_TIP[report.kind] : undefined}
-            className="rounded-full bg-neutral-200 px-2 py-px text-[10px] font-bold tracking-[0.06em] text-neutral-700 uppercase"
+            className="rounded-full bg-neutral-200 px-2 py-px text-xs font-semibold tracking-[0.06em] text-neutral-700 uppercase"
           >
             {report.kind}
           </span>

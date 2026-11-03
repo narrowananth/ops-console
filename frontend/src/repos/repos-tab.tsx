@@ -15,11 +15,11 @@ function RepoRow({ repo }: { repo: Repo }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <strong className="font-mono text-[13px]">{repo.name}</strong>
-          <span className="rounded-full bg-neutral-200 px-2 py-px text-[10px] text-neutral-700">{repo.host}</span>
-          {repo.dirty && <span className="text-[10px] text-accent-700">uncommitted changes</span>}
+          <span className="rounded-full bg-neutral-200 px-2 py-px text-xs text-neutral-700">{repo.host}</span>
+          {repo.dirty && <span className="text-xs text-accent-700">uncommitted changes</span>}
         </div>
-        <div className="truncate font-mono text-[11px] text-neutral-700">{repo.path}</div>
-        <div className={`text-[11px] ${repo.missing ? 'text-accent-700' : 'text-neutral-700'}`}>
+        <div className="truncate font-mono text-xs text-neutral-700">{repo.path}</div>
+        <div className={`text-xs ${repo.missing ? 'text-accent-700' : 'text-neutral-700'}`}>
           {repo.missing ? 'This folder is gone from the machine.' : `branch ${repo.branch ?? '?'}`}
         </div>
         {remove.error && (
@@ -99,7 +99,7 @@ export function ReposTab() {
   return (
     <div>
       <div className="flex flex-col gap-2 border-b border-line px-5 py-4">
-        <div className="text-xs font-extrabold">Import a local repo</div>
+        <div className="text-xs font-semibold">Import a local repo</div>
         <button
           type="button"
           disabled={pick.isPending || importRepo.isPending}
@@ -107,8 +107,8 @@ export function ReposTab() {
           onClick={browse}
           className="flex cursor-pointer flex-col items-start gap-0.5 border border-divider bg-card px-3 py-2.5 text-left text-text hover:bg-neutral-200 disabled:cursor-wait"
         >
-          <span className="text-[13px] font-extrabold">Local folder</span>
-          <span className="text-[11px] text-neutral-700">
+          <span className="text-[13px] font-semibold">Local folder</span>
+          <span className="text-xs text-neutral-700">
             {pick.isPending ? 'Waiting for the folder dialog…' : 'Browse a folder on disk'}
           </span>
         </button>
@@ -134,7 +134,7 @@ export function ReposTab() {
         <Empty>Could not read repos: {repos.error.message}</Empty>
       ) : (
         <>
-          <div className="px-5 py-3 text-[11px] tracking-[0.08em] text-neutral-700 uppercase">
+          <div className="px-5 py-3 text-xs tracking-[0.08em] text-neutral-700 uppercase">
             Imported repos · {repos.data.data.length}
           </div>
           {repos.data.data.length === 0 ? (

@@ -61,7 +61,7 @@ function PassThreadRow({ thread, failed }: { thread: PassThread; failed: boolean
         <span className="text-neutral-700">{thread.author}</span>
         <span
           title={OUTCOME_TIP[thread.outcome]}
-          className={`rounded-full border px-2 py-px text-[10px] font-semibold ${OUTCOME_CLASS[thread.outcome]}`}
+          className={`rounded-full border px-2 py-px text-xs font-semibold ${OUTCOME_CLASS[thread.outcome]}`}
         >
           {thread.outcome.replace('_', ' ')}
         </span>
@@ -149,7 +149,7 @@ function PassHeader({ pass, prUrl, sessionId }: { pass: CommentPass; prUrl: stri
       {pass.stale && (
         <span
           title="The pull request has newer commits than this Comment pass"
-          className="rounded-full bg-accent-100 px-2 py-px text-[10px] text-accent-700"
+          className="rounded-full bg-accent-100 px-2 py-px text-xs text-accent-700"
         >
           older commit
         </span>

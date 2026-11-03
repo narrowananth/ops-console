@@ -49,7 +49,7 @@ export function CommentComposer(props: {
         className="field-sizing-content max-h-[50vh] min-h-24 w-full resize-y overflow-y-auto rounded-md border border-divider bg-bg px-2.5 py-2 font-body text-[13px] leading-relaxed text-text outline-none focus:border-accent-400 focus:shadow-[0_0_0_3px_var(--color-accent-100)]"
       />
       <div className="flex items-center gap-2">
-        <span title="Write in Markdown. ⌘Enter or Ctrl+Enter sends." className="text-[11px] text-neutral-600">
+        <span title="Write in Markdown. ⌘Enter or Ctrl+Enter sends." className="text-xs text-neutral-600">
           Markdown · ⌘↵ to send
         </span>
         {props.error && (
@@ -183,7 +183,7 @@ export function Thread({
           <div className="flex items-center gap-2 text-xs">
             <span
               aria-hidden
-              className="flex size-5 flex-none items-center justify-center rounded-full bg-neutral-300 text-[10px] font-bold uppercase"
+              className="flex size-5 flex-none items-center justify-center rounded-full bg-neutral-300 text-xs font-semibold uppercase"
             >
               {comment.author.slice(0, 1)}
             </span>
@@ -191,7 +191,7 @@ export function Thread({
             {comment.by_agent && (
               <span
                 title="The agent wrote this comment on your behalf"
-                className="rounded-full bg-accent-100 px-2 py-px text-[10px] font-semibold text-accent-700"
+                className="rounded-full bg-accent-100 px-2 py-px text-xs font-semibold text-accent-700"
               >
                 agent
               </span>
@@ -206,7 +206,7 @@ export function Thread({
             <span className="ml-auto flex flex-none items-center gap-1.5">
               {comment.id === root.id && inline && (
                 <Button
-                  className="px-2 py-0.5 text-[11px]"
+                  className="px-2 py-0.5 text-xs"
                   disabled={resolve.isPending}
                   title={
                     root.resolved

@@ -109,15 +109,15 @@ const HEADING_TAG = ['h2', 'h3', 'h4', 'h5'] as const;
 
 const HEADING_CLASS = [
   '',
-  'text-lg font-extrabold',
-  'text-[15px] font-extrabold',
-  'text-sm font-bold',
-  'text-[13px] font-bold',
+  'text-lg font-semibold',
+  'text-[15px] font-semibold',
+  'text-sm font-semibold',
+  'text-[13px] font-semibold',
 ];
 
 /** Markdown an agent wrote, drawn. Links and images show as written. */
 export function Markdown({ source, className = '' }: { source: string; className?: string }) {
-  const code = 'rounded bg-neutral-200 px-1 text-[12px]';
+  const code = 'rounded bg-neutral-200 px-1 text-xs';
   return (
     <div className={`flex min-w-0 flex-col gap-2.5 text-[13px] leading-relaxed ${className}`}>
       {blocks(source).map((block, index): ReactNode => {
@@ -153,12 +153,12 @@ export function Markdown({ source, className = '' }: { source: string; className
         if (block.kind === 'table') {
           return (
             <div key={key} className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full border-collapse text-[12px]">
+              <table className="w-full border-collapse text-xs">
                 <thead className="bg-surface">
                   <tr>
                     {block.head.map((cell, at) => (
                       // biome-ignore lint/suspicious/noArrayIndexKey: cells sit by position and never reorder
-                      <th key={at} className="border-b border-line px-2.5 py-1.5 text-left font-bold">
+                      <th key={at} className="border-b border-line px-2.5 py-1.5 text-left font-semibold">
                         <InlineText text={cell} codeClassName={code} />
                       </th>
                     ))}

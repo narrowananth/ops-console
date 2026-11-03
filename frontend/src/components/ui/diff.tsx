@@ -99,7 +99,7 @@ export function DiffLines({ lines, comments }: { lines: DiffLine[]; comments?: L
                         aria-label={`Comment on line ${row.new}`}
                         title="Add a comment on this line"
                         onClick={() => comments.onAdd(row.new as number)}
-                        className="absolute top-1/2 left-0.5 z-10 hidden size-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md border-0 bg-diff-hunk-text p-0 font-body text-sm leading-none font-bold text-white shadow-sm group-hover:flex hover:scale-110"
+                        className="absolute top-1/2 left-0.5 z-10 hidden size-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md border-0 bg-diff-hunk-text p-0 font-body text-sm leading-none font-semibold text-white shadow-sm group-hover:flex hover:scale-110"
                       >
                         +
                       </button>
@@ -232,7 +232,7 @@ export function DiffStat({ additions, deletions }: { additions: number; deletion
       ? 0
       : Math.min(deletions > 0 ? 4 : 5, Math.max(additions > 0 ? 1 : 0, Math.round((additions / total) * 5)));
   return (
-    <span className="inline-flex flex-none items-center gap-1.5 font-mono text-[11px]">
+    <span className="inline-flex flex-none items-center gap-1.5 font-mono text-xs">
       <span className="font-semibold text-diff-add-text">+{additions}</span>
       <span className="font-semibold text-diff-del-text">−{deletions}</span>
       <span aria-hidden className="flex gap-px">

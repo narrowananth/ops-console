@@ -5,7 +5,7 @@ import type { StatusLook } from '../mcp/status';
 import { KindLabel } from './kind-label';
 
 const action =
-  'min-w-21 cursor-pointer border px-3 py-1.25 text-center text-xs font-bold shadow-sm transition-colors disabled:cursor-default disabled:opacity-50';
+  'min-w-21 cursor-pointer border px-3 py-1.25 text-center text-xs font-semibold shadow-sm transition-colors disabled:cursor-default disabled:opacity-50';
 
 /** The row action: a small button, the same for Connectors and MCP Servers. */
 export const rowAction = `${action} border-line bg-card text-text hover:bg-neutral-200`;
@@ -49,7 +49,7 @@ export function IntegrationRow(props: {
           <BrandIcon brand={props.brand} size="lg" />
           <span className="min-w-0">
             <span className="flex items-center gap-2">
-              <span className="truncate text-sm font-extrabold">{props.name}</span>
+              <span className="truncate text-sm font-semibold">{props.name}</span>
               <KindLabel>{props.kind}</KindLabel>
             </span>
             <span className={`block truncate text-xs ${props.alert ? 'text-accent-700' : 'text-neutral-700'}`}>

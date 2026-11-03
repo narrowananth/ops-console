@@ -68,20 +68,20 @@ export function BranchSwitcher({ session, all, repo }: { session: Session; all: 
         )}
       </button>
       {checkout.isSuccess && checkout.data.stashed && (
-        <span role="status" className="ml-2 text-[11px] text-accent-700">
+        <span role="status" className="ml-2 text-xs text-accent-700">
           Uncommitted changes were stashed.
         </span>
       )}
       {checkout.isError && (
-        <span role="alert" className="ml-2 text-[11px] text-accent-700">
+        <span role="alert" className="ml-2 text-xs text-accent-700">
           {checkout.error.message}
         </span>
       )}
       {open && (
         <div className={`absolute bottom-[calc(100%+6px)] left-0 z-51 w-80 ${menu}`}>
           <div className="flex items-center gap-2 px-2.5 pt-1 pb-2">
-            <span className="flex-1 text-xs font-extrabold">Branches in {repo?.name ?? 'this Repo'}</span>
-            {repo && <span className="truncate font-mono text-[11px] text-neutral-700">{repo.path}</span>}
+            <span className="flex-1 text-xs font-semibold">Branches in {repo?.name ?? 'this Repo'}</span>
+            {repo && <span className="truncate font-mono text-xs text-neutral-700">{repo.path}</span>}
           </div>
           <ul aria-label="Branches" className="m-0 flex max-h-60 list-none flex-col gap-0.5 overflow-y-auto p-0">
             {ascending(branches.data ?? [], (branch) => branch.name).map((branch) => {
@@ -93,13 +93,13 @@ export function BranchSwitcher({ session, all, repo }: { session: Session; all: 
                     disabled={checkout.isPending}
                     aria-current={current}
                     onClick={() => (current ? setOpen(false) : go(branch.name, false))}
-                    className={`flex w-full items-center gap-2 px-2.5 py-2 font-mono text-xs ${item(current)} ${current ? 'font-bold' : ''}`}
+                    className={`flex w-full items-center gap-2 px-2.5 py-2 font-mono text-xs ${item(current)} ${current ? 'font-semibold' : ''}`}
                   >
                     <span className="min-w-0 flex-1 truncate">{branch.name}</span>
                     {branch.has_open_pr && (
                       <span
                         title="This branch has an open pull request"
-                        className="rounded-full bg-neutral-200 px-1.5 font-sans text-[10px] whitespace-nowrap text-neutral-700"
+                        className="rounded-full bg-neutral-200 px-1.5 font-sans text-xs whitespace-nowrap text-neutral-700"
                       >
                         open PR
                       </span>
