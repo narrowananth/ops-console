@@ -1,5 +1,6 @@
 import {
   AgentReviewStatus,
+  CommentPassKind,
   PlaybookTrigger,
   PrChecks,
   PrReviewEvent,
@@ -15,6 +16,7 @@ import { Empty } from '../components/ui/empty';
 import { FoldTitle, useFold } from '../components/ui/fold';
 import { Markdown } from '../components/ui/markdown';
 import {
+  useCheckReplies,
   useMergePullRequest,
   usePostComment,
   usePullRequest,
@@ -29,7 +31,15 @@ import { AddressCommentsDialog } from './address-comments';
 import { AgentReviewCard } from './agent-review-card';
 import { CommentPassCard } from './comment-pass-card';
 import { PrFileView, useViewed } from './pr-file';
-import { ADDRESS_TIP, AGENT_REVIEW_TIP, agentBusy, BUSY_TITLE, openThreads } from './pr-jobs';
+import {
+  ADDRESS_TIP,
+  AGENT_REVIEW_TIP,
+  agentBusy,
+  BUSY_TITLE,
+  CHECK_REPLIES_TIP,
+  openThreads,
+  repliedThreads,
+} from './pr-jobs';
 import { PrSessions } from './pr-sessions';
 import { CommentComposer, Thread } from './pr-thread';
 
@@ -83,6 +93,8 @@ function Loaded(props: {
   const viewed = useViewed(pr);
   const reviewPlaybook = useTriggerPlaybook(PlaybookTrigger.ReviewPr);
   const addressPlaybook = useTriggerPlaybook(PlaybookTrigger.AddressComments);
+  const checkPlaybook = useTriggerPlaybook(PlaybookTrigger.CheckReply);
+  const checkReplies = useCheckReplies(pr.repo_id, pr.number);
   const comment = usePostComment(pr.repo_id, pr.number);
   const reviewing = pr.latest_agent_review?.status === AgentReviewStatus.Running;
   const busy = agentBusy(pr);
@@ -91,7 +103,11 @@ function Loaded(props: {
   const roots = pr.comments.filter((comment) => comment.parent_id === null);
   const open = pr.state === PrState.Open;
   const canAddress = open && openThreads(pr).length > 0;
-  const error = review.error ?? merge.error ?? agent.error ?? address.error;
+  const replied = open ? repliedThreads(pr).length : 0;
+  const checking = pr.comment_passes.some(
+    (pass) => pass.kind === CommentPassKind.Check && pass.status === AgentReviewStatus.Running,
+  );
+  const error = review.error ?? merge.error ?? agent.error ?? address.error ?? checkReplies.error;
 
   return (
     <div className="flex flex-col gap-4 px-5 py-4">
@@ -171,6 +187,17 @@ function Loaded(props: {
                   ? 'Reviewed at this commit'
                   : withPlaybook('Agent Review', reviewPlaybook)}
           </Button>
+          {(replied > 0 || checking) && (
+            <Button
+              className="px-3 py-1 text-xs"
+              disabled={checkReplies.isPending || busy}
+              title={busy ? BUSY_TITLE : CHECK_REPLIES_TIP}
+              onClick={() => checkReplies.mutate()}
+            >
+              {(checkReplies.isPending || checking) && <Spinner />}
+              {checking ? 'Checking replies…' : `${withPlaybook('Check replies', checkPlaybook)} · ${replied}`}
+            </Button>
+          )}
           {canAddress && (
             <Button
               className="px-3 py-1 text-xs"

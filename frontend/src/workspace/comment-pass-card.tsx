@@ -1,4 +1,10 @@
-import { AgentReviewStatus, type CommentPass, type PassThread, ThreadOutcome } from '@ops-console/shared';
+import {
+  AgentReviewStatus,
+  type CommentPass,
+  CommentPassKind,
+  type PassThread,
+  ThreadOutcome,
+} from '@ops-console/shared';
 import { StopRun } from '../agents/stop-run';
 import { FoldTitle, useFold } from '../components/ui/fold';
 import { Markdown } from '../components/ui/markdown';
@@ -22,17 +28,32 @@ const OUTCOME_TIP: Record<ThreadOutcome, string> = {
   [ThreadOutcome.Pending]: 'The agent has not answered this thread yet',
   [ThreadOutcome.Done]: 'The agent made the change or found it already made, replied, and resolved the thread',
   [ThreadOutcome.Declined]: 'The agent did not change the code. Its reply says why, and the thread stays open for you.',
+  [ThreadOutcome.Fixed]: 'The code at the newest commit does what the thread asked. The agent replied and resolved it.',
+  [ThreadOutcome.PartlyFixed]:
+    'Part of what the thread asked is done. The reply says what is left; the thread stays open.',
+  [ThreadOutcome.NotFixed]:
+    'The code does not do what the thread asked yet. The reply says why; the thread stays open.',
 };
 
 const OUTCOME_CLASS: Record<ThreadOutcome, string> = {
   [ThreadOutcome.Pending]: 'border-divider text-neutral-700',
   [ThreadOutcome.Done]: 'border-ok/40 bg-ok/10 text-ok',
   [ThreadOutcome.Declined]: 'border-accent-200 bg-accent-100 text-accent-700',
+  [ThreadOutcome.Fixed]: 'border-ok/40 bg-ok/10 text-ok',
+  [ThreadOutcome.PartlyFixed]: 'border-warn/40 bg-warn/10 text-warn',
+  [ThreadOutcome.NotFixed]: 'border-accent-200 bg-accent-100 text-accent-700',
 };
+
+/** What resolves a thread: a change made, or a reply the check found true. */
+const SETTLED = [ThreadOutcome.Done, ThreadOutcome.Fixed];
+
+/** The card's title for a pass: what the operator pressed. */
+export const passTitle = (pass: CommentPass) =>
+  pass.kind === CommentPassKind.Check ? 'Check replies' : 'Address comments';
 
 function PassThreadRow({ thread, failed }: { thread: PassThread; failed: boolean }) {
   const unposted = failed && thread.outcome !== ThreadOutcome.Pending && !thread.posted;
-  const unresolved = failed && thread.outcome === ThreadOutcome.Done && thread.posted && !thread.resolved;
+  const unresolved = failed && SETTLED.includes(thread.outcome) && thread.posted && !thread.resolved;
   return (
     <li aria-label={threadPlace(thread)} className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -42,7 +63,7 @@ function PassThreadRow({ thread, failed }: { thread: PassThread; failed: boolean
           title={OUTCOME_TIP[thread.outcome]}
           className={`rounded-full border px-2 py-px text-[10px] font-semibold ${OUTCOME_CLASS[thread.outcome]}`}
         >
-          {thread.outcome}
+          {thread.outcome.replace('_', ' ')}
         </span>
         {unposted && (
           <span title="The Comment pass stopped before this reply reached the Git host" className="text-accent-700">
@@ -75,10 +96,11 @@ function PassBody({ pass }: { pass: CommentPass }) {
           status={pass.status}
           answered={pass.threads.every((thread) => thread.outcome !== ThreadOutcome.Pending)}
           reading={{ todo: 'Read the threads', doing: 'Reading the threads' }}
-          closing={{
-            todo: 'Report each thread done or declined',
-            doing: 'Reporting each thread done or declined',
-          }}
+          closing={
+            pass.kind === CommentPassKind.Check
+              ? { todo: 'Give each thread its verdict', doing: 'Giving each thread its verdict' }
+              : { todo: 'Report each thread done or declined', doing: 'Reporting each thread done or declined' }
+          }
         />
       )}
       {failed && (
@@ -161,7 +183,7 @@ export function CommentPassCard({
         className={`flex items-center gap-2 bg-surface px-3 py-2 text-xs ${folded ? '' : 'border-b border-divider'}`}
       >
         <FoldTitle label="Comment pass" folded={folded} onToggle={toggle}>
-          <strong>Comment pass</strong>
+          <strong>{passTitle(newest)}</strong>
         </FoldTitle>
         <PassHeader pass={newest} prUrl={prUrl} sessionId={sessionId} />
       </header>
@@ -180,7 +202,9 @@ export function CommentPassCard({
               className="border-t border-line"
             >
               <header className="flex items-center gap-2 px-3 pt-2 text-xs">
-                <span className="text-neutral-700">{new Date(pass.created_at).toLocaleString()}</span>
+                <span className="text-neutral-700">
+                  {passTitle(pass)} · {new Date(pass.created_at).toLocaleString()}
+                </span>
                 <PassHeader pass={pass} prUrl={prUrl} sessionId={sessionId} />
               </header>
               <PassBody pass={pass} />

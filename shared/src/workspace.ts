@@ -191,8 +191,20 @@ export type ReplyCheck = z.infer<typeof replyCheckSchema>;
 
 export enum ThreadOutcome {
   Pending = 'pending',
+  /** Address comments. */
   Done = 'done',
   Declined = 'declined',
+  /** Check replies: the reply's claim holds, holds in part, or does not. */
+  Fixed = 'fixed',
+  PartlyFixed = 'partly_fixed',
+  NotFixed = 'not_fixed',
+}
+
+export enum CommentPassKind {
+  /** The agent changes code for the ticked threads; one commit, one push. */
+  Address = 'address',
+  /** The agent checks every replied thread against the head commit and gives each a verdict. Reads only. */
+  Check = 'check',
 }
 
 export const passThreadSchema = z.object({
@@ -216,6 +228,7 @@ export const commentPassSchema = z.object({
   id: z.string(),
   repo_id: z.string(),
   pr_number: z.number().int(),
+  kind: z.enum(CommentPassKind),
   head_sha: z.string(),
   status: z.enum(AgentReviewStatus),
   /** Null until pushed, and when there was nothing to commit. */

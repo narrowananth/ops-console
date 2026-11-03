@@ -7,8 +7,8 @@ export const AGENT_REVIEW_TIP =
   'The agent follows the Review PR Playbook in a Scratch copy at the newest commit, compares the change with the target branch and may run the tests. It posts each finding on its line on the Git host, then one comment with the verdict.';
 export const ADDRESS_TIP =
   "Pick open threads, yours or a teammate's. The agent makes the changes they ask for, pushes one commit to this branch, replies in each thread and resolves the ones it did.";
-export const CHECK_REPLY_TIP =
-  'The agent checks the code at the newest commit against what this thread asked. It replies fixed, partly fixed or not fixed, and resolves the thread when fixed.';
+export const CHECK_REPLIES_TIP =
+  'The agent checks every open thread that has a reply, in one run, against the code at the newest commit. It replies fixed, partly fixed or not fixed in each, and resolves the fixed ones. It changes no code.';
 
 /** An Agent Review, a Reply check or a Comment pass runs: the pull request's Session takes one at a time. */
 export const agentBusy = (pr: PullRequestDetail) =>
@@ -19,6 +19,13 @@ export const agentBusy = (pr: PullRequestDetail) =>
 /** The unresolved threads, by their first comment, on a line, a file or the pull request: what Address comments can work on. */
 export const openThreads = (pr: PullRequestDetail) =>
   pr.comments.filter((comment) => comment.parent_id === null && !comment.resolved);
+
+/** Open threads with a reply whose newest comment is not the agent's: what Check replies checks. */
+export const repliedThreads = (pr: PullRequestDetail) =>
+  openThreads(pr).filter((root) => {
+    const replies = pr.comments.filter((comment) => comment.parent_id === root.id);
+    return replies.length > 0 && !lastOf(root, replies).by_agent;
+  });
 
 /** Where a thread sits: `file:line`, a file, or "General comment" for one on the pull request. */
 export const threadPlace = (thread: { file_path: string | null; line: number | null }) =>

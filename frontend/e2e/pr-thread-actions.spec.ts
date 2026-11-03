@@ -78,6 +78,7 @@ const commentPass = (id: string, status: string, steps: Step[], extra: Record<st
   id,
   repo_id: 'r1',
   pr_number: 7,
+  kind: 'address',
   head_sha: '9c1e4b7d00000000000000000000000000000000',
   status,
   commit_sha: null,
@@ -139,7 +140,7 @@ async function routePullRequest(
   await page.route('**/api/playbooks', (route) => route.fulfill({ json: { data: { items: [], blocks: [] } } }));
   await page.route('**/api/repos/r1/pull-requests/7', (route) => route.fulfill({ json: { data: detail.current } }));
   await page.route(
-    /\/api\/(repos\/r1\/pull-requests\/7\/(reply-checks|comment-passes)|(reply-checks|comment-passes)\/[\w-]+\/retry)$/,
+    /\/api\/(repos\/r1\/pull-requests\/7\/(reply-checks|comment-passes|reply-check-passes)|(reply-checks|comment-passes)\/[\w-]+\/retry)$/,
     (route) => {
       const path = new URL(route.request().url()).pathname;
       posted.push({ path, body: route.request().postDataJSON() });
@@ -154,56 +155,68 @@ const openPullRequest = (page: Page) => page.goto(`${daemon.url}/workspace?tab=p
 const thread = (page: Page, text: string) =>
   page.getByRole('region', { name: 'Comments' }).getByRole('listitem').filter({ hasText: text });
 
-test('Check reply shows on an unresolved thread on a line whose last comment is not the agent’s, and starts a Reply check', async ({
+test('Check replies sits at the top, checks every replied thread in one run, and shows each verdict', async ({
   page,
 }) => {
   const detail = { current: pullRequest() };
+  const pass = (status: string, threads: unknown[]) =>
+    commentPass('cr1', status, [['Read the thread', status === 'running' ? 'running' : 'done', null]], {
+      kind: 'check',
+      threads,
+      playbook: playbook('Check reply (built-in)', [
+        ['Read the thread', status === 'running' ? 'running' : 'done', null],
+      ]),
+    });
   const posted = await routePullRequest(page, detail, () => {
     detail.current = {
       ...detail.current,
-      reply_checks: [
-        replyCheck('c1', 'running', [
-          ['Read the thread', 'done', 'The thread asks for a guard on an empty cart.'],
-          ['Read the code now', 'running', null],
+      comment_passes: [
+        pass('running', [
+          passThread('c1', 'src/cart.ts', 12, 'pending', null),
+          passThread('c5', 'src/rates.ts', 3, 'pending', null),
         ]),
       ],
     };
-    return { status: 202, json: { data: detail.current.reply_checks[0] } };
+    return { status: 202, json: { data: detail.current.comment_passes[0] } };
   });
   await openPullRequest(page);
 
-  const answered = thread(page, 'Guard the empty cart.');
-  await expect(answered.getByRole('button', { name: 'Check reply' })).toBeVisible();
-  await expect(thread(page, 'Cache the rate lookup.').getByRole('button', { name: 'Check reply' })).toBeVisible();
-  await expect(thread(page, 'Round the tax.').getByRole('button', { name: 'Check reply' })).toHaveCount(0);
-  await expect(thread(page, 'Name this rate.').getByRole('button', { name: 'Check reply' })).toHaveCount(0);
-  await expect(thread(page, 'Nice work overall.').getByRole('button', { name: 'Check reply' })).toHaveCount(0);
+  // No thread has its own button: one button at the top checks them all.
+  await expect(page.getByRole('button', { name: 'Check reply', exact: true })).toHaveCount(0);
+  const button = page.getByRole('button', { name: /^Check(ing)? replies/ });
+  await expect(button).toHaveText('Check replies · 2');
+  await expect(button).toHaveAttribute('title', /checks every open thread that has a reply, in one run/);
 
-  await answered.getByRole('button', { name: 'Check reply' }).click();
-  await expect
-    .poll(() => posted)
-    .toEqual([{ path: '/api/repos/r1/pull-requests/7/reply-checks', body: { comment_id: 'c1' } }]);
-
-  const strip = answered.getByRole('region', { name: 'Reply check' });
-  await expect(strip).toContainText('Checking the reply');
-  await expect(strip).toContainText('Check reply (built-in)');
-  const steps = strip.getByRole('list', { name: 'Playbook steps' }).getByRole('listitem');
-  await expect(steps).toHaveCount(3);
-  await expect(steps.nth(0)).toContainText('The thread asks for a guard on an empty cart.');
-  await expect(steps.nth(1)).toHaveAttribute('aria-current', 'step');
-  await expect(steps.nth(2)).toContainText('verdict and the reply');
-  // While it runs the button stays, disabled like every other job button on the pull request.
-  const button = answered.getByRole('button', { name: 'Check reply' });
+  await button.click();
+  await expect.poll(() => posted).toEqual([{ path: '/api/repos/r1/pull-requests/7/reply-check-passes', body: null }]);
   await expect(button).toBeDisabled();
-  await expect(button).toHaveAttribute('title', 'The agent is working on this PR');
+  await expect(button).toContainText('Checking replies…');
+  const card = page.getByRole('region', { name: 'Comment pass' });
+  await expect(card).toContainText('Check replies');
+  await expect(card).toContainText('Give each thread its verdict');
+
+  detail.current = {
+    ...detail.current,
+    comment_passes: [
+      pass('ready', [
+        { ...passThread('c1', 'src/cart.ts', 12, 'fixed', 'The empty cart returns early now.'), resolved: true },
+        passThread('c5', 'src/rates.ts', 3, 'not_fixed', 'The lookup is not cached yet.'),
+      ]),
+    ],
+  };
+  await page.reload();
+  const rows = card.getByRole('list', { name: 'Threads' }).getByRole('listitem');
+  await expect(rows.nth(0)).toContainText('fixed');
+  await expect(rows.nth(0)).toContainText('The empty cart returns early now.');
+  await expect(rows.nth(1)).toContainText('not fixed');
 });
 
-test('Check reply hides on a merged or closed pull request', async ({ page }) => {
+test('Check replies hides on a merged or closed pull request', async ({ page }) => {
   for (const state of ['closed', 'merged']) {
     await routePullRequest(page, { current: pullRequest({ state }) });
     await openPullRequest(page);
     await expect(thread(page, 'Guard the empty cart.')).toContainText('Fixed in 33f8c2b2');
-    await expect(page.getByRole('button', { name: 'Check reply' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^Check replies/ })).toHaveCount(0);
     await page.unrouteAll();
     // The next goto differs only after the #, which would keep this page and its cached pull request.
     await page.goto('about:blank');
@@ -422,7 +435,7 @@ test('a Comment pass that failed after its steps retries what is left; one the b
   await expect(card.getByRole('button', { name: /Retry/ })).toHaveCount(0);
 });
 
-test('while a job runs, Review with agent, every Check reply and Address comments wait, and a refused start says why', async ({
+test('while a job runs, Review with agent, Check replies and Address comments wait, and a refused start says why', async ({
   page,
 }) => {
   const detail = {
@@ -431,7 +444,7 @@ test('while a job runs, Review with agent, every Check reply and Address comment
     }),
   };
   await routePullRequest(page, detail, (path) =>
-    path.endsWith('/reply-checks')
+    path.endsWith('/reply-check-passes')
       ? { status: 409, json: { error: { code: 'session_busy', message: BUSY } } }
       : { status: 502, json: { error: { code: 'upstream_failed', message: 'GitHub did not answer.' } } },
   );
@@ -440,8 +453,7 @@ test('while a job runs, Review with agent, every Check reply and Address comment
   const buttons = [
     page.getByRole('button', { name: 'Agent Review' }),
     page.getByRole('button', { name: 'Address comments' }),
-    thread(page, 'Guard the empty cart.').getByRole('button', { name: 'Check reply' }),
-    thread(page, 'Cache the rate lookup.').getByRole('button', { name: 'Check reply' }),
+    page.getByRole('button', { name: /^Check replies/ }),
   ];
   for (const button of buttons) {
     await expect(button).toBeDisabled();
@@ -452,9 +464,8 @@ test('while a job runs, Review with agent, every Check reply and Address comment
   detail.current = pullRequest();
   await page.reload();
   for (const button of buttons) await expect(button).toBeEnabled();
-  const answered = thread(page, 'Guard the empty cart.');
-  await answered.getByRole('button', { name: 'Check reply' }).click();
-  await expect(answered.getByRole('alert')).toHaveText(BUSY);
+  await page.getByRole('button', { name: /^Check replies/ }).click();
+  await expect(page.getByRole('alert').filter({ hasText: BUSY })).toBeVisible();
 
   await page.getByRole('button', { name: 'Address comments' }).click();
   await page.getByRole('alertdialog', { name: 'Address comments' }).getByRole('button', { name: 'Start' }).click();

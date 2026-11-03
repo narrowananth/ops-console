@@ -1,11 +1,11 @@
-import { type PrComment, PrState, type PullRequestDetail } from '@ops-console/shared';
+import { type PrComment, type PullRequestDetail } from '@ops-console/shared';
 import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Button, Spinner } from '../components/ui/button';
 import { Markdown } from '../components/ui/markdown';
-import { useDeleteComment, usePostComment, useResolveComment, useStartReplyCheck } from '../lib/queries';
+import { useDeleteComment, usePostComment, useResolveComment } from '../lib/queries';
 import { useStored } from '../lib/remember';
-import { agentBusy, BUSY_TITLE, CHECK_REPLY_TIP, lastOf } from './pr-jobs';
+
 import { ReplyCheckStrip } from './reply-check-strip';
 
 /**
@@ -152,7 +152,7 @@ function CommentMenu({ comment, onDelete, pending }: { comment: PrComment; onDel
 }
 
 /**
- * One comment thread: its comments, Resolve and Check reply for a thread on a line, ⋯ to delete your own, the
+ * One comment thread: its comments, Resolve for a thread on a line, ⋯ to delete your own, the
  * thread's running or failed Reply check, and a reply box.
  */
 export function Thread({
@@ -169,15 +169,11 @@ export function Thread({
   const post = usePostComment(repoId, number);
   const resolve = useResolveComment(repoId, number);
   const remove = useDeleteComment(repoId, number);
-  const startCheck = useStartReplyCheck(repoId, number);
   const [replying, setReplying] = useStored(`workspace.replying.${repoId}#${number}.${root.id}`, z.boolean(), false);
   const replies = pr.comments.filter((comment) => comment.parent_id === root.id);
   const inline = root.file_path !== null;
   const check = pr.reply_checks.find((item) => item.comment_id === root.id);
-  const canCheck =
-    pr.state === PrState.Open && inline && root.line !== null && !root.resolved && !lastOf(root, replies).by_agent;
-  const busy = agentBusy(pr);
-  const error = startCheck.error ?? resolve.error ?? remove.error;
+  const error = resolve.error ?? remove.error;
   return (
     <div
       className={`overflow-hidden rounded-lg border border-divider bg-card font-body shadow-sm ${root.resolved ? 'opacity-70' : ''}`}
@@ -208,17 +204,6 @@ export function Thread({
               </span>
             )}
             <span className="ml-auto flex flex-none items-center gap-1.5">
-              {comment.id === root.id && canCheck && (
-                <Button
-                  className="px-2 py-0.5 text-[11px]"
-                  disabled={busy || startCheck.isPending}
-                  title={busy ? BUSY_TITLE : CHECK_REPLY_TIP}
-                  onClick={() => startCheck.mutate(root.id)}
-                >
-                  {startCheck.isPending && <Spinner />}
-                  Check reply
-                </Button>
-              )}
               {comment.id === root.id && inline && (
                 <Button
                   className="px-2 py-0.5 text-[11px]"

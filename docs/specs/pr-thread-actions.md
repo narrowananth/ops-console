@@ -28,22 +28,23 @@ Review with agent, Approve and Request changes, but nothing that acts on the com
 
 ### Check reply
 
-6. Check reply shows on a thread on a line of an open pull request when the thread is unresolved and its last
-   comment is not the agent's, whoever started the thread. It does not show on a resolved thread, a thread whose
-   last comment is the agent's, a comment on no line, or a merged or closed pull request.
-7. Pressing it starts a Reply check: it copies the Check reply Playbook, makes a scratch copy at the pull request's
-   head commit, and runs the steps in the pull request's Session. The thread shows a strip with the Playbook's name
-   and each step's status and summary.
-8. The closing turn returns a verdict (fixed, partly fixed or not fixed) and a short reply. The console posts the
-   reply in the thread as the agent. On fixed it resolves the thread; on partly fixed or not fixed the thread stays
-   open.
-9. Once the verdict is posted, Check reply hides, since the last comment is the agent's. It shows again when someone
-   replies.
-10. A failed step, or a closing answer the console cannot read, fails the Reply check and posts nothing. The strip
-    shows the failed step's summary and "Retry from step N", which runs that step and the rest in the kept scratch
-    copy.
-11. A reply that posted but a resolve that failed fails the Reply check with "Could not resolve the thread:" and the
-    host's reason. Retry only resolves.
+6. Check replies shows at the top of an open pull request, before Address comments, with the number of threads it
+   will check: every unresolved thread with at least one reply whose last comment is not the agent's, on a line, a
+   file or the pull request. It does not show when there are none, or on a merged or closed pull request. Threads
+   have no Check reply button of their own.
+7. Pressing it starts one Reply check over all of those threads, a Comment pass of kind `check`. It copies the Check
+   reply Playbook, makes one scratch copy at the pull request's head commit, and runs the steps once in the pull
+   request's Session. The Comment pass card, titled Check replies, shows the Playbook's name, each step's status
+   and summary, and the threads.
+8. The closing turn returns a verdict (fixed, partly fixed or not fixed) and a short reply for every thread. The
+   console posts each reply in its thread as the agent and resolves each fixed thread on a line or a file. Partly
+   fixed and not fixed threads stay open. It changes, commits and pushes nothing.
+9. Once its replies are posted, a thread's last comment is the agent's, so the next Check replies skips it until
+   someone replies again.
+10. A failed step, or a closing answer the console cannot read, fails the pass and posts nothing. The card shows the
+    failed step's summary and "Retry from step N", which runs in the kept scratch copy.
+11. Replies or resolves that fail after the verdicts fail the pass and list the threads left without them. Retry
+    posts and resolves only those.
 
 ### Address comments
 
@@ -172,13 +173,15 @@ CREATE TABLE pr_reply_checks (
 );
 CREATE INDEX pr_reply_checks_thread_idx ON pr_reply_checks (repo_id, pr_number, comment_id, created_at DESC);
 
--- One Comment pass over the threads the operator ticked.
+-- One Comment pass: Address comments over the ticked threads, or Check replies over every replied one.
 CREATE TABLE pr_comment_passes (
   id TEXT PRIMARY KEY NOT NULL,
   repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
   pr_number INTEGER NOT NULL,
   head_sha TEXT NOT NULL,
   branch TEXT NOT NULL,
+  -- `address` changes code and pushes; `check` gives each thread a verdict (outcome fixed, partly_fixed, not_fixed).
+  kind TEXT NOT NULL DEFAULT 'address',
   status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'ready', 'failed')),
   -- Where a retry picks up: the steps and closing turn, the commit and push, or the replies and resolves.
   stage TEXT NOT NULL DEFAULT 'steps' CHECK (stage IN ('steps', 'push', 'post')),

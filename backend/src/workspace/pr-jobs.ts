@@ -75,6 +75,7 @@ export function toCommentPass(row: CommentPassRow, headSha: string | null, playb
     id: row.id,
     repo_id: row.repoId,
     pr_number: row.prNumber,
+    kind: row.kind,
     head_sha: row.headSha,
     status: row.status,
     commit_sha: row.commitSha,
