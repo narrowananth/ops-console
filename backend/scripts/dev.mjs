@@ -108,7 +108,7 @@ async function devApp(name, id) {
   if (!built) {
     await rm(staging, { recursive: true, force: true });
     await mkdir(staging);
-    await buildAppBundle({ node: process.execPath, dir: staging, version: '0.0.0', name, id });
+    await buildAppBundle({ node: process.execPath, dir: staging, name, id });
     fresh = path.join(staging, `${name}.app`, 'Contents', 'MacOS', name);
   }
   if (owner !== stamp) {
@@ -136,9 +136,8 @@ function handOverKeychain(from, to) {
     if (result.status !== 0) throw new Error(`${mode} failed: ${result.stderr.trim().split('\n').at(-1)}`);
     return result.stdout;
   };
-  const accounts = consoleAccounts(env.OPS_CONSOLE_KEYCHAIN_SERVICE);
-  if (accounts.length === 0) return;
-  const secrets = run(from, 'take', JSON.stringify(accounts));
+  if (consoleAccounts(env.OPS_CONSOLE_KEYCHAIN_SERVICE).length === 0) return;
+  const secrets = run(from, 'take', '');
   try {
     run(to, 'put', secrets);
   } catch (error) {
