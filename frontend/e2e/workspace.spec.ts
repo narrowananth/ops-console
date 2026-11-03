@@ -588,3 +588,34 @@ test("the agent's tool steps fold to a count and the latest, and open as short l
   await expect(steps).toHaveText([/Ran ls.*done/, /Read scripts\/platforms\/engage\.ts.*in progress/]);
   await expect(steps.last()).toHaveAttribute('aria-current', 'step');
 });
+
+test('the side panel collapses to a rail that counts Sessions waiting on you, and opens on a tab', async ({ page }) => {
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'analytics', 2)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({
+      json: {
+        data: [session('s1', 'r1', 'fix login', 'waiting_input'), session('s2', 'r1', 'audit queries')],
+        meta: { next_cursor: null },
+      },
+    }),
+  );
+  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+
+  await expect(page.getByRole('region', { name: 'analytics' })).toContainText('fix login');
+  await page.getByRole('button', { name: 'Collapse the side panel' }).click();
+  await expect(page.getByRole('tablist', { name: 'Workspace' })).toHaveCount(0);
+  const rail = page.getByRole('navigation', { name: 'Workspace panel' });
+  await expect(rail.getByRole('button', { name: 'Sessions, 1 waiting on you' })).toBeVisible();
+
+  // Folded stays folded through a reload.
+  await page.reload();
+  await expect(rail).toBeVisible();
+  await rail.getByRole('button', { name: 'Pull requests' }).click();
+  await expect(page.getByRole('tab', { name: 'Pull requests' })).toHaveAttribute('aria-selected', 'true');
+
+  await page.getByRole('button', { name: 'Collapse the side panel' }).click();
+  await rail.getByRole('button', { name: 'Open the side panel' }).click();
+  await expect(page.getByRole('tab', { name: 'Pull requests' })).toHaveAttribute('aria-selected', 'true');
+});

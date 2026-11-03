@@ -230,6 +230,9 @@ Adds `branch: string | null`.
   the Monitor links to a Fix's Session this way. A picked Session that is gone drops out of the address. With nothing
   picked: "Pick a Session, or start one on a branch." or "Pick a pull request." The choices and drafts named below
   stay in the browser's local storage (`persist-selections-and-runs` Behaviors 1 to 10).
+- The arrow beside the tabs folds the side panel to a narrow rail, and the browser remembers it folded. The rail has
+  the arrow to open it again and an icon for each tab, which opens the panel on that tab. The Sessions icon counts
+  the Sessions waiting on the operator (`waiting_input` or `waiting_approval`).
 - Workspace Session list grouped by Repo, A→Z. It lists `repo` and anonymous Sessions; `pr_review` Sessions are not
   listed. A Repo's header shows its branch, how many Sessions are running, its Session count and `+`, and folds the
   group open or shut; the browser remembers folded Repos. An open Repo lists its 3 most recently active Sessions, plus
