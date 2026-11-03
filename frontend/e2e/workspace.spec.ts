@@ -357,6 +357,98 @@ test('a Session opens at its newest message', async ({ page }) => {
   await expect(marks.nth(39)).not.toHaveAttribute('aria-current', 'location');
 });
 
+test('a message typed while the agent works waits as Queued and sends when the run ends', async ({ page }) => {
+  let state = 'working';
+  const sent: string[] = [];
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform', state)] } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) => {
+    if (route.request().method() === 'POST') {
+      sent.push(route.request().postDataJSON().text);
+      return route.fulfill({ json: { data: { message_id: 'm9' } } });
+    }
+    return route.fulfill({ json: { data: [] } });
+  });
+  await page.route('**/api/sessions/s1/stop', (route) => {
+    state = 'idle';
+    return route.fulfill({ status: 204 });
+  });
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const box = page.getByRole('textbox', { name: 'Message' });
+  await expect(box).toBeEnabled();
+  await box.fill('also add a test');
+  await page.getByRole('button', { name: 'Queue' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Queued' })).toContainText('also add a test');
+  await expect(box).toHaveValue('');
+  expect(sent).toEqual([]);
+
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect.poll(() => sent).toEqual(['also add a test']);
+  await expect(page.getByRole('status').filter({ hasText: 'Queued' })).toHaveCount(0);
+});
+
+test('Scroll to end shows when scrolled up and jumps to the newest message', async ({ page }) => {
+  const said = (n: number) => ({
+    id: `m${n}`,
+    role: n % 2 === 0 ? 'user' : 'agent',
+    status: 'done',
+    parts: [{ kind: 'text', text: `message ${n}` }],
+    created_at: NOW,
+  });
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform')] } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) =>
+    route.fulfill({ json: { data: Array.from({ length: 40 }, (_, n) => said(n)) } }),
+  );
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const button = page.getByRole('button', { name: 'Scroll to end' });
+  await expect(page.getByText('message 39', { exact: true })).toBeInViewport();
+  await expect(button).toHaveCount(0);
+  await page.getByRole('region', { name: 'Conversation' }).evaluate((node) => node.scrollTo({ top: 0 }));
+  await expect(button).toBeVisible();
+  await button.click();
+  await expect(page.getByText('message 39', { exact: true })).toBeInViewport();
+  await expect(button).toHaveCount(0);
+});
+
+test('a pull request the agent names in the conversation links at the top of the Session', async ({ page }) => {
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform')] } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          {
+            id: 'm1',
+            role: 'agent',
+            status: 'done',
+            parts: [{ kind: 'text', text: 'Opened https://github.com/example/apis/pull/42 for review.' }],
+            created_at: NOW,
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const link = page.locator('header').getByRole('link', { name: /PR #42/ });
+  await expect(link).toHaveAttribute('href', 'https://github.com/example/apis/pull/42');
+});
+
 test("the agent's tool steps show as a path, the last one turning while the message streams", async ({ page }) => {
   await page.route('**/api/repos', (route) =>
     route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),

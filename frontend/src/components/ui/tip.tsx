@@ -136,7 +136,7 @@ export function Hint({ text, label = 'What is this?' }: { text: string; label?: 
       tabIndex={0}
       aria-label={label}
       title={text}
-      className="inline-flex size-3.5 flex-none cursor-help items-center justify-center rounded-full border border-neutral-500 align-middle font-body text-[9px] leading-none font-semibold text-neutral-600 select-none hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent focus-visible:outline-none"
+      className="inline-flex size-3.5 flex-none cursor-help items-center justify-center rounded-full border border-neutral-500 align-middle font-body text-xs leading-none font-semibold text-neutral-600 select-none hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent focus-visible:outline-none"
     >
       ?
     </span>

@@ -32,7 +32,7 @@ function Segmented<T extends string>({
 }) {
   return (
     <fieldset className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0">
-      <legend className="flex items-center gap-1.5 p-0 text-xs font-extrabold">
+      <legend className="flex items-center gap-1.5 p-0 text-xs font-semibold">
         {label} <Hint text={hint} />
       </legend>
       <div className="flex w-max gap-0.5 rounded-lg bg-neutral-200 p-1">
@@ -42,7 +42,7 @@ function Segmented<T extends string>({
             title={option.title}
             className={`rounded-md px-3.5 py-1.5 text-xs transition-colors has-focus-visible:outline-2 has-focus-visible:outline-accent ${option.disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${
               value === option.value
-                ? 'bg-card font-bold text-text shadow-sm'
+                ? 'bg-card font-semibold text-text shadow-sm'
                 : 'bg-transparent text-neutral-700 hover:text-text'
             }`}
           >
@@ -123,7 +123,7 @@ export function ConnectionForm({
         {(connection?.is_prod || env === ConnectionEnv.Prod) && (
           <span
             title={PROD_TIP}
-            className="rounded-full bg-accent-100 px-2 py-px text-[10px] font-extrabold text-accent-700"
+            className="rounded-full bg-accent-100 px-2 py-px text-xs font-semibold text-accent-700"
           >
             PROD
           </span>
@@ -134,7 +134,7 @@ export function ConnectionForm({
           <div className="text-[13px] text-neutral-700">Leave a field blank to keep its current value.</div>
         )}
         <div className="flex flex-col gap-1">
-          <label htmlFor="connection-name" className="text-xs font-extrabold">
+          <label htmlFor="connection-name" className="text-xs font-semibold">
             Name
           </label>
           <input
@@ -144,7 +144,7 @@ export function ConnectionForm({
             onChange={(e) => setName(e.target.value)}
             placeholder="orders-staging"
           />
-          <span className="text-[11px] text-neutral-700">Also the name of the MCP Server Claude sees.</span>
+          <span className="text-xs text-neutral-700">Also the name of the MCP Server Claude sees.</span>
         </div>
         <Segmented
           label="Environment"
@@ -166,7 +166,7 @@ export function ConnectionForm({
           const current = connection?.config[field.key];
           return (
             <div key={field.key} className="flex flex-col gap-1">
-              <label htmlFor={`conn-${field.key}`} className="text-xs font-extrabold">
+              <label htmlFor={`conn-${field.key}`} className="text-xs font-semibold">
                 {field.label}
               </label>
               <input
@@ -187,7 +187,7 @@ export function ConnectionForm({
           );
         })}
         <div className="flex flex-col gap-1">
-          <label htmlFor="connection-secret" className="text-xs font-extrabold">
+          <label htmlFor="connection-secret" className="text-xs font-semibold">
             {secretInfo.label}
             {secretInfo.optional ? ' (optional)' : ''}
           </label>
@@ -210,7 +210,7 @@ export function ConnectionForm({
               onChange={(e) => setSecret(e.target.value)}
             />
           )}
-          <span className="text-[11px] text-neutral-700">Kept in the Keychain; never shown again.</span>
+          <span className="text-xs text-neutral-700">Kept in the Keychain; never shown again.</span>
         </div>
         <div className="flex flex-col gap-1">
           <Segmented
@@ -240,7 +240,7 @@ export function ConnectionForm({
               },
             ]}
           />
-          <span className="text-[11px] text-neutral-700">
+          <span className="text-xs text-neutral-700">
             {hasServer
               ? ACCESS_TIPS[access]
               : `No MCP server is picked for ${TYPE_LABELS[type]} yet; it can be saved with access Off.`}

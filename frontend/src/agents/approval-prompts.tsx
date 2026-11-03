@@ -18,11 +18,11 @@ export function ApprovalPrompts({ sessionId }: { sessionId?: string }) {
           key={approval.id}
           className="flex flex-col gap-2 rounded-xl border border-accent-300 bg-accent-100/60 px-4 py-3 shadow-sm"
         >
-          <div className="flex items-center gap-2 text-[13px] font-extrabold">
+          <div className="flex items-center gap-2 text-[13px] font-semibold">
             {approval.is_prod && (
               <span
                 title="This touches production data. It always needs your Approval, whatever the Access mode."
-                className="bg-accent px-1.5 py-px text-[10px] text-bg"
+                className="bg-accent px-1.5 py-px text-xs text-bg"
               >
                 PROD
               </span>

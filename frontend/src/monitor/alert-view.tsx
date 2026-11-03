@@ -82,7 +82,7 @@ function SampleList({ samples }: { samples: Sample[] }) {
           aria-pressed={asJson}
           title={asJson ? 'Show each Sample as its time, level and message' : 'Show the Samples as raw JSON'}
           onClick={() => setAsJson((on) => !on)}
-          className="ml-auto cursor-pointer border border-divider bg-transparent px-2 py-0.5 text-[11px] text-text"
+          className="ml-auto cursor-pointer border border-divider bg-transparent px-2 py-0.5 text-xs text-text"
         >
           {asJson ? 'Messages' : 'JSON'}
         </button>
@@ -96,7 +96,7 @@ function SampleList({ samples }: { samples: Sample[] }) {
           {samples.map((sample) => (
             <li key={sample.id}>
               <span className="text-neutral-700">{new Date(sample.timestamp).toLocaleTimeString()}</span>{' '}
-              <span className="font-bold">{sample.status}</span> {sample.message}
+              <span className="font-semibold">{sample.status}</span> {sample.message}
             </li>
           ))}
         </ul>
@@ -235,7 +235,7 @@ function ReportPanel({
               </details>
             )}
             {shown.markdown_path && (
-              <div className="font-mono text-[11px] break-all text-neutral-700">Saved to {shown.markdown_path}</div>
+              <div className="font-mono text-xs break-all text-neutral-700">Saved to {shown.markdown_path}</div>
             )}
           </>
         )}
@@ -575,7 +575,7 @@ export function AlertView({ id }: { id: string }) {
         </div>
         <h1 className="m-0 mt-1 text-lg break-words">{data.title}</h1>
         <div className="flex flex-wrap items-center gap-x-2 font-mono text-xs text-neutral-700">
-          <span className="font-bold text-text">{data.service.name}</span>
+          <span className="font-semibold text-text">{data.service.name}</span>
           <span title="The Datadog env these logs came from. no env means the logs carry no env tag.">
             {data.service.env}
           </span>
@@ -584,7 +584,7 @@ export function AlertView({ id }: { id: string }) {
           {data.route && (
             <button
               type="button"
-              className="cursor-pointer border-0 bg-transparent p-0 font-sans text-[11px] text-accent hover:underline"
+              className="cursor-pointer border-0 bg-transparent p-0 font-sans text-xs text-accent hover:underline"
               title="This Route never raises an Alert again. Use it for a Route that is expected to fail."
               disabled={patchRoute.isPending}
               onClick={() => data.route && patchRoute.mutate({ id: data.route.id, ignored: true })}
@@ -601,7 +601,7 @@ export function AlertView({ id }: { id: string }) {
           {data.log_line}
         </pre>
         <div
-          className="mt-1 font-mono text-[11px] break-all text-neutral-700"
+          className="mt-1 font-mono text-xs break-all text-neutral-700"
           title="The Datadog log search that finds these failures. Paste it into Datadog Logs to see them there."
         >
           {data.datadog_query}

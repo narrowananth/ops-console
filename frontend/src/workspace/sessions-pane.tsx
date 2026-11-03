@@ -56,7 +56,7 @@ function RowStop({ session }: { session: Session }) {
       title={stop.isError ? stop.error.message : 'Stop the agent where it is. The conversation stays.'}
       disabled={stop.isPending}
       onClick={() => stop.mutate()}
-      className="absolute top-1.5 right-2 flex cursor-pointer items-center gap-1 rounded-full border border-line bg-card px-2 py-0.5 font-mono text-[10px] text-accent-700 opacity-0 shadow-sm group-hover:opacity-100 focus-visible:opacity-100 hover:border-accent-400 disabled:cursor-wait"
+      className="absolute top-1.5 right-2 flex cursor-pointer items-center gap-1 rounded-full border border-line bg-card px-2 py-0.5 font-mono text-xs text-accent-700 opacity-0 shadow-sm group-hover:opacity-100 focus-visible:opacity-100 hover:border-accent-400 disabled:cursor-wait"
     >
       <StopIcon />
       stop
@@ -128,16 +128,16 @@ function SessionRow({
         className={`flex w-full flex-col py-2 pr-3 pl-7 text-[13px] ${item(selected)}`}
       >
         <span className="flex items-baseline gap-2">
-          <span className="min-w-0 flex-1 truncate font-bold">{session.title}</span>
+          <span className="min-w-0 flex-1 truncate font-semibold">{session.title}</span>
           <span
             title={SESSION_STATE_TIP[session.state]}
-            className={`flex-none rounded-full px-1.75 font-mono text-[10px] ${session.state === SessionState.Idle ? 'bg-neutral-200 text-neutral-700' : 'bg-accent-100 text-accent-700'}`}
+            className={`flex-none rounded-full px-1.75 font-mono text-xs ${session.state === SessionState.Idle ? 'bg-neutral-200 text-neutral-700' : 'bg-accent-100 text-accent-700'}`}
           >
             {session.state.replace('_', ' ')}
           </span>
         </span>
         {session.branch && session.branch !== repoBranch && (
-          <span className="truncate font-mono text-[11px] text-neutral-700">{session.branch}</span>
+          <span className="truncate font-mono text-xs text-neutral-700">{session.branch}</span>
         )}
       </button>
       {isBusy(session) && <RowStop session={session} />}
@@ -181,19 +181,19 @@ function RepoGroup({
           onClick={onFold}
           className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-0 bg-transparent py-2 pl-2 text-left text-text"
         >
-          <span aria-hidden className="w-3 flex-none text-[10px] text-neutral-700">
+          <span aria-hidden className="w-3 flex-none text-xs text-neutral-700">
             {folded ? '▸' : '▾'}
           </span>
           <RepoIcon host={repo.host} size="xs" />
           <strong className="flex-none font-mono text-[13px]">{repo.name}</strong>
           <span
             title="The branch checked out in this Repo's folder now"
-            className="min-w-0 flex-1 truncate font-mono text-[11px] text-neutral-700"
+            className="min-w-0 flex-1 truncate font-mono text-xs text-neutral-700"
           >
             {repo.branch}
           </span>
-          {running > 0 && <span className="flex-none font-mono text-[11px] text-accent-700">{running} running</span>}
-          <span title="Sessions in this Repo" className="flex-none font-mono text-[11px] text-neutral-700">
+          {running > 0 && <span className="flex-none font-mono text-xs text-accent-700">{running} running</span>}
+          <span title="Sessions in this Repo" className="flex-none font-mono text-xs text-neutral-700">
             {sessions.length}
           </span>
         </button>
@@ -207,7 +207,7 @@ function RepoGroup({
               if (folded) onFold();
               setStarting(folded || !starting);
             }}
-            className="flex size-6.5 flex-none cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent text-base font-extrabold text-accent hover:bg-accent-100"
+            className="flex size-6.5 flex-none cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent text-base font-semibold text-accent hover:bg-accent-100"
           >
             +
           </button>
@@ -276,18 +276,18 @@ function AnonymousGroup({
           <span aria-hidden className="w-3 flex-none" />
           <span
             aria-hidden
-            className="inline-flex size-4.5 flex-none items-center justify-center rounded-[5px] border border-dashed border-neutral-500 text-[10px] text-neutral-700"
+            className="inline-flex size-4.5 flex-none items-center justify-center rounded-[5px] border border-dashed border-neutral-500 text-xs text-neutral-700"
           >
             ∅
           </span>
           <strong className="flex-none text-[13px]">No Repo</strong>
           <span
             title="Anonymous Sessions work in a folder of their own, not in an imported Repo. The agent may clone a repository there."
-            className="min-w-0 flex-1 truncate text-[11px] text-neutral-700"
+            className="min-w-0 flex-1 truncate text-xs text-neutral-700"
           >
             anonymous
           </span>
-          <span title="Anonymous Sessions" className="flex-none font-mono text-[11px] text-neutral-700">
+          <span title="Anonymous Sessions" className="flex-none font-mono text-xs text-neutral-700">
             {sessions.length}
           </span>
         </span>
@@ -297,7 +297,7 @@ function AnonymousGroup({
           title="New anonymous Session: no Repo, a folder of its own. Ask the agent to clone a repository or anything else."
           disabled={create.isPending}
           onClick={() => create.mutate({}, { onSuccess: (session) => onSelect(session.id) })}
-          className="flex size-6.5 flex-none cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent text-base font-extrabold text-accent hover:bg-accent-100"
+          className="flex size-6.5 flex-none cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent text-base font-semibold text-accent hover:bg-accent-100"
         >
           +
         </button>
@@ -408,7 +408,7 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
               className="w-full rounded-md border border-divider bg-card py-1.5 pr-2.5 pl-7.5 text-xs text-text outline-none focus:border-accent-400 focus:shadow-[0_0_0_3px_var(--color-accent-100)]"
             />
           </div>
-          <div className="flex items-center gap-2 px-0.5 text-[11px] text-neutral-700">
+          <div className="flex items-center gap-2 px-0.5 text-xs text-neutral-700">
             <span>
               <strong className="font-semibold text-text">{groups.length}</strong>{' '}
               {groups.length === 1 ? 'Repo' : 'Repos'}
@@ -420,9 +420,9 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
                 disabled={searching}
                 title={searching ? 'A search opens every match' : undefined}
                 onClick={() => saveFolded(allFolded ? [] : groups.map((group) => group.repo.id))}
-                className="ml-auto flex cursor-pointer items-center gap-1 rounded border-0 bg-transparent px-1 py-0.5 text-[11px] text-neutral-700 hover:bg-neutral-200 hover:text-text disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent"
+                className="ml-auto flex cursor-pointer items-center gap-1 rounded border-0 bg-transparent px-1 py-0.5 text-xs text-neutral-700 hover:bg-neutral-200 hover:text-text disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent"
               >
-                <span aria-hidden className={`text-[9px] transition-transform ${allFolded ? '' : 'rotate-90'}`}>
+                <span aria-hidden className={`text-xs transition-transform ${allFolded ? '' : 'rotate-90'}`}>
                   ▶
                 </span>
                 {allFolded ? 'Expand all' : 'Collapse all'}

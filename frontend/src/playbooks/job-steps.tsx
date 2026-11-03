@@ -14,7 +14,7 @@ export function ScratchTag() {
   return (
     <span
       title={SCRATCH_TIP}
-      className="flex-none rounded-full border border-warn/50 px-1.75 text-[10px] font-normal whitespace-nowrap text-warn"
+      className="flex-none rounded-full border border-warn/50 px-1.75 text-xs font-normal whitespace-nowrap text-warn"
     >
       scratch copy
     </span>
@@ -27,7 +27,7 @@ export function useTriggerPlaybook(trigger: PlaybookTrigger) {
 }
 
 const pill =
-  'rounded-full border border-line bg-card px-2.5 py-0.5 text-[11px] whitespace-nowrap text-text no-underline hover:border-accent-300 hover:bg-accent-100 hover:text-accent-900';
+  'rounded-full border border-line bg-card px-2.5 py-0.5 text-xs whitespace-nowrap text-text no-underline hover:border-accent-300 hover:bg-accent-100 hover:text-accent-900';
 
 /** A Playbook's name, opening it on the Playbooks page; a built-in or deleted one is plain text. */
 export function PlaybookLink({

@@ -23,7 +23,7 @@ import { PlaybookEditor } from './playbook-editor';
 
 function Caption({ children }: { children: ReactNode }) {
   return (
-    <div className="mt-3 mb-1 px-2 text-[10px] font-semibold tracking-[0.08em] text-neutral-600 uppercase first:mt-0">
+    <div className="mt-3 mb-1 px-2 text-xs font-semibold tracking-[0.08em] text-neutral-600 uppercase first:mt-0">
       {children}
     </div>
   );
@@ -169,7 +169,7 @@ export function PlaybooksView() {
                   }
                   disabled={open.builtin || full}
                   onClick={() => addStep(block)}
-                  className="size-5.5 flex-none cursor-pointer rounded-sm border-0 bg-transparent p-0 font-extrabold text-accent hover:bg-accent-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="size-5.5 flex-none cursor-pointer rounded-sm border-0 bg-transparent p-0 font-semibold text-accent hover:bg-accent-100 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   +
                 </button>
@@ -181,7 +181,7 @@ export function PlaybooksView() {
             </li>
           ))}
         </ul>
-        <p className="mx-1 mt-1.5 mb-0 text-[11px] text-neutral-700">
+        <p className="mx-1 mt-1.5 mb-0 text-xs text-neutral-700">
           Drag a block into Steps, or press +. The dropped copy is yours to edit. <ScratchTag /> steps write files or
           run commands in a scratch copy, never in your own checkout.
         </p>
@@ -309,8 +309,8 @@ function TriggersColumn(props: {
       >
         {!playbook.builtin && <Grip />}
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate font-bold">{playbook.name}</span>
-          <span className="truncate text-[11px] text-neutral-700">
+          <span className="truncate font-semibold">{playbook.name}</span>
+          <span className="truncate text-xs text-neutral-700">
             {playbook.builtin
               ? `built-in · ${stepCount(playbook)}`
               : playbook.triggers.map((trigger) => TRIGGER_LABELS[trigger].label).join(', ')}
@@ -341,7 +341,7 @@ function TriggersColumn(props: {
         <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
           {TABS.map((tab) => (
             <li key={tab} className="flex flex-col gap-1.5">
-              <div className="px-2 pt-1.5 pb-0.5 text-[11px] font-bold text-neutral-700">{tab}</div>
+              <div className="px-2 pt-1.5 pb-0.5 text-xs font-semibold text-neutral-700">{tab}</div>
               <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
                 {PLAYBOOK_TRIGGERS.filter((trigger) => TRIGGER_LABELS[trigger].tab === tab).map(slot)}
               </ul>

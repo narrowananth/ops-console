@@ -161,7 +161,7 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
             );
           }}
         >
-          <label className="flex-1 text-xs font-extrabold text-accent-900">
+          <label className="flex-1 text-xs font-semibold text-accent-900">
             {request.label}
             <input
               type="password"

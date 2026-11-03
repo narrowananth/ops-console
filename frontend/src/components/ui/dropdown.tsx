@@ -158,7 +158,7 @@ export function Dropdown<T extends string>({
           className={`fixed z-51 max-h-80 max-w-[calc(100vw-16px)] overflow-auto ${menu} ${listClassName}`}
         >
           {heading && (
-            <div className="px-2.5 pt-1.5 pb-1 text-[11px] font-semibold tracking-[0.06em] text-neutral-600 uppercase">
+            <div className="px-2.5 pt-1.5 pb-1 text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">
               {heading}
             </div>
           )}
@@ -177,13 +177,13 @@ export function Dropdown<T extends string>({
                 className={`flex w-full items-start gap-2.5 px-2.5 py-2 ${item(selected)}`}
               >
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span className={`text-[13px] break-words ${selected ? 'font-bold' : ''}`}>{option.label}</span>
+                  <span className={`text-[13px] break-words ${selected ? 'font-semibold' : ''}`}>{option.label}</span>
                   {option.description && (
-                    <span className="text-[11px] font-normal text-neutral-700">{option.description}</span>
+                    <span className="text-xs font-normal text-neutral-700">{option.description}</span>
                   )}
                 </span>
                 {option.value === defaultValue && (
-                  <span className="mt-0.5 rounded-full bg-neutral-200 px-1.5 text-[10px] whitespace-nowrap text-neutral-700">
+                  <span className="mt-0.5 rounded-full bg-neutral-200 px-1.5 text-xs whitespace-nowrap text-neutral-700">
                     default
                   </span>
                 )}

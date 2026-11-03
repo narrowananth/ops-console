@@ -13,10 +13,13 @@ export function useFollowLatest() {
   const following = useRef(true);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const [content, setContent] = useState<HTMLElement | null>(null);
+  // False once the operator has scrolled up to read; the "Scroll to end" button shows then.
+  const [atEnd, setAtEnd] = useState(true);
   useEffect(() => {
     if (!scroller || !content) return;
     const toEnd = () => {
       if (following.current) scroller.scrollTop = scroller.scrollHeight;
+      else setAtEnd(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= AT_END_PX);
     };
     const observer = new ResizeObserver(toEnd);
     observer.observe(scroller);
@@ -25,9 +28,30 @@ export function useFollowLatest() {
     return () => observer.disconnect();
   }, [scroller, content]);
   const onScroll = useCallback(() => {
-    if (scroller) following.current = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= AT_END_PX;
+    if (!scroller) return;
+    following.current = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= AT_END_PX;
+    setAtEnd(following.current);
   }, [scroller]);
-  return { scroller, content, setScroller, setContent, onScroll };
+  const scrollToEnd = useCallback(() => {
+    if (!scroller) return;
+    following.current = true;
+    scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+  }, [scroller]);
+  return { scroller, content, setScroller, setContent, onScroll, atEnd, scrollToEnd };
+}
+
+/** A button over the conversation's bottom edge while the operator is scrolled up; it jumps back to the newest message. */
+export function ScrollToEnd({ show, onClick }: { show: boolean; onClick: () => void }) {
+  if (!show) return null;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="absolute bottom-3 left-1/2 z-10 inline-flex -translate-x-1/2 cursor-pointer items-center gap-1.5 rounded-full border border-divider bg-card px-3.5 py-1.5 text-xs font-medium text-text shadow-md hover:bg-neutral-200"
+    >
+      <span aria-hidden="true">↓</span> Scroll to end
+    </button>
+  );
 }
 
 /** The first line of what a message says, for the map's label. */

@@ -89,7 +89,7 @@ function Welcome(props: { locked: boolean; pending: boolean; onStart: (line?: st
         </Button>
       </div>
       <div>
-        <div className="mb-2.5 text-[11px] font-semibold tracking-[0.06em] text-neutral-600 uppercase">Try asking</div>
+        <div className="mb-2.5 text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">Try asking</div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2.5">
           {EXAMPLES.map((example) => (
             <button
@@ -115,7 +115,7 @@ function Welcome(props: { locked: boolean; pending: boolean; onStart: (line?: st
 function Card({ title, aside, children }: { title: ReactNode; aside?: ReactNode; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-line bg-card px-4.5 py-4 shadow-sm">
-      <div className="flex items-center gap-2 text-[13px] font-extrabold">
+      <div className="flex items-center gap-2 text-[13px] font-semibold">
         {title}
         {aside}
       </div>
@@ -196,7 +196,7 @@ function Permissions({ locked }: { locked: boolean }) {
         <li aria-label="Full Disk Access" className="flex flex-col gap-2 rounded-lg bg-bg px-3 py-2.5">
           <div className="flex items-center gap-2">
             <strong className="flex-1">Full Disk Access</strong>
-            <span title={disk.tip} className={`rounded-full px-2 py-0.5 font-mono text-[11px] ${disk.className}`}>
+            <span title={disk.tip} className={`rounded-full px-2 py-0.5 font-mono text-xs ${disk.className}`}>
               {disk.glyph}
             </span>
           </div>
@@ -224,7 +224,7 @@ function Permissions({ locked }: { locked: boolean }) {
         <li aria-label="Keychain" className="flex flex-col gap-2 rounded-lg bg-bg px-3 py-2.5">
           <div className="flex items-center gap-2">
             <strong className="flex-1">Keychain</strong>
-            <span className="rounded-full bg-neutral-200 px-2 py-0.5 font-mono text-[11px] text-neutral-700">
+            <span className="rounded-full bg-neutral-200 px-2 py-0.5 font-mono text-xs text-neutral-700">
               ◐ asks each time
             </span>
           </div>
@@ -270,7 +270,7 @@ function StartAtLoginRow() {
     <li aria-label="Start at login" className="flex flex-col gap-2 rounded-lg bg-bg px-3 py-2.5">
       <div className="flex items-center gap-2">
         <strong className="flex-1">Start at login</strong>
-        <span title={look.tip} className={`rounded-full px-2 py-0.5 font-mono text-[11px] ${look.className}`}>
+        <span title={look.tip} className={`rounded-full px-2 py-0.5 font-mono text-xs ${look.className}`}>
           {look.glyph}
         </span>
       </div>

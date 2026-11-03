@@ -78,7 +78,7 @@ function SyncedTools({
         aria-pressed={scope.length === 0}
         title="Search every connected dev tool. Pick tools below to narrow the search."
         onClick={() => onScope([])}
-        className={`flex w-full items-center gap-2.5 px-2.5 py-2 text-xs font-bold ${item(scope.length === 0)}`}
+        className={`flex w-full items-center gap-2.5 px-2.5 py-2 text-xs font-semibold ${item(scope.length === 0)}`}
       >
         <span
           aria-hidden
@@ -97,11 +97,11 @@ function SyncedTools({
           </svg>
         </span>
         All connected
-        <span className="ml-auto rounded-full bg-neutral-200 px-2 font-mono text-[11px] font-normal text-neutral-700">
+        <span className="ml-auto rounded-full bg-neutral-200 px-2 font-mono text-xs font-normal text-neutral-700">
           {reachable.length}
         </span>
       </button>
-      <div className="mt-3 mb-1 px-2 text-[10px] font-semibold tracking-[0.08em] text-neutral-600 uppercase">
+      <div className="mt-3 mb-1 px-2 text-xs font-semibold tracking-[0.08em] text-neutral-600 uppercase">
         Connections
       </div>
       {ascending(connections, (connection) => connection.name).map((connection) => {
@@ -142,7 +142,7 @@ function SyncedTools({
             {connection.is_prod && (
               <span
                 title={PROD_TIP}
-                className="rounded-full bg-accent-100 px-1.75 py-px text-[9px] font-extrabold text-accent-700"
+                className="rounded-full bg-accent-100 px-1.75 py-px text-xs font-semibold text-accent-700"
               >
                 PROD
               </span>
@@ -252,7 +252,7 @@ function Terminal({
 
   return (
     <section className="term m-3 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl shadow-md">
-      <div className="flex items-center gap-2.5 border-b border-neutral-700 px-4 py-2 font-mono text-[11px] text-neutral-400">
+      <div className="flex items-center gap-2.5 border-b border-neutral-700 px-4 py-2 font-mono text-xs text-neutral-400">
         <span className="size-1.75 bg-neutral-300" />
         <span className="flex-1">
           ops-agent · dev tools · scope: <span className="text-neutral-100">{scopeLabel}</span>
@@ -449,7 +449,7 @@ export function DevToolsView() {
   // Oldest on the left, as terminal tabs open.
   const tabs = [...sessions.data].reverse();
   const tab = (selected: boolean) =>
-    `flex flex-none items-center gap-0.5 font-mono text-xs ${item(selected)} ${selected ? 'font-bold' : ''}`;
+    `flex flex-none items-center gap-0.5 font-mono text-xs ${item(selected)} ${selected ? 'font-semibold' : ''}`;
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -563,7 +563,7 @@ export function DevToolsView() {
               setDrafts((all) => [...all, blankDraft(id)]);
               setPicked(id);
             }}
-            className="flex size-7.5 flex-none cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-base font-extrabold text-accent hover:bg-accent-100"
+            className="flex size-7.5 flex-none cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-base font-semibold text-accent hover:bg-accent-100"
           >
             +
           </button>
@@ -637,7 +637,7 @@ function TerminalStop({ sessionId }: { sessionId: string }) {
         title="Stop the agent where it is"
         disabled={stop.isPending}
         onClick={() => stop.mutate()}
-        className="flex cursor-pointer items-center gap-1.5 rounded-sm border border-neutral-600 bg-transparent px-2 py-0.5 font-mono text-[11px] text-neutral-200 hover:border-accent-400 hover:text-accent-400 disabled:cursor-wait disabled:opacity-60"
+        className="flex cursor-pointer items-center gap-1.5 rounded-sm border border-neutral-600 bg-transparent px-2 py-0.5 font-mono text-xs text-neutral-200 hover:border-accent-400 hover:text-accent-400 disabled:cursor-wait disabled:opacity-60"
       >
         <StopIcon />
         stop

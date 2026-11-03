@@ -86,7 +86,7 @@ export function PlaybookEditor(props: {
               readOnly={readOnly}
               maxLength={PLAYBOOK_LIMITS.name}
               onChange={(event) => onChange({ ...working, name: event.target.value })}
-              className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 py-1 font-heading text-lg font-extrabold text-text outline-none hover:border-divider focus:border-accent-400 read-only:hover:border-transparent"
+              className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 py-1 font-heading text-lg font-semibold text-text outline-none hover:border-divider focus:border-accent-400 read-only:hover:border-transparent"
             />
             {!readOnly && (
               <>
@@ -196,10 +196,10 @@ export function PlaybookEditor(props: {
             <Hint
               text={`What the agent must always do or never do. Sent with every agent turn this Playbook runs, steps and chats alike. Up to ${PLAYBOOK_LIMITS.rules} characters.`}
             />
-            <span className="text-[11px] text-neutral-700">Every turn, after the console's own instructions</span>
+            <span className="text-xs text-neutral-700">Every turn, after the console's own instructions</span>
             <span
               title="Characters used, out of the most Rules can hold"
-              className="ml-auto font-mono text-[11px] text-neutral-700"
+              className="ml-auto font-mono text-xs text-neutral-700"
             >
               {working.rules.length} / {PLAYBOOK_LIMITS.rules}
             </span>
@@ -213,7 +213,7 @@ export function PlaybookEditor(props: {
             onChange={(event) => onChange({ ...working, rules: event.target.value })}
             className={`${field} field-sizing-content max-h-[50vh] min-h-28 resize-y overflow-y-auto text-[13px] leading-relaxed`}
           />
-          <details className="mt-1.5 text-[11px] text-neutral-700">
+          <details className="mt-1.5 text-xs text-neutral-700">
             <summary className="cursor-pointer">
               Every run also gets the console's pull request description rule, before these rules
             </summary>
@@ -227,7 +227,7 @@ export function PlaybookEditor(props: {
           <div className="mb-1.5 flex items-baseline gap-2">
             <h2 className="m-0 text-sm">Branch</h2>
             <Hint text="Branch names split by commas, tried in order. Verify and Fix read the newest commit of the first one origin has, so they see what is deployed, not your checkout. Blank: the Repo's default branch." />
-            <span className="text-[11px] text-neutral-700">
+            <span className="text-xs text-neutral-700">
               Where Verify and Fix read the code: the first of these origin has, fetched first
             </span>
           </div>
@@ -254,7 +254,7 @@ export function PlaybookEditor(props: {
           />
           <div className="flex flex-col">
             <h2 className="m-0 text-sm">Jira ticket</h2>
-            <span className="text-[11px] text-neutral-700">
+            <span className="text-xs text-neutral-700">
               Fix makes a Jira ticket first, when Jira is connected, and names the branch after it. Off: the branch is
               fix/&lt;name&gt;.
             </span>
@@ -265,10 +265,10 @@ export function PlaybookEditor(props: {
           <div className="mb-2 flex items-baseline gap-2">
             <h2 className="m-0 text-sm">Steps</h2>
             <Hint text="Each step runs as its own agent turn, top to bottom, and ends done, skipped or failed. A failed step stops the run; Retry or Skip it from where the run shows." />
-            <span className="text-[11px] text-neutral-700">Each step is its own agent turn, in order</span>
+            <span className="text-xs text-neutral-700">Each step is its own agent turn, in order</span>
             <span
               title="Steps used, out of the most a Playbook can hold"
-              className="ml-auto font-mono text-[11px] text-neutral-700"
+              className="ml-auto font-mono text-xs text-neutral-700"
             >
               {steps.length} / {PLAYBOOK_LIMITS.steps}
             </span>
@@ -420,7 +420,7 @@ function StepCard(props: {
             <Grip />
           </span>
         )}
-        <span className="mt-1 flex size-5.5 flex-none items-center justify-center rounded-full bg-neutral-200 text-[11px] font-bold">
+        <span className="mt-1 flex size-5.5 flex-none items-center justify-center rounded-full bg-neutral-200 text-xs font-semibold">
           {index + 1}
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -431,10 +431,10 @@ function StepCard(props: {
               readOnly={readOnly}
               maxLength={PLAYBOOK_LIMITS.title}
               onChange={(event) => props.onChange({ title: event.target.value })}
-              className={`${field} text-[13px] font-bold`}
+              className={`${field} text-[13px] font-semibold`}
             />
             {step.block === StepBlock.Custom && !readOnly ? (
-              <label title={SCRATCH_TIP} className="flex flex-none items-center gap-1 text-[11px] text-neutral-700">
+              <label title={SCRATCH_TIP} className="flex flex-none items-center gap-1 text-xs text-neutral-700">
                 <input
                   type="checkbox"
                   checked={step.writes}

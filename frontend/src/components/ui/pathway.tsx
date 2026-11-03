@@ -65,9 +65,9 @@ export function Pathway({
                 <span
                   className={
                     step.state === 'running'
-                      ? 'font-bold text-text'
+                      ? 'font-semibold text-text'
                       : step.state === 'failed'
-                        ? 'font-bold text-accent-700'
+                        ? 'font-semibold text-accent-700'
                         : step.state === 'pending'
                           ? 'text-neutral-700'
                           : 'text-text'
@@ -90,21 +90,21 @@ export function Pathway({
 function StateTag({ state }: { state: PathwayState }) {
   if (state === 'running') {
     return (
-      <span className="rounded-full bg-accent-100 px-2 py-0.5 text-[10px] font-semibold tracking-[0.04em] text-accent-700 uppercase">
+      <span className="rounded-full bg-accent-100 px-2 py-0.5 text-xs font-semibold tracking-[0.04em] text-accent-700 uppercase">
         In progress
       </span>
     );
   }
   if (state === 'failed') {
     return (
-      <span className="rounded-full bg-accent-700 px-2 py-0.5 text-[10px] font-semibold tracking-[0.04em] text-white uppercase">
+      <span className="rounded-full bg-accent-700 px-2 py-0.5 text-xs font-semibold tracking-[0.04em] text-white uppercase">
         Failed
       </span>
     );
   }
   if (state === 'skipped') {
     return (
-      <span className="rounded-full border border-dashed border-neutral-400 px-2 py-0.5 text-[10px] font-semibold tracking-[0.04em] text-neutral-600 uppercase">
+      <span className="rounded-full border border-dashed border-neutral-400 px-2 py-0.5 text-xs font-semibold tracking-[0.04em] text-neutral-600 uppercase">
         Skipped
       </span>
     );
@@ -164,13 +164,13 @@ function Node({ state, number }: { state: PathwayState; number: number }) {
   }
   if (state === 'skipped') {
     return (
-      <span aria-hidden className={`${base} border border-dashed border-neutral-400 text-[11px] text-neutral-500`}>
+      <span aria-hidden className={`${base} border border-dashed border-neutral-400 text-xs text-neutral-500`}>
         –
       </span>
     );
   }
   return (
-    <span aria-hidden className={`${base} border border-divider bg-card text-[11px] font-semibold text-neutral-600`}>
+    <span aria-hidden className={`${base} border border-divider bg-card text-xs font-semibold text-neutral-600`}>
       {number}
     </span>
   );
@@ -199,7 +199,7 @@ export function PathwayProgress({ steps }: { steps: PathwayStep[] }) {
           style={{ width: `${Math.max(share, running || failed ? 4 : 0)}%` }}
         />
       </div>
-      <span className="font-mono text-[11px] whitespace-nowrap text-neutral-700">
+      <span className="font-mono text-xs whitespace-nowrap text-neutral-700">
         {passed} of {steps.length}
       </span>
     </div>
@@ -217,9 +217,7 @@ const PILL: Record<PathwayState, string> = {
 /** A job's status in its card's header, tinted like its path: running, done, failed, or quiet. */
 export function StatusPill({ state, children }: { state: PathwayState; children: ReactNode }) {
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${PILL[state]}`}
-    >
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold ${PILL[state]}`}>
       {state === 'running' && <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-accent" />}
       {children}
     </span>

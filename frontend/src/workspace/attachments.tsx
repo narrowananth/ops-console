@@ -84,7 +84,7 @@ export function AttachmentChips({ pending, onRemove }: { pending: Pending[]; onR
             <PaperClip />
           )}
           <span className="min-w-0 flex-1 truncate">{item.file.name || 'pasted'}</span>
-          <span className="flex-none font-mono text-[10px] text-neutral-700">
+          <span className="flex-none font-mono text-xs text-neutral-700">
             {item.error ? 'failed' : item.saved ? size(item.saved.size) : 'uploading…'}
           </span>
           <button

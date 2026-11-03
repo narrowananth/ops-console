@@ -32,14 +32,14 @@ export function UpdateCard() {
   if (state.status === UpdateStatus.Updating) {
     return (
       <section aria-label="Update" className={card}>
-        <div className="flex items-center gap-2 text-xs font-extrabold">
+        <div className="flex items-center gap-2 text-xs font-semibold">
           <span
             aria-hidden
             className="size-3 flex-none animate-spin rounded-full border-2 border-accent-300 border-t-accent"
           />
           Updating to {latest}…
         </div>
-        <p className="m-0 mt-1 text-[11px] text-accent-800">
+        <p className="m-0 mt-1 text-xs text-accent-800">
           Downloading, then the console restarts. This page reconnects by itself.
         </p>
       </section>
@@ -48,8 +48,8 @@ export function UpdateCard() {
   if (state.status === UpdateStatus.Waiting) {
     return (
       <section aria-label="Update" className={card}>
-        <div className="text-xs font-extrabold">{latest} waits for agent runs</div>
-        <p className="m-0 mt-1 text-[11px] text-accent-800">
+        <div className="text-xs font-semibold">{latest} waits for agent runs</div>
+        <p className="m-0 mt-1 text-xs text-accent-800">
           It installs once {runs(state.runs_going)} {state.runs_going === 1 ? 'finishes' : 'finish'}.
         </p>
         <div className="mt-2 flex gap-1.5">
@@ -69,8 +69,8 @@ export function UpdateCard() {
   if (state.status === UpdateStatus.Failed) {
     return (
       <section aria-label="Update" className={card}>
-        <div className="text-xs font-extrabold">Update to {latest} failed</div>
-        <p role="alert" className="m-0 mt-1 text-[11px] break-words text-accent-800">
+        <div className="text-xs font-semibold">Update to {latest} failed</div>
+        <p role="alert" className="m-0 mt-1 text-xs break-words text-accent-800">
           {state.error}
         </p>
         <div className="mt-2 flex gap-1.5">
@@ -85,18 +85,18 @@ export function UpdateCard() {
 
   return (
     <section aria-label="Update" className={card}>
-      <div className="flex items-center justify-between gap-2 text-xs font-extrabold">
+      <div className="flex items-center justify-between gap-2 text-xs font-semibold">
         Update available
-        <span className="rounded-full border border-accent-300 bg-white px-2 py-px font-mono text-[10px] font-bold text-accent-700">
+        <span className="rounded-full border border-accent-300 bg-white px-2 py-px font-mono text-xs font-semibold text-accent-700">
           {latest}
         </span>
       </div>
-      <p className="m-0 mt-0.5 text-[11px] text-accent-800">
+      <p className="m-0 mt-0.5 text-xs text-accent-800">
         You're on {v(state.current)}
         {state.latest.published_at ? ` · released ${ago(state.latest.published_at)}` : ''}
       </p>
       {confirming ? (
-        <div role="alert" className="mt-2 rounded-md border border-accent-300 bg-white px-2.5 py-2 text-[11.5px]">
+        <div role="alert" className="mt-2 rounded-md border border-accent-300 bg-white px-2.5 py-2 text-xs">
           <b>{runs(state.runs_going)} going.</b> They stop when the console restarts.
           <div className="mt-1.5 flex gap-1.5">
             <button type="button" className={primary} onClick={() => start(UpdateWhen.Now)}>
@@ -123,7 +123,7 @@ export function UpdateCard() {
         </div>
       )}
       {install.error && (
-        <p role="alert" className="m-0 mt-1.5 text-[11px] text-accent-700">
+        <p role="alert" className="m-0 mt-1.5 text-xs text-accent-700">
           {install.error.message}
         </p>
       )}
@@ -133,7 +133,7 @@ export function UpdateCard() {
 
 const card = 'rounded-lg border border-accent-300 bg-accent-100 px-3 py-2.5 text-accent-900';
 const primary =
-  'inline-flex h-7.5 flex-1 cursor-pointer items-center justify-center rounded-md border-0 bg-accent px-2.5 text-xs font-bold text-white hover:bg-accent-600 disabled:opacity-60';
+  'inline-flex h-7.5 flex-1 cursor-pointer items-center justify-center rounded-md border-0 bg-accent px-2.5 text-xs font-semibold text-white hover:bg-accent-600 disabled:opacity-60';
 const secondary =
   'inline-flex h-7.5 cursor-pointer items-center justify-center rounded-md border border-accent-300 bg-white px-2.5 text-xs text-accent-700 no-underline hover:bg-accent-100 hover:text-accent-700 disabled:opacity-60';
 
@@ -170,8 +170,8 @@ export function VersionLine({ collapsed }: { collapsed: boolean }) {
         onClick={() => setOpen(!open)}
         className={
           collapsed
-            ? 'relative inline-flex h-8.5 w-full cursor-pointer items-center justify-center border border-line bg-card font-mono text-[10px] text-text hover:bg-neutral-200'
-            : 'flex w-full cursor-pointer items-center justify-center gap-1.5 border-0 bg-transparent px-0.5 text-[11px] text-neutral-700 hover:text-text'
+            ? 'relative inline-flex h-8.5 w-full cursor-pointer items-center justify-center border border-line bg-card font-mono text-xs text-text hover:bg-neutral-200'
+            : 'flex w-full cursor-pointer items-center justify-center gap-1.5 border-0 bg-transparent px-0.5 text-xs text-neutral-700 hover:text-text'
         }
       >
         {collapsed ? (
@@ -228,7 +228,7 @@ function VersionPanel({ state }: { state: UpdateState }) {
       aria-label="Ops Console version"
       className="absolute bottom-0 left-full z-50 ml-2 flex w-80 flex-col overflow-hidden rounded-xl border border-line bg-card text-xs shadow-lg"
     >
-      <header className="flex justify-between border-b border-divider px-4 py-2.5 font-extrabold">
+      <header className="flex justify-between border-b border-divider px-4 py-2.5 font-semibold">
         Ops Console <span className="font-mono font-semibold">{v(state.current)}</span>
       </header>
       <dl className="m-0 grid grid-cols-[84px_1fr] gap-x-2.5 gap-y-1.5 px-4 py-3">
@@ -265,8 +265,8 @@ function VersionPanel({ state }: { state: UpdateState }) {
       )}
       {latest && ready && (
         <div className="mx-4 mb-3 max-h-48 overflow-y-auto rounded-md bg-neutral-200 px-3 py-2.5">
-          <div className="mb-1 font-bold">What's new in {v(latest.version)}</div>
-          {latest.notes && <Markdown source={latest.notes} className="text-[12px]" />}
+          <div className="mb-1 font-semibold">What's new in {v(latest.version)}</div>
+          {latest.notes && <Markdown source={latest.notes} className="text-xs" />}
           <a className="mt-1.5 inline-block" href={latest.url} target="_blank" rel="noreferrer">
             Full release notes ↗
           </a>
@@ -275,8 +275,8 @@ function VersionPanel({ state }: { state: UpdateState }) {
       {!dev && (
         <div className="flex items-center justify-between gap-3 border-t border-divider px-4 py-2.5">
           <div>
-            <div className="font-bold">Update automatically</div>
-            <div className="text-[11px] text-neutral-700">Installs new versions when no agent runs</div>
+            <div className="font-semibold">Update automatically</div>
+            <div className="text-xs text-neutral-700">Installs new versions when no agent runs</div>
           </div>
           <Toggle label="Update automatically" checked={state.auto_update} onChange={(on) => auto.mutate(on)} />
         </div>
@@ -318,12 +318,12 @@ export function UpdateNotice() {
     >
       <span
         aria-hidden
-        className="grid size-6.5 flex-none place-items-center rounded-full bg-ok/12 font-extrabold text-ok"
+        className="grid size-6.5 flex-none place-items-center rounded-full bg-ok/12 font-semibold text-ok"
       >
         ✓
       </span>
       <div className="min-w-0 flex-1">
-        <div className="font-bold">Updated to {v(state.current)}</div>
+        <div className="font-semibold">Updated to {v(state.current)}</div>
         <div className="mt-0.5 text-neutral-700">
           {state.updated.automatic ? `Updated automatically at ${at}` : `From ${v(state.updated.from)} at ${at}`}.{' '}
           <a href={`${RELEASES}/tag/v${state.current}`} target="_blank" rel="noreferrer">

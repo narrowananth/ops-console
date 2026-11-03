@@ -25,7 +25,7 @@ export function SeverityBadge({ severity }: { severity: Severity }) {
   return (
     <span
       title={SEVERITY_TIP[severity]}
-      className={`inline-flex flex-none items-center rounded-full px-2 py-px text-[10px] font-extrabold tracking-[0.06em] uppercase ${TONE[severity]}`}
+      className={`inline-flex flex-none items-center rounded-full px-2 py-px text-xs font-semibold tracking-[0.06em] uppercase ${TONE[severity]}`}
     >
       {SEVERITY_LABEL[severity]}
     </span>

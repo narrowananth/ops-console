@@ -114,7 +114,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                 }
                 aria-pressed={mine === value}
                 onClick={() => setMine(value)}
-                className={`flex-1 cursor-pointer rounded-md border-0 py-1 text-xs transition-colors ${mine === value ? 'bg-card font-bold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
+                className={`flex-1 cursor-pointer rounded-md border-0 py-1 text-xs transition-colors ${mine === value ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
               >
                 {label}
               </button>
@@ -167,7 +167,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
           />
         </div>
         {pulls.data && pulls.data.data.length > 0 && (
-          <div className="flex items-center gap-2 px-0.5 text-[11px] text-neutral-700">
+          <div className="flex items-center gap-2 px-0.5 text-xs text-neutral-700">
             <span>
               <strong className="font-semibold text-text">{pulls.data.data.length}</strong>{' '}
               {pulls.data.data.length === 1 ? 'pull request' : 'pull requests'} in{' '}
@@ -178,9 +178,9 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
               <button
                 type="button"
                 onClick={() => fold.set(allFolded ? [] : projects.map((project) => project.key))}
-                className="ml-auto flex cursor-pointer items-center gap-1 rounded border-0 bg-transparent px-1 py-0.5 text-[11px] text-neutral-700 hover:bg-neutral-200 hover:text-text"
+                className="ml-auto flex cursor-pointer items-center gap-1 rounded border-0 bg-transparent px-1 py-0.5 text-xs text-neutral-700 hover:bg-neutral-200 hover:text-text"
               >
-                <span aria-hidden className={`text-[9px] transition-transform ${allFolded ? '' : 'rotate-90'}`}>
+                <span aria-hidden className={`text-xs transition-transform ${allFolded ? '' : 'rotate-90'}`}>
                   ▶
                 </span>
                 {allFolded ? 'Expand all' : 'Collapse all'}
@@ -218,11 +218,11 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                       type="button"
                       aria-expanded={!isFolded(project.key)}
                       onClick={() => fold.toggle(project.key)}
-                      className="flex w-full cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-[12px] font-bold text-text hover:bg-neutral-200"
+                      className="flex w-full cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-xs font-semibold text-text hover:bg-neutral-200"
                     >
                       <span
                         aria-hidden
-                        className={`flex-none text-[10px] text-neutral-600 transition-transform ${isFolded(project.key) ? '' : 'rotate-90'}`}
+                        className={`flex-none text-xs text-neutral-600 transition-transform ${isFolded(project.key) ? '' : 'rotate-90'}`}
                       >
                         ▶
                       </span>
@@ -231,19 +231,19 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                       {project.repoId ? (
                         <span
                           title="Imported as a Repo: its pull requests open here in the console"
-                          className="flex-none rounded-full bg-accent-100 px-1.75 text-[10px] font-semibold text-accent-900"
+                          className="flex-none rounded-full bg-accent-100 px-1.75 text-xs font-semibold text-accent-900"
                         >
                           local · {repoName(project.repoId)}
                         </span>
                       ) : (
                         <span
                           title="Not imported as a Repo: its pull requests open on the Git host. Import it in Repos to review them here."
-                          className="flex-none rounded-full bg-neutral-200 px-1.75 text-[10px] font-normal text-neutral-700"
+                          className="flex-none rounded-full bg-neutral-200 px-1.75 text-xs font-normal text-neutral-700"
                         >
                           not imported
                         </span>
                       )}
-                      <span className="ml-auto flex-none font-mono text-[11px] font-normal text-neutral-700">
+                      <span className="ml-auto flex-none font-mono text-xs font-normal text-neutral-700">
                         {project.prs.length}
                       </span>
                     </button>
@@ -256,7 +256,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                         const active = here && selected?.repoId === repoId && selected.number === pr.number;
                         const body = (
                           <>
-                            <span className="flex w-full items-center gap-1.5 font-bold">
+                            <span className="flex w-full items-center gap-1.5 font-semibold">
                               <span className="min-w-0 truncate">
                                 #{pr.number} {pr.title}
                               </span>
@@ -266,7 +266,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                                 </span>
                               )}
                             </span>
-                            <span className="flex flex-wrap gap-x-2 font-mono text-[11px] text-neutral-700">
+                            <span className="flex flex-wrap gap-x-2 font-mono text-xs text-neutral-700">
                               <span>{pr.author}</span>
                               <span className="truncate">{pr.branch}</span>
                               {pr.by_agent && <span title="A Session in the console worked on this branch">agent</span>}

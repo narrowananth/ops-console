@@ -29,7 +29,7 @@ function Tiers({ alerts }: { alerts: Alert[] }) {
           <span
             key={severity}
             title={`${count} open ${severity} ${count === 1 ? 'Alert' : 'Alerts'}`}
-            className="flex items-center gap-1 font-mono text-[10px] text-neutral-700"
+            className="flex items-center gap-1 font-mono text-xs text-neutral-700"
           >
             <span aria-hidden className={`size-1.5 rounded-full ${TIER_DOT[severity]}`} />
             {count}
@@ -111,9 +111,9 @@ export function ServicesPane({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-col gap-2 border-b border-divider px-3 py-3">
         <div className="flex items-baseline justify-between px-0.5">
-          <h2 className="m-0 text-[13px] font-extrabold">Services</h2>
+          <h2 className="m-0 text-[13px] font-semibold">Services</h2>
           <span
-            className="text-[11px] text-neutral-700"
+            className="text-xs text-neutral-700"
             title="Each Service in Datadog with failing requests in the range, across every env. Pick one to see its logs; tick it to Scan it."
           >
             Datadog requests failing, HTTP 400+
@@ -131,7 +131,7 @@ export function ServicesPane({
               aria-pressed={scope.range === value}
               title={`Read the last ${value} of Datadog logs`}
               onClick={() => scope.pickRange(value)}
-              className={`flex-1 cursor-pointer rounded-md border-0 py-1 font-mono text-[11px] transition-colors ${scope.range === value ? 'bg-card font-bold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
+              className={`flex-1 cursor-pointer rounded-md border-0 py-1 font-mono text-xs transition-colors ${scope.range === value ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
             >
               {value}
             </button>
@@ -140,7 +140,7 @@ export function ServicesPane({
         {known.data ? (
           <StatusPicker known={known.data} scope={scope} />
         ) : (
-          <span className="px-0.5 text-[11px] text-neutral-700">
+          <span className="px-0.5 text-xs text-neutral-700">
             {!connected
               ? 'Datadog is not connected.'
               : known.isError
@@ -180,8 +180,8 @@ export function ServicesPane({
               onClick={() => onSelect(null)}
               className={`flex w-full items-center gap-2 py-2 pr-2.5 pl-8 ${item(selected === null)}`}
             >
-              <strong className="text-[12px]">All Services</strong>
-              <span className="ml-auto font-mono text-[11px] text-neutral-700">{rows.length}</span>
+              <strong className="text-xs">All Services</strong>
+              <span className="ml-auto font-mono text-xs text-neutral-700">{rows.length}</span>
             </button>
           </li>
           {shown.map((row) => {
@@ -204,9 +204,9 @@ export function ServicesPane({
                   className={`flex w-full flex-col gap-1 py-2 pr-2.5 pl-8 ${item(picked)}`}
                 >
                   <span className="flex w-full items-center gap-2">
-                    <span className="min-w-0 truncate text-[12px] font-semibold">{row.name}</span>
+                    <span className="min-w-0 truncate text-xs font-semibold">{row.name}</span>
                     <span
-                      className="ml-auto flex-none font-mono text-[11px] text-neutral-700"
+                      className="ml-auto flex-none font-mono text-xs text-neutral-700"
                       title={
                         row.errors === null
                           ? 'No failing requests in this range. It is listed for its open Alerts from earlier Scans.'
@@ -233,15 +233,15 @@ export function ServicesPane({
           })}
         </ul>
         {listed.isPending && connected && (
-          <p className="m-0 px-4 py-2 text-[11px] text-neutral-700">Reading Services from Datadog…</p>
+          <p className="m-0 px-4 py-2 text-xs text-neutral-700">Reading Services from Datadog…</p>
         )}
         {listed.isError && (
-          <p role="alert" className="m-0 px-4 py-2 text-[11px] text-accent-700">
+          <p role="alert" className="m-0 px-4 py-2 text-xs text-accent-700">
             Could not read Services: {listed.error.message}
           </p>
         )}
         {listed.isSuccess && rows.length === 0 && (
-          <p className="m-0 px-4 py-2 text-[11px] text-neutral-700">
+          <p className="m-0 px-4 py-2 text-xs text-neutral-700">
             No failing requests in {scope.range} for these status codes.
           </p>
         )}
@@ -279,25 +279,25 @@ export function ServicesPane({
             type="button"
             onClick={() => setTicked([])}
             title="Clear the ticks. The Scan then reads the picked Service, or every listed one."
-            className="cursor-pointer self-start border-0 bg-transparent p-0 text-[11px] text-neutral-700 underline hover:text-text"
+            className="cursor-pointer self-start border-0 bg-transparent p-0 text-xs text-neutral-700 underline hover:text-text"
           >
             Untick {toScan.length === 1 ? toScan[0] : `all ${toScan.length}`}
           </button>
         )}
         {scan.isError && (
-          <span role="alert" className="text-[11px] text-accent-700">
+          <span role="alert" className="text-xs text-accent-700">
             {scan.error.message}
           </span>
         )}
         {last && (last.status === ScanStatus.Failed || last.status === ScanStatus.RateLimited) ? (
-          <span role="status" className="text-[11px] text-accent-700">
+          <span role="status" className="text-xs text-accent-700">
             The last Scan{' '}
             {last.status === ScanStatus.RateLimited ? 'hit a Datadog rate limit' : 'could not read Datadog'}.{' '}
             {lastGood?.finished_at ? `Last good one ${ago(lastGood.finished_at)}.` : 'No good Scan yet.'}
           </span>
         ) : (
           last?.finished_at && (
-            <span className="text-[11px] text-neutral-700">
+            <span className="text-xs text-neutral-700">
               Last Scan {ago(last.finished_at)}: {last.window_size} of{' '}
               {last.services ? last.services.join(', ') : 'every Service'},{' '}
               {last.status_codes.length > 0 ? `HTTP ${last.status_codes.join(', ')}` : 'HTTP 400+'}

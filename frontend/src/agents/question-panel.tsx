@@ -96,18 +96,18 @@ export function QuestionPanel({
     >
       <div className="flex items-center gap-2">
         {question.header && (
-          <span className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold tracking-wide text-white uppercase">
+          <span className="rounded-full bg-accent px-2 py-0.5 text-xs font-semibold tracking-wide text-white uppercase">
             {question.header}
           </span>
         )}
-        <span className="text-[10px] tracking-[0.08em] text-neutral-700 uppercase">The agent asks</span>
+        <span className="text-xs tracking-[0.08em] text-neutral-700 uppercase">The agent asks</span>
         {questions.length > 1 && (
           <span className="ml-auto text-xs text-neutral-700">
             {at + 1} / {questions.length}
           </span>
         )}
       </div>
-      <div className="text-sm font-bold">
+      <div className="text-sm font-semibold">
         <Markdown source={question.text} />
       </div>
       <fieldset className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0">
@@ -133,7 +133,7 @@ export function QuestionPanel({
                 <span className="text-sm font-semibold">{option.label}</span>
                 {option.description && <span className="text-xs text-neutral-700">{option.description}</span>}
               </span>
-              {index < 9 && <kbd className="font-mono text-[11px] text-neutral-600">{index + 1}</kbd>}
+              {index < 9 && <kbd className="font-mono text-xs text-neutral-600">{index + 1}</kbd>}
             </label>
           );
         })}
