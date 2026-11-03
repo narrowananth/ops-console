@@ -20,6 +20,7 @@ export function Dropdown<T extends string>({
   opens = variant === 'chip' ? 'up' : 'down',
   align = variant === 'chip' && opens === 'up' ? 'left' : 'right',
   heading,
+  searchable = false,
   defaultValue,
   title,
   disabled = false,
@@ -38,6 +39,8 @@ export function Dropdown<T extends string>({
   /** Which edge of the button the list lines up with. */
   align?: 'left' | 'right';
   heading?: string;
+  /** A search box tops the list and narrows it by label and description. */
+  searchable?: boolean;
   /** Tagged `default` in the list. */
   defaultValue?: T;
   title?: string;
@@ -48,9 +51,14 @@ export function Dropdown<T extends string>({
   const list = useRef<HTMLDivElement>(null);
   // The list renders hidden first, so its height is known before it picks a side.
   const [measured, setMeasured] = useState(false);
+  const [query, setQuery] = useState('');
   const open = place !== null;
   const current = options.find((option) => option.value === value);
   const chip = variant === 'chip';
+  const needle = query.trim().toLowerCase();
+  const shown = needle
+    ? options.filter((option) => `${option.label} ${option.description ?? ''}`.toLowerCase().includes(needle))
+    : options;
 
   useEffect(() => {
     if (!open) return;
@@ -100,6 +108,7 @@ export function Dropdown<T extends string>({
     const box = trigger.current?.getBoundingClientRect();
     if (open || !box) return setPlace(null);
     setMeasured(false);
+    setQuery('');
     setPlace({
       ...(opens === 'up' ? { bottom: window.innerHeight - box.top + 6 } : { top: box.bottom + 4 }),
       ...(align === 'left' ? { left: box.left } : { right: window.innerWidth - box.right }),
@@ -162,7 +171,20 @@ export function Dropdown<T extends string>({
               {heading}
             </div>
           )}
-          {options.map((option) => {
+          {searchable && (
+            <input
+              type="search"
+              aria-label={`Search ${label}`}
+              placeholder="Search"
+              value={query}
+              // biome-ignore lint/a11y/noAutofocus: the list opens to be searched
+              autoFocus
+              onChange={(event) => setQuery(event.target.value)}
+              className="sticky top-0 z-10 mb-1 block w-full border border-divider bg-bg px-2.5 py-1.5 text-[13px] text-text outline-none focus:border-accent-400"
+            />
+          )}
+          {shown.length === 0 && <div className="px-2.5 py-2 text-xs text-neutral-700">No match</div>}
+          {shown.map((option) => {
             const selected = option.value === value;
             return (
               <button

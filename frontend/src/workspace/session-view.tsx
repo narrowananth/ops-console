@@ -50,9 +50,16 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const working = sessionState === SessionState.Working || sessionState === SessionState.WaitingApproval;
   // A pull request the agent opened or named here wins over the one on the Session's branch.
   const named = pullRequestNamedIn(messages.data ?? []);
-  const pull =
+  const listed =
     pulls.data?.data.find((candidate) => candidate.number === named?.number) ??
     pulls.data?.data.find((candidate) => candidate.branch === session?.branch);
+  const pullNumber = listed?.number ?? named?.number;
+  // Both ways in: the console's Pull requests tab for the Session's Repo, and the Git host's page.
+  const internalPull =
+    session?.kind === SessionKind.Repo && session.repo_id !== null && pullNumber !== undefined
+      ? { repo_id: session.repo_id, number: pullNumber }
+      : null;
+  const externalPull = listed ? { url: listed.url, number: listed.number } : named;
   useEffect(() => {
     if (gone) onGone();
   }, [gone, onGone]);
@@ -113,26 +120,25 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             {session.branch}
           </span>
         )}
-        {pull?.repo_id ? (
+        {internalPull && (
           <Link
-            to={pullRequestPath(pull.repo_id, pull.number)}
-            title={`Open pull request #${pull.number}: ${pull.title}`}
+            to={pullRequestPath(internalPull.repo_id, internalPull.number)}
+            title={`Open pull request #${internalPull.number} in the Workspace's Pull requests tab`}
             className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
           >
-            PR #{pull.number} →
+            PR #{internalPull.number} →
           </Link>
-        ) : (
-          named && (
-            <a
-              href={named.url}
-              target="_blank"
-              rel="noreferrer"
-              title={`Open pull request #${named.number} on the Git host`}
-              className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
-            >
-              PR #{named.number} ↗
-            </a>
-          )
+        )}
+        {externalPull && (
+          <a
+            href={externalPull.url}
+            target="_blank"
+            rel="noreferrer"
+            title={`Open pull request #${externalPull.number} on the Git host`}
+            className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
+          >
+            #{externalPull.number} on host ↗
+          </a>
         )}
         {session.alert_id && (
           <Link

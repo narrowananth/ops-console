@@ -3,10 +3,11 @@ import { useState } from 'react';
 import { Button, Spinner } from '../components/ui/button';
 import { DiffLines } from '../components/ui/diff';
 import { Markdown } from '../components/ui/markdown';
-import { Pathway, type PathwayState } from '../components/ui/pathway';
+import type { PathwayState } from '../components/ui/pathway';
 import { ComparisonView, ResultView } from '../devtools/result-tables';
 import { COPY_FAILED, copyLabel, useCopy } from '../lib/clipboard';
 import { asReport, ReportDocument } from './report-document';
+import { StepRun } from './step-run';
 
 /** One part of a Session's transcript: text, a tool step, a diff, a code block, a question or a Dev tools table. */
 function PartView({ part }: { part: Part }) {
@@ -16,7 +17,7 @@ function PartView({ part }: { part: Part }) {
     const report = asReport(part.text);
     return report ? <ReportDocument report={report} /> : <Markdown source={part.text} />;
   }
-  if (part.kind === 'step') return <div className="font-mono text-xs text-neutral-700">{part.text}</div>;
+  if (part.kind === 'step') return null;
   if (part.kind === 'code') {
     const report = asReport(part.text);
     if (report) return <ReportDocument report={report} />;
@@ -202,18 +203,7 @@ function MessageParts({ message }: { message: Message }) {
     const tail = index === groups.length - 1;
     const end: PathwayState =
       tail && message.status === 'streaming' ? 'running' : tail && message.status === 'failed' ? 'failed' : 'done';
-    return (
-      <Pathway
-        key={group.at}
-        compact
-        label="Agent steps"
-        steps={group.parts.map((part, position) => ({
-          key: String(position),
-          title: <span className="text-neutral-700">{'text' in part ? part.text : ''}</span>,
-          state: position === group.parts.length - 1 ? end : 'done',
-        }))}
-      />
-    );
+    return <StepRun key={group.at} end={end} steps={group.parts.map((part) => ('text' in part ? part.text : ''))} />;
   });
 }
 
