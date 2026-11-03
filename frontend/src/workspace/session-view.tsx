@@ -1,5 +1,13 @@
-import { type EditedMessage, SessionKind, SessionState, withAttachments } from '@ops-console/shared';
-import { useEffect, useState } from 'react';
+import {
+  type EditedMessage,
+  FILE_TOKEN,
+  fileToken,
+  namesInText,
+  SessionKind,
+  SessionState,
+  withAttachments,
+} from '@ops-console/shared';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
 import { ApprovalPrompts } from '../agents/approval-prompts';
@@ -7,6 +15,7 @@ import { QuestionPanel, trailingQuestions } from '../agents/question-panel';
 import { SessionChips } from '../agents/session-chips';
 import { StopRun } from '../agents/stop-run';
 import { MessageView } from '../agents/transcript';
+import { AttachmentViewer, type Viewed } from '../components/ui/attachment-viewer';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
 import { type PathwayState, StatusPill } from '../components/ui/pathway';
@@ -22,10 +31,11 @@ import {
 } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { PlaybookLink } from '../playbooks/job-steps';
-import { AttachButton, AttachmentChips, filesIn, useAttachments } from './attachments';
+import { AttachButton, filesIn, useAttachments } from './attachments';
 import { BranchSwitcher } from './branch-switcher';
 import { ConversationMap, ScrollToEnd, useFollowLatest } from './conversation';
 import { alertPath, pullRequestNamedIn, pullRequestPath, sessionDraftKey } from './links';
+import { MessageEditor, type MessageEditorHandle } from './message-editor';
 import { DiffPanel, DiffToggle, ResizeHandle, useDiffWidth } from './session-diff';
 import { SESSION_STATE_TIP } from './sessions-pane';
 
@@ -40,6 +50,9 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const [reverted, setReverted] = useState<EditedMessage | null>(null);
   const [text, setText] = useStored(sessionDraftKey(id), z.string(), '');
   const attachments = useAttachments(id);
+  const editor = useRef<MessageEditorHandle>(null);
+  // An attached file open over the page.
+  const [viewed, setViewed] = useState<Viewed | null>(null);
   // A drag carrying files is over the message box.
   const [dropping, setDropping] = useState(false);
   const latest = useFollowLatest();
@@ -94,25 +107,30 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const busy = running || session.state === SessionState.WaitingInput;
   // Only the last thing the operator asked can be edited and run again.
   const lastAsked = messages.data?.findLast((message) => message.role === 'user')?.id;
-  const empty = text.trim() === '' && attachments.ready.length === 0;
+  // The files whose chips sit in the message, and those saved so far.
+  const placed = namesInText(text);
+  const files = attachments.saved(placed);
+  const uploading = attachments.uploading(placed);
+  const empty = text.replace(FILE_TOKEN, '').trim() === '' && files.length === 0;
+  const addFiles = (picked: File[]) => editor.current?.insertFiles(attachments.add(picked));
   const lastMessage = messages.data?.at(-1);
   const questions =
     session.state === SessionState.WaitingInput && lastMessage?.role === 'agent'
       ? trailingQuestions(lastMessage.parts)
       : [];
   const submit = () => {
-    if (empty || queued !== null || attachments.uploading) return;
+    if (empty || queued !== null || uploading) return;
     setReverted(null);
     if (running) {
-      setQueued(withAttachments(text, attachments.ready));
+      setQueued(withAttachments(text, files));
       setText('');
-      attachments.clear();
+      attachments.remove(placed);
       return;
     }
-    send.mutate(withAttachments(text, attachments.ready), {
+    send.mutate(withAttachments(text, files), {
       onSuccess: () => {
         setText('');
-        attachments.clear();
+        attachments.remove(placed);
       },
     });
   };
@@ -169,7 +187,10 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             title="The agent follows this Playbook's rules in every message here. Open it to read or change them."
           />
         )}
-        {hasDiff && <DiffToggle open={diffOpen} diff={diff.data} onToggle={() => setDiffOpen((now) => !now)} />}
+        {/* A Session whose branch changes nothing yet has nothing to show. */}
+        {hasDiff && (diffOpen || (diff.data?.files.length ?? 0) > 0) && (
+          <DiffToggle open={diffOpen} diff={diff.data} onToggle={() => setDiffOpen((now) => !now)} />
+        )}
         <Button
           className="px-2.5 py-1 text-xs"
           title={
@@ -267,13 +288,13 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 const files = filesIn(event.dataTransfer);
                 if (files.length === 0) return;
                 event.preventDefault();
-                attachments.add(files);
+                addFiles(files);
               }}
               className={`rounded-lg border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)] ${dropping ? 'border-dashed border-accent-400 bg-accent-100' : 'border-divider'}`}
             >
-              <AttachmentChips pending={attachments.pending} onRemove={attachments.remove} />
-              <textarea
-                aria-label="Message"
+              <MessageEditor
+                ref={editor}
+                label="Message"
                 value={text}
                 placeholder={
                   running
@@ -282,24 +303,23 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                       ? `Ask anything in ${repo.name} — e.g. add a retry to the orders webhook and write a test`
                       : 'Ask anything — e.g. clone github.com/owner/repo and find why the orders job fails'
                 }
-                onChange={(event) => setText(event.target.value)}
-                onPaste={(event) => {
-                  // A pasted screenshot or copied file attaches; pasted text goes in as text.
-                  const files = filesIn(event.clipboardData);
-                  if (files.length === 0) return;
-                  event.preventDefault();
-                  attachments.add(files);
+                onChange={(next) => {
+                  // A chip taken out of the text takes its file with it.
+                  const gone = placed.filter((name) => !next.includes(fileToken(name)));
+                  if (gone.length > 0) attachments.remove(gone);
+                  setText(next);
                 }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                    event.preventDefault();
-                    submit();
-                  }
+                find={attachments.find}
+                onOpen={(name) => {
+                  const item = attachments.find(name);
+                  if (item?.file) setViewed({ name, file: item.file });
+                  else if (item?.saved) setViewed({ name, path: item.saved.path });
                 }}
-                className="block field-sizing-content max-h-[50vh] min-h-28 w-full resize-none overflow-y-auto border-0 bg-transparent px-4 pt-3.5 pb-1.5 text-sm leading-relaxed text-text outline-none"
+                onPasteFiles={addFiles}
+                onSubmit={submit}
               />
               <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-1.5 pb-2.5">
-                <AttachButton onFiles={attachments.add} />
+                <AttachButton onFiles={addFiles} />
                 <SessionChips session={session} variant="chip" />
                 {repo && <BranchSwitcher session={session} all={sessions.data ?? []} repo={repo} />}
                 {send.isError && (
@@ -314,12 +334,12 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                     title={
                       running
                         ? 'The agent is working. The message waits and sends when the run ends.'
-                        : attachments.uploading
+                        : uploading
                           ? 'Waiting for the attached files to upload'
                           : 'Enter sends. Shift+Enter adds a new line.'
                     }
                     className="px-4 py-1.5"
-                    disabled={empty || queued !== null || attachments.uploading || send.isPending}
+                    disabled={empty || queued !== null || uploading || send.isPending}
                     onClick={submit}
                   >
                     {running ? 'Queue' : 'Send'}
@@ -329,6 +349,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             </div>
           </div>
         </div>
+        {viewed && <AttachmentViewer viewed={viewed} onClose={() => setViewed(null)} />}
         {hasDiff && diffOpen && (
           <>
             <ResizeHandle width={panel.width} widest={panel.widest} onWidth={panel.setWidth} />

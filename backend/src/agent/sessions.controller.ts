@@ -1,4 +1,17 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  StreamableFile,
+} from '@nestjs/common';
 import {
   type Attachment,
   type EditedMessage,
@@ -20,6 +33,7 @@ import { SessionsService } from './sessions.service';
 
 const idParams = z.object({ id: z.string().min(1) });
 const editParams = idParams.extend({ message_id: z.string().min(1) });
+const fileParams = idParams.extend({ file: z.string().min(1) });
 const attachQuery = z.object({ name: z.string().trim().min(1).max(255) });
 
 /** Routes shared by every kind; each kind's own fields come from its handler in `SessionKinds`. */
@@ -98,6 +112,19 @@ export class SessionsController {
     const { name } = parseInput(attachQuery, query, 'query');
     this.sessions.get(id);
     return { data: await this.attachments.save(id, name, request) };
+  }
+
+  /** A file attached to one of the Session's messages, to open in the console. */
+  @Get(':id/attachments/:file')
+  file(@Param() params: unknown): StreamableFile {
+    const { id, file } = parseInput(fileParams, params, 'params');
+    this.sessions.get(id);
+    const found = this.attachments.read(id, file);
+    return new StreamableFile(found.stream, {
+      type: found.type,
+      length: found.size,
+      disposition: 'inline',
+    });
   }
 
   @Post(':id/messages')

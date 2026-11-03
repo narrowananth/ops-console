@@ -297,6 +297,34 @@ describe('attachments', () => {
       .send(Buffer.from('x'));
     expect(missing.status).toBe(404);
   });
+
+  it('serves a saved file back for the console to open, and nothing outside the Session folder', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    const saved = await request(daemon.url)
+      .post(`/api/sessions/${id}/attachments?name=shot.png`)
+      .set(daemon.auth)
+      .set('Content-Type', 'application/octet-stream')
+      .send(Buffer.from('png bytes'));
+    const file = path.basename(saved.body.data.path);
+    const read = await request(daemon.url)
+      .get(`/api/sessions/${id}/attachments/${file}`)
+      .set(daemon.auth)
+      .buffer(true)
+      .parse((res, done) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => done(null, Buffer.concat(chunks)));
+      });
+    expect(read.status).toBe(200);
+    expect(read.headers['content-type']).toBe('image/png');
+    expect(read.body.toString()).toBe('png bytes');
+    const outside = await request(daemon.url)
+      .get(`/api/sessions/${id}/attachments/${encodeURIComponent('../../daemon.json')}`)
+      .set(daemon.auth);
+    expect(outside.status).toBe(404);
+    expect((await request(daemon.url).get(`/api/sessions/${id}/attachments/${file}`)).status).toBe(401);
+  });
 });
 
 describe('deleting a Session', () => {

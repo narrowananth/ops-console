@@ -30,6 +30,21 @@ const TAB_TIP: Record<Severity | 'all', string> = {
 
 const CLOSED = [AlertStatus.Resolved, AlertStatus.Dismissed];
 
+/** Every word of `needle` sits in the Alert's route, message, title, status code, Service or status. */
+function matches(alert: Alert, needle: string): boolean {
+  const text = [
+    alert.route ? `${alert.route.method} ${alert.route.path}` : '',
+    alert.log_line,
+    alert.title,
+    alert.http_status ?? '',
+    alert.service.name,
+    alert.status.replace('_', ' '),
+  ]
+    .join('\n')
+    .toLowerCase();
+  return needle.split(/\s+/).every((word) => text.includes(word));
+}
+
 /** Rows drawn at a time. A Scan can raise more than a thousand Alerts; drawing them all makes every click slow. */
 export const LOGS_PAGE = 100;
 
@@ -102,8 +117,10 @@ export function LogsPane({
   const alerts = useAlerts();
   const [tier, setTier] = useStored<Severity | 'all'>('monitor.tier', z.enum(['all', ...SEVERITIES]), 'all');
   const [showClosed, setShowClosed] = useStored('monitor.closed', z.boolean(), false);
+  const [query, setQuery] = useStored('monitor.logs-search', z.string(), '');
+  const needle = query.trim().toLowerCase();
   // How many rows are drawn, for the list as it is now picked; a new pick starts at one page again.
-  const view = `${service}|${tier}|${showClosed}|${codes.join(',')}`;
+  const view = `${service}|${tier}|${showClosed}|${codes.join(',')}|${needle}`;
   const [paged, setPaged] = useStored(
     'monitor.logs-shown',
     z.object({ view: z.string(), limit: z.number().int().positive() }),
@@ -114,7 +131,8 @@ export function LogsPane({
     (alert) =>
       (service === null || alert.service.name === service) &&
       inMonitor(alert, codes) &&
-      (showClosed || !CLOSED.includes(alert.status)),
+      (showClosed || !CLOSED.includes(alert.status)) &&
+      (needle === '' || matches(alert, needle)),
   );
   const counts = Object.fromEntries(
     SEVERITIES.map((severity) => [severity, inScope.filter((alert) => alert.severity === severity).length]),
@@ -165,6 +183,17 @@ export function LogsPane({
         </label>
       </div>
 
+      <div className="border-b border-divider px-3 py-2">
+        <input
+          type="search"
+          aria-label="Search logs"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search route, message, status code, Service"
+          title="Keeps the logs whose route, message, status code, Service or status holds these words, in any case"
+          className="w-full rounded-md border border-divider bg-bg px-2.5 py-1.5 text-xs text-text outline-none focus:border-accent-400"
+        />
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {alerts.isError ? (
           <Empty>Could not read Alerts: {alerts.error.message}</Empty>
@@ -172,11 +201,13 @@ export function LogsPane({
           <Empty>Reading Alerts…</Empty>
         ) : shown.length === 0 ? (
           <Empty>
-            {inScope.length > 0
-              ? 'None here.'
-              : service
-                ? `No logs from ${service} yet. Scan it for the last ${range}.`
-                : 'No logs yet. Pick a Service or Scan them all.'}
+            {needle !== ''
+              ? `No logs match “${query.trim()}”.`
+              : inScope.length > 0
+                ? 'None here.'
+                : service
+                  ? `No logs from ${service} yet. Scan it for the last ${range}.`
+                  : 'No logs yet. Pick a Service or Scan them all.'}
           </Empty>
         ) : (
           <ul aria-label="Logs" className="m-0 flex list-none flex-col gap-0.5 p-1.5">

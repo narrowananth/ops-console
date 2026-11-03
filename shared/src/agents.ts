@@ -221,6 +221,18 @@ export function splitAttachments(message: string): { text: string; attachments: 
   return { text: message.slice(0, at).trimEnd(), attachments };
 }
 
+/** Where an attached file sits in the operator's text: `[📎 <name>]`. A name holds no `]` and no line break. */
+export const fileToken = (name: string) => `[📎 ${name}]`;
+export const FILE_TOKEN = /\[📎 ([^\]\n]+)\]/g;
+
+/** A file name a token can hold: `]` and line breaks become spaces. */
+export const tokenName = (name: string) => name.replace(/[\]\r\n]+/g, ' ').trim() || 'pasted';
+
+/** The names of the files whose tokens sit in `text`, in order, each once. */
+export function namesInText(text: string): string[] {
+  return [...new Set([...text.matchAll(FILE_TOKEN)].map((match) => match[1] as string))];
+}
+
 /** What editing the last message did to the files before it ran again. */
 export const editedMessageSchema = z.object({
   message_id: z.string(),

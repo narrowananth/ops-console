@@ -108,7 +108,7 @@ test('a pull request links the Sessions on its branch, and New Session opens one
   await page.getByRole('button', { name: 'New Session' }).click();
   await expect(page).toHaveURL(/\/workspace\?session=s2$/);
   await expect.poll(() => created).toEqual([{ repo_id: 'r1', branch: 'fix/empty-cart', from_origin: true }]);
-  await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('On pull request #7 (Guard empty carts): ');
+  await expect(page.getByRole('textbox', { name: 'Message' })).toHaveText('On pull request #7 (Guard empty carts): ');
 });
 
 test('a Session links its pull request and its Monitor Alert', async ({ page }) => {
