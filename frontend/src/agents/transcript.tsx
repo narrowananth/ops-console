@@ -113,7 +113,7 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
                 rerun();
               }
             }}
-            className="min-h-20 w-full resize-y rounded-md border border-divider bg-card px-3 py-2 text-sm text-text outline-none focus:border-accent-400"
+            className="field-sizing-content max-h-[50vh] min-h-28 w-full resize-y overflow-y-auto rounded-md border border-divider bg-card px-3 py-2 text-sm leading-relaxed text-text outline-none focus:border-accent-400"
           />
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-neutral-700">

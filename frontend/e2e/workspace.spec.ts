@@ -95,6 +95,51 @@ test('a Repo shows its 3 newest Sessions and folds, so the next Repo stays in re
   await expect(page.getByRole('region', { name: 'analytics' }).getByRole('listitem')).toHaveCount(0);
 });
 
+test('Collapse all and Expand all fold every Repo; a search keeps the matching Repos and Sessions, open', async ({
+  page,
+}) => {
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'analytics'), repo('r2', 'apis')], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          session('s1', 'r1', 'fix login'),
+          session('s2', 'r1', 'audit queries'),
+          session('s3', 'r1', 'add metrics'),
+          session('s4', 'r1', 'old idea'),
+          session('s7', 'r2', 'check domain', 'idle', 'feature/dns'),
+        ],
+      },
+    }),
+  );
+  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+  const analytics = page.getByRole('region', { name: 'analytics' });
+  const apis = page.getByRole('region', { name: 'apis' });
+
+  await page.getByRole('button', { name: 'Collapse all' }).click();
+  await expect(analytics.getByRole('listitem')).toHaveCount(0);
+  await expect(apis.getByRole('listitem')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Expand all' }).click();
+  await expect(analytics.getByRole('listitem')).toHaveCount(3);
+  await expect(apis.getByRole('listitem')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Collapse all' }).click();
+
+  const search = page.getByRole('searchbox', { name: 'Search Sessions' });
+  await search.fill('dns');
+  await expect(analytics).toHaveCount(0);
+  await expect(apis.getByRole('listitem')).toHaveText([/check domain/]);
+  await search.fill('Analytics');
+  await expect(apis).toHaveCount(0);
+  await expect(analytics.getByRole('listitem')).toHaveCount(4);
+  await expect(analytics.getByRole('button', { name: /Show \d more/ })).toHaveCount(0);
+  await search.fill('nothing like it');
+  await expect(page.getByText('No Repo or Session matches “nothing like it”.')).toBeVisible();
+  await search.fill('');
+  await expect(analytics.getByRole('listitem')).toHaveCount(0);
+});
+
 test('removing a Repo with Sessions asks whether to keep or delete them', async ({ page }) => {
   const removed: string[] = [];
   await page.route('**/api/repos', (route) =>

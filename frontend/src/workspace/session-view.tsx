@@ -174,12 +174,12 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             }
             onChange={(event) => setText(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 submit();
               }
             }}
-            className="block max-h-50 min-h-16 w-full resize-none border-0 bg-transparent px-4 pt-3.5 pb-1.5 text-sm text-text outline-none"
+            className="block field-sizing-content max-h-[50vh] min-h-28 w-full resize-none overflow-y-auto border-0 bg-transparent px-4 pt-3.5 pb-1.5 text-sm leading-relaxed text-text outline-none"
           />
           <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-1.5 pb-2.5">
             <SessionChips session={session} variant="chip" />

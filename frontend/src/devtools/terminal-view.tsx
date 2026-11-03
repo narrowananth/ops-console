@@ -221,7 +221,7 @@ function Terminal({
   const messages = useMessages(session?.id ?? '');
   const send = useSendMessage(session?.id ?? '');
   const scroller = useRef<HTMLDivElement>(null);
-  const prompt = useRef<HTMLInputElement>(null);
+  const prompt = useRef<HTMLTextAreaElement>(null);
   const list = session ? (messages.data ?? []) : [];
   const running = isRunning(session) || asking || send.isPending;
   // Scrolls the terminal only; scrollIntoView would scroll the page under it too.
@@ -229,9 +229,17 @@ function Terminal({
   useEffect(() => {
     if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
   }, [list.length, list.at(-1)?.parts.length]);
+  // The cursor goes after what is typed, as in a terminal; a textarea would put it at the start.
+  const focusPrompt = () => {
+    const box = prompt.current;
+    if (!box) return;
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  };
   // The prompt keeps the cursor, as a terminal does, and gets it back when a run ends.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: focusPrompt reads the ref only
   useEffect(() => {
-    if (!running) prompt.current?.focus();
+    if (!running) focusPrompt();
   }, [running]);
 
   const submit = () => {
@@ -256,7 +264,7 @@ function Terminal({
       <div
         ref={scroller}
         onClick={() => {
-          if (window.getSelection()?.toString() === '') prompt.current?.focus();
+          if (window.getSelection()?.toString() === '') focusPrompt();
         }}
         className="min-h-0 flex-1 cursor-text overflow-auto px-4 py-3 font-mono text-xs leading-[1.7]"
       >
@@ -270,21 +278,26 @@ function Terminal({
         )}
         <Lines messages={list} connections={connections} />
         {error && <div className="text-accent-400">✘ {error}</div>}
-        <div className="mt-1 flex gap-2 text-neutral-100">
+        <div className="mt-1 flex items-start gap-2 text-neutral-100">
           <span className="text-accent-400">&gt;</span>
-          <input
+          <textarea
             ref={prompt}
+            rows={1}
             aria-label="Ask the agent"
             aria-busy={running}
             value={text}
+            title="Enter sends. Shift+Enter adds a new line."
             placeholder={
               running ? 'The agent is working…' : 'Ask the agent — e.g. find shop acme · show 5 pending reservations'
             }
             onChange={(event) => onText(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') submit();
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                submit();
+              }
             }}
-            className="flex-1 border-0 bg-transparent font-mono text-xs text-neutral-100 caret-accent-400 outline-none placeholder:text-neutral-600"
+            className="field-sizing-content max-h-[40vh] flex-1 resize-none overflow-y-auto border-0 bg-transparent p-0 font-mono text-xs leading-[1.7] text-neutral-100 caret-accent-400 outline-none placeholder:text-neutral-600"
           />
         </div>
       </div>

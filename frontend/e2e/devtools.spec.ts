@@ -162,6 +162,10 @@ test('a new terminal has its Model, Effort and Access chips, and its first quest
   await page.getByRole('button', { name: 'Close new terminal' }).last().click();
   await expect(fresh).toHaveCount(1);
 
+  await prompt.press('Shift+Enter');
+  await prompt.pressSequentially('and orders');
+  await expect(prompt).toHaveValue('count shops\nand orders');
+  await expect.poll(() => created).toBeUndefined();
   await prompt.press('Enter');
   await expect.poll(() => created).toMatchObject({ kind: 'devtools', connection_ids: [], effort: 'max' });
 });

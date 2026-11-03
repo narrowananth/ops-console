@@ -46,7 +46,7 @@ export function CommentComposer(props: {
           if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) submit();
           if (event.key === 'Escape' && props.onCancel) cancel();
         }}
-        className="min-h-16 w-full resize-y rounded-md border border-divider bg-bg px-2.5 py-2 font-body text-[13px] text-text outline-none focus:border-accent-400 focus:shadow-[0_0_0_3px_var(--color-accent-100)]"
+        className="field-sizing-content max-h-[50vh] min-h-24 w-full resize-y overflow-y-auto rounded-md border border-divider bg-bg px-2.5 py-2 font-body text-[13px] leading-relaxed text-text outline-none focus:border-accent-400 focus:shadow-[0_0_0_3px_var(--color-accent-100)]"
       />
       <div className="flex items-center gap-2">
         <span title="Write in Markdown. ⌘Enter or Ctrl+Enter sends." className="text-[11px] text-neutral-600">
