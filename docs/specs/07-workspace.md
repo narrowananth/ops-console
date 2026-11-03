@@ -248,6 +248,12 @@ Adds `branch: string | null`.
   text in place with Cancel and Revert and rerun (`02-settings-agents` Behavior 8a). A note above the composer then
   names the files put back with their line counts, or says why none were, until closed or the next Send.
   Enter sends and Shift+Enter adds a line; the box is disabled while the agent works. Its draft is kept per Session.
+  Files attach to the next message three ways: the paperclip before the chips, dropping them on the box, or pasting
+  them (a screenshot, a file copied in Finder). Each uploads at once to `POST /api/sessions/:id/attachments?name=`
+  and is saved under a new name in `attachments/<session id>/` in the data folder. A chip above the text shows each
+  file, a thumbnail for images, its size and a remove button; Send waits until every file is saved. The message ends
+  with an "Attached files" list of each name and saved path, and the run lets the agent read that folder, so its Read
+  tool opens them without an Approval. A sent message shows its files as chips under the text.
 - Branch switcher: the composer's branch chip shows the branch and "changed" or "clean" from the Repo's dirty state.
   Its menu lists branches A→Z with an "open PR" mark, and a field that creates a branch from the current one. It is
   disabled with the reason while Behavior 7 blocks it. "Uncommitted changes were stashed." shows after a checkout

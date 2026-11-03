@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import {
+  type Attachment,
   type EditedMessage,
   type Message,
   type Page,
@@ -9,14 +10,17 @@ import {
   sessionListQuerySchema,
   sessionPatchSchema,
 } from '@ops-console/shared';
+import type { Request } from 'express';
 import { z } from 'zod';
 import { parseInput, validationFailed } from '../common/errors';
+import { Attachments } from './attachments';
 import { AgentRuntime } from './runtime';
 import { SessionKinds } from './session-kinds';
 import { SessionsService } from './sessions.service';
 
 const idParams = z.object({ id: z.string().min(1) });
 const editParams = idParams.extend({ message_id: z.string().min(1) });
+const attachQuery = z.object({ name: z.string().trim().min(1).max(255) });
 
 /** Routes shared by every kind; each kind's own fields come from its handler in `SessionKinds`. */
 @Controller('sessions')
@@ -25,6 +29,7 @@ export class SessionsController {
     @Inject(SessionsService) private readonly sessions: SessionsService,
     @Inject(AgentRuntime) private readonly runtime: AgentRuntime,
     @Inject(SessionKinds) private readonly kinds: SessionKinds,
+    @Inject(Attachments) private readonly attachments: Attachments,
   ) {}
 
   /** Each kind's spec makes its own Sessions; a body without a `kind` is a `repo` Session. */
@@ -79,6 +84,20 @@ export class SessionsController {
   async messages(@Param() params: unknown): Promise<{ data: Message[]; meta: { next_cursor: null } }> {
     const data = await this.runtime.messages(parseInput(idParams, params, 'params').id);
     return { data, meta: { next_cursor: null } };
+  }
+
+  /** Saves the request body as a file for the Session's next message; `name` is the operator's file name. */
+  @Post(':id/attachments')
+  @HttpCode(201)
+  async attach(
+    @Param() params: unknown,
+    @Query() query: unknown,
+    @Req() request: Request,
+  ): Promise<{ data: Attachment }> {
+    const { id } = parseInput(idParams, params, 'params');
+    const { name } = parseInput(attachQuery, query, 'query');
+    this.sessions.get(id);
+    return { data: await this.attachments.save(id, name, request) };
   }
 
   @Post(':id/messages')

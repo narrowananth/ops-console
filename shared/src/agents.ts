@@ -186,6 +186,33 @@ export type SessionPatch = z.infer<typeof sessionPatchSchema>;
 
 export const sendMessageSchema = z.object({ text: z.string().trim().min(1) });
 
+/** A file the operator attached to a message: saved in the daemon's data folder, read by the agent from `path`. */
+export const attachmentSchema = z.object({ name: z.string(), path: z.string(), size: z.number().int() });
+export type Attachment = z.infer<typeof attachmentSchema>;
+
+const ATTACHED = 'Attached files (open each with the Read tool):';
+
+/** A message with its attachments: the text, then one `- <name>: <path>` line per file under a heading. */
+export function withAttachments(text: string, attachments: Pick<Attachment, 'name' | 'path'>[]): string {
+  if (attachments.length === 0) return text;
+  const lines = attachments.map((file) => `- ${file.name}: ${file.path}`);
+  return [text.trim(), [ATTACHED, ...lines].join('\n')].filter(Boolean).join('\n\n');
+}
+
+/** The other way: a message's own text and the files listed under its heading, if any. */
+export function splitAttachments(message: string): { text: string; attachments: Pick<Attachment, 'name' | 'path'>[] } {
+  const at = message.lastIndexOf(ATTACHED);
+  if (at === -1 || (at > 0 && !message.slice(0, at).endsWith('\n\n'))) return { text: message, attachments: [] };
+  const attachments = message
+    .slice(at + ATTACHED.length)
+    .split('\n')
+    .flatMap((line) => {
+      const cut = line.lastIndexOf(': /');
+      return line.startsWith('- ') && cut > 2 ? [{ name: line.slice(2, cut), path: line.slice(cut + 2) }] : [];
+    });
+  return { text: message.slice(0, at).trimEnd(), attachments };
+}
+
 /** What editing the last message did to the files before it ran again. */
 export const editedMessageSchema = z.object({
   message_id: z.string(),

@@ -29,11 +29,17 @@ export function apiSend<T extends z.ZodType>(
   return request(method, path, body, schema);
 }
 
+/** POSTs a file as the raw request body. */
+export function apiUpload<T extends z.ZodType>(path: string, file: Blob, schema: T): Promise<z.infer<T>> {
+  return request('POST', path, undefined, schema, file);
+}
+
 async function request<T extends z.ZodType>(
   method: string,
   path: string,
   json: unknown,
   schema: T,
+  file?: Blob,
 ): Promise<z.infer<T>> {
   let response: Response;
   try {
@@ -41,9 +47,13 @@ async function request<T extends z.ZodType>(
       method,
       headers: {
         Authorization: `Bearer ${sessionToken() ?? ''}`,
-        ...(json === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(file !== undefined
+          ? { 'Content-Type': 'application/octet-stream' }
+          : json === undefined
+            ? {}
+            : { 'Content-Type': 'application/json' }),
       },
-      body: json === undefined ? undefined : JSON.stringify(json),
+      body: file ?? (json === undefined ? undefined : JSON.stringify(json)),
     });
   } catch {
     throw new DaemonUnreachableError('no answer from the daemon');

@@ -1,4 +1,4 @@
-import type { Message, Part } from '@ops-console/shared';
+import { type Message, type Part, splitAttachments } from '@ops-console/shared';
 import { useState } from 'react';
 import { Button, Spinner } from '../components/ui/button';
 import { DiffLines } from '../components/ui/diff';
@@ -96,7 +96,11 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
         )}
       </div>
       {draft === null ? (
-        <MessageParts message={message} />
+        agent ? (
+          <MessageParts message={message} />
+        ) : (
+          <SentText text={text} />
+        )
       ) : (
         <div className="flex flex-col gap-2">
           <textarea
@@ -142,6 +146,29 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
         </div>
       )}
     </li>
+  );
+}
+
+/** The operator's message: its text, then a chip per attached file, named, with its saved path on hover. */
+function SentText({ text }: { text: string }) {
+  const sent = splitAttachments(text);
+  return (
+    <>
+      {sent.text && <Markdown source={sent.text} />}
+      {sent.attachments.length > 0 && (
+        <ul aria-label="Attached files" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+          {sent.attachments.map((file) => (
+            <li
+              key={file.path}
+              title={file.path}
+              className="max-w-64 truncate rounded-md border border-line bg-bg px-2 py-1 font-mono text-[11px] text-neutral-700"
+            >
+              📎 {file.name}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }
 

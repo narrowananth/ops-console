@@ -9,6 +9,7 @@ import { JobSteps } from '../playbooks/job-steps';
 import { PlaybooksController } from '../playbooks/playbooks.controller';
 import { PlaybooksService } from '../playbooks/playbooks.service';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
+import { Attachments } from './attachments';
 import { ConnectionLookup } from './connection-lookup';
 import { MessageInterceptors } from './message-interceptors';
 import { ProdWriteRule } from './prod-write-rule';
@@ -45,6 +46,7 @@ export class AgentModule {
         ConnectionLookup,
         ProdWriteRule,
         Transcripts,
+        Attachments,
         ActionLogService,
         ApprovalsService,
         AccountsService,
