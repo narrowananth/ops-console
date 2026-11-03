@@ -209,6 +209,20 @@ export class ConnectorsService implements OnModuleDestroy {
         if ((await this.tools.bitbucketUser()) === null) await this.tools.bitbucketLogin(signal, onPrompt);
         break;
       }
+      case ConnectorId.Slashdocs: {
+        if (!(await this.tools.installed('slashdocs'))) {
+          throw new ApiError(
+            409,
+            ErrorCode.InvalidState,
+            'slashdocs is not installed: install the slashdocs CLI, then Connect again',
+          );
+        }
+        // Already signed in, in the operator's terminal: nothing to open.
+        if ((await this.tools.slashdocsUser()) === null) {
+          await this.tools.slashdocsLogin(config.server?.trim() || null, signal, onPrompt);
+        }
+        break;
+      }
       case ConnectorId.Shopify: {
         const server = CONNECTOR_SERVERS[id] as McpSpec;
         await this.mcp.ensureRegistered(server);
@@ -292,6 +306,12 @@ export class ConnectorsService implements OnModuleDestroy {
         return login === null
           ? signedOut('bkt is not signed in, or macOS did not let it read its Keychain item')
           : { status: HealthStatus.Ok, detail: null, accountLabel: config.workspace || login, login };
+      }
+      case ConnectorId.Slashdocs: {
+        const user = await this.tools.slashdocsUser();
+        return user === null
+          ? signedOut('slashdocs is not signed in')
+          : { status: HealthStatus.Ok, detail: null, accountLabel: config.server || null, login: user.email };
       }
       default: {
         const server = CONNECTOR_SERVERS[id] as McpSpec;

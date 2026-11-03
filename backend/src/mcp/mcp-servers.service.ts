@@ -16,6 +16,7 @@ import {
   ErrorCode,
   HealthStatus,
   McpAuth,
+  type McpOAuthClient,
   McpScope,
   type McpServer,
   McpTransport,
@@ -329,7 +330,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
    * registered just now.
    */
   async ensureRegistered(
-    spec: { name: string; transport: McpTransport; target: string },
+    spec: { name: string; transport: McpTransport; target: string; oauth?: McpOAuthClient },
     env?: Record<string, string>,
   ): Promise<boolean> {
     const found = (await this.servers()).find((server) => server.name === spec.name);
@@ -338,8 +339,11 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
       this.invalidate();
     }
     const same = env === undefined || JSON.stringify(await this.storedEnv(spec.name)) === JSON.stringify(env);
-    if (found?.registered && same) return false;
     const previous = found?.registered ? await this.registrations(spec.name) : [];
+    // A server registered before it had its OAuth app signs in with dynamic registration, which it refuses.
+    const oauth = spec.oauth ?? null;
+    const sameOAuth = previous.every((item) => JSON.stringify(item.entry.oauth) === JSON.stringify(oauth));
+    if (found?.registered && same && sameOAuth) return false;
     await this.register(
       spec.name,
       McpScope.User,
@@ -348,6 +352,8 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
       env ?? {},
       {},
       previous.length > 0 ? previous : null,
+      null,
+      oauth,
     );
     this.dropRemoved(spec.name);
     return true;
@@ -500,6 +506,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     headers: Record<string, string>,
     previous: { account: Account; entry: RegisteredServer }[] | null,
     repo: { id: string; path: string } | null = null,
+    oauth: McpOAuthClient | null = null,
   ): Promise<void> {
     if (transport === McpTransport.Stdio && Object.keys(headers).length > 0) {
       throw new ApiError(400, ErrorCode.ValidationFailed, 'headers are for http and sse servers');
@@ -507,7 +514,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     if (transport !== McpTransport.Stdio && Object.keys(env).length > 0) {
       throw new ApiError(400, ErrorCode.ValidationFailed, 'env vars are for stdio servers');
     }
-    const spec = await this.specOf(name, scope, transport, target, env, headers);
+    const spec = await this.specOf(name, scope, transport, target, env, headers, oauth);
     const touched: Account[] = [];
     try {
       if (Object.keys(env).length > 0) await this.saveEnv(name, env);
@@ -545,6 +552,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     target: string,
     env: Record<string, string>,
     headers: Record<string, string>,
+    oauth: McpOAuthClient | null = null,
   ): Promise<McpServerToAdd> {
     if (transport === McpTransport.Stdio) {
       const [command, ...args] = splitCommand(target);
@@ -558,7 +566,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     } catch {
       throw new ApiError(400, ErrorCode.ValidationFailed, 'an http or sse server needs a URL');
     }
-    return { name, scope, transport, url: target, headers };
+    return { name, scope, transport, url: target, headers, oauth };
   }
 
   private async mergedEnv(name: string, changes: Record<string, string>): Promise<Record<string, string>> {
@@ -999,6 +1007,7 @@ function toAdd(entry: RegisteredServer): McpServerToAdd {
         transport: entry.transport as 'http' | 'sse',
         url: entry.url ?? '',
         headers: entry.headers,
+        oauth: entry.oauth,
       };
 }
 

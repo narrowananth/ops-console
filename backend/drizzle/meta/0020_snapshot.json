@@ -1,8 +1,8 @@
 {
+  "id": "219ad27a-4a4e-426a-a035-a2fd4a181e16",
+  "prevId": "bb868b1b-fdb2-48e9-8a7e-8c71343031ab",
   "version": "6",
   "dialect": "sqlite",
-  "id": "9e8557b9-7c8c-4fe0-a62a-0d961cdc10af",
-  "prevId": "bb868b1b-fdb2-48e9-8a7e-8c71343031ab",
   "tables": {
     "action_log": {
       "name": "action_log",
@@ -123,41 +123,41 @@
         "action_log_session_id_sessions_id_fk": {
           "name": "action_log_session_id_sessions_id_fk",
           "tableFrom": "action_log",
-          "tableTo": "sessions",
           "columnsFrom": [
             "session_id"
           ],
+          "tableTo": "sessions",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         },
         "action_log_connection_id_connections_id_fk": {
           "name": "action_log_connection_id_connections_id_fk",
           "tableFrom": "action_log",
-          "tableTo": "connections",
           "columnsFrom": [
             "connection_id"
           ],
+          "tableTo": "connections",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         },
         "action_log_alert_id_alerts_id_fk": {
           "name": "action_log_alert_id_alerts_id_fk",
           "tableFrom": "action_log",
-          "tableTo": "alerts",
           "columnsFrom": [
             "alert_id"
           ],
+          "tableTo": "alerts",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -214,28 +214,28 @@
         "agent_comments_repo_id_repos_id_fk": {
           "name": "agent_comments_repo_id_repos_id_fk",
           "tableFrom": "agent_comments",
-          "tableTo": "repos",
           "columnsFrom": [
             "repo_id"
           ],
+          "tableTo": "repos",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "agent_comments_agent_review_id_pr_agent_reviews_id_fk": {
           "name": "agent_comments_agent_review_id_pr_agent_reviews_id_fk",
           "tableFrom": "agent_comments",
-          "tableTo": "pr_agent_reviews",
           "columnsFrom": [
             "agent_review_id"
           ],
+          "tableTo": "pr_agent_reviews",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {
@@ -313,15 +313,15 @@
         "alert_events_alert_id_alerts_id_fk": {
           "name": "alert_events_alert_id_alerts_id_fk",
           "tableFrom": "alert_events",
-          "tableTo": "alerts",
           "columnsFrom": [
             "alert_id"
           ],
+          "tableTo": "alerts",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -504,15 +504,15 @@
         "alerts_route_id_routes_id_fk": {
           "name": "alerts_route_id_routes_id_fk",
           "tableFrom": "alerts",
-          "tableTo": "routes",
           "columnsFrom": [
             "route_id"
           ],
+          "tableTo": "routes",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -599,36 +599,36 @@
           "columns": [
             "requested_at"
           ],
-          "isUnique": false,
-          "where": "\"approvals\".\"status\" = 'pending'"
+          "where": "\"approvals\".\"status\" = 'pending'",
+          "isUnique": false
         }
       },
       "foreignKeys": {
         "approvals_action_log_id_action_log_id_fk": {
           "name": "approvals_action_log_id_action_log_id_fk",
           "tableFrom": "approvals",
-          "tableTo": "action_log",
           "columnsFrom": [
             "action_log_id"
           ],
+          "tableTo": "action_log",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "approvals_session_id_sessions_id_fk": {
           "name": "approvals_session_id_sessions_id_fk",
           "tableFrom": "approvals",
-          "tableTo": "sessions",
           "columnsFrom": [
             "session_id"
           ],
+          "tableTo": "sessions",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -1107,41 +1107,41 @@
         "fixes_review_id_reviews_id_fk": {
           "name": "fixes_review_id_reviews_id_fk",
           "tableFrom": "fixes",
-          "tableTo": "reviews",
           "columnsFrom": [
             "review_id"
           ],
+          "tableTo": "reviews",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "fixes_session_id_sessions_id_fk": {
           "name": "fixes_session_id_sessions_id_fk",
           "tableFrom": "fixes",
-          "tableTo": "sessions",
           "columnsFrom": [
             "session_id"
           ],
+          "tableTo": "sessions",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         },
         "fixes_playbook_id_playbooks_id_fk": {
           "name": "fixes_playbook_id_playbooks_id_fk",
           "tableFrom": "fixes",
-          "tableTo": "playbooks",
           "columnsFrom": [
             "playbook_id"
           ],
+          "tableTo": "playbooks",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -1259,8 +1259,8 @@
             "report_id",
             "position"
           ],
-          "isUnique": true,
-          "where": "\"playbook_steps\".\"report_id\" IS NOT NULL"
+          "where": "\"playbook_steps\".\"report_id\" IS NOT NULL",
+          "isUnique": true
         },
         "playbook_steps_fix_idx": {
           "name": "playbook_steps_fix_idx",
@@ -1268,8 +1268,8 @@
             "fix_id",
             "position"
           ],
-          "isUnique": true,
-          "where": "\"playbook_steps\".\"fix_id\" IS NOT NULL"
+          "where": "\"playbook_steps\".\"fix_id\" IS NOT NULL",
+          "isUnique": true
         },
         "playbook_steps_review_idx": {
           "name": "playbook_steps_review_idx",
@@ -1277,8 +1277,8 @@
             "agent_review_id",
             "position"
           ],
-          "isUnique": true,
-          "where": "\"playbook_steps\".\"agent_review_id\" IS NOT NULL"
+          "where": "\"playbook_steps\".\"agent_review_id\" IS NOT NULL",
+          "isUnique": true
         },
         "playbook_steps_reply_check_idx": {
           "name": "playbook_steps_reply_check_idx",
@@ -1286,8 +1286,8 @@
             "reply_check_id",
             "position"
           ],
-          "isUnique": true,
-          "where": "\"playbook_steps\".\"reply_check_id\" IS NOT NULL"
+          "where": "\"playbook_steps\".\"reply_check_id\" IS NOT NULL",
+          "isUnique": true
         },
         "playbook_steps_comment_pass_idx": {
           "name": "playbook_steps_comment_pass_idx",
@@ -1295,75 +1295,75 @@
             "comment_pass_id",
             "position"
           ],
-          "isUnique": true,
-          "where": "\"playbook_steps\".\"comment_pass_id\" IS NOT NULL"
+          "where": "\"playbook_steps\".\"comment_pass_id\" IS NOT NULL",
+          "isUnique": true
         }
       },
       "foreignKeys": {
         "playbook_steps_report_id_reports_id_fk": {
           "name": "playbook_steps_report_id_reports_id_fk",
           "tableFrom": "playbook_steps",
-          "tableTo": "reports",
           "columnsFrom": [
             "report_id"
           ],
+          "tableTo": "reports",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "playbook_steps_fix_id_fixes_id_fk": {
           "name": "playbook_steps_fix_id_fixes_id_fk",
           "tableFrom": "playbook_steps",
-          "tableTo": "fixes",
           "columnsFrom": [
             "fix_id"
           ],
+          "tableTo": "fixes",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "playbook_steps_agent_review_id_pr_agent_reviews_id_fk": {
           "name": "playbook_steps_agent_review_id_pr_agent_reviews_id_fk",
           "tableFrom": "playbook_steps",
-          "tableTo": "pr_agent_reviews",
           "columnsFrom": [
             "agent_review_id"
           ],
+          "tableTo": "pr_agent_reviews",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "playbook_steps_reply_check_id_pr_reply_checks_id_fk": {
           "name": "playbook_steps_reply_check_id_pr_reply_checks_id_fk",
           "tableFrom": "playbook_steps",
-          "tableTo": "pr_reply_checks",
           "columnsFrom": [
             "reply_check_id"
           ],
+          "tableTo": "pr_reply_checks",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "playbook_steps_comment_pass_id_pr_comment_passes_id_fk": {
           "name": "playbook_steps_comment_pass_id_pr_comment_passes_id_fk",
           "tableFrom": "playbook_steps",
-          "tableTo": "pr_comment_passes",
           "columnsFrom": [
             "comment_pass_id"
           ],
+          "tableTo": "pr_comment_passes",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -1414,15 +1414,15 @@
         "playbook_triggers_playbook_id_playbooks_id_fk": {
           "name": "playbook_triggers_playbook_id_playbooks_id_fk",
           "tableFrom": "playbook_triggers",
-          "tableTo": "playbooks",
           "columnsFrom": [
             "playbook_id"
           ],
+          "tableTo": "playbooks",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -1669,28 +1669,28 @@
         "pr_agent_reviews_repo_id_repos_id_fk": {
           "name": "pr_agent_reviews_repo_id_repos_id_fk",
           "tableFrom": "pr_agent_reviews",
-          "tableTo": "repos",
           "columnsFrom": [
             "repo_id"
           ],
+          "tableTo": "repos",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "pr_agent_reviews_playbook_id_playbooks_id_fk": {
           "name": "pr_agent_reviews_playbook_id_playbooks_id_fk",
           "tableFrom": "pr_agent_reviews",
-          "tableTo": "playbooks",
           "columnsFrom": [
             "playbook_id"
           ],
+          "tableTo": "playbooks",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -1747,14 +1747,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'address'"
         },
         "status": {
           "name": "status",
@@ -1853,28 +1845,28 @@
         "pr_comment_passes_repo_id_repos_id_fk": {
           "name": "pr_comment_passes_repo_id_repos_id_fk",
           "tableFrom": "pr_comment_passes",
-          "tableTo": "repos",
           "columnsFrom": [
             "repo_id"
           ],
+          "tableTo": "repos",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "pr_comment_passes_playbook_id_playbooks_id_fk": {
           "name": "pr_comment_passes_playbook_id_playbooks_id_fk",
           "tableFrom": "pr_comment_passes",
-          "tableTo": "playbooks",
           "columnsFrom": [
             "playbook_id"
           ],
+          "tableTo": "playbooks",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -2037,28 +2029,28 @@
         "pr_reply_checks_repo_id_repos_id_fk": {
           "name": "pr_reply_checks_repo_id_repos_id_fk",
           "tableFrom": "pr_reply_checks",
-          "tableTo": "repos",
           "columnsFrom": [
             "repo_id"
           ],
+          "tableTo": "repos",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "pr_reply_checks_playbook_id_playbooks_id_fk": {
           "name": "pr_reply_checks_playbook_id_playbooks_id_fk",
           "tableFrom": "pr_reply_checks",
-          "tableTo": "playbooks",
           "columnsFrom": [
             "playbook_id"
           ],
+          "tableTo": "playbooks",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -2287,8 +2279,8 @@
           "columns": [
             "alert_id"
           ],
-          "isUnique": true,
-          "where": "\"reports\".\"status\" = 'running'"
+          "where": "\"reports\".\"status\" = 'running'",
+          "isUnique": true
         },
         "reports_alert_version": {
           "name": "reports_alert_version",
@@ -2303,28 +2295,28 @@
         "reports_alert_id_alerts_id_fk": {
           "name": "reports_alert_id_alerts_id_fk",
           "tableFrom": "reports",
-          "tableTo": "alerts",
           "columnsFrom": [
             "alert_id"
           ],
+          "tableTo": "alerts",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "reports_playbook_id_playbooks_id_fk": {
           "name": "reports_playbook_id_playbooks_id_fk",
           "tableFrom": "reports",
-          "tableTo": "playbooks",
           "columnsFrom": [
             "playbook_id"
           ],
+          "tableTo": "playbooks",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -2472,23 +2464,23 @@
           "columns": [
             "report_id"
           ],
-          "isUnique": true,
-          "where": "\"reviews\".\"undone_at\" IS NULL"
+          "where": "\"reviews\".\"undone_at\" IS NULL",
+          "isUnique": true
         }
       },
       "foreignKeys": {
         "reviews_report_id_reports_id_fk": {
           "name": "reviews_report_id_reports_id_fk",
           "tableFrom": "reviews",
-          "tableTo": "reports",
           "columnsFrom": [
             "report_id"
           ],
+          "tableTo": "reports",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -2562,15 +2554,15 @@
         "routes_service_id_services_id_fk": {
           "name": "routes_service_id_services_id_fk",
           "tableFrom": "routes",
-          "tableTo": "services",
           "columnsFrom": [
             "service_id"
           ],
+          "tableTo": "services",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -2635,28 +2627,28 @@
         "scan_route_results_scan_id_scans_id_fk": {
           "name": "scan_route_results_scan_id_scans_id_fk",
           "tableFrom": "scan_route_results",
-          "tableTo": "scans",
           "columnsFrom": [
             "scan_id"
           ],
+          "tableTo": "scans",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "scan_route_results_route_id_routes_id_fk": {
           "name": "scan_route_results_route_id_routes_id_fk",
           "tableFrom": "scan_route_results",
-          "tableTo": "routes",
           "columnsFrom": [
             "route_id"
           ],
+          "tableTo": "routes",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -2784,15 +2776,15 @@
         "scans_service_id_services_id_fk": {
           "name": "scans_service_id_services_id_fk",
           "tableFrom": "scans",
-          "tableTo": "services",
           "columnsFrom": [
             "service_id"
           ],
+          "tableTo": "services",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -2867,15 +2859,15 @@
         "services_repo_id_repos_id_fk": {
           "name": "services_repo_id_repos_id_fk",
           "tableFrom": "services",
-          "tableTo": "repos",
           "columnsFrom": [
             "repo_id"
           ],
+          "tableTo": "repos",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -2905,28 +2897,28 @@
         "session_connections_session_id_sessions_id_fk": {
           "name": "session_connections_session_id_sessions_id_fk",
           "tableFrom": "session_connections",
-          "tableTo": "sessions",
           "columnsFrom": [
             "session_id"
           ],
+          "tableTo": "sessions",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "session_connections_connection_id_connections_id_fk": {
           "name": "session_connections_connection_id_connections_id_fk",
           "tableFrom": "session_connections",
-          "tableTo": "connections",
           "columnsFrom": [
             "connection_id"
           ],
+          "tableTo": "connections",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -3082,49 +3074,49 @@
             "repo_id",
             "pr_number"
           ],
-          "isUnique": true,
-          "where": "\"sessions\".\"kind\" = 'pr_review'"
+          "where": "\"sessions\".\"kind\" = 'pr_review'",
+          "isUnique": true
         }
       },
       "foreignKeys": {
         "sessions_account_id_claude_accounts_id_fk": {
           "name": "sessions_account_id_claude_accounts_id_fk",
           "tableFrom": "sessions",
-          "tableTo": "claude_accounts",
           "columnsFrom": [
             "account_id"
           ],
+          "tableTo": "claude_accounts",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "restrict"
         },
         "sessions_repo_id_repos_id_fk": {
           "name": "sessions_repo_id_repos_id_fk",
           "tableFrom": "sessions",
-          "tableTo": "repos",
           "columnsFrom": [
             "repo_id"
           ],
+          "tableTo": "repos",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "restrict"
         },
         "sessions_alert_id_alerts_id_fk": {
           "name": "sessions_alert_id_alerts_id_fk",
           "tableFrom": "sessions",
-          "tableTo": "alerts",
           "columnsFrom": [
             "alert_id"
           ],
+          "tableTo": "alerts",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -3172,9 +3164,9 @@
   "views": {},
   "enums": {},
   "_meta": {
+    "columns": {},
     "schemas": {},
-    "tables": {},
-    "columns": {}
+    "tables": {}
   },
   "internal": {
     "indexes": {

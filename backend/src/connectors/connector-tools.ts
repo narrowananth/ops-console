@@ -38,6 +38,10 @@ export interface ConnectorTools {
   /** The Bitbucket Cloud nickname `bkt` is signed in as, or `null` when it is signed out. */
   bitbucketUser(): Promise<string | null>;
   bitbucketLogin(signal: AbortSignal, onPrompt: (prompt: SignInPrompt) => void): Promise<void>;
+  /** Who the `slashdocs` CLI is signed in as, or `null` when it is signed out or has no server. */
+  slashdocsUser(): Promise<{ email: string; name: string | null } | null>;
+  /** `slashdocs auth login`, to `server` or, when `null`, the CLI's active one. */
+  slashdocsLogin(server: string | null, signal: AbortSignal, onPrompt: (prompt: SignInPrompt) => void): Promise<void>;
   /** Whether a command is on the PATH. */
   installed(command: string): Promise<boolean>;
   /** `brew install <formula>`. */
@@ -46,11 +50,13 @@ export interface ConnectorTools {
 
 const datadogStatusSchema = z.object({ authenticated: z.boolean(), org: z.string().nullish() }).loose();
 
-export type ToolBins = { pup: string; gh: string; glab: string; bkt: string };
+export type ToolBins = { pup: string; gh: string; glab: string; bkt: string; slashdocs: string };
 
 /** Errors name the tool only: output may hold tokens. */
 export class CliConnectorTools implements ConnectorTools {
-  constructor(private readonly bins: ToolBins = { pup: 'pup', gh: 'gh', glab: 'glab', bkt: 'bkt' }) {}
+  constructor(
+    private readonly bins: ToolBins = { pup: 'pup', gh: 'gh', glab: 'glab', bkt: 'bkt', slashdocs: 'slashdocs' },
+  ) {}
 
   async datadogStatus(): Promise<{ signedIn: boolean; org: string | null }> {
     const out = await this.exec(this.bins.pup, ['auth', 'status'], 'pup auth status', [0, 1]);
@@ -115,6 +121,33 @@ export class CliConnectorTools implements ConnectorTools {
       if (typeof (error as { code?: unknown }).code === 'number') return null;
       throw new ApiError(502, ErrorCode.UpstreamFailed, '`glab api user` failed');
     }
+  }
+
+  async slashdocsUser(): Promise<{ email: string; name: string | null } | null> {
+    try {
+      const { stdout } = await run(this.bins.slashdocs, ['auth', 'whoami', '--json'], { timeout: 30_000 });
+      const who = z
+        .object({ user: z.object({ email: z.string(), name: z.string().nullish() }).loose() })
+        .loose()
+        .safeParse(JSON.parse(stdout));
+      return who.success ? { email: who.data.user.email, name: who.data.user.name ?? null } : null;
+    } catch (error) {
+      // Signed out, or no server yet: `whoami` exits 1.
+      if (typeof (error as { code?: unknown }).code === 'number') return null;
+      throw new ApiError(502, ErrorCode.UpstreamFailed, '`slashdocs auth whoami` failed');
+    }
+  }
+
+  async slashdocsLogin(
+    server: string | null,
+    signal: AbortSignal,
+    onPrompt: (prompt: SignInPrompt) => void,
+  ): Promise<void> {
+    await this.exec(this.bins.slashdocs, ['auth', 'login', ...(server ? [server] : [])], 'slashdocs auth login', [0], {
+      signal,
+      login: true,
+      onPrompt,
+    });
   }
 
   async gitlabLogin(host: string, signal: AbortSignal, onPrompt: (prompt: SignInPrompt) => void): Promise<void> {

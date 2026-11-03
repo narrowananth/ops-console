@@ -65,6 +65,8 @@ import {
   terminalListSchema,
   type UpdateConnection,
   type UpdateMcpServer,
+  type UpdateWhen,
+  updateStateSchema,
 } from '@ops-console/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
@@ -93,14 +95,64 @@ export const queryKeys = {
   startAtLogin: ['start-at-login'] as const,
   terminals: ['terminals'] as const,
   playbooks: ['playbooks'] as const,
+  updates: ['updates'] as const,
 };
 
-export function useHealth() {
+/** `poll`: asks every second and a half, while the console restarts on a new version. */
+export function useHealth(poll = false) {
   return useQuery({
     queryKey: queryKeys.health,
     queryFn: () => apiGet('/health', z.object({ data: healthSchema })),
     enabled: sessionToken() !== null,
     retry: false,
+    refetchInterval: poll ? 1500 : false,
+  });
+}
+
+const updatesBody = z.object({ data: updateStateSchema });
+
+/** The installed version against the newest release on GitHub. */
+export function useUpdates() {
+  return useQuery({
+    queryKey: queryKeys.updates,
+    queryFn: () => apiGet('/updates', updatesBody),
+    enabled: sessionToken() !== null,
+    retry: false,
+  });
+}
+
+/** Check now: asks GitHub for the newest release. */
+export function useCheckUpdates() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('POST', '/updates/checks', {}, updatesBody),
+    onSuccess: (state) => client.setQueryData(queryKeys.updates, state),
+  });
+}
+
+/** Installs the newest release now, or once no agent run is going; the console then restarts on it. */
+export function useInstallUpdate() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (when: UpdateWhen) => apiSend('POST', '/updates', { when }, updatesBody),
+    onSuccess: (state) => client.setQueryData(queryKeys.updates, state),
+  });
+}
+
+/** The Update automatically switch. */
+export function useAutoUpdate() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (auto_update: boolean) => apiSend('PATCH', '/settings', { updates: { auto_update } }, z.unknown()),
+    onMutate: (auto_update) => {
+      const previous = client.getQueryData<z.infer<typeof updatesBody>>(queryKeys.updates);
+      if (previous) client.setQueryData(queryKeys.updates, { data: { ...previous.data, auto_update } });
+      return { previous };
+    },
+    onError: (_error, _value, context) => {
+      if (context?.previous) client.setQueryData(queryKeys.updates, context.previous);
+    },
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.updates }),
   });
 }
 
@@ -308,6 +360,14 @@ function useConnectorMutation<V>(send: (variables: V) => Promise<unknown>) {
 /** Starts the sign-in; the result arrives as `connection.checked`. */
 export function useConnectConnector() {
   return useConnectorMutation((id: ConnectorId) => apiSend('POST', `/connectors/${id}/connect`, {}, z.undefined()));
+}
+
+/** Saves a Connector's settings, such as the slashdocs server, then starts its sign-in. */
+export function useConnectConnectorWith() {
+  return useConnectorMutation(async ({ id, config }: { id: ConnectorId; config: Record<string, unknown> }) => {
+    await apiSend('PATCH', `/connectors/${id}`, { config }, z.object({ data: connectorSchema }));
+    return apiSend('POST', `/connectors/${id}/connect`, {}, z.undefined());
+  });
 }
 
 /** Stops a sign-in still waiting on the browser; the Connector keeps the status it had. */

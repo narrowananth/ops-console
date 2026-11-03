@@ -149,12 +149,18 @@ To remove this server, run: claude mcp remove "sentry" -s local
         }
       });
       const positional = options.filter(
-        (arg, at) => !arg.startsWith('-') && !['--scope', '--transport', '--header'].includes(options[at - 1]),
+        (arg, at) =>
+          !arg.startsWith('-') &&
+          !['--scope', '--transport', '--header', '--client-id', '--callback-port'].includes(options[at - 1]),
       );
       const name = positional[0];
+      // As Claude Code keeps a pre-registered OAuth app.
+      const oauth = flag('--client-id')
+        ? { oauth: { clientId: flag('--client-id'), callbackPort: Number(flag('--callback-port')) } }
+        : {};
       holder.mcpServers[name] =
         dash === -1
-          ? { type: flag('--transport'), url: positional[1], headers }
+          ? { type: flag('--transport'), url: positional[1], headers, ...oauth }
           : { type: 'stdio', command: rest[dash + 1], args: rest.slice(dash + 2), env: {} };
     }
     if (project) writeFileSync(projectFile, JSON.stringify(project, null, 2));
