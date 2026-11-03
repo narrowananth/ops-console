@@ -11,9 +11,10 @@ const ICON = path.resolve(import.meta.dirname, '../cli/assets/ops-console.icns')
 
 /**
  * Builds `<dir>/<name>.app` around `node` and returns the path of its executable. `pnpm dev` builds its own,
- * under another name and id, so macOS keeps its permissions apart from the installed app's.
+ * under another name and id, so macOS keeps its permissions apart from the installed app's. The bundle carries no
+ * version: releases on the same Node build the same app, which the Keychain and Full Disk Access already know.
  */
-export async function buildAppBundle({ node, dir, version, name = APP_NAME, id = BUNDLE_ID }) {
+export async function buildAppBundle({ node, dir, name = APP_NAME, id = BUNDLE_ID }) {
   const app = path.join(dir, `${name}.app`);
   const contents = path.join(app, 'Contents');
   await mkdir(path.join(contents, 'MacOS'), { recursive: true });
@@ -21,14 +22,14 @@ export async function buildAppBundle({ node, dir, version, name = APP_NAME, id =
   const executable = path.join(contents, 'MacOS', name);
   await copyFile(node, executable);
   await copyFile(ICON, path.join(contents, 'Resources', 'ops-console.icns'));
-  await writeFile(path.join(contents, 'Info.plist'), infoPlist({ version, name, id }));
+  await writeFile(path.join(contents, 'Info.plist'), infoPlist({ name, id }));
   // Node's own signature names Node; an ad-hoc one names the bundle. A new Node means a new signature, and
   // macOS asks for Full Disk Access again.
   execFileSync('codesign', ['--force', '--sign', '-', app], { stdio: 'inherit' });
   return executable;
 }
 
-function infoPlist({ version, name, id }) {
+function infoPlist({ name, id }) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -45,8 +46,6 @@ function infoPlist({ version, name, id }) {
     <string>ops-console</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>${version}</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.5</string>
     <key>LSUIElement</key>

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
@@ -11,6 +11,7 @@ import { CliConnectorTools } from './connectors/connector-tools';
 import { ConnectorsModule } from './connectors/connectors.module';
 import { startDaemon } from './daemon';
 import { DevtoolsModule } from './devtools/devtools.module';
+import { adoptKeychainItems, otherVersionApps } from './keychain/handover';
 import { LoginKeychain } from './keychain/keychain';
 import { runMcpExec } from './mcp/launcher';
 import { McpServersModule } from './mcp/mcp-servers.module';
@@ -44,14 +45,41 @@ const appDir = path.resolve(env.OPS_CONSOLE_APP_DIR ?? path.dirname(process.argv
 const versionFile = path.join(appDir, '..', 'VERSION');
 const uiDir = path.join(appDir, 'public');
 const version = existsSync(versionFile) ? readFileSync(versionFile, 'utf8').trim() : 'dev';
+const dataDir = path.resolve(
+  env.OPS_CONSOLE_DATA_DIR ?? path.join(homedir(), 'Library', 'Application Support', 'ops-console'),
+);
+
+/**
+ * An installed version takes the Keychain items over from the version before it, in the background so the daemon
+ * answers at once; its Keychain waits for the handover. `pnpm dev` hands its items over itself.
+ */
+function adoptOnUpdate(): Promise<unknown> {
+  const versionDir = path.dirname(realpathSync(appDir));
+  const self = realpathSync(process.execPath);
+  if (version === 'dev' || process.platform !== 'darwin' || !self.startsWith(`${versionDir}/`)) {
+    return Promise.resolve();
+  }
+  const log = (level: string, text: string) =>
+    process.stdout.write(`${new Date().toISOString()} ${level} [keychain] ${text}\n`);
+  mkdirSync(dataDir, { recursive: true });
+  return adoptKeychainItems({
+    self,
+    previous: otherVersionApps(versionDir, path.relative(versionDir, self)),
+    ownerFile: path.join(dataDir, 'keychain-owner.json'),
+    script: path.join(appDir, 'keychain-handover.mjs'),
+    service: 'ops-console',
+    keychain,
+  }).then(
+    (moved) => moved > 0 && log('INFO', `moved ${moved} items to ${version}'s app`),
+    (error: unknown) => log('WARN', `items stay with the previous version's app: ${(error as Error).message}`),
+  );
+}
 
 const daemon = await startDaemon({
-  dataDir: path.resolve(
-    env.OPS_CONSOLE_DATA_DIR ?? path.join(homedir(), 'Library', 'Application Support', 'ops-console'),
-  ),
+  dataDir,
   port: env.OPS_CONSOLE_PORT,
   version,
-  keychain,
+  keychain: new LoginKeychain(process.env.OPS_CONSOLE_KEYCHAIN_SERVICE || undefined, adoptOnUpdate()),
   uiDir: existsSync(uiDir) ? uiDir : null,
   migrationsDir: path.join(appDir, 'drizzle'),
   writeLog: (line) => process.stdout.write(`${line}\n`),

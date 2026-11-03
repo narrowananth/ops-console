@@ -31,7 +31,12 @@ Node 24, the bundled daemon, the built UI, the CLI, the native modules (`better-
 `@napi-rs/keyring`, `node-pty`) built for that Node, and the Claude Agent SDK with its platform's
 Claude Code binary. The system Node is never used. The Node binary sits inside `Ops Console.app`, so
 macOS names the daemon Ops Console when the operator grants it Full Disk Access; `node/bin/node`
-links to it for the CLI and the MCP helpers.
+links to it for the CLI and the MCP helpers. The bundle is signed ad hoc and carries no version, so releases on the
+same Node build the same app and keep its Keychain access and Full Disk Access. A new Node makes a new app. The
+first time a version starts, the previous version's app hands over the Keychain items it holds
+(`keychain-handover.mjs take`), and the new app writes them back itself, so macOS doesn't ask for the login password
+once per item. The handover runs in the background, about half a minute, and the daemon's Keychain reads wait for it.
+`keychain-owner.json` in the data folder names the app that holds the items.
 
 `ops-console start` writes a LaunchAgent plist (`RunAtLoad`, `KeepAlive`) that runs `current/Ops Console.app` on
 `current/app/main.js`, so launchd starts the daemon at login and again if it stops. macOS lists it as Ops Console

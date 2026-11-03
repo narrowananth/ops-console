@@ -36,3 +36,5 @@ await build({
 });
 await cp('drizzle', 'dist/drizzle', { recursive: true });
 await cp('launch', 'dist/launch', { recursive: true });
+// The installed daemon runs it with the previous version's app to move the Keychain items to its own.
+await cp('scripts/keychain-handover.mjs', 'dist/keychain-handover.mjs');

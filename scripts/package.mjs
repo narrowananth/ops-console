@@ -72,7 +72,7 @@ sh('tar', [
   `${nodeName}/LICENSE`,
 ]);
 // The daemon runs as Ops Console.app; the CLI and the MCP helpers reach the same binary through node/bin/node.
-const executable = await buildAppBundle({ node: path.join(stage, 'node/bin/node'), dir: stage, version });
+const executable = await buildAppBundle({ node: path.join(stage, 'node/bin/node'), dir: stage });
 await rm(path.join(stage, 'node/bin/node'));
 await symlink(path.relative(path.join(stage, 'node/bin'), executable), path.join(stage, 'node/bin/node'));
 
