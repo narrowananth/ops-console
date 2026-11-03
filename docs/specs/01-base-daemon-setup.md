@@ -25,9 +25,18 @@ CLI
 7. `ops-console status` prints running or stopped, and for a running daemon its pid, version, port and health. It exits 0 when running and 3 when stopped.
 8. `ops-console open` opens `http://127.0.0.1:4545/#token=<token>` with the token from the runtime file, in the default browser, or with `ops-console open <app>` in that browser app, so a second browser signs in too. It never prints the token. Every signed-in browser works on the one daemon at once. With the daemon stopped, it says to run `ops-console start` and exits 1.
 9. `ops-console logs` follows the daemon log.
-10. `ops-console update` runs the installer for the latest version and restarts the daemon if it was running. Migrations apply on that start (Behavior 17).
+10. `ops-console update` runs the installer for the latest version and restarts the daemon if it was running. Migrations apply on that start (Behavior 17). The console also updates itself; see Updates below.
 11. `ops-console uninstall` stops the daemon, removes the plist, `~/.ops-console` and the `~/.local/bin` link, and prints the data and log folders it left in place.
 12. `ops-console --version` prints the installed version.
+
+Updates
+
+- The sidebar footer shows the installed version under the theme and collapse buttons. Clicking it opens the version panel. The panel shows the installed and latest versions, when the console last checked (with Check now), the new version's release notes, the Update automatically switch and Update.
+- The daemon reads the newest GitHub release (`GET /updates`) 10 seconds after it starts and every 6 hours after that. It reads nothing in a development build. If GitHub can't be reached, the panel says so and keeps the last answer.
+- Update automatically is on by default (setting `updates.auto_update`). With it on, a newer release installs by itself. With it off, an Update available card above the account card offers Update and What's new. In the collapsed sidebar, the version button carries a dot instead.
+- An update waits until no agent run is going, because a restart fails each run going. Auto-update always waits. A manual Update with runs going asks first: Update anyway installs now, and Wait until idle installs once Running reads 0.
+- Installing runs the installed version's `install.sh` for the new version. The daemon then stops, and launchd starts it again from `current`. The page shows that the console is restarting, and loads the new version's UI once it answers. A failed install leaves the old version running and says why. Auto-update does not try a failed install again; Try again does.
+- The first start on a new version shows an Updated to vX notification bottom right. It says whether auto-update put it there, links to the release notes, and stays closed once closed.
 
 Daemon
 
@@ -95,7 +104,6 @@ Release and checks
 - **Signed or notarized builds**: files fetched with `curl` carry no quarantine flag, so Gatekeeper does not block the bundled Node.
 - **Downgrade**: an older version started on a data folder a newer version migrated is not supported.
 - **Backups**: none. The operator can copy `state.db` while the daemon is stopped.
-- **Auto-update**: the operator runs `ops-console update`.
 - **Exact job timing**: a job runs within a few seconds of its slot.
 
 ## Safety

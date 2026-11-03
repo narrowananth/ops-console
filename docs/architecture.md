@@ -51,6 +51,11 @@ To try an install before a release, `pnpm build`, `pnpm package` and a `checksum
 then `OPS_CONSOLE_RELEASE_URL=file://<repo>/out sh install.sh`. It replaces the installed app, since both use
 `~/.ops-console` and the same data folder.
 
+The daemon reads the newest GitHub release at start and every 6 hours (`UpdatesModule`). To install one, it runs
+the installed version's `install.sh` with `OPS_CONSOLE_VERSION` and then stops itself. `KeepAlive` has launchd
+start it again from `current`, now on the new version. `update.json` in the data folder records the version this
+data last ran on, so the first start on a new one can say what it came from.
+
 `bin/ops-console` also starts two helpers from the daemon bundle: `mcp-exec`, the launcher that
 reads a stdio MCP Server's env vars from the Keychain, and `mcp-setup`, the Setup agent's MCP
 Server.

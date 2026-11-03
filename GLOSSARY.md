@@ -211,6 +211,11 @@ The words a control, status or label shows on hover or keyboard focus: what it m
 agent do, or why it is off.
 _Avoid_: tooltip
 
+**Update**:
+Installing a newer release of the console over the running one, which then restarts on it. With **auto-update**
+on, the console installs one by itself once no agent run is going.
+_Avoid_: upgrade
+
 **Remembered view**:
 What the operator picked, ticked, typed or opened on a page, kept until they change it, through page switches,
 reloads and reopening the console.

@@ -15,6 +15,7 @@ import { WorkspaceView } from '../workspace/workspace-view';
 import { lastPage, useKeepAddress } from './last-address';
 import { Page, PageColumn } from './page';
 import { Sidebar } from './sidebar';
+import { UpdateNotice } from './updates';
 
 /** A list page's body: one rounded card in a readable column. */
 function Card({ children, wide }: { children: ReactNode; wide?: boolean }) {
@@ -32,6 +33,7 @@ export function Shell() {
   return (
     <div className="flex min-h-0 flex-1">
       <Sidebar />
+      <UpdateNotice />
       <main className="flex min-h-0 min-w-0 flex-1">
         <Routes>
           <Route
