@@ -247,8 +247,9 @@ Adds `branch: string | null`.
   state on hover or focus. With no Repos: "Import a Repo in Repos to work on its branches." Loading
   reads "Reading Sessions…"; an error, "Could not read Sessions."
 - A "No Repo" group above the Repos lists anonymous Sessions; its `+` starts one at once.
-- Session view: a header with the Repo's name (or "No Repo"), the title, the branch, the state and Delete, which is
-  disabled while the Session runs or waits on the operator; a failed Delete shows why. An empty conversation says what
+- Session view: a header in two rows. The first holds the Repo's name (or "No Repo"), the title and the state on the
+  left, and Diff and Delete on the right. Delete is disabled while the Session runs or waits on the operator; a
+  failed Delete shows why. The second row holds the branch and the links below. An empty conversation says what
   to ask. The branch chip shows the branch checked out now (Behavior 30). Beside it, "PR #N →" opens a pull request
   in the Pull requests tab and "#N on host ↗" on the Git host. The pull request is the last one the agent named in
   the conversation, or else the open one on the Session's branch. "Alert →" opens the Monitor Alert whose
@@ -257,6 +258,7 @@ Adds `branch: string | null`.
   longer and darker, and tints the marks of the messages in view. Hovering a mark names its message's first line;
   clicking it scrolls there. Scrolled up, a "Scroll to end" button over the bottom edge goes back to the newest
   message. The composer holds the Model, Effort and Access chips, the branch switcher on a `repo` Session, and Send.
+  Send keeps the right end of the chips' row; a long branch name shortens before its chip drops to a new row.
   While a run goes, `waiting_input` included, Stop sits before Send and ends it (`02-settings-agents` Behavior 11a).
   Each run of the agent's tool steps folds to one line: the count and the latest step, turning while the message
   streams. Open, each step is one short line, such as "Ran git add +3" for a chain of shell commands; the full

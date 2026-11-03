@@ -170,7 +170,7 @@ export function VersionLine({ collapsed }: { collapsed: boolean }) {
         onClick={() => setOpen(!open)}
         className={
           collapsed
-            ? 'relative inline-flex h-8.5 w-full cursor-pointer items-center justify-center border border-line bg-card font-mono text-xs text-text hover:bg-neutral-200'
+            ? 'relative inline-flex h-8.5 w-full cursor-pointer items-center justify-center border-0 bg-transparent px-0 font-mono text-[11px] text-neutral-700 hover:text-text'
             : 'flex w-full cursor-pointer items-center justify-center gap-1.5 border-0 bg-transparent px-0.5 text-xs text-neutral-700 hover:text-text'
         }
       >

@@ -138,7 +138,7 @@ export function Dropdown<T extends string>({
         onClick={toggle}
         className={
           chip
-            ? `flex cursor-pointer items-center gap-1.25 rounded-full border px-3 py-1 text-xs text-text transition-colors hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-50 ${
+            ? `flex flex-none cursor-pointer items-center gap-1.25 rounded-full border px-2.5 py-1 text-xs text-text transition-colors hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-50 ${
                 open ? 'border-divider bg-neutral-200' : 'border-transparent bg-transparent'
               }`
             : `flex w-full cursor-pointer items-center gap-2 rounded-md border bg-card px-3 py-2 text-left text-[13px] text-text shadow-sm transition-colors hover:border-neutral-400 disabled:cursor-not-allowed disabled:opacity-50 ${
