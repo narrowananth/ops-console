@@ -26,6 +26,8 @@ Branches
 6. Checking out a branch for a Session stashes uncommitted changes first and says so in the response (`stashed: true`). With `create: true` it makes a new branch from the current one and checks it out. The Session's `branch` follows, and `session.updated` carries it.
 7. Checkout is refused with `invalid_state` for any Session that is not a `repo` Session, while the Session is not `idle` or `failed`, and while any Session in that Repo is `working` or `waiting_approval`.
 8. Checkout, branch creation and stash each write an Action Log row of kind `git` before they run.
+30. When a run in a `repo` Session ends, the Session's `branch` follows the branch checked out in the Repo, as when the agent made a branch for its fix and switched to it. `session.updated` carries it. A detached HEAD leaves the branch as it was. Reading the diff (Behavior 31) does the same for an `idle` or `failed` Session.
+31. A `repo` Session's diff is what its branch changes, read from the Repo folder. It is compared with where the branch forked from the default branch: origin's when origin has it, else the Repo's. It holds the branch's commits and its staged, unstaged and untracked files; on the default branch, the commits not pushed and the uncommitted changes. Each file has its status, counts and lines. A file's lines stop at 3000. A binary file, or an untracked one over 512 KB, shows without lines, and at most 200 untracked files are read. Any other kind of Session answers `invalid_state`.
 
 Pull requests
 
@@ -171,6 +173,10 @@ Each branch adds `has_open_pr: boolean`.
 
 Answers 200 with `{ "data": { "session": "Session", "stashed": false } }`. Errors: `invalid_state` (Behavior 7), `upstream_failed` when git refuses.
 
+### `GET /sessions/:id/diff`
+
+Answers `{ "data": SessionDiff }` (Behavior 31): `branch` (null on a detached HEAD), `base` such as `origin/main` (null when the Repo has no commit), `additions`, `deletions`, and `files`, A→Z. Each file has `name`, `old_name` (renames only), `status` (`added`, `modified`, `deleted`, `renamed`), `additions`, `deletions`, `binary`, `lines` (`sign` and `text`, hunk headers kept) and `truncated`. Errors: `invalid_state` for a Session that is not `repo`, `not_found`.
+
 ### Pull requests
 
 `:repo` is the Repo id.
@@ -236,24 +242,38 @@ Adds `branch: string | null`.
 - A "No Repo" group above the Repos lists anonymous Sessions; its `+` starts one at once.
 - Session view: a header with the Repo's name (or "No Repo"), the title, the branch, the state and Delete, which is
   disabled while the Session runs or waits on the operator; a failed Delete shows why. An empty conversation says what
-  to ask. Beside the branch, "PR #N →" opens the open pull request on the Session's branch, and "Alert →" the
-  Monitor Alert whose Verification or Fix runs in the Session. The conversation opens at its newest message and follows new and streaming messages while the operator is
+  to ask. The branch chip shows the branch checked out now (Behavior 30). Beside it, "PR #N →" opens a pull request
+  in the Pull requests tab and "#N on host ↗" on the Git host. The pull request is the last one the agent named in
+  the conversation, or else the open one on the Session's branch. "Alert →" opens the Monitor Alert whose
+  Verification or Fix runs in the Session. The conversation opens at its newest message and follows new and streaming messages while the operator is
   at the end; scrolled up to read, it stays where they left it. A map on its left edge has a mark per message, the operator's
   longer and darker, and tints the marks of the messages in view. Hovering a mark names its message's first line;
-  clicking it scrolls there. The composer holds the Model, Effort and Access chips, the branch switcher on a `repo` Session, and Send.
+  clicking it scrolls there. Scrolled up, a "Scroll to end" button over the bottom edge goes back to the newest
+  message. The composer holds the Model, Effort and Access chips, the branch switcher on a `repo` Session, and Send.
   While a run goes, `waiting_input` included, Stop sits before Send and ends it (`02-settings-agents` Behavior 11a).
-  The agent's tool steps show as a compact path; while its message streams, the last step turns. The state in the
+  Each run of the agent's tool steps folds to one line: the count and the latest step, turning while the message
+  streams. Open, each step is one short line, such as "Ran git add +3" for a chain of shell commands; the full
+  command shows on hover. The state in the
   header is a pill: tinted and pulsing while a run goes, red when failed.
   Each message the operator sent shows Copy on hover. The last one also shows Edit while no run goes: it opens the
   text in place with Cancel and Revert and rerun (`02-settings-agents` Behavior 8a). A note above the composer then
   names the files put back with their line counts, or says why none were, until closed or the next Send.
-  Enter sends and Shift+Enter adds a line; the box is disabled while the agent works. Its draft is kept per Session.
+  Enter sends and Shift+Enter adds a line. While the agent works the box stays open and Send reads Queue: the
+  message waits in a "Queued" note with Take back, and sends when the run ends. A failed send puts it back in the
+  box. Its draft is kept per Session.
   Files attach to the next message three ways: the paperclip before the chips, dropping them on the box, or pasting
   them (a screenshot, a file copied in Finder). Each uploads at once to `POST /api/sessions/:id/attachments?name=`
   and is saved under a new name in `attachments/<session id>/` in the data folder. A chip above the text shows each
   file, a thumbnail for images, its size and a remove button; Send waits until every file is saved. The message ends
   with an "Attached files" list of each name and saved path, and the run lets the agent read that folder, so its Read
   tool opens them without an Approval. A sent message shows its files as chips under the text.
+- Diff: on a `repo` Session the header's Diff button, with the totals once read, opens a panel right of the
+  conversation (Behavior 31). It names the branch and what it is compared with, then lists each file with its status
+  letter, path and counts. Files open on their lines while there are 8 or fewer, else folded; each folds on its own,
+  and Expand all or Collapse all does every file. Split shows the old and new side by side, and Refresh reads again.
+  The diff is read again when a run ends, and every 4 seconds while one goes with the panel open. Dragging the bar
+  between the conversation and the panel, or the arrow keys on it, resizes the panel; a double click resets it, and
+  the conversation keeps at least 360 px. Open or closed, the width and Split are kept.
 - Branch switcher: the composer's branch chip shows the branch and "changed" or "clean" from the Repo's dirty state.
   Its menu lists branches A→Z with an "open PR" mark, and a field that creates a branch from the current one. It is
   disabled with the reason while Behavior 7 blocks it. "Uncommitted changes were stashed." shows after a checkout

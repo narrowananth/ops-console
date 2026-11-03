@@ -290,6 +290,44 @@ export const checkoutSchema = z.object({ branch: z.string().trim().min(1), creat
 
 export const checkoutResultSchema = z.object({ session: sessionSchema, stashed: z.boolean() });
 
+export enum SessionDiffStatus {
+  Added = 'added',
+  Modified = 'modified',
+  Deleted = 'deleted',
+  Renamed = 'renamed',
+}
+
+export const sessionDiffFileSchema = z.object({
+  name: z.string(),
+  /** The path before a rename; null otherwise. */
+  old_name: z.string().nullable(),
+  status: z.enum(SessionDiffStatus),
+  additions: z.number().int(),
+  deletions: z.number().int(),
+  binary: z.boolean(),
+  /** Hunk headers and lines; cut at a few thousand, with `truncated` set. */
+  lines: z.array(z.object({ sign: z.enum(['+', '-', ' ']), text: z.string() })),
+  truncated: z.boolean(),
+});
+
+export type SessionDiffFile = z.infer<typeof sessionDiffFileSchema>;
+
+/**
+ * What a repo Session's branch changes: committed, staged, unstaged and untracked, against where it forked from the
+ * Repo's default branch.
+ */
+export const sessionDiffSchema = z.object({
+  /** The branch checked out in the Repo now; null on a detached HEAD. */
+  branch: z.string().nullable(),
+  /** What the changes are compared with, such as `origin/main`; null when the Repo has no commit to compare with. */
+  base: z.string().nullable(),
+  files: z.array(sessionDiffFileSchema),
+  additions: z.number().int(),
+  deletions: z.number().int(),
+});
+
+export type SessionDiff = z.infer<typeof sessionDiffSchema>;
+
 export const pullRequestQuerySchema = z.object({
   repo_id: z.string().optional(),
   state: z.enum(PrState).default(PrState.Open),

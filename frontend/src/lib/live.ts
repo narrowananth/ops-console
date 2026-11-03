@@ -55,6 +55,7 @@ export function useLiveEvents(): void {
       if (event.event === 'session.output' || event.event === 'session.finished') {
         refetch(queryKeys.messages(event.data.session_id));
       }
+      if (event.event === 'session.finished') refetch(queryKeys.sessionDiff(event.data.session_id));
       if (
         event.event === 'pull_request.refreshed' ||
         event.event === 'pull_request.commented' ||

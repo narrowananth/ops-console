@@ -16,6 +16,7 @@ import {
   retryJobSchema,
   reviewPullRequestSchema,
   type Session,
+  type SessionDiff,
   startCommentPassSchema,
   startReplyCheckSchema,
 } from '@ops-console/shared';
@@ -31,7 +32,7 @@ const sessionParams = z.object({ id: z.string().min(1) });
 const pullParams = z.object({ repo: z.string().min(1), number: z.coerce.number().int().min(1) });
 const commentParams = pullParams.extend({ comment_id: z.string().min(1) });
 
-/** Moving a `repo` Session's branch. */
+/** Moving a `repo` Session's branch, and what its branch changes. */
 @Controller('sessions')
 export class WorkspaceSessionsController {
   constructor(@Inject(WorkspaceSessionsService) private readonly workspace: WorkspaceSessionsService) {}
@@ -45,6 +46,12 @@ export class WorkspaceSessionsController {
     const { id } = parseInput(sessionParams, params, 'params');
     const input = parseInput(checkoutSchema, body, 'body');
     return { data: await this.workspace.checkout(id, input.branch, input.create) };
+  }
+
+  @Get(':id/diff')
+  async diff(@Param() params: unknown): Promise<{ data: SessionDiff }> {
+    const { id } = parseInput(sessionParams, params, 'params');
+    return { data: await this.workspace.diff(id) };
   }
 }
 

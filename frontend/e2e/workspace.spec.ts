@@ -424,6 +424,91 @@ test('Scroll to end shows when scrolled up and jumps to the newest message', asy
   await expect(button).toHaveCount(0);
 });
 
+test('the Diff panel shows the branch the agent moved to and its files, folds them and resizes', async ({ page }) => {
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform')] } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
+  await page.route('**/api/sessions/s1/diff', (route) =>
+    route.fulfill({
+      json: {
+        data: {
+          branch: 'fix/login',
+          base: 'origin/main',
+          additions: 3,
+          deletions: 1,
+          files: [
+            {
+              name: 'src/auth/login.ts',
+              old_name: null,
+              status: 'modified',
+              additions: 2,
+              deletions: 1,
+              binary: false,
+              truncated: false,
+              lines: [
+                { sign: ' ', text: '@@ -1,2 +1,3 @@' },
+                { sign: '-', text: 'const retries = 1;' },
+                { sign: '+', text: 'const retries = 3;' },
+                { sign: '+', text: 'const backoff = 200;' },
+              ],
+            },
+            {
+              name: 'notes.md',
+              old_name: null,
+              status: 'added',
+              additions: 1,
+              deletions: 0,
+              binary: false,
+              truncated: false,
+              lines: [
+                { sign: ' ', text: '@@ -0,0 +1 @@' },
+                { sign: '+', text: 'why' },
+              ],
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const header = page.locator('header', { hasText: 'engage platform' });
+  // The header follows the branch checked out now, not the one the Session started on.
+  await expect(header).toContainText('fix/login');
+  const toggle = header.getByRole('button', { name: /^Diff/ });
+  await expect(toggle).toContainText('+3 −1');
+  await toggle.click();
+
+  const panel = page.getByRole('complementary', { name: 'Diff' });
+  await expect(panel).toContainText('fix/login → origin/main');
+  await expect(panel.getByRole('button', { name: /, (modified|added)$/ })).toHaveCount(2);
+  await expect(panel.getByText('const backoff = 200;')).toBeVisible();
+  await panel.getByRole('button', { name: 'src/auth/login.ts, modified' }).click();
+  await expect(panel.getByText('const backoff = 200;')).toHaveCount(0);
+  await panel.getByRole('button', { name: 'Split' }).click();
+  await expect(panel.getByRole('button', { name: 'Unified' })).toBeVisible();
+
+  const handle = page.getByRole('separator', { name: 'Resize the diff panel' });
+  const before = Number(await handle.getAttribute('aria-valuenow'));
+  await handle.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(handle).toHaveAttribute('aria-valuenow', String(before - 32));
+
+  // Open and width stay through a reload.
+  await page.reload();
+  await expect(page.getByRole('complementary', { name: 'Diff' })).toBeVisible();
+  await expect(page.getByRole('separator', { name: 'Resize the diff panel' })).toHaveAttribute(
+    'aria-valuenow',
+    String(before - 32),
+  );
+  await page.getByRole('button', { name: 'Close the diff' }).click();
+  await expect(page.getByRole('complementary', { name: 'Diff' })).toHaveCount(0);
+});
+
 test('a pull request the agent names in the conversation links at the top of the Session', async ({ page }) => {
   await page.route('**/api/repos', (route) =>
     route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),

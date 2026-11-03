@@ -565,6 +565,16 @@ export class AgentRuntime {
         error_code: failed ? result : null,
       });
     });
+    // A Session deleted mid-run has nothing to look at after it.
+    const session = (() => {
+      try {
+        return this.sessions.get(run.sessionId);
+      } catch {
+        return null;
+      }
+    })();
+    const after = session ? this.kinds.get(session.kind)?.afterRun : undefined;
+    if (session && after) void after(session).catch(() => {});
     run.onFinish?.({
       ok: result === 'done',
       stopped: result === 'stopped',

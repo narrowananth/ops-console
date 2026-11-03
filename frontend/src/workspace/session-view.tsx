@@ -18,6 +18,7 @@ import {
   useRepoSessions,
   useRepos,
   useSendMessage,
+  useSessionDiff,
 } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { PlaybookLink } from '../playbooks/job-steps';
@@ -25,6 +26,7 @@ import { AttachButton, AttachmentChips, filesIn, useAttachments } from './attach
 import { BranchSwitcher } from './branch-switcher';
 import { ConversationMap, ScrollToEnd, useFollowLatest } from './conversation';
 import { alertPath, pullRequestNamedIn, pullRequestPath, sessionDraftKey } from './links';
+import { DiffPanel, DiffToggle, ResizeHandle, useDiffWidth } from './session-diff';
 import { SESSION_STATE_TIP } from './sessions-pane';
 
 export function SessionView({ id, onGone }: { id: string; onGone: () => void }) {
@@ -42,17 +44,25 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const [dropping, setDropping] = useState(false);
   const latest = useFollowLatest();
   const session = sessions.data?.find((candidate) => candidate.id === id);
+  const [diffOpen, setDiffOpen] = useStored('workspace.session-diff-open', z.boolean(), false);
+  // The row beside the header; held in state so the panel measures it once it renders.
+  const [body, setBody] = useState<HTMLDivElement | null>(null);
+  const panel = useDiffWidth(body);
+  const hasDiff = session?.kind === SessionKind.Repo;
   const gone = sessions.isSuccess && session === undefined;
   const pulls = useRepoPullRequests(session?.kind === SessionKind.Repo ? session.repo_id : null);
   // What the operator typed while the agent was working; it goes out when the run ends.
   const [queued, setQueued] = useState<string | null>(null);
   const sessionState = session?.state;
   const working = sessionState === SessionState.Working || sessionState === SessionState.WaitingApproval;
+  const diff = useSessionDiff(id, hasDiff, diffOpen && working);
+  // The branch checked out now: the agent may have made one for its fix since the Session started.
+  const branch = diff.data?.branch ?? session?.branch ?? null;
   // A pull request the agent opened or named here wins over the one on the Session's branch.
   const named = pullRequestNamedIn(messages.data ?? []);
   const listed =
     pulls.data?.data.find((candidate) => candidate.number === named?.number) ??
-    pulls.data?.data.find((candidate) => candidate.branch === session?.branch);
+    pulls.data?.data.find((candidate) => candidate.branch === branch);
   const pullNumber = listed?.number ?? named?.number;
   // Both ways in: the console's Pull requests tab for the Session's Repo, and the Git host's page.
   const internalPull =
@@ -112,12 +122,12 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
       <header className="flex flex-wrap items-center gap-2.5 border-b border-line px-6 py-3">
         <span className="text-sm text-neutral-700">{repo ? `${repo.name} /` : 'No Repo /'}</span>
         <h2 className="m-0 min-w-0 flex-[1_1_200px] truncate text-base font-semibold">{session.title}</h2>
-        {session.branch && (
+        {branch && (
           <span
             title="The branch this Session works on"
             className="rounded-full border border-line bg-card px-2.5 py-0.5 font-mono text-xs"
           >
-            {session.branch}
+            {branch}
           </span>
         )}
         {internalPull && (
@@ -159,6 +169,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             title="The agent follows this Playbook's rules in every message here. Open it to read or change them."
           />
         )}
+        {hasDiff && <DiffToggle open={diffOpen} diff={diff.data} onToggle={() => setDiffOpen((now) => !now)} />}
         <Button
           className="px-2.5 py-1 text-xs"
           title={
@@ -177,143 +188,162 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
           </span>
         )}
       </header>
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        <section
-          ref={latest.setScroller}
-          onScroll={latest.onScroll}
-          aria-label="Conversation"
-          className="relative min-h-0 flex-1 overflow-y-auto"
-        >
-          <div ref={latest.setContent}>
-            {messages.isPending ? (
-              <Empty>Reading the conversation…</Empty>
-            ) : messages.isError ? (
-              <Empty>Could not read the conversation: {messages.error.message}</Empty>
-            ) : messages.data.length === 0 ? (
-              <Empty>
-                {repo
-                  ? `Nothing said yet. Tell the agent what to do on ${session.branch}.`
-                  : 'Nothing said yet. This Session has no Repo: it works in a folder of its own. Ask it to clone a repo, or to do anything else.'}
-              </Empty>
-            ) : (
-              <ul className="m-0 list-none px-0 py-2">
-                {messages.data.map((message) => (
-                  <MessageView
-                    key={message.id}
-                    message={message}
-                    onEdit={
-                      message.id === lastAsked && !busy
-                        ? (edited) =>
-                            editMessage
-                              .mutateAsync({ messageId: message.id, text: edited })
-                              .then((result) => setReverted(result))
-                        : undefined
-                    }
-                  />
-                ))}
-              </ul>
-            )}
+      <div ref={setBody} className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <section
+              ref={latest.setScroller}
+              onScroll={latest.onScroll}
+              aria-label="Conversation"
+              className="relative min-h-0 flex-1 overflow-y-auto"
+            >
+              <div ref={latest.setContent}>
+                {messages.isPending ? (
+                  <Empty>Reading the conversation…</Empty>
+                ) : messages.isError ? (
+                  <Empty>Could not read the conversation: {messages.error.message}</Empty>
+                ) : messages.data.length === 0 ? (
+                  <Empty>
+                    {repo
+                      ? `Nothing said yet. Tell the agent what to do on ${session.branch}.`
+                      : 'Nothing said yet. This Session has no Repo: it works in a folder of its own. Ask it to clone a repo, or to do anything else.'}
+                  </Empty>
+                ) : (
+                  <ul className="m-0 list-none px-0 py-2">
+                    {messages.data.map((message) => (
+                      <MessageView
+                        key={message.id}
+                        message={message}
+                        onEdit={
+                          message.id === lastAsked && !busy
+                            ? (edited) =>
+                                editMessage
+                                  .mutateAsync({ messageId: message.id, text: edited })
+                                  .then((result) => setReverted(result))
+                            : undefined
+                        }
+                      />
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </section>
+            <ConversationMap messages={messages.data ?? []} scroller={latest.scroller} content={latest.content} />
+            <ScrollToEnd show={!latest.atEnd} onClick={latest.scrollToEnd} />
           </div>
-        </section>
-        <ConversationMap messages={messages.data ?? []} scroller={latest.scroller} content={latest.content} />
-        <ScrollToEnd show={!latest.atEnd} onClick={latest.scrollToEnd} />
-      </div>
-      <div className="flex flex-col gap-2 px-6 pb-4.5">
-        <ApprovalPrompts sessionId={id} />
-        {questions.length > 0 && (
-          <QuestionPanel
-            // A new question set starts at its first question.
-            key={questions.map((question) => question.text).join('\n')}
-            questions={questions}
-            pending={send.isPending}
-            onSend={(answer) => send.mutate(answer)}
-          />
-        )}
-        {queued !== null && (
-          <QueuedNote
-            text={queued}
-            onCancel={() => {
-              setText((current) => (current.trim() === '' ? queued : `${queued}\n\n${current}`));
-              setQueued(null);
-            }}
-          />
-        )}
-        {reverted && <RevertNote result={reverted} onClose={() => setReverted(null)} />}
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: dropping files is a shortcut; Attach files does the same */}
-        <div
-          onDragOver={(event) => {
-            if (!event.dataTransfer.types.includes('Files')) return;
-            event.preventDefault();
-            setDropping(true);
-          }}
-          onDragLeave={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false);
-          }}
-          onDrop={(event) => {
-            setDropping(false);
-            const files = filesIn(event.dataTransfer);
-            if (files.length === 0) return;
-            event.preventDefault();
-            attachments.add(files);
-          }}
-          className={`rounded-lg border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)] ${dropping ? 'border-dashed border-accent-400 bg-accent-100' : 'border-divider'}`}
-        >
-          <AttachmentChips pending={attachments.pending} onRemove={attachments.remove} />
-          <textarea
-            aria-label="Message"
-            value={text}
-            placeholder={
-              running
-                ? 'The agent is working. Type the next message: it sends when the run ends.'
-                : repo
-                  ? `Ask anything in ${repo.name} — e.g. add a retry to the orders webhook and write a test`
-                  : 'Ask anything — e.g. clone github.com/owner/repo and find why the orders job fails'
-            }
-            onChange={(event) => setText(event.target.value)}
-            onPaste={(event) => {
-              // A pasted screenshot or copied file attaches; pasted text goes in as text.
-              const files = filesIn(event.clipboardData);
-              if (files.length === 0) return;
-              event.preventDefault();
-              attachments.add(files);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                submit();
-              }
-            }}
-            className="block field-sizing-content max-h-[50vh] min-h-28 w-full resize-none overflow-y-auto border-0 bg-transparent px-4 pt-3.5 pb-1.5 text-sm leading-relaxed text-text outline-none"
-          />
-          <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-1.5 pb-2.5">
-            <AttachButton onFiles={attachments.add} />
-            <SessionChips session={session} variant="chip" />
-            {repo && <BranchSwitcher session={session} all={sessions.data ?? []} repo={repo} />}
-            {send.isError && (
-              <span role="alert" className="text-xs text-accent-700">
-                {send.error.message}
-              </span>
+          <div className="flex flex-col gap-2 px-6 pb-4.5">
+            <ApprovalPrompts sessionId={id} />
+            {questions.length > 0 && (
+              <QuestionPanel
+                // A new question set starts at its first question.
+                key={questions.map((question) => question.text).join('\n')}
+                questions={questions}
+                pending={send.isPending}
+                onSend={(answer) => send.mutate(answer)}
+              />
             )}
-            <span className="ml-auto flex items-center gap-1.5">
-              {busy && <StopRun sessionId={id} className="px-4 py-1.5" />}
-              <Button
-                variant="primary"
-                title={
+            {queued !== null && (
+              <QueuedNote
+                text={queued}
+                onCancel={() => {
+                  setText((current) => (current.trim() === '' ? queued : `${queued}\n\n${current}`));
+                  setQueued(null);
+                }}
+              />
+            )}
+            {reverted && <RevertNote result={reverted} onClose={() => setReverted(null)} />}
+            {/* biome-ignore lint/a11y/noStaticElementInteractions: dropping files is a shortcut; Attach files does the same */}
+            <div
+              onDragOver={(event) => {
+                if (!event.dataTransfer.types.includes('Files')) return;
+                event.preventDefault();
+                setDropping(true);
+              }}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false);
+              }}
+              onDrop={(event) => {
+                setDropping(false);
+                const files = filesIn(event.dataTransfer);
+                if (files.length === 0) return;
+                event.preventDefault();
+                attachments.add(files);
+              }}
+              className={`rounded-lg border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)] ${dropping ? 'border-dashed border-accent-400 bg-accent-100' : 'border-divider'}`}
+            >
+              <AttachmentChips pending={attachments.pending} onRemove={attachments.remove} />
+              <textarea
+                aria-label="Message"
+                value={text}
+                placeholder={
                   running
-                    ? 'The agent is working. The message waits and sends when the run ends.'
-                    : attachments.uploading
-                      ? 'Waiting for the attached files to upload'
-                      : 'Enter sends. Shift+Enter adds a new line.'
+                    ? 'The agent is working. Type the next message: it sends when the run ends.'
+                    : repo
+                      ? `Ask anything in ${repo.name} — e.g. add a retry to the orders webhook and write a test`
+                      : 'Ask anything — e.g. clone github.com/owner/repo and find why the orders job fails'
                 }
-                className="px-4 py-1.5"
-                disabled={empty || queued !== null || attachments.uploading || send.isPending}
-                onClick={submit}
-              >
-                {running ? 'Queue' : 'Send'}
-              </Button>
-            </span>
+                onChange={(event) => setText(event.target.value)}
+                onPaste={(event) => {
+                  // A pasted screenshot or copied file attaches; pasted text goes in as text.
+                  const files = filesIn(event.clipboardData);
+                  if (files.length === 0) return;
+                  event.preventDefault();
+                  attachments.add(files);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    submit();
+                  }
+                }}
+                className="block field-sizing-content max-h-[50vh] min-h-28 w-full resize-none overflow-y-auto border-0 bg-transparent px-4 pt-3.5 pb-1.5 text-sm leading-relaxed text-text outline-none"
+              />
+              <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-1.5 pb-2.5">
+                <AttachButton onFiles={attachments.add} />
+                <SessionChips session={session} variant="chip" />
+                {repo && <BranchSwitcher session={session} all={sessions.data ?? []} repo={repo} />}
+                {send.isError && (
+                  <span role="alert" className="text-xs text-accent-700">
+                    {send.error.message}
+                  </span>
+                )}
+                <span className="ml-auto flex items-center gap-1.5">
+                  {busy && <StopRun sessionId={id} className="px-4 py-1.5" />}
+                  <Button
+                    variant="primary"
+                    title={
+                      running
+                        ? 'The agent is working. The message waits and sends when the run ends.'
+                        : attachments.uploading
+                          ? 'Waiting for the attached files to upload'
+                          : 'Enter sends. Shift+Enter adds a new line.'
+                    }
+                    className="px-4 py-1.5"
+                    disabled={empty || queued !== null || attachments.uploading || send.isPending}
+                    onClick={submit}
+                  >
+                    {running ? 'Queue' : 'Send'}
+                  </Button>
+                </span>
+              </div>
+            </div>
           </div>
         </div>
+        {hasDiff && diffOpen && (
+          <>
+            <ResizeHandle width={panel.width} widest={panel.widest} onWidth={panel.setWidth} />
+            <div style={{ width: panel.width }} className="flex min-h-0 flex-none">
+              <DiffPanel
+                diff={diff.data}
+                error={diff.error?.message ?? null}
+                loading={diff.isPending}
+                fetching={diff.isFetching}
+                onRefresh={() => void diff.refetch()}
+                onClose={() => setDiffOpen(false)}
+              />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
