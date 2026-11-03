@@ -137,74 +137,82 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center gap-2.5 border-b border-line px-6 py-3">
-        <span className="text-sm text-neutral-700">{repo ? `${repo.name} /` : 'No Repo /'}</span>
-        <h2 className="m-0 min-w-0 flex-[1_1_200px] truncate text-base font-semibold">{session.title}</h2>
-        {branch && (
-          <span
-            title="The branch this Session works on"
-            className="rounded-full border border-line bg-card px-2.5 py-0.5 font-mono text-xs"
-          >
-            {branch}
+      <header className="flex flex-col gap-1.5 border-b border-line px-6 py-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex-none text-sm text-neutral-700">{repo ? `${repo.name} /` : 'No Repo /'}</span>
+          <h2 className="m-0 min-w-0 truncate text-base font-semibold">{session.title}</h2>
+          <span title={SESSION_STATE_TIP[session.state]} className="flex-none">
+            <StatusPill state={SESSION_STATE[session.state]}>{session.state.replace('_', ' ')}</StatusPill>
           </span>
+          <span className="ml-auto flex flex-none items-center gap-2">
+            {/* A Session whose branch changes nothing yet has nothing to show. */}
+            {hasDiff && (diffOpen || (diff.data?.files.length ?? 0) > 0) && (
+              <DiffToggle open={diffOpen} diff={diff.data} onToggle={() => setDiffOpen((now) => !now)} />
+            )}
+            <Button
+              className="px-2.5 py-1 text-xs"
+              title={
+                busy
+                  ? 'Stop the agent first'
+                  : 'Delete this Session and its conversation. The files in the Repo stay as they are.'
+              }
+              disabled={busy || remove.isPending}
+              onClick={() => remove.mutate(id)}
+            >
+              Delete
+            </Button>
+          </span>
+        </div>
+        {(branch || internalPull || externalPull || session.alert_id || session.playbook) && (
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {branch && (
+              <span
+                title="The branch this Session works on"
+                className="max-w-90 truncate rounded-full border border-line bg-card px-2.5 py-0.5 font-mono text-xs"
+              >
+                {branch}
+              </span>
+            )}
+            {internalPull && (
+              <Link
+                to={pullRequestPath(internalPull.repo_id, internalPull.number)}
+                title={`Open pull request #${internalPull.number} in the Workspace's Pull requests tab`}
+                className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
+              >
+                PR #{internalPull.number} →
+              </Link>
+            )}
+            {externalPull && (
+              <a
+                href={externalPull.url}
+                target="_blank"
+                rel="noreferrer"
+                title={`Open pull request #${externalPull.number} on the Git host`}
+                className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
+              >
+                #{externalPull.number} on host ↗
+              </a>
+            )}
+            {session.alert_id && (
+              <Link
+                to={alertPath(session.alert_id)}
+                title="Open the Monitor Alert this Session verifies and fixes"
+                className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
+              >
+                Alert →
+              </Link>
+            )}
+            {session.playbook && (
+              <PlaybookLink
+                playbook={session.playbook}
+                label={`Playbook: ${session.playbook.name}`}
+                title="The agent follows this Playbook's rules in every message here. Open it to read or change them."
+              />
+            )}
+          </div>
         )}
-        {internalPull && (
-          <Link
-            to={pullRequestPath(internalPull.repo_id, internalPull.number)}
-            title={`Open pull request #${internalPull.number} in the Workspace's Pull requests tab`}
-            className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
-          >
-            PR #{internalPull.number} →
-          </Link>
-        )}
-        {externalPull && (
-          <a
-            href={externalPull.url}
-            target="_blank"
-            rel="noreferrer"
-            title={`Open pull request #${externalPull.number} on the Git host`}
-            className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
-          >
-            #{externalPull.number} on host ↗
-          </a>
-        )}
-        {session.alert_id && (
-          <Link
-            to={alertPath(session.alert_id)}
-            title="Open the Monitor Alert this Session verifies and fixes"
-            className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
-          >
-            Alert →
-          </Link>
-        )}
-        <span title={SESSION_STATE_TIP[session.state]}>
-          <StatusPill state={SESSION_STATE[session.state]}>{session.state.replace('_', ' ')}</StatusPill>
-        </span>
-        {session.playbook && (
-          <PlaybookLink
-            playbook={session.playbook}
-            label={`Playbook: ${session.playbook.name}`}
-            title="The agent follows this Playbook's rules in every message here. Open it to read or change them."
-          />
-        )}
-        {/* A Session whose branch changes nothing yet has nothing to show. */}
-        {hasDiff && (diffOpen || (diff.data?.files.length ?? 0) > 0) && (
-          <DiffToggle open={diffOpen} diff={diff.data} onToggle={() => setDiffOpen((now) => !now)} />
-        )}
-        <Button
-          className="px-2.5 py-1 text-xs"
-          title={
-            busy
-              ? 'Stop the agent first'
-              : 'Delete this Session and its conversation. The files in the Repo stay as they are.'
-          }
-          disabled={busy || remove.isPending}
-          onClick={() => remove.mutate(id)}
-        >
-          Delete
-        </Button>
         {remove.isError && (
-          <span role="alert" className="basis-full text-right text-xs text-accent-700">
+          <span role="alert" className="text-right text-xs text-accent-700">
             {remove.error.message}
           </span>
         )}
@@ -318,16 +326,18 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 onPasteFiles={addFiles}
                 onSubmit={submit}
               />
-              <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-1.5 pb-2.5">
-                <AttachButton onFiles={addFiles} />
-                <SessionChips session={session} variant="chip" />
-                {repo && <BranchSwitcher session={session} all={sessions.data ?? []} repo={repo} />}
-                {send.isError && (
-                  <span role="alert" className="text-xs text-accent-700">
-                    {send.error.message}
-                  </span>
-                )}
-                <span className="ml-auto flex items-center gap-1.5">
+              <div className="flex items-end gap-1.5 px-2.5 pt-1.5 pb-2.5">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                  <AttachButton onFiles={addFiles} />
+                  <SessionChips session={session} variant="chip" />
+                  {repo && <BranchSwitcher session={session} all={sessions.data ?? []} repo={repo} />}
+                  {send.isError && (
+                    <span role="alert" className="text-xs text-accent-700">
+                      {send.error.message}
+                    </span>
+                  )}
+                </div>
+                <span className="flex flex-none items-center gap-1.5">
                   {busy && <StopRun sessionId={id} className="px-4 py-1.5" />}
                   <Button
                     variant="primary"

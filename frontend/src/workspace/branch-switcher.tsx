@@ -27,7 +27,8 @@ export function BranchSwitcher({ session, all, repo }: { session: Session; all: 
     checkout.mutate({ branch, create }, { onSuccess: () => setOpen(false) });
 
   return (
-    <div className="relative flex items-center">
+    // Takes the room left on the composer's row; the branch name shortens before the chip drops to a new row.
+    <div className="relative flex min-w-0 flex-[1_1_13rem] items-center">
       {open && (
         <button
           type="button"
@@ -47,7 +48,7 @@ export function BranchSwitcher({ session, all, repo }: { session: Session; all: 
           `Switch branch. ${dirty ? 'Changed: uncommitted edits are stashed before switching.' : 'Clean: no uncommitted edits.'}`
         }
         onClick={() => setOpen(!open)}
-        className={`flex max-w-70 items-center gap-1.5 rounded-full border px-3 py-1 text-xs text-text transition-colors enabled:cursor-pointer enabled:hover:bg-neutral-200 ${
+        className={`flex min-w-0 max-w-70 items-center gap-1.5 rounded-full border px-3 py-1 text-xs text-text transition-colors enabled:cursor-pointer enabled:hover:bg-neutral-200 ${
           open ? 'border-divider bg-neutral-200' : 'border-line bg-card'
         }`}
       >
