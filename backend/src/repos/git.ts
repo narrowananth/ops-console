@@ -56,6 +56,24 @@ export class Git {
     return sha?.trim() || null;
   }
 
+  /**
+   * The branches `HEAD` moved to by a checkout since `since`, newest first, read from the reflog. A detached checkout
+   * and a branch deleted since are left out.
+   */
+  async checkoutsSince(dir: string, since: Date): Promise<string[]> {
+    const log = await this.try(dir, ['log', '-g', '--date=unix', '--format=%gd%x09%gs', 'HEAD']);
+    const after = Math.floor(since.getTime() / 1000);
+    const moves: string[] = [];
+    for (const line of (log ?? '').split('\n')) {
+      const entry = /^HEAD@\{(\d+)\}\tcheckout: moving from \S+ to (\S+)$/.exec(line);
+      if (!entry) continue;
+      if (Number(entry[1]) < after) break;
+      const branch = entry[2] as string;
+      if (!moves.includes(branch) && (await this.commitOf(dir, `refs/heads/${branch}`))) moves.push(branch);
+    }
+    return moves;
+  }
+
   /** The branch checked out; null on a detached HEAD or outside a repository. */
   async branchName(dir: string): Promise<string | null> {
     return (await this.try(dir, ['symbolic-ref', '--short', '-q', 'HEAD']))?.trim() || null;

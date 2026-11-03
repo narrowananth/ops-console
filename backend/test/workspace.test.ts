@@ -324,6 +324,37 @@ describe('branches', () => {
     );
     expect((await ctx.http.get(`/sessions/${id}`)).body.data.branch).toBe('fix/login');
   });
+
+  it('keeps the branch the agent made for its fix when the run ends back on the default branch', async () => {
+    const ctx = await start();
+    const id = await newSession(ctx);
+    const hold = gate();
+    ctx.daemon.sdk.script({ wait: hold.promise }, { text: 'pushed the fix' });
+    await ctx.http.post(`/sessions/${id}/messages`, { text: 'fix it on a branch' });
+    git(ctx.dir, 'checkout', '-q', '-b', 'fix/login');
+    git(ctx.dir, 'checkout', '-q', 'main');
+    hold.open();
+    await until(
+      () => ctx.http.get(`/sessions/${id}`).then((res) => res.body.data.branch),
+      (branch) => branch === 'fix/login',
+      'the Session on fix/login',
+    );
+  });
+
+  it('stays on its branch after a run that checked out nothing, whatever another Session left checked out', async () => {
+    const ctx = await start();
+    const id = await newSession(ctx);
+    // Another Session's work moved the shared folder before this run.
+    git(ctx.dir, 'checkout', '-q', '-b', 'fix/other');
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    ctx.daemon.sdk.script({ text: 'looked' });
+    await ctx.http.post(`/sessions/${id}/messages`, { text: 'look' });
+    await until(
+      () => ctx.http.get(`/sessions/${id}`).then((res) => res.body.data.state),
+      (state) => state === 'idle',
+    );
+    expect((await ctx.http.get(`/sessions/${id}`)).body.data.branch).toBe('main');
+  });
 });
 
 describe('Session diff', () => {
