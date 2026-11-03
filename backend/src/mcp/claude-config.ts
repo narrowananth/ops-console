@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { McpScope, McpTransport } from '@ops-console/shared';
+import { type McpOAuthClient, McpScope, McpTransport } from '@ops-console/shared';
 import { z } from 'zod';
 
 const entrySchema = z
@@ -11,6 +11,7 @@ const entrySchema = z
     url: z.string().optional(),
     headers: z.record(z.string(), z.string()).optional(),
     env: z.record(z.string(), z.string()).optional(),
+    oauth: z.object({ clientId: z.string().optional(), callbackPort: z.number().optional() }).loose().optional(),
   })
   .loose();
 
@@ -37,6 +38,8 @@ export type RegisteredServer = {
   headers: Record<string, string>;
   /** A stdio server's env vars as the config holds them; a launcher-wrapped one reads its own from the Keychain. */
   env?: Record<string, string>;
+  /** The pre-registered OAuth app an http server signs in with, when it has one. */
+  oauth: McpOAuthClient | null;
 };
 
 export function configFile(configDir: string): string {
@@ -82,7 +85,13 @@ export async function readRegistered(configDir: string, localDir: string): Promi
     url: entry.url ?? null,
     headers: entry.headers ?? {},
     env: entry.env ?? {},
+    oauth: oauthOf(entry),
   }));
+}
+
+function oauthOf(entry: z.infer<typeof entrySchema>): McpOAuthClient | null {
+  const { clientId, callbackPort } = entry.oauth ?? {};
+  return clientId && callbackPort ? { client_id: clientId, callback_port: callbackPort } : null;
 }
 
 const projectFileSchema = z.object({ mcpServers: z.record(z.string(), entrySchema).optional() }).loose();
@@ -100,6 +109,7 @@ export async function readProject(repoPath: string): Promise<RegisteredServer[]>
       args: entry.args ?? [],
       url: entry.url ?? null,
       headers: entry.headers ?? {},
+      oauth: oauthOf(entry),
     }));
   } catch {
     return [];

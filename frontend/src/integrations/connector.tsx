@@ -2,7 +2,12 @@ import { CONNECTOR_NAMES, type Connector, ConnectorId, HealthStatus } from '@ops
 import { useState } from 'react';
 import { BrandIcon, CONNECTOR_BRAND } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
-import { useCancelConnectorSignIn, useConnectConnector, useDisconnectConnector } from '../lib/queries';
+import {
+  useCancelConnectorSignIn,
+  useConnectConnector,
+  useConnectConnectorWith,
+  useDisconnectConnector,
+} from '../lib/queries';
 import { type StatusLook, statusGlyph } from '../mcp/status';
 import { IntegrationRow, rowAction, rowActionAttention } from './integration-row';
 
@@ -29,11 +34,19 @@ const NO_SIGN_IN: ConnectorId[] = [ConnectorId.Shopify];
 /** One Connector: Connect, Reconnect or Disconnect. Nothing else is set here. */
 export function ConnectorDrawer({ connector, onBack }: { connector: Connector; onBack: () => void }) {
   const connect = useConnectConnector();
+  const connectWith = useConnectConnectorWith();
   const disconnect = useDisconnectConnector();
   const cancel = useCancelConnectorSignIn();
   const [confirming, setConfirming] = useState(false);
+  const saved = typeof connector.config.server === 'string' ? connector.config.server : '';
+  const [server, setServer] = useState(saved);
+  const asksServer = connector.id === ConnectorId.Slashdocs;
   const connected = connector.status !== HealthStatus.Off;
-  const error = connect.error ?? disconnect.error ?? cancel.error;
+  const error = connect.error ?? connectWith.error ?? disconnect.error ?? cancel.error;
+  const onConnect = () =>
+    asksServer && server.trim() !== saved
+      ? connectWith.mutate({ id: connector.id, config: { server: server.trim() } })
+      : connect.mutate(connector.id);
   const status = connectorStatus(connector);
 
   return (
@@ -53,11 +66,24 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
           <div className="text-[15px] font-extrabold">Connect {connector.name} to Ops Console</div>
           <div className="text-xs text-neutral-700">Reached through {connector.via}.</div>
         </div>
+        {asksServer && (
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="font-bold">slashdocs server</span>
+            <input
+              value={server}
+              onChange={(event) => setServer(event.target.value)}
+              placeholder="slashdocs.example.com"
+              disabled={connector.sign_in !== null}
+              className="w-full border border-divider bg-card px-2 py-1.5 font-mono text-[13px] text-text"
+            />
+            <span className="text-neutral-700">Blank uses the server the slashdocs CLI already signed in to.</span>
+          </label>
+        )}
         <SignInStep
           connector={connector}
-          pending={connect.isPending}
+          pending={connect.isPending || connectWith.isPending}
           cancelling={cancel.isPending}
-          onConnect={() => connect.mutate(connector.id)}
+          onConnect={onConnect}
           onCancel={() => cancel.mutate(connector.id)}
         />
         {error && (

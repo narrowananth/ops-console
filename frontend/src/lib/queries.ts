@@ -310,6 +310,14 @@ export function useConnectConnector() {
   return useConnectorMutation((id: ConnectorId) => apiSend('POST', `/connectors/${id}/connect`, {}, z.undefined()));
 }
 
+/** Saves a Connector's settings, such as the slashdocs server, then starts its sign-in. */
+export function useConnectConnectorWith() {
+  return useConnectorMutation(async ({ id, config }: { id: ConnectorId; config: Record<string, unknown> }) => {
+    await apiSend('PATCH', `/connectors/${id}`, { config }, z.object({ data: connectorSchema }));
+    return apiSend('POST', `/connectors/${id}/connect`, {}, z.undefined());
+  });
+}
+
 /** Stops a sign-in still waiting on the browser; the Connector keeps the status it had. */
 export function useCancelConnectorSignIn() {
   return useConnectorMutation((id: ConnectorId) =>

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { CONNECTOR_ORDER, ConnectorId, type WsEvent } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
@@ -284,6 +284,88 @@ describe('connecting', () => {
       'the passing check',
     );
     expect(back).toMatchObject({ status: 'ok', status_detail: null });
+  });
+
+  it('connects slashdocs at once when its CLI is already signed in, opening no sign-in', async () => {
+    const ctx = await start();
+    ctx.tools.slashdocs = { email: 'operator@example.com', name: 'Operator' };
+    await api(ctx.daemon).patch('/connectors/slashdocs', { config: { server: 'slashdocs.example.com' } });
+
+    await api(ctx.daemon).post('/connectors/slashdocs/connect', {});
+    const row = await until(
+      () => one(ctx, 'slashdocs'),
+      (found) => found.status === 'ok' && found.sign_in === null,
+      'the check',
+    );
+
+    expect(row).toMatchObject({
+      name: 'slashdocs',
+      via: 'slashdocs CLI',
+      login: 'operator@example.com',
+      account_label: 'slashdocs.example.com',
+    });
+    expect(ctx.tools.slashdocsLogins).toEqual([]);
+  });
+
+  it('signs slashdocs in through its CLI to the server set, or the CLI’s own when blank', async () => {
+    const ctx = await start();
+    await api(ctx.daemon).post('/connectors/slashdocs/connect', {});
+    await until(
+      () => one(ctx, 'slashdocs'),
+      (row) => row.status === 'ok',
+      'the sign-in',
+    );
+    await api(ctx.daemon).delete('/connectors/slashdocs/credentials');
+    ctx.tools.slashdocs = null;
+    await api(ctx.daemon).patch('/connectors/slashdocs', { config: { server: 'slashdocs.example.com' } });
+    await api(ctx.daemon).post('/connectors/slashdocs/connect', {});
+    await until(
+      () => one(ctx, 'slashdocs'),
+      (row) => row.status === 'ok',
+      'the second sign-in',
+    );
+
+    expect(ctx.tools.slashdocsLogins).toEqual([null, 'slashdocs.example.com']);
+  });
+
+  it('says to install slashdocs when its CLI is missing', async () => {
+    const ctx = await start();
+    ctx.tools.missing.add('slashdocs');
+    await api(ctx.daemon).post('/connectors/slashdocs/connect', {});
+    const row = await until(
+      () => one(ctx, 'slashdocs'),
+      (found) => found.status === 'auth',
+      'the failed sign-in',
+    );
+    expect(row.status_detail).toBe('slashdocs is not installed: install the slashdocs CLI, then Connect again');
+  });
+
+  it("registers Slack's server with Slack's partner OAuth app, replacing one registered without it", async () => {
+    const ctx = await start();
+    const [active] = ctx.dirs as [string, string];
+    // Registered before the OAuth app: Slack refuses its dynamic client registration.
+    const config = JSON.parse(await readFile(path.join(active, '.claude.json'), 'utf8').catch(() => '{}'));
+    config.mcpServers = {
+      ...config.mcpServers,
+      slack: { type: 'http', url: 'https://mcp.slack.com/mcp', headers: {} },
+    };
+    await writeFile(path.join(active, '.claude.json'), JSON.stringify(config));
+
+    await api(ctx.daemon).post('/connectors/slack/connect', {});
+    await until(
+      () => one(ctx, 'slack'),
+      (row) => row.status === 'ok' && row.sign_in === null,
+      'the sign-in',
+    );
+
+    for (const dir of ctx.dirs) {
+      const servers = JSON.parse(await readFile(path.join(dir, '.claude.json'), 'utf8')).mcpServers;
+      expect(servers.slack).toMatchObject({
+        type: 'http',
+        url: 'https://mcp.slack.com/mcp',
+        oauth: { clientId: '1601185624273.8899143856786', callbackPort: 3118 },
+      });
+    }
   });
 
   it('reads Slack connected while only an account that is not active needs its sign-in', async () => {
