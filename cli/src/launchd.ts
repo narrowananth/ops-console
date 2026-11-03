@@ -5,6 +5,8 @@ import { CURRENT_APP, CURRENT_DAEMON, DATA_DIR, LABEL, LOG_DIR, LOG_FILE, PLIST 
 
 const domain = `gui/${process.getuid?.() ?? 0}`;
 const service = `${domain}/${LABEL}`;
+/** launchd drops a job some time after `bootout` returns: as long as the daemon takes to stop, and a moment more. */
+const BOOTOUT_TIMEOUT_MS = 15_000;
 
 function launchctl(...args: string[]): { ok: boolean; output: string } {
   const result = spawnSync('launchctl', args, { encoding: 'utf8' });
@@ -62,13 +64,20 @@ export async function load(): Promise<{ ok: boolean; output: string }> {
   await mkdir(path.dirname(PLIST), { recursive: true });
   await mkdir(LOG_DIR, { recursive: true });
   await writeFile(PLIST, plist());
-  unload();
+  await unload();
   launchctl('enable', service);
   return launchctl('bootstrap', domain, PLIST);
 }
 
-/** Boots the agent out; it stays stopped across logins until the next `load`. */
-export function unload(): void {
+/**
+ * Boots the agent out and waits until launchd has dropped it: a `bootstrap` before then fails with
+ * `Bootstrap failed: 5: Input/output error`. It stays stopped across logins until the next `load`.
+ */
+export async function unload(): Promise<void> {
   launchctl('bootout', service);
+  const deadline = Date.now() + BOOTOUT_TIMEOUT_MS;
+  while (launchctl('print', service).ok && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
   launchctl('disable', service);
 }

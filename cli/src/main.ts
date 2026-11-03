@@ -51,7 +51,7 @@ async function launch(): Promise<number> {
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  unload();
+  await unload();
   console.error(
     `The daemon did not answer within ${Math.round(START_TIMEOUT_MS / 1000)} seconds. Last lines of ${LOG_FILE}:`,
   );
@@ -68,7 +68,7 @@ async function logTail(lines: number): Promise<string> {
 }
 
 async function stop(): Promise<number> {
-  unload();
+  await unload();
   console.log('ops-console stopped.');
   return 0;
 }
@@ -112,12 +112,11 @@ async function update(): Promise<number> {
   const installed = spawnSync('sh', [path.join(VERSION_ROOT, 'install.sh')], { stdio: 'inherit', env });
   if (installed.status !== 0) return installed.status ?? 1;
   if (!wasRunning) return 0;
-  unload();
   return launch();
 }
 
 async function uninstall(): Promise<number> {
-  unload();
+  await unload();
   await rm(PLIST, { force: true });
   await rm(INSTALL_DIR, { recursive: true, force: true });
   if ((await lstat(BIN_LINK).catch(() => null))?.isSymbolicLink()) await rm(BIN_LINK);
