@@ -56,13 +56,32 @@ if (group === 'auth') {
     process.exit(signedIn ? 0 : 1);
   }
   if (command === 'login') {
-    // `FAKE_LOGIN` is `fail`, `hang`, or the email to sign in as.
+    // `FAKE_LOGIN` is `fail`, `hang`, `code:<email>` (signs in as <email> on the code `good#fake-state`), or the
+    // email to sign in as. `BROWSER` goes to `fake-login-browser.txt`, for the test to see whether a tab opened.
     const mode = process.env.FAKE_LOGIN ?? 'login@example.com';
+    writeFileSync(path.join(path.dirname(auth), 'fake-login-browser.txt'), process.env.BROWSER ?? '');
+    process.stdout.write(
+      "Opening browser to sign in…\nIf the browser didn't open, visit: https://claude.example.com/oauth/authorize?code=true&state=fake-state\nPaste code here if prompted > ",
+    );
     if (mode === 'fail') process.exit(1);
     if (mode === 'hang') {
       setInterval(() => {}, 1000);
       process.on('SIGTERM', () => process.exit(143));
       // Waits like the real CLI, instead of falling through to the exit below.
+      await new Promise(() => {});
+    } else if (mode.startsWith('code:')) {
+      process.on('SIGTERM', () => process.exit(143));
+      const lines = createInterface({ input: process.stdin });
+      for await (const line of lines) {
+        if (line === 'good#fake-state') {
+          writeFileSync(auth, JSON.stringify({ email: mode.slice('code:'.length), subscriptionType: 'pro' }));
+          process.exit(0);
+        }
+        console.log(
+          "Login failed: That code wasn't accepted. It may be incomplete, expired, already used, or from an earlier sign-in attempt. Sign in again to get a new code.",
+        );
+        process.exit(1);
+      }
       await new Promise(() => {});
     } else {
       writeFileSync(auth, JSON.stringify({ email: mode, subscriptionType: 'pro' }));

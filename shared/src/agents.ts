@@ -308,9 +308,29 @@ export const claudeAccountSchema = z.object({
   created_at: z.string(),
   is_active: z.boolean(),
   smart_note: z.string().optional(),
+  /**
+   * Set while a sign-in by link waits: the page anyone can sign in on (`null` until the CLI prints it) and when the
+   * sign-in stops waiting. Held in memory.
+   */
+  sign_in_link: z.object({ url: z.string().nullable(), expires_at: z.string() }).nullable(),
 });
 
 export type ClaudeAccount = z.infer<typeof claudeAccountSchema>;
+
+/**
+ * How a Claude account signs in: `browser` opens Anthropic's page in a browser tab on this Mac; `link` gives a link
+ * to open in any browser, and the code Anthropic shows there is pasted back.
+ */
+export enum SignInVia {
+  Browser = 'browser',
+  Link = 'link',
+}
+
+/** `POST /agent-accounts/:id/logins` */
+export const startLoginSchema = z.object({ via: z.enum(SignInVia).default(SignInVia.Browser) });
+
+/** `POST /agent-accounts/:id/logins/code`: the code Anthropic showed, or the address of the page it showed it on. */
+export const signInCodeSchema = z.object({ code: z.string().trim().min(1).max(4096) });
 
 export const smartPickSchema = z.object({ account_id: z.string(), reason: z.string() });
 

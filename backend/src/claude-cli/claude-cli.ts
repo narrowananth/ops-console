@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ErrorCode, type McpOAuthClient } from '@ops-console/shared';
 import { z } from 'zod';
@@ -54,6 +54,16 @@ export type AuthStatus = { signedIn: boolean; email: string | null; plan: string
 export type ConfigDir = string | null;
 
 export const LOGIN_TIMEOUT_MS = 5 * 60_000;
+
+/** A sign-in started by `authLogin`. */
+export type AuthLogin = {
+  /** The page to sign in on, from any browser; rejects when the sign-in ends before the CLI prints it. */
+  link: Promise<string>;
+  /** Hands the CLI the code Anthropic shows after a sign-in through `link`. */
+  sendCode: (code: string) => void;
+  /** Resolves once signed in; rejects with the CLI's reason when the sign-in fails, is stopped or times out. */
+  done: Promise<void>;
+};
 
 /**
  * What the shell can hand `claude` that beats the config dir's own sign-in: three credentials, and an API host
@@ -156,15 +166,50 @@ export class ClaudeCli {
     return { signedIn: status.loggedIn, email: status.email ?? null, plan: status.subscriptionType ?? null };
   }
 
-  /** Opens the browser and ends when the operator finishes Anthropic's sign-in, or on `signal` or the timeout. */
-  async authLogin(configDir: ConfigDir, signal: AbortSignal): Promise<void> {
-    const login = run(this.bin, ['auth', 'login', '--claudeai'], {
-      env: claudeEnv(configDir),
-      signal,
-      timeout: LOGIN_TIMEOUT_MS,
+  /**
+   * Starts Anthropic's sign-in. It ends when someone finishes it, or on `signal` or the timeout. With `openBrowser`
+   * the CLI opens a browser tab on this Mac. Without it, the sign-in goes through the link the CLI prints, which
+   * works in any browser. Anthropic then shows a one-time code that goes back to the CLI through `sendCode`.
+   */
+  authLogin(
+    configDir: ConfigDir,
+    signal: AbortSignal,
+    { openBrowser, timeoutMs }: { openBrowser: boolean; timeoutMs: number },
+  ): AuthLogin {
+    // The CLI runs `$BROWSER <url>` in place of `open`; `true` does nothing.
+    const env = openBrowser ? claudeEnv(configDir) : { ...claudeEnv(configDir), BROWSER: 'true' };
+    const child = spawn(this.bin, ['auth', 'login', '--claudeai'], { env, signal, timeout: timeoutMs });
+    child.on('error', () => {});
+    child.stdin.on('error', () => {});
+    // Only a sign-in through the link takes a pasted code.
+    if (openBrowser) child.stdin.end();
+    let output = '';
+    const link = new Promise<string>((resolve, reject) => {
+      const read = (data: Buffer) => {
+        output = (output + data.toString()).slice(-4000);
+        const url = /visit: (https:\/\/\S+)/.exec(output)?.[1];
+        if (url) resolve(url);
+      };
+      child.stdout.on('data', read);
+      child.stderr.on('data', read);
+      child.on('close', () => reject(new Error('the sign-in ended before it printed a link')));
     });
-    login.child.stdin?.end();
-    await login;
+    link.catch(() => {});
+    const done = new Promise<void>((resolve, reject) => {
+      // Ends at once on `signal`, as it did before the CLI exits.
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      child.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new ApiError(502, ErrorCode.UpstreamFailed, authLoginFailure(output)));
+      });
+    });
+    return {
+      link,
+      sendCode: (code) => {
+        if (child.stdin.writable) child.stdin.write(`${code}\n`);
+      },
+      done,
+    };
   }
 
   async authLogout(configDir: ConfigDir): Promise<void> {
@@ -195,6 +240,16 @@ export function loginFailure(output: string): string {
   const plain = output.replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b\[[0-9;?]*[a-zA-Z]/g, '');
   const line = plain.match(/Couldn't complete authentication[^\r\n]*/)?.[0];
   return line ? line.replace(/https?:\/\/\S+/g, '<url>').trim() : '`claude mcp login` failed';
+}
+
+/** Claude Code's reason from `claude auth login` output, without its "sign in again" advice or URLs. */
+export function authLoginFailure(output: string): string {
+  const line = output.match(/Login failed: ([^\r\n]*)/)?.[1];
+  if (!line) return '`claude auth login` failed';
+  return line
+    .replace(/https?:\/\/\S+/g, '<url>')
+    .replace(/\s*Sign in again[^.]*\./, '')
+    .trim();
 }
 
 function splitArgs(text: string | undefined): string[] {

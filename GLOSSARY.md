@@ -20,6 +20,12 @@ _Avoid_: bot, AI
 One Claude subscription signed in on this machine, named by its email, with its own 5-hour and
 weekly usage windows. Each is added once. The agent runs under the active one.
 
+**Sign-in by link**:
+Adding a Claude account without a browser tab on this Mac: the console shows Anthropic's sign-in
+link, anyone opens it in any browser, and the one-time code Anthropic shows comes back to the
+console. The other way is signing in in this browser.
+_Avoid_: remote login, shared login, callback URL
+
 **Auto-switch**:
 With Smart usage off, moving the active Claude account when its 5-hour usage reaches the
 threshold, carrying each Session's conversation over.
