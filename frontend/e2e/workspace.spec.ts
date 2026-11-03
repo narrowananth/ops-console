@@ -85,6 +85,9 @@ test('a Repo shows its 3 newest Sessions and folds, so the next Repo stays in re
   await analytics.getByRole('button', { name: 'New Session in analytics' }).click();
   await branch.click();
   await expect(page.getByRole('option', { name: /^main/ })).toContainText('checked out');
+  // The search narrows the branches as it is typed.
+  await page.getByRole('searchbox', { name: /Search Branch for a new Session/ }).fill('rel');
+  await expect(page.getByRole('option')).toHaveCount(1);
   await page.getByRole('option', { name: /^release/ }).click();
   await expect(branch).toContainText('release');
 
@@ -445,11 +448,16 @@ test('a pull request the agent names in the conversation links at the top of the
   );
   await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
 
-  const link = page.locator('header').getByRole('link', { name: /PR #42/ });
-  await expect(link).toHaveAttribute('href', 'https://github.com/example/apis/pull/42');
+  const header = page.locator('header');
+  // One link opens the pull request in the Workspace, the other on the Git host.
+  await expect(header.getByRole('link', { name: /^PR #42/ })).toHaveAttribute('href', /tab=pulls&pr=r1%2F42/);
+  await expect(header.getByRole('link', { name: /#42 on host/ })).toHaveAttribute(
+    'href',
+    'https://github.com/example/apis/pull/42',
+  );
 });
 
-test("the agent's tool steps show as a path, the last one turning while the message streams", async ({ page }) => {
+test("the agent's tool steps fold to a count and the latest, and open as short lines", async ({ page }) => {
   await page.route('**/api/repos', (route) =>
     route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
   );
@@ -484,10 +492,14 @@ test("the agent's tool steps show as a path, the last one turning while the mess
   );
   await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
 
+  // The run folds to one line: how many steps and the latest, not the commands.
+  const toggle = page.getByRole('button', { name: 'Show 2 steps' });
+  await expect(toggle).toContainText('2 steps');
+  await expect(toggle).toContainText('Read scripts/platforms/engage.ts');
+  await expect(page.getByRole('list', { name: 'Agent steps' })).toHaveCount(0);
+
+  await toggle.click();
   const steps = page.getByRole('list', { name: 'Agent steps' }).getByRole('listitem');
-  await expect(steps).toHaveText([
-    /\$ ls scripts\/platforms.*done/,
-    /Read scripts\/platforms\/engage\.ts.*in progress/,
-  ]);
+  await expect(steps).toHaveText([/Ran ls.*done/, /Read scripts\/platforms\/engage\.ts.*in progress/]);
   await expect(steps.last()).toHaveAttribute('aria-current', 'step');
 });

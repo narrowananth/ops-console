@@ -84,6 +84,7 @@ function NewSession({ repo, onCreated }: { repo: Repo; onCreated: (id: string) =
           onChange={setBranch}
           align="left"
           heading="Start on branch"
+          searchable
           className="min-w-0 flex-1 font-mono"
           listClassName="w-max max-w-md"
         />
