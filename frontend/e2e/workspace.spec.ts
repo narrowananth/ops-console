@@ -310,21 +310,91 @@ test('files picked, pasted or dropped on the message box upload, show as chips a
     element.dispatchEvent(new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true }));
     element.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
   });
-  const chips = page.getByRole('list', { name: 'Attached files' }).getByRole('listitem');
-  await expect(chips).toHaveCount(3);
-  await expect(chips.nth(1)).toContainText('2 KB');
+  // Each file sits in the text as a chip where it was added.
+  const chip = (name: string) => box.locator(`[data-file="${name}"]`);
+  await expect(chip('app.log')).toContainText('2 KB');
+  await expect(chip('shot.png')).toBeVisible();
+  await expect(chip('order.json')).toBeVisible();
   expect(uploads).toEqual(['app.log', 'shot.png', 'order.json']);
-  await expect(box).toHaveValue('');
 
-  await page.getByRole('button', { name: 'Remove order.json' }).click();
-  await box.fill('why does this fail?');
+  // Files stay with the Session through a reload.
+  await page.reload();
+  await expect(chip('app.log')).toContainText('2 KB');
+
+  await chip('order.json').getByRole('button', { name: 'Remove order.json' }).click();
+  await expect(chip('order.json')).toHaveCount(0);
+  // The cursor after the chips, as a click past them puts it.
+  await box.evaluate((element) => {
+    element.focus();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    document.getSelection()?.removeAllRanges();
+    document.getSelection()?.addRange(range);
+  });
+  await box.pressSequentially('why does this fail?');
   await box.press('Enter');
   await expect
     .poll(() => sent?.text)
     .toBe(
-      'why does this fail?\n\nAttached files (open each with the Read tool):\n- app.log: /data/attachments/s1/1.bin\n- shot.png: /data/attachments/s1/2.bin',
+      '[📎 app.log] [📎 shot.png] why does this fail?\n\nAttached files (open each with the Read tool):\n- app.log: /data/attachments/s1/1.bin\n- shot.png: /data/attachments/s1/2.bin',
     );
-  await expect(chips).toHaveCount(0);
+  await expect(box.locator('[data-file]')).toHaveCount(0);
+});
+
+test('a file chip opens the file over the page, in the message box and in the conversation', async ({ page }) => {
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform')] } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          {
+            id: 'm1',
+            role: 'user',
+            status: 'done',
+            created_at: NOW,
+            parts: [
+              {
+                kind: 'text',
+                text: 'see [📎 trace.log] here\n\nAttached files (open each with the Read tool):\n- trace.log: /data/attachments/s1/abc.log',
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/sessions/s1/diff', (route) =>
+    route.fulfill({ json: { data: { branch: 'main', base: 'origin/main', additions: 0, deletions: 0, files: [] } } }),
+  );
+  await page.route('**/api/sessions/s1/attachments/abc.log', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/plain', body: 'TypeError: boom' }),
+  );
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const message = page.getByRole('listitem', { name: 'Your message' });
+  await expect(message).toContainText('see');
+  // A branch that changes nothing has no Diff button.
+  await expect(page.getByRole('button', { name: /^Diff/ })).toHaveCount(0);
+  await message.getByRole('button', { name: 'trace.log' }).click();
+  const viewer = page.getByRole('dialog', { name: 'trace.log' });
+  await expect(viewer).toContainText('TypeError: boom');
+  await viewer.getByRole('button', { name: 'Close' }).click();
+  await expect(viewer).toHaveCount(0);
+
+  const box = page.getByRole('textbox', { name: 'Message' });
+  await box.evaluate((element) => {
+    const data = new DataTransfer();
+    data.items.add(new File(['hello there'], 'note.txt', { type: 'text/plain' }));
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  await box.locator('[data-file="note.txt"]').click();
+  await expect(page.getByRole('dialog', { name: 'note.txt' })).toContainText('hello there');
 });
 
 test('a Session opens at its newest message', async ({ page }) => {
@@ -387,7 +457,7 @@ test('a message typed while the agent works waits as Queued and sends when the r
   await box.fill('also add a test');
   await page.getByRole('button', { name: 'Queue' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Queued' })).toContainText('also add a test');
-  await expect(box).toHaveValue('');
+  await expect(box).toHaveText('');
   expect(sent).toEqual([]);
 
   await page.getByRole('button', { name: 'Stop', exact: true }).click();

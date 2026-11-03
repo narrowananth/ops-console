@@ -1,11 +1,13 @@
-import { type Message, type Part, splitAttachments } from '@ops-console/shared';
+import { fileToken, type Message, namesInText, type Part, splitAttachments } from '@ops-console/shared';
 import { useState } from 'react';
+import { AttachmentViewer, PaperClip, type Viewed } from '../components/ui/attachment-viewer';
 import { Button, Spinner } from '../components/ui/button';
 import { DiffLines } from '../components/ui/diff';
 import { Markdown } from '../components/ui/markdown';
 import type { PathwayState } from '../components/ui/pathway';
 import { ComparisonView, ResultView } from '../devtools/result-tables';
 import { COPY_FAILED, copyLabel, useCopy } from '../lib/clipboard';
+import { InlineText } from './inline-text';
 import { asReport, ReportDocument } from './report-document';
 import { StepRun } from './step-run';
 
@@ -160,26 +162,65 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
   );
 }
 
-/** The operator's message: its text, then a chip per attached file, named, with its saved path on hover. */
+/**
+ * The operator's message: its text with a chip where each file sat in it, then a chip for any file not placed in the
+ * text. A chip opens its file over the page.
+ */
 function SentText({ text }: { text: string }) {
   const sent = splitAttachments(text);
+  const [viewed, setViewed] = useState<Viewed | null>(null);
+  const byName = new Map(sent.attachments.map((file) => [file.name, file]));
+  const placed = new Set(namesInText(sent.text).filter((name) => byName.has(name)));
+  const open = (file: { name: string; path: string }) => setViewed({ name: file.name, path: file.path });
+  const rest = sent.attachments.filter((file) => !placed.has(file.name));
   return (
     <>
-      {sent.text && <Markdown source={sent.text} />}
-      {sent.attachments.length > 0 && (
+      {sent.text &&
+        (placed.size === 0 ? (
+          <Markdown source={sent.text} />
+        ) : (
+          <p className="m-0 text-sm leading-relaxed break-words whitespace-pre-wrap">
+            {sent.text.split(FILE_TOKEN_SPLIT).map((piece, index) => {
+              const file = index % 2 === 1 ? byName.get(piece) : undefined;
+              if (index % 2 === 1 && !file) return fileToken(piece);
+              return file ? (
+                // biome-ignore lint/suspicious/noArrayIndexKey: one file may sit twice; pieces never reorder
+                <FileChip key={`${file.path}-${index}`} name={file.name} onOpen={() => open(file)} />
+              ) : (
+                // biome-ignore lint/suspicious/noArrayIndexKey: pieces sit by position and never reorder
+                <InlineText key={index} text={piece} />
+              );
+            })}
+          </p>
+        ))}
+      {rest.length > 0 && (
         <ul aria-label="Attached files" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
-          {sent.attachments.map((file) => (
-            <li
-              key={file.path}
-              title={file.path}
-              className="max-w-64 truncate rounded-md border border-line bg-bg px-2 py-1 font-mono text-xs text-neutral-700"
-            >
-              📎 {file.name}
+          {rest.map((file) => (
+            <li key={file.path}>
+              <FileChip name={file.name} onOpen={() => open(file)} />
             </li>
           ))}
         </ul>
       )}
+      {viewed && <AttachmentViewer viewed={viewed} onClose={() => setViewed(null)} />}
     </>
+  );
+}
+
+/** Splits text around file tokens: odd pieces are the names. */
+const FILE_TOKEN_SPLIT = /\[📎 ([^\]\n]+)\]/;
+
+function FileChip({ name, onOpen }: { name: string; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      title={`Open ${name}`}
+      onClick={onOpen}
+      className="mx-0.5 inline-flex max-w-72 cursor-pointer items-center gap-1.5 rounded-md border border-line bg-bg px-1.5 py-0.5 align-middle font-mono text-xs text-neutral-800 hover:border-accent-300 hover:text-text"
+    >
+      <PaperClip />
+      <span className="min-w-0 truncate">{name}</span>
+    </button>
   );
 }
 

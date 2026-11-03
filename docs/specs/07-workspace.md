@@ -173,6 +173,10 @@ Each branch adds `has_open_pr: boolean`.
 
 Answers 200 with `{ "data": { "session": "Session", "stashed": false } }`. Errors: `invalid_state` (Behavior 7), `upstream_failed` when git refuses.
 
+### `GET /sessions/:id/attachments/:file`
+
+Answers the bytes of a file saved for the Session's messages, `:file` being the last part of its saved path, with its type: images and PDFs as themselves, `.txt`, `.log`, `.json` and other text as `text/plain`, anything else as bytes. A name that is not a saved file in the Session's folder, or a Session that does not exist, is `not_found`.
+
 ### `GET /sessions/:id/diff`
 
 Answers `{ "data": SessionDiff }` (Behavior 31): `branch` (null on a detached HEAD), `base` such as `origin/main` (null when the Repo has no commit), `additions`, `deletions`, and `files`, A→Z. Each file has `name`, `old_name` (renames only), `status` (`added`, `modified`, `deleted`, `renamed`), `additions`, `deletions`, `binary`, `lines` (`sign` and `text`, hunk headers kept) and `truncated`. Errors: `invalid_state` for a Session that is not `repo`, `not_found`.
@@ -230,7 +234,7 @@ Adds `branch: string | null`.
   the Monitor links to a Fix's Session this way. A picked Session that is gone drops out of the address. With nothing
   picked: "Pick a Session, or start one on a branch." or "Pick a pull request." The choices and drafts named below
   stay in the browser's local storage (`persist-selections-and-runs` Behaviors 1 to 10).
-- The arrow beside the tabs folds the side panel to a narrow rail, and the browser remembers it folded. The rail has
+- The arrow beside the tabs, as tall as them, folds the side panel to a narrow rail, and the browser remembers it folded. The rail has
   the arrow to open it again and an icon for each tab, which opens the panel on that tab. The Sessions icon counts
   the Sessions waiting on the operator (`waiting_input` or `waiting_approval`).
 - Workspace Session list grouped by Repo, A→Z. It lists `repo` and anonymous Sessions; `pr_review` Sessions are not
@@ -264,13 +268,18 @@ Adds `branch: string | null`.
   Enter sends and Shift+Enter adds a line. While the agent works the box stays open and Send reads Queue: the
   message waits in a "Queued" note with Take back, and sends when the run ends. A failed send puts it back in the
   box. Its draft is kept per Session.
-  Files attach to the next message three ways: the paperclip before the chips, dropping them on the box, or pasting
-  them (a screenshot, a file copied in Finder). Each uploads at once to `POST /api/sessions/:id/attachments?name=`
-  and is saved under a new name in `attachments/<session id>/` in the data folder. A chip above the text shows each
-  file, a thumbnail for images, its size and a remove button; Send waits until every file is saved. The message ends
-  with an "Attached files" list of each name and saved path, and the run lets the agent read that folder, so its Read
-  tool opens them without an Approval. A sent message shows its files as chips under the text.
-- Diff: on a `repo` Session the header's Diff button, with the totals once read, opens a panel right of the
+  Files attach to the next message three ways: the paperclip, dropping them on the box, or pasting them (a
+  screenshot, a file copied in Finder). Each uploads at once to `POST /api/sessions/:id/attachments?name=` and is
+  saved under a new name in `attachments/<session id>/` in the data folder. A file sits in the text as a chip where
+  the cursor was, written `[📎 <name>]` in the message, with a thumbnail for images, its size and a remove button. Two
+  files with one name get `name (2)` and on. Taking a chip out of the text removes its file. Saved files stay with the
+  Session through a reload, a switch of Session or tab, until removed or sent. Send waits until every file is saved.
+  The message ends with an "Attached files" list of each name and saved path, and the run lets the agent read that
+  folder, so its Read tool opens them without an Approval. A sent message shows each file as a chip where it sat in
+  the text, and any other under it. A chip, in the box or in the conversation, opens its file over the page from
+  `GET /api/sessions/:id/attachments/:file`: an image or PDF as itself, text as text up to 256 KB, anything else
+  with Download.
+- Diff: on a `repo` Session whose branch changes something, the header's Diff button, with the totals, opens a panel right of the
   conversation (Behavior 31). It names the branch and what it is compared with, then lists each file with its status
   letter, path and counts. Files open on their lines while there are 8 or fewer, else folded; each folds on its own,
   and Expand all or Collapse all does every file. Split shows the old and new side by side, and Refresh reads again.

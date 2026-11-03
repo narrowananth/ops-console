@@ -34,6 +34,20 @@ export function apiUpload<T extends z.ZodType>(path: string, file: Blob, schema:
   return request('POST', path, undefined, schema, file);
 }
 
+/** GETs a file the daemon serves, such as an attached screenshot, as bytes. */
+export async function apiBlob(path: string): Promise<Blob> {
+  let response: Response;
+  try {
+    response = await fetch(`/api${path}`, { headers: { Authorization: `Bearer ${sessionToken() ?? ''}` } });
+  } catch {
+    throw new DaemonUnreachableError('no answer from the daemon');
+  }
+  if (response.ok) return response.blob();
+  const error = errorBodySchema.safeParse(await response.json().catch(() => undefined));
+  if (!error.success) throw new DaemonUnreachableError(`HTTP ${response.status} without an error body`);
+  throw new ApiError(response.status, error.data.error.code, error.data.error.message);
+}
+
 async function request<T extends z.ZodType>(
   method: string,
   path: string,

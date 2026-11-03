@@ -1,6 +1,7 @@
 import { SessionState } from '@ops-console/shared';
 import { z } from 'zod';
 import { Empty } from '../components/ui/empty';
+import { PanelRail, PanelToggle, RAIL_BUTTON } from '../components/ui/side-panel';
 import { useRepoSessions } from '../lib/queries';
 import { useAddress, useStored } from '../lib/remember';
 import { PullRequestView } from './pull-request-view';
@@ -71,16 +72,7 @@ export function WorkspaceView() {
                 </button>
               ))}
             </div>
-            <button
-              type="button"
-              aria-label="Collapse the side panel"
-              aria-expanded
-              title="Collapse the side panel"
-              onClick={() => setCollapsed(true)}
-              className={RAIL_BUTTON}
-            >
-              <PanelIcon open />
-            </button>
+            <PanelToggle open onToggle={() => setCollapsed(true)} />
           </div>
           {tab === 'sessions' ? (
             <SessionsPane selected={sessionId} onSelect={setSessionId} />
@@ -118,20 +110,8 @@ function PaneRail({ tab, onOpen }: { tab: Tab; onOpen: (tab: Tab | null) => void
   const sessions = useRepoSessions();
   const waiting = (sessions.data ?? []).filter((session) => NEEDS_YOU.includes(session.state)).length;
   return (
-    <nav
-      aria-label="Workspace panel"
-      className="flex w-12 flex-none flex-col items-center gap-1.5 border-r border-line pt-3.5"
-    >
-      <button
-        type="button"
-        aria-label="Open the side panel"
-        aria-expanded={false}
-        title="Open the side panel"
-        onClick={() => onOpen(null)}
-        className={RAIL_BUTTON}
-      >
-        <PanelIcon open={false} />
-      </button>
+    <PanelRail label="Workspace panel">
+      <PanelToggle open={false} onToggle={() => onOpen(null)} />
       <span aria-hidden className="my-1 h-px w-6 bg-line" />
       {TABS.map(([id, label]) => (
         <button
@@ -154,31 +134,7 @@ function PaneRail({ tab, onOpen }: { tab: Tab; onOpen: (tab: Tab | null) => void
           )}
         </button>
       ))}
-    </nav>
-  );
-}
-
-const RAIL_BUTTON =
-  'flex size-8 flex-none cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-neutral-700 hover:bg-neutral-200 hover:text-text focus-visible:outline-2 focus-visible:outline-accent';
-
-/** A panel with its side bar, and a chevron that points the way it moves: in to fold, out to open. */
-function PanelIcon({ open }: { open: boolean }) {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <rect x="2" y="2.5" width="12" height="11" rx="2" />
-      <path d="M6 2.5v11" />
-      <path d={open ? 'M10.5 6 8.5 8l2 2' : 'M8.5 6l2 2-2 2'} />
-    </svg>
+    </PanelRail>
   );
 }
 

@@ -897,3 +897,34 @@ test('the Agent Review folds to its header from the chevron, and stays folded af
   await fold.click();
   await expect(card.getByText('Ready once the cache has a TTL.')).toBeVisible();
 });
+
+test('the Monitor search keeps the logs whose words match, and the Services panel folds to a rail', async ({
+  page,
+}) => {
+  const a1 = alert('a1', 'open', report('a1', 'ready', null));
+  const a2 = {
+    ...alert('a2', 'open', report('a2', 'ready', null)),
+    route: { id: 'rt2', method: 'GET', path: '/v1/carts' },
+    http_status: 404,
+    log_line: 'Cart not found',
+  };
+  await routeAlerts(page, [a1, a2]);
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+
+  const logs = page.getByRole('list', { name: 'Logs' }).getByRole('listitem');
+  await expect(logs).toHaveCount(2);
+  const search = page.getByRole('searchbox', { name: 'Search logs' });
+  await search.fill('carts 404');
+  await expect(logs).toHaveCount(1);
+  await expect(logs.first()).toContainText('Cart not found');
+  await search.fill('nothing like this');
+  await expect(page.getByText('No logs match “nothing like this”.')).toBeVisible();
+  await search.fill('');
+
+  await page.getByRole('button', { name: 'Collapse the Services panel' }).click();
+  await expect(page.getByRole('list', { name: 'Services' })).toHaveCount(0);
+  await page.reload();
+  const rail = page.getByRole('navigation', { name: 'Services panel' });
+  await rail.getByRole('button', { name: 'Open the Services panel' }).click();
+  await expect(page.getByRole('list', { name: 'Services' })).toBeVisible();
+});

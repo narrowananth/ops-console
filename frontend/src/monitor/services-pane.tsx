@@ -2,6 +2,7 @@ import { type Alert, AlertStatus, SCAN_RANGES, ScanStatus, SEVERITIES, type Seve
 import { z } from 'zod';
 import { Button, Spinner } from '../components/ui/button';
 import { item } from '../components/ui/item';
+import { PanelToggle } from '../components/ui/side-panel';
 import { useAlerts, useDatadogServices, useScans, useStartScan, useStatusCodes } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
@@ -52,11 +53,14 @@ export function ServicesPane({
   scope,
   selected,
   onSelect,
+  onCollapse,
 }: {
   connected: boolean;
   scope: ScanScope;
   selected: string | null;
   onSelect: (name: string | null) => void;
+  /** Folds the panel to its rail. */
+  onCollapse: () => void;
 }) {
   const listed = useDatadogServices(scope.range, scope.codes, connected);
   const known = useStatusCodes(scope.range, connected);
@@ -119,24 +123,27 @@ export function ServicesPane({
             Datadog requests failing, HTTP 400+
           </span>
         </div>
-        <fieldset
-          aria-label="Range"
-          title="How far back the list, the counts and the next Scan read in Datadog"
-          className="m-0 flex gap-0.5 rounded-lg border-0 bg-neutral-200 p-0.75"
-        >
-          {SCAN_RANGES.map((value) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={scope.range === value}
-              title={`Read the last ${value} of Datadog logs`}
-              onClick={() => scope.pickRange(value)}
-              className={`flex-1 cursor-pointer rounded-md border-0 py-1 font-mono text-xs transition-colors ${scope.range === value ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
-            >
-              {value}
-            </button>
-          ))}
-        </fieldset>
+        <div className="flex gap-1.5">
+          <fieldset
+            aria-label="Range"
+            title="How far back the list, the counts and the next Scan read in Datadog"
+            className="m-0 flex min-w-0 flex-1 gap-0.5 rounded-lg border-0 bg-neutral-200 p-0.75"
+          >
+            {SCAN_RANGES.map((value) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={scope.range === value}
+                title={`Read the last ${value} of Datadog logs`}
+                onClick={() => scope.pickRange(value)}
+                className={`flex-1 cursor-pointer rounded-md border-0 py-1 font-mono text-xs transition-colors ${scope.range === value ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
+              >
+                {value}
+              </button>
+            ))}
+          </fieldset>
+          <PanelToggle open panel="Services panel" onToggle={onCollapse} />
+        </div>
         {known.data ? (
           <StatusPicker known={known.data} scope={scope} />
         ) : (
