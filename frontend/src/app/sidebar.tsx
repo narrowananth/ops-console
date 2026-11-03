@@ -6,6 +6,7 @@ import { shown } from '../monitor/scan-scope';
 import { lastAddress } from './last-address';
 import { RunningTasks } from './running-tasks';
 import { useUi } from './ui-store';
+import { UpdateCard, VersionLine } from './updates';
 
 export function Logo({ size = 28 }: { size?: number }) {
   return (
@@ -183,6 +184,7 @@ export function Sidebar() {
       </nav>
       <div className="flex flex-none flex-col gap-3 p-3.5">
         <RunningTasks collapsed={collapsed} />
+        {!collapsed && <UpdateCard />}
         {!collapsed && <ActiveAccount />}
         <div className={`flex gap-2 ${collapsed ? 'flex-col' : ''}`}>
           <button
@@ -222,6 +224,7 @@ export function Sidebar() {
             {collapsed ? '⟩' : '⟨ Collapse'}
           </button>
         </div>
+        <VersionLine collapsed={collapsed} />
       </div>
     </aside>
   );

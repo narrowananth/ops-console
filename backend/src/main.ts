@@ -20,6 +20,9 @@ import { MonitorModule } from './monitor/monitor.module';
 import { ReposModule } from './repos/repos.module';
 import { runSetupMcp } from './terminals/setup-mcp';
 import { TerminalsModule } from './terminals/terminals.module';
+import { ScriptInstaller } from './updates/installer';
+import { GithubReleases } from './updates/releases';
+import { UpdatesModule } from './updates/updates.module';
 import { WorkspaceModule } from './workspace/workspace.module';
 
 const keychain = new LoginKeychain(process.env.OPS_CONSOLE_KEYCHAIN_SERVICE || undefined);
@@ -92,6 +95,7 @@ const daemon = await startDaemon({
     TerminalsModule.forRoot(),
     ConnectionsModule.forRoot({ tester: new McpConnectionTester(version), launchDir: path.join(appDir, 'launch') }),
     ConnectorsModule.forRoot({ tools: new CliConnectorTools() }),
+    UpdatesModule.forRoot({ releases: new GithubReleases(), installer: new ScriptInstaller(path.join(appDir, '..')) }),
     McpServersModule.forRoot({
       probe: new SdkProbe(),
       launcher: env.OPS_CONSOLE_LAUNCHER ?? path.join(homedir(), '.ops-console', 'current', 'bin', 'ops-console'),
