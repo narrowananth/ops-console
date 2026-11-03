@@ -162,7 +162,7 @@ describe('ops-console update', () => {
     m.env.OPS_CONSOLE_RELEASE_URL = `file://${nextRelease}`;
     const result = await opsConsole(m, 'update');
 
-    expect(result.code).toBe(0);
+    expect(result).toMatchObject({ code: 0, stderr: '' });
     expect((await opsConsole(m, '--version')).stdout.trim()).toBe('1.1.0');
     expect((await opsConsole(m, 'status')).stdout).toMatch(/version\s+1\.1\.0/);
   });

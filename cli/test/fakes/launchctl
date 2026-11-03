@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Stands in for launchctl: bootstrap runs the plist's program in the background with its env and log
-// paths, bootout stops it. State lives in $FAKE_LAUNCHCTL_STATE; every call is appended to calls.log.
+// paths, bootout stops it. Like launchd, bootout returns at once and the job stays loaded for a moment after,
+// until its process exits and a second has passed; bootstrap meanwhile fails with error 5. State lives in $FAKE_LAUNCHCTL_STATE; every call is appended
+// to calls.log.
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -10,6 +12,7 @@ mkdirSync(state, { recursive: true });
 const args = process.argv.slice(2);
 appendFileSync(path.join(state, 'calls.log'), `${args.join(' ')}\n`);
 const pidFile = path.join(state, 'pid');
+const goneFile = path.join(state, 'gone-at');
 
 const alive = (pid) => {
   try {
@@ -19,7 +22,16 @@ const alive = (pid) => {
     return false;
   }
 };
-const loadedPid = () => (existsSync(pidFile) ? Number(readFileSync(pidFile, 'utf8')) : null);
+/** The loaded job's pid, while its process runs. */
+const loadedPid = () => {
+  if (!existsSync(pidFile)) return null;
+  const pid = Number(readFileSync(pidFile, 'utf8'));
+  const goneAt = existsSync(goneFile) ? Number(readFileSync(goneFile, 'utf8')) : null;
+  if (alive(pid) || (goneAt !== null && Date.now() < goneAt)) return pid;
+  rmSync(pidFile, { force: true });
+  rmSync(goneFile, { force: true });
+  return null;
+};
 
 const [command, target, plistPath] = args;
 if (command === 'bootstrap') {
@@ -42,6 +54,7 @@ if (command === 'bootstrap') {
     detached: true,
   });
   writeFileSync(pidFile, String(child.pid));
+  rmSync(goneFile, { force: true });
   child.unref();
   process.exit(0);
 } else if (command === 'bootout') {
@@ -51,9 +64,7 @@ if (command === 'bootstrap') {
     process.exit(3);
   }
   if (alive(pid)) process.kill(pid, 'SIGTERM');
-  const deadline = Date.now() + 5000;
-  while (alive(pid) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
-  rmSync(pidFile, { force: true });
+  writeFileSync(goneFile, String(Date.now() + 1000));
   process.exit(0);
 } else if (command === 'enable' || command === 'disable') {
   process.exit(0);
