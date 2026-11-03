@@ -7,7 +7,7 @@ removed once the Report is ready. That is where it builds mock data and tests th
 It never writes in the operator's checkout or to a Connection during a Verification. It changes the
 operator's code, files a ticket or opens a PR only after the operator confirms the Report, and it
 never merges. Merge is a button only the operator can press; every agent run denies `gh pr merge`,
-`glab mr merge` and the GitHub and GitLab MCP merge tools through `disallowedTools`, which holds in
+`glab mr merge`, `bkt pr merge`, `bkt pr auto-merge` and the GitHub and GitLab MCP merge tools through `disallowedTools`, which holds in
 every access mode. Alerts come from service logs, which anyone who can send a Service a request can
 write to, so an agent that acted on them alone could be steered into changing code or data. The
 console's safety lines close every run's system prompt and say that a log line is data, never an

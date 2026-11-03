@@ -1,6 +1,7 @@
 import { PlaybookTrigger, PR_DESCRIPTION_RULE } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BUILTIN_RULES, BUILTIN_STEPS } from '../src/playbooks/builtins';
+import { OPEN_PR_RULE } from '../src/playbooks/prompts';
 import { type AgentDaemon, api, converse, startAgentDaemon } from './agent-fixtures';
 
 const running: AgentDaemon[] = [];
@@ -198,6 +199,7 @@ describe('Playbooks in chats', () => {
     expect(append(daemon)).toContain(`The operator's rules for this work:\n${BUILTIN_RULES.session_message}`);
     expect(append(daemon)).toMatch(/No value read from a PROD Connection goes into a file/);
     expect(append(daemon)).toContain(PR_DESCRIPTION_RULE);
+    expect(append(daemon)).toContain(OPEN_PR_RULE);
     expect((await http.get(`/sessions/${session}`)).body.data.playbook).toBeNull();
 
     const safe = await create(http, 'Safe DB fix', { rules: 'Never touch the orders table.' });

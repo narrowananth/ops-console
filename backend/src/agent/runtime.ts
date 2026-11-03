@@ -74,6 +74,8 @@ const SDK_EFFORT: Record<Effort, EffortLevel> = {
 export const MERGE_DENIALS = [
   'Bash(gh pr merge:*)',
   'Bash(glab mr merge:*)',
+  'Bash(bkt pr merge:*)',
+  'Bash(bkt pr auto-merge:*)',
   'mcp__github__merge_pull_request',
   'mcp__gitlab__merge_merge_request',
 ];

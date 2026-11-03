@@ -192,6 +192,7 @@ describe('merging', () => {
     const id = daemon.createSession({ access_mode: AccessMode.Full });
     daemon.sdk.script(
       { tool: 'Bash', input: { command: 'gh pr merge 42 --squash' } },
+      { tool: 'Bash', input: { command: 'bkt pr merge 42' } },
       { tool: 'mcp__github__merge_pull_request', input: { pullNumber: 42 } },
     );
     await converse(daemon, id, 'ship it');
@@ -200,6 +201,7 @@ describe('merging', () => {
     const log = await api(daemon).get('/action-log');
     expect(log.body.data.map((row: { kind: string; outcome: string }) => [row.kind, row.outcome])).toEqual([
       ['query', 'denied'],
+      ['shell', 'denied'],
       ['pr', 'denied'],
     ]);
   });

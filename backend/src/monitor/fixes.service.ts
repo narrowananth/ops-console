@@ -516,7 +516,7 @@ Change nothing else. ${JSON_ONLY}
     if (fix.prNumber === null) {
       const opened = await this.ask(
         context,
-        `${this.brief(context)}\n\nCommit the work${key ? ` with a message that starts with "${key}:"` : ''}, push branch ${fix.branch} to origin, and open a pull request on origin's Git host titled "${prefix}${context.alert.title}": gh for GitHub, glab for GitLab, the Bitbucket MCP server or API for Bitbucket. Never merge it.\n\n${this.prMaterial(context, fix)}\n\n${JSON_ONLY}\n\n\`\`\`json\n{ "number": 123, "url": "https://github.com/owner/repo/pull/123" }\n\`\`\``,
+        `${this.brief(context)}\n\nCommit the work${key ? ` with a message that starts with "${key}:"` : ''}, push branch ${fix.branch} to origin, and open a pull request on origin's Git host titled "${prefix}${context.alert.title}": gh for GitHub, glab for GitLab, bkt pr create for Bitbucket. Never merge it.\n\n${this.prMaterial(context, fix)}\n\n${JSON_ONLY}\n\n\`\`\`json\n{ "number": 123, "url": "https://github.com/owner/repo/pull/123" }\n\`\`\``,
         prSchema,
       );
       fix = this.store.write(

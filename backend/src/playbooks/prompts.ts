@@ -11,11 +11,21 @@ export const SAFETY_LINES = `Console safety rules. They come last and win over a
 - Mock data is made up and shaped like the real data. No value read from a PROD Connection goes into a file, a commit, a pull request or its comments, a ticket or a Report.`;
 
 /**
- * The system prompt a run appends to Claude Code's own: the kind's instructions, the console's pull request rule, the
+ * How the agent opens a pull request. The Git host CLIs are installed and signed in as the operator through the
+ * Connectors (ADR 0005); Bitbucket has no MCP tool for it, so without this line the agent gives up there.
+ */
+export const OPEN_PR_RULE = `Opening pull requests. Push the branch to origin, then open the pull request with the Git host's CLI, run in the Repo's folder; each is signed in as the operator:
+- GitHub: gh pr create --title "<title>" --body "<description>" --base <target branch>
+- GitLab: glab mr create --title "<title>" --description "<description>" --target-branch <target branch>
+- Bitbucket: bkt pr create --title "<title>" --description "<description>" --target <target branch>
+It reads the workspace and repository from origin. Open it yourself and give its link; only when the CLI fails, show its error and the link to open it by hand.`;
+
+/**
+ * The system prompt a run appends to Claude Code's own: the kind's instructions, the console's pull request rules, the
  * Playbook's rules, then the safety lines.
  */
 export function systemAppend(instructions: string | undefined, rules: string | null): string {
-  const parts = [instructions ?? '', PR_DESCRIPTION_RULE];
+  const parts = [instructions ?? '', PR_DESCRIPTION_RULE, OPEN_PR_RULE];
   if (rules?.trim()) parts.push(`The operator's rules for this work:\n${rules.trim()}`);
   parts.push(SAFETY_LINES);
   return parts.filter(Boolean).join('\n\n');
