@@ -1,5 +1,5 @@
-import { Controller, Delete, Get, HttpCode, Inject, Param, Post } from '@nestjs/common';
-import type { ClaudeAccount } from '@ops-console/shared';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post } from '@nestjs/common';
+import { type ClaudeAccount, signInCodeSchema, startLoginSchema } from '@ops-console/shared';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
 import { AccountsService } from './accounts.service';
@@ -34,8 +34,16 @@ export class AccountsController {
 
   @Post(':id/logins')
   @HttpCode(200)
-  login(@Param() params: unknown): { data: ClaudeAccount } {
-    return { data: this.accounts.startLogin(parseInput(idParams, params, 'params').id) };
+  login(@Param() params: unknown, @Body() body: unknown): { data: ClaudeAccount } {
+    const { via } = parseInput(startLoginSchema, body ?? {}, 'body');
+    return { data: this.accounts.startLogin(parseInput(idParams, params, 'params').id, via) };
+  }
+
+  @Post(':id/logins/code')
+  @HttpCode(200)
+  async submitCode(@Param() params: unknown, @Body() body: unknown): Promise<{ data: ClaudeAccount }> {
+    const { code } = parseInput(signInCodeSchema, body, 'body');
+    return { data: await this.accounts.submitCode(parseInput(idParams, params, 'params').id, code) };
   }
 
   @Delete(':id/logins')

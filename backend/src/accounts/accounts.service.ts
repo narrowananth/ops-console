@@ -6,6 +6,7 @@ import {
   agentAccountsSettingSchema,
   type ClaudeAccount,
   ErrorCode,
+  SignInVia,
   type SmartPick,
   SwitchReason,
 } from '@ops-console/shared';
@@ -14,7 +15,7 @@ import { z } from 'zod';
 import { RunRegistry } from '../agent/runs';
 import { emitSessionUpdated } from '../agent/sessions.service';
 import { Transcripts } from '../agent/transcripts';
-import { CLAUDE_CLI, type ClaudeCli } from '../claude-cli/claude-cli';
+import { type AuthLogin, CLAUDE_CLI, type ClaudeCli, LOGIN_TIMEOUT_MS } from '../claude-cli/claude-cli';
 import { DATA_DIR } from '../common/data-dir';
 import { ApiError } from '../common/errors';
 import { claudeAccounts, nowIso, sessions } from '../db/schema';
@@ -69,6 +70,44 @@ function windowOf(info: RateLimitInfo, name: 'five_hour' | 'seven_day'): Window 
   return undefined;
 }
 
+/**
+ * How long a sign-in by link waits. Longer than one in this Mac's browser: the link goes to someone else, who signs in
+ * and sends the code back.
+ */
+export const LINK_LOGIN_TIMEOUT_MS = 15 * 60_000;
+
+/** How long a pasted code waits for the CLI's answer before the request returns with the sign-in still going. */
+const CODE_ANSWER_MS = 60_000;
+
+type Login = {
+  abort: AbortController;
+  cli: AuthLogin;
+  /** Set for a sign-in by link. */
+  link: { url: string | null; expiresAt: string } | null;
+  /** A code went to the CLI: a failure is the code turned down, and `submitCode` starts a new link. */
+  codeSent: boolean;
+  outcome: Promise<ApiError | Error | null>;
+};
+
+const signInLink = (login: Login | undefined): ClaudeAccount['sign_in_link'] =>
+  login?.link ? { url: login.link.url, expires_at: login.link.expiresAt } : null;
+
+/**
+ * The code to hand the CLI: as pasted, or `<code>#<state>` from the address of the page Anthropic showed it on.
+ * Anything else is passed on as it is, for the CLI to turn down.
+ */
+export function signInCode(pasted: string): string {
+  const text = pasted.trim();
+  if (!/^https?:\/\//.test(text)) return text;
+  try {
+    const url = new URL(text);
+    const code = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
+    if (code && state) return `${code}#${state}`;
+  } catch {}
+  return text;
+}
+
 const usageOf = (row: AccountRow): AccountUsage => ({
   id: row.id,
   signedIn: row.signedIn,
@@ -82,7 +121,7 @@ const usageOf = (row: AccountRow): AccountUsage => ({
 export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger('accounts');
   /** Sign-ins waiting on the operator, by account id. */
-  private readonly logins = new Map<string, AbortController>();
+  private readonly logins = new Map<string, Login>();
   private usageTimer: NodeJS.Timeout | undefined;
   private polling = false;
 
@@ -112,7 +151,7 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
 
   onModuleDestroy(): void {
     clearInterval(this.usageTimer);
-    for (const login of this.logins.values()) login.abort();
+    for (const login of this.logins.values()) login.abort.abort();
   }
 
   setting(): AgentAccountsSetting {
@@ -205,43 +244,91 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
   }
 
   /**
-   * Starts Anthropic's sign-in for the account; the account is checked when the operator finishes. One already
-   * waiting is stopped and replaced, which opens the browser page again.
+   * Starts Anthropic's sign-in for the account; the account is checked when it finishes. `browser` opens the page in
+   * a browser tab on this Mac. `link` opens nothing: the account carries a link to sign in on from any browser, and
+   * the code Anthropic shows there comes back through `submitCode`. One already waiting is stopped and replaced.
    */
-  startLogin(id: string): ClaudeAccount {
+  startLogin(id: string, via: SignInVia = SignInVia.Browser): ClaudeAccount {
     const account = this.get(id);
-    this.logins.get(id)?.abort();
+    this.logins.get(id)?.abort.abort();
     const abort = new AbortController();
-    this.logins.set(id, abort);
+    const byLink = via === SignInVia.Link;
+    const timeoutMs = byLink ? LINK_LOGIN_TIMEOUT_MS : LOGIN_TIMEOUT_MS;
+    const cli = this.claude.authLogin(this.configDir(account), abort.signal, { openBrowser: !byLink, timeoutMs });
+    const login: Login = {
+      abort,
+      cli,
+      link: byLink ? { url: null, expiresAt: new Date(Date.now() + timeoutMs).toISOString() } : null,
+      codeSent: false,
+      outcome: Promise.resolve(null),
+    };
+    this.logins.set(id, login);
+    login.outcome = this.login(account, login);
+    if (login.link) {
+      cli.link.then(
+        (url) => {
+          if (this.logins.get(id) !== login || !login.link) return;
+          login.link.url = url;
+          this.emitCurrent(id);
+        },
+        () => {},
+      );
+    }
     this.emitCurrent(id);
-    void this.login(account, abort);
     return this.one(id);
   }
 
   /** Stops the sign-in. An account that never signed in is deleted with it. */
   async cancelLogin(id: string): Promise<void> {
     this.get(id);
-    this.logins.get(id)?.abort();
+    this.logins.get(id)?.abort.abort();
     await this.discardIfNew(id);
   }
 
-  private async login(account: AccountRow, abort: AbortController): Promise<void> {
+  /**
+   * Hands the CLI the code Anthropic showed after a sign-in through the account's link, and answers once the CLI
+   * took it or turned it down. The CLI ends its sign-in on a code it turns down, so the account gets a new link.
+   */
+  async submitCode(id: string, pasted: string): Promise<ClaudeAccount> {
+    this.get(id);
+    const login = this.logins.get(id);
+    if (!login?.link) throw new ApiError(409, ErrorCode.InvalidState, 'no sign-in by link is waiting for this account');
+    login.codeSent = true;
+    login.cli.sendCode(signInCode(pasted));
+    const failure = await Promise.race([
+      login.outcome,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), CODE_ANSWER_MS).unref()),
+    ]);
+    if (failure === null) return this.one(id);
+    // An account that signed in as one already added is signed out, and deleted when new.
+    if (failure instanceof ApiError && failure.status === 409) throw failure;
+    if (login.abort.signal.aborted) throw new ApiError(409, ErrorCode.InvalidState, 'the sign-in was stopped');
+    this.startLogin(id, SignInVia.Link);
+    throw new ApiError(
+      422,
+      ErrorCode.ValidationFailed,
+      `${failure.message} The old link no longer works: send the new one.`,
+    );
+  }
+
+  /** Ends with `null` once the account signed in and was checked, or with why it did not. */
+  private async login(account: AccountRow, login: Login): Promise<ApiError | Error | null> {
+    let failure: ApiError | Error | null = null;
     try {
-      await this.claude.authLogin(account.configDir, abort.signal);
+      await login.cli.done;
       await this.check(account.id);
     } catch (error) {
-      if (!abort.signal.aborted) {
-        this.logger.warn(
-          `signing in "${account.label}" failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
+      failure = error instanceof Error ? error : new Error(String(error));
+      if (!login.abort.signal.aborted) this.logger.warn(`signing in "${account.label}" failed: ${failure.message}`);
     } finally {
       // A replaced sign-in must not clear the one that replaced it.
-      if (this.logins.get(account.id) === abort) this.logins.delete(account.id);
+      if (this.logins.get(account.id) === login) this.logins.delete(account.id);
       this.emitCurrent(account.id);
     }
-    // A cancel deletes through `cancelLogin`; a sign-in the operator declined, or that failed or timed out, ends here.
-    if (!abort.signal.aborted) await this.discardIfNew(account.id);
+    // A cancel deletes through `cancelLogin`, and a turned-down code starts a new link through `submitCode`. A
+    // sign-in the operator declined, or that failed or timed out, ends here.
+    if (failure && !login.abort.signal.aborted && !login.codeSent) await this.discardIfNew(account.id);
+    return failure;
   }
 
   /** Deletes an account that was added but never signed in, so an abandoned sign-in leaves no row behind. */
@@ -333,7 +420,7 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
     const account = this.get(id);
     if (this.runs.onAccount(id))
       throw new ApiError(409, ErrorCode.InvalidState, 'a run on this account is still going');
-    this.logins.get(id)?.abort();
+    this.logins.get(id)?.abort.abort();
     await this.claude.authLogout(this.configDir(account));
     return this.check(id);
   }
@@ -455,7 +542,7 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
     const account = this.get(id);
     if (this.runs.onAccount(id))
       throw new ApiError(409, ErrorCode.InvalidState, 'a run on this account is still going');
-    this.logins.get(id)?.abort();
+    this.logins.get(id)?.abort.abort();
     const wasActive = id === this.setting().active_account_id;
     const target = wasActive ? (this.rows().find((row) => row.id !== id && row.signedIn) ?? null) : this.activeRow();
     const moved = this.store.db.select().from(sessions).where(eq(sessions.accountId, id)).all();
@@ -556,6 +643,7 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
       position: row.position,
       signed_in: row.signedIn,
       signing_in: this.logins.has(row.id),
+      sign_in_link: signInLink(this.logins.get(row.id)),
       email: row.email,
       plan: row.plan,
       five_hour_pct: effectivePct(row.fiveHourPct, row.fiveHourResetsAt, now),

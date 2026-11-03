@@ -56,6 +56,7 @@ import {
   type SessionDefaults,
   type SessionPatch,
   SessionState,
+  SignInVia,
   scanSchema,
   serviceSchema,
   sessionDefaultsSchema,
@@ -227,12 +228,26 @@ export function useCheckAccount() {
   });
 }
 
-/** Opens Anthropic's sign-in in the browser; `account.updated` arrives over `/ws` when the account is checked. */
+/**
+ * Starts the account's sign-in: in a browser tab on this Mac, or by a link to open in any browser. `account.updated`
+ * arrives over `/ws` when the link is ready and when the account is checked.
+ */
 export function useStartLogin() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => apiSend('POST', `/agent-accounts/${id}/logins`, undefined, accountResponse),
+    mutationFn: ({ id, via = SignInVia.Browser }: { id: string; via?: SignInVia }) =>
+      apiSend('POST', `/agent-accounts/${id}/logins`, { via }, accountResponse),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.accounts }),
+  });
+}
+
+/** Hands over the code Anthropic showed after a sign-in by link; a code turned down comes back with a new link. */
+export function useSubmitSignInCode() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, code }: { id: string; code: string }) =>
+      apiSend('POST', `/agent-accounts/${id}/logins/code`, { code }, accountResponse),
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.accounts }),
   });
 }
 

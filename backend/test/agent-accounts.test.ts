@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { WsEvent } from '@ops-console/shared';
@@ -174,6 +174,86 @@ describe('signing in an account', () => {
         (present) => !present,
         'the failed sign-in',
       );
+    } finally {
+      restore();
+    }
+  });
+
+  it('signs in by link: no browser tab, the link on the account, the pasted code signs it in', async () => {
+    const restore = login('code:friend@example.com');
+    try {
+      const daemon = await start();
+      const added = await api(daemon).post('/agent-accounts');
+      const id = added.body.data.account.id;
+      const started = await api(daemon).post(`/agent-accounts/${id}/logins`).send({ via: 'link' });
+      expect(started.status).toBe(200);
+      expect(started.body.data).toMatchObject({ signing_in: true, sign_in_link: { expires_at: expect.any(String) } });
+      const waiting = await until(
+        async () => (await accounts(daemon)).data.find((row) => row.id === id),
+        (row) => (row?.sign_in_link as { url: string | null } | null)?.url != null,
+        'the sign-in link',
+      );
+      expect(waiting?.sign_in_link).toMatchObject({
+        url: 'https://claude.example.com/oauth/authorize?code=true&state=fake-state',
+      });
+      const link = waiting?.sign_in_link as { expires_at: string };
+      const minutes = (Date.parse(link.expires_at) - Date.now()) / 60_000;
+      expect(minutes).toBeGreaterThan(14);
+      // `true` stands in for the browser, so no tab opens on this Mac.
+      const browser = readFileSync(path.join(daemon.dataDir, 'accounts', id, 'fake-login-browser.txt'), 'utf8');
+      expect(browser).toBe('true');
+
+      const signedIn = await api(daemon)
+        .post(`/agent-accounts/${id}/logins/code`)
+        .send({ code: ' https://platform.example.com/oauth/code/callback?code=good&state=fake-state ' });
+      expect(signedIn.status).toBe(200);
+      expect(signedIn.body.data).toMatchObject({
+        email: 'friend@example.com',
+        signed_in: true,
+        signing_in: false,
+        sign_in_link: null,
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  it('gives a new link when the CLI turns the code down, and keeps the new account', async () => {
+    const restore = login('code:friend@example.com');
+    try {
+      const daemon = await start();
+      const added = await api(daemon).post('/agent-accounts');
+      const id = added.body.data.account.id;
+      await api(daemon).post(`/agent-accounts/${id}/logins`).send({ via: 'link' });
+      const turnedDown = await api(daemon).post(`/agent-accounts/${id}/logins/code`).send({ code: 'typo#fake-state' });
+      expect(turnedDown.status).toBe(422);
+      expect(turnedDown.body.error.message).toBe(
+        "That code wasn't accepted. It may be incomplete, expired, already used, or from an earlier sign-in attempt. The old link no longer works: send the new one.",
+      );
+      expect((await accounts(daemon)).data.find((row) => row.id === id)).toMatchObject({
+        signing_in: true,
+        sign_in_link: { expires_at: expect.any(String) },
+      });
+
+      const signedIn = await api(daemon).post(`/agent-accounts/${id}/logins/code`).send({ code: 'good#fake-state' });
+      expect(signedIn.body.data).toMatchObject({ email: 'friend@example.com', signed_in: true });
+    } finally {
+      restore();
+    }
+  });
+
+  it('refuses a code when no sign-in by link waits, and a browser sign-in has no link', async () => {
+    const restore = login('hang');
+    try {
+      const daemon = await start();
+      const added = await api(daemon).post('/agent-accounts');
+      const id = added.body.data.account.id;
+      const code = () => api(daemon).post(`/agent-accounts/${id}/logins/code`).send({ code: 'good#fake-state' });
+      expect((await code()).body.error.code).toBe('invalid_state');
+      const started = await api(daemon).post(`/agent-accounts/${id}/logins`);
+      expect(started.body.data).toMatchObject({ signing_in: true, sign_in_link: null });
+      expect((await code()).status).toBe(409);
+      expect((await api(daemon).post(`/agent-accounts/${id}/logins/code`).send({ code: ' ' })).status).toBe(400);
     } finally {
       restore();
     }

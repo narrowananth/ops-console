@@ -3,6 +3,7 @@ import {
   agentAccountsSettingSchema,
   type ClaudeAccount,
   type SessionDefaults,
+  SignInVia,
 } from '@ops-console/shared';
 import { type ReactNode, useRef, useState } from 'react';
 import { Section } from '../app/page';
@@ -24,6 +25,7 @@ import {
 } from '../lib/queries';
 import { ascending } from '../lib/sort';
 import { ACCESS_MODES, EFFORTS, MODELS } from './options';
+import { SignInLinkDialog } from './sign-in-link-dialog';
 
 const HOUR_MS = 3_600_000;
 
@@ -82,18 +84,20 @@ function AccountRow({
   number,
   isPick,
   onUse,
+  onShowLink,
 }: {
   account: ClaudeAccount;
   number: number;
   isPick: boolean;
   onUse: () => void;
+  onShowLink: () => void;
 }) {
   const login = useStartLogin();
   const cancel = useCancelLogin();
   const logout = useLogout();
   const remove = useRemoveAccount();
   const error = login.error ?? cancel.error ?? logout.error ?? remove.error;
-  const startLogin = () => login.mutate(account.id);
+  const startLogin = () => login.mutate({ id: account.id });
   const current = account.is_active && account.signed_in;
   return (
     <li
@@ -125,7 +129,11 @@ function AccountRow({
         </div>
         {!account.signed_in ? (
           <div className="text-xs text-neutral-700">
-            {account.signing_in ? 'Finish signing in with Anthropic in your browser.' : 'Not signed in.'}
+            {account.sign_in_link
+              ? 'Waiting for a sign-in through the link.'
+              : account.signing_in
+                ? 'Finish signing in with Anthropic in your browser.'
+                : 'Not signed in.'}
           </div>
         ) : (
           <>
@@ -161,9 +169,19 @@ function AccountRow({
       <div className="flex items-center gap-1.5">
         {account.signing_in ? (
           <>
-            <Button className="px-3 py-1.25 text-xs" disabled={login.isPending} onClick={startLogin}>
-              Re-login
-            </Button>
+            {account.sign_in_link ? (
+              <Button
+                className="px-3 py-1.25 text-xs"
+                title="Show the sign-in link and the box for the code Anthropic shows"
+                onClick={onShowLink}
+              >
+                Show link
+              </Button>
+            ) : (
+              <Button className="px-3 py-1.25 text-xs" disabled={login.isPending} onClick={startLogin}>
+                Re-login
+              </Button>
+            )}
             <Button
               className="px-3 py-1.25 text-xs"
               disabled={cancel.isPending}
@@ -232,20 +250,40 @@ function AccountRow({
   );
 }
 
-/** Adds an account and starts its sign-in; the account is labelled with its email once it signs in. */
-function AddAccount({ primary = false }: { primary?: boolean }) {
+/**
+ * The two ways to add an account; each adds it and starts its sign-in, and the account is labelled with its email once
+ * it signs in. In this browser: Anthropic's page opens in a tab on this Mac. By sign-in link: a link to open in any
+ * browser, and the code Anthropic shows there pasted back, in `SignInLinkDialog`.
+ */
+function AddAccount({ primary = false, onLink }: { primary?: boolean; onLink: (id: string) => void }) {
   const add = useAddAccount();
   const login = useStartLogin();
+  const start = (via: SignInVia) =>
+    add.mutate(undefined, {
+      onSuccess: ({ data }) =>
+        login.mutate(
+          { id: data.account.id, via },
+          { onSuccess: () => via === SignInVia.Link && onLink(data.account.id) },
+        ),
+    });
   return (
     <div className="flex items-center gap-2">
+      {add.isError && <span className="text-xs text-accent-700">Could not add the account.</span>}
+      <Button
+        disabled={add.isPending}
+        title="Get a link to sign in from any browser, yours or someone else's, then paste back the code Anthropic shows"
+        onClick={() => start(SignInVia.Link)}
+      >
+        + Add by sign-in link
+      </Button>
       <Button
         variant={primary ? 'primary' : 'secondary'}
         disabled={add.isPending}
-        onClick={() => add.mutate(undefined, { onSuccess: ({ data }) => login.mutate(data.account.id) })}
+        title="Open Anthropic's sign-in in a browser tab on this Mac"
+        onClick={() => start(SignInVia.Browser)}
       >
-        + Add Claude account
+        + Add in this browser
       </Button>
-      {add.isError && <span className="text-xs text-accent-700">Could not add the account.</span>}
     </div>
   );
 }
@@ -355,6 +393,7 @@ export function AgentsTab() {
   const settings = useAgentSettings();
   const patch = usePatchSettings();
   const activate = useActivateAccount();
+  const [linkFor, setLinkFor] = useState<string | null>(null);
 
   if (accounts.isPending || settings.isPending) return <Empty>Loading agents…</Empty>;
   if (accounts.isError || settings.isError) {
@@ -391,6 +430,7 @@ export function AgentsTab() {
           account={account}
           isPick={account.id === pick?.account_id}
           onUse={() => activate.mutate(account.id)}
+          onShowLink={() => setLinkFor(account.id)}
         />
       ))}
     </ul>
@@ -408,8 +448,8 @@ export function AgentsTab() {
       )}
       <Section
         title="Claude Code accounts"
-        sub="The agent runs under one account at a time. Signing in opens Anthropic in your browser."
-        aside={<AddAccount primary={!ready} />}
+        sub="The agent runs under one account at a time. Add in this browser opens Anthropic's sign-in here. Add by sign-in link gives a link to sign in from any browser, then takes the code Anthropic shows."
+        aside={<AddAccount primary={!ready} onLink={setLinkFor} />}
       >
         {list.length === 0 ? (
           <div className="px-5 py-8 text-center text-xs text-neutral-700">
@@ -419,6 +459,9 @@ export function AgentsTab() {
           accountList
         )}
       </Section>
+      {linkFor !== null && (
+        <SignInLinkDialog account={list.find((account) => account.id === linkFor)} onClose={() => setLinkFor(null)} />
+      )}
       {ready && (
         <>
           <Section title="Account switching" sub="How the console moves sessions between your accounts.">
