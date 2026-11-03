@@ -1,11 +1,26 @@
+import { SessionState } from '@ops-console/shared';
+import { z } from 'zod';
 import { Empty } from '../components/ui/empty';
-import { useAddress } from '../lib/remember';
+import { useRepoSessions } from '../lib/queries';
+import { useAddress, useStored } from '../lib/remember';
 import { PullRequestView } from './pull-request-view';
 import { PullRequestsPane } from './pull-requests-pane';
 import { SessionView } from './session-view';
 import { SessionsPane } from './sessions-pane';
 
 type Tab = 'sessions' | 'pulls';
+
+const TABS = [
+  ['sessions', 'Sessions'],
+  ['pulls', 'Pull requests'],
+] as const;
+
+const TAB_TIP: Record<Tab, string> = {
+  sessions: 'Your conversations with the agent, grouped by Repo',
+  pulls: 'Open pull requests on your Git hosts: review, comment, and let the agent review or address comments',
+};
+
+const NEEDS_YOU: SessionState[] = [SessionState.WaitingInput, SessionState.WaitingApproval];
 
 /** `<repo id>/<number>` from the address. */
 function parsePull(value: string | null): { repoId: string; number: number } | null {
@@ -26,43 +41,54 @@ export function WorkspaceView() {
   const setPull = (next: { repoId: string; number: number } | null) =>
     setAddress({ pr: next ? `${next.repoId}/${next.number}` : null });
 
+  const [collapsed, setCollapsed] = useStored('workspace.pane-collapsed', z.boolean(), false);
+
   return (
     <>
-      <aside className="flex w-80 flex-none flex-col overflow-y-auto border-r border-line">
-        <div
-          role="tablist"
-          aria-label="Workspace"
-          className="mx-3 mt-3.5 mb-2 flex gap-0.5 rounded-lg bg-neutral-200 p-1"
-        >
-          {(
-            [
-              ['sessions', 'Sessions'],
-              ['pulls', 'Pull requests'],
-            ] as const
-          ).map(([id, label]) => (
+      {collapsed ? (
+        <PaneRail
+          tab={tab}
+          onOpen={(next) => {
+            if (next) setTab(next);
+            setCollapsed(false);
+          }}
+        />
+      ) : (
+        <aside className="flex w-80 flex-none flex-col overflow-y-auto border-r border-line">
+          <div className="mx-3 mt-3.5 mb-2 flex items-center gap-1.5">
+            <div role="tablist" aria-label="Workspace" className="flex flex-1 gap-0.5 rounded-lg bg-neutral-200 p-1">
+              {TABS.map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  title={TAB_TIP[id]}
+                  role="tab"
+                  aria-selected={tab === id}
+                  onClick={() => setTab(id)}
+                  className={`flex-1 cursor-pointer rounded-md border-0 px-3.5 py-1.5 text-center text-[13px] transition-colors ${tab === id ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <button
-              key={id}
               type="button"
-              title={
-                id === 'sessions'
-                  ? 'Your conversations with the agent, grouped by Repo'
-                  : 'Open pull requests on your Git hosts: review, comment, and let the agent review or address comments'
-              }
-              role="tab"
-              aria-selected={tab === id}
-              onClick={() => setTab(id)}
-              className={`flex-1 cursor-pointer rounded-md border-0 px-3.5 py-1.5 text-center text-[13px] transition-colors ${tab === id ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
+              aria-label="Collapse the side panel"
+              aria-expanded
+              title="Collapse the side panel"
+              onClick={() => setCollapsed(true)}
+              className={RAIL_BUTTON}
             >
-              {label}
+              <PanelIcon open />
             </button>
-          ))}
-        </div>
-        {tab === 'sessions' ? (
-          <SessionsPane selected={sessionId} onSelect={setSessionId} />
-        ) : (
-          <PullRequestsPane selected={pull} onSelect={setPull} />
-        )}
-      </aside>
+          </div>
+          {tab === 'sessions' ? (
+            <SessionsPane selected={sessionId} onSelect={setSessionId} />
+          ) : (
+            <PullRequestsPane selected={pull} onSelect={setPull} />
+          )}
+        </aside>
+      )}
       <section className="min-w-0 flex-1 overflow-y-auto">
         {tab === 'sessions' ? (
           sessionId ? (
@@ -81,5 +107,106 @@ export function WorkspaceView() {
         )}
       </section>
     </>
+  );
+}
+
+/**
+ * The side panel folded to a strip: the arrow opens it again, and each tab's icon opens it on that tab. Sessions
+ * waiting on the operator show as a count.
+ */
+function PaneRail({ tab, onOpen }: { tab: Tab; onOpen: (tab: Tab | null) => void }) {
+  const sessions = useRepoSessions();
+  const waiting = (sessions.data ?? []).filter((session) => NEEDS_YOU.includes(session.state)).length;
+  return (
+    <nav
+      aria-label="Workspace panel"
+      className="flex w-12 flex-none flex-col items-center gap-1.5 border-r border-line pt-3.5"
+    >
+      <button
+        type="button"
+        aria-label="Open the side panel"
+        aria-expanded={false}
+        title="Open the side panel"
+        onClick={() => onOpen(null)}
+        className={RAIL_BUTTON}
+      >
+        <PanelIcon open={false} />
+      </button>
+      <span aria-hidden className="my-1 h-px w-6 bg-line" />
+      {TABS.map(([id, label]) => (
+        <button
+          key={id}
+          type="button"
+          aria-label={id === 'sessions' && waiting > 0 ? `${label}, ${waiting} waiting on you` : label}
+          aria-current={tab === id ? 'page' : undefined}
+          title={id === 'sessions' && waiting > 0 ? `${label}: ${waiting} waiting on you` : label}
+          onClick={() => onOpen(id)}
+          className={`relative ${RAIL_BUTTON} ${tab === id ? 'bg-card text-text shadow-sm' : ''}`}
+        >
+          {id === 'sessions' ? <SessionsIcon /> : <PullRequestIcon />}
+          {id === 'sessions' && waiting > 0 && (
+            <span
+              aria-hidden
+              className="absolute -top-0.5 -right-0.5 min-w-3.5 rounded-full bg-accent px-1 text-center font-mono text-[9px] leading-3.5 font-semibold text-white"
+            >
+              {waiting}
+            </span>
+          )}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+const RAIL_BUTTON =
+  'flex size-8 flex-none cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-neutral-700 hover:bg-neutral-200 hover:text-text focus-visible:outline-2 focus-visible:outline-accent';
+
+/** A panel with its side bar, and a chevron that points the way it moves: in to fold, out to open. */
+function PanelIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="2" y="2.5" width="12" height="11" rx="2" />
+      <path d="M6 2.5v11" />
+      <path d={open ? 'M10.5 6 8.5 8l2 2' : 'M8.5 6l2 2-2 2'} />
+    </svg>
+  );
+}
+
+function SessionsIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function PullRequestIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="4.5" cy="3.5" r="1.5" />
+      <circle cx="4.5" cy="12.5" r="1.5" />
+      <circle cx="11.5" cy="12.5" r="1.5" />
+      <path d="M4.5 5v6M11.5 11V6.5a2 2 0 0 0-2-2H7.5M9 3 7.5 4.5 9 6" />
+    </svg>
   );
 }

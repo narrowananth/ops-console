@@ -26,8 +26,8 @@ Branches
 6. Checking out a branch for a Session stashes uncommitted changes first and says so in the response (`stashed: true`). With `create: true` it makes a new branch from the current one and checks it out. The Session's `branch` follows, and `session.updated` carries it.
 7. Checkout is refused with `invalid_state` for any Session that is not a `repo` Session, while the Session is not `idle` or `failed`, and while any Session in that Repo is `working` or `waiting_approval`.
 8. Checkout, branch creation and stash each write an Action Log row of kind `git` before they run.
-30. When a run in a `repo` Session ends, the Session's `branch` follows the branch checked out in the Repo, as when the agent made a branch for its fix and switched to it. `session.updated` carries it. A detached HEAD leaves the branch as it was. Reading the diff (Behavior 31) does the same for an `idle` or `failed` Session.
-31. A `repo` Session's diff is what its branch changes, read from the Repo folder. It is compared with where the branch forked from the default branch: origin's when origin has it, else the Repo's. It holds the branch's commits and its staged, unstaged and untracked files; on the default branch, the commits not pushed and the uncommitted changes. Each file has its status, counts and lines. A file's lines stop at 3000. A binary file, or an untracked one over 512 KB, shows without lines, and at most 200 untracked files are read. Any other kind of Session answers `invalid_state`.
+30. When a run in a `repo` Session ends, the Session moves to the branch the run worked on, as when the agent made a branch for its fix. That is the newest branch the run checked out other than the default branch, so a fix branch stays even when the agent goes back to the default branch before it ends. When the run checked out only the default branch, the Session moves there. Repo Sessions share the folder, so a run that checked out nothing leaves the Session on its branch, whatever is checked out now. Each new Session starts on the branch it was created with, normally the default branch. `session.updated` carries the move. A detached HEAD does not move it, and neither does reading the diff.
+31. A `repo` Session's diff is what its own branch changes, read from the Repo folder. While the Session runs, its branch is the one checked out, since its agent may have moved to a new one. It is compared with where the branch forked from the default branch: origin's when origin has it, else the Repo's. It holds the branch's commits. While the branch is the one checked out, it also holds the staged, unstaged and untracked files. Repo Sessions share the folder, so another Session's checked-out branch and its uncommitted work never show in this one's diff. On the default branch, the diff holds the commits not pushed. Each file has its status, counts and lines. A file's lines stop at 3000. A binary file, or an untracked one over 512 KB, shows without lines, and at most 200 untracked files are read. Any other kind of Session answers `invalid_state`.
 
 Pull requests
 
@@ -230,6 +230,9 @@ Adds `branch: string | null`.
   the Monitor links to a Fix's Session this way. A picked Session that is gone drops out of the address. With nothing
   picked: "Pick a Session, or start one on a branch." or "Pick a pull request." The choices and drafts named below
   stay in the browser's local storage (`persist-selections-and-runs` Behaviors 1 to 10).
+- The arrow beside the tabs folds the side panel to a narrow rail, and the browser remembers it folded. The rail has
+  the arrow to open it again and an icon for each tab, which opens the panel on that tab. The Sessions icon counts
+  the Sessions waiting on the operator (`waiting_input` or `waiting_approval`).
 - Workspace Session list grouped by Repo, A→Z. It lists `repo` and anonymous Sessions; `pr_review` Sessions are not
   listed. A Repo's header shows its branch, how many Sessions are running, its Session count and `+`, and folds the
   group open or shut; the browser remembers folded Repos. An open Repo lists its 3 most recently active Sessions, plus

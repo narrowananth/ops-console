@@ -34,7 +34,7 @@ export class WorkspaceSessionsService {
       workingDir: (session) => this.folder(session.repoId),
       acceptsMessages: true,
       create: (body) => this.create(parseInput(createRepoSessionSchema, body, 'body')),
-      afterRun: (session) => this.followBranch(session.id).then(() => {}),
+      afterRun: (session, run) => this.followBranch(session.id, new Date(run.startedAt)),
     });
     kinds.register(SessionKind.PrReview, {
       workingDir: (session) => this.folder(session.repoId),
@@ -106,8 +106,9 @@ export class WorkspaceSessionsService {
   }
 
   /**
-   * What the Session's branch changes, read from the Repo folder now. Reading it also catches the Session up with a
-   * branch the agent checked out itself.
+   * What the Session's own branch changes, read from the Repo folder now. The folder may have another Session's branch
+   * checked out; that branch's changes are not this Session's, so they do not show and do not move it. While the
+   * Session runs, the branch checked out is its agent's doing, as when it makes a branch for its fix.
    */
   async diff(sessionId: string): Promise<SessionDiff> {
     const session = this.sessions.get(sessionId);
@@ -115,20 +116,25 @@ export class WorkspaceSessionsService {
       throw new ApiError(409, ErrorCode.InvalidState, 'Only a repo Session has a diff');
     }
     const repo = this.repo(session.repoId);
-    const changes = await this.git.changes(repo.path, repo.defaultBranch);
-    if (changes.branch !== null && changes.branch !== session.branch) this.follow(session.id, changes.branch);
-    return changes;
+    const running = session.state !== SessionState.Idle && session.state !== SessionState.Failed;
+    const branch = (running ? await this.git.branchName(repo.path) : null) ?? session.branch;
+    if (branch === null) return { branch: null, base: null, files: [], additions: 0, deletions: 0 };
+    return this.git.changes(repo.path, repo.defaultBranch, branch);
   }
 
   /**
-   * Writes the branch checked out in the Repo onto the Session, as after a run in which the agent made and switched to
-   * a branch for its fix. A detached HEAD leaves the Session's branch as it was.
+   * Moves the Session to the branch its run worked on, as when the agent made a branch for its fix. That is the newest
+   * branch the run checked out other than the default branch, or the default branch when that is all it checked out.
+   * Repo Sessions share the folder, so a run that checked out nothing leaves the Session on its branch, whatever the
+   * folder has checked out now.
    */
-  async followBranch(sessionId: string): Promise<void> {
+  async followBranch(sessionId: string, since: Date): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (session.kind !== SessionKind.Repo || session.repoId === null) return;
-    const branch = await this.git.branchName(this.folder(session.repoId));
-    if (branch !== null && branch !== session.branch) this.follow(session.id, branch);
+    const repo = this.repo(session.repoId);
+    const moves = await this.git.checkoutsSince(repo.path, since);
+    const branch = moves.find((name) => name !== repo.defaultBranch) ?? moves[0];
+    if (branch !== undefined && branch !== session.branch) this.follow(session.id, branch);
   }
 
   /** Only an idle or failed Session moves: a running one may be mid-checkout. */

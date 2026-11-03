@@ -424,12 +424,12 @@ test('Scroll to end shows when scrolled up and jumps to the newest message', asy
   await expect(button).toHaveCount(0);
 });
 
-test('the Diff panel shows the branch the agent moved to and its files, folds them and resizes', async ({ page }) => {
+test("the Diff panel shows the Session's branch and its files, folds them and resizes", async ({ page }) => {
   await page.route('**/api/repos', (route) =>
     route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
   );
   await page.route(/\/api\/sessions\?kind=repo/, (route) =>
-    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform')] } }),
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform', 'idle', 'fix/login')] } }),
   );
   await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
   await page.route('**/api/sessions/s1/diff', (route) =>
@@ -587,4 +587,35 @@ test("the agent's tool steps fold to a count and the latest, and open as short l
   const steps = page.getByRole('list', { name: 'Agent steps' }).getByRole('listitem');
   await expect(steps).toHaveText([/Ran ls.*done/, /Read scripts\/platforms\/engage\.ts.*in progress/]);
   await expect(steps.last()).toHaveAttribute('aria-current', 'step');
+});
+
+test('the side panel collapses to a rail that counts Sessions waiting on you, and opens on a tab', async ({ page }) => {
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'analytics', 2)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({
+      json: {
+        data: [session('s1', 'r1', 'fix login', 'waiting_input'), session('s2', 'r1', 'audit queries')],
+        meta: { next_cursor: null },
+      },
+    }),
+  );
+  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+
+  await expect(page.getByRole('region', { name: 'analytics' })).toContainText('fix login');
+  await page.getByRole('button', { name: 'Collapse the side panel' }).click();
+  await expect(page.getByRole('tablist', { name: 'Workspace' })).toHaveCount(0);
+  const rail = page.getByRole('navigation', { name: 'Workspace panel' });
+  await expect(rail.getByRole('button', { name: 'Sessions, 1 waiting on you' })).toBeVisible();
+
+  // Folded stays folded through a reload.
+  await page.reload();
+  await expect(rail).toBeVisible();
+  await rail.getByRole('button', { name: 'Pull requests' }).click();
+  await expect(page.getByRole('tab', { name: 'Pull requests' })).toHaveAttribute('aria-selected', 'true');
+
+  await page.getByRole('button', { name: 'Collapse the side panel' }).click();
+  await rail.getByRole('button', { name: 'Open the side panel' }).click();
+  await expect(page.getByRole('tab', { name: 'Pull requests' })).toHaveAttribute('aria-selected', 'true');
 });

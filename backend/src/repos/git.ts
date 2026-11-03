@@ -56,45 +56,71 @@ export class Git {
     return sha?.trim() || null;
   }
 
+  /**
+   * The branches `HEAD` moved to by a checkout since `since`, newest first, read from the reflog. A detached checkout
+   * and a branch deleted since are left out.
+   */
+  async checkoutsSince(dir: string, since: Date): Promise<string[]> {
+    const log = await this.try(dir, ['log', '-g', '--date=unix', '--format=%gd%x09%gs', 'HEAD']);
+    const after = Math.floor(since.getTime() / 1000);
+    const moves: string[] = [];
+    for (const line of (log ?? '').split('\n')) {
+      const entry = /^HEAD@\{(\d+)\}\tcheckout: moving from \S+ to (\S+)$/.exec(line);
+      if (!entry) continue;
+      if (Number(entry[1]) < after) break;
+      const branch = entry[2] as string;
+      if (!moves.includes(branch) && (await this.commitOf(dir, `refs/heads/${branch}`))) moves.push(branch);
+    }
+    return moves;
+  }
+
   /** The branch checked out; null on a detached HEAD or outside a repository. */
   async branchName(dir: string): Promise<string | null> {
     return (await this.try(dir, ['symbolic-ref', '--short', '-q', 'HEAD']))?.trim() || null;
   }
 
   /**
-   * Everything the checked-out branch changes against where it forked from the default branch, on origin when origin
-   * has it: its commits, then staged, unstaged and untracked files. On the default branch itself, the commits not
-   * pushed yet and the uncommitted changes. `fallback` is the default branch when origin names none.
+   * Everything `branch` changes against where it forked from the default branch, on origin when origin has it: its
+   * commits, and while it is the branch checked out, the staged, unstaged and untracked files too. On the default
+   * branch itself, the commits not pushed yet. `fallback` is the default branch when origin names none.
    */
-  async changes(dir: string, fallback: string): Promise<SessionDiff> {
-    const branch = await this.branchName(dir);
+  async changes(dir: string, fallback: string, branch: string): Promise<SessionDiff> {
     const named = (await this.try(dir, ['symbolic-ref', '--short', '-q', 'refs/remotes/origin/HEAD']))?.trim();
     const main = named ? named.replace(/^origin\//, '') : fallback;
-    const base =
-      main === null
-        ? null
-        : (await this.commitOf(dir, `refs/remotes/origin/${main}`))
-          ? `origin/${main}`
-          : (await this.commitOf(dir, `refs/heads/${main}`))
-            ? main
-            : null;
-    const head = await this.commitOf(dir, 'HEAD');
-    const fork = base && head ? ((await this.try(dir, ['merge-base', base, 'HEAD']))?.trim() ?? head) : head;
+    const base = (await this.commitOf(dir, `refs/remotes/origin/${main}`))
+      ? `origin/${main}`
+      : (await this.commitOf(dir, `refs/heads/${main}`))
+        ? main
+        : null;
+    // Repo Sessions share the folder: the working tree is this branch's only while it is the one checked out.
+    const checkedOut = (await this.branchName(dir)) === branch;
+    const head = await this.commitOf(dir, `refs/heads/${branch}`);
+    const fork = base && head ? ((await this.try(dir, ['merge-base', base, head]))?.trim() ?? head) : head;
     const files: SessionDiffFile[] = fork
       ? parseDiff(
-          (await this.try(dir, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '-M', fork])) ??
-            '',
+          (await this.try(dir, [
+            '-c',
+            'core.quotePath=false',
+            'diff',
+            '--no-color',
+            '--no-ext-diff',
+            '-M',
+            fork,
+            ...(checkedOut || !head ? [] : [head]),
+          ])) ?? '',
         )
       : [];
-    const untracked =
-      (await this.try(dir, ['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '-z'])) ?? '';
+    const untracked = checkedOut
+      ? ((await this.try(dir, ['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '-z'])) ??
+        '')
+      : '';
     for (const name of untracked.split('\0').filter(Boolean).slice(0, UNTRACKED_FILES)) {
       files.push(await untrackedFile(path.join(dir, name), name));
     }
     files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     return {
       branch,
-      base: fork ? (base ?? 'HEAD') : null,
+      base: fork ? (base ?? branch) : null,
       files,
       additions: files.reduce((sum, file) => sum + file.additions, 0),
       deletions: files.reduce((sum, file) => sum + file.deletions, 0),
