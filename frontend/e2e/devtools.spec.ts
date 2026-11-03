@@ -69,8 +69,8 @@ const MESSAGES = [
         kind: 'result',
         connection: 'mongo-prod',
         query: null,
-        columns: ['shop', 'plan'],
-        rows: [['acme', 'growth']],
+        columns: ['shop', 'plan', 'status', 'settings'],
+        rows: [['acme', 'growth', 'active', '{"theme":"dark","beta":true}']],
         total: 1,
         ms: 31,
       },
@@ -180,7 +180,11 @@ test('a question across Connections shows a Result per Connection and the Compar
   await expect(pg).toContainText('── pg-tenant · Postgres');
   await expect(pg).toContainText('acme.example.com');
   await expect(pg).toContainText('✓ 1 row · 12ms');
-  await expect(page.getByRole('region', { name: 'Result from mongo-prod' })).toContainText('PROD');
+  const mongo = page.getByRole('region', { name: 'Result from mongo-prod' });
+  await expect(mongo).toContainText('PROD');
+  await expect(mongo.getByRole('columnheader')).toHaveText(['field', 'value']);
+  await expect(mongo.getByRole('row', { name: /plan/ })).toContainText('growth');
+  await expect(mongo.getByRole('row', { name: /settings/ })).toContainText('{\n  "theme": "dark",\n  "beta": true\n}');
 
   const compared = page.getByRole('region', { name: 'Compared on shop_domain' });
   await expect(compared).toContainText('■ Compared on shop_domain = acme.example.com');
@@ -190,6 +194,11 @@ test('a question across Connections shows a Result per Connection and the Compar
   await expect(page.getByText('2 rows across 2 of 2 Connections. The plan differs.')).toBeVisible();
 
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  // Chrome's Clipboard API refuses on the click that brings an unfocused window forward; that click still copies.
+  await page.evaluate(() => {
+    navigator.clipboard.writeText = () =>
+      Promise.reject(new DOMException('Document is not focused.', 'NotAllowedError'));
+  });
   await compared.getByRole('button', { name: 'Copy JSON' }).click();
   await expect(compared.getByRole('button', { name: 'Copied' })).toBeVisible();
   const copied = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));

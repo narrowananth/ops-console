@@ -126,9 +126,11 @@ Two kinds join the union. `session.output` and `GET /sessions/:id/messages` carr
 - **Terminal**: the panel stays dark in both themes. Its header reads the scope (Behavior 3) and the Session's
   state, or `new terminal`. Welcome lines open it. Then the operator's question as `> <text>`, `step` parts as dim
   `●` lines, Results as monospace tables under the query, ending `✓ <total> rows`, `showing <n>` when cut, and the
-  time, the Comparison under `■ Compared on <key> = <value>` with marked rows in the accent colour and `◀ differs`,
+  time. Rows are ruled; a long cell wraps inside its column, and a cell holding a whole JSON object or list shows it
+  indented, one key per line. A Result of one row with more than 3 columns shows as `field` and `value`, one line
+  per column. Then the Comparison under `■ Compared on <key> = <value>` with marked rows in the accent colour and `◀ differs`,
   then the summary. A streaming message ends with `Working…`; a failed run with `✘ The run failed.` The
-  prompt is the last line: `>` and an input. Enter sends. The prompt keeps the cursor: a click anywhere in the terminal moves it there, and it comes
+  prompt is the last line: `>` and an input that grows with what is typed. Enter sends; Shift+Enter adds a line. The prompt keeps the cursor: a click anywhere in the terminal moves it there, and it comes
   back when a run ends. While a run is going, the input reads "The agent is working…".
 - **Model, Effort and Access** sit as chips at the right of the tab row; their lists open downward. A change shows at once. A new terminal shows them too, starting from the defaults in Agents & accounts, and its Session starts with what they show. A pending Approval shows under that bar.
 - **Loading**: "Reading Dev tools…". **No Connections**: the empty state with the link to Connections,

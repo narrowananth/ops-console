@@ -286,9 +286,10 @@ function Terminal({
             aria-label="Ask the agent"
             aria-busy={running}
             value={text}
-            title="Enter sends. Shift+Enter adds a new line."
             placeholder={
-              running ? 'The agent is working…' : 'Ask the agent — e.g. find shop acme · show 5 pending reservations'
+              running
+                ? 'The agent is working…'
+                : 'Ask the agent — e.g. find shop acme · show 5 pending reservations. Shift+Enter adds a line.'
             }
             onChange={(event) => onText(event.target.value)}
             onKeyDown={(event) => {

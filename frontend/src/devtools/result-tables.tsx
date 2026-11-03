@@ -1,31 +1,46 @@
 import type { Cell, Connection, Part } from '@ops-console/shared';
-import { useEffect, useState } from 'react';
+import { COPY_FAILED, copyLabel, useCopy } from '../lib/clipboard';
 import { PROD_TIP, TYPE_LABELS } from './fields';
 
 type ResultPart = Extract<Part, { kind: 'result' }>;
 type ComparisonPart = Extract<Part, { kind: 'comparison' }>;
 
-const shown = (value: Cell) => (value === null ? '—' : String(value));
+/** A cell that holds an object or a list, as the agent's JSON text; null when it is not whole JSON (cut at 200). */
+function json(value: Cell): unknown {
+  if (typeof value !== 'string' || !/^\s*[[{]/.test(value)) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return typeof parsed === 'object' && parsed !== null ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A cell as text: JSON indented, so a nested object reads one key per line; an empty cell as a dash. */
+const shown = (value: Cell) => {
+  if (value === null) return '—';
+  const parsed = json(value);
+  return parsed === null ? String(value) : JSON.stringify(parsed, null, 2);
+};
 
 function CopyJson({ value }: { value: unknown }) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 1500);
-    return () => clearTimeout(timer);
-  }, [copied]);
+  const [copied, copy] = useCopy();
   return (
     <button
       type="button"
-      title="Copy these rows as JSON to the clipboard"
-      onClick={() => void navigator.clipboard.writeText(JSON.stringify(value, null, 2)).then(() => setCopied(true))}
+      title={copied === 'failed' ? COPY_FAILED : 'Copy these rows as JSON to the clipboard'}
+      onClick={() => copy(JSON.stringify(value, null, 2))}
       className="ml-auto cursor-pointer border border-neutral-700 bg-transparent px-1.5 font-mono text-[10px] text-neutral-400 hover:text-neutral-100"
     >
-      {copied ? 'Copied' : 'Copy JSON'}
+      {copyLabel(copied, 'Copy JSON')}
     </button>
   );
 }
 
+/**
+ * Rows under their columns. A long cell wraps inside its column rather than running off the right edge, and rows are
+ * ruled so a wrapped cell still reads as one row.
+ */
 function Table({ head, rows, marked }: { head: string[]; rows: Cell[][]; marked?: boolean[] }) {
   return (
     <div className="overflow-x-auto pl-4">
@@ -36,7 +51,7 @@ function Table({ head, rows, marked }: { head: string[]; rows: Cell[][]; marked?
               <th
                 // biome-ignore lint/suspicious/noArrayIndexKey: two columns may share a name
                 key={index}
-                className="border-b border-neutral-700 py-0.5 pr-4 text-left font-semibold whitespace-nowrap"
+                className="border-b border-neutral-600 py-0.5 pr-4 text-left align-bottom font-semibold whitespace-nowrap text-neutral-300"
               >
                 {column}
               </th>
@@ -48,18 +63,20 @@ function Table({ head, rows, marked }: { head: string[]; rows: Cell[][]; marked?
             <tr
               // biome-ignore lint/suspicious/noArrayIndexKey: rows have no id of their own
               key={rowIndex}
-              className={marked?.[rowIndex] ? 'text-accent-400' : ''}
+              className={`border-b border-neutral-800 hover:bg-neutral-800/60 ${marked?.[rowIndex] ? 'text-accent-400' : ''}`}
             >
               {row.map((value, index) => (
                 <td
                   // biome-ignore lint/suspicious/noArrayIndexKey: cells sit by position
                   key={index}
-                  className={`py-0.5 pr-4 align-top whitespace-pre ${value === null ? 'text-neutral-600' : ''}`}
+                  className={`py-1 pr-4 align-top ${value === null ? 'text-neutral-600' : ''}`}
                 >
-                  {shown(value)}
+                  <div className={index === 0 ? 'whitespace-nowrap' : 'max-w-[60ch] break-words whitespace-pre-wrap'}>
+                    {shown(value)}
+                  </div>
                 </td>
               ))}
-              {marked?.[rowIndex] && <td className="py-0.5 whitespace-nowrap">◀ differs</td>}
+              {marked?.[rowIndex] && <td className="py-1 align-top whitespace-nowrap">◀ differs</td>}
             </tr>
           ))}
         </tbody>
@@ -67,6 +84,9 @@ function Table({ head, rows, marked }: { head: string[]; rows: Cell[][]; marked?
     </div>
   );
 }
+
+/** A single row of more than this many columns shows as one line per column: a wide row would run off the right. */
+const WIDE = 3;
 
 /** One Connection's rows for one question, under its name, type and PROD tag. */
 export function ResultView({ part, connections }: { part: ResultPart; connections: Connection[] }) {
@@ -92,7 +112,14 @@ export function ResultView({ part, connections }: { part: ResultPart; connection
         <div className="pl-4 text-neutral-500">· no matches</div>
       ) : (
         <>
-          <Table head={part.columns} rows={part.rows} />
+          {part.rows.length === 1 && part.columns.length > WIDE ? (
+            <Table
+              head={['field', 'value']}
+              rows={part.columns.map((column, index) => [column, part.rows[0]?.[index] ?? null])}
+            />
+          ) : (
+            <Table head={part.columns} rows={part.rows} />
+          )}
           <div className="pl-4 text-neutral-500">
             ✓ {total} {total === 1 ? 'row' : 'rows'}
             {total > part.rows.length && ` · showing ${part.rows.length}`}

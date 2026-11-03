@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Button } from '../components/ui/button';
 import { FoldTitle, useFold } from '../components/ui/fold';
 import { Markdown } from '../components/ui/markdown';
+import { COPY_FAILED, copyLabel, useCopy } from '../lib/clipboard';
 
 /** What a Report's kind means, shown on hover of its chip. */
 export const REPORT_KIND_TIP: Record<ReportKind, string> = {
@@ -38,15 +39,9 @@ export function asReport(text: string): AgentReport | null {
 /** A Report drawn as a document: a file bar with Copy, Download and the raw JSON, then the Markdown. */
 export function ReportDocument({ report }: { report: AgentReport }) {
   const [raw, setRaw] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, copy] = useCopy();
   const [folded, toggle] = useFold('report-document');
   const file = `${report.title}.md`;
-  const copy = () => {
-    void navigator.clipboard.writeText(report.markdown).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
   const download = () => {
     const url = URL.createObjectURL(new Blob([report.markdown], { type: 'text/markdown' }));
     const link = document.createElement('a');
@@ -90,8 +85,12 @@ export function ReportDocument({ report }: { report: AgentReport }) {
           >
             {raw ? 'Document' : 'JSON'}
           </Button>
-          <Button className="px-2.5 py-1 text-xs" title="Copy the Report's Markdown" onClick={copy}>
-            {copied ? 'Copied' : 'Copy'}
+          <Button
+            className="px-2.5 py-1 text-xs"
+            title={copied === 'failed' ? COPY_FAILED : "Copy the Report's Markdown"}
+            onClick={() => copy(report.markdown)}
+          >
+            {copyLabel(copied, 'Copy')}
           </Button>
           <Button className="px-2.5 py-1 text-xs" title={`Save the Report as ${file}`} onClick={download}>
             Download .md

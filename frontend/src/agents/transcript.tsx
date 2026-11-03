@@ -5,6 +5,7 @@ import { DiffLines } from '../components/ui/diff';
 import { Markdown } from '../components/ui/markdown';
 import { Pathway, type PathwayState } from '../components/ui/pathway';
 import { ComparisonView, ResultView } from '../devtools/result-tables';
+import { COPY_FAILED, copyLabel, useCopy } from '../lib/clipboard';
 import { asReport, ReportDocument } from './report-document';
 
 /** One part of a Session's transcript: text, a tool step, a diff, a code block, a question or a Dev tools table. */
@@ -47,13 +48,7 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  const copy = () =>
-    void navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
+  const [copied, copy] = useCopy();
   const rerun = () => {
     if (!onEdit || draft === null || draft.trim() === '' || pending) return;
     setPending(true);
@@ -79,8 +74,13 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
         </span>
         {!agent && draft === null && (
           <span className="ml-auto flex gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-            <button type="button" onClick={copy} title="Copy this message" className={messageAction}>
-              {copied ? 'Copied' : 'Copy'}
+            <button
+              type="button"
+              onClick={() => copy(text)}
+              title={copied === 'failed' ? COPY_FAILED : 'Copy this message'}
+              className={messageAction}
+            >
+              {copyLabel(copied, 'Copy')}
             </button>
             {onEdit && (
               <button
