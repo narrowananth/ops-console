@@ -1,0 +1,1 @@
+ALTER TABLE `pr_comment_passes` ADD `kind` text DEFAULT 'address' NOT NULL;

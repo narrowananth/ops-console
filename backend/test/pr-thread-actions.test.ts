@@ -150,6 +150,9 @@ const verdict = (value: string, reply: string) => `\`\`\`json\n{ "verdict": "${v
 const outcomes = (threads: { comment_id: string; outcome: string; reply: string }[]) =>
   `\`\`\`json\n${JSON.stringify({ threads })}\n\`\`\``;
 
+const verdicts = (threads: { comment_id: string; verdict: string; reply: string }[]) =>
+  `\`\`\`json\n${JSON.stringify({ threads })}\n\`\`\``;
+
 const jobEnded = (ctx: Ctx, kind: 'reply_check' | 'comment_pass', id: string) =>
   until(
     () => ctx.events,
@@ -392,6 +395,90 @@ describe('Check reply', () => {
     });
     await jobEnded(ctx, 'reply_check', started.body.data.id);
     expect(ctx.daemon.sdk.calls.at(-2)?.prompt).toContain('You may write files and run local commands');
+  });
+});
+
+describe('Check replies', () => {
+  /** A second replied thread, on the same line. */
+  const secondReplied = (ctx: Ctx) => {
+    ctx.host.comments.get(1)?.push(
+      {
+        id: 'c5',
+        parent_id: null,
+        author: 'reviewer',
+        body: 'Add a test for the rate.',
+        file_path: 'src/app.ts',
+        line: 1,
+        resolved: false,
+        created_at: '2026-11-01T10:05:00.000Z',
+      },
+      {
+        id: 'c6',
+        parent_id: 'c5',
+        author: 'colleague',
+        body: 'Added one.',
+        file_path: 'src/app.ts',
+        line: 1,
+        resolved: false,
+        created_at: '2026-11-01T10:06:00.000Z',
+      },
+    );
+  };
+
+  it('checks every replied thread in one run, replies in each, resolves the fixed ones, and pushes nothing', async () => {
+    const ctx = await start('colleague');
+    secondReplied(ctx);
+    const turns = stepTurns(PlaybookTrigger.CheckReply);
+    script(ctx, turns);
+    ctx.daemon.sdk.script({
+      text: verdicts([
+        { comment_id: 'c1', verdict: 'fixed', reply: 'The rate is read from config now.' },
+        { comment_id: 'c5', verdict: 'not_fixed', reply: 'No test covers the rate yet.' },
+      ]),
+    });
+
+    const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-check-passes`);
+    expect(started.status).toBe(202);
+    expect(started.body.data).toMatchObject({
+      kind: 'check',
+      status: 'running',
+      playbook: { name: 'Check reply (built-in)' },
+    });
+    // Only threads with a reply: c3 and the general comment c4 have none.
+    expect(started.body.data.threads.map((item: { comment_id: string }) => item.comment_id)).toEqual(['c1', 'c5']);
+    await jobEnded(ctx, 'comment_pass', started.body.data.id);
+
+    const [pass] = (await detail(ctx)).comment_passes;
+    expect(pass).toMatchObject({ kind: 'check', status: 'ready', commit_sha: null });
+    expect(pass.threads).toMatchObject([
+      { comment_id: 'c1', outcome: 'fixed', posted: true, resolved: true },
+      { comment_id: 'c5', outcome: 'not_fixed', posted: true, resolved: false },
+    ]);
+    expect(ctx.host.posted.map((post) => [post.parent_id, post.body])).toEqual([
+      ['c1', 'The rate is read from config now.'],
+      ['c5', 'No test covers the rate yet.'],
+    ]);
+    expect(thread(ctx, 'c1')?.resolved).toBe(true);
+    expect(thread(ctx, 'c5')?.resolved).toBe(false);
+    // One run for both threads: each step once, then one closing turn.
+    expect(ctx.daemon.sdk.calls).toHaveLength(turns.length + 1);
+    expect(ctx.daemon.sdk.calls[0]?.prompt).toContain('[comment_id c1]');
+    expect(ctx.daemon.sdk.calls[0]?.prompt).toContain('[comment_id c5]');
+    expect(git(ctx.remote, 'rev-parse', 'feature-1')).toBe(ctx.head);
+
+    // Every replied thread now ends with the agent's reply: nothing is left to check.
+    const again = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-check-passes`);
+    expect([again.status, again.body.error.message]).toEqual([409, 'No open thread has a reply to check']);
+  });
+
+  it('refuses a pull request with no replied thread', async () => {
+    const ctx = await start();
+    ctx.host.comments.set(
+      1,
+      (ctx.host.comments.get(1) ?? []).filter((comment) => comment.id !== 'c2'),
+    );
+    const refused = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-check-passes`);
+    expect([refused.status, refused.body.error.message]).toEqual([409, 'No open thread has a reply to check']);
   });
 });
 

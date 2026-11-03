@@ -821,6 +821,21 @@ export function useRetryReplyCheck(repoId: string, number: number) {
   });
 }
 
+/** Check replies: one run over every replied thread. */
+export function useCheckReplies(repoId: string, number: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiSend(
+        'POST',
+        `/repos/${repoId}/pull-requests/${number}/reply-check-passes`,
+        undefined,
+        z.object({ data: commentPassSchema }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+  });
+}
+
 export function useStartCommentPass(repoId: string, number: number) {
   const client = useQueryClient();
   return useMutation({

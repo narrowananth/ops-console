@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   AgentReviewStatus,
   type CommentPass,
+  CommentPassKind,
   ErrorCode,
   PlaybookTrigger,
   PrState,
@@ -43,7 +44,41 @@ const outcomesSchema = z.object({
   ),
 });
 
+const verdictsSchema = z.object({
+  threads: z.array(
+    z.object({
+      comment_id: z.string(),
+      verdict: z.enum([ThreadOutcome.Fixed, ThreadOutcome.PartlyFixed, ThreadOutcome.NotFixed]),
+      reply: z.string().trim().min(1),
+    }),
+  ),
+});
+
 const MOVED = 'The branch moved; run Address comments again.';
+
+/** What the agent is told before Check replies' first step: every replied thread, to check against the head commit. */
+export function checkRepliesBrief(slug: string, pr: HostPullRequest, threads: HostComment[][]): string {
+  const listed = threads.map((thread) => {
+    const root = thread[0] as HostComment;
+    return `[comment_id ${root.id}] on ${fileLine(root)}:\n${threadText(thread)}`;
+  });
+  return `Check the replies in review threads on pull request #${pr.number} of ${slug}: "${pr.title}" by ${pr.author}, ${pr.branch} into ${pr.base_branch}, at head commit ${pr.head_sha}. This folder is a scratch copy at that commit.
+
+Each thread below has a reply after its comment. For each one, decide whether the code at the head commit does what the thread asked:
+
+${listed.join('\n\n')}
+
+Do not change anything and do not post comments: the console posts your replies. The console sends the check as steps, one per turn.`;
+}
+
+/** Check replies' closing turn: a verdict and a reply for every thread. */
+export const CHECK_REPLIES_PROMPT = `Give your verdict on each thread. Answer with one JSON block and nothing after it:
+
+\`\`\`json
+{ "threads": [{ "comment_id": "id", "verdict": "fixed | partly_fixed | not_fixed", "reply": "a few sentences for the thread: what you checked, and what is left if anything" }] }
+\`\`\`
+
+List every thread once.`;
 
 /** What the agent is told about the pull request and the ticked threads before its first step. */
 export function commentPassBrief(slug: string, pr: HostPullRequest, threads: HostComment[][]): string {
@@ -106,13 +141,32 @@ export class CommentPassesService {
       }
     }
     const session = this.jobs.requireIdle(repo, number);
-    const earlier = this.store.db
+    const earlier = this.earlier(repoId, number);
+    const copy = this.playbooks.copyFor(PlaybookTrigger.AddressComments);
+    const row = this.insert(repoId, pr, CommentPassKind.Address, threads, copy);
+    // The running row is in before anything awaits, so a second start meets it as busy.
+    await this.jobs.release(prCommentPasses, earlier);
+    this.run(row.id, session, commentPassBrief(slug, pr, threads), false);
+    return this.view(row, pr.head_sha);
+  }
+
+  private earlier(repoId: string, number: number): string[] {
+    return this.store.db
       .select({ id: prCommentPasses.id })
       .from(prCommentPasses)
       .where(and(eq(prCommentPasses.repoId, repoId), eq(prCommentPasses.prNumber, number)))
       .all()
       .map((row) => row.id);
-    const copy = this.playbooks.copyFor(PlaybookTrigger.AddressComments);
+  }
+
+  /** The running row and its steps, in before anything awaits, so a second start meets it as busy. */
+  private insert(
+    repoId: string,
+    pr: HostPullRequest,
+    kind: CommentPassKind,
+    threads: HostComment[][],
+    copy: ReturnType<PlaybooksService['copyFor']>,
+  ): Row {
     const stored: StoredThread[] = threads.map((thread) => {
       const root = thread[0] as HostComment;
       return {
@@ -127,15 +181,16 @@ export class CommentPassesService {
         reply_comment_id: null,
       };
     });
-    const row = this.store.write((tx, emit) => {
+    return this.store.write((tx, emit) => {
       const created = tx
         .insert(prCommentPasses)
         .values({
           id: crypto.randomUUID(),
           repoId,
-          prNumber: number,
+          prNumber: pr.number,
           headSha: pr.head_sha,
           branch: pr.branch,
+          kind,
           threads: JSON.stringify(stored),
           playbookId: copy.id,
           playbookName: copy.name,
@@ -147,9 +202,31 @@ export class CommentPassesService {
       this.announce(emit, created);
       return created;
     });
-    // The running row is in before anything awaits, so a second start meets it as busy.
+  }
+
+  /**
+   * Check replies: one pass over every unresolved thread with a reply whose last comment is not the agent's. The
+   * agent gives each a verdict; the console replies in each and resolves the fixed ones.
+   */
+  async startCheck(repoId: string, number: number): Promise<CommentPass> {
+    const repo = this.pulls.hosted(repoId);
+    const slug = repo.remoteSlug as string;
+    const { pr, comments } = await this.pulls.adapter(repo).get(slug, number);
+    if (pr.state !== PrState.Open) throw new ApiError(409, ErrorCode.InvalidState, 'The pull request is not open');
+    const agents = this.jobs.agentCommentIds(repoId, number);
+    const threads = comments
+      .filter((comment) => comment.parent_id === null && !comment.resolved)
+      .map((root) => threadOf(comments, root.id))
+      .filter((thread) => thread.length > 1 && !agents.has((thread.at(-1) as HostComment).id));
+    if (threads.length === 0) {
+      throw new ApiError(409, ErrorCode.InvalidState, 'No open thread has a reply to check');
+    }
+    const session = this.jobs.requireIdle(repo, number);
+    const earlier = this.earlier(repoId, number);
+    const copy = this.playbooks.copyFor(PlaybookTrigger.CheckReply);
+    const row = this.insert(repoId, pr, CommentPassKind.Check, threads, copy);
     await this.jobs.release(prCommentPasses, earlier);
-    this.run(row.id, session, commentPassBrief(slug, pr, threads), false);
+    this.run(row.id, session, checkRepliesBrief(slug, pr, threads), false);
     return this.view(row, pr.head_sha);
   }
 
@@ -176,7 +253,8 @@ export class CommentPassesService {
       this.announce(emit, next);
       return next;
     });
-    this.run(id, session, commentPassBrief(slug, { ...pr, head_sha: row.headSha }, threads), true);
+    const brief = row.kind === CommentPassKind.Check ? checkRepliesBrief : commentPassBrief;
+    this.run(id, session, brief(slug, { ...pr, head_sha: row.headSha }, threads), true);
     return this.view(updated, pr.head_sha);
   }
 
@@ -217,19 +295,22 @@ export class CommentPassesService {
     });
     if (failure) throw new JobFailed(failure, true);
     const closing = { rules, cwd, deny: HOST_WRITE_DENIALS };
-    const summary = await this.runtime.runFor(session, COMMENT_PASS_PROMPT, null, closing).finished;
+    const check = row.kind === CommentPassKind.Check;
+    const prompt = check ? CHECK_REPLIES_PROMPT : COMMENT_PASS_PROMPT;
+    const summary = await this.runtime.runFor(session, prompt, null, closing).finished;
     if (summary.stopped) throw new JobFailed(`The threads were not reported: ${STOPPED}`, true);
-    const answer = summary.ok ? parseAgentJson(summary.text, outcomesSchema) : null;
+    const answered = summary.ok ? readOutcomes(summary.text, check) : null;
     const threads = storedThreads(row);
-    const byId = new Map(answer?.threads.map((thread) => [thread.comment_id, thread]));
-    if (!answer || threads.some((thread) => !byId.has(thread.comment_id))) {
+    const byId = new Map(answered?.map((thread) => [thread.comment_id, thread]));
+    if (!answered || threads.some((thread) => !byId.has(thread.comment_id))) {
       throw new JobFailed('The agent did not report every thread in a way the console could read', true);
     }
     const reported = threads.map((thread) => {
-      const answered = byId.get(thread.comment_id) as z.infer<typeof outcomesSchema>['threads'][number];
-      return { ...thread, outcome: answered.outcome, reply: answered.reply };
+      const answer = byId.get(thread.comment_id) as { outcome: ThreadOutcome; reply: string };
+      return { ...thread, outcome: answer.outcome, reply: answer.reply };
     });
-    return this.update(row.id, { threads: JSON.stringify(reported), stage: 'push' });
+    // Check replies changes nothing, so there is nothing to commit or push.
+    return this.update(row.id, { threads: JSON.stringify(reported), stage: check ? 'post' : 'push' });
   }
 
   /** One commit of every change, pushed to the branch without force; nothing when no thread is done (Behavior 18). */
@@ -275,7 +356,8 @@ export class CommentPassesService {
         }
       }
       // A general comment has no thread to resolve on the hosts; its reply is the answer.
-      if (thread.outcome === ThreadOutcome.Done && !thread.resolved && thread.file_path !== null) {
+      const settled = thread.outcome === ThreadOutcome.Done || thread.outcome === ThreadOutcome.Fixed;
+      if (settled && !thread.resolved && thread.file_path !== null) {
         try {
           await this.jobs.resolve(repo, row.prNumber, session, thread.comment_id);
           thread.resolved = true;
@@ -345,4 +427,19 @@ export class CommentPassesService {
       status: row.status,
     });
   }
+}
+
+/** The closing turn's answer as outcomes: Address comments' done or declined, or Check replies' verdicts. */
+function readOutcomes(
+  text: string,
+  check: boolean,
+): { comment_id: string; outcome: ThreadOutcome; reply: string }[] | null {
+  if (!check) return parseAgentJson(text, outcomesSchema)?.threads ?? null;
+  return (
+    parseAgentJson(text, verdictsSchema)?.threads.map(({ comment_id, verdict, reply }) => ({
+      comment_id,
+      outcome: verdict,
+      reply,
+    })) ?? null
+  );
 }

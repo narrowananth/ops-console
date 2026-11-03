@@ -12,6 +12,7 @@ import {
   type ApprovalKind,
   ApprovalStatus,
   type CheckInterval,
+  type CommentPassKind,
   type ConnectionEnv,
   type ConnectionType,
   type ConnectorId,
@@ -333,6 +334,11 @@ export const prCommentPasses = sqliteTable(
     prNumber: integer('pr_number').notNull(),
     headSha: text('head_sha').notNull(),
     branch: text().notNull(),
+    /** Address comments changes code and pushes; Check replies only gives each replied thread a verdict. */
+    kind: text()
+      .$type<CommentPassKind>()
+      .notNull()
+      .default('address' as CommentPassKind),
     status: text()
       .$type<AgentReviewStatus>()
       .notNull()

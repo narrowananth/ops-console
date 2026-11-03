@@ -164,6 +164,14 @@ export class PullRequestsController {
     return { data: await this.passes.start(repo, number, comment_ids) };
   }
 
+  /** Check replies: every replied thread at once. */
+  @Post('repos/:repo/pull-requests/:number/reply-check-passes')
+  @HttpCode(202)
+  async startCheckReplies(@Param() params: unknown): Promise<{ data: CommentPass }> {
+    const { repo, number } = parseInput(pullParams, params, 'params');
+    return { data: await this.passes.startCheck(repo, number) };
+  }
+
   @Post('comment-passes/:id/retry')
   @HttpCode(202)
   async retryCommentPass(@Param() params: unknown, @Body() body: unknown): Promise<{ data: CommentPass }> {

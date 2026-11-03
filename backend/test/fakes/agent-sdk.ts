@@ -78,16 +78,19 @@ export class FakeAgentSdk implements AgentSdk {
     const dir = path.join(configDir, 'projects', projectKey(options.cwd ?? ''));
     const file = path.join(dir, `${sessionId}.jsonl`);
     if (options.resume && !existsSync(file)) throw new Error(`No conversation found with session ID: ${sessionId}`);
+    // Aborting the controller ends the query with an error wherever it waits, as Claude Code's does. It listens
+    // before the first await, so a stop that lands while the run starts still ends it.
+    const signal = options.abortController?.signal;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      const fail = () => reject(new Error('Claude Code process aborted by user'));
+      if (signal?.aborted) fail();
+      else signal?.addEventListener('abort', fail, { once: true });
+    });
+    aborted.catch(() => {});
+    const abortable = <T>(promise: Promise<T>) => Promise.race([promise, aborted]);
     this.calls.push({ prompt, options, configDir, sessionId });
     const steps = this.scripts.shift() ?? [{ text: 'Done.' }];
     await mkdir(dir, { recursive: true });
-    // Aborting the controller ends the query with an error wherever it waits, as Claude Code's does.
-    const signal = options.abortController?.signal;
-    const aborted = new Promise<never>((_resolve, reject) =>
-      signal?.addEventListener('abort', () => reject(new Error('Claude Code process aborted by user')), { once: true }),
-    );
-    aborted.catch(() => {});
-    const abortable = <T>(promise: Promise<T>) => Promise.race([promise, aborted]);
 
     // A resumed run chains onto the transcript's last entry, or onto `resumeSessionAt`, as Claude Code does.
     const existing = options.resume ? (await readFile(file, 'utf8')).trim().split('\n') : [];
