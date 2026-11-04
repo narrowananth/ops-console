@@ -50,8 +50,17 @@ import { toCommentPass, toReplyCheck } from './pr-jobs';
 type RepoRow = typeof repos.$inferSelect;
 type ReviewRow = typeof prAgentReviews.$inferSelect;
 
-/** A list read this recently is served from memory. Older, it is still served at once while a new read runs. */
-export const LIST_TTL_MS = 60_000;
+/**
+ * A list read this recently is served from memory. Older, it is still served at once while a new read runs. The
+ * Refresh button reads at once.
+ */
+export const LIST_TTL_MS = 30 * 60_000;
+
+/** A read that failed is tried again after this, or after the list's own TTL when that is shorter. */
+const FAILED_RETRY_MS = 5 * 60_000;
+
+/** A pull request found by number on a host is kept this long, so typing or a refetch does not ask again. */
+const LOOKUP_TTL_MS = 60_000;
 
 /**
  * After a host answers 429, no list read of it starts for this long, and the kept lists are served as stale. Each read
@@ -69,7 +78,11 @@ type OwnerEntry = Kept & { prs: OwnedPullRequest[] };
 type HostDetail = Awaited<ReturnType<GitHostAdapter['get']>>;
 type DetailEntry = Kept & { value: HostDetail };
 
-const expired = (entry: Kept, ttl: number) => Date.now() - Math.max(entry.at, entry.tried ?? 0) >= ttl;
+const expired = (entry: Kept, ttl: number) =>
+  Date.now() - Math.max(entry.at, entry.tried ?? 0) >= (entry.failed ? Math.min(ttl, FAILED_RETRY_MS) : ttl);
+
+/** A search of just a number, with or without `#`: it asks the Git host. */
+const asNumber = (q: string): number | null => (/^#?\d{1,9}$/.test(q) ? Number(q.replace('#', '')) : null);
 
 /** How long the list of owners a host lets the operator read is kept. */
 const OWNERS_TTL_MS = 10 * 60_000;
@@ -87,6 +100,10 @@ function changedNumbers<T extends HostPullRequest>(
   for (const pr of before) if (!now.has(`${scope(pr)}#${pr.number}`)) out.add(pr.number);
   return [...out];
 }
+
+/** Mine searches a pull request's number, its title and the operator's login; All, its number, title and author. */
+const matches = (pr: PullRequest, q: string, who: string | null) =>
+  [`#${pr.number}`, String(pr.number), pr.title, who ?? ''].some((field) => field.toLowerCase().includes(q));
 
 const sameSlug = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -144,13 +161,14 @@ const signature = (pr: HostPullRequest) =>
     pr.resolved_count,
   ].join('|');
 
-/** Pull requests live on the Git host. This keeps list reads in memory for 60 seconds and adds what only the console knows. */
+/** Pull requests live on the Git host. This keeps list reads in memory for 30 minutes and adds what only the console knows. */
 @Injectable()
 export class PullRequestsService implements OpenPrBranches {
   private readonly logger = new Logger('pull-requests');
   private readonly cache = new Map<string, Entry>();
   private readonly ownerCache = new Map<string, OwnerEntry>();
   private readonly details = new Map<string, DetailEntry>();
+  private readonly found = new Map<string, { at: number; pr: HostPullRequest | null }>();
   /** Background reads under way, one per cache key. */
   private readonly reading = new Map<string, Promise<void>>();
   private readonly ownersOf = new Map<GitHost, { at: number; owners: string[] }>();
@@ -236,12 +254,24 @@ export class PullRequestsService implements OpenPrBranches {
         data.push(...this.decorate(repo, repo.host, repo.remoteSlug ?? '', read.prs));
       }
     }
-    const q = query.q?.trim().toLowerCase();
+    const q = query.q?.trim().toLowerCase() ?? '';
+    const number = asNumber(q);
+    if (number !== null && query.repo_id === undefined) {
+      const looked = await this.lookup(number, data);
+      stale ||= looked.failed;
+      data.push(...looked.found);
+    }
+    const mine = query.mine === true;
+    const logins = new Map<GitHost, string | null>();
+    const loginOf = (host: GitHost) => {
+      if (!logins.has(host)) logins.set(host, this.login(host));
+      return logins.get(host) ?? null;
+    };
     const shown = data
-      .filter((pr) => query.mine !== true || pr.is_mine)
+      .filter((pr) => !mine || pr.is_mine)
       .filter(
         (pr) =>
-          !q || [pr.title, pr.author, pr.branch, `#${pr.number}`].some((field) => field.toLowerCase().includes(q)),
+          q === '' || (number === null ? matches(pr, q, mine ? loginOf(pr.host) : pr.author) : pr.number === number),
       )
       .sort((a, b) => b.opened_at.localeCompare(a.opened_at));
     return {
@@ -250,9 +280,57 @@ export class PullRequestsService implements OpenPrBranches {
     };
   }
 
+  /**
+   * Pull request `number` asked of the host in every project the list knows and every imported Repo, so one that is
+   * closed, or on a page the list did not read, is found too. `failed` when a host could not be asked.
+   */
+  private async lookup(number: number, listed: PullRequest[]): Promise<{ found: PullRequest[]; failed: boolean }> {
+    const imported = this.hostedRepos();
+    const places = new Map<string, { host: GitHost; slug: string; repo: RepoRow | null }>();
+    for (const pr of listed) {
+      if (pr.host === GitHost.Local) continue;
+      places.set(`${pr.host}:${pr.slug.toLowerCase()}`, {
+        host: pr.host,
+        slug: pr.slug,
+        repo: imported.find((one) => one.host === pr.host && sameSlug(one.remoteSlug ?? '', pr.slug)) ?? null,
+      });
+    }
+    for (const repo of imported) {
+      const slug = repo.remoteSlug ?? '';
+      if (this.connected(repo.host)) places.set(`${repo.host}:${slug.toLowerCase()}`, { host: repo.host, slug, repo });
+    }
+    let failed = false;
+    const out: PullRequest[] = [];
+    await Promise.all(
+      [...places.entries()].map(async ([where, place]) => {
+        const key = `${where}#${number}`;
+        let hit = this.found.get(key);
+        if (!hit || Date.now() - hit.at >= LOOKUP_TTL_MS) {
+          try {
+            const pr = await this.asking(place.host, () => this.hosts.for(place.host).find(place.slug, number));
+            hit = { at: Date.now(), pr };
+            this.found.set(key, hit);
+          } catch (error) {
+            this.logger.warn(
+              `${place.host} ${place.slug}#${number}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+            failed = true;
+            return;
+          }
+        }
+        if (hit.pr) out.push(...this.decorate(place.repo, place.host, place.slug, [hit.pr]));
+      }),
+    );
+    // A pull request the list already has is not added twice.
+    const have = new Set(listed.map((pr) => `${pr.host}:${pr.slug.toLowerCase()}#${pr.number}`));
+    const fresh = out.filter((pr) => !have.has(`${pr.host}:${pr.slug.toLowerCase()}#${pr.number}`));
+    return { found: fresh, failed };
+  }
+
   /** Drops the memory and reads again in the background; `pull_request.refreshed` reports it. */
   refresh(repoId: string | undefined): void {
     const wanted = repoId === undefined ? this.hostedRepos() : [this.repoRow(repoId)];
+    this.found.clear();
     if (repoId === undefined) {
       // A rate limited host keeps what was read: asking again would fail and leave the list empty.
       for (const key of [...this.ownerCache.keys()]) {

@@ -145,7 +145,9 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
       <header className="flex flex-col gap-1.5 border-b border-line px-6 py-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <span className="flex-none text-sm text-neutral-700">{repo ? `${repo.name} /` : 'No Repo /'}</span>
-          <h2 className="m-0 min-w-0 truncate text-base font-semibold">{session.title}</h2>
+          <h2 className="m-0 min-w-0 truncate text-sm font-semibold" title={session.title}>
+            {session.title}
+          </h2>
           <span title={SESSION_STATE_TIP[session.state]} className="flex-none">
             <StatusPill state={SESSION_STATE[session.state]}>{session.state.replace('_', ' ')}</StatusPill>
           </span>

@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>From a failing route to a merged pull request</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Geist', system-ui, sans-serif; background: #f5f5f5; color: #2d3142; padding: 3rem 2rem; }
+  .frame { max-width: 1460px; width: 100%; margin: 0 auto; }
+  .eyebrow { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: #4f5d75; margin-bottom: 0.5rem; }
+  h1 { font-family: 'Instrument Serif', serif; font-size: 2rem; font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 1.5rem; }
+  .diagram-container { width: 100%; overflow-x: auto; }
+  svg { width: 100%; min-width: 1460px; display: block; }
+  @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+</style>
+</head>
+<body>
+<div class="frame">
+  <p class="eyebrow">Lifecycle · Monitor Alert · failure paths included</p>
+  <h1>From a failing route to a merged pull request</h1>
+  <div class="diagram-container">
+<svg viewBox="0 64 1460 872" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="alert-to-pull-request-title alert-to-pull-request-desc">
+<title id="alert-to-pull-request-title">From a failing route to a merged pull request</title>
+<desc id="alert-to-pull-request-desc">Lifecycle of a Monitor Alert: Scan detects it, a Verification writes a Report, the operator confirms or dismisses it, a Fix opens a pull request, and the operator merges; failure, cancel, abandon and regression paths return it to earlier states.</desc>
+<defs>
+<marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+<marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+<marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+</defs>
+<rect x="0" y="64" width="1460" height="872" fill="#f5f5f5"/>
+<rect x="40" y="580" width="1380" height="240" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="52" y="574" width="117" height="12" rx="2" fill="#f5f5f5"/>
+<text x="110.5" y="583" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">EDGE CASES AND TIPS</text>
+<path d="M 192,196 L 268,196" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<path d="M 396,196 L 472,196" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 600,196 L 676,196" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 804,180 L 880,180" fill="none" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<path d="M 1008,196 L 1084,196" fill="none" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<path d="M 1212,196 L 1288,196" fill="none" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<path d="M 880,200 L 804,200" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<path d="M 500,228 L 500,264 Q 500,272 492,272 L 376,272 Q 368,272 368,264 L 368,228" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<path d="M 1388,164 L 1388,140 Q 1388,132 1380,132 L 340,132 Q 332,132 332,140 L 332,164" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<path d="M 1124,164 L 1124,156 Q 1124,148 1116,148 L 748,148 Q 740,148 740,156 L 740,164" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<path d="M 700,228 L 700,316" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 780,316 L 780,228" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<path d="M 920,228 L 920,412 Q 920,420 912,420 L 748,420 Q 740,420 740,428 L 740,460" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 804,492 L 880,492" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 1008,492 L 1084,492" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 1212,492 L 1288,492" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 1352,460 L 1352,408 Q 1352,400 1344,400 L 1188,400 Q 1180,400 1180,392 L 1180,228" fill="none" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<rect x="202" y="178" width="56" height="12" rx="2" fill="#f5f5f5"/>
+<text x="230" y="187" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">DETECTED</text>
+<rect x="411.5" y="178" width="45" height="12" rx="2" fill="#f5f5f5"/>
+<text x="434" y="187" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">VERIFY</text>
+<rect x="615.5" y="178" width="45" height="12" rx="2" fill="#f5f5f5"/>
+<text x="638" y="187" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">REPORT</text>
+<rect x="816.5" y="162" width="51" height="12" rx="2" fill="#f5f5f5"/>
+<text x="842" y="171" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">CONFIRM</text>
+<rect x="819.5" y="206" width="45" height="12" rx="2" fill="#f5f5f5"/>
+<text x="842" y="215" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">CANCEL</text>
+<rect x="1015" y="178" width="62" height="12" rx="2" fill="#f5f5f5"/>
+<text x="1046" y="187" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">PR OPENED</text>
+<rect x="1227.5" y="178" width="45" height="12" rx="2" fill="#f5f5f5"/>
+<text x="1250" y="187" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">MERGED</text>
+<rect x="389" y="254" width="90" height="12" rx="2" fill="#f5f5f5"/>
+<text x="434" y="263" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">FAILED · RETRY</text>
+<rect x="809" y="114" width="62" height="12" rx="2" fill="#f5f5f5"/>
+<text x="840" y="123" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">REGRESSED</text>
+<rect x="1015" y="154" width="62" height="12" rx="2" fill="#f5f5f5"/>
+<text x="1046" y="163" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">PR CLOSED</text>
+<rect x="634.5" y="292" width="51" height="12" rx="2" fill="#f5f5f5"/>
+<text x="660" y="301" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">DISMISS</text>
+<rect x="786" y="292" width="34" height="12" rx="2" fill="#f5f5f5"/>
+<text x="803" y="301" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">UNDO</text>
+<rect x="1222" y="382" width="56" height="12" rx="2" fill="#f5f5f5"/>
+<text x="1250" y="391" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">OPENS PR</text>
+<rect x="825" y="474" width="34" height="12" rx="2" fill="#f5f5f5"/>
+<text x="842" y="483" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">THEN</text>
+<rect x="1029" y="474" width="34" height="12" rx="2" fill="#f5f5f5"/>
+<text x="1046" y="483" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">THEN</text>
+<rect x="1233" y="474" width="34" height="12" rx="2" fill="#f5f5f5"/>
+<text x="1250" y="483" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">THEN</text>
+<rect x="64" y="164" width="128" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="64" y="164" width="128" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<rect x="72" y="170" width="31" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="87.5" y="179" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">SCAN</text>
+<text x="128" y="199" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Scan</text>
+<text x="128" y="212" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Datadog through pup</text>
+<text x="128" y="223" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">6 h grid or by hand</text>
+<circle cx="188" cy="168" r="8" fill="#2d3142"/>
+<text x="188" y="171.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">1</text>
+<rect x="268" y="164" width="128" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="268" y="164" width="128" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="276" y="170" width="36" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="294" y="179" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">ALERT</text>
+<text x="332" y="199" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Open</text>
+<text x="332" y="212" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Fingerprint group</text>
+<text x="332" y="223" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">up to 25 Samples</text>
+<circle cx="392" cy="168" r="8" fill="#2d3142"/>
+<text x="392" y="171.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">3</text>
+<rect x="472" y="164" width="128" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="472" y="164" width="128" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="480" y="170" width="36" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="498" y="179" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">ALERT</text>
+<text x="536" y="199" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Verifying</text>
+<text x="536" y="212" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">scratch copy · Recheck</text>
+<text x="536" y="223" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">agent writes Report</text>
+<circle cx="596" cy="168" r="8" fill="#2d3142"/>
+<text x="596" y="171.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">2</text>
+<rect x="676" y="164" width="128" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="676" y="164" width="128" height="64" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<rect x="684" y="170" width="36" height="12" rx="2" fill="transparent" stroke="#bf4520" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="702" y="179" fill="#bf4520" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">ALERT</text>
+<text x="740" y="199" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Verified</text>
+<text x="740" y="212" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Report ready</text>
+<text x="740" y="223" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">operator decides</text>
+<circle cx="800" cy="168" r="8" fill="#2d3142"/>
+<text x="800" y="171.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
+<rect x="880" y="164" width="128" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="880" y="164" width="128" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="888" y="170" width="36" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="906" y="179" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">ALERT</text>
+<text x="944" y="199" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Fixing</text>
+<text x="944" y="212" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">same Session</text>
+<text x="944" y="223" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">new conversation</text>
+<circle cx="1004" cy="168" r="8" fill="#2d3142"/>
+<text x="1004" y="171.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">7</text>
+<rect x="1084" y="164" width="128" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="1084" y="164" width="128" height="64" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<rect x="1092" y="170" width="36" height="12" rx="2" fill="transparent" stroke="#bf4520" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="1110" y="179" fill="#bf4520" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">ALERT</text>
+<text x="1148" y="199" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">PR open</text>
+<text x="1148" y="212" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">operator reviews</text>
+<text x="1148" y="223" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">watched every 5 min</text>
+<circle cx="1208" cy="168" r="8" fill="#2d3142"/>
+<text x="1208" y="171.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">8</text>
+<rect x="1288" y="164" width="128" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="1288" y="164" width="128" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="1296" y="170" width="36" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="1314" y="179" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">ALERT</text>
+<text x="1352" y="199" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Resolved</text>
+<text x="1352" y="212" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">PR merged</text>
+<text x="1352" y="223" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">by the operator</text>
+<rect x="676" y="316" width="128" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="676" y="316" width="128" height="64" rx="6" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+<rect x="684" y="322" width="36" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.20)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="702" y="331" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">ALERT</text>
+<text x="740" y="351" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Dismissed</text>
+<text x="740" y="364" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">operator&#x27;s call</text>
+<text x="740" y="375" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">undo brings it back</text>
+<rect x="676" y="460" width="128" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="676" y="460" width="128" height="64" rx="6" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+<rect x="684" y="466" width="31" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.20)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="699.5" y="475" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">JIRA</text>
+<text x="740" y="495" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Ticket</text>
+<text x="740" y="508" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">if Playbook asks</text>
+<text x="740" y="519" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">and Jira is up</text>
+<circle cx="800" cy="464" r="8" fill="#2d3142"/>
+<text x="800" y="467.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
+<rect x="880" y="460" width="128" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="880" y="460" width="128" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="888" y="466" width="26" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="901" y="475" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">GIT</text>
+<text x="944" y="495" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Branch</text>
+<text x="944" y="508" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">ticket key or slug</text>
+<text x="944" y="519" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">off newest origin</text>
+<rect x="1084" y="460" width="128" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="1084" y="460" width="128" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="1092" y="466" width="36" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="1110" y="475" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STEPS</text>
+<text x="1148" y="495" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Playbook steps</text>
+<text x="1148" y="508" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">one agent turn each</text>
+<text x="1148" y="519" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">failed step stops</text>
+<circle cx="1208" cy="464" r="8" fill="#2d3142"/>
+<text x="1208" y="467.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
+<rect x="1288" y="460" width="128" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="1288" y="460" width="128" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="1296" y="466" width="21" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="1306.5" y="475" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">PR</text>
+<text x="1352" y="495" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Pull request</text>
+<text x="1352" y="508" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">agent writes the text</text>
+<text x="1352" y="519" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">console pushes, opens</text>
+<text x="230" y="100" fill="#5a6580" font-size="8" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.18em">DETECT</text>
+<text x="536" y="100" fill="#5a6580" font-size="8" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.18em">VERIFY</text>
+<text x="740" y="100" fill="#5a6580" font-size="8" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.18em">REVIEW</text>
+<text x="944" y="100" fill="#5a6580" font-size="8" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.18em">FIX</text>
+<text x="1250" y="100" fill="#5a6580" font-size="8" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.18em">PULL REQUEST</text>
+<text x="78" y="616" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Scans run on a 6 h grid and by hand. The same Fingerprint reopens a resolved Alert, which is a regression.</text>
+<text x="78" y="640" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A failed Verification, or a daemon restart (interrupted), returns the Alert to Open. Its scratch copy is removed once the Report is ready.</text>
+<text x="78" y="664" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Stale Alerts show overdue; awaiting prod check clears when the Recheck count and the version tag are read. Neither blocks a job.</text>
+<text x="78" y="688" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Confirming the Report starts the Fix in the same Session and checkout, in a new conversation. Dismiss is undoable until the Alert moves on.</text>
+<text x="78" y="712" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The ticket stage runs only when the Fix Playbook asks and Jira is connected. Otherwise the branch is fix/&lt;slug&gt;.</text>
+<text x="78" y="736" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A failed step stops the job. The Fix stays at its stage and a retry resumes there. A retry never makes a second ticket or pull request.</text>
+<text x="78" y="760" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Cancel with no PR yet: stop the run, stash changes, delete the Fix branch, back to Verified. With a PR, close it on the Git host.</text>
+<text x="78" y="784" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Only the operator merges. Every 5 min and after each list refresh: merged resolves the Alert, closed unmerged abandons the Fix.</text>
+<circle cx="60" cy="613" r="8" fill="#2d3142"/>
+<text x="60" y="616.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">1</text>
+<circle cx="60" cy="637" r="8" fill="#2d3142"/>
+<text x="60" y="640.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">2</text>
+<circle cx="60" cy="661" r="8" fill="#2d3142"/>
+<text x="60" y="664.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">3</text>
+<circle cx="60" cy="685" r="8" fill="#2d3142"/>
+<text x="60" y="688.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
+<circle cx="60" cy="709" r="8" fill="#2d3142"/>
+<text x="60" y="712.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
+<circle cx="60" cy="733" r="8" fill="#2d3142"/>
+<text x="60" y="736.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
+<circle cx="60" cy="757" r="8" fill="#2d3142"/>
+<text x="60" y="760.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">7</text>
+<circle cx="60" cy="781" r="8" fill="#2d3142"/>
+<text x="60" y="784.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">8</text>
+<line x1="40" y1="860" x2="1420" y2="860" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<text x="40" y="876" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">LEGEND</text>
+<rect x="40" y="888" width="14" height="10" rx="2" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<text x="60" y="896" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Operator decision</text>
+<rect x="172" y="888" width="14" height="10" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="192" y="896" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Alert state or stage</text>
+<rect x="320" y="888" width="14" height="10" rx="2" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<text x="340" y="896" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Scan job</text>
+<rect x="406" y="888" width="14" height="10" rx="2" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="426" y="896" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Optional</text>
+<line x1="492" y1="893" x2="520" y2="893" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<text x="528" y="896" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Detection</text>
+<line x1="599" y1="893" x2="627" y2="893" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<text x="635" y="896" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Happy path</text>
+<line x1="712" y1="893" x2="740" y2="893" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<text x="748" y="896" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Return or retry</text>
+</svg>
+  </div>
+</div>
+</body>
+</html>

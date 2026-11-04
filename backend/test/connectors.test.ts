@@ -549,7 +549,7 @@ describe('disconnecting', () => {
       'the registration',
     );
     const off = await api(ctx.daemon).delete('/connectors/datadog/credentials');
-    expect(off.body.data).toMatchObject({ status: 'off', login: null, account_label: null });
+    expect(off.body, `HTTP ${off.status}`).toMatchObject({ data: { status: 'off', login: null, account_label: null } });
     const server = (await api(ctx.daemon).get('/mcp-servers')).body.data.find((s: Row) => s.name === 'datadog-pup');
     expect(server).toMatchObject({ registered: false });
     expect(ctx.tools.datadog.signedIn).toBe(true);

@@ -1,17 +1,20 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ConnectorId, ErrorCode, HealthStatus } from '@ops-console/shared';
+import { AccessMode, ConnectorId, ErrorCode, HealthStatus } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
+import { CONSOLE_TOOLS_SERVER, OPEN_PULL_REQUEST_TOOL, runOpenPullRequest } from '../src/agent/pull-request-tool';
+import { AgentRuntime } from '../src/agent/runtime';
 import { ApiError } from '../src/common/errors';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
 import { connectors } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { ReposModule } from '../src/repos/repos.module';
+import { PullRequestOpeningService } from '../src/workspace/pull-request-opening.service';
 import { WorkspaceModule } from '../src/workspace/workspace.module';
-import { type AgentDaemon, api, startAgentDaemon } from './agent-fixtures';
+import { type AgentDaemon, api, converse, startAgentDaemon, until } from './agent-fixtures';
 import type { Step } from './fakes/agent-sdk';
 import { FakeConnectorTools } from './fakes/connector-tools';
 import { FakeGitHost, hostPr } from './fakes/git-host';
@@ -248,14 +251,130 @@ describe('Pull request opening', () => {
     expect(ctx.host.opened).toHaveLength(1);
   });
 
-  it('never gives a run the push or the pull request: the prompt says the console does it (1)', async () => {
+  it('tells the agent to commit and ask through the console tool, never to push (1)', async () => {
     const ctx = await start();
     const id = await session(ctx);
     ctx.daemon.sdk.script({ text: 'ok' });
-    await ctx.http.post(`/sessions/${id}/messages`, { text: 'create a pr now' });
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await converse(ctx.daemon, id, 'create a pr now');
     const append = JSON.stringify(ctx.daemon.sdk.calls.at(-1)?.options.systemPrompt ?? '');
-    expect(append).toContain('Never push a branch and never open a pull request');
-    expect(append).toContain('Open pull request');
+    expect(append).toContain('Never push a branch');
+    expect(append).toContain(OPEN_PULL_REQUEST_TOOL);
+  });
+
+  it('gives the console tool to a Session in its Repo folder and to no other run (1)', async () => {
+    const ctx = await start();
+    ctx.daemon.sdk.script({ text: 'ok' }, { text: 'ok' }, { text: 'ok' });
+    await converse(ctx.daemon, await session(ctx), 'hi');
+    expect(Object.keys(ctx.daemon.sdk.calls.at(-1)?.options.mcpServers ?? {})).toEqual([CONSOLE_TOOLS_SERVER]);
+    // An anonymous Session has no Repo, and a run in a scratch copy is not in the Repo's folder.
+    const anonymous = (await ctx.http.post('/sessions', { kind: 'anonymous' })).body.data.id as string;
+    await converse(ctx.daemon, anonymous, 'hi');
+    expect(ctx.daemon.sdk.calls.at(-1)?.options.mcpServers).toBeUndefined();
+    const scratch = await tempDir('ops-console-scratch-');
+    const runtime = ctx.daemon.app.get(AgentRuntime);
+    await runtime.runFor(await session(ctx), 'hi', null, { cwd: scratch }).finished;
+    expect(ctx.daemon.sdk.calls.at(-1)?.options.mcpServers).toBeUndefined();
+  });
+
+  describe('the agent asks for it', () => {
+    const ASK: Step = {
+      tool: OPEN_PULL_REQUEST_TOOL,
+      input: { title: 'Fix the total', description: 'Defaults it to zero.' },
+    };
+
+    async function asked(ctx: Ctx, mode: AccessMode, decision: 'approved' | 'denied') {
+      const id = ctx.daemon.createSession({ access_mode: mode, repoId: ctx.repoId, branch: 'work' });
+      ctx.daemon.sdk.script(ASK);
+      await ctx.http.post(`/sessions/${id}/messages`, { text: 'create a pr now' });
+      const [approval] = await until(
+        async () => (await ctx.http.get('/approvals?status=pending')).body.data as { id: string; summary: string }[],
+        (list) => list.length === 1,
+        'the Approval',
+      );
+      await ctx.http.post(`/approvals/${approval?.id}/decision`, { decision });
+      await until(
+        async () => (await ctx.http.get(`/sessions/${id}`)).body.data.state,
+        (state) => state === 'idle',
+        'the run to end',
+      );
+      return approval;
+    }
+
+    it('asks first in every Access mode, `full` included, and nothing is pushed before the yes (Safety)', async () => {
+      for (const mode of Object.values(AccessMode)) {
+        const ctx = await start();
+        const id = ctx.daemon.createSession({ access_mode: mode, repoId: ctx.repoId, branch: 'work' });
+        ctx.daemon.sdk.script(ASK);
+        await ctx.http.post(`/sessions/${id}/messages`, { text: 'create a pr now' });
+        const [approval] = await until(
+          async () =>
+            (await ctx.http.get('/approvals?status=pending')).body.data as { summary: string; kind: string }[],
+          (list) => list.length === 1,
+          `an Approval in ${mode}`,
+        );
+        expect(approval).toMatchObject({
+          kind: 'command',
+          summary: 'Push work and open a pull request into main on github: "Fix the total"',
+        });
+        expect(git(ctx.remote, 'branch', '--list', 'work')).toBe('');
+        expect(ctx.host.opened).toEqual([]);
+      }
+    });
+
+    it('a denied request pushes and opens nothing', async () => {
+      const ctx = await start();
+      await asked(ctx, AccessMode.Full, 'denied');
+      expect(ctx.daemon.sdk.ran).toEqual([]);
+      expect(git(ctx.remote, 'branch', '--list', 'work')).toBe('');
+      expect(ctx.host.opened).toEqual([]);
+    });
+
+    it('an approved request lets the call run, and asks once', async () => {
+      const ctx = await start();
+      await asked(ctx, AccessMode.Supervised, 'approved');
+      expect(ctx.daemon.sdk.ran).toEqual([{ tool: OPEN_PULL_REQUEST_TOOL, input: ASK.input }]);
+      expect((await ctx.http.get('/approvals')).body.data).toHaveLength(1);
+    });
+
+    it('is refused before it asks when nothing can open, and the agent is told why', async () => {
+      const ctx = await start();
+      git(ctx.dir, 'switch', '-q', 'main');
+      const id = ctx.daemon.createSession({ access_mode: AccessMode.Full, repoId: ctx.repoId, branch: 'main' });
+      ctx.daemon.sdk.script(ASK);
+      await converse(ctx.daemon, id, 'create a pr now');
+      expect((await ctx.http.get('/approvals')).body.data).toEqual([]);
+      expect(ctx.daemon.sdk.ran).toEqual([]);
+    });
+
+    it('opens the branch checked out in the Repo folder, with the default base, and answers with the link', async () => {
+      const ctx = await start();
+      const id = await session(ctx);
+      const opener = ctx.daemon.app.get(PullRequestOpeningService);
+      const answer = await runOpenPullRequest(opener, id, { title: 'Fix the total', description: 'Zero.' });
+      expect(answer).toEqual({
+        content: [{ type: 'text', text: 'Opened pull request #41: https://github.com/acme/orders-api/pull/41' }],
+      });
+      expect(ctx.host.opened).toEqual([{ title: 'Fix the total', body: 'Zero.', head: 'work', base: 'main' }]);
+      expect(git(ctx.remote, 'rev-parse', 'work')).toBe(git(ctx.dir, 'rev-parse', 'work'));
+      // The branch the agent names wins over the one checked out.
+      git(ctx.dir, 'branch', 'other', 'work');
+      git(ctx.dir, 'switch', '-q', 'main');
+      const named = await runOpenPullRequest(opener, id, { title: 'T', description: 'D', branch: 'other' });
+      expect(named.content[0]?.text).toMatch(/^Opened pull request #\d+:/);
+      expect(ctx.host.opened.at(-1)).toMatchObject({ head: 'other' });
+    });
+
+    it('tells the agent why when the host refuses, with isError set', async () => {
+      const ctx = await start();
+      ctx.host.failOpen = new ApiError(502, ErrorCode.UpstreamFailed, '`gh api POST` failed');
+      const answer = await runOpenPullRequest(ctx.daemon.app.get(PullRequestOpeningService), await session(ctx), {
+        title: 'T',
+        description: 'D',
+      });
+      expect(answer).toEqual({
+        content: [{ type: 'text', text: 'No pull request was opened: `gh api POST` failed' }],
+        isError: true,
+      });
+    });
   });
 });

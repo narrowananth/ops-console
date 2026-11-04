@@ -460,7 +460,7 @@ describe('Session diff', () => {
 });
 
 describe('pull requests', () => {
-  it('lists from memory for a minute, and Refresh reads the host again and says what changed', async () => {
+  it('lists from memory for 30 minutes, and Refresh reads the host again and says what changed', async () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1), hostPr(2)];
     const first = await ctx.http.get('/pull-requests');
@@ -485,6 +485,66 @@ describe('pull requests', () => {
     close();
   });
 
+  it('reads the host again only after 30 minutes, and searches the list without reading it', async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1), hostPr(2)];
+    await ctx.http.get('/pull-requests');
+    const { LIST_TTL_MS } = await import('../src/workspace/pull-requests.service');
+    const realNow = Date.now;
+    try {
+      Date.now = () => realNow() + LIST_TTL_MS - 1000;
+      await ctx.http.get('/pull-requests');
+      await ctx.http.get('/pull-requests?q=change');
+      expect(ctx.host.calls.list).toBe(1);
+
+      Date.now = () => realNow() + LIST_TTL_MS + 1;
+      await ctx.http.get('/pull-requests');
+      await until(
+        () => ctx.host.calls.list,
+        (calls) => calls === 2,
+        'a read behind the answer',
+      );
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it('asks the host for a number, finding a pull request the list does not hold', async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1)];
+    ctx.host.closed = [hostPr(7, { state: 'merged' as never, title: 'Old work' })];
+    const hit = await ctx.http.get('/pull-requests?q=%237');
+    expect(hit.body.data.map((pr: { number: number; state: string }) => [pr.number, pr.state])).toEqual([
+      [7, 'merged'],
+    ]);
+    expect(ctx.host.found).toContain(7);
+    // A number the list holds shows once; one nobody has shows nothing.
+    expect((await ctx.http.get('/pull-requests?q=1')).body.data.map((pr: { number: number }) => pr.number)).toEqual([
+      1,
+    ]);
+    expect((await ctx.http.get('/pull-requests?q=99')).body.data).toEqual([]);
+    // Words and an author never reach the host.
+    const asked = ctx.host.found.length;
+    await ctx.http.get('/pull-requests?q=colleague');
+    expect(ctx.host.found).toHaveLength(asked);
+  });
+
+  it('searches Mine by number, title or the operator login, and All by number, title or author', async () => {
+    const ctx = await start();
+    ctx.host.prs = [
+      hostPr(1, { author: 'octo-operator', title: 'Fix login' }),
+      hostPr(2, { author: 'colleague', title: 'Fix login too', branch: 'special-branch' }),
+    ];
+    const numbers = async (url: string) =>
+      ((await ctx.http.get(url)).body.data as { number: number }[]).map((pr) => pr.number).sort();
+    expect(await numbers('/pull-requests?mine=true&q=fix')).toEqual([1]);
+    expect(await numbers('/pull-requests?mine=true&q=octo-operator')).toEqual([1]);
+    expect(await numbers('/pull-requests?mine=true&q=colleague')).toEqual([]);
+    expect(await numbers('/pull-requests?q=colleague')).toEqual([2]);
+    expect(await numbers('/pull-requests?q=fix')).toEqual([1, 2]);
+    expect(await numbers('/pull-requests?q=special-branch')).toEqual([]);
+  });
+
   it('errors when the host fails and nothing is cached', async () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];
@@ -501,7 +561,7 @@ describe('pull requests', () => {
     ctx.host.prs = [hostPr(1)];
     await ctx.http.get('/pull-requests');
     ctx.host.down = 'failed';
-    // Past the minute the kept list answers at once and is read again behind it; that read fails, so the next answer
+    // Past the TTL the kept list answers at once and is read again behind it; that read fails, so the next answer
     // says the list is stale.
     const { LIST_TTL_MS } = await import('../src/workspace/pull-requests.service');
     const realNow = Date.now;
@@ -530,7 +590,7 @@ describe('pull requests', () => {
     let offset = 0;
     Date.now = () => realNow() + offset;
     try {
-      // The kept list is a minute old; the read behind it meets the 429.
+      // The kept list is past its TTL; the read behind it meets the 429.
       offset = LIST_TTL_MS + 1;
       ctx.host.down = 'rate_limited';
       await ctx.http.get('/pull-requests');
@@ -543,7 +603,7 @@ describe('pull requests', () => {
       // The host is back, but the cooldown holds: no call reaches it and the list stays.
       ctx.host.down = null;
       const asked = ctx.host.calls.list;
-      offset += LIST_TTL_MS * 2;
+      offset += 2 * 60_000;
       for (const _ of [1, 2]) {
         const held = await ctx.http.get('/pull-requests');
         expect(held.body.data).toHaveLength(1);
@@ -567,7 +627,7 @@ describe('pull requests', () => {
     }
   });
 
-  it('answers a minute-old list from memory, reads the host behind it, and tells the UI what changed', async () => {
+  it('answers an expired list from memory, reads the host behind it, and tells the UI what changed', async () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];
     await ctx.http.get(`/pull-requests?repo_id=${ctx.repoId}`);

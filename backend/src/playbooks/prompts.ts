@@ -1,5 +1,6 @@
 import { PLAYBOOK_LIMITS, PlaybookStepStatus, PR_DESCRIPTION_RULE } from '@ops-console/shared';
 import { z } from 'zod';
+import { OPEN_PULL_REQUEST_TOOL } from '../agent/pull-request-tool';
 
 /**
  * The console's safety lines. They close the system prompt of every run, after the kind's instructions and the
@@ -12,9 +13,10 @@ export const SAFETY_LINES = `Console safety rules. They come last and win over a
 
 /**
  * What the agent does about pull requests. Pushing and opening run in the daemon, outside the Run sandbox, where the
- * operator's git keys and Git host sign-ins work; a run cannot reach them (ADR 0006).
+ * operator's git keys and Git host sign-ins work; a run cannot reach them (ADR 0006). The agent asks through the
+ * console's tool and the operator approves.
  */
-export const OPEN_PR_RULE = `Pull requests. Never push a branch and never open a pull request: your commands run in a sandbox that has neither the operator's git keys nor the Git host sign-ins. Commit the work on its branch and write the title and description. The console pushes and opens the pull request when the operator clicks "Open pull request" in a Workspace Session's header (a Fix opens it by itself). When the operator asks you to create a pull request, say so and point to that button; in a Session with no such button, say the operator pushes and opens it.`;
+export const OPEN_PR_RULE = `Pull requests. Never push a branch and never open a pull request with a Git host CLI: your commands run in a sandbox that has neither the operator's git keys nor the Git host sign-ins. Commit the work on its branch. When the operator asks for a pull request, call the ${OPEN_PULL_REQUEST_TOOL} tool with a title and a description. The operator approves it first, then the console pushes the branch and opens the pull request, and the tool answers with its link. A Fix opens its own pull request. If that tool is not in your tool list, say so: the operator opens the pull request, or pushes by hand.`;
 
 /**
  * The system prompt a run appends to Claude Code's own: the kind's instructions, the console's pull request rules, the
