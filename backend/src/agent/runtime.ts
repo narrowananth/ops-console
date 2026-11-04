@@ -583,7 +583,7 @@ export class AgentRuntime {
       }
     })();
     const after = session ? this.kinds.get(session.kind)?.afterRun : undefined;
-    if (session && after) void after(session, { startedAt: run.createdAt }).catch(() => {});
+    if (session && after) void after(session, { startedAt: run.createdAt, workingDir: run.workingDir }).catch(() => {});
     run.onFinish?.({
       ok: result === 'done',
       stopped: result === 'stopped',

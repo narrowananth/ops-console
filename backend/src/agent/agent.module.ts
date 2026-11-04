@@ -60,6 +60,7 @@ export class AgentModule {
         JobSteps,
       ],
       exports: [
+        RunRegistry,
         CliProxyService,
         SessionKinds,
         MessageInterceptors,
