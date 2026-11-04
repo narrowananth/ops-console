@@ -36,6 +36,7 @@ import {
   useRetryFix,
   useRetryReport,
   useReviewAlert,
+  useSkipRunningStep,
   useUndoDismissal,
   useVerifyAlert,
 } from '../lib/queries';
@@ -246,6 +247,7 @@ function ReportPanel({
 
 /** The Verification as a path: the Playbook it copied, its steps live, then the console's closing turn. */
 function VerificationPath({ report }: { report: Report }) {
+  const skipStep = useSkipRunningStep('report', report.id);
   return (
     <>
       {report.playbook && (
@@ -262,6 +264,7 @@ function VerificationPath({ report }: { report: Report }) {
         status={report.status}
         reading={{ todo: 'Read the code', doing: 'Reading the code' }}
         closing={{ todo: 'Write the Report', doing: 'Writing the Report' }}
+        skip={{ isPending: skipStep.isPending, error: skipStep.error, mutate: () => skipStep.mutate() }}
       />
     </>
   );
@@ -312,6 +315,7 @@ const outLink = 'font-semibold text-text';
  * and Retry.
  */
 function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: (skip: boolean) => void; retrying: boolean }) {
+  const skipStep = useSkipRunningStep('fix', fix.id);
   const cancel = useCancelFix(fix.id);
   const [asking, setAsking] = useState(false);
   const [fixFolded, toggleFix] = useFold('fix');
@@ -366,7 +370,28 @@ function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: (skip: boo
           state: stepState,
           aside: step.writes ? <ScratchTag /> : undefined,
           // A failed step's error already says what its summary says.
-          children: stepState === 'failed' && retry ? retry : step.summary && <span>{step.summary}</span>,
+          children:
+            stepState === 'failed' && retry ? (
+              retry
+            ) : stepState === 'running' && fix.status === FixStatus.Running ? (
+              <span className="flex flex-col items-start gap-1.5">
+                {step.summary && <span>{step.summary}</span>}
+                <SkipStep
+                  step={position + 1}
+                  running
+                  pending={skipStep.isPending}
+                  disabled={skipStep.isPending}
+                  onSkip={() => skipStep.mutate()}
+                />
+                {skipStep.error && (
+                  <span role="alert" className="text-xs text-accent-700">
+                    {skipStep.error.message}
+                  </span>
+                )}
+              </span>
+            ) : (
+              step.summary && <span>{step.summary}</span>
+            ),
         };
       });
     }
@@ -651,6 +676,7 @@ export function AlertView({ id }: { id: string }) {
                 Retry from step {retryFrom}
               </Button>
               <SkipStep
+                small={false}
                 step={retryFrom}
                 disabled={retryReport.isPending || verify.isPending}
                 onSkip={() => retryReport.mutate({ id: report.id, skip: true })}

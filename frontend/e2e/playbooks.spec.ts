@@ -833,6 +833,89 @@ test("a running Report, Fix and Agent Review each stop their Session's run", asy
     .toEqual(['/api/sessions/sv5/stop', '/api/sessions/sf6/stop', '/api/sessions/sr7/stop']);
 });
 
+test('Skip step on a running Report, Fix and Agent Review step stops that step and goes on', async ({ page }) => {
+  const skipped: string[] = [];
+  const running = (name: string) =>
+    jobPlaybook(null, name, [
+      ['Trace', 'done', 'traced'],
+      ['Run the tests and build', 'running', null, true],
+      ['Classify', 'pending', null],
+    ]);
+  const verifying = {
+    ...alert('a7', 'verifying', report('a7', 'running', running('Verify (built-in)'))),
+    session_id: 'sv7',
+  };
+  const fixing = alert('a8', 'fixing', report('a8', 'ready', null), {
+    id: 'fix8',
+    review_id: 'rv8',
+    session_id: 'sf8',
+    stage: 'steps',
+    status: 'running',
+    jira_key: null,
+    jira_url: null,
+    ticket_skipped: null,
+    branch: 'fix/orders-empty-cart',
+    pr_number: null,
+    pr_url: null,
+    error_message: null,
+    started_at: NOW,
+    finished_at: null,
+    playbook: running('Fix (built-in)'),
+  });
+  await routeAlerts(page, [verifying, fixing]);
+  await page.route('**/api/jobs/*/*/skip-step', (route) => {
+    skipped.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ status: 204 });
+  });
+  await page.route('**/api/repos/r1/pull-requests/7', (route) =>
+    route.fulfill({
+      json: {
+        data: {
+          ...pullRequest(agentReview({ id: 'ar9', status: 'running', playbook: running('Review PR (built-in)') })),
+          agent_session_id: 'sr9',
+        },
+      },
+    }),
+  );
+
+  await page.goto(`${daemon.url}/monitor?service=checkout-api&alert=a7#token=${daemon.token}`);
+  const reportSteps = page
+    .getByRole('region', { name: 'Report', exact: true })
+    .getByRole('list', { name: 'Playbook steps' });
+  // Only the running step can be skipped while the job runs.
+  await expect(reportSteps.getByRole('button', { name: /^Skip step/ })).toHaveCount(1);
+  await reportSteps.getByRole('button', { name: 'Skip step 2' }).click();
+  await expect.poll(() => skipped).toEqual(['/api/jobs/report/rep-a7/skip-step']);
+
+  await page.goto(`${daemon.url}/monitor?service=checkout-api&alert=a8#token=${daemon.token}`);
+  await page.getByRole('region', { name: 'Fix', exact: true }).getByRole('button', { name: 'Skip step 2' }).click();
+  await expect.poll(() => skipped).toHaveLength(2);
+  expect(skipped[1]).toBe('/api/jobs/fix/fix8/skip-step');
+
+  await page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1/7#token=${daemon.token}`);
+  await page.getByRole('region', { name: 'Agent Review' }).getByRole('button', { name: 'Skip step 2' }).click();
+  await expect.poll(() => skipped).toHaveLength(3);
+  expect(skipped[2]).toBe('/api/jobs/agent_review/ar9/skip-step');
+});
+
+test('Retry from step and Skip step on a failed Verification are the same size', async ({ page }) => {
+  const failed = alert(
+    'a10',
+    'open',
+    report('a10', 'failed', jobPlaybook(null, 'Verify (built-in)', [['Trace', 'failed', 'stopped by the operator']])),
+  );
+  await routeAlerts(page, [failed]);
+  await page.goto(`${daemon.url}/monitor?service=checkout-api&alert=a10#token=${daemon.token}`);
+  const retry = page.getByRole('button', { name: 'Retry from step 1' }).first();
+  const skip = page.getByRole('button', { name: 'Skip step 1' }).first();
+  await expect(retry).toBeVisible();
+  const [a, b] = [await retry.boundingBox(), await skip.boundingBox()];
+  expect(b?.height).toBe(a?.height);
+  expect(await skip.evaluate((node) => getComputedStyle(node).fontSize)).toBe(
+    await retry.evaluate((node) => getComputedStyle(node).fontSize),
+  );
+});
+
 const session = (id: string, kind: string, playbook: { id: string; name: string } | null) => ({
   id,
   kind,
