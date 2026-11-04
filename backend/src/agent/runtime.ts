@@ -49,6 +49,13 @@ import { ConnectionLookup } from './connection-lookup';
 import { MessageInterceptors } from './message-interceptors';
 import { blockParts, contentSchema, EDIT_TOOLS, questionInputSchema, stepText, toMessages } from './parts';
 import { ProdWriteRule } from './prod-write-rule';
+import {
+  CONSOLE_TOOLS_SERVER,
+  consoleToolsServer,
+  OPEN_PULL_REQUEST_TOOL,
+  openPullRequestInputSchema,
+  type PullRequestOpener,
+} from './pull-request-tool';
 import { runSandbox } from './run-sandbox';
 import { type Run, RunRegistry, type RunSummary } from './runs';
 import { SessionKinds } from './session-kinds';
@@ -167,6 +174,13 @@ export class AgentRuntime {
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
     recovery.register('agent sessions and approvals', () => this.recover());
+  }
+
+  /** Who opens a pull request when the agent asks. Set once by the Workspace, which this module does not import. */
+  private opener: PullRequestOpener | null = null;
+
+  setPullRequestOpener(opener: PullRequestOpener): void {
+    this.opener = opener;
   }
 
   /** A run does not survive a restart: its Session fails and its Approvals expire (Behavior 18). */
@@ -461,6 +475,10 @@ export class AgentRuntime {
       },
       includePartialMessages: true,
       abortController: run.abort,
+      // The console's own tools: the agent asks, the operator approves, the daemon pushes and opens the pull request.
+      ...(this.opener?.offers(run.sessionId, run.workingDir)
+        ? { mcpServers: { [CONSOLE_TOOLS_SERVER]: consoleToolsServer(this.opener, run.sessionId) } }
+        : {}),
       disallowedTools: [...MERGE_DENIALS, ...WEB_DENIALS, ...run.deny],
       systemPrompt: { type: 'preset', preset: 'claude_code', append: systemAppend(instructions, run.rules) },
       // Servers the operator disabled stay out of the run.
@@ -648,6 +666,7 @@ export class AgentRuntime {
     return async (input): Promise<HookJSONOutput> => {
       if (input.hook_event_name !== 'PreToolUse') return {};
       const toolInput = asRecord(input.tool_input);
+      if (input.tool_name === OPEN_PULL_REQUEST_TOOL) return this.approvePullRequest(run, toolInput);
       const prodWrite = this.prodWrites.match({
         toolName: input.tool_name,
         input: toolInput,
@@ -725,6 +744,41 @@ export class AgentRuntime {
       return decision === ApprovalStatus.Approved
         ? { behavior: 'allow', updatedInput: input }
         : { behavior: 'deny', message: 'The operator denied this.' };
+    };
+  }
+
+  /**
+   * Opening a pull request asks in every Access mode, `full` included: the operator reads what will be pushed and where,
+   * and the daemon pushes and opens only after a yes. A call that cannot open anything is refused before it asks.
+   */
+  private async approvePullRequest(run: Run, toolInput: Record<string, unknown>): Promise<HookJSONOutput> {
+    const refuse = (reason: string): HookJSONOutput => ({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
+    });
+    const parsed = openPullRequestInputSchema.safeParse(toolInput);
+    if (!this.opener || !parsed.success) return refuse('Give the pull request a title and a description.');
+    let summary: string;
+    try {
+      summary = await this.opener.describe(run.sessionId, parsed.data);
+    } catch (error) {
+      return refuse(error instanceof ApiError ? error.message : 'No pull request can open here.');
+    }
+    const decision = await this.ask(run, {
+      actionLogId: null,
+      sessionId: run.sessionId,
+      kind: ApprovalKind.Command,
+      summary,
+      isProd: false,
+    });
+    const approved = decision === ApprovalStatus.Approved;
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: approved ? 'allow' : 'deny',
+        permissionDecisionReason: approved
+          ? 'The operator approved this pull request.'
+          : 'The operator denied this pull request. Do not retry it.',
+      },
     };
   }
 
