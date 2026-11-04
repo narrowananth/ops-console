@@ -87,13 +87,21 @@ export const stepsFinished = (playbook: JobPlaybook) =>
   playbook.steps.every((step) => step.status === PlaybookStepStatus.Done || step.status === PlaybookStepStatus.Skipped);
 
 /** A job's copy of its Playbook's steps as a path, each with its status and the agent's summary. */
-export function JobSteps({ playbook, closing }: { playbook: JobPlaybook; closing?: string }) {
-  const steps = playbookPath(playbook);
+export function JobSteps({
+  playbook,
+  closing,
+  skip = null,
+}: {
+  playbook: JobPlaybook;
+  closing?: string;
+  skip?: RunningSkip;
+}) {
+  const steps = playbookPath(playbook, skip);
   if (closing) steps.push({ key: 'closing', title: closing, state: 'running' });
   return <Pathway label="Playbook steps" steps={steps} />;
 }
 
-const playbookPath = (playbook: JobPlaybook): PathwayStep[] =>
+const playbookPath = (playbook: JobPlaybook, skip: RunningSkip = null): PathwayStep[] =>
   playbook.steps.map((step, index) => ({
     // A job's copy never changes order: the position is its identity.
     key: String(index),
@@ -107,7 +115,26 @@ const playbookPath = (playbook: JobPlaybook): PathwayStep[] =>
           <Elapsed from={step.started_at} to={step.finished_at} running={step.status === PlaybookStepStatus.Running} />
         </>
       ) : undefined,
-    children: step.summary ? <span>{step.summary}</span> : undefined,
+    children:
+      skip && step.status === PlaybookStepStatus.Running ? (
+        <span className="flex flex-col items-start gap-1.5">
+          {step.summary && <span>{step.summary}</span>}
+          <SkipStep
+            step={index + 1}
+            running
+            pending={skip.isPending}
+            disabled={skip.isPending}
+            onSkip={() => skip.mutate()}
+          />
+          {skip.error && (
+            <span role="alert" className="text-xs text-accent-700">
+              {skip.error.message}
+            </span>
+          )}
+        </span>
+      ) : step.summary ? (
+        <span>{step.summary}</span>
+      ) : undefined,
   }));
 
 /** A Verification's or an Agent Review's status as a path state; both say `running`, `ready` or `failed`. */
@@ -127,6 +154,7 @@ export function JobPath({
   reading,
   closing,
   answered = false,
+  skip = null,
 }: {
   playbook: JobPlaybook | null;
   status: string;
@@ -134,11 +162,13 @@ export function JobPath({
   closing: StageWords;
   /** The closing turn gave its answer, so a failure after it (a push, a post) is not the closing turn's. */
   answered?: boolean;
+  /** Skip step on the running step. */
+  skip?: RunningSkip;
 }) {
   const state = runState(status);
   const own = playbook && playbook.steps.length > 0;
   const steps: PathwayStep[] = own
-    ? playbookPath(playbook)
+    ? playbookPath(playbook, state === 'running' ? skip : null)
     : [{ key: 'reading', title: state === 'running' ? reading.doing : reading.todo, state }];
   const through = own ? stepsFinished(playbook) : state === 'done';
   const last: PathwayState =
@@ -210,16 +240,41 @@ export function JobFailure({
   );
 }
 
-/** Passes over a failed step: it reads skipped by the operator, and the job goes on from the next one. */
-export function SkipStep({ step, disabled, onSkip }: { step: number; disabled: boolean; onSkip: () => void }) {
+/**
+ * Passes over a step: a failed one, or the running one, whose turn stops. It reads skipped by the operator, and the
+ * job goes on from the next one. `small` matches the small Retry beside it; without it, the full-size one.
+ */
+export function SkipStep({
+  step,
+  disabled,
+  onSkip,
+  running = false,
+  pending = false,
+  small = true,
+}: {
+  step: number;
+  disabled: boolean;
+  onSkip: () => void;
+  running?: boolean;
+  pending?: boolean;
+  small?: boolean;
+}) {
   return (
     <Button
-      className="px-2.5 py-1 text-xs"
-      title={`Mark step ${step} skipped and go on from the next one. That step does not run again.`}
+      className={small ? 'px-2.5 py-1 text-xs' : undefined}
+      title={
+        running
+          ? `Stop step ${step} where it is, mark it skipped and go on from the next one.`
+          : `Mark step ${step} skipped and go on from the next one. That step does not run again.`
+      }
       disabled={disabled}
       onClick={onSkip}
     >
+      {pending && <Spinner />}
       Skip step {step}
     </Button>
   );
 }
+
+/** Skip step on a job's running step; null when nothing can skip it. */
+export type RunningSkip = { isPending: boolean; error: Error | null; mutate: () => void } | null;

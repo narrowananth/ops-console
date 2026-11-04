@@ -11,7 +11,7 @@ import { FoldTitle, useFold } from '../components/ui/fold';
 import { Markdown } from '../components/ui/markdown';
 import { StatusPill } from '../components/ui/pathway';
 import { Hint } from '../components/ui/tip';
-import { useRetryAgentReview } from '../lib/queries';
+import { useRetryAgentReview, useSkipRunningStep } from '../lib/queries';
 import { JobFailure, JobPath, PlaybookLink, runState } from '../playbooks/job-steps';
 
 const MARK = { pass: '✓', warn: '!', fail: '✕', na: '–' } as const;
@@ -68,6 +68,7 @@ const rank = (severity: FindingSeverity) => FINDING_SEVERITIES.indexOf(severity)
 
 /** The agent's written review, tied to the commit it read. */
 export function AgentReviewCard({ review, sessionId }: { review: PrAgentReview; sessionId: string | null }) {
+  const skipStep = useSkipRunningStep('agent_review', review.id);
   const retry = useRetryAgentReview(review.repo_id, review.pr_number);
   const [folded, toggle] = useFold('agent-review');
   return (
@@ -137,6 +138,7 @@ export function AgentReviewCard({ review, sessionId }: { review: PrAgentReview; 
               todo: 'Write findings, checklist and verdict',
               doing: 'Writing findings, checklist and verdict',
             }}
+            skip={{ isPending: skipStep.isPending, error: skipStep.error, mutate: () => skipStep.mutate() }}
           />
         )}
         {review.verdict && <p className="m-0 font-semibold">{review.verdict}</p>}

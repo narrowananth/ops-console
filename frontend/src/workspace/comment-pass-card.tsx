@@ -10,7 +10,7 @@ import { Elapsed } from '../components/ui/elapsed';
 import { FoldTitle, useFold } from '../components/ui/fold';
 import { Markdown } from '../components/ui/markdown';
 import { StatusPill } from '../components/ui/pathway';
-import { useRetryCommentPass } from '../lib/queries';
+import { useRetryCommentPass, useSkipRunningStep } from '../lib/queries';
 import { JobFailure, JobPath, PlaybookLink, runState } from '../playbooks/job-steps';
 import { threadPlace } from './pr-jobs';
 
@@ -88,6 +88,7 @@ function PassThreadRow({ thread, failed }: { thread: PassThread; failed: boolean
 
 function PassBody({ pass }: { pass: CommentPass }) {
   const retry = useRetryCommentPass(pass.repo_id, pass.pr_number);
+  const skipStep = useSkipRunningStep('comment_pass', pass.id);
   const failed = pass.status === AgentReviewStatus.Failed;
   return (
     <div className="flex flex-col gap-3 px-3 py-2.5 text-[13px]">
@@ -95,6 +96,7 @@ function PassBody({ pass }: { pass: CommentPass }) {
         <JobPath
           playbook={pass.playbook}
           status={pass.status}
+          skip={{ isPending: skipStep.isPending, error: skipStep.error, mutate: () => skipStep.mutate() }}
           answered={pass.threads.every((thread) => thread.outcome !== ThreadOutcome.Pending)}
           reading={{ todo: 'Read the threads', doing: 'Reading the threads' }}
           closing={

@@ -28,6 +28,9 @@ export const CANCELLED = 'cancelled by the operator';
 
 export const SKIPPED_BY_OPERATOR = 'Skipped by the operator';
 
+/** The summary of a step the operator skipped while it ran. */
+export const SKIPPED_WHILE_RUNNING = 'Skipped by the operator while it ran';
+
 const COLUMN = {
   report: playbookSteps.reportId,
   fix: playbookSteps.fixId,
@@ -91,6 +94,11 @@ export type StepRun = {
 /** Runs a job's copied Playbook steps one turn each, in order, and keeps their status (Behaviors 13 to 15). */
 @Injectable()
 export class JobSteps {
+  /** The Session each running step's turn runs in, by step id, so Skip step can stop that turn. */
+  private readonly running = new Map<string, string>();
+  /** Steps the operator skipped mid-turn: their turn ends as skipped and the job goes on. */
+  private readonly skipping = new Set<string>();
+
   constructor(
     @Inject(STORE) private readonly store: Store,
     @Inject(AgentRuntime) private readonly runtime: AgentRuntime,
@@ -141,6 +149,7 @@ export class JobSteps {
     this.set(row, PlaybookStepStatus.Running, null, { startedAt: new Date().toISOString(), finishedAt: null });
     const prompt = `${first ? `${options.brief}\n\n` : ''}${stepPrompt(row, row.position, total)}`;
     let outcome: { status: PlaybookStepStatus; summary: string };
+    this.running.set(row.id, options.sessionId);
     try {
       const { finished } = this.runtime.runFor(options.sessionId, prompt, options.onPart ?? null, {
         rules: options.rules,
@@ -165,7 +174,11 @@ export class JobSteps {
         status: PlaybookStepStatus.Failed,
         summary: error instanceof Error ? error.message : 'the agent could not start',
       };
+    } finally {
+      this.running.delete(row.id);
     }
+    // Skipped while it ran: whatever the stopped turn said, the step reads skipped and the job goes on.
+    if (this.skipping.delete(row.id)) outcome = { status: PlaybookStepStatus.Skipped, summary: SKIPPED_WHILE_RUNNING };
     const summary = redact(outcome.summary.trim()).slice(0, PLAYBOOK_LIMITS.summary);
     this.set(row, outcome.status, summary, { finishedAt: new Date().toISOString() });
     if (outcome.status !== PlaybookStepStatus.Failed) return null;
@@ -192,6 +205,20 @@ export class JobSteps {
       .returning()
       .get();
     if (updated) this.announce(emit, updated);
+  }
+
+  /**
+   * Skip step on the running step: its turn stops, the step reads skipped, and the job goes on from the next step.
+   * Refused with `invalid_state` when no step of the job is running, as while the closing turn runs.
+   */
+  skipRunning(job: JobRef): void {
+    const row = this.rows(job).find((step) => step.status === PlaybookStepStatus.Running);
+    const sessionId = row ? this.running.get(row.id) : undefined;
+    if (!row || sessionId === undefined) {
+      throw new ApiError(409, ErrorCode.InvalidState, 'No step is running, so there is no step to skip');
+    }
+    this.skipping.add(row.id);
+    this.runtime.stop(sessionId);
   }
 
   /** A retry runs the failed step again, and every step after it. */

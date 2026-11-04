@@ -1136,6 +1136,46 @@ describe('Agent Review', () => {
     close();
   });
 
+  it('skips the running step on the operator’s word: its turn stops and the review goes on from the next step', async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1)];
+    const step = (title: string) => ({ block: 'custom', title, instructions: `Check ${title}.`, writes: false });
+    const created = await ctx.http.post('/playbooks', {
+      name: 'PROD readiness',
+      rules: 'Flag every missing migration.',
+      steps: [step('Tests'), step('Flags')],
+    });
+    await ctx.http.put('/playbook-triggers/review_pr', { playbook_id: created.body.data.id });
+    const { events, close } = await listen(ctx.daemon);
+    const outcome = (status: string, summary: string) => ({
+      text: `\`\`\`json\n${JSON.stringify({ outcome: status, summary })}\n\`\`\``,
+    });
+    // The tests take long: the turn waits until it is stopped.
+    const never = gate();
+    ctx.daemon.sdk.script({ wait: never.promise }, outcome('done', 'tests passed'));
+    ctx.daemon.sdk.script(outcome('done', 'no flag'));
+    ctx.daemon.sdk.script({ text: REVIEW });
+    const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
+    const id = started.body.data.id;
+    const list = () =>
+      ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`).then((res) => res.body.data[0]);
+    await until(list, (review) => review.playbook.steps[0].status === 'running', 'the first step to run');
+
+    const skipped = await ctx.http.post(`/jobs/agent_review/${id}/skip-step`);
+    expect(skipped.status).toBe(204);
+    await waitForReview(events);
+    const ready = await list();
+    expect(ready.status).toBe('ready');
+    expect(ready.playbook.steps.map((row: { status: string; summary: string }) => [row.status, row.summary])).toEqual([
+      ['skipped', 'Skipped by the operator while it ran'],
+      ['done', 'no flag'],
+    ]);
+    // Nothing runs now, so there is no step to skip.
+    const late = await ctx.http.post(`/jobs/agent_review/${id}/skip-step`);
+    expect([late.status, late.body.error.code]).toEqual([409, 'invalid_state']);
+    close();
+  });
+
   it('skips a failed step on the operator’s word and goes on from the next one to the review', async () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];

@@ -2,11 +2,12 @@ import { AgentReviewStatus, type ReplyCheck } from '@ops-console/shared';
 import { StopRun } from '../agents/stop-run';
 import { Elapsed } from '../components/ui/elapsed';
 import { StatusPill } from '../components/ui/pathway';
-import { useRetryReplyCheck } from '../lib/queries';
+import { useRetryReplyCheck, useSkipRunningStep } from '../lib/queries';
 import { JobFailure, JobPath, PlaybookLink, runState } from '../playbooks/job-steps';
 
 /** A running or failed Reply check under its thread. A ready one shows nothing: its verdict is the agent's reply. */
 export function ReplyCheckStrip({ check, sessionId }: { check: ReplyCheck; sessionId: string | null }) {
+  const skipStep = useSkipRunningStep('reply_check', check.id);
   const retry = useRetryReplyCheck(check.repo_id, check.pr_number);
   if (check.status === AgentReviewStatus.Ready) return null;
   const failed = check.status === AgentReviewStatus.Failed;
@@ -39,6 +40,7 @@ export function ReplyCheckStrip({ check, sessionId }: { check: ReplyCheck; sessi
       <JobPath
         playbook={check.playbook}
         status={check.status}
+        skip={{ isPending: skipStep.isPending, error: skipStep.error, mutate: () => skipStep.mutate() }}
         answered={check.verdict !== null}
         reading={{ todo: 'Read the thread and the code', doing: 'Reading the thread and the code' }}
         closing={{ todo: 'Give the verdict and the reply', doing: 'Giving the verdict and the reply' }}

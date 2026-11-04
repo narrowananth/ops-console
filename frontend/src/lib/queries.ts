@@ -1089,6 +1089,16 @@ export function useUndoDismissal(id: string) {
   });
 }
 
+/** The kinds of job whose Playbook steps run one turn each. */
+export type StepJob = 'report' | 'fix' | 'agent_review' | 'reply_check' | 'comment_pass';
+
+/** Skips the job's running step: its turn stops and the job goes on; `playbook_step.updated` brings the change. */
+export function useSkipRunningStep(kind: StepJob, id: string) {
+  return useMutation({
+    mutationFn: () => apiSend('POST', `/jobs/${kind}/${id}/skip-step`, undefined, z.undefined()),
+  });
+}
+
 export function useRetryReport() {
   const client = useQueryClient();
   return useMutation({

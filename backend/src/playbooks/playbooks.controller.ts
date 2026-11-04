@@ -9,14 +9,29 @@ import {
 } from '@ops-console/shared';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
+import { JobSteps } from './job-steps';
 import { PlaybooksService } from './playbooks.service';
 
 const idParams = z.object({ id: z.string().min(1) });
 const triggerParams = z.object({ trigger: z.enum(PlaybookTrigger) });
+const jobParams = z.object({
+  kind: z.enum(['report', 'fix', 'agent_review', 'reply_check', 'comment_pass']),
+  id: z.string().min(1),
+});
 
 @Controller()
 export class PlaybooksController {
-  constructor(@Inject(PlaybooksService) private readonly playbooks: PlaybooksService) {}
+  constructor(
+    @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
+    @Inject(JobSteps) private readonly steps: JobSteps,
+  ) {}
+
+  /** Skips the job's running step: its turn stops and the job goes on from the next step. */
+  @Post('jobs/:kind/:id/skip-step')
+  @HttpCode(204)
+  skipStep(@Param() params: unknown): void {
+    this.steps.skipRunning(parseInput(jobParams, params, 'params'));
+  }
 
   @Get('playbooks')
   list(): { data: PlaybookList } {

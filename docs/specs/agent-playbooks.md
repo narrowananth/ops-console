@@ -74,6 +74,12 @@ patch. They have no place to write that down, so they retype it in every Session
     stops the job, which fails with "Step 3 · Make mock data failed:" and the summary. An agent error, an answer the
     console cannot read and the operator stopping the run each fail the running step; a stopped step's summary is
     "stopped by the operator".
+15a. While a job runs a step, the step shows "Skip step N" under its title, on the Report, the Fix, the Agent Review,
+    the Reply check and the Comment pass. It calls `POST /jobs/:kind/:id/skip-step` (`kind` is `report`, `fix`,
+    `agent_review`, `reply_check` or `comment_pass`): the step's turn stops, the step reads skipped with "Skipped by the
+    operator while it ran", and the job goes on from the next step in the same Session. With no step running, as during
+    the closing turn, it answers `invalid_state`. Stop, by contrast, fails the step and the job; the failed job then
+    offers "Retry from step N" and "Skip step N", side by side and the same size.
 16. After the last step the console runs its own closing turn: the Verification writes the Report, the Agent Review
     writes its findings, checklist and verdict, and the Fix goes on to its PR stage. Report, Agent Review and PR keep
     today's shape.
