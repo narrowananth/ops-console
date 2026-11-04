@@ -33,6 +33,7 @@ import { PlaybooksService } from '../playbooks/playbooks.service';
 import { type CodeBase, cloneUrl, codeBaseStep, GIT, Git, GitFailed, parseRemote } from '../repos/git';
 import { everyMinutes, Scheduler } from '../scheduler/scheduler';
 import { AnonymousSessionsService } from '../workspace/anonymous-sessions.service';
+import { PullRequestOpeningService } from '../workspace/pull-request-opening.service';
 import { PullRequestsService } from '../workspace/pull-requests.service';
 import { WorkspaceSessionsService } from '../workspace/workspace-sessions.service';
 import { AlertSessions } from './alert-sessions';
@@ -42,7 +43,7 @@ import { type AlertRow, type FixRow, type ReportRow, type ReviewRow, type Servic
 import { PROD_PARITY_ASK, recheck } from './prod-parity';
 
 const ticketSchema = z.object({ key: z.string().min(1), url: z.string().min(1) });
-const prSchema = z.object({ number: z.number().int(), url: z.string().min(1) });
+const descriptionSchema = z.object({ description: z.string().trim().min(1) });
 const okSchema = z.object({ ok: z.literal(true) });
 
 const JSON_ONLY = 'Answer with one JSON block and nothing after it.';
@@ -84,6 +85,7 @@ export class FixesService {
     @Inject(WorkspaceSessionsService) private readonly workspace: WorkspaceSessionsService,
     @Inject(AnonymousSessionsService) private readonly anonymous: AnonymousSessionsService,
     @Inject(PullRequestsService) private readonly pulls: PullRequestsService,
+    @Inject(PullRequestOpeningService) private readonly opening: PullRequestOpeningService,
     @Inject(GIT) private readonly git: Git,
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
     @Inject(JobSteps) private readonly steps: JobSteps,
@@ -362,7 +364,6 @@ export class FixesService {
         brief: `${this.brief(context)}\nThe console sends the work as steps, one per turn, on branch ${context.fix.branch}.`,
         rules: context.fix.playbookRules,
         fresh: this.takeFresh(context),
-        readSsh: true,
         halted: () => this.cancelling.has(context.fix.id),
       });
       if (failure) throw new StageFailed(failure);
@@ -402,7 +403,6 @@ ${context.recheckLine}`;
       finished = this.runtime.runFor(context.sessionId, prompt, null, {
         rules: context.fix.playbookRules,
         fresh: this.takeFresh(context),
-        readSsh: true,
       }).finished;
     } catch (error) {
       throw new StageFailed(error instanceof Error ? error.message : 'the agent could not start');
@@ -523,11 +523,12 @@ Change nothing else. ${JSON_ONLY}
     const prefix = key ? `${key}: ` : '';
     let fix = this.row(context.fix.id);
     if (fix.prNumber === null) {
-      const opened = await this.ask(
+      const written = await this.ask(
         context,
-        `${this.brief(context)}\n\nCommit the work${key ? ` with a message that starts with "${key}:"` : ''}, push branch ${fix.branch} to origin, and open a pull request on origin's Git host titled "${prefix}${context.alert.title}": gh for GitHub, glab for GitLab, bkt pr create for Bitbucket. Never merge it.\n\n${this.prMaterial(context, fix)}\n\n${JSON_ONLY}\n\n\`\`\`json\n{ "number": 123, "url": "https://github.com/owner/repo/pull/123" }\n\`\`\``,
-        prSchema,
+        `${this.brief(context)}\n\nCommit the work${key ? ` with a message that starts with "${key}:"` : ''} on branch ${fix.branch}. Do not push and do not open a pull request: the console does both. Write the pull request's description.\n\n${this.prMaterial(context, fix)}\n\n${JSON_ONLY}\n\n\`\`\`json\n{ "description": "markdown" }\n\`\`\``,
+        descriptionSchema,
       );
+      const opened = await this.publish(context, fix, `${prefix}${context.alert.title}`, written.description);
       fix = this.store.write(
         (tx) =>
           tx
@@ -554,6 +555,44 @@ Change nothing else. ${JSON_ONLY}
       this.announce(tx, emit, fix);
     });
     if (context.service.repoId) this.pulls.drop(context.service.repoId);
+  }
+
+  /** The console pushes the Fix branch and opens its pull request; the agent only committed and wrote the text. */
+  private async publish(context: Context, fix: FixRow, title: string, body: string) {
+    if (!fix.branch) throw new StageFailed('the Fix has no branch name');
+    const session = this.store.db.select().from(sessions).where(eq(sessions.id, context.sessionId)).get();
+    let dir: string;
+    let repoId: string | null = null;
+    let remote: { host: GitHost; slug: string | null };
+    let fallback: string;
+    if (session?.kind === SessionKind.Anonymous) {
+      dir = this.anonymous.folder(context.sessionId);
+      remote = parseRemote(await this.git.originUrl(dir));
+      fallback = (await this.git.defaultBranch(dir)) ?? 'main';
+    } else {
+      const source = this.sessions.sourceOf(context.service);
+      if (source.kind !== 'repo') throw new StageFailed('the Fix Session lost its Repo');
+      dir = source.repo.path;
+      repoId = source.repo.id;
+      remote = { host: source.repo.host, slug: source.repo.remoteSlug };
+      fallback = source.repo.defaultBranch;
+    }
+    try {
+      const base = await this.base(context, dir, fallback);
+      return await this.opening.publish({
+        sessionId: context.sessionId,
+        dir,
+        repoId,
+        remote,
+        branch: fix.branch,
+        base: base.branch,
+        title,
+        body,
+      });
+    } catch (error) {
+      if (error instanceof StageFailed) throw error;
+      throw new StageFailed(error instanceof Error && error.message ? error.message : 'the pull request did not open');
+    }
   }
 
   /** What the pull request's description is written from: the Report, the steps' results and the links. */

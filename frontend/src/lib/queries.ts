@@ -37,6 +37,8 @@ import {
   mcpServerSchema,
   messageSchema,
   networkAllowlistSchema,
+  type OpenPullRequest,
+  openedPullRequestSchema,
   type PlaybookPatch,
   type PlaybookTrigger,
   type PrReviewEvent,
@@ -46,6 +48,7 @@ import {
   prCommentSchema,
   prFileContentSchema,
   pullRequestDetailSchema,
+  pullRequestDraftSchema,
   pullRequestListSchema,
   type RemovedRepoSessions,
   type ReviewAlert,
@@ -67,6 +70,7 @@ import {
   serviceSchema,
   sessionDefaultsSchema,
   sessionDiffSchema,
+  sessionPullRequestSchema,
   sessionSchema,
   startAtLoginSchema,
   statusCodeCountSchema,
@@ -101,6 +105,7 @@ export const queryKeys = {
   session: (id: string) => ['sessions', id] as const,
   messages: (id: string) => ['messages', id] as const,
   sessionDiff: (id: string) => ['session-diff', id] as const,
+  sessionPullRequest: (id: string) => ['session-pull-request', id] as const,
   diskAccess: ['disk-access'] as const,
   startAtLogin: ['start-at-login'] as const,
   runSandbox: ['run-sandbox'] as const,
@@ -757,6 +762,44 @@ export function useSessionDiff(sessionId: string, enabled: boolean, follow: bool
     queryFn: () => apiGet(`/sessions/${sessionId}/diff`, z.object({ data: sessionDiffSchema })).then((d) => d.data),
     enabled,
     refetchInterval: follow ? 4000 : false,
+  });
+}
+
+/** Whether the Session's branch can open a pull request, and the one already open for it. */
+export function useSessionPullRequest(sessionId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.sessionPullRequest(sessionId),
+    queryFn: () =>
+      apiGet(`/sessions/${sessionId}/pull-request`, z.object({ data: sessionPullRequestSchema })).then((d) => d.data),
+    enabled,
+  });
+}
+
+/** The agent's title and description for the pull request; the turn takes as long as the agent does. */
+export function useDraftPullRequest(sessionId: string) {
+  return useMutation({
+    mutationFn: (baseBranch: string) =>
+      apiSend(
+        'POST',
+        `/sessions/${sessionId}/pull-request-draft`,
+        { base_branch: baseBranch },
+        z.object({ data: pullRequestDraftSchema }),
+      ).then((body) => body.data),
+  });
+}
+
+/** The console pushes the branch and opens the pull request. */
+export function useOpenPullRequest(sessionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: OpenPullRequest) =>
+      apiSend('POST', `/sessions/${sessionId}/pull-request`, input, z.object({ data: openedPullRequestSchema })).then(
+        (body) => body.data,
+      ),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.sessionPullRequest(sessionId) });
+      void client.invalidateQueries({ queryKey: queryKeys.pulls });
+    },
   });
 }
 

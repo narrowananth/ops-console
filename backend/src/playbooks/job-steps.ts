@@ -86,8 +86,6 @@ export type StepRun = {
   fresh?: boolean;
   /** Tools denied on top of merging. */
   deny?: string[];
-  /** The Run sandbox lets these turns read `~/.ssh`: a Fix. */
-  readSsh?: boolean;
   onPart?: (part: Part) => void;
   /** True once the job is being cancelled: no further step starts. */
   halted?: () => boolean;
@@ -158,7 +156,6 @@ export class JobSteps {
         ...(options.cwd ? { cwd: options.cwd } : {}),
         fresh: first && options.fresh === true,
         ...(options.deny ? { deny: options.deny } : {}),
-        ...(options.readSsh ? { readSsh: true } : {}),
       });
       const summary = await finished;
       const parsed = summary.ok ? parseAgentJson(summary.text, stepOutcomeSchema) : null;

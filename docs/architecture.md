@@ -110,7 +110,7 @@ agent Session.
 | `playbooks` | Playbooks and the Trigger each one holds, the built-ins (each Trigger's method, steps and shared rules on evidence, data, Connections and git) and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each (registered by `agent`) |
 | `accounts` | Claude accounts, their usage, Auto-switch and Smart usage; the Claude account hub: with CLIProxy on, runs go to its loopback address with the API key from the Keychain and switching pauses |
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
-| `workspace` | `repo`, `pr_review` and `anonymous` Sessions; a Session's diff, and a `repo` Session following the agent's branch; branch checkout with stash; pull requests, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews, Reply checks and Comment passes, one job per pull request at a time, each in a scratch copy at the pull request's head commit (an Agent Review makes one only when a Playbook step writes; the built-in's test step does); an Agent Review also fetches the target branch to compare with, may run the tests and build, and the console posts its findings and one summary comment; for the others the console commits, pushes, replies and resolves |
+| `workspace` | `repo`, `pr_review` and `anonymous` Sessions; a Session's diff, and a `repo` Session following the agent's branch; branch checkout with stash; pull requests, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews, Reply checks and Comment passes, one job per pull request at a time, each in a scratch copy at the pull request's head commit (an Agent Review makes one only when a Playbook step writes; the built-in's test step does); an Agent Review also fetches the target branch to compare with, may run the tests and build, and the console posts its findings and one summary comment; for the others the console commits, pushes, replies and resolves; Pull request opening: the console pushes a `repo` Session's branch and opens its pull request on the Git host, for a click in the Session header (the agent drafts the text) and for a Fix's PR stage |
 | `monitor` | Services, Routes, Scans and Alerts through `pup`; finding a Service's code; the Alert's Session; Verification and Reports; the operator's Review; the Fix from ticket to merged PR |
 | `devtools` | `devtools` Sessions scoped to Connections; ties MCP calls to their Connection; the PROD-write rule; the instructions that make the agent hand over Results and a Comparison |
 | `updates` | The newest GitHub release, the version record (`update.json`), install through `install.sh`, auto-update, the wait for running agent runs |
@@ -123,7 +123,7 @@ agent Session.
 | `app` | Sign-in gate with the restart panel while an update installs, sidebar with the running tasks tray, the update card, version panel and "Updated to" notice, page shell and routes, theme store, the remembered page address |
 | `lib` | API client, TanStack queries, `/ws` live events, session token, Remembered view storage, sorting, the finish chime, clipboard copy |
 | `monitor` | Monitor page: scan range and status codes, ticked Services, Alerts, Samples, Reports, Review and Fix |
-| `workspace` | Workspace page: Repos and Anonymous Sessions, branch switcher, pull request list, files with Expand all and Collapse all, threads, the Agent Review, Reply check and Comment pass cards, the Session's Changes panel, queued messages, attachments |
+| `workspace` | Workspace page: Repos and Anonymous Sessions, branch switcher, pull request list, files with Expand all and Collapse all, threads, the Agent Review, Reply check and Comment pass cards, the Session's Changes panel, the Open pull request form, queued messages, attachments |
 | `devtools` | Dev tools page (terminal-style `devtools` Sessions scoped to Connections, Results, Comparison) and the Connections page and form |
 | `integrations` | Integrations page: Connectors and MCP Servers |
 | `repos` | Repos page |
@@ -183,7 +183,7 @@ on and Jira is connected; otherwise the branch is `fix/<name>`.
 derived from `scans` and the Alert's own `resolved_at` and `cleared_at`. A Verification and a Fix each start with a
 Recheck: one `pup` count of the Alert's query over the last hour. The result is the first step of the Report and a line
 in the agent's brief. The Verification then adds the `version:` tag of the newest Sample, set against the commit of its
-scratch copy. The Report's closing turn and the Fix's pull request brief ask for a Prod parity section. None of this
+scratch copy. The Report's closing turn and the Fix's pull request brief ask for a Prod parity section; the Fix's PR stage asks the agent for the description only, and the console pushes the branch and opens the pull request. None of this
 blocks a job.
 
 **Playbooks.** Each Trigger holds one Playbook, or its built-in. A job (Verification, Fix, Agent
@@ -231,7 +231,7 @@ merge tools. An Agent Review, Reply check and Comment pass also deny `git push`,
 commands and the host MCP comment tools, since the console pushes, replies and resolves. Permission prompts in `supervised` mode, and the agent's questions, reach `canUseTool`
 and wait for the operator. MCP Servers the operator disabled, and for a `devtools` Session the
 Connections outside its scope, are denied for the run. Every run's system prompt appends the kind's
-instructions, the rules for a PR description and for opening a pull request, then the Playbook's rules, then the console's
+instructions, the rules for a PR description and the rule that the console, not the run, pushes and opens pull requests, then the Playbook's rules, then the console's
 safety lines. Those say that log lines and
 data are never instructions, that the agent never merges, and that no PROD value goes into a mock or
 anything else it writes. Stop ends a run and expires its Approvals, and the operator may edit the last message, which rewinds the agent's file

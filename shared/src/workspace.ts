@@ -295,6 +295,37 @@ export const createAnonymousSessionSchema = z.strictObject({
 
 export type CreateAnonymousSession = z.infer<typeof createAnonymousSessionSchema>;
 
+/** What the Session's header needs to offer opening a pull request. */
+export const sessionPullRequestSchema = z.object({
+  /** True when the branch has commits its base lacks and no pull request is open for it. */
+  can_open: z.boolean(),
+  /** The pull request already open for the Session's branch. */
+  pull_request: z.object({ number: z.number().int(), url: z.string() }).nullable(),
+  /** The branch the pull request merges into by default: the Repo's default branch. */
+  base_branch: z.string().nullable(),
+  /** Files with changes not committed yet. The pull request leaves them out. */
+  uncommitted_files: z.number().int(),
+});
+
+export type SessionPullRequest = z.infer<typeof sessionPullRequestSchema>;
+
+export const pullRequestDraftRequestSchema = z.strictObject({ base_branch: z.string().trim().min(1).optional() });
+
+/** The agent's title and description for a pull request; null where the agent gave none. */
+export const pullRequestDraftSchema = z.object({ title: z.string().nullable(), description: z.string().nullable() });
+
+export type PullRequestDraft = z.infer<typeof pullRequestDraftSchema>;
+
+export const openPullRequestSchema = z.strictObject({
+  title: z.string().trim().min(1),
+  description: z.string(),
+  base_branch: z.string().trim().min(1),
+});
+
+export type OpenPullRequest = z.infer<typeof openPullRequestSchema>;
+
+export const openedPullRequestSchema = z.object({ number: z.number().int(), url: z.string() });
+
 export const checkoutSchema = z.object({ branch: z.string().trim().min(1), create: z.boolean().default(false) });
 
 export const checkoutResultSchema = z.object({ session: sessionSchema, stashed: z.boolean() });

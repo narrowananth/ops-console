@@ -267,6 +267,22 @@ export class Git {
     return (await this.try(dir, ['rev-parse', 'HEAD']))?.trim() ?? null;
   }
 
+  /** How many commits `branch` has that `origin/<base>` (the local `base` without it) lacks; 0 when either is missing. */
+  async commitsAhead(dir: string, base: string, branch: string): Promise<number> {
+    const from = (await this.commitOf(dir, `refs/remotes/origin/${base}`))
+      ? `refs/remotes/origin/${base}`
+      : `refs/heads/${base}`;
+    if (!(await this.commitOf(dir, from)) || !(await this.commitOf(dir, `refs/heads/${branch}`))) return 0;
+    const count = await this.try(dir, ['rev-list', '--count', `${from}..refs/heads/${branch}`]);
+    return Number.parseInt(count ?? '0', 10) || 0;
+  }
+
+  /** Files with changes not committed yet: staged, unstaged and untracked. */
+  async uncommittedFiles(dir: string): Promise<number> {
+    const out = await this.try(dir, ['status', '--porcelain']);
+    return (out ?? '').split('\n').filter((line) => line.trim() !== '').length;
+  }
+
   /** The commit `dir` is at. */
   async head(dir: string): Promise<string | null> {
     return (await this.try(dir, ['rev-parse', 'HEAD']))?.trim() || null;
@@ -276,9 +292,9 @@ export class Git {
    * Pushes the commit `dir` is at to `branch` on `origin`, never with force. A branch that moved on the remote throws
    * `BranchMoved`.
    */
-  async pushHead(dir: string, branch: string): Promise<void> {
+  async pushHead(dir: string, branch: string, source = 'HEAD'): Promise<void> {
     try {
-      await run(this.bin, ['-C', dir, 'push', '--quiet', 'origin', `HEAD:refs/heads/${branch}`], {
+      await run(this.bin, ['-C', dir, 'push', '--quiet', 'origin', `${source}:refs/heads/${branch}`], {
         maxBuffer: 10 * 1024 * 1024,
         env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
       });

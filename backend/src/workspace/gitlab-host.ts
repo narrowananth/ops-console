@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { ErrorCode, PrChecks, PrReviewState, PrState } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
-import type { GitHostAdapter, HostPullRequest, OwnedPullRequest } from './git-host';
+import type { GitHostAdapter, HostPullRequest, NewPullRequest, OwnedPullRequest } from './git-host';
 
 const run = promisify(execFile);
 
@@ -55,7 +55,8 @@ function toPullRequest(mr: z.infer<typeof mrSchema>): OwnedPullRequest {
 }
 
 /**
- * GitLab merge requests through `glab api`, listed only: opening one shows it on GitLab. Errors name the call only.
+ * GitLab merge requests through `glab api`: listed, and opened by the console. Everything else shows on GitLab. Errors
+ * name the call only.
  */
 export class GitlabHost implements GitHostAdapter {
   constructor(private readonly bin = 'glab') {}
@@ -105,6 +106,18 @@ export class GitlabHost implements GitHostAdapter {
     );
   }
 
+  async open(slug: string, pull: NewPullRequest): Promise<{ number: number; url: string }> {
+    const made = z.object({ iid: z.number().int(), web_url: z.string() }).parse(
+      await this.json(`projects/${encodeURIComponent(slug)}/merge_requests`, {
+        title: pull.title,
+        description: pull.body,
+        source_branch: pull.head,
+        target_branch: pull.base,
+      }),
+    );
+    return { number: made.iid, url: made.web_url };
+  }
+
   get = async () => this.unsupported();
   fileAt = async () => this.unsupported();
   deleteComment = async () => this.unsupported();
@@ -113,9 +126,15 @@ export class GitlabHost implements GitHostAdapter {
   review = async () => this.unsupported();
   merge = async () => this.unsupported();
 
-  private async json(path: string): Promise<unknown> {
+  /** A read, or with `fields` a POST that sends them as text. */
+  private async json(path: string, fields?: Record<string, string>): Promise<unknown> {
+    const args = ['api', path];
+    if (fields) {
+      args.push('-X', 'POST');
+      for (const [key, value] of Object.entries(fields)) args.push('--raw-field', `${key}=${value}`);
+    }
     try {
-      const pending = run(this.bin, ['api', path], { maxBuffer: 20 * 1024 * 1024, timeout: 60_000 });
+      const pending = run(this.bin, args, { maxBuffer: 20 * 1024 * 1024, timeout: 60_000 });
       pending.child.stdin?.end();
       return JSON.parse((await pending).stdout);
     } catch (error) {

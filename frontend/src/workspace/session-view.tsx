@@ -28,6 +28,7 @@ import {
   useRepos,
   useSendMessage,
   useSessionDiff,
+  useSessionPullRequest,
 } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { PlaybookLink } from '../playbooks/job-steps';
@@ -36,6 +37,7 @@ import { BranchSwitcher } from './branch-switcher';
 import { ConversationMap, ScrollToEnd, useFollowLatest } from './conversation';
 import { alertPath, pullRequestNamedIn, pullRequestPath, sessionDraftKey } from './links';
 import { MessageEditor, type MessageEditorHandle } from './message-editor';
+import { OpenPullRequestForm } from './open-pull-request';
 import { DiffPanel, DiffToggle, ResizeHandle, useDiffWidth } from './session-diff';
 import { SESSION_STATE_TIP } from './sessions-pane';
 
@@ -69,6 +71,9 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const sessionState = session?.state;
   const working = sessionState === SessionState.Working || sessionState === SessionState.WaitingApproval;
   const diff = useSessionDiff(id, hasDiff, diffOpen && working);
+  const openable = useSessionPullRequest(id, hasDiff);
+  // The form that opens the pull request, while the operator has it open.
+  const [formOpen, setFormOpen] = useState(false);
   // While the agent works, the branch it has checked out: it may make one for its fix. After the run the Session follows it.
   const branch = (working ? diff.data?.branch : null) ?? session?.branch ?? null;
   // A pull request the agent opened or named here wins over the one on the Session's branch.
@@ -163,7 +168,12 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             </Button>
           </span>
         </div>
-        {(branch || internalPull || externalPull || session.alert_id || session.playbook) && (
+        {(branch ||
+          internalPull ||
+          externalPull ||
+          session.alert_id ||
+          session.playbook ||
+          openable.data?.can_open) && (
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             {branch && (
               <span
@@ -193,6 +203,20 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 #{externalPull.number} on host ↗
               </a>
             )}
+            {openable.data?.can_open && !externalPull && (
+              <Button
+                className="px-2.5 py-0.5 text-xs"
+                title={
+                  busy
+                    ? 'Wait for the agent to finish'
+                    : 'Push this branch and open a pull request on the Git host. The agent drafts the text.'
+                }
+                disabled={busy || formOpen}
+                onClick={() => setFormOpen(true)}
+              >
+                Open pull request
+              </Button>
+            )}
             {session.alert_id && (
               <Link
                 to={alertPath(session.alert_id)}
@@ -217,6 +241,14 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
           </span>
         )}
       </header>
+      {formOpen && openable.data?.can_open && openable.data.base_branch !== null && (
+        <OpenPullRequestForm
+          sessionId={id}
+          baseBranch={openable.data.base_branch}
+          uncommittedFiles={openable.data.uncommitted_files}
+          onClose={() => setFormOpen(false)}
+        />
+      )}
       <div ref={setBody} className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="relative flex min-h-0 flex-1 flex-col">

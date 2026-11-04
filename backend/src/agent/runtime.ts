@@ -125,8 +125,6 @@ export type RunOptions = {
   resumeAt?: string;
   /** Tools denied on top of merging. */
   deny?: string[];
-  /** The Run sandbox lets the run read `~/.ssh`: a Fix, whose operator confirmed the Report. */
-  readSsh?: boolean;
 };
 
 type RunResult =
@@ -317,7 +315,6 @@ export class AgentRuntime {
       stopped: false,
       resumeAt: options.resumeAt ?? null,
       deny: options.deny ?? [],
-      readSsh: options.readSsh ?? false,
       networkDomains: this.network.forRun(),
       failure: null,
     };
@@ -445,7 +442,6 @@ export class AgentRuntime {
         workingDir: run.workingDir,
         dataDir: this.dataDir,
         readable: attached === null ? [] : [attached],
-        readSsh: run.readSsh,
         networkDomains: run.networkDomains,
       }),
       // The operator's attached files sit outside the working folder; the agent reads them without asking.

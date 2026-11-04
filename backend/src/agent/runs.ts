@@ -40,8 +40,6 @@ export type Run = {
   stopped: boolean;
   /** The conversation resumes from this transcript entry, dropping what came after it; null for all of it. */
   resumeAt: string | null;
-  /** Read `~/.ssh` in the Run sandbox: set for a Fix only. */
-  readSsh: boolean;
   /** The Network allowlist the run started with; a retry on another account keeps it. */
   networkDomains: string[];
   /** Why the run failed, when the console can say: the Run sandbox is unavailable, or the Keychain did not answer. */

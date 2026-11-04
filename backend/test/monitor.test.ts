@@ -162,6 +162,11 @@ const REPORT = {
 async function linkRepo(ctx: Ctx, serviceId: string): Promise<string> {
   ctx.dir = await makeRepo();
   const repo = await ctx.http.post('/repos', { path: ctx.dir });
+  // The Repo is on GitHub to the console; the console's push reaches a bare repository.
+  const bare = path.join(await tempDir('ops-console-origin-'), 'orders-api.git');
+  git(path.dirname(bare), 'init', '-q', '--bare', '-b', 'main', bare);
+  git(ctx.dir, 'remote', 'set-url', 'origin', bare);
+  git(ctx.dir, 'push', '-q', 'origin', 'main');
   await ctx.http.patch(`/services/${serviceId}`, { repo_id: repo.body.data.id });
   return repo.body.data.id;
 }
@@ -923,7 +928,7 @@ describe('Fix', () => {
   const TICKET = json({ key: 'ORD-7', url: 'https://example.atlassian.net/browse/ORD-7' });
   const CODED = outcome('done', 'defaulted the total');
   const PASSED = outcome('done', '12 passed');
-  const OPENED = json({ number: 41, url: 'https://github.com/acme/orders-api/pull/41' });
+  const OPENED = json({ description: 'Defaults the order total.' });
   const MOVED = json({ ok: true });
 
   /** Each stage is its own agent run, so each gets its own script. */
@@ -1034,15 +1039,25 @@ describe('Fix', () => {
     expect(prompts).toHaveLength(fix.playbook.steps.length + 1);
     expect(prompts.some((prompt) => prompt.includes('Atlassian'))).toBe(false);
     expect(prompts.at(-1)).toContain('- Confirm the root cause and look for an existing fix: the root cause holds');
-    // The Run sandbox lets every Fix turn read ~/.ssh to push, and the Verification before it could not.
+    // No run reads ~/.ssh, a Fix's included: the console pushes and opens the pull request (console-opens-pull-request 4, 16).
     const ssh = path.join(os.homedir(), '.ssh');
     const denied = (call: { options: { sandbox?: { filesystem?: { denyRead?: string[] } } } }) =>
       call.options.sandbox?.filesystem?.denyRead ?? [];
-    expect(ctx.daemon.sdk.calls.slice(before).map((call) => denied(call).includes(ssh))).toEqual(
-      prompts.map(() => false),
-    );
     expect(before).toBeGreaterThan(0);
-    expect(ctx.daemon.sdk.calls.slice(0, before).every((call) => denied(call).includes(ssh))).toBe(true);
+    expect(ctx.daemon.sdk.calls.every((call) => denied(call).includes(ssh))).toBe(true);
+    // The agent only wrote the description. The console pushed the branch and opened the pull request.
+    expect(prompts.at(-1)).toContain('Do not push and do not open a pull request');
+    expect(ctx.host.opened).toEqual([
+      {
+        title: '500 POST /orders failing on orders-api',
+        body: 'Defaults the order total.',
+        head: 'fix/null-order-total',
+        base: 'main',
+      },
+    ]);
+    expect(git(ctx.dir, 'ls-remote', '--heads', 'origin', 'fix/null-order-total').toString()).toContain(
+      'refs/heads/fix/null-order-total',
+    );
   });
 
   it('skips the ticket with Jira off and names the branch fix/<slug>', async () => {
@@ -1246,6 +1261,37 @@ describe('Fix', () => {
     expect(prompts).toHaveLength(3);
     expect(prompts.some((prompt) => prompt.includes('Create a Jira issue'))).toBe(false);
     expect((await ctx.http.post(`/fixes/${fixId}/retry`)).body.error.code).toBe('invalid_state');
+  });
+
+  it('fails the pull request stage with the console’s reason, pushes once, and a retry opens it without a duplicate (5, 6, 18)', async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    await linkRepo(ctx, alert.service.id);
+    await verify(ctx, alert.id);
+    setConnector(ctx.store, ConnectorId.Jira, { status: HealthStatus.Off });
+    setConnector(ctx.store, ConnectorId.Github, { status: HealthStatus.Off });
+    scriptSteps(ctx);
+    scriptRuns(ctx, OPENED);
+    const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
+    const fixId = confirm.body.data.fix.id;
+    const failed = await until(
+      () => ctx.http.get(`/fixes/${fixId}`).then((res) => res.body.data),
+      (fix) => fix.status === 'failed',
+      'the Fix to fail',
+    );
+    expect(failed).toMatchObject({ stage: 'pr', error_message: 'GitHub is not connected', pr_number: null });
+    expect(ctx.host.opened).toEqual([]);
+
+    setConnector(ctx.store, ConnectorId.Github, { status: HealthStatus.Ok, login: 'octo-operator' });
+    scriptRuns(ctx, OPENED);
+    expect((await ctx.http.post(`/fixes/${fixId}/retry`)).status).toBe(202);
+    await until(
+      () => ctx.http.get(`/fixes/${fixId}`).then((res) => res.body.data.status),
+      (status) => status === 'done',
+      'the retried Fix to finish',
+    );
+    expect(ctx.host.opened).toHaveLength(1);
+    expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.status).toBe('pr_open');
   });
 
   it('uses priority High for a high Alert', async () => {
@@ -1668,7 +1714,7 @@ describe('Playbooks in Monitor jobs', () => {
     });
     const before = ctx.daemon.sdk.calls.length;
     ctx.daemon.sdk.script(outcome('done', 'test added and passing'));
-    ctx.daemon.sdk.script(json({ number: 41, url: 'https://github.com/acme/orders-api/pull/41' }));
+    ctx.daemon.sdk.script(json({ description: 'Defaults the order total.' }));
     const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
     expect(confirm.body.data.fix.playbook).toMatchObject({ name: 'Lasting fix' });
     const fix = await until(

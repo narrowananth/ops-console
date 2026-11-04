@@ -3,7 +3,14 @@ import { promisify } from 'node:util';
 import { ErrorCode, PrChecks, type PrFile, PrReviewEvent, PrReviewState, PrState } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
-import type { GitHostAdapter, HostComment, HostPullRequest, NewHostComment, OwnedPullRequest } from './git-host';
+import type {
+  GitHostAdapter,
+  HostComment,
+  HostPullRequest,
+  NewHostComment,
+  NewPullRequest,
+  OwnedPullRequest,
+} from './git-host';
 import { encodePath } from './github-host';
 
 const run = promisify(execFile);
@@ -305,6 +312,18 @@ export class BitbucketHost implements GitHostAdapter {
 
   async merge(slug: string, number: number): Promise<void> {
     await this.json(`/repositories/${slug}/pullrequests/${number}/merge`, {}, 'POST', {});
+  }
+
+  async open(slug: string, pull: NewPullRequest): Promise<{ number: number; url: string }> {
+    const made = z.object({ id: z.number().int(), links: z.object({ html: z.object({ href: z.string() }) }) }).parse(
+      await this.json(`/repositories/${slug}/pullrequests`, {}, 'POST', {
+        title: pull.title,
+        description: pull.body,
+        source: { branch: { name: pull.head } },
+        destination: { branch: { name: pull.base } },
+      }),
+    );
+    return { number: made.id, url: made.links.html.href };
   }
 
   async fileAt(slug: string, ref: string, path: string): Promise<string | null> {

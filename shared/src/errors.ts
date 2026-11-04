@@ -16,6 +16,7 @@ export enum ErrorCode {
   ServiceUnlinked = 'service_unlinked',
   ConnectionNoAccess = 'connection_no_access',
   KeychainTimeout = 'keychain_timeout',
+  BranchMoved = 'branch_moved',
 }
 
 export const errorBodySchema = z.object({

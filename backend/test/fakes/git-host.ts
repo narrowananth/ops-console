@@ -14,6 +14,7 @@ import type {
   HostComment,
   HostPullRequest,
   NewHostComment,
+  NewPullRequest,
   OwnedPullRequest,
 } from '../../src/workspace/git-host';
 
@@ -56,6 +57,12 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
   readonly posted: (NewHostComment & { id: string; number: number })[] = [];
   readonly reviews: { number: number; event: PrReviewEvent; body: string }[] = [];
   readonly merged: number[] = [];
+  /** Every pull request the console opened, in order. */
+  readonly opened: NewPullRequest[] = [];
+  /** Opening fails like this while set. */
+  failOpen: ApiError | null = null;
+  /** The number the next opened pull request gets. */
+  nextOpenNumber = 41;
   /** Every read fails like this while set. */
   down: 'rate_limited' | 'failed' | null = null;
   failPosts: ((comment: NewHostComment) => boolean) | null = null;
@@ -177,6 +184,18 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
   async fileAt(_slug: string, ref: string, path: string): Promise<string | null> {
     this.check();
     return this.texts.get(`${ref}:${path}`) ?? null;
+  }
+
+  async open(slug: string, pull: NewPullRequest): Promise<{ number: number; url: string }> {
+    this.check();
+    if (this.failOpen) throw this.failOpen;
+    this.opened.push(pull);
+    const number = this.nextOpenNumber++;
+    const url = `https://github.com/${slug}/pull/${number}`;
+    this.prs.push(
+      hostPr(number, { url, title: pull.title, body: pull.body, branch: pull.head, base_branch: pull.base }),
+    );
+    return { number, url };
   }
 
   async merge(_slug: string, number: number): Promise<void> {

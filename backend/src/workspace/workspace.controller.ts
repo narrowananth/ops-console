@@ -1,14 +1,17 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import {
   type CommentPass,
   checkoutSchema,
+  openPullRequestSchema,
   type PrAgentReview,
   type PrComment,
   type PrFileContent,
   type PullRequest,
   type PullRequestDetail,
+  type PullRequestDraft,
   postCommentSchema,
   prFileQuerySchema,
+  pullRequestDraftRequestSchema,
   pullRequestQuerySchema,
   type ReplyCheck,
   refreshPullRequestsSchema,
@@ -17,13 +20,16 @@ import {
   reviewPullRequestSchema,
   type Session,
   type SessionDiff,
+  type SessionPullRequest,
   startCommentPassSchema,
   startReplyCheckSchema,
 } from '@ops-console/shared';
+import type { Response } from 'express';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
 import { AgentReviewsService } from './agent-reviews.service';
 import { CommentPassesService } from './comment-passes.service';
+import { PullRequestOpeningService } from './pull-request-opening.service';
 import { PullRequestsService } from './pull-requests.service';
 import { ReplyChecksService } from './reply-checks.service';
 import { WorkspaceSessionsService } from './workspace-sessions.service';
@@ -35,7 +41,10 @@ const commentParams = pullParams.extend({ comment_id: z.string().min(1) });
 /** Moving a `repo` Session's branch, and what its branch changes. */
 @Controller('sessions')
 export class WorkspaceSessionsController {
-  constructor(@Inject(WorkspaceSessionsService) private readonly workspace: WorkspaceSessionsService) {}
+  constructor(
+    @Inject(WorkspaceSessionsService) private readonly workspace: WorkspaceSessionsService,
+    @Inject(PullRequestOpeningService) private readonly opening: PullRequestOpeningService,
+  ) {}
 
   @Post(':id/checkout')
   @HttpCode(200)
@@ -52,6 +61,36 @@ export class WorkspaceSessionsController {
   async diff(@Param() params: unknown): Promise<{ data: SessionDiff }> {
     const { id } = parseInput(sessionParams, params, 'params');
     return { data: await this.workspace.diff(id) };
+  }
+
+  /** The open pull request of the Session's branch, or whether one can be opened. */
+  @Get(':id/pull-request')
+  async pullRequest(@Param() params: unknown): Promise<{ data: SessionPullRequest }> {
+    const { id } = parseInput(sessionParams, params, 'params');
+    return { data: await this.opening.status(id) };
+  }
+
+  /** The agent's title and description for the pull request; the operator edits them before it opens. */
+  @Post(':id/pull-request-draft')
+  @HttpCode(200)
+  async draft(@Param() params: unknown, @Body() body: unknown): Promise<{ data: PullRequestDraft }> {
+    const { id } = parseInput(sessionParams, params, 'params');
+    const input = parseInput(pullRequestDraftRequestSchema, body ?? {}, 'body');
+    return { data: await this.opening.draft(id, input.base_branch) };
+  }
+
+  /** Pushes the branch and opens the pull request: 201, or 200 when one was already open. */
+  @Post(':id/pull-request')
+  async open(
+    @Param() params: unknown,
+    @Body() body: unknown,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ data: { number: number; url: string } }> {
+    const { id } = parseInput(sessionParams, params, 'params');
+    const input = parseInput(openPullRequestSchema, body, 'body');
+    const { created, ...pull } = await this.opening.open(id, input);
+    res.status(created ? 201 : 200);
+    return { data: pull };
   }
 }
 

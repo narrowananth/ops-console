@@ -3,7 +3,14 @@ import { promisify } from 'node:util';
 import { ErrorCode, PrChecks, type PrFile, type PrReviewEvent, PrReviewState, PrState } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
-import type { GitHostAdapter, HostComment, HostPullRequest, NewHostComment, OwnedPullRequest } from './git-host';
+import type {
+  GitHostAdapter,
+  HostComment,
+  HostPullRequest,
+  NewHostComment,
+  NewPullRequest,
+  OwnedPullRequest,
+} from './git-host';
 
 const run = promisify(execFile);
 
@@ -279,6 +286,13 @@ export class GithubHost implements GitHostAdapter {
 
   async merge(slug: string, number: number): Promise<void> {
     await this.rest(`repos/${slug}/pulls/${number}/merge`, 'PUT', {});
+  }
+
+  async open(slug: string, pull: NewPullRequest): Promise<{ number: number; url: string }> {
+    const made = z
+      .object({ number: z.number().int(), html_url: z.string() })
+      .parse(await this.rest(`repos/${slug}/pulls`, 'POST', pull));
+    return { number: made.number, url: made.html_url };
   }
 
   async fileAt(slug: string, ref: string, path: string): Promise<string | null> {
