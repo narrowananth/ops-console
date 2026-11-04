@@ -434,6 +434,10 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-5-6-5M12 19h8"/></svg>
         <span class="lbl">Setup agent</span>
       </button>
+      <button class="item" data-page="permissions" title="Permissions">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+        <span class="lbl">Permissions</span>
+      </button>
       <div class="group"><span class="txt">Claude</span><span class="dot">·</span></div>
       <button class="item" data-page="agents" title="Agents &amp; accounts">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
@@ -1025,7 +1029,7 @@
               <div class="row" style="align-items:flex-start;gap:16px">
                 <span style="display:flex;width:48px;height:48px;flex:none;align-items:center;justify-content:center;border-radius:var(--r-lg);background:var(--accent-100);color:var(--accent)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-5-6-5M12 19h8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
                 <div class="grow"><h2 style="font-size:20px">Tell Claude what to set up</h2><p class="m muted" style="margin:6px 0 0;max-width:36rem">Claude runs in a terminal on this Mac. Ask in plain words and it adds Connections, MCP servers and Connectors for you.</p></div>
-                <button class="btn primary" data-go="setup:running">Start setup agent</button>
+                <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px"><button class="btn primary" data-go="setup:running">Start setup agent</button><a class="xs muted" href="#permissions" data-page="permissions">Needs Full Disk Access · Permissions →</a></div>
               </div>
               <div><div class="cap" style="margin-bottom:10px;font-weight:600;letter-spacing:.06em;color:var(--n600)">Try asking</div>
                 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">
@@ -1037,13 +1041,6 @@
             
           </div>
           <aside style="display:flex;width:320px;flex:none;flex-direction:column;gap:16px">
-            <section class="card" aria-label="Permissions" style="display:flex;flex-direction:column;gap:12px;padding:16px 18px;font-size:12px;overflow:visible">
-              <div class="row m"><svg width="20" height="20" viewBox="0 0 32 32" style="border-radius:22%"><rect width="32" height="32" fill="#ec3013"/><path d="M8 9.5l7 6.5-7 6.5" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="square"/><rect x="17" y="20" width="8" height="3.2" fill="#fff"/><rect x="25" y="4" width="3" height="3" fill="#fff"/></svg><strong>Permissions</strong></div>
-              <ul style="display:flex;flex-direction:column;gap:8px">
-                <li class="perm"><div class="row"><strong class="grow">Full Disk Access</strong><span class="status ok" style="font-size:11px;padding:2px 8px">● on</span></div><span class="muted">Reads every folder on this Mac.</span></li>
-                <li class="perm"><div class="row"><strong class="grow">Keychain</strong><span class="status" style="font-size:11px;padding:2px 8px">◐ asks each time</span></div><span class="muted">macOS asks before each saved password.</span></li>
-              </ul>
-            </section>
             <section class="card" style="display:flex;flex-direction:column;gap:12px;padding:16px 18px">
               <div class="m xb">What it sets up</div>
               <ul class="s muted" style="display:flex;flex-direction:column;gap:10px">
@@ -1054,6 +1051,38 @@
               </ul>
             </section>
           </aside>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Permissions (setup/permissions-tab.tsx) ============ -->
+    <section class="page" id="p-permissions">
+      <header class="ph"><div class="ph-in"><h1>Permissions</h1><span class="sub">What macOS lets Ops Console do, and what an agent run's commands can reach</span><span class="sp"></span></div></header>
+      <div class="pb">
+        <div style="margin:0 auto;display:flex;width:100%;max-width:720px;flex-direction:column;gap:20px;padding:28px 32px">
+          <section class="card" aria-label="Mac" style="display:flex;flex-direction:column;gap:12px;padding:16px 18px;font-size:12px;overflow:visible">
+            <div class="row m"><svg width="20" height="20" viewBox="0 0 32 32" style="border-radius:22%"><rect width="32" height="32" fill="#ec3013"/><path d="M8 9.5l7 6.5-7 6.5" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="square"/><rect x="17" y="20" width="8" height="3.2" fill="#fff"/><rect x="25" y="4" width="3" height="3" fill="#fff"/></svg><strong>On this Mac</strong></div>
+            <ul style="display:flex;flex-direction:column;gap:8px">
+            <li class="perm" aria-label="Full Disk Access"><div class="row"><strong class="grow" style="font-size:13px">Full Disk Access</strong><span class="status ok" style="font-size:11px;padding:2px 8px">● on</span></div><span class="muted">Reads every folder on this Mac.</span></li>
+            <li class="perm" aria-label="Start at login"><div class="row"><strong class="grow" style="font-size:13px">Start at login</strong><span class="status ok" style="font-size:11px;padding:2px 8px">● on</span></div><span class="muted">Runs in the background. macOS lists it under App Background Activity.</span><div class="row"><button class="btn xs">Open Login Items</button></div></li>
+            <li class="perm" aria-label="Keychain"><div class="row"><strong class="grow" style="font-size:13px">Keychain</strong><span class="status" style="font-size:11px;padding:2px 8px">◐ asks each time</span></div><span class="muted">macOS asks before each saved password.</span></li>
+            </ul>
+          </section>
+          <section class="card" aria-label="Agent runs" style="display:flex;flex-direction:column;gap:12px;padding:16px 18px;font-size:12px;overflow:visible">
+            <div class="row m"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/></svg><strong>Agent runs</strong></div>
+            <ul style="display:flex;flex-direction:column;gap:8px">
+            <li class="perm" aria-label="Run sandbox"><div class="row"><strong class="grow" style="font-size:13px">Run sandbox</strong><span class="status ok" style="font-size:11px;padding:2px 8px">● on</span></div><span class="muted">Limits what an agent run's commands can write and read.</span></li>
+            <li class="perm" aria-label="Network allowlist">
+              <details open style="display:flex;flex-direction:column;gap:6px"><summary class="b" style="cursor:pointer;font-size:13px">Network allowlist: 7 domains</summary><span class="muted" style="display:block;margin-top:6px">The only hosts an agent run's commands can reach.</span>
+                <div style="display:flex;flex-direction:column;gap:12px;margin-top:10px">
+                  <div><div class="xs b muted" style="margin-bottom:4px">Built-in</div><ul style="display:flex;flex-direction:column;gap:2px"><li class="mono xs">github.com</li><li class="mono xs">api.github.com</li><li class="mono xs">*.githubusercontent.com</li><li class="mono xs">registry.npmjs.org</li><li class="mono xs">bitbucket.org</li><li class="mono xs">gitlab.example.com</li></ul></div>
+                  <div><div class="xs b muted" style="margin-bottom:4px">Added by you</div><ul style="display:flex;flex-direction:column;gap:2px"><li class="row mono xs"><span class="grow">npm.example.com</span><button class="btn ghost xxs">Remove</button></li></ul></div>
+                  <div class="row" style="gap:8px"><input class="field grow" aria-label="Domain" placeholder="npm.example.com" style="border-radius:var(--r-md)"><button class="btn xs">Add</button></div>
+                  <span class="xs muted">*.example.com covers subdomains. Add example.com too if you need it.</span>
+                </div>
+              </details></li>
+            </ul>
+          </section>
         </div>
       </div>
     </section>

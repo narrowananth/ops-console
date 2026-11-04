@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 // `bkt api <path> [-P k=v]...` answering from canned Bitbucket Cloud bodies.
+import { appendFileSync } from 'node:fs';
+
 const [, , command, path, ...rest] = process.argv;
 if (command !== 'api') process.exit(2);
+// BKT_LOG: every path asked for is appended here. BKT_IDLE_UPDATED: when the repository `idle` was last pushed to.
+if (process.env.BKT_LOG) appendFileSync(process.env.BKT_LOG, `${path}\n`);
 const pr = (id, repo, extra = {}) => ({
   id,
   title: `Change ${id}`,
@@ -22,8 +26,15 @@ const bodies = {
   '/user/workspaces': { values: [{ workspace: { slug: 'acme' } }] },
   '/repositories/acme':
     page === 1
-      ? { values: [{ slug: 'orders' }], next: 'https://api.example.com/next' }
-      : { values: [{ slug: 'billing' }] },
+      ? {
+          values: [
+            { slug: 'orders', updated_on: '2026-10-03T10:00:00.000000+00:00' },
+            { slug: 'idle', updated_on: process.env.BKT_IDLE_UPDATED ?? '2026-09-01T10:00:00.000000+00:00' },
+          ],
+          next: 'https://api.example.com/next',
+        }
+      : { values: [{ slug: 'billing', updated_on: '2026-10-02T10:00:00.000000+00:00' }] },
+  '/repositories/acme/idle/pullrequests': { values: [] },
   '/repositories/acme/orders/pullrequests': { values: [pr(1, 'orders')] },
   '/repositories/acme/billing/pullrequests': {
     values: [pr(2, 'billing', { participants: [{ approved: false, state: 'changes_requested' }] })],

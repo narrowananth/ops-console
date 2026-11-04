@@ -9,6 +9,7 @@ import { usePrefetchPullRequests } from '../lib/queries';
 import { MonitorView } from '../monitor/monitor-view';
 import { NewPlaybookButton, PlaybooksView } from '../playbooks/playbooks-view';
 import { ReposTab } from '../repos/repos-tab';
+import { PermissionsTab } from '../setup/permissions-tab';
 import { SetupAgentButton } from '../setup/setup-agent-link';
 import { SetupAgentTab } from '../setup/setup-agent-tab';
 import { WorkspaceView } from '../workspace/workspace-view';
@@ -106,6 +107,17 @@ export function Shell() {
               element={
                 <Page title="Setup agent" sub="Claude adds Connections, MCP servers and Connectors for you">
                   <SetupAgentTab />
+                </Page>
+              }
+            />
+            <Route
+              path="/permissions"
+              element={
+                <Page
+                  title="Permissions"
+                  sub="What macOS lets Ops Console do, and what an agent run's commands can reach"
+                >
+                  <PermissionsTab />
                 </Page>
               }
             />

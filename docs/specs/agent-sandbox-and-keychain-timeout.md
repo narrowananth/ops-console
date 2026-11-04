@@ -1,7 +1,7 @@
 # Agent Sandbox and Keychain Timeout
 
 **Status:** shipped
-**Design:** none. Setup agent page, Permissions: gains two rows. The app shell gains a banner.
+**Design:** none. Permissions page: gains two rows. The app shell gains a banner.
 
 ## Problem
 
@@ -46,7 +46,7 @@ no reason why.
    otherwise reads it from. A run gets no `GH_TOKEN` while the Connector holds none. The files the operator
    attached to a Session stay readable. MCP Servers and Connections are unchanged, and a PROD write still
    waits for an Approval in every Access mode.
-10. Setup agent > Permissions shows a read-only row, Run sandbox: on, or unavailable with the reason. The
+10. Permissions shows a read-only row, Run sandbox: on, or unavailable with the reason. The
     daemon tests the sandbox with a trivial command each time the row is read. The row has no control.
 
 ### Keychain wait
@@ -171,7 +171,7 @@ true, and once with `waiting` false when the last pending call ends or times out
 - **App shell banner**: on every page, above the page. States: hidden; shown with "Keychain is waiting for
   the Mac's password prompt" and, below it, "Answer it on the Mac." It has no close button and goes away
   when `waiting` turns false. Follows no design screen.
-- **Setup agent > Permissions**: two rows beside Full Disk Access and Start at login. Run sandbox: loading,
+- **Permissions**: two rows beside Full Disk Access and Start at login. Run sandbox: loading,
   on, unavailable with the reason, and an error row when the read fails. Keychain: idle, waiting with the
   time since, and the same text as the banner. Neither row has a control. In a dev build the rows read the
   dev daemon's state. Departs from the design, as Permissions already does.
