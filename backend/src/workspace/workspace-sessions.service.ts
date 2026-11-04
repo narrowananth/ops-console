@@ -114,7 +114,8 @@ export class WorkspaceSessionsService {
   /**
    * What the Session's own branch changes, read from the Repo folder now. The folder may have another Session's branch
    * checked out; that branch's changes are not this Session's, so they do not show and do not move it. While the
-   * Session runs, the branch checked out is its agent's doing, as when it makes a branch for its fix.
+   * Session runs, its branch is the one its own run checked out, as when the agent makes a branch for its fix; a run
+   * that has checked out nothing yet stays on the Session's branch, whatever the folder has checked out.
    */
   async diff(sessionId: string): Promise<SessionDiff> {
     const session = this.sessions.get(sessionId);
@@ -123,8 +124,12 @@ export class WorkspaceSessionsService {
     }
     const repo = this.repo(session.repoId);
     // Only a run working in the Repo's folder owns what it has checked out; one in a scratch copy does not.
-    const inFolder = this.runs.get(sessionId)?.workingDir === repo.path;
-    const branch = (inFolder ? await this.git.branchName(repo.path) : null) ?? session.branch;
+    const run = this.runs.get(sessionId);
+    const moved =
+      run?.workingDir === repo.path
+        ? workedBranch(await this.git.checkoutsSince(repo.path, new Date(run.createdAt)), repo.defaultBranch)
+        : undefined;
+    const branch = moved ?? session.branch;
     if (branch === null) return { branch: null, base: null, files: [], additions: 0, deletions: 0 };
     return this.git.changes(repo.path, repo.defaultBranch, branch);
   }
@@ -139,8 +144,7 @@ export class WorkspaceSessionsService {
     const session = this.sessions.get(sessionId);
     if (session.kind !== SessionKind.Repo || session.repoId === null) return;
     const repo = this.repo(session.repoId);
-    const moves = await this.git.checkoutsSince(repo.path, since);
-    const branch = moves.find((name) => name !== repo.defaultBranch) ?? moves[0];
+    const branch = workedBranch(await this.git.checkoutsSince(repo.path, since), repo.defaultBranch);
     if (branch !== undefined && branch !== session.branch) this.follow(session.id, branch);
   }
 
@@ -192,4 +196,9 @@ export class WorkspaceSessionsService {
     if (!row) throw new ApiError(404, ErrorCode.NotFound, 'no such Repo');
     return row;
   }
+}
+
+/** The branch a run worked on, from its checkouts newest first: a branch other than the default, else the default. */
+function workedBranch(moves: string[], defaultBranch: string): string | undefined {
+  return moves.find((name) => name !== defaultBranch) ?? moves[0];
 }
