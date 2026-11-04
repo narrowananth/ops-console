@@ -25,7 +25,8 @@ import { RELEASES, type ReleaseSource } from './releases';
 
 export const UPDATES = 'updates';
 const FIRST_CHECK_MS = 10_000;
-const CHECK_EVERY_MS = 6 * 60 * 60_000;
+/** A release is found within a minute of going out; each check is one small request to GitHub (`GithubReleases`). */
+const CHECK_EVERY_MS = 60_000;
 /** How often an update waiting on agent runs looks again. */
 const IDLE_POLL_MS = 30_000;
 /** The states the Running count shows; a restart fails each of them. */

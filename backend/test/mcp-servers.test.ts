@@ -516,13 +516,13 @@ describe('authenticating and reconnecting', () => {
     for (const dir of ctx.dirs) ctx.probe.set(dir, 'sentry', { status: 'needs-auth' });
     const { events, close } = await listen(ctx.daemon);
     await api(ctx.daemon).post('/mcp-servers/sentry/auth');
+    // A check from adding the server may still land first and read ok; wait for the one after the failed sign-in.
     await until(
       () => checked(events),
-      (found) => found.length > 0,
-      'a check',
+      (found) => found.at(-1)?.status === 'auth',
+      'an auth check',
     );
     close();
-    expect(checked(events).at(-1)?.status).toBe('auth');
     expect(await find(ctx, 'sentry')).toMatchObject({ status: 'auth' });
   });
 
