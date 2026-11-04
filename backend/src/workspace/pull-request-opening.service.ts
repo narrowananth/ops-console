@@ -16,6 +16,7 @@ import {
 import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { ActionLogService } from '../action-log/action-log.service';
+import { type OpenPullRequestInput, type PullRequestOpener } from '../agent/pull-request-tool';
 import { AgentRuntime } from '../agent/runtime';
 import { SessionsService } from '../agent/sessions.service';
 import { parseAgentJson } from '../common/agent-json';
@@ -57,7 +58,7 @@ export type Published = { number: number; url: string; created: boolean };
  * rest in the daemon, outside the Run sandbox, as the operator (ADR 0005, ADR 0006). Same steps for every Git host.
  */
 @Injectable()
-export class PullRequestOpeningService {
+export class PullRequestOpeningService implements PullRequestOpener {
   /** Openings under way, so a second click on one branch waits for the first and gets its pull request. */
   private readonly inflight = new Map<string, Promise<Published>>();
 
@@ -70,7 +71,9 @@ export class PullRequestOpeningService {
     @Inject(ConnectorsService) private readonly connectors: ConnectorsService,
     @Inject(PullRequestsService) private readonly pulls: PullRequestsService,
     @Inject(AgentRuntime) private readonly runtime: AgentRuntime,
-  ) {}
+  ) {
+    runtime.setPullRequestOpener(this);
+  }
 
   /** What the Session's header shows: the open pull request, or whether one can be opened. */
   async status(sessionId: string): Promise<SessionPullRequest> {
@@ -114,9 +117,55 @@ Change nothing: no commit, no push, no pull request. The console pushes and open
     }
   }
 
+  /** The agent may ask in a Session's own Repo folder, on a Git host the console can open on. */
+  offers(sessionId: string, dir: string): boolean {
+    const found = this.target(sessionId);
+    return (
+      found !== null &&
+      found.repo.path === dir &&
+      found.repo.host !== GitHost.Local &&
+      found.repo.remoteSlug !== null &&
+      this.hosts.supports(found.repo.host)
+    );
+  }
+
+  /** What the operator reads before approving the agent's request. */
+  async describe(sessionId: string, input: OpenPullRequestInput): Promise<string> {
+    const { repo, branch, base } = await this.resolve(sessionId, input);
+    return `Push ${branch} and open a pull request into ${base} on ${repo.host}: "${input.title}"`;
+  }
+
+  /** The agent's request, after the operator approved it. */
+  async open(sessionId: string, input: OpenPullRequestInput): Promise<Published> {
+    const { branch, base } = await this.resolve(sessionId, input);
+    return this.openBranch(sessionId, branch, {
+      title: input.title,
+      description: input.description,
+      base_branch: base,
+    });
+  }
+
+  /** The branch the agent means (the one checked out in the Repo's folder unless it names another) and its base. */
+  private async resolve(sessionId: string, input: OpenPullRequestInput) {
+    const found = this.target(sessionId);
+    if (!found) throw new ApiError(409, ErrorCode.InvalidState, 'Only a Session in a Repo opens a pull request');
+    const branch = input.branch ?? (await this.git.currentBranch(found.repo.path)) ?? found.branch;
+    const base = input.base_branch ?? found.repo.defaultBranch;
+    await this.openable(sessionId, base, branch);
+    return { repo: found.repo, branch, base };
+  }
+
   /** Pushes the Session's branch and opens its pull request. An open one for the branch is returned, not duplicated. */
-  async open(sessionId: string, input: OpenPullRequest): Promise<Published> {
-    const { repo, branch } = await this.openable(sessionId, input.base_branch);
+  async openFromUi(sessionId: string, input: OpenPullRequest): Promise<Published> {
+    return this.openBranch(sessionId, undefined, input);
+  }
+
+  private async openBranch(
+    sessionId: string,
+    onBranch: string | undefined,
+    input: OpenPullRequest,
+  ): Promise<Published> {
+    const { repo, branch } = await this.openable(sessionId, input.base_branch, onBranch);
     return this.publish({
       sessionId,
       dir: repo.path,
@@ -257,9 +306,10 @@ Change nothing: no commit, no push, no pull request. The console pushes and open
   }
 
   /** The Session's Repo and branch, or `invalid_state` when no pull request can open from it. */
-  private async openable(sessionId: string, base?: string) {
-    const found = this.target(sessionId);
-    if (!found) throw new ApiError(409, ErrorCode.InvalidState, 'Only a Session in a Repo opens a pull request');
+  private async openable(sessionId: string, base?: string, onBranch?: string) {
+    const target = this.target(sessionId);
+    if (!target) throw new ApiError(409, ErrorCode.InvalidState, 'Only a Session in a Repo opens a pull request');
+    const found = { repo: target.repo, branch: onBranch ?? target.branch };
     const { repo, branch } = found;
     if (repo.host === GitHost.Local || repo.remoteSlug === null || !this.hosts.supports(repo.host)) {
       throw new ApiError(

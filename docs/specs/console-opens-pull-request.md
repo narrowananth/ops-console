@@ -1,7 +1,7 @@
 # Console opens the pull request
 
 **Status:** shipped
-**Design:** none. Workspace Session header: gains an "Open pull request" button, and a form under the header. Departs from the design, which has no such control.
+**Design:** none. Workspace Session header: gains an "Open pull request" button, and a form under the header. A chat run gains a console tool the operator approves. Departs from the design, which has no such control.
 
 ## Problem
 
@@ -13,7 +13,7 @@ The console already pushes and talks to every Git host outside the sandbox, sign
 
 ### Who does what
 
-1. An agent run commits the work and writes the pull request's title and description. It never pushes and never opens a pull request, in any Session kind and any Access mode. Its prompt says so, and says the console does it.
+1. An agent run commits the work and writes the pull request's title and description. It never pushes and never opens a pull request itself, in any Session kind and any Access mode. Its prompt says so, and says the console does it when the agent asks through the console's `open_pull_request` tool (Behavior 12).
 2. The console pushes the branch to `origin` and opens the pull request on the Repo's Git host. Both run in the daemon, outside the Run sandbox, as the operator: the push uses the Repo's own `origin` remote and keys, the pull request uses the Connector's CLI (`gh`, `glab` or `bkt`). Same steps for all three hosts.
 3. The console never forces a push and never merges (ADR 0002).
 
@@ -30,7 +30,7 @@ The console already pushes and talks to every Git host outside the sandbox, sign
 9. The button opens a form under the header with a title, a description and a base branch. An agent turn in the same Session fills the title and description from the Session's diff, following the pull request description rule. While it runs the form shows a placeholder and the fields are read-only. If the turn fails or does not answer as asked, the fields start empty and the operator can write them.
 10. The base branch starts as the Repo's default branch. The operator may change it to any branch origin has.
 11. The operator edits the fields and confirms. The console pushes, opens the pull request and shows its number and link in the Session header, replacing the button. The Session's pull request list refreshes.
-12. Asking the agent in chat to "create a PR" gets a reply that points to the button. The agent does not try to push.
+12. Asking the agent in chat to "create a PR" makes it call the `open_pull_request` tool with a title and a description. The tool is offered only to a Session in a Repo, in the Repo's own folder, on a supported Git host. Before it runs, an Approval asks in every Access mode, `full` included: "Push <branch> and open a pull request into <base> on <host>: <title>". Nothing is pushed before the yes. A yes has the console push and open it, as the button does, and the tool answers the agent with the link. A no pushes and opens nothing, and the agent is told not to retry. A call that cannot open anything (the default branch, no new commits, no supported host) is refused before the Approval, with the reason. The branch is the one checked out in the Repo's folder unless the agent names another, and the base is the Repo's default branch unless it names another. A run with no such tool, such as an anonymous Session or one in a scratch copy, says the operator opens it with the button or pushes by hand.
 13. Every push and every pull request opening writes an Action Log row first and finishes it `ok` or `failed`, with the failure reason.
 14. Two clicks at once, or two browsers, open one pull request. The second confirm finds the open pull request and shows it, with no error and no duplicate.
 15. A reload mid-draft closes the form; the button is there to start it again. A reload after confirm shows the link.
@@ -53,6 +53,7 @@ The console already pushes and talks to every Git host outside the sandbox, sign
 - **Push command**: the existing never-force push of the Session's HEAD to `origin`. `ssh` remotes work because the daemon is not sandboxed.
 - **Host adapters**: each gains "open a pull request": title, description, head branch, base branch, answering the number and link. GitHub through `gh`, GitLab through `glab`, Bitbucket through `bkt`. A pull request already open for the head branch is returned in place of a new one.
 - **Operator click in chat, none in Fix**: ADR 0002. A Fix starts only after the Report is confirmed; a chat Session has no such gate, so the button is the gate.
+- **Agent's request**: the console's own in-process MCP server `ops-console`, with one tool, `open_pull_request` (title, description, optional base and branch). The Approval is raised by the run's PreToolUse hook, which runs in every Access mode, so `full` asks too. It is an ordinary `command` Approval; the Action Log rows come from the push and the opening themselves.
 - **Draft turn**: a normal agent run in the Session. It reads the Session's diff, writes JSON with a title and a description and changes nothing.
 - **Host cannot be read**: the Session header treats it as no open pull request and offers the button; a click finds the open one, so none is duplicated.
 - **Uncommitted changes**: left out and named in the form. The console does not commit for the operator.
@@ -60,7 +61,7 @@ The console already pushes and talks to every Git host outside the sandbox, sign
 
 ## Not required
 
-- **The agent opening a pull request itself** in a chat. The operator clicks the button.
+- **The agent opening a pull request on its own**: it asks, and the operator approves. The button stays as the manual path.
 - **Pushing from a run over ssh or https**: still fails or stays blocked. Review flags code that tries to make it work.
 - **A commit made by the console** for uncommitted changes.
 - **Finding the open pull request past the host's first page** (50 on GitHub and Bitbucket, 100 on GitLab): a branch whose pull request sits beyond it is opened again, and the host refuses the duplicate.
@@ -69,7 +70,7 @@ The console already pushes and talks to every Git host outside the sandbox, sign
 
 ## Safety
 
-The agent's reach shrinks. A run loses `~/.ssh` in a Fix and loses the instruction to push and open pull requests. It gains nothing. The push and the pull request opening run in the daemon, never with force, and only after the Report's confirmation (Fix) or the operator's click (chat). The console runs no shell command a run chose. ADR 0002 and ADR 0003 hold. The PROD-write rule is untouched.
+The agent's reach shrinks, with one addition. A run loses `~/.ssh` in a Fix and loses the instruction to push and open pull requests. A chat run gains one tool that can push its branch and open a pull request, and the tool runs only after the operator approves each call. The push and the opening run in the daemon, never with force, and only after the Report's confirmation (Fix), the operator's click or the operator's Approval (chat). A run steered by a log line can ask for a pull request, and the operator sees the branch and title before anything leaves the Mac. The console runs no shell command a run chose. ADR 0002 and ADR 0003 hold. The PROD-write rule is untouched.
 
 ## API
 
@@ -144,7 +145,6 @@ Workspace Session header: an "Open pull request" button, shown by Behavior 8; th
 - **A token handed to the run, as for GitHub**: `bkt` has no export and its OAuth token lasts about 2 hours. GitLab is unverified. Copies expire or leak.
 - **A `bkt` API token the operator types**: breaks ADR 0005 ("the operator types no token").
 - **Relaxing the sandbox** (write `~/.ssh/known_hosts`, `~/.config/bkt`, the Keychain): opens the files the sandbox protects, and `ssh` still ignores the proxy.
-- **An agent tool with an Approval card**: needs a console-side MCP server for one action a button does.
 
 ## Glossary
 
@@ -157,7 +157,7 @@ Workspace Session header: an "Open pull request" button, shown by Behavior 8; th
 
 ## Seams
 
-- **Pull request opening** (backend + SQLite, Supertest, a fake Git host adapter, real git against a bare `origin`; a new test file and the Fix tests in Monitor): 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 18.
+- **Pull request opening** (backend + SQLite, Supertest, a fake Git host adapter, real git against a bare `origin`, the fake SDK recording its options and running the PreToolUse hook; a new test file and the Fix tests in Monitor): 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 18.
 - **Run sandbox options** (backend, fake SDK that records options, and the real-sandbox test): 16, 17.
 - **Browser** (Playwright with the daemon's answers scripted; a new spec): 9, 10, 11, 15.
 - **Unchanged code, pinned by the existing tests** (the Agent Review, Reply check and Comment pass deny lists; the `GH_TOKEN` run env): 19, 20.

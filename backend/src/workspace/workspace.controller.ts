@@ -88,7 +88,7 @@ export class WorkspaceSessionsController {
   ): Promise<{ data: { number: number; url: string } }> {
     const { id } = parseInput(sessionParams, params, 'params');
     const input = parseInput(openPullRequestSchema, body, 'body');
-    const { created, ...pull } = await this.opening.open(id, input);
+    const { created, ...pull } = await this.opening.openFromUi(id, input);
     res.status(created ? 201 : 200);
     return { data: pull };
   }

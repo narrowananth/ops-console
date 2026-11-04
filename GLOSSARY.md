@@ -171,7 +171,7 @@ A local git repository imported into the console, identified by its top folder, 
 The service holding a Repo's remote: GitHub, GitLab or Bitbucket.
 
 **Pull request opening**:
-The console's push of a Session's branch to `origin` and its call to the Git host to open the pull request, run in the daemon as the operator. The agent writes the title and description; it never pushes or opens. The operator's click starts it in a Session, and a confirmed Fix starts it by itself.
+The console's push of a Session's branch to `origin` and its call to the Git host to open the pull request, run in the daemon as the operator. The agent writes the title and description; it never pushes or opens. The operator's click starts it in a Session, as does the operator's Approval of the agent's request, and a confirmed Fix starts it by itself.
 
 **Session**:
 One conversation between the operator and the agent. It runs in one Repo on one branch, except a
