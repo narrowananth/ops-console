@@ -17,7 +17,7 @@ export type SessionKindHandler = {
   /** What a step shows for an MCP server: its Connection and Access Level. */
   serverLabel?: (server: string) => string | null;
   /** Runs after each run ends, such as reading which branch the agent worked on. Its errors are ignored. */
-  afterRun?: (session: SessionRow, run: { startedAt: string }) => Promise<void>;
+  afterRun?: (session: SessionRow, run: { startedAt: string; workingDir: string }) => Promise<void>;
   /** Appended to Claude Code's system prompt on this kind's runs. */
   instructions?: string;
 };

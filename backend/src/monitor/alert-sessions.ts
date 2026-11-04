@@ -5,7 +5,7 @@ import { SessionsService } from '../agent/sessions.service';
 import { ApiError } from '../common/errors';
 import { repos, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
-import { cloneUrl, GIT, Git } from '../repos/git';
+import { cloneUrl } from '../repos/git';
 import { AnonymousSessionsService } from '../workspace/anonymous-sessions.service';
 import type { AlertRow, ServiceRow } from './mappers';
 
@@ -22,7 +22,6 @@ export type CodeSource = { kind: 'repo'; repo: RepoRow; name: string } | { kind:
 export class AlertSessions {
   constructor(
     @Inject(STORE) private readonly store: Store,
-    @Inject(GIT) private readonly git: Git,
     @Inject(SessionsService) private readonly sessions: SessionsService,
     @Inject(AnonymousSessionsService) private readonly anonymous: AnonymousSessionsService,
   ) {}
@@ -57,8 +56,12 @@ export class AlertSessions {
     const source = this.sourceOf(service);
     const title = alert.title.slice(0, 80);
     if (source.kind === 'repo') {
-      const branch = (await this.git.currentBranch(source.repo.path)) ?? source.repo.defaultBranch;
-      const created = this.sessions.create({ kind: SessionKind.Repo, repoId: source.repo.id, branch });
+      // What the folder has checked out may be another Session's branch; this one has made none yet.
+      const created = this.sessions.create({
+        kind: SessionKind.Repo,
+        repoId: source.repo.id,
+        branch: source.repo.defaultBranch,
+      });
       this.sessions.write(created.id, { alertId: alert.id, title });
       return created.id;
     }
