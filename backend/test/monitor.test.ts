@@ -678,6 +678,10 @@ describe('Verification', () => {
     const kinds = listener.events.map((e: WsEvent) => e.event);
     expect(kinds).toContain('verification.stepped');
     expect(kinds).toContain('alert.verified');
+    // Each step is a run the job started, not the operator: the page plays no sound for it.
+    const finished = listener.events.flatMap((e: WsEvent) => (e.event === 'session.finished' ? [e.data] : []));
+    expect(finished.length).toBeGreaterThan(0);
+    expect(finished.every((data) => data.started_by === 'console')).toBe(true);
     listener.close();
     const events = (await ctx.http.get(`/alerts/${alert.id}/events`)).body.data.map((e: { kind: string }) => e.kind);
     expect(events).toEqual(['detected', 'verification_started', 'verified']);

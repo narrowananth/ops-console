@@ -174,6 +174,7 @@ describe('runs', () => {
       status: 'done',
       state: 'idle',
       error_code: null,
+      started_by: 'operator',
     });
     close();
   });

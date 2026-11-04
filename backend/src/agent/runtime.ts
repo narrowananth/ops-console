@@ -563,6 +563,7 @@ export class AgentRuntime {
         status: failed ? 'failed' : 'done',
         state: failed ? SessionState.Failed : SessionState.Idle,
         error_code: failed ? result : null,
+        started_by: run.onFinish ? 'console' : 'operator',
       });
     });
     // A Session deleted mid-run has nothing to look at after it.

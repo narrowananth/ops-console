@@ -12,6 +12,7 @@ import { Button } from '../components/ui/button';
 import { Dropdown } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
 import { Toggle } from '../components/ui/toggle';
+import { CHIME_KEY, chimeSchema, playChime, unlockChime } from '../lib/chime';
 import {
   useActivateAccount,
   useAddAccount,
@@ -23,6 +24,7 @@ import {
   useRemoveAccount,
   useStartLogin,
 } from '../lib/queries';
+import { useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
 import { ACCESS_MODES, EFFORTS, MODELS } from './options';
 import { SignInLinkDialog } from './sign-in-link-dialog';
@@ -522,6 +524,36 @@ export function AgentsTab() {
           </Section>
         </>
       )}
+      <SoundSection />
     </div>
+  );
+}
+
+/** Per browser, like the theme: whether a run the operator started chimes when it ends. */
+function SoundSection() {
+  const [on, setOn] = useStored(CHIME_KEY, chimeSchema, true);
+  return (
+    <Section title="Notifications" sub="What this browser does when the agent is done.">
+      <div className="flex items-center gap-4 px-5 py-4">
+        <div className="flex-1">
+          <div className="font-semibold">Sound when the agent finishes</div>
+          <div className="text-xs text-neutral-700">
+            A soft two-note chime when a run you started ends: rising when it finished, falling when it failed. Monitor
+            and pull request jobs stay quiet.
+          </div>
+        </div>
+        <Button
+          className="px-3 py-1.25 text-xs"
+          title="Hear the chime"
+          onClick={() => {
+            unlockChime();
+            playChime('done', true);
+          }}
+        >
+          Play
+        </Button>
+        <Toggle label="Sound when the agent finishes" checked={on} onChange={setOn} />
+      </div>
+    </Section>
   );
 }

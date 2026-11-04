@@ -1,6 +1,7 @@
 import { WS_PATH, WS_PROTOCOL, wsEventSchema } from '@ops-console/shared';
 import { type QueryKey, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
+import { playChime, unlockChime } from './chime';
 import { queryKeys } from './queries';
 import { sessionToken } from './session';
 
@@ -24,6 +25,9 @@ export function useLiveEvents(): void {
         for (const key of keys) void client.invalidateQueries({ queryKey: key });
       }, BATCH_MS);
     };
+    // Audio may start only after the operator touched the page.
+    document.addEventListener('pointerdown', unlockChime);
+    document.addEventListener('keydown', unlockChime);
     const url = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}${WS_PATH}`;
     const socket = new WebSocket(url, [WS_PROTOCOL, token]);
     socket.addEventListener('message', (message) => {
@@ -55,7 +59,11 @@ export function useLiveEvents(): void {
       if (event.event === 'session.output' || event.event === 'session.finished') {
         refetch(queryKeys.messages(event.data.session_id));
       }
-      if (event.event === 'session.finished') refetch(queryKeys.sessionDiff(event.data.session_id));
+      if (event.event === 'session.finished') {
+        refetch(queryKeys.sessionDiff(event.data.session_id));
+        // Only the operator's own runs: a Monitor job's steps would chime once per step.
+        if (event.data.started_by === 'operator') playChime(event.data.status);
+      }
       if (
         event.event === 'pull_request.refreshed' ||
         event.event === 'pull_request.commented' ||
@@ -89,6 +97,8 @@ export function useLiveEvents(): void {
     return () => {
       if (timer) clearTimeout(timer);
       socket.close();
+      document.removeEventListener('pointerdown', unlockChime);
+      document.removeEventListener('keydown', unlockChime);
     };
   }, [client]);
 }
