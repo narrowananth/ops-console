@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  # A run again by hand, from the Actions tab or `gh workflow run ci.yml`.
+  workflow_dispatch:
 
 jobs:
   check:
