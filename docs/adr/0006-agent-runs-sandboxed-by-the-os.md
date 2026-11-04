@@ -2,7 +2,7 @@
 
 Every agent run's shell commands run in the Run sandbox: the Claude Agent SDK's own `sandbox` option, which on macOS
 is Seatbelt. A run writes only in its working folder and the temp folders, and reads neither the data folder nor
-`~/.aws`, `~/.config/gcloud` or the login Keychain folder. It reads `~/.ssh` only in a Fix. The data folder holds
+`~/.aws`, `~/.config/gcloud`, `~/.ssh` or the login Keychain folder. The data folder holds
 `runtime.json`, whose session token lets a command call the console's own API as the operator, Approvals included. The
 console sets the rules and leaves the profile to the SDK. It fails a run when the sandbox is unavailable, never runs a
 command outside it, and has no Setting to turn it off. The Setup agent's terminal is no agent run and is not sandboxed.
@@ -28,7 +28,10 @@ pending past 10 seconds on every page. The native call cannot be cancelled, so a
 - **DNS interception or a proxy in the daemon**: the SDK already filters, and a second filter is code to keep for the
   same result.
 - **A Setting or an unsandboxed retry**: the escape hatch is what the sandbox removes.
-- **Denying `~/.ssh` in a Fix too**: breaks the PR stage's push.
+- **Reading `~/.ssh` in a Fix so its PR stage can push**: the first design. `ssh` writes `known_hosts` and ignores the
+  proxy, and the GitLab and Bitbucket CLIs keep short-lived tokens in the Keychain, so a run could not open a pull
+  request there anyway. The console pushes and opens it in the daemon instead (Pull request opening).
+- **A Git host token handed to the run, as `GH_TOKEN` is**: `bkt` has no token export and refreshes its own OAuth token.
 
 ## Consequences
 
@@ -40,5 +43,7 @@ operator adds the host in Permissions and the next run has it.
 The sandbox blocks the login Keychain, so `gh` signs in through that token in place of its Keychain item, and
 `enableWeakerNetworkIsolation` lets Go programs check certificates through macOS's trust service. `pup` keeps its
 Datadog sign-in in the Keychain and does not work inside a run's shell; the Datadog MCP Server, outside the sandbox, is
-how the Playbooks read Datadog. `ssh` and Node's built-in `fetch` ignore the proxy settings and fail in a run, so a `git push` over ssh does not work. A late `set` may still reach the Keychain after its timeout. The Keychain reads of
+how the Playbooks read Datadog. `ssh` and Node's built-in `fetch` ignore the proxy settings and fail in a run, so a run
+cannot push. The console pushes and opens every pull request in the daemon, outside the sandbox, as the operator. A late
+`set` may still reach the Keychain after its timeout. The Keychain reads of
 `mcp-exec` and the Setup agent have their own waits and are not shown.

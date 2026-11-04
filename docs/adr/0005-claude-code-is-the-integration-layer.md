@@ -7,7 +7,8 @@ Connect, the way claude.ai and ChatGPT connect. The Connector pane offers Connec
 and Cancel while a sign-in waits; config the console needs keeps its defaults. A secret the console must hold, such as an MCP server's env var, goes to
 the Keychain. The console registers servers with `claude mcp add`. Fixed reads, such as a pull
 request list or a health check, call the same servers and CLIs directly, with no model turn.
-Judgment work runs as agent sessions.
+Judgment work runs as agent sessions. The agent writes a pull request's text; the console pushes the branch and opens
+the pull request through the Git host's CLI, since a run's sandbox cannot reach the operator's keys or sign-ins.
 
 ## Consequences
 

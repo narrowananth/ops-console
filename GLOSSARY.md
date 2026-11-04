@@ -160,7 +160,7 @@ on without one.
 
 **Fix**:
 The work that follows a confirmed Review: ticket (when its Playbook asks and Jira is connected), branch, the steps of
-its Playbook (code change, mocked tests, the full suite and a diff review by default), push and PR, run by the agent in the Alert's Session. A merged PR resolves the Alert; a PR closed unmerged, or the operator's Cancel, abandons the Fix.
+its Playbook (code change, mocked tests, the full suite and a diff review by default), the agent's PR description, then the console's push and PR opening, in the Alert's Session. A merged PR resolves the Alert; a PR closed unmerged, or the operator's Cancel, abandons the Fix.
 
 ### Workspace
 
@@ -169,6 +169,9 @@ A local git repository imported into the console, identified by its top folder, 
 
 **Git host**:
 The service holding a Repo's remote: GitHub, GitLab or Bitbucket.
+
+**Pull request opening**:
+The console's push of a Session's branch to `origin` and its call to the Git host to open the pull request, run in the daemon as the operator. The agent writes the title and description; it never pushes or opens. The operator's click starts it in a Session, and a confirmed Fix starts it by itself.
 
 **Session**:
 One conversation between the operator and the agent. It runs in one Repo on one branch, except a

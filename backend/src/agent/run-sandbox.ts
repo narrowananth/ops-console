@@ -9,8 +9,6 @@ export type SandboxRun = {
   dataDir: string;
   /** Folders outside the working folder the run may read, such as the Session's attached files. */
   readable?: string[];
-  /** A Fix reads `~/.ssh` so its PR stage can push; every other run denies it (ADR 0006). */
-  readSsh?: boolean;
   /** The run's Network allowlist (ADR 0006): the only hosts its commands reach. */
   networkDomains: string[];
   home?: string;
@@ -43,7 +41,7 @@ export function runSandbox(run: SandboxRun): SandboxSettings {
         path.join(home, '.aws'),
         path.join(home, '.config', 'gcloud'),
         path.join(home, 'Library', 'Keychains'),
-        ...(run.readSsh ? [] : [path.join(home, '.ssh')]),
+        path.join(home, '.ssh'),
       ],
       allowRead: [run.workingDir, ...(run.readable ?? [])],
     },

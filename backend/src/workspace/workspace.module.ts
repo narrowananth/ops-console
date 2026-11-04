@@ -6,6 +6,7 @@ import { CliGitHosts } from './cli-git-hosts';
 import { CommentPassesService } from './comment-passes.service';
 import { GIT_HOSTS, type GitHosts } from './git-host';
 import { PrJobs } from './pr-jobs';
+import { PullRequestOpeningService } from './pull-request-opening.service';
 import { PullRequestsService } from './pull-requests.service';
 import { ReplyChecksService } from './reply-checks.service';
 import { PullRequestsController, WorkspaceSessionsController } from './workspace.controller';
@@ -27,10 +28,17 @@ export class WorkspaceModule {
         ReplyChecksService,
         CommentPassesService,
         WorkspaceSessionsService,
+        PullRequestOpeningService,
         AnonymousSessionsService,
         { provide: OPEN_PR_BRANCHES, useExisting: PullRequestsService },
       ],
-      exports: [PullRequestsService, WorkspaceSessionsService, AnonymousSessionsService, OPEN_PR_BRANCHES],
+      exports: [
+        PullRequestsService,
+        PullRequestOpeningService,
+        WorkspaceSessionsService,
+        AnonymousSessionsService,
+        OPEN_PR_BRANCHES,
+      ],
     };
   }
 }

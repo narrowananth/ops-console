@@ -69,7 +69,12 @@ export interface GitHostAdapter {
   merge(slug: string, number: number): Promise<void>;
   /** The text of `path` at commit `ref`, or null when the file is not there. */
   fileAt(slug: string, ref: string, path: string): Promise<string | null>;
+  /** Opens a pull request from a branch the host already has. */
+  open(slug: string, pull: NewPullRequest): Promise<{ number: number; url: string }>;
 }
+
+/** A pull request the console opens: `head` is a branch of the repository, `base` the branch it merges into. */
+export type NewPullRequest = { title: string; body: string; head: string; base: string };
 
 export interface GitHosts {
   /** False for a host whose adapter has not landed: lists across Repos leave it out. */

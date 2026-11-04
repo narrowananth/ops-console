@@ -190,8 +190,8 @@ function run(command: string, cwd: string, sandbox: object | null): Promise<stri
 }
 
 const BUILT_IN = ['github.com', 'api.github.com', '*.githubusercontent.com', 'registry.npmjs.org'];
-const rules = (workingDir: string, readSsh = false, networkDomains = BUILT_IN) =>
-  runSandbox({ workingDir, dataDir: data, home, readSsh, networkDomains });
+const rules = (workingDir: string, networkDomains = BUILT_IN) =>
+  runSandbox({ workingDir, dataDir: data, home, networkDomains });
 
 describe.skipIf(process.platform !== 'darwin' || CLAUDE === null)('Run sandbox, enforced by Seatbelt', () => {
   it('reads the token with no sandbox, so the cases below prove something', async () => {
@@ -221,9 +221,8 @@ describe.skipIf(process.platform !== 'darwin' || CLAUDE === null)('Run sandbox, 
     expect(existsSync(path.join(data, 'scratch', 'job-2'))).toBe(false);
   }, 240_000);
 
-  it('denies ~/.ssh to every run but a Fix (Behavior 4)', async () => {
+  it('denies ~/.ssh to every run (console-opens-pull-request 16)', async () => {
     expect(await run(`cat ${home}/.ssh/key`, checkout, rules(checkout))).toContain('Operation not permitted');
-    expect(await run(`cat ${home}/.ssh/key`, checkout, rules(checkout, true))).toContain('ssh-ok');
   }, 120_000);
 
   it('still runs git and node (Behavior 9)', async () => {
@@ -238,10 +237,8 @@ describe.skipIf(process.platform !== 'darwin' || CLAUDE === null)('Run sandbox, 
 
   it('passes a host on the allowlist through the filter and refuses the same request once it is off (Network Behavior 1)', async () => {
     const viaProxy = `curl -sS -m 10 --noproxy '' -x $HTTP_PROXY http://localhost:${port}/ping; echo exit=$?`;
-    expect(await run(viaProxy, checkout, rules(checkout, false, ['localhost']))).toContain('exit=0');
-    expect(await run(viaProxy, checkout, rules(checkout, false, ['example.org']))).toContain(
-      'host is not on the allow list',
-    );
+    expect(await run(viaProxy, checkout, rules(checkout, ['localhost']))).toContain('exit=0');
+    expect(await run(viaProxy, checkout, rules(checkout, ['example.org']))).toContain('host is not on the allow list');
   }, 240_000);
 
   it('cannot go around the filter by IP address, DNS, UDP or a client that ignores the proxy (Network Behavior 2)', async () => {
