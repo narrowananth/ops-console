@@ -65,6 +65,12 @@ const ICONS = {
     </>,
   ),
   setup: icon(<path d="M4 17l6-5-6-5M12 19h8" />),
+  permissions: icon(
+    <>
+      <path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z" />
+      <path d="M9 12l2 2 4-4" />
+    </>,
+  ),
   agents: icon(
     <>
       <circle cx="12" cy="8" r="4" />
@@ -88,6 +94,7 @@ export const PAGES = [
   { group: 'Connect', path: '/connections', label: 'Connections', icon: ICONS.connections },
   { group: 'Connect', path: '/repos', label: 'Repos', icon: ICONS.repos },
   { group: 'Connect', path: '/setup', label: 'Setup agent', icon: ICONS.setup },
+  { group: 'Connect', path: '/permissions', label: 'Permissions', icon: ICONS.permissions },
   { group: 'Claude', path: '/agents', label: 'Agents & accounts', icon: ICONS.agents },
   { group: 'Claude', path: '/playbooks', label: 'Playbooks', icon: ICONS.playbooks },
 ] as const;

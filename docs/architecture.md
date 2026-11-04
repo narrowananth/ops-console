@@ -42,7 +42,7 @@ once per item. The handover runs in the background, about half a minute, and the
 `ops-console start` writes a LaunchAgent plist (`RunAtLoad`, `KeepAlive`) that runs `current/Ops Console.app` on
 `current/app/main.js`, so launchd starts the daemon at login and again if it stops. macOS lists it as Ops Console
 under App Background Activity in Login Items & Extensions; switched off there, it does not start at login. The Setup agent's
-Permissions show it as Start at login, read from the plist and `launchctl print-disabled`. `OPS_CONSOLE_PORT` at
+The Permissions page shows it as Start at login, read from the plist and `launchctl print-disabled`. `OPS_CONSOLE_PORT` at
 `start` goes into the plist. The data folder is `~/Library/Application Support/ops-console`
 (`OPS_CONSOLE_DATA_DIR` overrides it) and holds `state.db`, `runtime.json` (pid, port, version,
 session token; mode `0600`), `daemon.lock`, `update.json`, `keychain-owner.json`, and a folder each for Claude
@@ -127,7 +127,7 @@ agent Session.
 | `devtools` | Dev tools page (terminal-style `devtools` Sessions scoped to Connections, Results, Comparison) and the Connections page and form |
 | `integrations` | Integrations page: Connectors and MCP Servers |
 | `repos` | Repos page |
-| `setup` | Setup agent page with its xterm terminal, and Permissions: Full Disk Access, Start at login, Keychain |
+| `setup` | Setup agent page with its xterm terminal, and the Permissions page: Full Disk Access, Start at login, Keychain, Run sandbox, Network allowlist |
 | `playbooks` | Playbooks page: Triggers, Playbooks, the editor with drag and drop, Step blocks; unsaved edits kept as a Remembered view; a job's Playbook steps |
 | `agents` | Agents & accounts page (accounts, sign-in by link, the CLIProxy hub, the chime), Session transcript, model, effort and Access mode chips, Approval prompts, the question panel, stop run, Report rendering |
 | `mcp`, `components/ui` | MCP status labels; shared controls, the folding card title, the side panel that folds to a rail, the job pathway and live timers, and the Tip layer that shows every element's `title` as a styled Tip on hover and keyboard focus |
@@ -269,7 +269,7 @@ Where the build departs from `design/ops-console.html` on purpose:
   suggestions and nits.
 - **Tips** on every control, status and count whose words leave its meaning open, and a "?" beside such labels.
 - **Folding cards**: each card with a title folds to it, and stays folded for that kind of card.
-- **Permissions** on the Setup agent page add Start at login.
+- **Permissions** page under Connect, with Start at login.
 - **Running tasks** tray in the sidebar: every agent run going, each linking to its work.
 - **Updates**: a version line and panel, an update card and an "Updated to" notice, with Check now and auto-update.
 - **Claude account hub**: CLIProxy as the sign-in for agent runs, and adding an account by link.

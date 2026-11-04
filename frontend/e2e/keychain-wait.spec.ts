@@ -29,7 +29,7 @@ test('a Keychain wait shows a banner on every page and in Permissions until it e
   await expect(banner).toContainText('Answer it on the Mac.');
 
   // It follows the operator to the other pages, and Permissions shows the same state.
-  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Permissions' }).click();
   await expect(banner).toBeVisible();
   const keychain = page.getByRole('region', { name: 'Permissions' }).getByRole('listitem', { name: 'Keychain' });
   await expect(keychain).toContainText('waiting since');
@@ -57,7 +57,7 @@ test('Permissions reads the Run sandbox as on, or unavailable with the reason, a
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
   await expect(page.getByRole('alert', { name: 'Keychain wait' })).toHaveCount(0);
 
-  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Permissions' }).click();
   const row = page.getByRole('region', { name: 'Permissions' }).getByRole('listitem', { name: 'Run sandbox' });
   await expect(row).toContainText('● on');
   await expect(row.getByRole('button')).toHaveCount(0);

@@ -4,7 +4,7 @@ import { Button } from '../components/ui/button';
 import { useAddNetworkDomain, useNetworkAllowlist, useRemoveNetworkDomain } from '../lib/queries';
 import { ascending } from '../lib/sort';
 
-/** The hosts an agent run's commands may reach. Built in and From Repos are read-only; the operator edits the rest. */
+/** The hosts an agent run's commands may reach. Built-in is read-only; the operator edits Added by you. */
 export function NetworkAllowlistRow() {
   const read = useNetworkAllowlist();
   const add = useAddNetworkDomain();
@@ -14,6 +14,8 @@ export function NetworkAllowlistRow() {
   const [refusal, setRefusal] = useState<string | null>(null);
   const list = read.data;
   const count = list ? allNetworkDomains(list).length : null;
+  // The Repos' hosts are built in too; the page does not say which Repo has which.
+  const builtIn = list ? [...new Set([...list.built_in, ...list.from_repos.map((entry) => entry.domain)])] : [];
   const submit = () => {
     const checked = networkDomainSchema.safeParse(value);
     if (!checked.success) {
@@ -58,15 +60,7 @@ export function NetworkAllowlistRow() {
         <div className="flex flex-col gap-3">
           <DomainGroup
             label="Built-in"
-            domains={ascending(list.built_in, (domain) => domain).map((domain) => ({ domain }))}
-          />
-          <DomainGroup
-            label="From Repos"
-            empty="No Repo remotes"
-            domains={ascending(list.from_repos, (entry) => entry.domain).map((entry) => ({
-              domain: entry.domain,
-              note: entry.repo,
-            }))}
+            domains={ascending(builtIn, (domain) => domain).map((domain) => ({ domain }))}
           />
           <DomainGroup
             label="Added by you"
@@ -126,7 +120,7 @@ function DomainGroup({
 }: {
   label: string;
   empty?: string;
-  domains: { domain: string; note?: string }[];
+  domains: { domain: string }[];
   onRemove?: (domain: string) => void;
 }) {
   return (
@@ -134,10 +128,9 @@ function DomainGroup({
       <span className="text-xs font-semibold text-neutral-700">{label}</span>
       <ul aria-label={label} className="m-0 flex list-none flex-col gap-0.5 p-0 font-mono text-xs">
         {domains.length === 0 && <li className="text-neutral-700">{empty}</li>}
-        {domains.map(({ domain, note }) => (
+        {domains.map(({ domain }) => (
           <li key={domain} className="flex items-center gap-2">
             <span>{domain}</span>
-            {note && <span className="font-body text-neutral-700">{note}</span>}
             {onRemove && (
               <Button
                 variant="ghost"

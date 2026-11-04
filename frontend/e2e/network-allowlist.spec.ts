@@ -36,11 +36,11 @@ async function openRow(page: Page) {
     route.fulfill({ json: { data: { granted: true, app_path: '/Applications/Ops Console.app' } } }),
   );
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Permissions' }).click();
   return page.getByRole('region', { name: 'Permissions' }).getByRole('listitem', { name: 'Network allowlist' });
 }
 
-test('Permissions counts the allowed domains and shows the three groups, with no switch', async ({ page }) => {
+test('Permissions counts the allowed domains and shows Built-in and Added by you, with no switch', async ({ page }) => {
   const folder = path.join(mkdtempSync(path.join(tmpdir(), 'e2e-allowlist-')), 'billing');
   mkdirSync(folder);
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: folder });
@@ -55,17 +55,16 @@ test('Permissions counts the allowed domains and shows the three groups, with no
 
     await row.getByRole('button', { name: /Network allowlist: 6 domains/ }).click();
     const builtIn = row.getByRole('list', { name: 'Built-in' });
+    // A Repo's host is built in; the list never names the Repo.
     await expect(builtIn.getByRole('listitem')).toHaveText([
       '*.githubusercontent.com',
       'api.github.com',
       'github.com',
+      'gitlab.example.com',
       'registry.npmjs.org',
     ]);
+    await expect(row).not.toContainText('billing');
     await expect(builtIn.getByRole('button')).toHaveCount(0);
-    const fromRepos = row.getByRole('list', { name: 'From Repos' });
-    await expect(fromRepos).toContainText('gitlab.example.com');
-    await expect(fromRepos).toContainText('billing');
-    await expect(fromRepos.getByRole('button')).toHaveCount(0);
     await expect(row.getByRole('list', { name: 'Added by you' })).toContainText('npm.example.com');
   } finally {
     await api('DELETE', `/repos/${repo.id}`);
@@ -77,7 +76,6 @@ test('the operator adds, repeats and removes a domain, and a reload shows the sa
   await row.getByRole('button', { name: /Network allowlist/ }).click();
   const added = row.getByRole('list', { name: 'Added by you' });
   await expect(added).toContainText('None added');
-  await expect(row.getByRole('list', { name: 'From Repos' })).toContainText('No Repo remotes');
 
   const input = row.getByRole('textbox', { name: 'Domain' });
   await input.fill('  NPM.example.com ');

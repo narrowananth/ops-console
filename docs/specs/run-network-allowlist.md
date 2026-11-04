@@ -1,7 +1,7 @@
 # Run network allowlist
 
 **Status:** shipped
-**Design:** none. Setup agent page, Permissions: gains one row that opens a list. Permissions already departs from the design.
+**Design:** none. Permissions page: gains one row that opens a list. Permissions already departs from the design.
 
 ## Problem
 
@@ -26,9 +26,9 @@ An agent run can read the checkout, the files the operator attached and the `GH_
 10. A wildcard `*.example.com` covers subdomains only. `example.com` needs its own entry.
 11. A run keeps the list it started with. A change to Added by you, or to the Repos, reaches the next run. A resumed conversation, a retried step and a run after a daemon restart build a new list when they start. Two runs started on either side of an edit can hold different lists.
 
-### Setup agent > Permissions
+### Permissions
 
-12. Permissions shows a row, "Network allowlist: N domains", next to the Run sandbox row. N counts the distinct domains across the three groups. Opening the row shows the groups. Built-in and From Repos are read-only. The row has no on/off control.
+12. Permissions shows a row, "Network allowlist: N domains", next to the Run sandbox row. N counts the distinct domains across the three groups. Opening the row shows Built-in, which holds the built-in hosts and the Repos' hosts without naming a Repo, and Added by you. Built-in is read-only. The row has no on/off control.
 13. The operator adds a hostname such as `npm.example.com` or a wildcard such as `*.example.com`. The console trims it, lowercases it and saves it.
 14. The console refuses, with a message and nothing saved: an empty value, a bare `*`, a wildcard over one label (`*.com`), a scheme (`https://…`), a path, a port, an IP address, a name over 253 characters and anything that is not a hostname.
 15. A domain already in any group is accepted and changes nothing: no second row, the count stays.
@@ -116,11 +116,11 @@ Answers 204. The name is trimmed and lowercased, as on add. Errors: Common.
 
 ## UI
 
-Setup agent > Permissions: a row "Network allowlist: N domains" under Run sandbox, opening the three groups. Departs from the design, as Permissions already does.
+Permissions: a row "Network allowlist: N domains" under Run sandbox, opening the three groups. Departs from the design, as Permissions already does.
 
 - **Loading**: the row shows a placeholder count.
 - **Error**: the row reads "Could not read the list" with a retry.
-- **Empty**: Built-in always has four entries. From Repos shows "No Repo remotes" and Added by you shows "None added".
+- **Empty**: Built-in always has four entries. Added by you shows "None added".
 - **Added by you**: an input with an Add button, and a remove button on each domain. A refused value shows its message under the input and clears when the operator edits it. Help text: "`*.example.com` covers subdomains. Add `example.com` too if you need it."
 - **PROD**: changes nothing here.
 

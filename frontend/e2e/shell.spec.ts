@@ -38,6 +38,7 @@ test('the sidebar holds every page, and the Setup agent buttons open it', async 
     'Connections',
     'Repos',
     'Setup agent',
+    'Permissions',
     'Agents & accounts',
     'Playbooks',
   ]);
@@ -72,7 +73,8 @@ test('the installed app starts the Setup agent only once Full Disk Access is on'
     return route.fulfill({ status: 204 });
   });
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  const nav = page.getByRole('navigation');
+  await nav.getByRole('link', { name: 'Permissions' }).click();
   const drawer = page.getByRole('main');
 
   const permissions = drawer.getByRole('region', { name: 'Permissions' });
@@ -82,13 +84,20 @@ test('the installed app starts the Setup agent only once Full Disk Access is on'
   await expect(disk).toContainText('ops-console stop');
   await expect(permissions.getByRole('listitem', { name: 'Keychain' })).toContainText('asks each time');
   await expect(permissions.getByRole('img', { name: 'Ops Console logo' })).toBeVisible();
-  await expect(drawer.getByRole('button', { name: 'Start setup agent' })).toBeDisabled();
   await disk.getByRole('button', { name: 'Open System Settings' }).click();
   await expect.poll(() => opened).toBe(1);
+
+  // The Setup agent page holds the Start button back and points to Permissions.
+  await nav.getByRole('link', { name: 'Setup agent' }).click();
+  await expect(drawer.getByRole('button', { name: 'Start setup agent' })).toBeDisabled();
+  await expect(drawer.getByRole('region', { name: 'Permissions' })).toHaveCount(0);
+  await drawer.getByRole('link', { name: /Needs Full Disk Access/ }).click();
+  await expect(page.getByRole('heading', { name: 'Permissions' })).toBeVisible();
 
   granted = true;
   await disk.getByRole('button', { name: 'Check again' }).click();
   await expect(disk).toContainText('● on');
+  await nav.getByRole('link', { name: 'Setup agent' }).click();
   await expect(drawer.getByRole('button', { name: 'Start setup agent' })).toBeEnabled();
 });
 
@@ -97,7 +106,7 @@ test('pnpm dev runs as Ops Console (dev), and asks for Full Disk Access under th
     route.fulfill({ json: { data: { granted: false, app_path: '/repo/backend/.data/Ops Console (dev).app' } } }),
   );
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Permissions' }).click();
   const disk = page.getByRole('main').getByRole('listitem', { name: 'Full Disk Access' });
   await expect(disk).toContainText('✕ off');
   await expect(disk).toContainText('Drag Ops Console (dev) from the Finder window');
@@ -118,7 +127,7 @@ test('Start at login reads off until Ops Console is on under App Background Acti
     return route.fulfill({ status: 204 });
   });
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Permissions' }).click();
 
   const login = page.getByRole('region', { name: 'Permissions' }).getByRole('listitem', { name: 'Start at login' });
   await expect(login).toContainText('✕ off');
@@ -139,7 +148,7 @@ test('a dev build never starts at login and offers no Login Items', async ({ pag
     route.fulfill({ json: { data: { on: false, dev_build: true } } }),
   );
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Permissions' }).click();
   const login = page.getByRole('main').getByRole('listitem', { name: 'Start at login' });
   await expect(login).toContainText('off · dev build');
   await expect(login.getByRole('button')).toHaveCount(0);
@@ -150,12 +159,13 @@ test('a daemon that is no app reads off · dev build and the Setup agent still s
     route.fulfill({ json: { data: { granted: false, app_path: null } } }),
   );
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Permissions' }).click();
   const drawer = page.getByRole('main');
 
   const disk = drawer.getByRole('listitem', { name: 'Full Disk Access' });
   await expect(disk).toContainText('off · dev build');
   await expect(disk.getByRole('button', { name: 'Open System Settings' })).toHaveCount(0);
+  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
   await expect(drawer.getByRole('button', { name: 'Start setup agent' })).toBeEnabled();
 });
 
