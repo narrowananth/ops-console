@@ -330,7 +330,7 @@ Adds `branch: string | null`.
 - A changed file reads as a unified diff: added lines green, removed lines red, hunk headers blue, old and new line
   numbers. Hovering an added or unchanged line shows a `+` that opens a comment box under it; posting sends an inline
   comment on that new-side line. Threads on a line sit under it. Its header folds it and shows how many threads sit
-  on the file and `+N −N` with a five-block bar. Viewed marks the file and folds it; the Files header counts viewed
+  on the file and `+N −N` with a five-block bar. With more than one file, the Files header has Expand all and Collapse all, which open or fold every file at once and are kept like a file's own fold. Viewed marks the file and folds it; the Files header counts viewed
   files. The browser keeps the marks per pull request, and a mark clears when the file's patch changes. The file's ⋯
   menu switches to side by side or to the entire file (Behavior 25), and opens the file at `head_sha` on the host;
   line comments are in the unified view only. Each file's fold, side by side and entire file are kept. A file with no

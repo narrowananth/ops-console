@@ -138,14 +138,20 @@ export function PrFileView({
   file,
   viewed,
   onViewed,
+  bulk,
 }: {
   pr: PullRequestDetail;
   file: PrFile;
   viewed: boolean;
   onViewed: (viewed: boolean) => void;
+  /** The last Expand all or Collapse all; each press is a new object, so pressing one twice applies it twice. */
+  bulk: { open: boolean } | null;
 }) {
   const at = `${pr.repo_id}#${pr.number}.${file.name}`;
   const [open, setOpen] = useStored(`workspace.pr-file-open.${at}`, z.boolean(), !viewed);
+  useEffect(() => {
+    if (bulk) setOpen(bulk.open);
+  }, [bulk, setOpen]);
   const [split, setSplit] = useStored(`workspace.pr-file-split.${at}`, z.boolean(), false);
   const [full, setFull] = useStored(`workspace.pr-file-full.${at}`, z.boolean(), false);
   const whole = usePrFile(pr.repo_id, pr.number, file.name, pr.head_sha, full);
