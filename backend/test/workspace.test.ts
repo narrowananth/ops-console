@@ -443,6 +443,11 @@ describe('Session diff', () => {
     expect(during.branch).toBe('fix/mine');
     expect(during.files.map((file: { name: string }) => file.name)).toEqual(['mine.ts']);
     hold.open();
+    // The run ends before the test does; a run that finishes after the daemon closes writes to a closed database.
+    await until(
+      () => ctx.http.get(`/sessions/${id}`).then((res) => res.body.data.state),
+      (state) => state === 'idle',
+    );
   });
 
   it('has no diff for a Session without a Repo', async () => {

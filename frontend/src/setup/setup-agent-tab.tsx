@@ -31,7 +31,7 @@ export function SetupAgentTab() {
   };
   return (
     <div className="flex min-h-0 flex-1 overflow-auto">
-      <div className="mx-auto flex w-full max-w-300 gap-6 px-8 py-7">
+      <div className={`flex w-full gap-6 px-8 py-7 ${terminal ? '' : 'mx-auto max-w-300'}`}>
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           {terminal ? (
             <SetupTerminal terminalId={terminal} onClose={() => close.mutate(terminal)} />
@@ -44,17 +44,19 @@ export function SetupAgentTab() {
             </div>
           )}
         </div>
-        <aside className="flex w-80 flex-none flex-col gap-4 self-start">
-          <Permissions locked={locked && !terminal} />
-          <Card title="What it sets up">
-            <ul className="m-0 flex list-none flex-col gap-2.5 p-0 text-xs text-neutral-700">
-              <Fact icon="db">Connections to your local databases</Fact>
-              <Fact icon="plug">MCP servers from your Claude config</Fact>
-              <Fact icon="key">Connectors, through each service's own sign-in</Fact>
-              <Fact icon="lock">Passwords go in a masked field</Fact>
-            </ul>
-          </Card>
-        </aside>
+        {!terminal && (
+          <aside className="flex w-80 flex-none flex-col gap-4 self-start">
+            <Permissions locked={locked} />
+            <Card title="What it sets up">
+              <ul className="m-0 flex list-none flex-col gap-2.5 p-0 text-xs text-neutral-700">
+                <Fact icon="db">Connections to your local databases</Fact>
+                <Fact icon="plug">MCP servers from your Claude config</Fact>
+                <Fact icon="key">Connectors, through each service's own sign-in</Fact>
+                <Fact icon="lock">Passwords go in a masked field</Fact>
+              </ul>
+            </Card>
+          </aside>
+        )}
       </div>
     </div>
   );
