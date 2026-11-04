@@ -34,6 +34,7 @@ const SESSION = {
   alert_id: null,
   state: 'waiting_input',
   last_message_preview: null,
+  last_error: null,
   created_at: NOW,
   last_active_at: NOW,
   playbook: null,

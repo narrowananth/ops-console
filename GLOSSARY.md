@@ -48,6 +48,11 @@ write asks in every mode.
 The operator's yes or no on one agent action that needs it: a PROD write, or an edit or command in
 a mode that asks.
 
+**Run sandbox**:
+The operating-system limit on an agent run's commands: writes only in the run's working folder and temp, no reads of
+the console's data folder or the operator's cloud and login credentials. It applies in every Access mode, and a run
+fails when the sandbox is unavailable.
+
 ### Playbooks
 
 **Playbook**:
@@ -243,6 +248,10 @@ _Avoid_: audit trail, history
 **Start at login**:
 launchd starting the installed console when the operator logs in, and again if it stops. macOS lists it as Ops
 Console under App Background Activity. A dev build never starts at login.
+
+**Keychain wait**:
+A Keychain call the Mac has not answered, usually because it waits for the login password. The console shows it after
+10 seconds and fails the call after 60.
 
 **Tip**:
 The words a control, status or label shows on hover or keyboard focus: what it means, what pressing it makes the

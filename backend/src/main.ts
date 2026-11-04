@@ -13,6 +13,7 @@ import { startDaemon } from './daemon';
 import { DevtoolsModule } from './devtools/devtools.module';
 import { adoptKeychainItems, otherVersionApps } from './keychain/handover';
 import { LoginKeychain } from './keychain/keychain';
+import { KeychainWaitTracker } from './keychain/keychain-wait';
 import { runMcpExec } from './mcp/launcher';
 import { McpServersModule } from './mcp/mcp-servers.module';
 import { SdkProbe } from './mcp/probe';
@@ -78,11 +79,16 @@ function adoptOnUpdate(): Promise<unknown> {
   );
 }
 
+const keychainWait = new KeychainWaitTracker();
+
 const daemon = await startDaemon({
   dataDir,
   port: env.OPS_CONSOLE_PORT,
   version,
-  keychain: new LoginKeychain(process.env.OPS_CONSOLE_KEYCHAIN_SERVICE || undefined, adoptOnUpdate()),
+  keychain: new LoginKeychain(process.env.OPS_CONSOLE_KEYCHAIN_SERVICE || undefined, adoptOnUpdate(), {
+    wait: keychainWait,
+  }),
+  keychainWait,
   uiDir: existsSync(uiDir) ? uiDir : null,
   migrationsDir: path.join(appDir, 'drizzle'),
   writeLog: (line) => process.stdout.write(`${line}\n`),

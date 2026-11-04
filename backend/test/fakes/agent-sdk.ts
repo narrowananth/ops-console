@@ -29,6 +29,8 @@ export type Step =
   | { rejected: true }
   /** The account's sign-in expired and cannot refresh; the run ends. */
   | { signInExpired: true }
+  /** Claude Code refuses to start because the Run sandbox is unavailable; the run ends with this error. */
+  | { sandboxUnavailable: string }
   /** Holds the run until the promise settles. */
   | { wait: Promise<unknown> }
   /** The SDK throws, as when the Claude Code process dies. */
@@ -207,6 +209,16 @@ export class FakeAgentSdk implements AgentSdk {
           type: 'result',
           subtype: 'success',
           is_error: true,
+          permission_denials: denials,
+          session_id: sessionId,
+        });
+        return;
+      } else if ('sandboxUnavailable' in step) {
+        yield sdk({
+          type: 'result',
+          subtype: 'success',
+          is_error: true,
+          result: step.sandboxUnavailable,
           permission_denials: denials,
           session_id: sessionId,
         });

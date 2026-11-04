@@ -40,13 +40,21 @@ export type Run = {
   stopped: boolean;
   /** The conversation resumes from this transcript entry, dropping what came after it; null for all of it. */
   resumeAt: string | null;
+  /** Read `~/.ssh` in the Run sandbox: set for a Fix only. */
+  readSsh: boolean;
+  /** Why the run failed, when the console can say: the Run sandbox is unavailable, or the Keychain did not answer. */
+  failure: string | null;
 };
 
 /** How a run ended, for the code that started it. `stopped` is set when the operator stopped it. */
-export type RunSummary = { ok: boolean; stopped: boolean; text: string };
+export type RunSummary = { ok: boolean; stopped: boolean; text: string; failure: string | null };
 
 /** Why a job failed when the operator stopped its run. */
 export const STOPPED = 'stopped by the operator';
+
+/** Why a run that did not finish failed, in the words a job shows. */
+export const failedBecause = (summary: RunSummary): string =>
+  summary.stopped ? STOPPED : (summary.failure ?? 'the agent run failed');
 
 export class RunRegistry {
   private readonly runs = new Map<string, Run>();

@@ -299,6 +299,7 @@ export class CommentPassesService {
     const prompt = check ? CHECK_REPLIES_PROMPT : COMMENT_PASS_PROMPT;
     const summary = await this.runtime.runFor(session, prompt, null, closing).finished;
     if (summary.stopped) throw new JobFailed(`The threads were not reported: ${STOPPED}`, true);
+    if (summary.failure) throw new JobFailed(summary.failure, true);
     const answered = summary.ok ? readOutcomes(summary.text, check) : null;
     const threads = storedThreads(row);
     const byId = new Map(answered?.map((thread) => [thread.comment_id, thread]));

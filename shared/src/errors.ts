@@ -15,6 +15,7 @@ export enum ErrorCode {
   RepoHasSessions = 'repo_has_sessions',
   ServiceUnlinked = 'service_unlinked',
   ConnectionNoAccess = 'connection_no_access',
+  KeychainTimeout = 'keychain_timeout',
 }
 
 export const errorBodySchema = z.object({

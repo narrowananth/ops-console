@@ -21,6 +21,7 @@ import { applyMigrations } from './db/migrate';
 import { openSqlite } from './db/open';
 import { Store } from './db/store';
 import { type Keychain, LoginKeychain } from './keychain/keychain';
+import { KeychainWaitTracker } from './keychain/keychain-wait';
 import { Scheduler } from './scheduler/scheduler';
 
 const HOST = '127.0.0.1';
@@ -35,6 +36,8 @@ export type DaemonOptions = {
   writeLog: WriteLog;
   modules?: DynamicModule[];
   keychain?: Keychain;
+  /** The Keychain calls `keychain` has pending; give the one `keychain` reports to. */
+  keychainWait?: KeychainWaitTracker;
   claudeBin?: string;
 };
 
@@ -68,6 +71,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     const session = new Session(options.version);
     const hub = new WsHub(session);
     const address = new DaemonAddress();
+    const keychainWait = options.keychainWait ?? new KeychainWaitTracker();
     cleanups.push(() => hub.close());
     const app = await NestFactory.create(
       AppModule.forRoot({
@@ -76,7 +80,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         session,
         store: new Store(sqlite, hub),
         hub,
-        keychain: options.keychain ?? new LoginKeychain(),
+        keychain: options.keychain ?? new LoginKeychain(undefined, undefined, { wait: keychainWait }),
+        keychainWait,
         claudeBin: options.claudeBin ?? 'claude',
         modules: options.modules ?? [],
       }),

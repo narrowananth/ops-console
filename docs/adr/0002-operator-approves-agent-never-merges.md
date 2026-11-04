@@ -50,7 +50,8 @@ resolves threads, and a Reply check or Comment pass denies the agent `git push` 
 
 A fix waits for the operator. The console shows how long each verified Alert has waited for its
 Review. A run steered by log text can execute local commands in the scratch copy; the safety lines,
-the Alert Session's Access mode and the scratch copy's folder bound that. A reviewer can steer a
+the Alert Session's Access mode, the scratch copy's folder and the Run sandbox ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md))
+bound that. The sandbox keeps those commands from writing outside the run's folder and from reading the session token. A reviewer can steer a
 Comment pass's code change through a comment the operator ticked; the operator's tick, the
 scratch copy and the one pushed commit, never forced, bound that. On a teammate's pull request the
 commit lands on their branch under the operator's git identity, for the teammate to see. An Agent Review runs the

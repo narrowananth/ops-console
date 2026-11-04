@@ -169,6 +169,7 @@ export class ReplyChecksService {
       const closing = { rules, cwd, deny: HOST_WRITE_DENIALS };
       const summary = await this.runtime.runFor(session, REPLY_CHECK_PROMPT, null, closing).finished;
       if (summary.stopped) throw new JobFailed(`The verdict was not given: ${STOPPED}`, true);
+      if (summary.failure) throw new JobFailed(summary.failure, true);
       const answer = summary.ok ? parseAgentJson(summary.text, verdictSchema) : null;
       if (!answer) throw new JobFailed('The agent did not give a verdict the console could read', true);
       row = this.update(id, { verdict: answer.verdict, reply: answer.reply });

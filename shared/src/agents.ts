@@ -166,6 +166,8 @@ export const sessionSchema = z.object({
   alert_id: z.string().nullable(),
   state: z.enum(SessionState),
   last_message_preview: z.string().nullable(),
+  /** Why the last run failed, when the console can say: the Run sandbox is unavailable, or the Keychain did not answer. */
+  last_error: z.string().nullable(),
   created_at: z.string(),
   last_active_at: z.string(),
   /** The Playbook its rules come from, when it is not built-in. */

@@ -1,11 +1,14 @@
+import { KEYCHAIN_WAIT_MESSAGE } from '@ops-console/shared';
 import type { ReactNode } from 'react';
 import { Logo } from '../app/sidebar';
 import { Button } from '../components/ui/button';
 import {
   useCloseSetupTerminal,
   useDiskAccess,
+  useKeychainWait,
   useOpenDiskAccessSettings,
   useOpenLoginItemsSettings,
+  useRunSandbox,
   useSetupTerminal,
   useStartAtLogin,
   useStartSetupTerminal,
@@ -221,15 +224,8 @@ function Permissions({ locked }: { locked: boolean }) {
           )}
         </li>
         <StartAtLoginRow />
-        <li aria-label="Keychain" className="flex flex-col gap-2 rounded-lg bg-bg px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            <strong className="flex-1">Keychain</strong>
-            <span className="rounded-full bg-neutral-200 px-2 py-0.5 font-mono text-xs text-neutral-700">
-              ◐ asks each time
-            </span>
-          </div>
-          <span className="text-neutral-700">macOS asks before each saved password.</span>
-        </li>
+        <RunSandboxRow />
+        <KeychainRow />
       </ul>
       {openSettings.error && (
         <div role="alert" className="text-accent-700">
@@ -237,6 +233,76 @@ function Permissions({ locked }: { locked: boolean }) {
         </div>
       )}
     </section>
+  );
+}
+
+/** Whether agent runs' commands run inside the Run sandbox. Read-only: no Setting turns it off. */
+function RunSandboxRow() {
+  const sandbox = useRunSandbox();
+  const state = sandbox.data;
+  const on = state?.status === 'on';
+  const look = !state
+    ? { glyph: '… checking', className: 'bg-neutral-200 text-neutral-700', tip: 'Testing the sandbox.' }
+    : on
+      ? {
+          glyph: '● on',
+          className: 'bg-ok/12 text-ok',
+          tip: 'Agent runs write only in their working folder and read nothing of the console or your cloud credentials.',
+        }
+      : {
+          glyph: '✕ unavailable',
+          className: 'bg-accent-100 text-accent-700',
+          tip: 'Agent runs fail rather than run without the sandbox.',
+        };
+  return (
+    <li aria-label="Run sandbox" className="flex flex-col gap-2 rounded-lg bg-bg px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <strong className="flex-1">Run sandbox</strong>
+        <span title={look.tip} className={`rounded-full px-2 py-0.5 font-mono text-xs ${look.className}`}>
+          {look.glyph}
+        </span>
+      </div>
+      <span className="text-neutral-700">Limits what an agent run's commands can write and read.</span>
+      {state?.status === 'unavailable' && <span className="text-accent-700">{state.reason}</span>}
+      {sandbox.error && (
+        <span role="alert" className="text-accent-700">
+          {sandbox.error.message}
+        </span>
+      )}
+    </li>
+  );
+}
+
+/** macOS asks before each saved password; a question left unanswered holds up the runs that need it. */
+function KeychainRow() {
+  const read = useKeychainWait();
+  const wait = read.data;
+  const waiting = wait?.waiting === true;
+  const since = wait?.since ? new Date(wait.since).toLocaleTimeString([], { timeStyle: 'short' }) : null;
+  return (
+    <li aria-label="Keychain" className="flex flex-col gap-2 rounded-lg bg-bg px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <strong className="flex-1">Keychain</strong>
+        <span
+          title={
+            waiting
+              ? 'The Mac is asking for the login password. Runs that need a secret fail if it stays unanswered.'
+              : 'macOS asks each time the console reads a saved password.'
+          }
+          className={`rounded-full px-2 py-0.5 font-mono text-xs ${waiting ? 'bg-accent-100 text-accent-700' : 'bg-neutral-200 text-neutral-700'}`}
+        >
+          {read.isPending ? '… checking' : waiting ? `◐ waiting since ${since}` : '◐ asks each time'}
+        </span>
+      </div>
+      <span className="text-neutral-700">
+        {waiting ? `${KEYCHAIN_WAIT_MESSAGE}. Answer it on the Mac.` : 'macOS asks before each saved password.'}
+      </span>
+      {read.error && (
+        <span role="alert" className="text-accent-700">
+          {read.error.message}
+        </span>
+      )}
+    </li>
   );
 }
 

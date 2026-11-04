@@ -18,7 +18,7 @@ import {
 import { and, desc, eq, isNotNull, max, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { redact } from '../action-log/redact';
-import { type RunSummary, STOPPED } from '../agent/runs';
+import { failedBecause, type RunSummary } from '../agent/runs';
 import { AgentRuntime } from '../agent/runtime';
 import { parseAgentJson } from '../common/agent-json';
 import { DATA_DIR } from '../common/data-dir';
@@ -348,11 +348,7 @@ export class VerificationsService {
   private async complete(reportId: string, alert: AlertRow, summary: RunSummary): Promise<void> {
     const output = summary.ok ? parseAgentJson(summary.text, outputSchema) : null;
     if (!output) {
-      this.fail(
-        reportId,
-        alert.id,
-        summary.ok ? 'the agent did not answer with a Report' : summary.stopped ? STOPPED : 'the agent run failed',
-      );
+      this.fail(reportId, alert.id, summary.ok ? 'the agent did not answer with a Report' : failedBecause(summary));
       return;
     }
     const slug = cleanSlug(output.slug) || 'fix';

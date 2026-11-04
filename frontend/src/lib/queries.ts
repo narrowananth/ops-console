@@ -32,6 +32,7 @@ import {
   findCodeResultSchema,
   fixSchema,
   healthSchema,
+  keychainWaitSchema,
   mcpServerListSchema,
   mcpServerSchema,
   messageSchema,
@@ -53,6 +54,7 @@ import {
   repoSchema,
   reviewSchema,
   routeViewSchema,
+  runSandboxSchema,
   type ScanWindow,
   type Session,
   type SessionDefaults,
@@ -99,6 +101,8 @@ export const queryKeys = {
   sessionDiff: (id: string) => ['session-diff', id] as const,
   diskAccess: ['disk-access'] as const,
   startAtLogin: ['start-at-login'] as const,
+  runSandbox: ['run-sandbox'] as const,
+  keychainWait: ['keychain-wait'] as const,
   terminals: ['terminals'] as const,
   playbooks: ['playbooks'] as const,
   updates: ['updates'] as const,
@@ -528,6 +532,23 @@ export function useStartAtLogin() {
     queryKey: queryKeys.startAtLogin,
     queryFn: () => apiGet('/terminals/start-at-login', z.object({ data: startAtLoginSchema })).then((r) => r.data),
     refetchOnWindowFocus: 'always',
+  });
+}
+
+/** Read again each time the Permissions page opens: the daemon tests the sandbox then. */
+export function useRunSandbox() {
+  return useQuery({
+    queryKey: queryKeys.runSandbox,
+    queryFn: () => apiGet('/terminals/run-sandbox', z.object({ data: runSandboxSchema })).then((r) => r.data),
+    refetchOnMount: 'always',
+  });
+}
+
+/** Pending Keychain calls past 10 seconds; `/ws` sends `keychain.wait_changed` on each change. */
+export function useKeychainWait() {
+  return useQuery({
+    queryKey: queryKeys.keychainWait,
+    queryFn: () => apiGet('/terminals/keychain-wait', z.object({ data: keychainWaitSchema })).then((r) => r.data),
   });
 }
 

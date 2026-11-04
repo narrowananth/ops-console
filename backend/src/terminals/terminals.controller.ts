@@ -2,13 +2,17 @@ import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post } from '@n
 import {
   createTerminalSchema,
   type DiskAccess,
+  type KeychainWait,
+  type RunSandbox,
   type StartAtLogin,
   type TerminalKind,
   terminalSecretSchema,
 } from '@ops-console/shared';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
+import { KEYCHAIN_WAIT, type KeychainWaitTracker } from '../keychain/keychain-wait';
 import { DISK_ACCESS, type DiskAccessGate } from './disk-access';
+import { RUN_SANDBOX, type RunSandboxGate } from './run-sandbox-gate';
 import { START_AT_LOGIN, type StartAtLoginGate } from './start-at-login';
 import { TerminalsService } from './terminals.service';
 
@@ -21,6 +25,8 @@ export class TerminalsController {
     @Inject(TerminalsService) private readonly terminals: TerminalsService,
     @Inject(DISK_ACCESS) private readonly diskAccess: DiskAccessGate,
     @Inject(START_AT_LOGIN) private readonly startAtLogin: StartAtLoginGate,
+    @Inject(RUN_SANDBOX) private readonly runSandbox: RunSandboxGate,
+    @Inject(KEYCHAIN_WAIT) private readonly keychainWait: KeychainWaitTracker,
   ) {}
 
   @Get('disk-access')
@@ -43,6 +49,16 @@ export class TerminalsController {
   @HttpCode(204)
   async openLoginItemsSettings(): Promise<void> {
     await this.startAtLogin.openSettings();
+  }
+
+  @Get('run-sandbox')
+  async checkRunSandbox(): Promise<{ data: RunSandbox }> {
+    return { data: await this.runSandbox.check() };
+  }
+
+  @Get('keychain-wait')
+  readKeychainWait(): { data: KeychainWait } {
+    return { data: this.keychainWait.state() };
   }
 
   @Get()

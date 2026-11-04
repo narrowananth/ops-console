@@ -8,6 +8,7 @@ import {
   SessionState,
   SwitchReason,
 } from './agents';
+import { keychainWaitSchema } from './connections';
 import { CheckTarget, HealthStatus } from './mcp';
 import { FixStage, FixStatus, ReviewDecision, ScanStatus, Severity } from './monitor';
 import { PlaybookStepStatus } from './playbooks';
@@ -24,6 +25,7 @@ const event = <E extends string, D extends z.ZodType>(name: E, data: D) =>
 export const wsEventSchema = z.discriminatedUnion('event', [
   event('settings.updated', z.object({ keys: z.array(z.string()) })),
   event('update.changed', z.object({ status: z.enum(UpdateStatus) })),
+  event('keychain.wait_changed', keychainWaitSchema),
   event(
     'session.output',
     z.object({ session_id: z.string(), message_id: z.string(), part_index: z.number().int(), part: partSchema }),

@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import {
   AlertStatus,
@@ -1033,6 +1034,15 @@ describe('Fix', () => {
     expect(prompts).toHaveLength(fix.playbook.steps.length + 1);
     expect(prompts.some((prompt) => prompt.includes('Atlassian'))).toBe(false);
     expect(prompts.at(-1)).toContain('- Confirm the root cause and look for an existing fix: the root cause holds');
+    // The Run sandbox lets every Fix turn read ~/.ssh to push, and the Verification before it could not.
+    const ssh = path.join(os.homedir(), '.ssh');
+    const denied = (call: { options: { sandbox?: { filesystem?: { denyRead?: string[] } } } }) =>
+      call.options.sandbox?.filesystem?.denyRead ?? [];
+    expect(ctx.daemon.sdk.calls.slice(before).map((call) => denied(call).includes(ssh))).toEqual(
+      prompts.map(() => false),
+    );
+    expect(before).toBeGreaterThan(0);
+    expect(ctx.daemon.sdk.calls.slice(0, before).every((call) => denied(call).includes(ssh))).toBe(true);
   });
 
   it('skips the ticket with Jira off and names the branch fix/<slug>', async () => {
