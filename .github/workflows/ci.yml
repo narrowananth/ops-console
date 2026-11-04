@@ -7,8 +7,8 @@ on:
 
 jobs:
   check:
-    # macOS, like the operator's machine; nothing here needs Docker.
-    runs-on: macos-15
+    # The operator's own Mac, through a self-hosted runner: GitHub's macOS runners queue for 15 minutes or more.
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6

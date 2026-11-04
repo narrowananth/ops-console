@@ -10,13 +10,16 @@ permissions:
 jobs:
   build:
     strategy:
+      # One Mac builds both: the install test below starts the daemon on its port, so the builds run in turn.
+      max-parallel: 1
       matrix:
         include:
-          - runner: macos-15
+          - label: ARM64
             arch: arm64
-          - runner: macos-15-intel
+          - label: X64
             arch: x64
-    runs-on: ${{ matrix.runner }}
+    # A self-hosted runner of the build's own architecture; each runner carries its label.
+    runs-on: [self-hosted, "${{ matrix.label }}"]
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
