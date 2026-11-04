@@ -36,6 +36,7 @@ import {
   mcpServerListSchema,
   mcpServerSchema,
   messageSchema,
+  networkAllowlistSchema,
   type PlaybookPatch,
   type PlaybookTrigger,
   type PrReviewEvent,
@@ -61,6 +62,7 @@ import {
   type SessionPatch,
   SessionState,
   SignInVia,
+  savedNetworkDomainSchema,
   scanSchema,
   serviceSchema,
   sessionDefaultsSchema,
@@ -102,6 +104,7 @@ export const queryKeys = {
   diskAccess: ['disk-access'] as const,
   startAtLogin: ['start-at-login'] as const,
   runSandbox: ['run-sandbox'] as const,
+  networkAllowlist: ['network-allowlist'] as const,
   keychainWait: ['keychain-wait'] as const,
   terminals: ['terminals'] as const,
   playbooks: ['playbooks'] as const,
@@ -541,6 +544,35 @@ export function useRunSandbox() {
     queryKey: queryKeys.runSandbox,
     queryFn: () => apiGet('/terminals/run-sandbox', z.object({ data: runSandboxSchema })).then((r) => r.data),
     refetchOnMount: 'always',
+  });
+}
+
+/** The hosts agent runs may reach, in three groups. Read again each time the Permissions page opens. */
+export function useNetworkAllowlist() {
+  return useQuery({
+    queryKey: queryKeys.networkAllowlist,
+    queryFn: () => apiGet('/network-allowlist', z.object({ data: networkAllowlistSchema })).then((r) => r.data),
+    refetchOnMount: 'always',
+    // The row shows the error with its own Retry.
+    retry: false,
+  });
+}
+
+export function useAddNetworkDomain() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (domain: string) =>
+      apiSend('POST', '/network-allowlist/domains', { domain }, z.object({ data: savedNetworkDomainSchema })),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.networkAllowlist }),
+  });
+}
+
+export function useRemoveNetworkDomain() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (domain: string) =>
+      apiSend('DELETE', `/network-allowlist/domains/${encodeURIComponent(domain)}`, undefined, z.undefined()),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.networkAllowlist }),
   });
 }
 

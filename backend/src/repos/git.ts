@@ -317,12 +317,23 @@ export function cloneUrl(url: string): string {
   return `https://${trimmed.replace(/\.git$/, '')}.git`;
 }
 
+const REMOTE_URL = /^(?:[a-z+]+:\/\/(?:[^@/]+@)?|[^@/\s]+@)([^/:]+)[/:](?:\d+\/)?(.+?)(?:\.git)?\/?$/i;
+
+/** The lowercase hostname and `owner/name` an `origin` URL names, in `https://host/path` or `git@host:path` form. */
+function splitRemote(url: string | null): { hostname: string | null; slug: string | null } {
+  const match = url === null ? null : REMOTE_URL.exec(url.trim());
+  return { hostname: match?.[1]?.toLowerCase() ?? null, slug: match?.[2] ?? null };
+}
+
+/** The lowercase hostname an `origin` URL points at; null for a local path or no URL. */
+export function remoteHostname(url: string | null): string | null {
+  return splitRemote(url).hostname;
+}
+
 /** The host and `owner/name` an `origin` URL points at; any other host is `local`. */
 export function parseRemote(url: string | null): { host: GitHost; slug: string | null } {
   if (url === null) return { host: GitHost.Local, slug: null };
-  const match = /^(?:[a-z+]+:\/\/(?:[^@/]+@)?|[^@/\s]+@)([^/:]+)[/:](?:\d+\/)?(.+?)(?:\.git)?\/?$/i.exec(url.trim());
-  const hostname = match?.[1]?.toLowerCase();
-  const slug = match?.[2] ?? null;
+  const { hostname, slug } = splitRemote(url);
   const host =
     hostname === 'github.com'
       ? GitHost.Github

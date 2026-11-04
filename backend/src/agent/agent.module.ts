@@ -7,6 +7,8 @@ import { USAGE_SOURCE } from '../accounts/usage-source';
 import { ActionLogController, ApprovalsController } from '../action-log/action-log.controller';
 import { ActionLogService } from '../action-log/action-log.service';
 import { ApprovalsService } from '../action-log/approvals.service';
+import { NetworkAllowlistController } from '../network/network-allowlist.controller';
+import { NetworkAllowlistService } from '../network/network-allowlist.service';
 import { JobSteps } from '../playbooks/job-steps';
 import { PlaybooksController } from '../playbooks/playbooks.controller';
 import { PlaybooksService } from '../playbooks/playbooks.service';
@@ -39,6 +41,7 @@ export class AgentModule {
         AccountsController,
         CliProxyController,
         PlaybooksController,
+        NetworkAllowlistController,
       ],
       providers: [
         { provide: AGENT_CONFIG, useValue: config },
@@ -55,6 +58,7 @@ export class AgentModule {
         AccountsService,
         CliProxyService,
         SessionsService,
+        NetworkAllowlistService,
         AgentRuntime,
         PlaybooksService,
         JobSteps,
