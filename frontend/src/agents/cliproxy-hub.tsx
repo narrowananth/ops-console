@@ -34,6 +34,9 @@ export function CliProxyHub({ hub }: { hub: CliProxy }) {
   const [key, setKey] = useState('');
   const addressOk = LOCAL_ADDRESS.test(address.trim());
   const status = STATUS[hub.status];
+  // Turning on waits for CLIProxy to answer with the key; turning off never waits.
+  const answered = hub.status === CliProxyStatus.Connected;
+  const blocked = !hub.enabled && !answered;
   const error = patch.error ?? action.error;
 
   return (
@@ -49,12 +52,19 @@ export function CliProxyHub({ hub }: { hub: CliProxy }) {
               Runs go through CLIProxy. It picks the account and tracks the quota; the accounts and switching below
               pause until you turn this off.
             </div>
+            {blocked && (
+              <div className="mt-1 text-xs text-accent-700">
+                {hub.has_key
+                  ? 'Turns on once CLIProxy answers: install it (brew install cliproxyapi), start it, then Check.'
+                  : "Turns on once CLIProxy's API key is saved and CLIProxy answers to it."}
+              </div>
+            )}
           </div>
           <Toggle
             label="Use CLIProxy"
             checked={hub.enabled}
-            disabled={!hub.has_key && !hub.enabled}
-            title={hub.has_key || hub.enabled ? undefined : "Save CLIProxy's API key first"}
+            disabled={blocked}
+            title={blocked ? 'CLIProxy has to answer to the saved key first' : undefined}
             onChange={(enabled) => patch.mutate({ cliproxy: { enabled, address: hub.address } })}
           />
         </div>

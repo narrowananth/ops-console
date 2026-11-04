@@ -125,8 +125,12 @@ test('Use CLIProxy needs a key first, then pauses the accounts and switching and
     const request = route.request();
     const path = new URL(request.url()).pathname.replace('/api', '');
     if (request.method() !== 'GET') sent.push({ method: request.method(), path, body: request.postDataJSON() });
+    // CLIProxy is not running when the key is saved, and answers by the time of Check.
     if (path === '/cliproxy/key' && request.method() === 'PUT') {
-      hub = { ...hub, has_key: true, status: 'connected', checked_at: new Date().toISOString() };
+      hub = { ...hub, has_key: true, status: 'unreachable', status_detail: 'Nothing answers at http://127.0.0.1:8317' };
+    }
+    if (path === '/cliproxy/checks') {
+      hub = { ...hub, status: 'connected', status_detail: null, checked_at: new Date().toISOString() };
     }
     return route.fulfill({ json: { data: hub } });
   });
@@ -147,9 +151,15 @@ test('Use CLIProxy needs a key first, then pauses the accounts and switching and
   await expect(page.getByText('No API key')).toBeVisible();
   await page.getByLabel('CLIProxy API key').fill('sk-test');
   await page.getByRole('button', { name: 'Save' }).nth(1).click();
-  await expect(page.getByText('Connected')).toBeVisible();
+  await expect(page.getByText('Not reachable')).toBeVisible();
   await expect(page.getByLabel('CLIProxy API key')).toHaveValue('');
   expect(sent[0]).toEqual({ method: 'PUT', path: '/cliproxy/key', body: { key: 'sk-test' } });
+  // Not installed or not started: the toggle stays off until CLIProxy answers.
+  await expect(toggle).toBeDisabled();
+  await expect(page.getByText(/Turns on once CLIProxy answers: install it/)).toBeVisible();
+  await page.getByRole('button', { name: 'Check' }).click();
+  await expect(page.getByText('Connected')).toBeVisible();
+  await expect(toggle).toBeEnabled();
 
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
