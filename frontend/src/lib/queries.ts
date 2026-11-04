@@ -9,6 +9,7 @@ import {
   alertSchema,
   approvalSchema,
   branchSchema,
+  type CliProxySetting,
   type ConnectionTestResult,
   type ConnectionType,
   type ConnectorId,
@@ -17,6 +18,7 @@ import {
   type CreateScan,
   checkoutResultSchema,
   claudeAccountSchema,
+  cliProxySchema,
   commentPassSchema,
   connectionCheckSchema,
   connectionListSchema,
@@ -80,6 +82,7 @@ export const queryKeys = {
   health: ['health'] as const,
   settings: ['settings'] as const,
   accounts: ['agent-accounts'] as const,
+  cliProxy: ['cliproxy'] as const,
   approvals: ['approvals'] as const,
   mcpServers: ['mcp-servers'] as const,
   connectors: ['connectors'] as const,
@@ -180,8 +183,11 @@ export function usePatchSettings() {
   return useMutation({
     mutationKey: PATCH_SETTINGS,
     scope: { id: 'patch-settings' },
-    mutationFn: (patch: { session_defaults?: SessionDefaults; agent_accounts?: AgentAccountsSetting }) =>
-      apiSend('PATCH', '/settings', patch, agentSettingsSchema),
+    mutationFn: (patch: {
+      session_defaults?: SessionDefaults;
+      agent_accounts?: AgentAccountsSetting;
+      cliproxy?: CliProxySetting;
+    }) => apiSend('PATCH', '/settings', patch, agentSettingsSchema),
     onMutate: async (patch) => {
       await client.cancelQueries({ queryKey: queryKeys.settings });
       const previous = client.getQueryData<Cached>(queryKeys.settings);
@@ -197,10 +203,39 @@ export function usePatchSettings() {
       // A later click is still waiting to save: its own answer will carry the whole state.
       if (client.isMutating({ mutationKey: PATCH_SETTINGS }) <= 1) client.setQueryData(queryKeys.settings, settings);
     },
+    // Turning CLIProxy on or off, or moving it, changes what `/cliproxy` answers.
+    onSettled: (_settings, _error, patch) => {
+      if (patch.cliproxy) void client.invalidateQueries({ queryKey: queryKeys.cliProxy });
+    },
   });
 }
 
 const ACCOUNTS_REFRESH_MS = 10_000;
+
+const cliProxyResponse = z.object({ data: cliProxySchema });
+
+/** CLIProxy as the Claude account hub: on or off, its address, whether a key is saved, and how it last answered. */
+export function useCliProxy() {
+  return useQuery({
+    queryKey: queryKeys.cliProxy,
+    queryFn: () => apiGet('/cliproxy', cliProxyResponse),
+    refetchInterval: ACCOUNTS_REFRESH_MS,
+  });
+}
+
+/** Saves the key to the Keychain, removes it, or asks CLIProxy again; each answers with the hub as it is now. */
+export function useCliProxyAction() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (action: { kind: 'save'; key: string } | { kind: 'remove' } | { kind: 'check' }) =>
+      action.kind === 'save'
+        ? apiSend('PUT', '/cliproxy/key', { key: action.key }, cliProxyResponse)
+        : action.kind === 'remove'
+          ? apiSend('DELETE', '/cliproxy/key', undefined, cliProxyResponse)
+          : apiSend('POST', '/cliproxy/checks', undefined, cliProxyResponse),
+    onSuccess: (body) => client.setQueryData(queryKeys.cliProxy, body),
+  });
+}
 
 /** Refetched every 10 seconds while mounted, so windows that reset and usage from runs show without a reload. */
 export function useAgentAccounts() {

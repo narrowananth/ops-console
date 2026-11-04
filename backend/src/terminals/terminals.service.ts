@@ -18,6 +18,7 @@ import type { IPty } from 'node-pty';
 import type { WebSocket } from 'ws';
 import { z } from 'zod';
 import { AccountsService } from '../accounts/accounts.service';
+import { CliProxyService } from '../accounts/cliproxy.service';
 import { ActionLogService } from '../action-log/action-log.service';
 import { SESSION_DEFAULTS_KEY } from '../agent/sessions.service';
 import { CLAUDE_CLI, type ClaudeCli, claudeEnv } from '../claude-cli/claude-cli';
@@ -69,6 +70,7 @@ export class TerminalsService implements OnModuleDestroy {
     @Inject(CLAUDE_CLI) private readonly claude: ClaudeCli,
     @Inject(MCP_CONFIG) private readonly mcpConfig: McpConfig,
     @Inject(AccountsService) private readonly accounts: AccountsService,
+    @Inject(CliProxyService) private readonly cliProxy: CliProxyService,
     @Inject(ActionLogService) private readonly actionLog: ActionLogService,
     @Inject(ConnectionsService) private readonly connections: ConnectionsService,
     @Inject(ConnectorsService) private readonly connectors: ConnectorsService,
@@ -89,7 +91,7 @@ export class TerminalsService implements OnModuleDestroy {
   async create(_kind: TerminalKind): Promise<{ id: string }> {
     const running = this.list()[0];
     if (running) return { id: running.id };
-    const account = this.accounts.active();
+    const account = this.accounts.forRun();
     const id = crypto.randomUUID();
     const dir = path.join(this.dataDir, 'terminals', id);
     await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -102,7 +104,7 @@ export class TerminalsService implements OnModuleDestroy {
     await trustFolder(this.accounts.configDir(account), await realpath(dir));
     const nodePty = await loadPty();
     // Markers of the Claude Code session the daemon may have been started from would turn off this one's transcript.
-    const env = { ...claudeEnv(this.accounts.configDir(account)) };
+    const env = { ...claudeEnv(this.accounts.configDir(account)), ...(await this.cliProxy.env()) };
     for (const marker of ['CLAUDECODE', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_ENTRYPOINT']) delete env[marker];
     // Model and effort follow the defaults in Settings › Agents, as a new Session's do. The CLI tops out at `max`.
     const { model, effort } = this.settings.get(SESSION_DEFAULTS_KEY, sessionDefaultsSchema);

@@ -104,3 +104,69 @@ test('Add by sign-in link shows the link and signs in with the pasted code', asy
   );
   expect(sent.at(-1)).toEqual({ path: '/agent-accounts/acc-1/logins/code', body: { code: 'good#fake-state' } });
 });
+
+test('Use CLIProxy needs a key first, then pauses the accounts and switching and shows in the sidebar', async ({
+  page,
+}) => {
+  const sent: { method: string; path: string; body: unknown }[] = [];
+  let hub = {
+    enabled: false,
+    address: 'http://127.0.0.1:8317',
+    has_key: false,
+    status: 'no_key',
+    status_detail: null as string | null,
+    checked_at: null as string | null,
+  };
+  const list = [account({ label: 'ops@example.com', email: 'ops@example.com', signed_in: true, is_active: true })];
+  await page.route('**/api/agent-accounts**', (route) =>
+    route.fulfill({ json: { data: list, meta: { next_cursor: null, active_account_id: 'acc-1', smart_pick: null } } }),
+  );
+  await page.route('**/api/cliproxy**', (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname.replace('/api', '');
+    if (request.method() !== 'GET') sent.push({ method: request.method(), path, body: request.postDataJSON() });
+    if (path === '/cliproxy/key' && request.method() === 'PUT') {
+      hub = { ...hub, has_key: true, status: 'connected', checked_at: new Date().toISOString() };
+    }
+    return route.fulfill({ json: { data: hub } });
+  });
+  await page.route('**/api/settings', async (route) => {
+    const request = route.request();
+    if (request.method() === 'PATCH') {
+      const body = request.postDataJSON() as { cliproxy?: typeof hub };
+      sent.push({ method: 'PATCH', path: '/settings', body });
+      if (body.cliproxy) hub = { ...hub, ...body.cliproxy };
+      return route.fulfill({ response: await route.fetch({ method: 'GET' }) });
+    }
+    return route.fallback();
+  });
+  await page.goto(`${daemon.url}/agents#token=${daemon.token}`);
+
+  const toggle = page.getByRole('switch', { name: 'Use CLIProxy' });
+  await expect(toggle).toBeDisabled();
+  await expect(page.getByText('No API key')).toBeVisible();
+  await page.getByLabel('CLIProxy API key').fill('sk-test');
+  await page.getByRole('button', { name: 'Save' }).nth(1).click();
+  await expect(page.getByText('Connected')).toBeVisible();
+  await expect(page.getByLabel('CLIProxy API key')).toHaveValue('');
+  expect(sent[0]).toEqual({ method: 'PUT', path: '/cliproxy/key', body: { key: 'sk-test' } });
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  expect(sent.at(-1)).toEqual({
+    method: 'PATCH',
+    path: '/settings',
+    body: { cliproxy: { enabled: true, address: 'http://127.0.0.1:8317' } },
+  });
+  await expect(page.getByRole('status')).toHaveText(
+    'CLIProxy manages Claude accounts and quota now. Turn off Use CLIProxy to manage them here.',
+  );
+  // The accounts and their switching are out of reach.
+  await expect(page.locator('[inert] [aria-label="Auto-switch accounts"]')).toHaveCount(1);
+  await expect(page.locator('[inert] section[aria-label="Claude Code accounts"]')).toHaveCount(1);
+  await expect(page.locator('[inert] [aria-label="Use CLIProxy"]')).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Claude account hub' })).toContainText('connected');
+
+  await page.getByLabel('CLIProxy address').fill('https://proxy.example.com');
+  await expect(page.getByRole('button', { name: 'Save' }).first()).toBeDisabled();
+});
