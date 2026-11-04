@@ -33,6 +33,12 @@ jobs:
       - name: Install the built tarball and run it under launchd
         run: |
           set -eu
+          # install.sh installs the arm64 build in a shell under Rosetta, so an Intel runner on an Apple silicon Mac
+          # cannot install the x64 tarball. The build above still ran.
+          if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = 1 ]; then
+            echo "Under Rosetta: install.sh picks arm64 here, so the install test is skipped."
+            exit 0
+          fi
           mkdir release
           cp "out/ops-console-darwin-${{ matrix.arch }}.tar.gz" release/
           (cd release && shasum -a 256 ops-console-darwin-*.tar.gz > checksums.txt)
