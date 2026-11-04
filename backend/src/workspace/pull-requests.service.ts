@@ -255,7 +255,11 @@ export class PullRequestsService implements OpenPrBranches {
     if (repoId === undefined) {
       // A rate limited host keeps what was read: asking again would fail and leave the list empty.
       for (const key of [...this.ownerCache.keys()]) {
-        if (!this.cooling(key.split(':')[0] as GitHost)) this.ownerCache.delete(key);
+        const [host, owner] = key.split(':') as [GitHost, string];
+        if (this.cooling(host)) continue;
+        this.ownerCache.delete(key);
+        // Refresh is the operator asking for everything again, so an adapter's own memory of quiet repositories goes too.
+        this.hosts.for(host).forgetOwner?.(owner);
       }
       for (const host of [...this.ownersOf.keys()]) if (!this.cooling(host)) this.ownersOf.delete(host);
     }

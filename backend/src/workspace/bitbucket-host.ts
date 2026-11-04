@@ -18,6 +18,14 @@ const STATES: Record<PrState, string> = {
 export const REPOS_PER_WORKSPACE = 300;
 /** Repositories read at once. */
 const PARALLEL = 6;
+/**
+ * A repository with no open pull request, and nothing pushed since the last read, is not read again for this long.
+ * Reading all of a workspace's repositories each minute is what used up Bitbucket's quota.
+ */
+const QUIET_REPO_MS = 30 * 60_000;
+
+/** What the last read of a repository found: when it was pushed to, when it was read, and whether it had any. */
+type Seen = { updated: string | null; at: number; open: number };
 
 const page = <T extends z.ZodType>(item: T) => z.object({ values: z.array(item), next: z.string().nullish() });
 
@@ -147,7 +155,15 @@ export function diffFiles(diff: string, stats: z.infer<typeof diffstatSchema>[])
  * the call only: output may hold tokens.
  */
 export class BitbucketHost implements GitHostAdapter {
+  /** Per workspace and state: what the last read of each repository found. */
+  private readonly seen = new Map<string, Map<string, Seen>>();
+
   constructor(private readonly bin = 'bkt') {}
+
+  /** The next read of the workspace reads every repository. */
+  forgetOwner(owner: string): void {
+    for (const key of [...this.seen.keys()]) if (key.startsWith(`${owner.toLowerCase()}:`)) this.seen.delete(key);
+  }
 
   async list(slug: string, state: PrState): Promise<HostPullRequest[]> {
     const out = await this.json(`/repositories/${slug}/pullrequests`, {
@@ -166,26 +182,46 @@ export class BitbucketHost implements GitHostAdapter {
   }
 
   async listOwner(owner: string, state: PrState): Promise<OwnedPullRequest[]> {
-    const names: string[] = [];
+    const memory = this.seen.get(`${owner.toLowerCase()}:${state}`) ?? new Map<string, Seen>();
+    const names: { name: string; updated: string | null }[] = [];
     for (let at = 1; names.length < REPOS_PER_WORKSPACE; at++) {
       const out = await this.json(`/repositories/${owner}`, {
         pagelen: '100',
         page: String(at),
         sort: '-updated_on',
-        fields: 'next,values.slug',
+        fields: 'next,values.slug,values.updated_on',
       });
-      const read = page(z.object({ slug: z.string() })).parse(out);
-      names.push(...read.values.map((value) => value.slug));
+      const read = page(z.object({ slug: z.string(), updated_on: z.string().nullish() })).parse(out);
+      names.push(...read.values.map((value) => ({ name: value.slug, updated: value.updated_on ?? null })));
       if (!read.next) break;
     }
     const out: OwnedPullRequest[] = [];
+    const next = new Map<string, Seen>();
     const queue = names.slice(0, REPOS_PER_WORKSPACE);
+    // A repository with open pull requests is always read; a quiet one only when it was pushed to or is long unread.
+    const skipped = (name: string, updated: string | null) => {
+      const before = memory.get(name);
+      return (
+        before !== undefined &&
+        before.open === 0 &&
+        before.updated !== null &&
+        before.updated === updated &&
+        Date.now() - before.at < QUIET_REPO_MS
+      );
+    };
     await Promise.all(
       Array.from({ length: PARALLEL }, async () => {
-        for (let name = queue.shift(); name !== undefined; name = queue.shift()) {
-          const slug = `${owner}/${name}`;
+        for (let one = queue.shift(); one !== undefined; one = queue.shift()) {
+          const slug = `${owner}/${one.name}`;
+          const before = memory.get(one.name);
+          if (before && skipped(one.name, one.updated)) {
+            next.set(one.name, before);
+            continue;
+          }
           try {
-            out.push(...(await this.list(slug, state)).map((pr) => ({ ...pr, slug })));
+            const found = (await this.list(slug, state)).map((pr) => ({ ...pr, slug }));
+            out.push(...found);
+            next.set(one.name, { updated: one.updated, at: Date.now(), open: found.length });
           } catch (error) {
             // The read fails as a whole, so the other workers stop asking instead of finishing the queue.
             queue.length = 0;
@@ -194,6 +230,8 @@ export class BitbucketHost implements GitHostAdapter {
         }
       }),
     );
+    // Kept only when the whole read worked: a failed one leaves the last good memory.
+    this.seen.set(`${owner.toLowerCase()}:${state}`, next);
     return out;
   }
 

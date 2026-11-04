@@ -60,6 +60,8 @@ export interface GitHostAdapter {
   owners(): Promise<string[]>;
   /** Pull requests in every repository of one owner, each with its repository's slug. */
   listOwner(owner: string, state: PrState): Promise<OwnedPullRequest[]>;
+  /** Drops what an adapter remembers of an owner's last read, so the next `listOwner` reads everything. */
+  forgetOwner?(owner: string): void;
   get(slug: string, number: number): Promise<{ pr: HostPullRequest; files: PrFile[]; comments: HostComment[] }>;
   postComment(slug: string, number: number, comment: NewHostComment): Promise<HostComment>;
   setResolved(slug: string, number: number, commentId: string, resolved: boolean): Promise<void>;
