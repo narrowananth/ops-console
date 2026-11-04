@@ -638,3 +638,31 @@ test('a running job counts up the time it has taken, each second; one that ended
   await page.reload();
   await expect(card.locator('time').first()).toHaveText('took 4m 03s');
 });
+
+test('Collapse all folds every file to its name and Expand all opens them again', async ({ page }) => {
+  const file = (name: string) => ({
+    name,
+    additions: 1,
+    deletions: 0,
+    lines: [
+      { sign: ' ', text: '@@ -1 +1,2 @@' },
+      { sign: '+', text: `export const ${name.replace(/\W/g, '')} = 1;` },
+    ],
+  });
+  const detail = { current: pullRequest({ files: [file('src/a.ts'), file('src/b.ts'), file('src/c.ts')] }) };
+  await routePullRequest(page, detail);
+  await openPullRequest(page);
+
+  const files = page.getByRole('region', { name: 'Files' });
+  await expect(files.getByText('export const srcats = 1;')).toBeVisible();
+  await files.getByRole('button', { name: 'Collapse all' }).click();
+  for (const name of ['srcats', 'srcbts', 'srccts'])
+    await expect(files.getByText(`export const ${name} = 1;`)).toBeHidden();
+
+  // A fold kept in the browser holds through a reload, and Expand all opens every file again.
+  await page.reload();
+  await expect(files.getByText('export const srcbts = 1;')).toBeHidden();
+  await files.getByRole('button', { name: 'Expand all' }).click();
+  for (const name of ['srcats', 'srcbts', 'srccts'])
+    await expect(files.getByText(`export const ${name} = 1;`)).toBeVisible();
+});
