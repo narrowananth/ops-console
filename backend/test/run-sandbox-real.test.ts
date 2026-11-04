@@ -189,7 +189,9 @@ function run(command: string, cwd: string, sandbox: object | null): Promise<stri
   });
 }
 
-const rules = (workingDir: string, readSsh = false) => runSandbox({ workingDir, dataDir: data, home, readSsh });
+const BUILT_IN = ['github.com', 'api.github.com', '*.githubusercontent.com', 'registry.npmjs.org'];
+const rules = (workingDir: string, readSsh = false, networkDomains = BUILT_IN) =>
+  runSandbox({ workingDir, dataDir: data, home, readSsh, networkDomains });
 
 describe.skipIf(process.platform !== 'darwin' || CLAUDE === null)('Run sandbox, enforced by Seatbelt', () => {
   it('reads the token with no sandbox, so the cases below prove something', async () => {
@@ -227,6 +229,41 @@ describe.skipIf(process.platform !== 'darwin' || CLAUDE === null)('Run sandbox, 
   it('still runs git and node (Behavior 9)', async () => {
     expect(await run('git --version && node -v', checkout, rules(checkout))).toMatch(/git version .*\nv\d+/);
   }, 120_000);
+
+  it('refuses a host off the allowlist, names it, and lets the command finish (Network Behavior 1)', async () => {
+    const out = await run('curl -sS -m 10 https://example.com; echo finished', checkout, rules(checkout));
+    expect(out).toContain('deny network-outbound example.com:443 (host is not on the allow list)');
+    expect(out).toContain('finished');
+  }, 120_000);
+
+  it('passes a host on the allowlist through the filter and refuses the same request once it is off (Network Behavior 1)', async () => {
+    const viaProxy = `curl -sS -m 10 --noproxy '' -x $HTTP_PROXY http://localhost:${port}/ping; echo exit=$?`;
+    expect(await run(viaProxy, checkout, rules(checkout, false, ['localhost']))).toContain('exit=0');
+    expect(await run(viaProxy, checkout, rules(checkout, false, ['example.org']))).toContain(
+      'host is not on the allow list',
+    );
+  }, 240_000);
+
+  it('cannot go around the filter by IP address, DNS, UDP or a client that ignores the proxy (Network Behavior 2)', async () => {
+    const failed = /exit=[1-9]/;
+    expect(
+      await run("curl -sS -m 8 --noproxy '*' -k https://93.184.216.34; echo exit=$?", checkout, rules(checkout)),
+    ).toMatch(failed);
+    expect(
+      await run("curl -sS -m 8 --noproxy '*' https://example.com; echo exit=$?", checkout, rules(checkout)),
+    ).toContain('Could not resolve host');
+    expect(await run("bash -c 'echo x > /dev/udp/93.184.216.34/9'; echo exit=$?", checkout, rules(checkout))).toMatch(
+      failed,
+    );
+    // Node's `fetch` ignores the proxy settings, so even an allowed host fails.
+    expect(
+      await run(
+        "node -e 'fetch(process.argv[1]).then(r=>console.log(r.status),e=>console.log(e.cause.code))' https://api.github.com",
+        checkout,
+        rules(checkout),
+      ),
+    ).toContain('ENOTFOUND');
+  }, 240_000);
 
   it('reports the sandbox on when Seatbelt works (Behavior 10)', async () => {
     expect(await new SeatbeltRunSandbox().check()).toEqual({ status: 'on', reason: null });

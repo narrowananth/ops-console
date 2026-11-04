@@ -251,6 +251,12 @@ export const repos = sqliteTable('repos', {
   removedAt: text('removed_at'),
 });
 
+/** Hosts the operator added to the Network allowlist: a hostname, or `*.` and a hostname, lowercase. */
+export const networkDomains = sqliteTable('network_domains', {
+  domain: text().primaryKey().notNull(),
+  createdAt: text('created_at').notNull().default(nowIso),
+});
+
 /** The agent's written review of a pull request, tied to the commit it read. */
 export const prAgentReviews = sqliteTable(
   'pr_agent_reviews',

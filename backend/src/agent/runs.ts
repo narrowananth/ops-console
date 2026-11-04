@@ -42,6 +42,8 @@ export type Run = {
   resumeAt: string | null;
   /** Read `~/.ssh` in the Run sandbox: set for a Fix only. */
   readSsh: boolean;
+  /** The Network allowlist the run started with; a retry on another account keeps it. */
+  networkDomains: string[];
   /** Why the run failed, when the console can say: the Run sandbox is unavailable, or the Keychain did not answer. */
   failure: string | null;
 };

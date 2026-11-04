@@ -40,6 +40,7 @@ import { disabledMcpServers, nowIso, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { KEYCHAIN, type Keychain, KeychainTimeout } from '../keychain/keychain';
 import { storedEnvVar } from '../mcp/launcher';
+import { NetworkAllowlistService } from '../network/network-allowlist.service';
 import { PlaybooksService } from '../playbooks/playbooks.service';
 import { systemAppend } from '../playbooks/prompts';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
@@ -86,6 +87,12 @@ export const MERGE_DENIALS = [
   'mcp__github__merge_pull_request',
   'mcp__gitlab__merge_merge_request',
 ];
+
+/**
+ * The Run sandbox filters a run's commands (ADR 0006), not the agent's own web tools, so a steered run could send out
+ * what it reads through them.
+ */
+export const WEB_DENIALS = ['WebFetch', 'WebSearch'];
 
 /**
  * A Reply check or Comment pass hands its outcome to the console, which pushes, replies and resolves; the agent's own
@@ -158,6 +165,7 @@ export class AgentRuntime {
     @Inject(MessageInterceptors) private readonly interceptors: MessageInterceptors,
     @Inject(ConnectionLookup) private readonly connections: ConnectionLookup,
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
+    @Inject(NetworkAllowlistService) private readonly network: NetworkAllowlistService,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
     recovery.register('agent sessions and approvals', () => this.recover());
@@ -310,6 +318,7 @@ export class AgentRuntime {
       resumeAt: options.resumeAt ?? null,
       deny: options.deny ?? [],
       readSsh: options.readSsh ?? false,
+      networkDomains: this.network.forRun(),
       failure: null,
     };
     this.runs.add(run);
@@ -437,6 +446,7 @@ export class AgentRuntime {
         dataDir: this.dataDir,
         readable: attached === null ? [] : [attached],
         readSsh: run.readSsh,
+        networkDomains: run.networkDomains,
       }),
       // The operator's attached files sit outside the working folder; the agent reads them without asking.
       ...(attached === null ? {} : { additionalDirectories: [attached] }),
@@ -455,7 +465,7 @@ export class AgentRuntime {
       },
       includePartialMessages: true,
       abortController: run.abort,
-      disallowedTools: [...MERGE_DENIALS, ...run.deny],
+      disallowedTools: [...MERGE_DENIALS, ...WEB_DENIALS, ...run.deny],
       systemPrompt: { type: 'preset', preset: 'claude_code', append: systemAppend(instructions, run.rules) },
       // Servers the operator disabled stay out of the run.
       settings: {

@@ -13,6 +13,7 @@ import {
   useStartAtLogin,
   useStartSetupTerminal,
 } from '../lib/queries';
+import { NetworkAllowlistRow } from './network-allowlist-row';
 import { EXAMPLES, queueSetupLine, SetupTerminal } from './setup-terminal';
 
 /** Setup agent: Claude, in a terminal, setting up what the other pages hold from the operator's words. */
@@ -225,6 +226,7 @@ function Permissions({ locked }: { locked: boolean }) {
         </li>
         <StartAtLoginRow />
         <RunSandboxRow />
+        <NetworkAllowlistRow />
         <KeychainRow />
       </ul>
       {openSettings.error && (

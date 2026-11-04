@@ -11,6 +11,8 @@ export type SandboxRun = {
   readable?: string[];
   /** A Fix reads `~/.ssh` so its PR stage can push; every other run denies it (ADR 0006). */
   readSsh?: boolean;
+  /** The run's Network allowlist (ADR 0006): the only hosts its commands reach. */
+  networkDomains: string[];
   home?: string;
 };
 
@@ -20,7 +22,7 @@ const TEMP = ['/tmp', '/private/tmp'];
  * The Run sandbox for one agent run (ADR 0006): macOS Seatbelt through the SDK. Commands write only in the working
  * folder and the temp folders, and read neither the data folder, which holds the session token, nor the operator's
  * cloud and Keychain credentials. The working folder stays readable though it sits inside the data folder. The run
- * fails when the sandbox is unavailable and can never ask to leave it. The network stays open.
+ * fails when the sandbox is unavailable and can never ask to leave it. Commands reach only the Network allowlist.
  */
 export function runSandbox(run: SandboxRun): SandboxSettings {
   const home = run.home ?? os.homedir();
@@ -31,8 +33,9 @@ export function runSandbox(run: SandboxRun): SandboxSettings {
     // The Access mode, not the sandbox, decides which commands ask.
     autoAllowBashIfSandboxed: false,
     // Go programs such as `gh` check certificates through macOS's trust service, which the sandbox blocks without it.
-    // The network is open anyway (ADR 0006), so this gives up nothing more.
+    // That service only checks certificates; hosts off the allowlist stay refused.
     enableWeakerNetworkIsolation: true,
+    network: { allowedDomains: run.networkDomains, strictAllowlist: true },
     filesystem: {
       allowWrite: [run.workingDir, ...TEMP],
       denyRead: [

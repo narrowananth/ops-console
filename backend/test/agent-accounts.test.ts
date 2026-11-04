@@ -683,6 +683,43 @@ describe('a run rejected for its limit', () => {
     close();
   });
 
+  it('keeps the Network allowlist it started with when it resumes on another account (Network Behavior 11)', async () => {
+    const daemon = await start();
+    const personal = await addSignedIn(daemon, 'personal');
+    await api(daemon).post(`/agent-accounts/${personal.id}/activate`);
+    await reportUsage(daemon, 10, 10);
+    const [primary] = (await accounts(daemon)).data;
+    await api(daemon).post(`/agent-accounts/${primary?.id}/activate`);
+
+    const id = daemon.createSession();
+    await converse(daemon, id, 'first');
+    const before = daemon.sdk.calls.length;
+    let release = () => {};
+    daemon.sdk.script({ wait: new Promise((resolve) => (release = () => resolve(null))) }, { rejected: true });
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'second' });
+    await until(
+      () => daemon.sdk.calls.length,
+      (calls) => calls === before + 1,
+    );
+    // The operator edits the list while the run waits; the account switch does not start a new list.
+    await api(daemon).post('/network-allowlist/domains', { domain: 'npm.example.com' });
+    release();
+    await until(
+      () => daemon.sdk.calls.length,
+      (calls) => calls === before + 2,
+    );
+    await until(
+      async () => (await api(daemon).get(`/sessions/${id}`)).body.data.state,
+      (state) => state === 'idle' || state === 'failed',
+      'the run to end',
+    );
+    const [started, resumed] = daemon.sdk.calls
+      .slice(before)
+      .map((call) => call.options.sandbox?.network?.allowedDomains);
+    expect(resumed).toEqual(started);
+    expect(resumed).not.toContain('npm.example.com');
+  });
+
   it('fails with rate_limited when Auto-switch has no account to move to', async () => {
     const daemon = await start();
     const { events, close } = await listen(daemon);

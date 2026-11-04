@@ -89,7 +89,7 @@ no reason why.
 
 ## Not required
 
-- **A network allowlist**: a steered run can send readable data out. Review flags code that adds one here.
+- **A network allowlist**: this spec leaves the network open. [run-network-allowlist](run-network-allowlist.md) adds one.
 - **`mcp-exec` and the Setup agent's Keychain reads**: they run in their own processes with their own
   waits, and the 10-second banner does not see them. The Setup agent's reads keep their 120-second limit.
 - **Cancelling the native Keychain prompt**: the dialog stays on the Mac until answered or dismissed.

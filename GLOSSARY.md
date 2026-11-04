@@ -53,6 +53,10 @@ The operating-system limit on an agent run's commands: writes only in the run's 
 the console's data folder or the operator's cloud and login credentials. It applies in every Access mode, and a run
 fails when the sandbox is unavailable.
 
+**Network allowlist**:
+The hosts an agent run's commands may reach, built when the run starts from the built-in hosts, the hosts of the
+Repos' remotes and the operator's own domains. Any other host is refused.
+
 ### Playbooks
 
 **Playbook**:

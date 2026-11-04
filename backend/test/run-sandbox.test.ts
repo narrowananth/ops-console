@@ -1,13 +1,16 @@
+import { execFileSync } from 'node:child_process';
+import { mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AccessMode, CONNECTOR_SERVERS, ConnectorId, StepBlock } from '@ops-console/shared';
+import { AccessMode, CONNECTOR_SERVERS, ConnectorId, GitHost, StepBlock } from '@ops-console/shared';
 import { sql } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AgentRuntime } from '../src/agent/runtime';
+import { repos } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { KEYCHAIN, type Keychain } from '../src/keychain/keychain';
 import { JobSteps } from '../src/playbooks/job-steps';
-import { type AgentDaemon, api, converse, startAgentDaemon, WORKING_DIR } from './agent-fixtures';
+import { type AgentDaemon, api, converse, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
 import { tempDir } from './helpers';
 
 const running: AgentDaemon[] = [];
@@ -15,13 +18,31 @@ afterEach(async () => {
   for (const daemon of running.splice(0)) await daemon.stop();
 });
 
-async function start() {
-  const daemon = await startAgentDaemon();
+async function start(dataDir?: string) {
+  const daemon = await startAgentDaemon(dataDir ? { dataDir } : {});
   running.push(daemon);
   return daemon;
 }
 
 const home = os.homedir();
+const BUILT_IN = ['github.com', 'api.github.com', '*.githubusercontent.com', 'registry.npmjs.org'];
+
+/** A git folder the console knows as a Repo, with `origin` at `origin` or none. */
+async function addRepo(daemon: AgentDaemon, name: string, origin: string | null, removedAt: string | null = null) {
+  const dir = path.join(await tempDir('ops-console-remote-'), name);
+  await mkdir(dir, { recursive: true });
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+  if (origin) execFileSync('git', ['remote', 'add', 'origin', origin], { cwd: dir });
+  daemon.app
+    .get<Store>(STORE)
+    .write((tx) =>
+      tx
+        .insert(repos)
+        .values({ id: crypto.randomUUID(), name, path: dir, host: GitHost.Local, defaultBranch: 'main', removedAt })
+        .run(),
+    );
+}
+
 const sandboxOf = (daemon: AgentDaemon, call = -1) => {
   const options = daemon.sdk.calls.at(call)?.options;
   if (!options?.sandbox) throw new Error('the run had no sandbox');
@@ -29,12 +50,17 @@ const sandboxOf = (daemon: AgentDaemon, call = -1) => {
 };
 
 describe('Run sandbox on agent runs', () => {
-  it('sandboxes a run in every Access mode, full included (Behavior 1)', async () => {
+  it('sandboxes a run in every Access mode, full included (Behavior 1; Network Behavior 1, 3, 7)', async () => {
     const daemon = await start();
     for (const mode of Object.values(AccessMode)) {
       const id = daemon.createSession({ access_mode: mode });
       await converse(daemon, id, 'go');
       expect(sandboxOf(daemon)).toMatchObject({ enabled: true, allowUnsandboxedCommands: false });
+      // The shell reaches the built-in hosts only, and the agent's own web tools, which the filter does not cover, are denied.
+      expect(sandboxOf(daemon).network).toEqual({ allowedDomains: BUILT_IN, strictAllowlist: true });
+      expect(daemon.sdk.calls.at(-1)?.options.disallowedTools).toEqual(
+        expect.arrayContaining(['WebFetch', 'WebSearch']),
+      );
     }
     expect(daemon.sdk.calls).toHaveLength(Object.values(AccessMode).length);
   });
@@ -115,6 +141,27 @@ describe('Run sandbox on agent runs', () => {
     for (const call of daemon.sdk.calls) expect(call.options.sandbox).toMatchObject({ enabled: true });
   });
 
+  it('adds the host of each Repo’s origin, in either form, and nothing for a Repo without one or with a remote that is no domain (Network Behavior 8)', async () => {
+    const daemon = await start();
+    await addRepo(daemon, 'billing', 'https://gitlab.example.com/acme/billing.git');
+    await addRepo(daemon, 'orders', 'git@git.example.org:acme/orders.git');
+    await addRepo(daemon, 'scratch', null);
+    await addRepo(daemon, 'mirror', '/srv/git/mirror.git');
+    await addRepo(daemon, 'odd', 'https://*/acme/odd.git');
+    await addRepo(daemon, 'old', 'https://old.example.net/acme/old.git', '2026-01-01T00:00:00.000Z');
+    await converse(daemon, daemon.createSession(), 'go');
+    expect(sandboxOf(daemon).network?.allowedDomains?.toSorted()).toEqual(
+      [
+        'github.com',
+        'api.github.com',
+        '*.githubusercontent.com',
+        'registry.npmjs.org',
+        'gitlab.example.com',
+        'git.example.org',
+      ].toSorted(),
+    );
+  });
+
   it('lets the run go on when a command is blocked (Behavior 8)', async () => {
     const daemon = await start();
     const id = daemon.createSession({ access_mode: AccessMode.Full });
@@ -137,5 +184,135 @@ describe('Run sandbox on agent runs', () => {
     });
     await converse(daemon, id, 'again');
     expect((await api(daemon).get(`/sessions/${id}`)).body.data.last_error).toBeNull();
+  });
+});
+
+describe('Network allowlist on Permissions', () => {
+  const read = async (daemon: AgentDaemon) => (await api(daemon).get('/network-allowlist')).body.data;
+
+  it('lists the three groups, with the Repo that has each host (Network Behavior 12)', async () => {
+    const daemon = await start();
+    expect(await read(daemon)).toEqual({ built_in: BUILT_IN, from_repos: [], added: [] });
+    await addRepo(daemon, 'billing', 'https://gitlab.example.com/acme/billing.git');
+    await addRepo(daemon, 'ledger', 'git@gitlab.example.com:acme/ledger.git');
+    await addRepo(daemon, 'scratch', null);
+    expect((await read(daemon)).from_repos).toEqual([{ domain: 'gitlab.example.com', repo: 'billing' }]);
+  });
+
+  it('saves a domain trimmed and lowercased, and the next run reaches it (Network Behavior 6, 10, 13)', async () => {
+    const daemon = await start();
+    const added = await api(daemon).post('/network-allowlist/domains', { domain: '  NPM.Example.com ' });
+    expect(added.status).toBe(201);
+    expect(added.body.data).toEqual({ domain: 'npm.example.com' });
+    // A wildcard covers subdomains only, so the apex is its own entry.
+    for (const domain of ['*.example.com', 'example.com']) {
+      expect((await api(daemon).post('/network-allowlist/domains', { domain })).status).toBe(201);
+    }
+    expect((await read(daemon)).added).toEqual(['*.example.com', 'example.com', 'npm.example.com']);
+    await converse(daemon, daemon.createSession(), 'go');
+    expect(sandboxOf(daemon).network?.allowedDomains).toEqual([
+      ...BUILT_IN,
+      '*.example.com',
+      'example.com',
+      'npm.example.com',
+    ]);
+  });
+
+  it.each([
+    ['', 'empty'],
+    ['   ', 'blank'],
+    ['*', 'a bare wildcard'],
+    ['*.com', 'a wildcard over one label'],
+    ['https://npm.example.com', 'a scheme'],
+    ['npm.example.com/v1', 'a path'],
+    ['npm.example.com:8080', 'a port'],
+    ['npm example.com', 'a space'],
+    ['npm.example.com.', 'a trailing dot'],
+    ['10.0.0.1', 'an IP address'],
+    [`${'a'.repeat(250)}.example.com`, 'a name over 253 characters'],
+  ])('refuses %j (%s) and saves nothing (Network Behavior 14)', async (domain) => {
+    const daemon = await start();
+    const refused = await api(daemon).post('/network-allowlist/domains', { domain });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.code).toBe('validation_failed');
+    expect(refused.body.error.message).toEqual(expect.any(String));
+    expect((await read(daemon)).added).toEqual([]);
+  });
+
+  it('accepts a domain already on the list and changes nothing (Network Behavior 15)', async () => {
+    const daemon = await start();
+    await addRepo(daemon, 'billing', 'https://gitlab.example.com/acme/billing.git');
+    await api(daemon).post('/network-allowlist/domains', { domain: 'npm.example.com' });
+    for (const domain of ['github.com', 'gitlab.example.com', 'npm.example.com']) {
+      const again = await api(daemon).post('/network-allowlist/domains', { domain });
+      expect(again.status).toBe(200);
+      expect(again.body.data).toEqual({ domain });
+    }
+    expect((await read(daemon)).added).toEqual(['npm.example.com']);
+  });
+
+  it('removes a domain from the next run and keeps it in a run that already started (Network Behavior 11, 16)', async () => {
+    const daemon = await start();
+    await api(daemon).post('/network-allowlist/domains', { domain: 'npm.example.com' });
+    let release = () => {};
+    daemon.sdk.script({ wait: new Promise((resolve) => (release = () => resolve(null))) });
+    const running = daemon.app.get(AgentRuntime).runFor(daemon.createSession(), 'one', null, {});
+    await until(
+      () => daemon.sdk.calls.length,
+      (calls) => calls === 1,
+      'the first run to start',
+    );
+
+    expect((await api(daemon).delete('/network-allowlist/domains/npm.example.com')).status).toBe(204);
+    await api(daemon).post('/network-allowlist/domains', { domain: 'pkg.example.com' });
+    await converse(daemon, daemon.createSession(), 'two');
+    release();
+    await running.finished;
+
+    const [first, second] = daemon.sdk.calls.map((call) => call.options.sandbox?.network?.allowedDomains);
+    expect(first).toEqual([...BUILT_IN, 'npm.example.com']);
+    expect(second).toEqual([...BUILT_IN, 'pkg.example.com']);
+  });
+
+  it('removes a domain by its name, wildcard or not and whatever the case (Network Behavior 16)', async () => {
+    const daemon = await start();
+    for (const domain of ['*.example.com', 'npm.example.com']) {
+      await api(daemon).post('/network-allowlist/domains', { domain });
+    }
+    for (const name of ['*.example.com', 'NPM.Example.com']) {
+      expect((await api(daemon).delete(`/network-allowlist/domains/${encodeURIComponent(name)}`)).status).toBe(204);
+    }
+    expect((await read(daemon)).added).toEqual([]);
+  });
+
+  it('answers 404 when the domain is not in Added by you (Network Behavior 16)', async () => {
+    const daemon = await start();
+    const missing = await api(daemon).delete('/network-allowlist/domains/github.com');
+    expect(missing.status).toBe(404);
+    expect(missing.body.error.code).toBe('not_found');
+  });
+
+  it('builds a new list when a resumed conversation starts its next turn (Network Behavior 11)', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    await converse(daemon, id, 'first');
+    await api(daemon).post('/network-allowlist/domains', { domain: 'npm.example.com' });
+    await converse(daemon, id, 'second');
+    expect(daemon.sdk.calls[1]?.options.resume).toBeTruthy();
+    expect(daemon.sdk.calls.map((call) => call.options.sandbox?.network?.allowedDomains)).toEqual([
+      BUILT_IN,
+      [...BUILT_IN, 'npm.example.com'],
+    ]);
+  });
+
+  it('keeps Added by you across a daemon restart, and a run after it has them (Network Behavior 11, 17)', async () => {
+    const first = await start();
+    await api(first).post('/network-allowlist/domains', { domain: 'npm.example.com' });
+    const dataDir = first.dataDir;
+    await running.pop()?.stop();
+    const again = await start(dataDir);
+    expect((await read(again)).added).toEqual(['npm.example.com']);
+    await converse(again, again.createSession(), 'go');
+    expect(sandboxOf(again).network?.allowedDomains).toContain('npm.example.com');
   });
 });
