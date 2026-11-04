@@ -5,25 +5,29 @@ import {
   type SessionDefaults,
   SignInVia,
 } from '@ops-console/shared';
-import { type ReactNode, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Section } from '../app/page';
 import { BrandIcon } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Dropdown } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
 import { Toggle } from '../components/ui/toggle';
+import { CHIME_KEY, chimeSchema, playChime, unlockChime } from '../lib/chime';
 import {
   useActivateAccount,
   useAddAccount,
   useAgentAccounts,
   useAgentSettings,
   useCancelLogin,
+  useCliProxy,
   useLogout,
   usePatchSettings,
   useRemoveAccount,
   useStartLogin,
 } from '../lib/queries';
+import { useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
+import { CliProxyHub } from './cliproxy-hub';
 import { ACCESS_MODES, EFFORTS, MODELS } from './options';
 import { SignInLinkDialog } from './sign-in-link-dialog';
 
@@ -387,10 +391,28 @@ const DEFAULTS: {
   },
 ];
 
+/** Greyed and out of reach, keyboard included, while CLIProxy manages the accounts. */
+function Paused({ paused, children }: { paused: boolean; children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    box.current?.toggleAttribute('inert', paused);
+  }, [paused]);
+  return (
+    <div
+      ref={box}
+      aria-disabled={paused || undefined} // The Section inside is its last child and drops its margin; the wrapper keeps the gap to the next one.
+      className={`mb-8 last:mb-0 ${paused ? 'opacity-45 grayscale select-none' : ''}`}
+    >
+      {children}
+    </div>
+  );
+}
+
 /** Agents & accounts: Claude accounts and their usage, Auto-switch, Smart usage and the defaults for new Sessions. */
 export function AgentsTab() {
   const accounts = useAgentAccounts();
   const settings = useAgentSettings();
+  const hub = useCliProxy();
   const patch = usePatchSettings();
   const activate = useActivateAccount();
   const [linkFor, setLinkFor] = useState<string | null>(null);
@@ -420,6 +442,8 @@ export function AgentsTab() {
   const pickLabel = list.find((account) => account.id === pick?.account_id)?.label;
   // Nothing below the account list means anything until one Claude account is signed in.
   const ready = list.some((account) => account.signed_in);
+  // CLIProxy picks the account and tracks the quota, so the accounts and their switching pause.
+  const proxied = hub.data?.data.enabled ?? false;
 
   const accountList = (
     <ul aria-label="Claude Code accounts" className="m-0 list-none divide-y divide-line p-0">
@@ -438,50 +462,63 @@ export function AgentsTab() {
 
   return (
     <div className="text-sm">
-      {list.length > 0 && !ready && (
-        <div className="mb-8 rounded-xl border border-accent-200 bg-accent-100 px-5 py-4 text-accent-900">
-          <div className="font-semibold">Sign in to a Claude account</div>
-          <div className="text-xs">
-            The agent runs under a Claude account. Sign in below; the settings appear once one account is signed in.
-          </div>
+      {hub.data && <CliProxyHub key={hub.data.data.address} hub={hub.data.data} />}
+      {proxied && (
+        <div
+          role="status"
+          className="mb-3 rounded-lg border border-accent-200 bg-accent-100 px-4 py-2.5 text-xs text-accent-900"
+        >
+          CLIProxy manages Claude accounts and quota now. Turn off Use CLIProxy to manage them here.
         </div>
       )}
-      <Section
-        title="Claude Code accounts"
-        sub="The agent runs under one account at a time. Add in this browser opens Anthropic's sign-in here. Add by sign-in link gives a link to sign in from any browser, then takes the code Anthropic shows."
-        aside={<AddAccount primary={!ready} onLink={setLinkFor} />}
-      >
-        {list.length === 0 ? (
-          <div className="px-5 py-8 text-center text-xs text-neutral-700">
-            No Claude account yet. Add one to run agents; the usage and session settings appear once it is signed in.
+      <Paused paused={proxied}>
+        {list.length > 0 && !ready && !proxied && (
+          <div className="mb-8 rounded-xl border border-accent-200 bg-accent-100 px-5 py-4 text-accent-900">
+            <div className="font-semibold">Sign in to a Claude account</div>
+            <div className="text-xs">
+              The agent runs under a Claude account. Sign in below; the settings appear once one account is signed in.
+            </div>
           </div>
-        ) : (
-          accountList
         )}
-      </Section>
+        <Section
+          title="Claude Code accounts"
+          sub="The agent runs under one account at a time. Add in this browser opens Anthropic's sign-in here. Add by sign-in link gives a link to sign in from any browser, then takes the code Anthropic shows."
+          aside={<AddAccount primary={!ready} onLink={setLinkFor} />}
+        >
+          {list.length === 0 ? (
+            <div className="px-5 py-8 text-center text-xs text-neutral-700">
+              No Claude account yet. Add one to run agents; the usage and session settings appear once it is signed in.
+            </div>
+          ) : (
+            accountList
+          )}
+        </Section>
+      </Paused>
       {linkFor !== null && (
         <SignInLinkDialog account={list.find((account) => account.id === linkFor)} onClose={() => setLinkFor(null)} />
       )}
       {ready && (
         <>
-          <Section title="Account switching" sub="How the console moves sessions between your accounts.">
-            <Switches
-              key={setting.threshold}
-              setting={setting}
-              onChange={(next) => patch.mutate({ agent_accounts: next })}
-            />
-            {pick && (
-              <div className="border-t border-line bg-accent-100 px-5 py-3 text-xs text-accent-900">
-                <strong className="font-mono">{pickLabel}</strong> is the smart pick: {pick.reason}. It is used
-                automatically; turn Smart usage off to stop that.
-              </div>
-            )}
-            {(patch.isError || activate.isError) && (
-              <div role="alert" className="border-t border-line px-5 py-3 text-xs text-accent-700">
-                {(patch.error ?? activate.error)?.message}
-              </div>
-            )}
-          </Section>
+          <Paused paused={proxied}>
+            <Section title="Account switching" sub="How the console moves sessions between your accounts.">
+              <Switches
+                key={setting.threshold}
+                setting={setting}
+                onChange={(next) => patch.mutate({ agent_accounts: next })}
+              />
+              {pick && (
+                <div className="border-t border-line bg-accent-100 px-5 py-3 text-xs text-accent-900">
+                  <strong className="font-mono">{pickLabel}</strong> is the smart pick: {pick.reason}. It is used
+                  automatically; turn Smart usage off to stop that.
+                </div>
+              )}
+              {(patch.isError || activate.isError) && (
+                <div role="alert" className="border-t border-line px-5 py-3 text-xs text-accent-700">
+                  {(patch.error ?? activate.error)?.message}
+                </div>
+              )}
+            </Section>
+          </Paused>
           <Section
             title="Defaults for new sessions"
             sub="Every agent the console starts begins with these: Workspace and Dev tools terminals, Monitor Verify and Fix, Agent Review, and the Setup agent. Change them for one session from its Model, Effort and Access chips."
@@ -522,6 +559,36 @@ export function AgentsTab() {
           </Section>
         </>
       )}
+      <SoundSection />
     </div>
+  );
+}
+
+/** Per browser, like the theme: whether a run the operator started chimes when it ends. */
+function SoundSection() {
+  const [on, setOn] = useStored(CHIME_KEY, chimeSchema, true);
+  return (
+    <Section title="Notifications" sub="What this browser does when the agent is done.">
+      <div className="flex items-center gap-4 px-5 py-4">
+        <div className="flex-1">
+          <div className="font-semibold">Sound when the agent finishes</div>
+          <div className="text-xs text-neutral-700">
+            A soft two-note chime when a run you started ends: rising when it finished, falling when it failed. Monitor
+            and pull request jobs stay quiet.
+          </div>
+        </div>
+        <Button
+          className="px-3 py-1.25 text-xs"
+          title="Hear the chime"
+          onClick={() => {
+            unlockChime();
+            playChime('done', true);
+          }}
+        >
+          Play
+        </Button>
+        <Toggle label="Sound when the agent finishes" checked={on} onChange={setOn} />
+      </div>
+    </Section>
   );
 }

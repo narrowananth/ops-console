@@ -112,6 +112,8 @@ export function toAgentReview(row: ReviewRow, headSha: string | null, playbook: 
     checklist: JSON.parse(row.checklist),
     tools: JSON.parse(row.tools),
     created_at: row.createdAt,
+    started_at: row.startedAt ?? row.createdAt,
+    finished_at: row.finishedAt,
     stale: headSha !== null && row.headSha !== headSha,
     playbook,
   };

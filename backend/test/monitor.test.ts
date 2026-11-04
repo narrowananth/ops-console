@@ -53,6 +53,9 @@ import { FakeGitHost, hostPr } from './fakes/git-host';
 import { FakeProbe } from './fakes/probe';
 import { MIGRATIONS_DIR, startTestDaemon, tempDir } from './helpers';
 
+/** A job's step without its times, which each test run sets anew. */
+const untimed = ({ started_at: _started, finished_at: _finished, ...step }: Record<string, unknown>) => step;
+
 const running: AgentDaemon[] = [];
 
 /** Runs write their end to the store; a daemon that stops first leaves them writing to a closed one. */
@@ -592,6 +595,39 @@ describe('the schedule', () => {
 });
 
 describe('Verification', () => {
+  it("keeps the Alert's Session on the default branch while another Session's branch is checked out", async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    await linkRepo(ctx, alert.service.id);
+    // Another Session's work: its branch checked out in the shared folder, with a commit on it.
+    git(ctx.dir, 'checkout', '-q', '-b', 'security/deps');
+    await writeFile(path.join(ctx.dir, 'deps.ts'), 'deps\n');
+    git(ctx.dir, 'add', '.');
+    git(ctx.dir, 'commit', '-q', '-m', 'deps');
+    const hold = gate();
+    ctx.daemon.sdk.script({ wait: hold.promise }, outcome('done'));
+    for (const run of VERIFY_STEPS.slice(1)) ctx.daemon.sdk.script(...run);
+    ctx.daemon.sdk.script(json(REPORT));
+    await ctx.http.post(`/alerts/${alert.id}/verifications`);
+    const sessionId = (await ctx.http.get(`/alerts/${alert.id}`)).body.data.session_id;
+    await until(
+      () => ctx.http.get(`/sessions/${sessionId}`).then((res) => res.body.data.state),
+      (state) => state === 'working',
+      'the Verification run',
+    );
+
+    // The run works in its scratch copy: the folder's branch is not this Session's.
+    const diff = (await ctx.http.get(`/sessions/${sessionId}/diff`)).body.data;
+    expect([diff.branch, diff.files]).toEqual(['main', []]);
+    git(ctx.dir, 'checkout', '-q', '-b', 'security/more');
+    hold.open();
+    await until(
+      () => ctx.http.get(`/alerts/${alert.id}`).then((res) => res.body.data.status),
+      (status) => status === 'verified',
+    );
+    expect((await ctx.http.get(`/sessions/${sessionId}`)).body.data.branch).toBe('main');
+  });
+
   it('refuses a Service with no Repo', async () => {
     const ctx = await start();
     const alert = await failing(ctx);
@@ -645,6 +681,10 @@ describe('Verification', () => {
     const kinds = listener.events.map((e: WsEvent) => e.event);
     expect(kinds).toContain('verification.stepped');
     expect(kinds).toContain('alert.verified');
+    // Each step is a run the job started, not the operator: the page plays no sound for it.
+    const finished = listener.events.flatMap((e: WsEvent) => (e.event === 'session.finished' ? [e.data] : []));
+    expect(finished.length).toBeGreaterThan(0);
+    expect(finished.every((data) => data.started_by === 'console')).toBe(true);
     listener.close();
     const events = (await ctx.http.get(`/alerts/${alert.id}/events`)).body.data.map((e: { kind: string }) => e.kind);
     expect(events).toEqual(['detected', 'verification_started', 'verified']);
@@ -1455,7 +1495,7 @@ describe('Playbooks in Monitor jobs', () => {
       (status) => status === 'verified',
     );
     const report = (await ctx.http.get(`/reports/${started.body.data.id}`)).body.data;
-    expect(report.playbook).toEqual({
+    expect({ ...report.playbook, steps: report.playbook.steps.map(untimed) }).toEqual({
       id: playbook.id,
       name: 'Checkout deep check',
       steps: [
@@ -1619,7 +1659,7 @@ describe('Playbooks in Monitor jobs', () => {
       'the Fix to end',
     );
     expect(fix).toMatchObject({ status: 'done', stage: 'pr' });
-    expect(fix.playbook.steps).toEqual([
+    expect(fix.playbook.steps.map(untimed)).toEqual([
       { title: 'Test a lasting fix', writes: true, status: 'done', summary: 'test added and passing' },
     ]);
     const calls = ctx.daemon.sdk.calls.slice(before);

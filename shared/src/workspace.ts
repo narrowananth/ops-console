@@ -94,6 +94,9 @@ export const prAgentReviewSchema = z.object({
   checklist: z.array(checklistItemSchema),
   tools: z.array(toolUseSchema),
   created_at: z.string(),
+  /** When the latest attempt began (a retry starts the clock again) and ended; null while it runs. */
+  started_at: z.string(),
+  finished_at: z.string().nullable(),
   /** The pull request moved on to another commit. */
   stale: z.boolean(),
   /** Null on Agent Reviews from before Playbooks. */
@@ -184,6 +187,9 @@ export const replyCheckSchema = z.object({
   error: z.string().nullable(),
   can_retry: z.boolean(),
   created_at: z.string(),
+  /** When the latest attempt began (a retry starts the clock again) and ended; null while it runs. */
+  started_at: z.string(),
+  finished_at: z.string().nullable(),
   playbook: jobPlaybookSchema.nullable(),
 });
 
@@ -239,6 +245,9 @@ export const commentPassSchema = z.object({
   /** The pull request's head is neither the commit it started from nor the one it pushed. */
   stale: z.boolean(),
   created_at: z.string(),
+  /** When the latest attempt began (a retry starts the clock again) and ended; null while it runs. */
+  started_at: z.string(),
+  finished_at: z.string().nullable(),
   playbook: jobPlaybookSchema.nullable(),
 });
 

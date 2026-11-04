@@ -371,3 +371,45 @@ export const agentAccountsSettingSchema = z.object({
 });
 
 export type AgentAccountsSetting = z.infer<typeof agentAccountsSettingSchema>;
+
+/** An address on this Mac (ADR 0003): prompts and code go there, so a remote one is refused. */
+export const LOCAL_ADDRESS = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?\/?$/;
+
+/**
+ * `PATCH /settings` key `cliproxy`. On, the agent signs in to Claude through the CLIProxy server at `address` in place
+ * of the Claude accounts, and CLIProxy picks the account and tracks the quota.
+ */
+export const cliProxySettingSchema = z.object({
+  enabled: z.boolean(),
+  address: z.string().trim().regex(LOCAL_ADDRESS, 'an address on this Mac, such as http://127.0.0.1:8317'),
+});
+
+export type CliProxySetting = z.infer<typeof cliProxySettingSchema>;
+
+export enum CliProxyStatus {
+  /** Answered with the saved key. */
+  Connected = 'connected',
+  /** No key saved yet. */
+  NoKey = 'no_key',
+  /** Not checked since the daemon started or the address or key changed. */
+  Unchecked = 'unchecked',
+  /** Answered, but refused the key. */
+  Refused = 'refused',
+  /** Nothing answered at the address. */
+  Unreachable = 'unreachable',
+}
+
+/** `GET /cliproxy`. The key itself never leaves the Keychain (ADR 0004). */
+export const cliProxySchema = z.object({
+  enabled: z.boolean(),
+  address: z.string(),
+  has_key: z.boolean(),
+  status: z.enum(CliProxyStatus),
+  status_detail: z.string().nullable(),
+  checked_at: z.string().nullable(),
+});
+
+export type CliProxy = z.infer<typeof cliProxySchema>;
+
+/** `PUT /cliproxy/key`: one of the keys in CLIProxy's `access.api-keys`. */
+export const cliProxyKeySchema = z.object({ key: z.string().trim().min(1).max(512) });

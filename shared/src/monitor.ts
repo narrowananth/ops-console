@@ -183,6 +183,8 @@ export const reportSchema = z.object({
   markdown_path: z.string().nullable(),
   error_message: z.string().nullable(),
   created_at: z.string(),
+  /** When the latest attempt began: a retry starts the clock again. */
+  started_at: z.string(),
   finished_at: z.string().nullable(),
   /** Null on Reports from before Playbooks. */
   playbook: jobPlaybookSchema.nullable(),

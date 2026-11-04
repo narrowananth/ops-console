@@ -62,6 +62,9 @@ const REVIEW_TIP: Record<PrReviewState, string> = {
   [PrReviewState.ChangesRequested]: 'A reviewer asked for changes',
 };
 
+const FOLD_ALL =
+  'cursor-pointer rounded border-0 bg-transparent px-1.5 py-0.5 text-xs text-neutral-700 hover:bg-neutral-200 hover:text-text';
+
 export function PullRequestView({ repoId, number }: { repoId: string; number: number }) {
   const pull = usePullRequest(repoId, number);
   const review = useReviewPullRequest(repoId, number);
@@ -91,6 +94,11 @@ function Loaded(props: {
   const [picking, setPicking] = useState(false);
   const [descriptionFolded, toggleDescription] = useFold('description');
   const viewed = useViewed(pr);
+  // Expand all or Collapse all, for this pull request only: another one opens with each file as it was left.
+  const [fold, setFold] = useState<{ pr: string; open: boolean } | null>(null);
+  const here = `${pr.repo_id}#${pr.number}`;
+  const bulk = fold?.pr === here ? fold : null;
+  const setBulk = ({ open }: { open: boolean }) => setFold({ pr: here, open });
   const reviewPlaybook = useTriggerPlaybook(PlaybookTrigger.ReviewPr);
   const addressPlaybook = useTriggerPlaybook(PlaybookTrigger.AddressComments);
   const checkPlaybook = useTriggerPlaybook(PlaybookTrigger.CheckReply);
@@ -309,6 +317,26 @@ function Loaded(props: {
             additions={pr.files.reduce((sum, file) => sum + file.additions, 0)}
             deletions={pr.files.reduce((sum, file) => sum + file.deletions, 0)}
           />
+          {pr.files.length > 1 && (
+            <span className="flex items-center gap-1 tracking-normal normal-case">
+              <button
+                type="button"
+                title="Open every file on its lines"
+                onClick={() => setBulk({ open: true })}
+                className={FOLD_ALL}
+              >
+                Expand all
+              </button>
+              <button
+                type="button"
+                title="Fold every file to its name, to get to the comments and the end of the page"
+                onClick={() => setBulk({ open: false })}
+                className={FOLD_ALL}
+              >
+                Collapse all
+              </button>
+            </span>
+          )}
           {pr.files.length > 0 && (
             <span
               title="Files you ticked Viewed, kept in this browser. A file whose change changes reads unviewed again."
@@ -333,6 +361,7 @@ function Loaded(props: {
             file={file}
             viewed={viewed.isViewed(file)}
             onViewed={(next) => viewed.set(file, next)}
+            bulk={bulk}
           />
         ))}
       </section>

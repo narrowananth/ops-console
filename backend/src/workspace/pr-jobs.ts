@@ -65,6 +65,8 @@ export function toReplyCheck(row: ReplyCheckRow, playbook: JobPlaybook | null): 
     error: row.error,
     can_retry: row.status === AgentReviewStatus.Failed && row.canRetry,
     created_at: row.createdAt,
+    started_at: row.startedAt ?? row.createdAt,
+    finished_at: row.finishedAt,
     playbook,
   };
 }
@@ -84,6 +86,8 @@ export function toCommentPass(row: CommentPassRow, headSha: string | null, playb
     can_retry: row.status === AgentReviewStatus.Failed && row.canRetry,
     stale: headSha !== null && headSha !== row.headSha && headSha !== row.commitSha,
     created_at: row.createdAt,
+    started_at: row.startedAt ?? row.createdAt,
+    finished_at: row.finishedAt,
     playbook,
   };
 }
@@ -135,7 +139,12 @@ export class PrJobs {
       ] as const) {
         const rows = tx
           .update(table)
-          .set({ status: AgentReviewStatus.Failed, error: 'interrupted', canRetry: isNotNull(table.scratchPath) })
+          .set({
+            status: AgentReviewStatus.Failed,
+            error: 'interrupted',
+            canRetry: isNotNull(table.scratchPath),
+            finishedAt: new Date().toISOString(),
+          })
           .where(eq(table.status, AgentReviewStatus.Running))
           .returning()
           .all();
