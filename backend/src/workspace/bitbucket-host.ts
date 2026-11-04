@@ -242,6 +242,15 @@ export class BitbucketHost implements GitHostAdapter {
     return out;
   }
 
+  async find(slug: string, number: number): Promise<HostPullRequest | null> {
+    try {
+      return toPullRequest(prSchema.parse(await this.json(`/repositories/${slug}/pullrequests/${number}`)));
+    } catch (error) {
+      if (error instanceof ApiError && error.code === ErrorCode.NotFound) return null;
+      throw error;
+    }
+  }
+
   async get(slug: string, number: number) {
     const base = `/repositories/${slug}/pullrequests/${number}`;
     // Five reads side by side: each `bkt` call is a process and a round trip, so in a row they add up.

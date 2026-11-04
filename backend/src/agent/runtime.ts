@@ -59,6 +59,7 @@ import {
 import { runSandbox } from './run-sandbox';
 import { type Run, RunRegistry, type RunSummary } from './runs';
 import { SessionKinds } from './session-kinds';
+import { sessionTitle } from './session-title';
 import { emitSessionUpdated, NEW_SESSION_TITLE, type SessionRow, SessionsService } from './sessions.service';
 import { Transcripts } from './transcripts';
 
@@ -338,7 +339,7 @@ export class AgentRuntime {
     const isFirst = session.title === NEW_SESSION_TITLE && session.sdkSessionId === null;
     this.sessions.write(sessionId, {
       state: SessionState.Working,
-      title: isFirst ? firstLine(text, 60) || NEW_SESSION_TITLE : session.title,
+      title: isFirst ? (sessionTitle(text) ?? NEW_SESSION_TITLE) : session.title,
       lastActiveAt: new Date().toISOString(),
     });
     void this.execute(run, text);

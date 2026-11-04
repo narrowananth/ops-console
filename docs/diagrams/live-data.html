@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live data: REST, WebSocket, scheduler and recovery</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Geist', system-ui, sans-serif; background: #f5f5f5; color: #2d3142; padding: 3rem 2rem; }
+  .frame { max-width: 1460px; width: 100%; margin: 0 auto; }
+  .eyebrow { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: #4f5d75; margin-bottom: 0.5rem; }
+  h1 { font-family: 'Instrument Serif', serif; font-size: 2rem; font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 1.5rem; }
+  .diagram-container { width: 100%; overflow-x: auto; }
+  svg { width: 100%; min-width: 1460px; display: block; }
+  @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+</style>
+</head>
+<body>
+<div class="frame">
+  <p class="eyebrow">Data flow · state · events · timers · recovery</p>
+  <h1>Live data: REST, WebSocket, scheduler and recovery</h1>
+  <div class="diagram-container">
+<svg viewBox="0 64 1460 868" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="live-data-title live-data-desc">
+<title id="live-data-title">Live data: REST, WebSocket, scheduler and recovery</title>
+<desc id="live-data-desc">How state moves in Ops Console: every REST call and database write goes through the daemon, Store.write commits then sends WebSocket events, the UI refetches, the scheduler and watchers run in process, and start-up recovery fails runs a restart interrupted.</desc>
+<defs>
+<marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+<marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+<marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+</defs>
+<rect x="0" y="64" width="1460" height="868" fill="#f5f5f5"/>
+<rect x="40" y="112" width="220" height="392" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="52" y="106" width="101" height="12" rx="2" fill="#f5f5f5"/>
+<text x="102.5" y="115" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">BROWSER · N TABS</text>
+<rect x="300" y="112" width="840" height="392" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="312" y="106" width="47" height="12" rx="2" fill="#f5f5f5"/>
+<text x="335.5" y="115" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">DAEMON</text>
+<rect x="1180" y="112" width="240" height="392" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="1192" y="106" width="53" height="12" rx="2" fill="#f5f5f5"/>
+<text x="1218.5" y="115" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">SOURCES</text>
+<rect x="40" y="552" width="1380" height="280" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="52" y="546" width="117" height="12" rx="2" fill="#f5f5f5"/>
+<text x="110.5" y="555" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">EDGE CASES AND TIPS</text>
+<path d="M 236,172 L 324,172" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<path d="M 472,184 L 548,184" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 696,184 L 772,184" fill="none" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<path d="M 920,184 L 996,184" fill="none" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<path d="M 846,220 L 846,300" fill="none" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<path d="M 846,372 L 846,384 Q 846,392 838,392 L 288,392 Q 280,392 280,384 L 280,236 Q 280,228 272,228 L 236,228" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<path d="M 472,336 L 548,336" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 696,336 L 772,336" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<path d="M 472,444 L 548,444" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<path d="M 1204,184 L 1140,184" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<path d="M 1204,288 L 1140,288" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<rect x="260" y="152" width="40" height="12" rx="2" fill="#f5f5f5"/>
+<text x="280" y="161" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">HTTPS</text>
+<rect x="872.5" y="254" width="79" height="12" rx="2" fill="#f5f5f5"/>
+<text x="912" y="263" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">AFTER COMMIT</text>
+<rect x="1146" y="164" width="28" height="12" rx="2" fill="#f5f5f5"/>
+<text x="1160" y="173" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">PUP</text>
+<rect x="1146" y="268" width="28" height="12" rx="2" fill="#f5f5f5"/>
+<text x="1160" y="277" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">CLI</text>
+<rect x="64" y="148" width="172" height="120" rx="6" fill="#f5f5f5"/>
+<rect x="64" y="148" width="172" height="120" rx="6" fill="rgba(79,93,117,0.10)" stroke="#5a6580" stroke-width="1"/>
+<rect x="72" y="154" width="21" height="12" rx="2" fill="transparent" stroke="#5a6580" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="82.5" y="163" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">UI</text>
+<text x="150" y="211" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Web UI</text>
+<text x="150" y="224" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">REST calls</text>
+<text x="150" y="235" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">events refetch</text>
+<rect x="64" y="300" width="172" height="120" rx="6" fill="#f5f5f5"/>
+<rect x="64" y="300" width="172" height="120" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<rect x="72" y="306" width="36" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="90" y="315" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">LOCAL</text>
+<text x="150" y="363" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Remembered view</text>
+<text x="150" y="376" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">ops-console: keys</text>
+<text x="150" y="387" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">draft · picks · address</text>
+<rect x="324" y="148" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="324" y="148" width="148" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="332" y="154" width="26" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="345" y="163" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
+<text x="398" y="187" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">REST /api</text>
+<text x="398" y="200" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">bearer token</text>
+<text x="398" y="211" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Zod in shared/</text>
+<circle cx="468" cy="152" r="8" fill="#2d3142"/>
+<text x="468" y="155.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">1</text>
+<rect x="548" y="148" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="548" y="148" width="148" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="556" y="154" width="26" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="569" y="163" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">MOD</text>
+<text x="622" y="187" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Services</text>
+<text x="622" y="200" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">monitor · workspace</text>
+<text x="622" y="211" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">agent · settings</text>
+<rect x="772" y="148" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="772" y="148" width="148" height="72" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<rect x="780" y="154" width="36" height="12" rx="2" fill="transparent" stroke="#bf4520" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="798" y="163" fill="#bf4520" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">WRITE</text>
+<text x="846" y="187" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Store.write</text>
+<text x="846" y="200" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">one transaction</text>
+<text x="846" y="211" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">events after commit</text>
+<circle cx="916" cy="152" r="8" fill="#2d3142"/>
+<text x="916" y="155.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">2</text>
+<rect x="996" y="148" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="996" y="148" width="120" height="72" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<rect x="1004" y="154" width="21" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="1014.5" y="163" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">DB</text>
+<text x="1056" y="187" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">state.db</text>
+<text x="1056" y="200" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">SQLite · Drizzle</text>
+<text x="1056" y="211" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">no secrets</text>
+<rect x="772" y="300" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="772" y="300" width="148" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="780" y="306" width="21" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="790.5" y="315" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">WS</text>
+<text x="846" y="339" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">WebSocket /ws</text>
+<text x="846" y="352" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">server to client</text>
+<text x="846" y="363" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">token subprotocol</text>
+<circle cx="916" cy="304" r="8" fill="#2d3142"/>
+<text x="916" y="307.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">3</text>
+<rect x="548" y="300" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="548" y="300" width="148" height="72" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<rect x="556" y="306" width="26" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="569" y="315" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">MEM</text>
+<text x="622" y="339" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">List cache</text>
+<text x="622" y="352" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">PRs 60 s · detail 15 s</text>
+<text x="622" y="363" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">stale-while-revalidate</text>
+<circle cx="692" cy="304" r="8" fill="#2d3142"/>
+<text x="692" y="307.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
+<rect x="324" y="300" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="324" y="300" width="148" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="332" y="306" width="36" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="350" y="315" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">TIMER</text>
+<text x="398" y="339" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Scheduler</text>
+<text x="398" y="352" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">scan grid · PR watch</text>
+<text x="398" y="363" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">missed slot runs once</text>
+<circle cx="468" cy="304" r="8" fill="#2d3142"/>
+<text x="468" y="307.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
+<rect x="324" y="408" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="324" y="408" width="148" height="72" rx="6" fill="rgba(191,69,32,0.05)" stroke="rgba(191,69,32,0.50)" stroke-width="1" stroke-dasharray="4,4"/>
+<rect x="332" y="414" width="31" height="12" rx="2" fill="transparent" stroke="rgba(191,69,32,0.50)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="347.5" y="423" fill="#bf4520" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">BOOT</text>
+<text x="398" y="447" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Start-up recovery</text>
+<text x="398" y="460" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">runs before the port</text>
+<text x="398" y="471" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">interrupted, expired</text>
+<circle cx="468" cy="412" r="8" fill="#2d3142"/>
+<text x="468" y="415.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
+<rect x="548" y="408" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="548" y="408" width="148" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="556" y="414" width="31" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="571.5" y="423" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">RUNS</text>
+<text x="622" y="447" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Live agent runs</text>
+<text x="622" y="460" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">daemon memory only</text>
+<text x="622" y="471" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">a restart fails them</text>
+<rect x="1204" y="148" width="192" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="1204" y="148" width="192" height="72" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<rect x="1212" y="154" width="26" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="1225" y="163" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">CLI</text>
+<text x="1300" y="187" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Datadog</text>
+<text x="1300" y="200" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">pup count and logs</text>
+<text x="1300" y="211" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Scans · Recheck</text>
+<rect x="1204" y="252" width="192" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="1204" y="252" width="192" height="72" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<rect x="1212" y="258" width="26" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="1225" y="267" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">CLI</text>
+<text x="1300" y="291" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Git hosts</text>
+<text x="1300" y="304" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">gh · glab · bkt</text>
+<text x="1300" y="315" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">PR lists and details</text>
+<circle cx="1392" cy="256" r="8" fill="#2d3142"/>
+<text x="1392" y="259.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">7</text>
+<rect x="1204" y="356" width="192" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="1204" y="356" width="192" height="72" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<rect x="1212" y="362" width="26" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="1225" y="371" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">MCP</text>
+<text x="1300" y="395" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">MCP servers</text>
+<text x="1300" y="408" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Jira · Slack · DBs</text>
+<text x="1300" y="419" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">agent and fixed reads</text>
+<text x="68" y="456" fill="#4f5d75" font-size="13" font-weight="400" font-family="'Instrument Serif', serif" text-anchor="start" font-style="italic">UI turns each event into query</text>
+<text x="68" y="474" fill="#4f5d75" font-size="13" font-weight="400" font-family="'Instrument Serif', serif" text-anchor="start" font-style="italic">refetches, batched over 40 ms.</text>
+<text x="78" y="590" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">An unauthorized reply drops the token and signs the UI out. Any number of browsers on the Mac work at once, each with its own Remembered view.</text>
+<text x="78" y="616" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Events are sent only after the transaction commits, so a refetch never reads half a write. Pull requests and Session messages stay off state.db.</text>
+<text x="78" y="642" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">/ws sends events only, never commands. Events cover settings, Sessions, Approvals, Action Log, accounts, Connectors, Keychain waits, Workspace and Monitor.</text>
+<text x="78" y="668" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A list over 60 s (detail over 15 s) is served at once while a background read runs. A failed read keeps the old list and marks it stale. Refresh drops it.</text>
+<text x="78" y="694" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">monitor-scan: 6 h grid from the daily scan time. monitor-pr-watch: every 5 min and after each list refresh. A missed slot runs once at start.</text>
+<text x="78" y="720" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Before the port opens: working, waiting_input and waiting_approval Sessions fail, Approvals expire, running Scans, Fixes and jobs fail as interrupted.</text>
+<text x="78" y="746" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">429 or a rate-limit message becomes rate_limited and the UI shows stale data. Merge is a button for the operator only.</text>
+<text x="78" y="772" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Keychain calls are bound at 60 s and fail keychain_timeout. A late answer is dropped, and a late set may still land.</text>
+<text x="78" y="798" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Claude accounts hold their own CLAUDE_CONFIG_DIR. With CLIProxy on, usage is not read and switching is off. Smart usage moves work to the best account.</text>
+<circle cx="60" cy="587" r="8" fill="#2d3142"/>
+<text x="60" y="590.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">1</text>
+<circle cx="60" cy="613" r="8" fill="#2d3142"/>
+<text x="60" y="616.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">2</text>
+<circle cx="60" cy="639" r="8" fill="#2d3142"/>
+<text x="60" y="642.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">3</text>
+<circle cx="60" cy="665" r="8" fill="#2d3142"/>
+<text x="60" y="668.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
+<circle cx="60" cy="691" r="8" fill="#2d3142"/>
+<text x="60" y="694.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
+<circle cx="60" cy="717" r="8" fill="#2d3142"/>
+<text x="60" y="720.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
+<circle cx="60" cy="743" r="8" fill="#2d3142"/>
+<text x="60" y="746.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">7</text>
+<circle cx="60" cy="769" r="8" fill="#2d3142"/>
+<text x="60" y="772.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">8</text>
+<circle cx="60" cy="795" r="8" fill="#2d3142"/>
+<text x="60" y="798.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">9</text>
+<line x1="40" y1="864" x2="1420" y2="864" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<text x="40" y="880" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">LEGEND</text>
+<rect x="40" y="892" width="14" height="10" rx="2" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<text x="60" y="900" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Commit then events</text>
+<rect x="177" y="892" width="14" height="10" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="197" y="900" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Daemon part</text>
+<rect x="279" y="892" width="14" height="10" rx="2" fill="rgba(79,93,117,0.10)" stroke="#5a6580" stroke-width="1"/>
+<text x="299" y="900" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Browser</text>
+<rect x="360" y="892" width="14" height="10" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<text x="380" y="900" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">State or cache</text>
+<rect x="477" y="892" width="14" height="10" rx="2" fill="rgba(191,69,32,0.05)" stroke="rgba(191,69,32,0.50)" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="497" y="900" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Recovery</text>
+<rect x="563" y="892" width="14" height="10" rx="2" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<text x="583" y="900" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Outside source</text>
+<line x1="680" y1="897" x2="708" y2="897" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<text x="716" y="900" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Calls</text>
+<line x1="767" y1="897" x2="795" y2="897" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<text x="803" y="900" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Write path</text>
+<line x1="880" y1="897" x2="908" y2="897" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<text x="916" y="900" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Events, recovery</text>
+</svg>
+  </div>
+</div>
+</body>
+</html>

@@ -39,14 +39,14 @@ describe('Session creation', () => {
 });
 
 describe('runs', () => {
-  it('runs the first message under the active account and titles the Session from its first line', async () => {
+  it('runs the first message under the active account and names the Session for its task', async () => {
     const daemon = await start();
     const id = daemon.createSession();
     const long = `Why does POST /fb/webhook return 500 for every order placed after midnight UTC?\nMore detail.`;
     const session = await converse(daemon, id, long);
 
     expect(session).toMatchObject({
-      title: long.split('\n')[0]?.slice(0, 60),
+      title: 'Why does POST /fb/webhook return 500 for every…',
       state: 'idle',
       last_message_preview: 'Done.',
       last_error: null,

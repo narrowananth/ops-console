@@ -262,7 +262,16 @@
   .composer .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px 10px; }
   .brchip { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 4px 12px; font-size: 12px; }
   .brchip:hover { background: var(--n200); }
-  .approval { display: flex; flex-direction: column; gap: 8px; border-radius: var(--r-xl); border: 1px solid var(--accent-300); background: color-mix(in srgb, var(--accent-100) 60%, transparent); padding: 12px 16px; box-shadow: var(--shadow-sm); }
+  .approval { display: flex; flex-direction: column; overflow: hidden; border-radius: var(--r-xl); border: 1px solid var(--line); background: var(--card); box-shadow: var(--shadow-sm); }
+  .approval.is-prod { border-color: var(--accent-300); }
+  .approval .a-body { display: flex; gap: 12px; padding: 14px 16px 12px; }
+  .approval .a-icon { flex: none; width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: var(--n200); }
+  .approval.is-prod .a-icon { background: var(--accent-100); color: var(--accent-600); }
+  .approval .a-kind { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--n700); }
+  .approval .a-summary { margin: 6px 0 0; font-size: 14px; line-height: 1.5; font-weight: 500; }
+  .approval .a-cmd { margin: 8px 0 0; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--n200); font: 12px/1.5 var(--mono, ui-monospace, monospace); white-space: pre-wrap; word-break: break-all; }
+  .approval .a-foot { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surface, var(--n200)) 60%, transparent); }
+  .approval .a-foot .hint { margin-left: auto; font-size: 12px; color: var(--n700); }
   .prod { background: var(--accent); color: var(--bg); padding: 1px 6px; font-size: 10px; font-weight: 800; }
   .proj-h { display: flex; width: 100%; align-items: center; gap: 8px; border: 0; background: transparent; border-radius: var(--r); padding: 6px 8px; font-size: 12px; font-weight: 700; text-align: left; }
   .proj-h:hover { background: var(--n200); }
@@ -803,7 +812,7 @@
                 <button class="btn icon" aria-label="Refresh pull requests" title="Read the Git hosts again"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
               </div>
               <div style="position:relative"><svg width="13" height="13" viewBox="0 0 16 16" style="position:absolute;top:50%;left:10px;transform:translateY(-50%);color:var(--n600)"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-                <input class="field" type="search" placeholder="Search title, author, branch" style="width:100%;padding-left:30px;background:var(--card)"></div>
+                <input class="field" type="search" placeholder="Search number, title or your email" style="width:100%;padding-left:30px;background:var(--card)"></div>
               <div class="row xs muted" style="padding:0 2px"><span><strong style="color:var(--text);font-weight:600">5</strong> pull requests in <strong style="color:var(--text);font-weight:600">3</strong> projects</span><button class="ml row" style="gap:4px;border:0;background:transparent;padding:2px 4px;font-size:11px;color:var(--n700)"><span class="tri open" style="font-size:9px">▶</span>Collapse all</button></div>
             </div>
             <div style="display:flex;flex-direction:column;gap:4px;padding:8px 8px 12px">

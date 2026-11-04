@@ -149,6 +149,22 @@ export class GithubHost implements GitHostAdapter {
     return this.loginRead;
   }
 
+  async find(slug: string, number: number): Promise<HostPullRequest | null> {
+    const [owner, name] = splitSlug(slug);
+    const query = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) { ${PR_FIELDS} } } }`;
+    try {
+      const out = await this.graphql(query, { owner, name }, { number });
+      return toPullRequest(
+        z.object({ repository: z.object({ pullRequest: nodeSchema }) }).parse(out).repository.pullRequest,
+      );
+    } catch (error) {
+      // GraphQL answers a missing pull request with an error, not a 404.
+      if (error instanceof ApiError && error.code === ErrorCode.RateLimited) throw error;
+      return null;
+    }
+  }
+
   async get(slug: string, number: number) {
     const [owner, name] = splitSlug(slug);
     const query = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {

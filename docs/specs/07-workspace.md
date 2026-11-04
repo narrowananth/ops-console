@@ -31,7 +31,7 @@ Branches
 
 Pull requests
 
-9. Listing pull requests reads the Git host, kept in the daemon's memory per Repo. A list under 60 seconds old is served as is. An older one is served at once while the host is read again in the background; when that read finds a pull request added, gone or changed, `pull_request.refreshed` goes out with them in `changed`, and the next list has it. For an owner's list (Behavior 23) the event carries a null `repo_id` and an empty `changed`. A pull request's detail is kept the same way for 15 seconds, and a change to it goes out as `pull_request.refreshed` with that pull request. Refresh drops that cache. With nothing kept, the list waits for the host.
+9. Listing pull requests reads the Git host, kept in the daemon's memory per Repo. A list under 30 minutes old is served as is. An older one is served at once while the host is read again in the background; when that read finds a pull request added, gone or changed, `pull_request.refreshed` goes out with them in `changed`, and the next list has it. For an owner's list (Behavior 23) the event carries a null `repo_id` and an empty `changed`. A pull request's detail is kept the same way for 15 seconds, and a change to it goes out as `pull_request.refreshed` with that pull request. Refresh drops that cache; it is the only read besides the 30-minute one. With nothing kept, the list waits for the host. A search by words filters the kept list and reads nothing. A search of just a number (`42` or `#42`) asks the host for that number, in any state, in every project the list knows and every imported Repo, through the adapter's `find`; each answer is kept 60 seconds, and a host that fails marks the answer stale.
 10. When the host rate limits or fails on a background read, the kept list comes back with `meta.stale: true` from the next list on. With nothing cached it returns `rate_limited` or `upstream_failed`. The cache is empty after a daemon restart.
 11. Posting a comment, a reply, a resolve or a delete goes to the host. On failure nothing changes. On success the Repo's cache is dropped (Settled). An inline comment attaches to the commit the pull request is at when it is posted.
 12. A pull request is `is_mine` when its `author` equals the `login` on the Git host's Connector (`04-settings-connectors`), or when the agent opened it (`by_agent`).
@@ -78,7 +78,7 @@ Anonymous Sessions
 
 ## Not required
 
-- **Fresh PR data**: a list can be up to 60 seconds old, plus the time its background read takes, or older with `meta.stale` while the host fails. The UI starts the first list read (Mine, no search) as the app opens, so the Workspace finds it kept.
+- **Fresh PR data**: a list can be up to 30 minutes old, plus the time its background read takes, or older with `meta.stale` while the host fails. The UI starts the first list read (Mine, no search) as the app opens, so the Workspace finds it kept.
 - **Every pull request of a large owner**: GitHub and GitLab answer up to 100 pull requests per owner, and a Bitbucket workspace is read for 300 repositories (Behavior 23). The rest are not listed.
 - **PRs offline**: with the host unreachable after a restart, the PR list is an error until the host answers.
 - **Thread answers while the daemon is down**: a reply posted on the host directly, not through the console, does not wake the agent.
@@ -253,7 +253,8 @@ Adds `branch: string | null`.
   state on hover or focus. With no Repos: "Import a Repo in Repos to work on its branches." Loading
   reads "Reading Sessions…"; an error, "Could not read Sessions."
 - A "No Repo" group above the Repos lists anonymous Sessions; its `+` starts one at once.
-- Session view: a header in two rows. The first holds the Repo's name (or "No Repo"), the title and the state on the
+- Session view: a header in two rows. The first holds the Repo's name (or "No Repo"), the title (the same size as the
+  Repo's name, cut with an ellipsis, the whole title in its Tip) and the state on the
   left, and Diff and Delete on the right. Delete is disabled while the Session runs or waits on the operator; a
   failed Delete shows why. The second row holds the branch and the links below. An empty conversation says what
   to ask. The branch chip shows the branch checked out now (Behavior 30). Beside it, "PR #N →" opens a pull request
@@ -298,12 +299,12 @@ Adds `branch: string | null`.
   Its menu lists branches A→Z with an "open PR" mark, and a field that creates a branch from the current one. It is
   disabled with the reason while Behavior 7 blocks it. "Uncommitted changes were stashed." shows after a checkout
   that stashed.
-- Pull request list: Mine (the default) or All, a search over title, author and branch, and Refresh, which reads the
-  Git hosts again. Mine or All and the search text are kept. A count line reads "N pull requests in M projects".
+- Pull request list: Mine (the default) or All, a search and Refresh, which reads the
+  Git hosts again. Under Mine the search reads "Search number, title or your email" and matches the number, the title and the Connector's `login`; under All it reads "Search number, title or author" and matches the number, the title and the author. A search stays still for 400 ms before it is sent, a number shows "Asking the Git hosts for #N…" while it waits, and a pull request that is not open shows its state beside the title. Mine or All and the search text are kept. A count line reads "N pull requests in M projects".
   Pull requests are grouped by repository A→Z under its host's icon and `slug`, tagged `local` with the Repo's name
   when imported and `not imported` otherwise. Clicking a repository's header folds or unfolds its pull requests, and
   Collapse all (Expand all once all are folded) shows with more than one repository; the folded set survives a
-  reload, and a search unfolds every match. A row shows `#number` and title, then author, branch, `agent` when
+  reload, and a search unfolds every match. A row shows `#number` and title, then author, branch (shown, not searched), `agent` when
   `by_agent`, checks, who approved it or the review state, and the comment count. A pull request of an imported
   GitHub or Bitbucket Repo opens in the console; any other opens on the host in a new tab. A stale banner reads "The
   Git host did not answer. Showing what was read at" `synced_at` when `meta.stale` is true. Error state, with the

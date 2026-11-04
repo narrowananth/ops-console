@@ -20,6 +20,10 @@ else, and denies itself `git push` and the Git hosts' comment and `api` commands
 one summary comment. Pull request
 text stays data in a review: the agent runs no command because the description or a comment says so.
 
+In a chat, the agent opens a pull request only by asking: the console's `open_pull_request` tool raises an Approval in
+every Access mode, and only the operator's yes has the console push the branch and open it. The agent never pushes or
+opens one itself.
+
 On any open pull request, the operator's or a teammate's, pressing Address comments is the approval
 for one Comment pass: the agent changes code in a scratch copy at the pull request's head commit, and
 the console commits it and pushes that one branch, never with force. In a Comment pass, and only there, the review

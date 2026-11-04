@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent run safety: what runs where, and who approves</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Geist', system-ui, sans-serif; background: #f5f5f5; color: #2d3142; padding: 3rem 2rem; }
+  .frame { max-width: 1220px; width: 100%; margin: 0 auto; }
+  .eyebrow { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: #4f5d75; margin-bottom: 0.5rem; }
+  h1 { font-family: 'Instrument Serif', serif; font-size: 2rem; font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 1.5rem; }
+  .diagram-container { width: 100%; overflow-x: auto; }
+  svg { width: 100%; min-width: 1220px; display: block; }
+  @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+</style>
+</head>
+<body>
+<div class="frame">
+  <p class="eyebrow">Architecture · trust boundaries · edge cases numbered below</p>
+  <h1>Agent run safety: what runs where, and who approves</h1>
+  <div class="diagram-container">
+<svg viewBox="0 64 1220 1020" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="agent-run-safety-title agent-run-safety-desc">
+<title id="agent-run-safety-title">Agent run safety: what runs where, and who approves</title>
+<desc id="agent-run-safety-desc">Trust boundaries of an agent run: shell commands run in the Seatbelt sandbox behind a network allowlist, while the daemon, MCP servers and the console tools run outside it, and Approvals gate PROD writes and pull request opening.</desc>
+<defs>
+<marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+<marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+<marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+</defs>
+<rect x="0" y="64" width="1220" height="1020" fill="#f5f5f5"/>
+<rect x="40" y="112" width="196" height="372" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="52" y="106" width="58" height="12" rx="2" fill="#f5f5f5"/>
+<text x="81" y="115" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">OPERATOR</text>
+<rect x="280" y="112" width="644" height="372" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="292" y="106" width="164" height="12" rx="2" fill="#f5f5f5"/>
+<text x="374" y="115" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">DAEMON · OUTSIDE THE SANDBOX</text>
+<rect x="968" y="112" width="212" height="372" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="980" y="106" width="95" height="12" rx="2" fill="#f5f5f5"/>
+<text x="1027.5" y="115" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">OUTSIDE SYSTEMS</text>
+<rect x="280" y="532" width="644" height="144" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8" stroke-dasharray="5,4"/>
+<rect x="292" y="526" width="133" height="12" rx="2" fill="#f5f5f5"/>
+<text x="358.5" y="535" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">RUN SANDBOX · SEATBELT</text>
+<rect x="968" y="532" width="212" height="196" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="980" y="526" width="53" height="12" rx="2" fill="#f5f5f5"/>
+<text x="1006.5" y="535" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">NETWORK</text>
+<rect x="40" y="756" width="1140" height="228" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="52" y="750" width="117" height="12" rx="2" fill="#f5f5f5"/>
+<text x="110.5" y="759" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">EDGE CASES AND TIPS</text>
+<path d="M 212,164 L 528,164" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<path d="M 304,332 L 212,332" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<path d="M 212,364 L 304,364" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<path d="M 528,288 L 498,288 Q 490,288 490,296 L 490,432 Q 490,440 482,440 L 452,440" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 378,408 L 378,380" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 452,244 L 528,244" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<path d="M 676,164 L 992,164" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<path d="M 676,244 L 992,244" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<path d="M 676,288 L 706,288 Q 714,288 714,296 L 714,340 Q 714,348 722,348 L 752,348" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 826,380 L 826,408" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 900,440 L 992,440" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<path d="M 602,304 L 602,564" fill="none" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<path d="M 452,596 L 528,596" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 676,596 L 752,596" fill="none" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<path d="M 900,580 L 938,580 Q 946,580 946,588 L 946,592 Q 946,600 954,600 L 992,600" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<path d="M 900,612 L 938,612 Q 946,612 946,620 L 946,664 Q 946,672 954,672 L 992,672" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<rect x="348.5" y="146" width="51" height="12" rx="2" fill="#f5f5f5"/>
+<text x="374" y="155" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">MESSAGE</text>
+<rect x="243" y="280" width="34" height="12" rx="2" fill="#f5f5f5"/>
+<text x="260" y="289" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">CARD</text>
+<rect x="232" y="342" width="56" height="12" rx="2" fill="#f5f5f5"/>
+<text x="260" y="351" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">YES / NO</text>
+<rect x="940" y="146" width="40" height="12" rx="2" fill="#f5f5f5"/>
+<text x="960" y="155" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">TURNS</text>
+<rect x="929" y="226" width="62" height="12" rx="2" fill="#f5f5f5"/>
+<text x="960" y="235" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">MCP CALLS</text>
+<rect x="467.5" y="252" width="45" height="12" rx="2" fill="#f5f5f5"/>
+<text x="490" y="261" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">DENIES</text>
+<rect x="392" y="292" width="28" height="12" rx="2" fill="#f5f5f5"/>
+<text x="406" y="301" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">ASK</text>
+<rect x="625" y="420" width="34" height="12" rx="2" fill="#f5f5f5"/>
+<text x="642" y="429" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">BASH</text>
+<rect x="462" y="578" width="56" height="12" rx="2" fill="#f5f5f5"/>
+<text x="490" y="587" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">CONFINES</text>
+<rect x="697" y="578" width="34" height="12" rx="2" fill="#f5f5f5"/>
+<text x="714" y="587" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">HTTP</text>
+<rect x="926" y="422" width="40" height="12" rx="2" fill="#f5f5f5"/>
+<text x="946" y="431" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">OPENS</text>
+<rect x="835" y="387" width="62" height="12" rx="2" fill="#f5f5f5"/>
+<text x="866" y="396" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">AFTER YES</text>
+<rect x="64" y="132" width="148" height="340" rx="6" fill="#f5f5f5"/>
+<rect x="64" y="132" width="148" height="340" rx="6" fill="rgba(79,93,117,0.10)" stroke="#5a6580" stroke-width="1"/>
+<rect x="72" y="138" width="31" height="12" rx="2" fill="transparent" stroke="#5a6580" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="87.5" y="147" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">USER</text>
+<text x="138" y="305" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Operator</text>
+<text x="138" y="318" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Workspace · Monitor</text>
+<text x="138" y="329" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Approval card · Stop</text>
+<rect x="304" y="212" width="148" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="304" y="212" width="148" height="64" rx="6" fill="rgba(191,69,32,0.05)" stroke="rgba(191,69,32,0.50)" stroke-width="1" stroke-dasharray="4,4"/>
+<rect x="312" y="218" width="31" height="12" rx="2" fill="transparent" stroke="rgba(191,69,32,0.50)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="327.5" y="227" fill="#bf4520" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">DENY</text>
+<text x="378" y="247" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Always denied</text>
+<text x="378" y="260" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">merge · WebFetch</text>
+<text x="378" y="271" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">WebSearch</text>
+<circle cx="448" cy="216" r="8" fill="#2d3142"/>
+<text x="448" y="219.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">7</text>
+<rect x="304" y="316" width="148" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="304" y="316" width="148" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="312" y="322" width="26" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="325" y="331" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">ASK</text>
+<text x="378" y="351" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Approvals</text>
+<text x="378" y="364" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">operator yes or no</text>
+<text x="378" y="375" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">in every Access mode</text>
+<circle cx="448" cy="320" r="8" fill="#2d3142"/>
+<text x="448" y="323.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
+<rect x="304" y="408" width="148" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="304" y="408" width="148" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="312" y="414" width="31" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="327.5" y="423" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">HOOK</text>
+<text x="378" y="443" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Permission gate</text>
+<text x="378" y="456" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">PreToolUse · canUseTool</text>
+<text x="378" y="467" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Action Log row first</text>
+<circle cx="448" cy="412" r="8" fill="#2d3142"/>
+<text x="448" y="415.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">3</text>
+<rect x="528" y="132" width="148" height="172" rx="6" fill="#f5f5f5"/>
+<rect x="528" y="132" width="148" height="172" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<rect x="536" y="138" width="36" height="12" rx="2" fill="transparent" stroke="#bf4520" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="554" y="147" fill="#bf4520" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">AGENT</text>
+<text x="602" y="221" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Agent runtime</text>
+<text x="602" y="234" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">SDK query() per run</text>
+<text x="602" y="245" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Access mode · Playbook</text>
+<rect x="752" y="316" width="148" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="752" y="316" width="148" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="760" y="322" width="31" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="775.5" y="331" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">TOOL</text>
+<text x="826" y="351" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">open_pull_request</text>
+<text x="826" y="364" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">in-process MCP tool</text>
+<text x="826" y="375" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">console only</text>
+<circle cx="896" cy="320" r="8" fill="#2d3142"/>
+<text x="896" y="323.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
+<rect x="752" y="408" width="148" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="752" y="408" width="148" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="760" y="414" width="26" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="773" y="423" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">GIT</text>
+<text x="826" y="443" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Pull request opening</text>
+<text x="826" y="456" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">git push · host CLI</text>
+<text x="826" y="467" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">your keys · no force</text>
+<circle cx="896" cy="412" r="8" fill="#2d3142"/>
+<text x="896" y="415.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
+<rect x="992" y="132" width="164" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="992" y="132" width="164" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<rect x="1000" y="138" width="26" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="1013" y="147" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">LLM</text>
+<text x="1074" y="167" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Claude</text>
+<text x="1074" y="180" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Anthropic API</text>
+<text x="1074" y="191" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">or CLIProxy</text>
+<circle cx="1152" cy="136" r="8" fill="#2d3142"/>
+<text x="1152" y="139.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">9</text>
+<rect x="992" y="212" width="164" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="992" y="212" width="164" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<rect x="1000" y="218" width="26" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="1013" y="227" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">MCP</text>
+<text x="1074" y="247" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">MCP servers</text>
+<text x="1074" y="260" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Datadog · Jira · DBs</text>
+<text x="1074" y="271" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">not sandboxed</text>
+<circle cx="1152" cy="216" r="8" fill="#2d3142"/>
+<text x="1152" y="219.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">8</text>
+<rect x="992" y="408" width="164" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="992" y="408" width="164" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<rect x="1000" y="414" width="26" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="1013" y="423" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">GIT</text>
+<text x="1074" y="443" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Git host</text>
+<text x="1074" y="456" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">PR opens here</text>
+<text x="1074" y="467" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">GitHub · GitLab · BB</text>
+<rect x="304" y="564" width="148" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="304" y="564" width="148" height="64" rx="6" fill="rgba(191,69,32,0.05)" stroke="rgba(191,69,32,0.50)" stroke-width="1" stroke-dasharray="4,4"/>
+<rect x="312" y="570" width="21" height="12" rx="2" fill="transparent" stroke="rgba(191,69,32,0.50)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="322.5" y="579" fill="#bf4520" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">FS</text>
+<text x="378" y="599" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Filesystem rules</text>
+<text x="378" y="612" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">write: folder · /tmp</text>
+<text x="378" y="623" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">no data folder · ~/.ssh</text>
+<rect x="528" y="564" width="148" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="528" y="564" width="148" height="64" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<rect x="536" y="570" width="26" height="12" rx="2" fill="transparent" stroke="#bf4520" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="549" y="579" fill="#bf4520" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">SBX</text>
+<text x="602" y="599" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Shell commands</text>
+<text x="602" y="612" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Bash tool, every kind</text>
+<text x="602" y="623" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">fails closed</text>
+<circle cx="672" cy="568" r="8" fill="#2d3142"/>
+<text x="672" y="571.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">1</text>
+<rect x="752" y="564" width="148" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="752" y="564" width="148" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="760" y="570" width="26" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="773" y="579" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">NET</text>
+<text x="826" y="599" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Network filter</text>
+<text x="826" y="612" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">strict allowlist</text>
+<text x="826" y="623" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">built per run</text>
+<circle cx="896" cy="568" r="8" fill="#2d3142"/>
+<text x="896" y="571.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">2</text>
+<rect x="992" y="548" width="164" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="992" y="548" width="164" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<rect x="1000" y="554" width="21" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="1010.5" y="563" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">OK</text>
+<text x="1074" y="583" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Allowed hosts</text>
+<text x="1074" y="596" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">github.com · npm</text>
+<text x="1074" y="607" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Repo origins · yours</text>
+<rect x="992" y="640" width="164" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="992" y="640" width="164" height="64" rx="6" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+<rect x="1000" y="646" width="21" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.20)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="1010.5" y="655" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">NO</text>
+<text x="1074" y="675" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Refused</text>
+<text x="1074" y="688" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">other hosts · raw IP</text>
+<text x="1074" y="699" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">DNS · UDP · ssh</text>
+<text x="78" y="788" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Sandbox unavailable: the run fails before its first command. No Setting, flag or retry runs a command outside it.</text>
+<text x="78" y="810" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">ssh, Node fetch, raw IPs, DNS and UDP skip the proxy and fail. A run keeps the allowlist it started with.</text>
+<text x="78" y="832" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A PROD write waits for an Approval in every Access mode, full included. Log row is written before any Bash or MCP call.</text>
+<text x="78" y="854" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Asked in every mode. Refused before asking on the default branch, with no new commits, or on an unsupported host.</text>
+<text x="78" y="876" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Never forces. A branch that moved gives branch_moved and opens nothing. Host not connected: refused before the push.</text>
+<text x="78" y="898" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Stop, or a daemon restart, expires pending Approvals and fails the run. A denied request is not retried.</text>
+<text x="78" y="920" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Agent Review, Reply check and Comment pass also deny git push and CLI comment, review and api. Merge is a button.</text>
+<text x="78" y="942" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">MCP servers run outside the sandbox. Access Level and the PROD tag decide what the agent may call.</text>
+<text x="78" y="964" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">CLIProxy must be loopback. A Keychain call over 60 s fails keychain_timeout, and a late answer is dropped.</text>
+<circle cx="60" cy="785" r="8" fill="#2d3142"/>
+<text x="60" y="788.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">1</text>
+<circle cx="60" cy="807" r="8" fill="#2d3142"/>
+<text x="60" y="810.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">2</text>
+<circle cx="60" cy="829" r="8" fill="#2d3142"/>
+<text x="60" y="832.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">3</text>
+<circle cx="60" cy="851" r="8" fill="#2d3142"/>
+<text x="60" y="854.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
+<circle cx="60" cy="873" r="8" fill="#2d3142"/>
+<text x="60" y="876.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
+<circle cx="60" cy="895" r="8" fill="#2d3142"/>
+<text x="60" y="898.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
+<circle cx="60" cy="917" r="8" fill="#2d3142"/>
+<text x="60" y="920.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">7</text>
+<circle cx="60" cy="939" r="8" fill="#2d3142"/>
+<text x="60" y="942.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">8</text>
+<circle cx="60" cy="961" r="8" fill="#2d3142"/>
+<text x="60" y="964.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">9</text>
+<line x1="40" y1="1016" x2="1180" y2="1016" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<text x="40" y="1032" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">LEGEND</text>
+<rect x="40" y="1044" width="14" height="10" rx="2" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<text x="60" y="1052" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Agent run and shell</text>
+<rect x="182" y="1044" width="14" height="10" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="202" y="1052" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Daemon part</text>
+<rect x="284" y="1044" width="14" height="10" rx="2" fill="rgba(79,93,117,0.10)" stroke="#5a6580" stroke-width="1"/>
+<text x="304" y="1052" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Operator</text>
+<rect x="370" y="1044" width="14" height="10" rx="2" fill="rgba(191,69,32,0.05)" stroke="rgba(191,69,32,0.50)" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="390" y="1052" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Rule or denial</text>
+<rect x="487" y="1044" width="14" height="10" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<text x="507" y="1052" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Allowed</text>
+<rect x="568" y="1044" width="14" height="10" rx="2" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<text x="588" y="1052" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Outside system</text>
+<line x1="685" y1="1049" x2="713" y2="1049" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<text x="721" y="1052" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Calls out</text>
+<line x1="792" y1="1049" x2="820" y2="1049" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<text x="828" y="1052" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Sandboxed path</text>
+<line x1="925" y1="1049" x2="953" y2="1049" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<text x="961" y="1052" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Back or refused</text>
+</svg>
+  </div>
+</div>
+</body>
+</html>

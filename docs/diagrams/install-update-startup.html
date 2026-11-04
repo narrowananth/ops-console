@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Install, start, update and recover</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Geist', system-ui, sans-serif; background: #f5f5f5; color: #2d3142; padding: 3rem 2rem; }
+  .frame { max-width: 1460px; width: 100%; margin: 0 auto; }
+  .eyebrow { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: #4f5d75; margin-bottom: 0.5rem; }
+  h1 { font-family: 'Instrument Serif', serif; font-size: 2rem; font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 1.5rem; }
+  .diagram-container { width: 100%; overflow-x: auto; }
+  svg { width: 100%; min-width: 1460px; display: block; }
+  @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+</style>
+</head>
+<body>
+<div class="frame">
+  <p class="eyebrow">Lifecycle · install · launchd · update · start-up order</p>
+  <h1>Install, start, update and recover</h1>
+  <div class="diagram-container">
+<svg viewBox="0 64 1460 916" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="install-update-startup-title install-update-startup-desc">
+<title id="install-update-startup-title">Install, start, update and recover</title>
+<desc id="install-update-startup-desc">How Ops Console gets onto a Mac and stays current: install.sh unpacks a release tarball and links current, launchd keeps the daemon running, the daemon starts in a fixed order, and auto-update installs the next release then restarts itself.</desc>
+<defs>
+<marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+<marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+<marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+</defs>
+<rect x="0" y="64" width="1460" height="916" fill="#f5f5f5"/>
+<rect x="40" y="112" width="1380" height="132" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="52" y="106" width="303" height="12" rx="2" fill="#f5f5f5"/>
+<text x="203.5" y="115" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">INSTALL · curl | sh · no sudo · writes only under HOME</text>
+<rect x="40" y="300" width="1380" height="160" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="52" y="294" width="149" height="12" rx="2" fill="#f5f5f5"/>
+<text x="126.5" y="303" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">RUN · launchd keeps it up</text>
+<rect x="40" y="516" width="1380" height="132" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="52" y="510" width="351" height="12" rx="2" fill="#f5f5f5"/>
+<text x="227.5" y="519" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">UPDATE · daemon checks GitHub 10 s after start and every minute</text>
+<rect x="40" y="704" width="1380" height="164" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="52" y="698" width="117" height="12" rx="2" fill="#f5f5f5"/>
+<text x="110.5" y="707" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">EDGE CASES AND TIPS</text>
+<path d="M 212,184 L 276,184" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<path d="M 424,184 L 488,184" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 636,184 L 700,184" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 848,184 L 912,184" fill="none" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<path d="M 212,376 L 276,376" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 424,376 L 488,376" fill="none" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<path d="M 636,376 L 700,376" fill="none" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<path d="M 848,376 L 912,376" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<path d="M 1060,376 L 1124,376" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<path d="M 986,220 L 986,252 Q 986,260 978,260 L 570,260 Q 562,260 562,268 L 562,340" fill="none" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<path d="M 212,588 L 276,588" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<path d="M 424,588 L 488,588" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 636,588 L 700,588" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 848,588 L 912,588" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 1060,588 L 1232,588 Q 1240,588 1240,580 L 1240,412" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<rect x="224" y="160" width="40" height="12" rx="2" fill="#f5f5f5"/>
+<text x="244" y="169" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">FETCH</text>
+<rect x="433.5" y="160" width="45" height="12" rx="2" fill="#f5f5f5"/>
+<text x="456" y="169" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">UNPACK</text>
+<rect x="645.5" y="160" width="45" height="12" rx="2" fill="#f5f5f5"/>
+<text x="668" y="169" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">SWITCH</text>
+<rect x="866" y="160" width="28" height="12" rx="2" fill="#f5f5f5"/>
+<text x="880" y="169" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">RUN</text>
+<rect x="227" y="352" width="34" height="12" rx="2" fill="#f5f5f5"/>
+<text x="244" y="361" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">LOAD</text>
+<rect x="433.5" y="352" width="45" height="12" rx="2" fill="#f5f5f5"/>
+<text x="456" y="361" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STARTS</text>
+<rect x="648" y="352" width="40" height="12" rx="2" fill="#f5f5f5"/>
+<text x="668" y="361" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">READY</text>
+<rect x="854.5" y="352" width="51" height="12" rx="2" fill="#f5f5f5"/>
+<text x="880" y="361" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">1ST RUN</text>
+<rect x="1072" y="352" width="40" height="12" rx="2" fill="#f5f5f5"/>
+<text x="1092" y="361" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">GRANT</text>
+<rect x="227" y="564" width="34" height="12" rx="2" fill="#f5f5f5"/>
+<text x="244" y="573" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">POLL</text>
+<rect x="439" y="564" width="34" height="12" rx="2" fill="#f5f5f5"/>
+<text x="456" y="573" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">THEN</text>
+<rect x="651" y="564" width="34" height="12" rx="2" fill="#f5f5f5"/>
+<text x="668" y="573" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">EXEC</text>
+<rect x="860" y="564" width="40" height="12" rx="2" fill="#f5f5f5"/>
+<text x="880" y="573" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">EXITS</text>
+<rect x="1170.5" y="536" width="51" height="12" rx="2" fill="#f5f5f5"/>
+<text x="1196" y="545" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">RESTART</text>
+<rect x="64" y="148" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="64" y="148" width="148" height="72" rx="6" fill="rgba(79,93,117,0.10)" stroke="#5a6580" stroke-width="1"/>
+<rect x="72" y="154" width="21" height="12" rx="2" fill="transparent" stroke="#5a6580" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="82.5" y="163" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">SH</text>
+<text x="138" y="187" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">install.sh</text>
+<text x="138" y="200" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">macOS 13.5 or later</text>
+<text x="138" y="211" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Rosetta gets arm64</text>
+<circle cx="208" cy="152" r="8" fill="#2d3142"/>
+<text x="208" y="155.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">1</text>
+<rect x="276" y="148" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="276" y="148" width="148" height="72" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<rect x="284" y="154" width="26" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="297" y="163" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">WEB</text>
+<text x="350" y="187" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Release tarball</text>
+<text x="350" y="200" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">checksum verified</text>
+<text x="350" y="211" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">arm64 or x64</text>
+<rect x="488" y="148" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="488" y="148" width="148" height="72" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<rect x="496" y="154" width="26" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="509" y="163" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">DIR</text>
+<text x="562" y="187" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">~/.ops-console</text>
+<text x="562" y="200" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">versions/&lt;version&gt;</text>
+<text x="562" y="211" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">keeps new + previous</text>
+<rect x="700" y="148" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="700" y="148" width="148" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="708" y="154" width="31" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="723.5" y="163" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">LINK</text>
+<text x="774" y="187" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">current</text>
+<text x="774" y="200" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">points at the version</text>
+<text x="774" y="211" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">~/.local/bin link</text>
+<rect x="912" y="148" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="912" y="148" width="148" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="920" y="154" width="26" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="933" y="163" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">APP</text>
+<text x="986" y="187" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Ops Console.app</text>
+<text x="986" y="200" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">bundled Node 24</text>
+<text x="986" y="211" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">ad hoc signed</text>
+<circle cx="1056" cy="152" r="8" fill="#2d3142"/>
+<text x="1056" y="155.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">2</text>
+<rect x="1124" y="148" width="232" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="1124" y="148" width="232" height="72" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<rect x="1132" y="154" width="41" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="1152.5" y="163" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">BUNDLE</text>
+<text x="1240" y="187" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">What the tarball carries</text>
+<text x="1240" y="200" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">daemon · UI · CLI · SDK</text>
+<text x="1240" y="211" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">node-pty · sqlite · keyring</text>
+<rect x="64" y="340" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="64" y="340" width="148" height="72" rx="6" fill="rgba(79,93,117,0.10)" stroke="#5a6580" stroke-width="1"/>
+<rect x="72" y="346" width="26" height="12" rx="2" fill="transparent" stroke="#5a6580" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="85" y="355" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">CLI</text>
+<text x="138" y="379" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">ops-console start</text>
+<text x="138" y="392" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">writes the LaunchAgent</text>
+<text x="138" y="403" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">RunAtLoad · KeepAlive</text>
+<rect x="276" y="340" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="276" y="340" width="148" height="72" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<rect x="284" y="346" width="21" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="294.5" y="355" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">OS</text>
+<text x="350" y="379" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">launchd</text>
+<text x="350" y="392" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">dev.ops-console</text>
+<text x="350" y="403" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">restarts if it stops</text>
+<circle cx="420" cy="344" r="8" fill="#2d3142"/>
+<text x="420" y="347.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">3</text>
+<rect x="488" y="340" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="488" y="340" width="148" height="72" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<rect x="496" y="346" width="31" height="12" rx="2" fill="transparent" stroke="#bf4520" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="511.5" y="355" fill="#bf4520" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">BOOT</text>
+<text x="562" y="379" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Daemon start-up</text>
+<text x="562" y="392" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">lock · migrate</text>
+<text x="562" y="403" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">recover · port · scheduler</text>
+<circle cx="632" cy="344" r="8" fill="#2d3142"/>
+<text x="632" y="347.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
+<rect x="700" y="340" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="700" y="340" width="148" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="708" y="346" width="26" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="721" y="355" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">RUN</text>
+<text x="774" y="379" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Daemon running</text>
+<text x="774" y="392" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">127.0.0.1:4545</text>
+<text x="774" y="403" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">runtime.json 0600</text>
+<rect x="912" y="340" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="912" y="340" width="148" height="72" rx="6" fill="rgba(191,69,32,0.05)" stroke="rgba(191,69,32,0.50)" stroke-width="1" stroke-dasharray="4,4"/>
+<rect x="920" y="346" width="26" height="12" rx="2" fill="transparent" stroke="rgba(191,69,32,0.50)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="933" y="355" fill="#bf4520" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">KEY</text>
+<text x="986" y="379" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Keychain handover</text>
+<text x="986" y="392" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">old app gives items</text>
+<text x="986" y="403" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">about 30 s, in background</text>
+<circle cx="1056" cy="344" r="8" fill="#2d3142"/>
+<text x="1056" y="347.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
+<rect x="1124" y="340" width="232" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="1124" y="340" width="232" height="72" rx="6" fill="rgba(191,69,32,0.05)" stroke="rgba(191,69,32,0.50)" stroke-width="1" stroke-dasharray="4,4"/>
+<rect x="1132" y="346" width="26" height="12" rx="2" fill="transparent" stroke="rgba(191,69,32,0.50)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="1145" y="355" fill="#bf4520" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">MAC</text>
+<text x="1240" y="379" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Full Disk Access</text>
+<text x="1240" y="392" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">granted to Ops Console</text>
+<text x="1240" y="403" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Start at login in Settings</text>
+<rect x="64" y="552" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="64" y="552" width="148" height="72" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<rect x="72" y="558" width="36" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="90" y="567" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">CHECK</text>
+<text x="138" y="591" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Newest release</text>
+<text x="138" y="604" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">dev build never updates</text>
+<text x="138" y="615" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">update.changed event</text>
+<rect x="276" y="552" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="276" y="552" width="148" height="72" rx="6" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+<rect x="284" y="558" width="31" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.20)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="299.5" y="567" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">WAIT</text>
+<text x="350" y="591" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Wait for runs</text>
+<text x="350" y="604" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">unless operator says now</text>
+<text x="350" y="615" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">auto_update on by default</text>
+<circle cx="420" cy="556" r="8" fill="#2d3142"/>
+<text x="420" y="559.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
+<rect x="488" y="552" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="488" y="552" width="148" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="496" y="558" width="21" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="506.5" y="567" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">SH</text>
+<text x="562" y="591" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Run install.sh</text>
+<text x="562" y="604" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">OPS_CONSOLE_VERSION</text>
+<text x="562" y="615" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">installed version runs it</text>
+<rect x="700" y="552" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="700" y="552" width="148" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="708" y="558" width="31" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="723.5" y="567" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">EXIT</text>
+<text x="774" y="591" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Daemon stops</text>
+<text x="774" y="604" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">it stops itself</text>
+<text x="774" y="615" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">update.json records it</text>
+<rect x="912" y="552" width="148" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="912" y="552" width="148" height="72" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<rect x="920" y="558" width="21" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="930.5" y="567" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">OS</text>
+<text x="986" y="591" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">launchd restarts</text>
+<text x="986" y="604" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">now from current</text>
+<text x="986" y="615" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">new version, same data</text>
+<circle cx="1056" cy="556" r="8" fill="#2d3142"/>
+<text x="1056" y="559.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">7</text>
+<text x="78" y="740" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">macOS older than 13.5 is refused. A bad or missing checksum aborts and leaves current alone. OPS_CONSOLE_RELEASE_URL tests a local build.</text>
+<text x="78" y="757" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Node sits inside the app, so macOS names the daemon Ops Console. Releases on one Node keep Keychain and Full Disk Access; a new Node makes a new app.</text>
+<text x="78" y="774" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Switched off under Login Items it does not start at login. OPS_CONSOLE_PORT at start goes into the plist. Dev runs on 4556 with Keychain service ops-console-dev.</text>
+<text x="78" y="791" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Order: data folder lock, migrations in one transaction, start-up recovery, open the port, start the scheduler, write runtime.json.</text>
+<text x="78" y="808" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The daemon Keychain reads wait up to 90 s for the handover, then fail keychain_timeout. A call pending over 10 s shows a banner on every page.</text>
+<text x="78" y="825" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Update waits for running agent runs, or installs now if the operator picks it. A restart fails live runs and expires their Approvals.</text>
+<text x="78" y="842" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Only the newest and previous versions are kept, so a bad release can be rolled back by pointing current at the previous one.</text>
+<circle cx="60" cy="737" r="8" fill="#2d3142"/>
+<text x="60" y="740.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">1</text>
+<circle cx="60" cy="754" r="8" fill="#2d3142"/>
+<text x="60" y="757.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">2</text>
+<circle cx="60" cy="771" r="8" fill="#2d3142"/>
+<text x="60" y="774.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">3</text>
+<circle cx="60" cy="788" r="8" fill="#2d3142"/>
+<text x="60" y="791.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
+<circle cx="60" cy="805" r="8" fill="#2d3142"/>
+<text x="60" y="808.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
+<circle cx="60" cy="822" r="8" fill="#2d3142"/>
+<text x="60" y="825.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
+<circle cx="60" cy="839" r="8" fill="#2d3142"/>
+<text x="60" y="842.2" fill="#ffffff" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">7</text>
+<line x1="40" y1="900" x2="1420" y2="900" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<text x="40" y="916" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">LEGEND</text>
+<rect x="40" y="928" width="14" height="10" rx="2" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<text x="60" y="936" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Start-up</text>
+<rect x="126" y="928" width="14" height="10" rx="2" fill="rgba(79,93,117,0.10)" stroke="#5a6580" stroke-width="1"/>
+<text x="146" y="936" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Operator action</text>
+<rect x="248" y="928" width="14" height="10" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="268" y="936" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Step</text>
+<rect x="314" y="928" width="14" height="10" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<text x="334" y="936" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">On disk</text>
+<rect x="395" y="928" width="14" height="10" rx="2" fill="rgba(191,69,32,0.05)" stroke="rgba(191,69,32,0.50)" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="415" y="936" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">macOS permission</text>
+<rect x="522" y="928" width="14" height="10" rx="2" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<text x="542" y="936" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Outside or OS</text>
+<rect x="634" y="928" width="14" height="10" rx="2" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="654" y="936" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Optional</text>
+<line x1="720" y1="933" x2="748" y2="933" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<text x="756" y="936" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Network</text>
+<line x1="817" y1="933" x2="845" y2="933" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<text x="853" y="936" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Main path</text>
+<line x1="924" y1="933" x2="952" y2="933" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<text x="960" y="936" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, sans-serif">Background or restart</text>
+</svg>
+  </div>
+</div>
+</body>
+</html>

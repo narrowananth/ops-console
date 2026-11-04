@@ -174,7 +174,7 @@ The service holding a Repo's remote: GitHub, GitLab or Bitbucket.
 The console's push of a Session's branch to `origin` and its call to the Git host to open the pull request, run in the daemon as the operator. The agent writes the title and description; it never pushes or opens. The operator's click starts it in a Session, as does the operator's Approval of the agent's request, and a confirmed Fix starts it by itself.
 
 **Session**:
-One conversation between the operator and the agent. It runs in one Repo on one branch, except a
+One conversation between the operator and the agent, named for its first task. It runs in one Repo on one branch, except a
 dev-tools Session and an anonymous Session, which have no Repo. A pull request has its own Session for the agent's
 replies, with no composer, and an Alert has one for its Verification and Fix.
 _Avoid_: chat, thread
