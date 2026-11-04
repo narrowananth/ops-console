@@ -46,6 +46,13 @@ describe('install.sh', () => {
     expect(await readlink(path.join(m.installDir, 'current'))).toBe('versions/1.0.0');
   });
 
+  it('installs the arm64 tarball from a shell running under Rosetta', async () => {
+    const m = await machine(release100, 0);
+    const result = await install(m, { FAKE_UNAME_M: 'x86_64', FAKE_SYSCTL_TRANSLATED: '1' });
+    expect(result.code).toBe(0);
+    expect(await readlink(path.join(m.installDir, 'current'))).toBe('versions/1.0.0');
+  });
+
   it('refuses a tarball whose checksum does not match, and leaves current alone', async () => {
     const m = await machine(release100, 0);
     await install(m);

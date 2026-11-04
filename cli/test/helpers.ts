@@ -63,7 +63,7 @@ export type Machine = {
   opened(): Promise<string[]>;
 };
 
-/** A fresh HOME with fake launchctl, open and uname first on PATH. */
+/** A fresh HOME with fake launchctl, open, sysctl and uname first on PATH. */
 export async function machine(release: string, port: number): Promise<Machine> {
   const home = await tempDir('home-');
   const state = path.join(home, '.fake-launchctl');
