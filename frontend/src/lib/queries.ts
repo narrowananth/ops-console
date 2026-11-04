@@ -945,11 +945,11 @@ export function useMergePullRequest(repoId: string, number: number) {
 export function useStartAgentReview(repoId: string, number: number) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: () =>
+    mutationFn: (note?: string) =>
       apiSend(
         'POST',
         `/repos/${repoId}/pull-requests/${number}/agent-reviews`,
-        undefined,
+        note ? { note } : undefined,
         z.object({ data: prAgentReviewSchema }),
       ),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),

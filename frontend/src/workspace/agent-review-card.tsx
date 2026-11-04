@@ -141,6 +141,11 @@ export function AgentReviewCard({ review, sessionId }: { review: PrAgentReview; 
             skip={{ isPending: skipStep.isPending, error: skipStep.error, mutate: () => skipStep.mutate() }}
           />
         )}
+        {review.note && (
+          <p className="m-0 whitespace-pre-wrap text-xs text-neutral-700">
+            <strong>Your note:</strong> {review.note}
+          </p>
+        )}
         {review.verdict && <p className="m-0 font-semibold">{review.verdict}</p>}
         {review.status === AgentReviewStatus.Ready && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-700">

@@ -276,6 +276,8 @@ export const prAgentReviews = sqliteTable(
     /** The production branch the change was compared with, and its commit then. */
     baseBranch: text('base_branch'),
     baseSha: text('base_sha'),
+    /** What the operator told the agent when starting the review; null when empty. */
+    note: text(),
     /** The full review as Markdown. */
     report: text(),
     /** Why a failed review stopped, for the operator. */

@@ -575,6 +575,7 @@ test('Skip step on a failed Comment pass and a failed Agent Review sends the ret
         finished_at: LATER,
         stale: false,
         playbook: playbook('Review PR (built-in)', [['Read the change', 'failed', 'the diff would not load']]),
+        note: null,
       },
       comment_passes: [
         commentPass(
@@ -668,4 +669,33 @@ test('Collapse all folds every file to its name and Expand all opens them again'
   await files.getByRole('button', { name: 'Expand all' }).click();
   for (const name of ['srcats', 'srcbts', 'srccts'])
     await expect(files.getByText(`export const ${name} = 1;`)).toBeVisible();
+});
+
+test('Agent Review opens a note dialog; Start sends the note, and an empty note sends none', async ({ page }) => {
+  const detail = { current: pullRequest() };
+  await routePullRequest(page, detail);
+  const sent: unknown[] = [];
+  await page.route('**/api/repos/r1/pull-requests/7/agent-reviews', (route) => {
+    sent.push(route.request().postDataJSON());
+    return route.fulfill({ status: 202, json: { data: {} } });
+  });
+  await openPullRequest(page);
+
+  await page.getByRole('button', { name: 'Agent Review' }).click();
+  const dialog = page.getByRole('alertdialog', { name: 'Agent Review' });
+  const field = dialog.getByRole('textbox', { name: 'Note for the agent' });
+  await expect(field).toBeFocused();
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(sent).toEqual([]);
+
+  await page.getByRole('button', { name: 'Agent Review' }).click();
+  await field.fill('Continues #12; check the retry path');
+  await dialog.getByRole('button', { name: 'Start' }).click();
+  await expect.poll(() => sent).toEqual([{ note: 'Continues #12; check the retry path' }]);
+
+  await page.getByRole('button', { name: 'Agent Review' }).click();
+  await dialog.getByRole('button', { name: 'Start' }).click();
+  await expect.poll(() => sent.length).toBe(2);
+  expect(sent[1]).toBeNull();
 });

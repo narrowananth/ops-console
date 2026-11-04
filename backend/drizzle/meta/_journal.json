@@ -169,6 +169,13 @@
       "when": 1793795345968,
       "tag": "0023_network_allowlist",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1793822360092,
+      "tag": "0024_lovely_sabra",
+      "breakpoints": true
     }
   ]
 }

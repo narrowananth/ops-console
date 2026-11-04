@@ -1,0 +1,1 @@
+ALTER TABLE `pr_agent_reviews` ADD `note` text;
