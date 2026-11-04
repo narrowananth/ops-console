@@ -143,6 +143,22 @@ test('Collapse all and Expand all fold every Repo; a search keeps the matching R
   await expect(analytics.getByRole('listitem')).toHaveCount(0);
 });
 
+test('the tabs, search and Repo count stay in view while the Sessions list scrolls', async ({ page }) => {
+  const repos = Array.from({ length: 30 }, (_, n) => repo(`r${n}`, `service-${n}`));
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await page.route('**/api/repos', (route) => route.fulfill({ json: { data: repos, meta: { next_cursor: null } } }));
+  await page.route(/\/api\/sessions\?kind=repo/, (route) => route.fulfill({ json: { data: [] } }));
+  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+  const search = page.getByRole('searchbox', { name: 'Search Sessions' });
+  const tabs = page.getByRole('tablist', { name: 'Workspace' });
+  await expect(page.getByRole('region', { name: 'service-29' })).toHaveCount(1);
+
+  await page.getByRole('region', { name: 'service-29' }).scrollIntoViewIfNeeded();
+  await expect(tabs).toBeInViewport();
+  await expect(search).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'Collapse all' })).toBeInViewport();
+});
+
 test('removing a Repo with Sessions asks whether to keep or delete them', async ({ page }) => {
   const removed: string[] = [];
   await page.route('**/api/repos', (route) =>
