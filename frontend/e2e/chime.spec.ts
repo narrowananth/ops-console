@@ -68,9 +68,10 @@ test("a run the operator started chimes when it ends; a job's run and a turned-o
   });
   await page.goto(`${daemon.url}/agents#token=${daemon.token}`);
   const played = () => page.evaluate(() => (window as unknown as { played: number[] }).played);
-  // Audio starts only after the operator touched the page.
-  await page.mouse.click(5, 5);
+  // The page opens its socket after it listens for the first click, so wait for the socket, then click: audio starts
+  // only after the operator touched the page.
   await expect.poll(() => socket !== undefined).toBe(true);
+  await page.mouse.click(5, 5);
 
   socket?.send(finished('console'));
   socket?.send(finished('operator'));
