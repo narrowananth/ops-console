@@ -26,6 +26,12 @@ link, anyone opens it in any browser, and the one-time code Anthropic shows come
 console. The other way is signing in in this browser.
 _Avoid_: remote login, shared login, callback URL
 
+**Claude account hub**:
+What signs the agent in to Claude: the console's own Claude accounts, or CLIProxy. With CLIProxy,
+runs send CLIProxy's API key to a CLIProxy server on this Mac, and CLIProxy picks the account and
+tracks the quota; Auto-switch and Smart usage pause.
+_Avoid_: proxy mode, account manager
+
 **Auto-switch**:
 With Smart usage off, moving the active Claude account when its 5-hour usage reaches the
 threshold, carrying each Session's conversation over.

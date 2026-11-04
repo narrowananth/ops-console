@@ -30,7 +30,10 @@ export function useLiveEvents(): void {
       const parsed = wsEventSchema.safeParse(JSON.parse(String(message.data)));
       if (!parsed.success) return;
       const event = parsed.data;
-      if (event.event === 'settings.updated') refetch(queryKeys.settings);
+      if (event.event === 'settings.updated') {
+        refetch(queryKeys.settings);
+        refetch(queryKeys.cliProxy);
+      }
       if (event.event === 'update.changed' || event.event === 'settings.updated') refetch(queryKeys.updates);
       if (
         event.event === 'account.updated' ||

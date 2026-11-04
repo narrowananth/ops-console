@@ -22,6 +22,7 @@ import { claudeAccounts, nowIso, sessions } from '../db/schema';
 import { type Emit, STORE, type Store, type Tx } from '../db/store';
 import { SettingsRegistry } from '../settings/settings.registry';
 import { SettingsService } from '../settings/settings.service';
+import { CliProxyService } from './cliproxy.service';
 import { type AccountUsage, effectivePct, formatNumber, smartRank } from './smart-rank';
 import { USAGE_SOURCE, type UsageReading, type UsageSource } from './usage-source';
 
@@ -134,6 +135,7 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
     @Inject(Transcripts) private readonly transcripts: Transcripts,
     @Inject(SettingsRegistry) registry: SettingsRegistry,
     @Inject(USAGE_SOURCE) private readonly usageSource: UsageSource,
+    @Inject(CliProxyService) private readonly cliProxy: CliProxyService,
   ) {
     registry.register({
       key: AGENT_ACCOUNTS,
@@ -169,6 +171,24 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
     const row = this.activeRow();
     if (!row?.signedIn) {
       throw new ApiError(409, ErrorCode.InvalidState, 'no Claude account is signed in; add one in Settings › Agents');
+    }
+    return row;
+  }
+
+  /**
+   * The account a run goes under. Through CLIProxy it need not be signed in: CLIProxy signs the run in, and the account
+   * only lends its folder, which holds the conversations and the MCP servers.
+   */
+  forRun(): AccountRow {
+    if (!this.cliProxy.enabled()) return this.active();
+    this.cliProxy.assertReady();
+    const row = this.activeRow() ?? this.rows()[0];
+    if (!row) {
+      throw new ApiError(
+        409,
+        ErrorCode.InvalidState,
+        "runs through CLIProxy keep their conversations and MCP servers in a Claude account's folder: add one first",
+      );
     }
     return row;
   }
@@ -572,6 +592,8 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
 
   /** Smart usage moves to the Smart pick on its own; otherwise Auto-switch moves off an account at its threshold. */
   private autoSwitch(): void {
+    // CLIProxy picks the account itself.
+    if (this.cliProxy.enabled()) return;
     const setting = this.setting();
     const pick = setting.smart_usage ? this.list().meta.smart_pick : null;
     if (pick && pick.account_id !== setting.active_account_id) {

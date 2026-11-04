@@ -1,7 +1,15 @@
-import { AlertStatus, type ClaudeAccount, HealthStatus } from '@ops-console/shared';
+import { AlertStatus, type ClaudeAccount, CliProxyStatus, HealthStatus } from '@ops-console/shared';
 import type { ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { useAgentAccounts, useAlerts, useConnections, useConnectors, useMcpServers, useRepos } from '../lib/queries';
+import {
+  useAgentAccounts,
+  useAlerts,
+  useCliProxy,
+  useConnections,
+  useConnectors,
+  useMcpServers,
+  useRepos,
+} from '../lib/queries';
 import { shown } from '../monitor/scan-scope';
 import { lastAddress } from './last-address';
 import { RunningTasks } from './running-tasks';
@@ -236,6 +244,24 @@ const footButton =
 /** The account Sessions run on now, with its 5-hour and weekly usage; opens Agents & accounts. */
 function ActiveAccount() {
   const accounts = useAgentAccounts().data?.data ?? [];
+  const hub = useCliProxy().data?.data;
+  if (hub?.enabled) {
+    const connected = hub.status === CliProxyStatus.Connected;
+    return (
+      <NavLink
+        to="/agents"
+        aria-label="Claude account hub"
+        title="CLIProxy signs the agent in to Claude and tracks the quota. Opens Agents & accounts."
+        className="flex items-center justify-between gap-2 rounded-lg border border-line bg-card px-3.5 py-3 text-xs text-text no-underline shadow-sm hover:text-text"
+      >
+        <span className="font-mono font-semibold">CLIProxy</span>
+        <span className={`flex items-center gap-1.5 ${connected ? 'text-ok' : 'text-accent-700'}`}>
+          <span aria-hidden className={`size-1.5 rounded-full ${connected ? 'bg-ok' : 'bg-accent'}`} />
+          {connected ? 'connected' : hub.status.replace('_', ' ')}
+        </span>
+      </NavLink>
+    );
+  }
   const active = accounts.find((account) => account.is_active) ?? accounts.find((account) => account.signed_in);
   if (!active) return null;
   return (
