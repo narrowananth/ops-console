@@ -163,6 +163,9 @@ export const jobPlaybookSchema = z.object({
       writes: z.boolean(),
       status: z.enum(PlaybookStepStatus),
       summary: z.string().nullable(),
+      /** Null until the step starts; a retry from it starts it again. */
+      started_at: z.string().nullable(),
+      finished_at: z.string().nullable(),
     }),
   ),
 });

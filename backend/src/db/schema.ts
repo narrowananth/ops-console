@@ -278,6 +278,9 @@ export const prAgentReviews = sqliteTable(
     checklist: text().notNull().default('[]'),
     tools: text().notNull().default('[]'),
     createdAt: text('created_at').notNull().default(nowIso),
+    /** When the latest attempt began: a retry starts the clock again. Null until the first retry: then `created_at`. */
+    startedAt: text('started_at'),
+    finishedAt: text('finished_at'),
     ...jobPlaybookColumns(),
   },
   (table) => [
@@ -314,6 +317,9 @@ export const prReplyChecks = sqliteTable(
     /** The scratch copy's folder; null once removed. */
     scratchPath: text('scratch_path'),
     createdAt: text('created_at').notNull().default(nowIso),
+    /** When the latest attempt began: a retry starts the clock again. Null until the first retry: then `created_at`. */
+    startedAt: text('started_at'),
+    finishedAt: text('finished_at'),
     ...jobPlaybookColumns(),
   },
   (table) => [
@@ -353,6 +359,9 @@ export const prCommentPasses = sqliteTable(
     canRetry: bool('can_retry').notNull().default(false),
     scratchPath: text('scratch_path'),
     createdAt: text('created_at').notNull().default(nowIso),
+    /** When the latest attempt began: a retry starts the clock again. Null until the first retry: then `created_at`. */
+    startedAt: text('started_at'),
+    finishedAt: text('finished_at'),
     ...jobPlaybookColumns(),
   },
   (table) => [
@@ -558,6 +567,8 @@ export const reports = sqliteTable(
     markdownPath: text('markdown_path'),
     errorMessage: text('error_message'),
     createdAt: text('created_at').notNull().default(nowIso),
+    /** When the latest attempt began: a retry starts the clock again. Null until the first retry: then `created_at`. */
+    startedAt: text('started_at'),
     finishedAt: text('finished_at'),
     ...jobPlaybookColumns(),
     /** The Playbook's Branch field as copied at start: where the code is read from. Null before Branch. */

@@ -130,7 +130,7 @@ export class ReplyChecksService {
       this.steps.reset(tx, emit, { kind: 'reply_check', id });
       const next = tx
         .update(prReplyChecks)
-        .set({ status: AgentReviewStatus.Running, error: null })
+        .set({ status: AgentReviewStatus.Running, error: null, startedAt: new Date().toISOString(), finishedAt: null })
         .where(eq(prReplyChecks.id, id))
         .returning()
         .get() as Row;
@@ -201,7 +201,7 @@ export class ReplyChecksService {
     this.store.write((tx, emit) => {
       const done = tx
         .update(prReplyChecks)
-        .set({ status: AgentReviewStatus.Ready, scratchPath: null, error: null })
+        .set({ status: AgentReviewStatus.Ready, scratchPath: null, error: null, finishedAt: new Date().toISOString() })
         .where(eq(prReplyChecks.id, id))
         .returning()
         .get() as Row;
@@ -213,7 +213,7 @@ export class ReplyChecksService {
     this.store.write((tx, emit) => {
       const row = tx
         .update(prReplyChecks)
-        .set({ status: AgentReviewStatus.Failed, error, canRetry })
+        .set({ status: AgentReviewStatus.Failed, error, canRetry, finishedAt: new Date().toISOString() })
         .where(eq(prReplyChecks.id, id))
         .returning()
         .get();
