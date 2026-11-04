@@ -1,6 +1,8 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { AccountsController } from '../accounts/accounts.controller';
 import { AccountsService } from '../accounts/accounts.service';
+import { CliProxyController } from '../accounts/cliproxy.controller';
+import { CliProxyService } from '../accounts/cliproxy.service';
 import { USAGE_SOURCE } from '../accounts/usage-source';
 import { ActionLogController, ApprovalsController } from '../action-log/action-log.controller';
 import { ActionLogService } from '../action-log/action-log.service';
@@ -35,6 +37,7 @@ export class AgentModule {
         ActionLogController,
         ApprovalsController,
         AccountsController,
+        CliProxyController,
         PlaybooksController,
       ],
       providers: [
@@ -50,6 +53,7 @@ export class AgentModule {
         ActionLogService,
         ApprovalsService,
         AccountsService,
+        CliProxyService,
         SessionsService,
         AgentRuntime,
         PlaybooksService,
@@ -57,6 +61,7 @@ export class AgentModule {
       ],
       exports: [
         RunRegistry,
+        CliProxyService,
         SessionKinds,
         MessageInterceptors,
         ConnectionLookup,

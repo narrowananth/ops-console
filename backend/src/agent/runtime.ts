@@ -25,6 +25,7 @@ import {
 } from '@ops-console/shared';
 import { eq, inArray } from 'drizzle-orm';
 import { type AccountRow, AccountsService, rateLimitInfoSchema } from '../accounts/accounts.service';
+import { CliProxyService } from '../accounts/cliproxy.service';
 import { ActionLogService } from '../action-log/action-log.service';
 import { type ApprovalRequest, ApprovalsService, type Decision } from '../action-log/approvals.service';
 import { classifyCall, mcpTool } from '../action-log/classify';
@@ -130,6 +131,7 @@ export class AgentRuntime {
     @Inject(AGENT_CONFIG) private readonly config: AgentConfig,
     @Inject(SessionsService) private readonly sessions: SessionsService,
     @Inject(AccountsService) private readonly accounts: AccountsService,
+    @Inject(CliProxyService) private readonly cliProxy: CliProxyService,
     @Inject(ActionLogService) private readonly actionLog: ActionLogService,
     @Inject(ApprovalsService) private readonly approvals: ApprovalsService,
     @Inject(RunRegistry) private readonly runs: RunRegistry,
@@ -273,7 +275,7 @@ export class AgentRuntime {
     const run: Run = {
       sessionId,
       messageId: crypto.randomUUID(),
-      accountId: this.accounts.active().id,
+      accountId: this.accounts.forRun().id,
       workingDir: options.cwd ?? kind.workingDir(session),
       rules: options.rules ?? null,
       parts: [],
@@ -356,8 +358,10 @@ export class AgentRuntime {
       result = await this.runOnce(run, text, account);
       // A run rejected for a limit resumes once, on the account Auto-switch picks (Behavior 26). One whose sign-in no
       // longer works resumes once on the next signed-in account (Behavior 26a).
-      const next =
-        result === ErrorCode.RateLimited
+      // Through CLIProxy a limit or a refused key is CLIProxy's to handle: no account switch, no account signed out.
+      const next = this.cliProxy.enabled()
+        ? null
+        : result === ErrorCode.RateLimited
           ? this.accounts.switchAfterRejection(account.id)
           : result === ErrorCode.Unauthorized
             ? this.accounts.signInFailed(account.id)
@@ -407,7 +411,11 @@ export class AgentRuntime {
       ...(resume === null ? {} : { resume, ...(run.resumeAt === null ? {} : { resumeSessionAt: run.resumeAt }) }),
       // Each message gets a file checkpoint, so editing it can put the agent's file edits back (Behavior 8a).
       enableFileCheckpointing: true,
-      env: { ...claudeEnv(configDir), CLAUDE_CODE_MCP_STARTUP_WAIT_MS: MCP_STARTUP_WAIT_MS },
+      env: {
+        ...claudeEnv(configDir),
+        ...(await this.cliProxy.env()),
+        CLAUDE_CODE_MCP_STARTUP_WAIT_MS: MCP_STARTUP_WAIT_MS,
+      },
       includePartialMessages: true,
       abortController: run.abort,
       disallowedTools: [...MERGE_DENIALS, ...run.deny],
@@ -442,7 +450,8 @@ export class AgentRuntime {
           // An event whose shape changed in an SDK release leaves the last usage in place (Not required: exact usage).
           const info = rateLimitInfoSchema.safeParse(message.rate_limit_info);
           if (info.success) {
-            this.accounts.recordUsage(account.id, info.data);
+            // Through CLIProxy the numbers are of whichever account CLIProxy picked, not this one.
+            if (!this.cliProxy.enabled()) this.accounts.recordUsage(account.id, info.data);
             rejected ||= info.data.status === 'rejected';
           }
         } else if (message.type === 'result') {

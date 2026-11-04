@@ -246,7 +246,7 @@ export class CommentPassesService {
       this.steps.reset(tx, emit, { kind: 'comment_pass', id });
       const next = tx
         .update(prCommentPasses)
-        .set({ status: AgentReviewStatus.Running, error: null })
+        .set({ status: AgentReviewStatus.Running, error: null, startedAt: new Date().toISOString(), finishedAt: null })
         .where(eq(prCommentPasses.id, id))
         .returning()
         .get() as Row;
@@ -380,7 +380,7 @@ export class CommentPassesService {
     this.store.write((tx, emit) => {
       const done = tx
         .update(prCommentPasses)
-        .set({ status: AgentReviewStatus.Ready, scratchPath: null, error: null })
+        .set({ status: AgentReviewStatus.Ready, scratchPath: null, error: null, finishedAt: new Date().toISOString() })
         .where(eq(prCommentPasses.id, row.id))
         .returning()
         .get() as Row;
@@ -392,7 +392,7 @@ export class CommentPassesService {
     this.store.write((tx, emit) => {
       const row = tx
         .update(prCommentPasses)
-        .set({ status: AgentReviewStatus.Failed, error, canRetry })
+        .set({ status: AgentReviewStatus.Failed, error, canRetry, finishedAt: new Date().toISOString() })
         .where(eq(prCommentPasses.id, id))
         .returning()
         .get();

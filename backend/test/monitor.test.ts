@@ -53,6 +53,9 @@ import { FakeGitHost, hostPr } from './fakes/git-host';
 import { FakeProbe } from './fakes/probe';
 import { MIGRATIONS_DIR, startTestDaemon, tempDir } from './helpers';
 
+/** A job's step without its times, which each test run sets anew. */
+const untimed = ({ started_at: _started, finished_at: _finished, ...step }: Record<string, unknown>) => step;
+
 const running: AgentDaemon[] = [];
 
 /** Runs write their end to the store; a daemon that stops first leaves them writing to a closed one. */
@@ -1492,7 +1495,7 @@ describe('Playbooks in Monitor jobs', () => {
       (status) => status === 'verified',
     );
     const report = (await ctx.http.get(`/reports/${started.body.data.id}`)).body.data;
-    expect(report.playbook).toEqual({
+    expect({ ...report.playbook, steps: report.playbook.steps.map(untimed) }).toEqual({
       id: playbook.id,
       name: 'Checkout deep check',
       steps: [
@@ -1656,7 +1659,7 @@ describe('Playbooks in Monitor jobs', () => {
       'the Fix to end',
     );
     expect(fix).toMatchObject({ status: 'done', stage: 'pr' });
-    expect(fix.playbook.steps).toEqual([
+    expect(fix.playbook.steps.map(untimed)).toEqual([
       { title: 'Test a lasting fix', writes: true, status: 'done', summary: 'test added and passing' },
     ]);
     const calls = ctx.daemon.sdk.calls.slice(before);

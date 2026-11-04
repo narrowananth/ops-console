@@ -37,6 +37,7 @@ export function toReport(row: ReportRow, playbook: JobPlaybook | null): Report {
     markdown_path: row.markdownPath,
     error_message: row.errorMessage,
     created_at: row.createdAt,
+    started_at: row.startedAt ?? row.createdAt,
     finished_at: row.finishedAt,
     playbook,
   };
