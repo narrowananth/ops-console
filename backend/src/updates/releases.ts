@@ -20,23 +20,54 @@ const githubRelease = z.object({
   body: z.string().nullable(),
 });
 
-/** GitHub's latest release, read without signing in: 60 requests an hour, far more than a check every few hours. */
+/**
+ * GitHub's latest release, read without signing in. The page `releases/latest` redirects to the newest tag: asking for
+ * it without following the redirect costs a few hundred bytes and no API quota, so it can run every minute. The API,
+ * which allows 60 requests an hour, is asked only for a tag not seen yet, for its date and notes.
+ */
 export class GithubReleases implements ReleaseSource {
+  private known: Release | null = null;
+
+  constructor(private readonly get: typeof fetch = fetch) {}
+
   async latest(): Promise<Release> {
-    const response = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-      headers: { accept: 'application/vnd.github+json', 'user-agent': 'ops-console' },
+    const tag = await this.newestTag();
+    if (this.known && this.known.version === version(tag)) return this.known;
+    const release = await this.release(tag);
+    // Without its notes the release is asked for again at the next check.
+    if (release.notes !== null || release.published_at !== null) this.known = release;
+    return release;
+  }
+
+  private async newestTag(): Promise<string> {
+    const response = await this.get(`https://github.com/${REPO}/releases/latest`, {
+      method: 'HEAD',
+      redirect: 'manual',
+      headers: { 'user-agent': 'ops-console' },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (response.status === 403 || response.status === 429) {
-      throw new Error('GitHub limits how often it answers; the next check tries again');
-    }
-    if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
-    const release = githubRelease.parse(await response.json());
+    const tag = /\/releases\/tag\/([^/?#]+)$/.exec(response.headers.get('location') ?? '')?.[1];
+    if (!tag) throw new Error(`GitHub answered ${response.status} without the newest release`);
+    return decodeURIComponent(tag);
+  }
+
+  /** The tag's date and notes; when the API turns the console away, the version alone is enough to update. */
+  private async release(tag: string): Promise<Release> {
+    const page = `https://github.com/${REPO}/releases/tag/${encodeURIComponent(tag)}`;
+    const response = await this.get(`https://api.github.com/repos/${REPO}/releases/tags/${encodeURIComponent(tag)}`, {
+      headers: { accept: 'application/vnd.github+json', 'user-agent': 'ops-console' },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    }).catch(() => null);
+    const parsed = response?.ok ? githubRelease.safeParse(await response.json()) : null;
+    if (!parsed?.success) return { version: version(tag), published_at: null, url: page, notes: null };
+    const release = parsed.data;
     return {
-      version: release.tag_name.replace(/^v/, ''),
+      version: version(release.tag_name),
       published_at: release.published_at,
       url: release.html_url,
       notes: release.body?.trim() || null,
     };
   }
 }
+
+const version = (tag: string) => tag.replace(/^v/, '');
