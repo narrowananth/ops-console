@@ -184,7 +184,13 @@ export class BitbucketHost implements GitHostAdapter {
       Array.from({ length: PARALLEL }, async () => {
         for (let name = queue.shift(); name !== undefined; name = queue.shift()) {
           const slug = `${owner}/${name}`;
-          out.push(...(await this.list(slug, state)).map((pr) => ({ ...pr, slug })));
+          try {
+            out.push(...(await this.list(slug, state)).map((pr) => ({ ...pr, slug })));
+          } catch (error) {
+            // The read fails as a whole, so the other workers stop asking instead of finishing the queue.
+            queue.length = 0;
+            throw error;
+          }
         }
       }),
     );

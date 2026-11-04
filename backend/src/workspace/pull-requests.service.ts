@@ -53,6 +53,12 @@ type ReviewRow = typeof prAgentReviews.$inferSelect;
 /** A list read this recently is served from memory. Older, it is still served at once while a new read runs. */
 export const LIST_TTL_MS = 60_000;
 
+/**
+ * After a host answers 429, no list read of it starts for this long, and the kept lists are served as stale. Each read
+ * spends the quota whose shortage caused the 429, so reading on every minute kept the limit up.
+ */
+export const RATE_LIMIT_COOLDOWN_MS = 10 * 60_000;
+
 /** A pull request's detail read this recently is served from memory; older, like a list. */
 const DETAIL_TTL_MS = 15_000;
 
@@ -147,6 +153,8 @@ export class PullRequestsService implements OpenPrBranches {
   /** Background reads under way, one per cache key. */
   private readonly reading = new Map<string, Promise<void>>();
   private readonly ownersOf = new Map<GitHost, { at: number; owners: string[] }>();
+  /** When each rate limited host may be read again. */
+  private readonly coolingUntil = new Map<GitHost, number>();
   private readonly refreshListeners: (() => void)[] = [];
 
   constructor(
@@ -245,13 +253,16 @@ export class PullRequestsService implements OpenPrBranches {
   refresh(repoId: string | undefined): void {
     const wanted = repoId === undefined ? this.hostedRepos() : [this.repoRow(repoId)];
     if (repoId === undefined) {
-      this.ownerCache.clear();
-      this.ownersOf.clear();
+      // A rate limited host keeps what was read: asking again would fail and leave the list empty.
+      for (const key of [...this.ownerCache.keys()]) {
+        if (!this.cooling(key.split(':')[0] as GitHost)) this.ownerCache.delete(key);
+      }
+      for (const host of [...this.ownersOf.keys()]) if (!this.cooling(host)) this.ownersOf.delete(host);
     }
     const before = new Map<string, Entry | undefined>();
     for (const repo of wanted) {
       before.set(repo.id, this.cache.get(this.key(repo.id, PrState.Open)));
-      this.drop(repo.id);
+      if (!this.cooling(repo.host)) this.drop(repo.id);
     }
     void this.refreshAll(wanted, before, repoId ?? null);
   }
@@ -478,6 +489,23 @@ export class PullRequestsService implements OpenPrBranches {
     return hit.value;
   }
 
+  private cooling(host: GitHost): boolean {
+    return (this.coolingUntil.get(host) ?? 0) > Date.now();
+  }
+
+  /** Runs a read of `host`; a 429 starts its cooldown, and a read inside one is refused without asking the host. */
+  private async asking<T>(host: GitHost, ask: () => Promise<T>): Promise<T> {
+    if (this.cooling(host)) throw new ApiError(429, ErrorCode.RateLimited, `${host} is rate limiting the console`);
+    try {
+      return await ask();
+    } catch (error) {
+      if (error instanceof ApiError && error.code === ErrorCode.RateLimited) {
+        this.coolingUntil.set(host, Date.now() + RATE_LIMIT_COOLDOWN_MS);
+      }
+      throw error;
+    }
+  }
+
   /** Runs `work` unless a background read for `key` is already under way. */
   private inBackground(key: string, work: () => Promise<void>): void {
     if (this.reading.has(key)) return;
@@ -552,7 +580,10 @@ export class PullRequestsService implements OpenPrBranches {
     const key = this.key(repo.id, state);
     const fetch = async () => {
       this.hosted(repo.id);
-      return { at: Date.now(), prs: await this.adapter(repo).list(repo.remoteSlug as string, state) };
+      return {
+        at: Date.now(),
+        prs: await this.asking(repo.host, () => this.adapter(repo).list(repo.remoteSlug as string, state)),
+      };
     };
     const hit = this.cache.get(key);
     if (!hit) {
@@ -595,6 +626,7 @@ export class PullRequestsService implements OpenPrBranches {
         status = error instanceof ApiError && error.code === ErrorCode.RateLimited ? 'rate_limited' : 'failed';
       }
     }
+    if (status === 'ok' && wanted.some((repo) => this.cooling(repo.host))) status = 'rate_limited';
     this.store.write((_tx, emit) => emit('pull_request.refreshed', { repo_id: repoId, status, changed }));
     for (const listener of this.refreshListeners) listener();
   }
@@ -652,7 +684,10 @@ export class PullRequestsService implements OpenPrBranches {
     state: PrState,
   ): Promise<{ at: number; prs: OwnedPullRequest[]; stale: boolean }> {
     const key = `${host}:${owner.toLowerCase()}:${state}`;
-    const fetch = async () => ({ at: Date.now(), prs: await this.hosts.for(host).listOwner(owner, state) });
+    const fetch = async () => ({
+      at: Date.now(),
+      prs: await this.asking(host, () => this.hosts.for(host).listOwner(owner, state)),
+    });
     const hit = this.ownerCache.get(key);
     if (!hit) {
       const entry = await fetch();

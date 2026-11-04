@@ -485,17 +485,20 @@ describe('pull requests', () => {
     close();
   });
 
-  it('serves the cached list as stale when the host fails, and errors when nothing is cached', async () => {
+  it('errors when the host fails and nothing is cached', async () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];
+    ctx.host.down = 'failed';
+    expect((await ctx.http.get(`/pull-requests?repo_id=${ctx.repoId}`)).body.error.code).toBe('upstream_failed');
     ctx.host.down = 'rate_limited';
     const cold = await ctx.http.get(`/pull-requests?repo_id=${ctx.repoId}`);
     expect(cold.status).toBe(429);
     expect(cold.body.error.code).toBe('rate_limited');
-    ctx.host.down = 'failed';
-    expect((await ctx.http.get(`/pull-requests?repo_id=${ctx.repoId}`)).body.error.code).toBe('upstream_failed');
+  });
 
-    ctx.host.down = null;
+  it('serves the cached list as stale when the host fails', async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1)];
     await ctx.http.get('/pull-requests');
     ctx.host.down = 'failed';
     // Past the minute the kept list answers at once and is read again behind it; that read fails, so the next answer
@@ -513,6 +516,52 @@ describe('pull requests', () => {
         'a stale list',
       );
       expect(stale.body.data).toHaveLength(1);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it('stops asking a rate limited host for ten minutes, keeps its list and says it is stale', async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1)];
+    await ctx.http.get('/pull-requests');
+    const { LIST_TTL_MS, RATE_LIMIT_COOLDOWN_MS } = await import('../src/workspace/pull-requests.service');
+    const realNow = Date.now;
+    let offset = 0;
+    Date.now = () => realNow() + offset;
+    try {
+      // The kept list is a minute old; the read behind it meets the 429.
+      offset = LIST_TTL_MS + 1;
+      ctx.host.down = 'rate_limited';
+      await ctx.http.get('/pull-requests');
+      await until(
+        () => ctx.http.get('/pull-requests'),
+        (res) => res.body.meta.stale === true,
+        'a stale list',
+      );
+
+      // The host is back, but the cooldown holds: no call reaches it and the list stays.
+      ctx.host.down = null;
+      const asked = ctx.host.calls.list;
+      offset += LIST_TTL_MS * 2;
+      for (const _ of [1, 2]) {
+        const held = await ctx.http.get('/pull-requests');
+        expect(held.body.data).toHaveLength(1);
+        expect(held.body.meta.stale).toBe(true);
+      }
+      await ctx.http.post('/pull-requests/refresh', {});
+      expect((await ctx.http.get('/pull-requests')).body.data).toHaveLength(1);
+      expect(ctx.host.calls.list).toBe(asked);
+
+      // Past the cooldown the host is read again and the list is fresh.
+      offset += RATE_LIMIT_COOLDOWN_MS;
+      await ctx.http.get('/pull-requests');
+      await until(
+        () => ctx.http.get('/pull-requests'),
+        (res) => res.body.meta.stale === false,
+        'a fresh list',
+      );
+      expect(ctx.host.calls.list).toBeGreaterThan(asked);
     } finally {
       Date.now = realNow;
     }
