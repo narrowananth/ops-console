@@ -89,6 +89,7 @@ patch. They have no place to write that down, so they retype it in every Session
     or its closing turn when no step failed, while the pull request is on the same commit.
     Next to "Retry from step N", every failed job with a failed step offers "Skip step N": the step reads skipped,
     its summary "Skipped by the operator:" and why it failed, and the job goes on from the next step.
+17a. Every job shows how long it has taken: the Report and the Fix on Monitor, and the Agent Review, Reply check and Comment pass on a pull request. While the job runs, its header counts up each second (`42s`, `4m 05s`, `1h 02m`); once it ends, the header says "took 4m 05s". Each step shows its own time beside its title the same way. A job's clock is `started_at` to `finished_at`, and a retry starts it again. A step's clock starts when the step does, so a retried step shows only its last run. Jobs from before times were kept show no time.
 18. The buttons that start a job name a Playbook that is not built-in: "Verify with agent · Checkout deep check".
     With the built-in they read as today.
 

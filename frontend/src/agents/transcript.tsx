@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { AttachmentViewer, PaperClip, type Viewed } from '../components/ui/attachment-viewer';
 import { Button, Spinner } from '../components/ui/button';
 import { DiffLines } from '../components/ui/diff';
+import { Elapsed } from '../components/ui/elapsed';
 import { Markdown } from '../components/ui/markdown';
 import type { PathwayState } from '../components/ui/pathway';
 import { ComparisonView, ResultView } from '../devtools/result-tables';
@@ -85,6 +86,8 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
           {message.status === 'streaming' && ' · working'}
           {message.status === 'failed' && ' · failed'}
         </span>
+        {/* The run's in-flight message starts with the run, so its age is how long the agent has worked. */}
+        {message.status === 'streaming' && <Elapsed from={message.created_at} to={null} running className="ml-1" />}
         {!agent && draft === null && (
           <span className="ml-auto flex gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
             <button

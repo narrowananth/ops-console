@@ -6,6 +6,7 @@ import {
   ReviewVerdict,
 } from '@ops-console/shared';
 import { StopRun } from '../agents/stop-run';
+import { Elapsed } from '../components/ui/elapsed';
 import { FoldTitle, useFold } from '../components/ui/fold';
 import { Markdown } from '../components/ui/markdown';
 import { StatusPill } from '../components/ui/pathway';
@@ -102,6 +103,12 @@ export function AgentReviewCard({ review, sessionId }: { review: PrAgentReview; 
           {review.status === AgentReviewStatus.Running && sessionId && (
             <StopRun sessionId={sessionId} title="Stop the review; it fails and can start again" />
           )}
+          <Elapsed
+            from={review.started_at}
+            to={review.finished_at}
+            running={review.status === AgentReviewStatus.Running}
+            took
+          />
           <StatusPill state={runState(review.status)}>{review.status}</StatusPill>
         </span>
       </header>

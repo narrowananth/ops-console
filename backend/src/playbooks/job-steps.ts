@@ -68,6 +68,8 @@ export function jobPlaybook(
       writes: row.writes,
       status: row.status,
       summary: row.summary,
+      started_at: row.startedAt,
+      finished_at: row.finishedAt,
     })),
   };
 }

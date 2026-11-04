@@ -413,7 +413,15 @@ test('the page says while it reads Playbooks, and why it could not', async ({ pa
 const jobPlaybook = (id: string | null, name: string, steps: [string, string, string | null, boolean?][]) => ({
   id,
   name,
-  steps: steps.map(([title, status, summary, writes = false]) => ({ title, status, summary, writes })),
+  steps: steps.map(([title, status, summary, writes = false]) => ({
+    title,
+    status,
+    summary,
+    writes,
+    // A step that ran started at NOW; one that ended, ended then too.
+    started_at: status === 'pending' || status === 'skipped' ? null : NOW,
+    finished_at: status === 'pending' || status === 'running' ? null : NOW,
+  })),
 });
 
 const builtinsList = (held: { id: string; name: string; triggers: string[] }[]) => ({
@@ -447,7 +455,8 @@ const report = (alertId: string, status: string, playbook: unknown, extra: Recor
   markdown_path: null,
   error_message: null,
   created_at: NOW,
-  finished_at: null,
+  started_at: NOW,
+  finished_at: status === 'running' ? null : NOW,
   playbook,
   ...extra,
 });
@@ -701,6 +710,8 @@ const agentReview = (extra: Record<string, unknown>) => ({
   checklist: [],
   tools: [],
   created_at: NOW,
+  started_at: NOW,
+  finished_at: extra.status === 'running' ? null : NOW,
   stale: false,
   playbook: null,
   ...extra,

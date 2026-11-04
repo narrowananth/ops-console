@@ -1,6 +1,7 @@
 import { type JobPlaybook, PlaybookStepStatus, type PlaybookTrigger } from '@ops-console/shared';
 import { Link } from 'react-router-dom';
 import { Button, Spinner } from '../components/ui/button';
+import { Elapsed } from '../components/ui/elapsed';
 import { Pathway, PathwayProgress, type PathwayState, type PathwayStep } from '../components/ui/pathway';
 import { usePlaybooks } from '../lib/queries';
 import { holderOf } from './labels';
@@ -106,7 +107,14 @@ const playbookPath = (playbook: JobPlaybook, skip: RunningSkip = null): PathwayS
     key: String(index),
     title: step.title,
     state: STATE[step.status],
-    aside: step.writes ? <ScratchTag /> : undefined,
+    aside:
+      step.writes || step.started_at ? (
+        <>
+          {step.writes && <ScratchTag />}
+          {/* A skipped step that never ran has no time. */}
+          <Elapsed from={step.started_at} to={step.finished_at} running={step.status === PlaybookStepStatus.Running} />
+        </>
+      ) : undefined,
     children:
       skip && step.status === PlaybookStepStatus.Running ? (
         <span className="flex flex-col items-start gap-1.5">

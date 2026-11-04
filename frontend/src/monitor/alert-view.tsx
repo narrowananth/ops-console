@@ -21,6 +21,7 @@ import { Button, Spinner } from '../components/ui/button';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { DiffLines } from '../components/ui/diff';
 import { Dropdown } from '../components/ui/dropdown';
+import { Elapsed } from '../components/ui/elapsed';
 import { Empty } from '../components/ui/empty';
 import { FoldTitle, useFold } from '../components/ui/fold';
 import { Markdown } from '../components/ui/markdown';
@@ -160,6 +161,7 @@ function ReportPanel({
           {shown.status === RunStatus.Running && sessionId && (
             <StopRun sessionId={sessionId} title="Stop the Verification; it fails and can retry from its step" />
           )}
+          <Elapsed from={shown.started_at} to={shown.finished_at} running={shown.status === RunStatus.Running} took />
           <span title={REPORT_STATUS_TIP[shown.status]}>
             <StatusPill state={runState(shown.status)}>{shown.status}</StatusPill>
           </span>
@@ -479,6 +481,7 @@ function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: (skip: boo
         <span title={FIX_STATUS_TIP[fix.status]}>
           <StatusPill state={FIX_STATE[fix.status]}>{fix.status}</StatusPill>
         </span>
+        <Elapsed from={fix.started_at} to={fix.finished_at} running={fix.status === FixStatus.Running} took />
         {fix.playbook && (
           <PlaybookLink
             playbook={fix.playbook}

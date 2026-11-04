@@ -19,6 +19,9 @@ import { FakeGitHost, hostPr } from './fakes/git-host';
 import { FakeProbe } from './fakes/probe';
 import { tempDir } from './helpers';
 
+/** A job's step without its times, which each test run sets anew. */
+const untimed = ({ started_at: _started, finished_at: _finished, ...step }: Record<string, unknown>) => step;
+
 const running: AgentDaemon[] = [];
 afterEach(async () => {
   for (const daemon of running.splice(0)) await daemon.stop();
@@ -1102,7 +1105,8 @@ describe('Agent Review', () => {
     await waitForReview(events);
     const [failed] = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
     expect(failed.status).toBe('failed');
-    expect(failed.playbook.steps).toEqual([
+    expect(failed.finished_at).not.toBeNull();
+    expect(failed.playbook.steps.map(untimed)).toEqual([
       { title: 'Migrations', writes: false, status: 'done', summary: 'no migration' },
       { title: 'Rollback', writes: false, status: 'failed', summary: 'no rollback plan' },
     ]);
@@ -1201,11 +1205,16 @@ describe('Agent Review', () => {
     await waitForReview(events);
     const [ready] = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
     expect(ready).toMatchObject({ id, status: 'ready', verdict: 'Needs one fix' });
-    expect(ready.playbook.steps).toEqual([
+    expect(ready.playbook.steps.map(untimed)).toEqual([
       { title: 'Migrations', writes: false, status: 'done', summary: 'no migration' },
       { title: 'Rollback', writes: false, status: 'skipped', summary: 'Skipped by the operator: no rollback plan' },
       { title: 'Flags', writes: false, status: 'done', summary: 'no flag' },
     ]);
+    // The retry started the clock again; the review and each step that ran carry their times.
+    expect(Date.parse(ready.started_at)).toBeGreaterThan(Date.parse(ready.created_at) - 1);
+    expect(Date.parse(ready.finished_at)).toBeGreaterThanOrEqual(Date.parse(ready.started_at));
+    const flags = ready.playbook.steps[2];
+    expect(Date.parse(flags.finished_at)).toBeGreaterThanOrEqual(Date.parse(flags.started_at));
     const prompts = ctx.daemon.sdk.calls.slice(2).map((call) => call.prompt);
     expect(prompts[0]).toContain('Review pull request #1');
     expect(prompts[0]).toContain('Step 3 of 3: Flags');

@@ -147,7 +147,7 @@ export class FixesService {
     const row = this.store.write((tx, emit) => {
       const updated = tx
         .update(fixes)
-        .set({ status: FixStatus.Running, errorMessage: null, finishedAt: null })
+        .set({ status: FixStatus.Running, errorMessage: null, startedAt: new Date().toISOString(), finishedAt: null })
         .where(eq(fixes.id, id))
         .returning()
         .get() as FixRow;

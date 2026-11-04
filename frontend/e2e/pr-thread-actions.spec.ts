@@ -42,7 +42,15 @@ type Step = [title: string, status: string, summary: string | null, writes?: boo
 const playbook = (name: string, steps: Step[]) => ({
   id: null,
   name,
-  steps: steps.map(([title, status, summary, writes = false]) => ({ title, status, summary, writes })),
+  steps: steps.map(([title, status, summary, writes = false]) => ({
+    title,
+    status,
+    summary,
+    writes,
+    // A step that ran started at LATER; one that ended, ended then too.
+    started_at: status === 'pending' || status === 'skipped' ? null : LATER,
+    finished_at: status === 'pending' || status === 'running' ? null : LATER,
+  })),
 });
 
 const replyCheck = (commentId: string, status: string, steps: Step[], extra: Record<string, unknown> = {}) => ({
@@ -58,6 +66,8 @@ const replyCheck = (commentId: string, status: string, steps: Step[], extra: Rec
   error: null,
   can_retry: false,
   created_at: LATER,
+  started_at: LATER,
+  finished_at: status === 'running' ? null : LATER,
   playbook: playbook('Check reply (built-in)', steps),
   ...extra,
 });
@@ -87,6 +97,8 @@ const commentPass = (id: string, status: string, steps: Step[], extra: Record<st
   can_retry: false,
   stale: false,
   created_at: LATER,
+  started_at: LATER,
+  finished_at: status === 'running' ? null : LATER,
   playbook: playbook('Address comments (built-in)', steps),
   ...extra,
 });
@@ -556,6 +568,8 @@ test('Skip step on a failed Comment pass and a failed Agent Review sends the ret
         checklist: [],
         tools: [],
         created_at: LATER,
+        started_at: LATER,
+        finished_at: LATER,
         stale: false,
         playbook: playbook('Review PR (built-in)', [['Read the change', 'failed', 'the diff would not load']]),
       },
@@ -593,4 +607,62 @@ test('Skip step on a failed Comment pass and a failed Agent Review sends the ret
   );
   await review.getByRole('button', { name: 'Skip step 1' }).click();
   await expect.poll(() => reviews).toEqual([{ skip: true }]);
+});
+
+test('a running job counts up the time it has taken, each second; one that ended says how long it took', async ({
+  page,
+}) => {
+  const started = new Date(Date.now() - 65_000).toISOString();
+  const detail = {
+    current: pullRequest({
+      agent_session_id: 'sp7',
+      comment_passes: [commentPass('cp1', 'running', [['Read the threads', 'running', null]], { started_at: started })],
+    }),
+  };
+  await routePullRequest(page, detail);
+  await openPullRequest(page);
+
+  const card = page.getByRole('region', { name: 'Comment pass' });
+  const timer = card.locator('header time').first();
+  await expect(timer).toHaveText(/^1m 0[5-9]s$/);
+  const first = await timer.textContent();
+  await expect.poll(() => timer.textContent(), { timeout: 3_000 }).not.toBe(first);
+
+  const ended = new Date(Date.parse(started) + 4 * 60_000 + 3_000).toISOString();
+  detail.current = pullRequest({
+    agent_session_id: 'sp7',
+    comment_passes: [
+      commentPass('cp1', 'ready', [['Read the threads', 'done', 'read']], { started_at: started, finished_at: ended }),
+    ],
+  });
+  await page.reload();
+  await expect(card.locator('time').first()).toHaveText('took 4m 03s');
+});
+
+test('Collapse all folds every file to its name and Expand all opens them again', async ({ page }) => {
+  const file = (name: string) => ({
+    name,
+    additions: 1,
+    deletions: 0,
+    lines: [
+      { sign: ' ', text: '@@ -1 +1,2 @@' },
+      { sign: '+', text: `export const ${name.replace(/\W/g, '')} = 1;` },
+    ],
+  });
+  const detail = { current: pullRequest({ files: [file('src/a.ts'), file('src/b.ts'), file('src/c.ts')] }) };
+  await routePullRequest(page, detail);
+  await openPullRequest(page);
+
+  const files = page.getByRole('region', { name: 'Files' });
+  await expect(files.getByText('export const srcats = 1;')).toBeVisible();
+  await files.getByRole('button', { name: 'Collapse all' }).click();
+  for (const name of ['srcats', 'srcbts', 'srccts'])
+    await expect(files.getByText(`export const ${name} = 1;`)).toBeHidden();
+
+  // A fold kept in the browser holds through a reload, and Expand all opens every file again.
+  await page.reload();
+  await expect(files.getByText('export const srcbts = 1;')).toBeHidden();
+  await files.getByRole('button', { name: 'Expand all' }).click();
+  for (const name of ['srcats', 'srcbts', 'srccts'])
+    await expect(files.getByText(`export const ${name} = 1;`)).toBeVisible();
 });

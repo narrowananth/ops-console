@@ -6,6 +6,7 @@ import {
   ThreadOutcome,
 } from '@ops-console/shared';
 import { StopRun } from '../agents/stop-run';
+import { Elapsed } from '../components/ui/elapsed';
 import { FoldTitle, useFold } from '../components/ui/fold';
 import { Markdown } from '../components/ui/markdown';
 import { StatusPill } from '../components/ui/pathway';
@@ -160,6 +161,12 @@ function PassHeader({ pass, prUrl, sessionId }: { pass: CommentPass; prUrl: stri
         {pass.status === AgentReviewStatus.Running && sessionId && (
           <StopRun sessionId={sessionId} title="Stop the Comment pass; it fails and can retry from its step" />
         )}
+        <Elapsed
+          from={pass.started_at}
+          to={pass.finished_at}
+          running={pass.status === AgentReviewStatus.Running}
+          took
+        />
         <StatusPill state={runState(pass.status)}>{pass.status}</StatusPill>
       </span>
     </>
