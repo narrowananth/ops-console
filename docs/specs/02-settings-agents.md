@@ -19,6 +19,7 @@ Sessions and runs
 4. While a run streams, each part goes out as `session.output`. A part that grows is resent whole with the same `part_index`. The in-flight agent message lives in the daemon's memory: listing during a run returns it as `streaming`, and after a reload mid-run the next `session.output` continues from the next `part_index`.
 4a. While a run goes, the agent's in-flight message in the Session reads "Agent · working" with a timer beside it that counts up each second from the run's start, the message's `created_at`.
 5. A run that ends sets the Session `idle`, or `failed` when the run errored, updates `last_message_preview` (the first line of the agent's first text in that run, cut to 200 characters) and `last_active_at`, and sends `session.finished`. After a failed run, listing marks the last agent message `failed`.
+5a. `session.finished` says who started the run: `operator` for a run the operator's message started, `console` for one a job started, such as a Monitor Verify step or an Agent Review. The page plays a soft two-note chime when a run the operator started ends: rising when it finished, falling when it failed. A job's runs stay quiet, so a job of eight steps does not chime eight times. The sound is made in the browser with Web Audio, with no audio file, and only after the operator first clicked or typed on the page. Notifications on Agents & accounts turns it off for this browser (`ops-console:notify.sound`, on by default), and Play sounds it.
 6. A Session whose transcript is gone (deleted outside the console) lists no messages. Its next message starts a new SDK session and replaces `sdk_session_id`.
 7. A message to a Session whose run is still going is refused with `session_busy`. Runs of different Sessions go on side by side.
 8. When the agent asks the operator a question, the Session is `waiting_input` and the question shows as a `question` part. The operator's next message answers it and sets the Session `working`.
@@ -281,7 +282,7 @@ Server to client, when the agent appends or grows a part.
 Server to client, when a run ends.
 
 ```json
-{ "session_id": "uuid", "message_id": "string", "status": "done | failed", "state": "idle | failed", "error_code": "string | null" }
+{ "session_id": "uuid", "message_id": "string", "status": "done | failed", "state": "idle | failed", "error_code": "string | null", "started_by": "operator | console" }
 ```
 
 ### WebSocket `session.updated`

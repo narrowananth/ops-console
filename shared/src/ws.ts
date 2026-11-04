@@ -36,6 +36,8 @@ export const wsEventSchema = z.discriminatedUnion('event', [
       status: z.enum(['done', 'failed']),
       state: z.enum([SessionState.Idle, SessionState.Failed]),
       error_code: z.string().nullable(),
+      /** `operator` for a run the operator's message started; `console` for one a job started, such as a Verify step. */
+      started_by: z.enum(['operator', 'console']),
     }),
   ),
   event(
