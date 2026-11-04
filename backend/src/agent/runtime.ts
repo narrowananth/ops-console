@@ -16,6 +16,8 @@ import {
   ActionOutcome,
   ApprovalKind,
   ApprovalStatus,
+  CONNECTOR_SERVERS,
+  ConnectorId,
   type EditedMessage,
   Effort,
   ErrorCode,
@@ -31,10 +33,13 @@ import { type ApprovalRequest, ApprovalsService, type Decision } from '../action
 import { classifyCall, mcpTool } from '../action-log/classify';
 import { redact } from '../action-log/redact';
 import { claudeEnv } from '../claude-cli/claude-cli';
+import { DATA_DIR } from '../common/data-dir';
 import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
 import { disabledMcpServers, nowIso, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
+import { KEYCHAIN, type Keychain, KeychainTimeout } from '../keychain/keychain';
+import { storedEnvVar } from '../mcp/launcher';
 import { PlaybooksService } from '../playbooks/playbooks.service';
 import { systemAppend } from '../playbooks/prompts';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
@@ -43,6 +48,7 @@ import { ConnectionLookup } from './connection-lookup';
 import { MessageInterceptors } from './message-interceptors';
 import { blockParts, contentSchema, EDIT_TOOLS, questionInputSchema, stepText, toMessages } from './parts';
 import { ProdWriteRule } from './prod-write-rule';
+import { runSandbox } from './run-sandbox';
 import { type Run, RunRegistry, type RunSummary } from './runs';
 import { SessionKinds } from './session-kinds';
 import { emitSessionUpdated, NEW_SESSION_TITLE, type SessionRow, SessionsService } from './sessions.service';
@@ -112,9 +118,17 @@ export type RunOptions = {
   resumeAt?: string;
   /** Tools denied on top of merging. */
   deny?: string[];
+  /** The Run sandbox lets the run read `~/.ssh`: a Fix, whose operator confirmed the Report. */
+  readSsh?: boolean;
 };
 
-type RunResult = 'done' | 'stopped' | ErrorCode.RateLimited | ErrorCode.Unauthorized | ErrorCode.UpstreamFailed;
+type RunResult =
+  | 'done'
+  | 'stopped'
+  | ErrorCode.RateLimited
+  | ErrorCode.Unauthorized
+  | ErrorCode.UpstreamFailed
+  | ErrorCode.KeychainTimeout;
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -128,6 +142,8 @@ export class AgentRuntime {
 
   constructor(
     @Inject(STORE) private readonly store: Store,
+    @Inject(DATA_DIR) private readonly dataDir: string,
+    @Inject(KEYCHAIN) private readonly keychain: Keychain,
     @Inject(AGENT_CONFIG) private readonly config: AgentConfig,
     @Inject(SessionsService) private readonly sessions: SessionsService,
     @Inject(AccountsService) private readonly accounts: AccountsService,
@@ -293,8 +309,11 @@ export class AgentRuntime {
       stopped: false,
       resumeAt: options.resumeAt ?? null,
       deny: options.deny ?? [],
+      readSsh: options.readSsh ?? false,
+      failure: null,
     };
     this.runs.add(run);
+    this.sessions.setFailure(sessionId, null);
     if (options.fresh) this.sessions.write(sessionId, { sdkSessionId: null });
     const isFirst = session.title === NEW_SESSION_TITLE && session.sdkSessionId === null;
     this.sessions.write(sessionId, {
@@ -376,9 +395,20 @@ export class AgentRuntime {
       this.logger.error(
         `run of session ${run.sessionId} failed: ${error instanceof Error ? error.message : String(error)}`,
       );
-      result = ErrorCode.UpstreamFailed;
+      if (error instanceof KeychainTimeout) run.failure = error.message;
+      result = error instanceof KeychainTimeout ? ErrorCode.KeychainTimeout : ErrorCode.UpstreamFailed;
     }
     this.finish(run, result);
+  }
+
+  /**
+   * `gh` keeps its token in the login Keychain, which the Run sandbox blocks, so a run signs `gh` in through
+   * `GH_TOKEN` with the copy the GitHub Connector holds (ADR 0006). With no Connector there is none to give.
+   */
+  private async githubEnv(): Promise<Record<string, string>> {
+    const server = CONNECTOR_SERVERS[ConnectorId.Github];
+    const token = server ? await storedEnvVar(this.keychain, server.name, 'GITHUB_PERSONAL_ACCESS_TOKEN') : null;
+    return token ? { GH_TOKEN: token } : {};
   }
 
   private async runOnce(run: Run, text: string, account: AccountRow): Promise<RunResult> {
@@ -402,6 +432,12 @@ export class AgentRuntime {
     const attached = this.attachments.existingFolder(run.sessionId);
     const options: Options = {
       cwd: run.workingDir,
+      sandbox: runSandbox({
+        workingDir: run.workingDir,
+        dataDir: this.dataDir,
+        readable: attached === null ? [] : [attached],
+        readSsh: run.readSsh,
+      }),
       // The operator's attached files sit outside the working folder; the agent reads them without asking.
       ...(attached === null ? {} : { additionalDirectories: [attached] }),
       model: session.model,
@@ -414,6 +450,7 @@ export class AgentRuntime {
       env: {
         ...claudeEnv(configDir),
         ...(await this.cliProxy.env()),
+        ...(await this.githubEnv()),
         CLAUDE_CODE_MCP_STARTUP_WAIT_MS: MCP_STARTUP_WAIT_MS,
       },
       includePartialMessages: true,
@@ -460,6 +497,9 @@ export class AgentRuntime {
             if (row) this.actionLog.finish(row, ActionOutcome.Denied);
           }
           failed = message.is_error;
+          // Only a sandbox refusal is worth the operator's eyes; other result text stays in the transcript.
+          const said = message.subtype === 'success' ? message.result : message.errors?.join('; ');
+          if (failed && typeof said === 'string' && /sandbox/i.test(said)) run.failure = said;
         } else {
           rejected ||= message.type === 'assistant' && message.error === 'rate_limit';
           signInFailed ||= message.type === 'assistant' && message.error === 'authentication_failed';
@@ -550,6 +590,7 @@ export class AgentRuntime {
 
   private finish(run: Run, result: RunResult): void {
     this.runs.remove(run.sessionId);
+    this.sessions.setFailure(run.sessionId, run.failure);
     // A run the operator stopped ends `idle`, like one that finished; the job that started it still sees it fail.
     const failed = result !== 'done' && result !== 'stopped';
     // The agent's first words in the message; its tool steps make a poor preview.
@@ -589,6 +630,7 @@ export class AgentRuntime {
       ok: result === 'done',
       stopped: result === 'stopped',
       text: run.said.join('\n'),
+      failure: run.failure,
     });
   }
 

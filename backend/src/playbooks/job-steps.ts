@@ -9,7 +9,7 @@ import {
 } from '@ops-console/shared';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { redact } from '../action-log/redact';
-import { STOPPED } from '../agent/runs';
+import { failedBecause } from '../agent/runs';
 import { AgentRuntime } from '../agent/runtime';
 import { parseAgentJson } from '../common/agent-json';
 import { ApiError } from '../common/errors';
@@ -86,6 +86,8 @@ export type StepRun = {
   fresh?: boolean;
   /** Tools denied on top of merging. */
   deny?: string[];
+  /** The Run sandbox lets these turns read `~/.ssh`: a Fix. */
+  readSsh?: boolean;
   onPart?: (part: Part) => void;
   /** True once the job is being cancelled: no further step starts. */
   halted?: () => boolean;
@@ -156,6 +158,7 @@ export class JobSteps {
         ...(options.cwd ? { cwd: options.cwd } : {}),
         fresh: first && options.fresh === true,
         ...(options.deny ? { deny: options.deny } : {}),
+        ...(options.readSsh ? { readSsh: true } : {}),
       });
       const summary = await finished;
       const parsed = summary.ok ? parseAgentJson(summary.text, stepOutcomeSchema) : null;
@@ -163,11 +166,7 @@ export class JobSteps {
         ? { status: parsed.outcome, summary: parsed.summary }
         : {
             status: PlaybookStepStatus.Failed,
-            summary: summary.ok
-              ? 'the agent did not answer as asked'
-              : summary.stopped
-                ? STOPPED
-                : 'the agent run failed',
+            summary: summary.ok ? 'the agent did not answer as asked' : failedBecause(summary),
           };
     } catch (error) {
       outcome = {

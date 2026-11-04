@@ -98,14 +98,14 @@ agent Session.
 | `auth` | Session token check on every `/api` route |
 | `settings` | Registered keys with schema and default; `GET` and `PATCH /api/settings` |
 | `scheduler` | Jobs with slots; a missed slot runs once at start |
-| `keychain` | `set`, `get`, `delete` in the login Keychain; the handover of items from the previous version's app, which reads wait for |
+| `keychain` | `set`, `get`, `delete` in the login Keychain, each bounded at 60 seconds and failing `keychain_timeout`; the handover of items from the previous version's app, which reads wait for (at most 90 seconds); the Keychain wait shown after 10 |
 | `claude-cli` | `claude mcp add`, `remove`, `list`, `get`, `login`, and Claude account sign-in in this browser or by link and code, parsed with Zod |
 | `mcp-client` | Calls one tool on a server registered with Claude Code, for a fixed read |
 | `mcp` | Servers registered in every Claude account (`.claude.json`) and a Repo's `.mcp.json`; Probe, add, edit, reconnect, disable, remove; the `mcp-exec` launcher |
 | `connectors` | The nine Connectors: browser sign-in through `pup`, `gh`, `glab`, `bkt`, `slashdocs` or an MCP Server; cancel a sign-in; the MCP Server each registers; Homebrew install of a missing CLI; checks; config |
 | `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks; secrets via Keychain |
 | `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash and checkout |
-| `agent` | Sessions and their kinds, Claude Agent SDK runs, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors; stop a run, edit the last message (file edits rewound), attachments |
+| `agent` | Sessions and their kinds, Claude Agent SDK runs, the Run sandbox rules, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors; stop a run, edit the last message (file edits rewound), attachments |
 | `playbooks` | Playbooks and the Trigger each one holds, the built-ins (each Trigger's method, steps and shared rules on evidence, data, Connections and git) and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each (registered by `agent`) |
 | `accounts` | Claude accounts, their usage, Auto-switch and Smart usage; the Claude account hub: with CLIProxy on, runs go to its loopback address with the API key from the Keychain and switching pauses |
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
@@ -146,6 +146,7 @@ query refetches, batched over 40 ms. Events (`shared/src/ws.ts`):
   `approval.requested`, `approval.decided`, `action.logged`, `account.updated`, `account.removed`,
   `account.switched`.
 - Integrations: `connection.checked` for MCP Servers, Connectors and Connections.
+- Keychain: `keychain.wait_changed` when a call has waited past 10 seconds, and when the wait ends.
 - Workspace: `pull_request.refreshed`, `pull_request.commented`, `pull_request.reviewed`, `pull_request.job_changed` (a Reply check or Comment pass).
 - Playbooks: `playbook_step.updated`, for each step of any job.
 - Monitor: `scan.started`, `scan.finished`, `alert.detected`, `alert.updated`, `alert.regressed`,
@@ -213,7 +214,9 @@ A Session's run is a Claude Agent SDK `query()` in the working directory its kin
 resuming the stored SDK session. Each Claude account has its own `CLAUDE_CONFIG_DIR` under the data
 folder; the console never uses the operator's own Claude Code login. A `PreToolUse` hook writes the
 Action Log row before every Bash and MCP call and holds a PROD write for an Approval in every
-access mode. `disallowedTools` denies `gh pr merge`, `glab mr merge`, `bkt pr merge`, `bkt pr auto-merge` and the GitHub and GitLab MCP
+access mode. Every run's shell commands run in the Run sandbox (ADR 0006): the SDK's `sandbox` option, built per run
+from its working folder, the data folder in use and the run's kind, which fails the run when it is unavailable.
+`disallowedTools` denies `gh pr merge`, `glab mr merge`, `bkt pr merge`, `bkt pr auto-merge` and the GitHub and GitLab MCP
 merge tools. An Agent Review, Reply check and Comment pass also deny `git push`, the host CLIs' comment, review and `api`
 commands and the host MCP comment tools, since the console pushes, replies and resolves. Permission prompts in `supervised` mode, and the agent's questions, reach `canUseTool`
 and wait for the operator. MCP Servers the operator disabled, and for a `devtools` Session the

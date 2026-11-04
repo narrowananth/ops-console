@@ -207,6 +207,23 @@ export const startAtLoginSchema = z.object({ on: z.boolean().nullable(), dev_bui
 
 export type StartAtLogin = z.infer<typeof startAtLoginSchema>;
 
+/** Whether an agent run's commands can run inside the Run sandbox. `reason` says why not. */
+export const runSandboxSchema = z.object({ status: z.enum(['on', 'unavailable']), reason: z.string().nullable() });
+
+export type RunSandbox = z.infer<typeof runSandboxSchema>;
+
+/** The Keychain wait: `waiting` once a call has been pending past 10 seconds; `since` is when the oldest began. */
+export const keychainWaitSchema = z.object({
+  waiting: z.boolean(),
+  since: z.string().nullable(),
+  pending: z.number().int(),
+});
+
+export type KeychainWait = z.infer<typeof keychainWaitSchema>;
+
+/** What the Keychain wait banner and the Permissions row say. */
+export const KEYCHAIN_WAIT_MESSAGE = "Keychain is waiting for the Mac's password prompt";
+
 /**
  * Why a setup terminal request may not reach Claude, or null when it may. Only plain requests go through: a symbol
  * first (`/login`, `!cmd`, `#`), an `@path` word or a control character would drive Claude Code itself. A line break

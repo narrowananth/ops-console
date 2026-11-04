@@ -49,6 +49,7 @@ describe('runs', () => {
       title: long.split('\n')[0]?.slice(0, 60),
       state: 'idle',
       last_message_preview: 'Done.',
+      last_error: null,
     });
     const accounts = await api(daemon).get('/agent-accounts');
     expect(session.account_id).toBe(accounts.body.meta.active_account_id);

@@ -442,6 +442,7 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
     const review = this.store.db.select().from(prAgentReviews).where(eq(prAgentReviews.id, reviewId)).get();
     if (!review) return;
     if (summary.stopped) throw new JobFailed('The review was stopped before it was written', true);
+    if (summary.failure) throw new JobFailed(summary.failure, true);
     const output = summary.ok ? parseReview(summary.text) : null;
     if (!output) throw new JobFailed('The agent did not write the review in a way the console could read', true);
     const repo = this.pulls.repoRow(review.repoId);

@@ -56,6 +56,7 @@ export function toSession(row: SessionRow): Session {
     alert_id: row.alertId,
     state: row.state,
     last_message_preview: row.lastMessagePreview,
+    last_error: null,
     created_at: row.createdAt,
     last_active_at: row.lastActiveAt,
     playbook: null,
@@ -74,6 +75,9 @@ export function emitSessionUpdated(emit: Emit, row: SessionRow): void {
 
 @Injectable()
 export class SessionsService {
+  /** Why each Session's last run failed; a restart or the next run clears it. */
+  private readonly failures = new Map<string, string>();
+
   constructor(
     @Inject(STORE) private readonly store: Store,
     @Inject(SettingsService) private readonly settings: SettingsService,
@@ -140,10 +144,17 @@ export class SessionsService {
     );
   }
 
+  /** Remembers why a Session's run failed, or forgets it with `null`. */
+  setFailure(id: string, message: string | null): void {
+    if (message === null) this.failures.delete(id);
+    else this.failures.set(id, message);
+  }
+
   /** The Session with the fields its kind adds. */
   view(row: SessionRow): Session {
     return {
       ...toSession(row),
+      last_error: this.failures.get(row.id) ?? null,
       playbook: this.playbooks.forSession(row).playbook,
       ...this.kinds.get(row.kind)?.view?.(row),
     };

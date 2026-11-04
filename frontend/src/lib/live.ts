@@ -38,6 +38,7 @@ export function useLiveEvents(): void {
         refetch(queryKeys.settings);
         refetch(queryKeys.cliProxy);
       }
+      if (event.event === 'keychain.wait_changed') refetch(queryKeys.keychainWait);
       if (event.event === 'update.changed' || event.event === 'settings.updated') refetch(queryKeys.updates);
       if (
         event.event === 'account.updated' ||

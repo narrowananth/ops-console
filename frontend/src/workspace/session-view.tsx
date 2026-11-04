@@ -271,6 +271,14 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 onSend={(answer) => send.mutate(answer)}
               />
             )}
+            {session.state === SessionState.Failed && session.last_error && (
+              <div
+                role="alert"
+                className="rounded-lg border border-accent-300 bg-accent-100 px-3 py-2 text-accent-900 text-xs"
+              >
+                {session.last_error}
+              </div>
+            )}
             {queued !== null && (
               <QueuedNote
                 text={queued}

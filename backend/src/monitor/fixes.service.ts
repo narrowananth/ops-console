@@ -20,7 +20,7 @@ import {
 } from '@ops-console/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
-import { type RunSummary, STOPPED } from '../agent/runs';
+import { failedBecause, type RunSummary, STOPPED } from '../agent/runs';
 import { AgentRuntime } from '../agent/runtime';
 import { parseAgentJson } from '../common/agent-json';
 import { ApiError } from '../common/errors';
@@ -356,6 +356,7 @@ export class FixesService {
         brief: `${this.brief(context)}\nThe console sends the work as steps, one per turn, on branch ${context.fix.branch}.`,
         rules: context.fix.playbookRules,
         fresh: this.takeFresh(context),
+        readSsh: true,
         halted: () => this.cancelling.has(context.fix.id),
       });
       if (failure) throw new StageFailed(failure);
@@ -394,12 +395,13 @@ ${jira}Root cause: ${context.report.rootCause}. Proposed fix: ${context.report.p
       finished = this.runtime.runFor(context.sessionId, prompt, null, {
         rules: context.fix.playbookRules,
         fresh: this.takeFresh(context),
+        readSsh: true,
       }).finished;
     } catch (error) {
       throw new StageFailed(error instanceof Error ? error.message : 'the agent could not start');
     }
     const summary = await finished;
-    if (!summary.ok) throw new StageFailed(summary.stopped ? STOPPED : 'the agent run failed');
+    if (!summary.ok) throw new StageFailed(failedBecause(summary));
     const parsed = parseAgentJson(summary.text, schema);
     if (!parsed) throw new StageFailed('the agent did not answer as asked');
     return parsed;

@@ -12,6 +12,7 @@ import { WsHub } from './common/ws-hub';
 import { STORE, type Store } from './db/store';
 import type { Keychain } from './keychain/keychain';
 import { KeychainModule } from './keychain/keychain.module';
+import type { KeychainWaitTracker } from './keychain/keychain-wait';
 import { McpClientModule } from './mcp-client/mcp-client.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { SettingsModule } from './settings/settings.module';
@@ -23,6 +24,7 @@ export type AppParts = {
   store: Store;
   hub: WsHub;
   keychain: Keychain;
+  keychainWait: KeychainWaitTracker;
   claudeBin: string;
   /** Feature modules; each later spec adds its own. */
   modules: DynamicModule[];
@@ -38,7 +40,7 @@ export class AppModule {
         AuthModule,
         SettingsModule,
         SchedulerModule,
-        KeychainModule.forRoot(parts.keychain),
+        KeychainModule.forRoot(parts.keychain, parts.keychainWait),
         ClaudeCliModule.forRoot(parts.claudeBin),
         McpClientModule.forRoot(parts.session.version),
         ...parts.modules,

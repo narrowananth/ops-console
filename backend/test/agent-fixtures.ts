@@ -10,6 +10,8 @@ import { SessionKinds } from '../src/agent/session-kinds';
 import { type NewSession, SessionsService } from '../src/agent/sessions.service';
 import { repos } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
+import type { Keychain } from '../src/keychain/keychain';
+import type { KeychainWaitTracker } from '../src/keychain/keychain-wait';
 import { BUILTIN_STEPS } from '../src/playbooks/builtins';
 import { FakeAgentSdk, type Step } from './fakes/agent-sdk';
 import { FakeUsageSource } from './fakes/usage-source';
@@ -76,7 +78,14 @@ function fixtureRepo(daemon: TestDaemon): string {
 }
 
 export async function startAgentDaemon(
-  options: { dataDir?: string; signedIn?: boolean; modules?: DynamicModule[]; fixtureKinds?: boolean } = {},
+  options: {
+    dataDir?: string;
+    signedIn?: boolean;
+    modules?: DynamicModule[];
+    fixtureKinds?: boolean;
+    keychain?: Keychain;
+    keychainWait?: KeychainWaitTracker;
+  } = {},
 ): Promise<AgentDaemon> {
   const dataDir = options.dataDir ?? (await tempDir());
   WORKING_DIR ||= await tempDir('ops-console-repo-');
@@ -84,6 +93,8 @@ export async function startAgentDaemon(
   const usage = new FakeUsageSource();
   const daemon = await startTestDaemon({
     dataDir,
+    ...(options.keychain ? { keychain: options.keychain } : {}),
+    ...(options.keychainWait ? { keychainWait: options.keychainWait } : {}),
     modules: [
       AgentModule.forRoot({ sdk, usage }),
       ...(options.fixtureKinds === false ? [] : [{ module: KindsFixtureModule }]),

@@ -10,6 +10,12 @@ export const secretsKey = (server: string) => `mcp:${server}`;
 
 const envSchema = z.record(z.string(), z.string());
 
+/** One env var stored for the MCP Server `server`, or null when the server has none or it is unreadable. */
+export async function storedEnvVar(keychain: Keychain, server: string, name: string): Promise<string | null> {
+  const stored = await keychain.get(secretsKey(server));
+  return stored === null ? null : (parseEnv(stored)[name] ?? null);
+}
+
 /** The env vars stored under `mcp:<name>`; anything unreadable is no env vars. */
 export function parseEnv(stored: string): Record<string, string> {
   try {
