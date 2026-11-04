@@ -195,10 +195,13 @@ Playbook's rules at each turn. An Alert's Session uses the rules its latest job 
 
 **Workspace pull requests.** Lists span every repository of every owner the operator can read on
 each connected Git host, plus imported Repos under other owners. The daemon keeps lists in memory and
-serves them stale-while-revalidate: a list older than 60 seconds (a detail older than 15) is served
+serves them stale-while-revalidate: a list older than 30 minutes (a detail older than 15 seconds) is served
 at once while a background read runs, and a read that changed something sends
 `pull_request.refreshed` with the changed numbers. A failed background read keeps the old list and
-marks it stale. Refresh drops the memory and reads again. The UI prefetches the list at load.
+marks it stale, and a failed list is tried again after 5 minutes. Refresh drops the memory and reads again; it is the
+only read besides the 30-minute one. A search by words filters what is kept. A search of just a number, with or without
+`#`, asks the host for that number in every known project, in any state, and keeps the answer for a minute. Mine matches
+number, title and the operator's login (the email on Bitbucket); All matches number, title and author. The UI prefetches the list at load.
 
 **Remembered view.** The UI keeps each page's address (`app/last-address.ts`) and the picks on a page
 (`lib/remember.ts`) in local storage under `ops-console:` (a few older keys, such as the theme, the token and Monitor's range, use

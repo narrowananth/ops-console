@@ -129,6 +129,16 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
     );
   }
 
+  /** Pull requests asked for by number, as `find` is called. */
+  readonly found: number[] = [];
+  /** Pull requests in any state that `find` can read, besides `prs`. */
+  closed: HostPullRequest[] = [];
+  async find(_slug: string, number: number): Promise<HostPullRequest | null> {
+    this.found.push(number);
+    this.check();
+    return [...this.prs, ...this.closed].find((pr) => pr.number === number) ?? null;
+  }
+
   async get(_slug: string, number: number) {
     this.calls.get++;
     this.check();

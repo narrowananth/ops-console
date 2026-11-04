@@ -1,5 +1,5 @@
-import { GitHost, PrChecks, PrReviewState, type PullRequest } from '@ops-console/shared';
-import { useState } from 'react';
+import { GitHost, PrChecks, PrReviewState, PrState, type PullRequest } from '@ops-console/shared';
+import { useEffect, useState } from 'react';
 import { z } from 'zod';
 import { BrandIcon } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
@@ -48,6 +48,16 @@ const CHECKS_TIP: Record<PrChecks, string> = {
   [PrChecks.Failed]: 'At least one CI check failed on the newest commit',
 };
 
+/** `value`, once it has stood still for `ms`: a number typed in the search asks the Git host, so keystrokes wait. */
+function useSettled(value: string, ms: number): string {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(timer);
+  }, [value, ms]);
+  return settled;
+}
+
 const FOLDED_KEY = 'ops-console-pr-folded';
 
 /** Projects the operator folded, kept across reloads. */
@@ -80,14 +90,15 @@ const REVIEWS: Record<PrReviewState, string> = {
 export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null; onSelect: (pull: Pull) => void }) {
   const [mine, setMine] = useStored('workspace.pr-mine', z.boolean(), true);
   const [q, setQ] = useStored('workspace.pr-search', z.string(), '');
-  const pulls = usePullRequests({ mine, q });
+  const settled = useSettled(q.trim(), 400);
+  const pulls = usePullRequests({ mine, q: settled });
   const refresh = useRefreshPullRequests();
   const repos = useRepos();
   const repoName = (id: string) => repos.data?.data.find((repo) => repo.id === id)?.name ?? '';
   const fold = useFolded();
   const projects = pulls.data ? byProject(pulls.data.data) : [];
   // A search shows every match.
-  const isFolded = (key: string) => q.trim() === '' && fold.folded.includes(key);
+  const isFolded = (key: string) => settled === '' && fold.folded.includes(key);
   const allFolded = projects.length > 0 && projects.every((project) => isFolded(project.key));
 
   return (
@@ -124,7 +135,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
             icon
             className="size-7.5 flex-none text-neutral-700 hover:text-text"
             aria-label="Refresh pull requests"
-            title="Read the Git hosts again now. The list also refreshes on its own."
+            title="Read the Git hosts again now. Otherwise they are read every 30 minutes."
             disabled={refresh.isPending}
             onClick={() => refresh.mutate()}
           >
@@ -161,11 +172,16 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
             type="search"
             aria-label="Search pull requests"
             value={q}
-            placeholder="Search title, author, branch"
+            placeholder={mine ? 'Search number, title or your email' : 'Search number, title or author'}
             onChange={(event) => setQ(event.target.value)}
             className="w-full rounded-md border border-divider bg-card py-1.5 pr-2.5 pl-7.5 text-xs text-text outline-none focus:border-accent-400 focus:shadow-[0_0_0_3px_var(--color-accent-100)]"
           />
         </div>
+        {/^#?\d+$/.test(settled) && pulls.isFetching && (
+          <div role="status" className="px-0.5 text-xs text-neutral-700">
+            Asking the Git hosts for #{settled.replace('#', '')}…
+          </div>
+        )}
         {pulls.data && pulls.data.data.length > 0 && (
           <div className="flex items-center gap-2 px-0.5 text-xs text-neutral-700">
             <span>
@@ -203,8 +219,8 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
           )}
           {pulls.data.data.length === 0 ? (
             <Empty>
-              {q.trim() !== ''
-                ? `No ${mine ? 'pull requests of yours' : 'pull requests'} match “${q.trim()}”.`
+              {settled !== ''
+                ? `No ${mine ? 'pull requests of yours' : 'pull requests'} match “${settled}”.`
                 : mine
                   ? 'No open pull requests of yours.'
                   : 'No open pull requests.'}
@@ -260,6 +276,11 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                               <span className="min-w-0 truncate">
                                 #{pr.number} {pr.title}
                               </span>
+                              {pr.state !== PrState.Open && (
+                                <span className="flex-none rounded-full bg-neutral-200 px-1.75 text-xs font-normal text-neutral-700">
+                                  {pr.state}
+                                </span>
+                              )}
                               {!here && (
                                 <span aria-hidden className="ml-auto flex-none text-xs font-normal text-neutral-600">
                                   ↗

@@ -80,7 +80,7 @@ import {
   type UpdateWhen,
   updateStateSchema,
 } from '@ops-console/shared';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { z } from 'zod';
 import { apiGet, apiSend } from './api';
@@ -827,7 +827,7 @@ export function useCheckout(sessionId: string, repoId: string) {
 
 export type PullRequestFilter = { mine: boolean; q: string };
 
-/** The Git host's open pull requests across every Repo, kept 60 seconds in the daemon. */
+/** The Git host's open pull requests across every Repo, read every 30 minutes by the daemon. A number is asked of the host. */
 function pullRequestsQuery(filter: PullRequestFilter) {
   const params = new URLSearchParams();
   if (filter.mine) params.set('mine', 'true');
@@ -838,8 +838,9 @@ function pullRequestsQuery(filter: PullRequestFilter) {
   };
 }
 
+/** The previous list stays up while a new search is read, so typing does not blank it. */
 export function usePullRequests(filter: PullRequestFilter) {
-  return useQuery(pullRequestsQuery(filter));
+  return useQuery({ ...pullRequestsQuery(filter), placeholderData: keepPreviousData });
 }
 
 /** One Repo's open pull requests, from the same daemon cache as the list; read when `repoId` is set. */

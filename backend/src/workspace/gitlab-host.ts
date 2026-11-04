@@ -118,6 +118,7 @@ export class GitlabHost implements GitHostAdapter {
     return { number: made.iid, url: made.web_url };
   }
 
+  find = async () => null;
   get = async () => this.unsupported();
   fileAt = async () => this.unsupported();
   deleteComment = async () => this.unsupported();
