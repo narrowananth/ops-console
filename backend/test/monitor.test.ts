@@ -592,6 +592,39 @@ describe('the schedule', () => {
 });
 
 describe('Verification', () => {
+  it("keeps the Alert's Session on the default branch while another Session's branch is checked out", async () => {
+    const ctx = await start();
+    const alert = await failing(ctx);
+    await linkRepo(ctx, alert.service.id);
+    // Another Session's work: its branch checked out in the shared folder, with a commit on it.
+    git(ctx.dir, 'checkout', '-q', '-b', 'security/deps');
+    await writeFile(path.join(ctx.dir, 'deps.ts'), 'deps\n');
+    git(ctx.dir, 'add', '.');
+    git(ctx.dir, 'commit', '-q', '-m', 'deps');
+    const hold = gate();
+    ctx.daemon.sdk.script({ wait: hold.promise }, outcome('done'));
+    for (const run of VERIFY_STEPS.slice(1)) ctx.daemon.sdk.script(...run);
+    ctx.daemon.sdk.script(json(REPORT));
+    await ctx.http.post(`/alerts/${alert.id}/verifications`);
+    const sessionId = (await ctx.http.get(`/alerts/${alert.id}`)).body.data.session_id;
+    await until(
+      () => ctx.http.get(`/sessions/${sessionId}`).then((res) => res.body.data.state),
+      (state) => state === 'working',
+      'the Verification run',
+    );
+
+    // The run works in its scratch copy: the folder's branch is not this Session's.
+    const diff = (await ctx.http.get(`/sessions/${sessionId}/diff`)).body.data;
+    expect([diff.branch, diff.files]).toEqual(['main', []]);
+    git(ctx.dir, 'checkout', '-q', '-b', 'security/more');
+    hold.open();
+    await until(
+      () => ctx.http.get(`/alerts/${alert.id}`).then((res) => res.body.data.status),
+      (status) => status === 'verified',
+    );
+    expect((await ctx.http.get(`/sessions/${sessionId}`)).body.data.branch).toBe('main');
+  });
+
   it('refuses a Service with no Repo', async () => {
     const ctx = await start();
     const alert = await failing(ctx);

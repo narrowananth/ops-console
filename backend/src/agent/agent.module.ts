@@ -56,6 +56,7 @@ export class AgentModule {
         JobSteps,
       ],
       exports: [
+        RunRegistry,
         SessionKinds,
         MessageInterceptors,
         ConnectionLookup,
