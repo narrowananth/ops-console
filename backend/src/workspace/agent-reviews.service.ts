@@ -313,7 +313,7 @@ export class AgentReviewsService {
       this.steps.reset(tx, emit, job);
       return tx
         .update(prAgentReviews)
-        .set({ status: AgentReviewStatus.Running, error: null })
+        .set({ status: AgentReviewStatus.Running, error: null, startedAt: new Date().toISOString(), finishedAt: null })
         .where(eq(prAgentReviews.id, id))
         .returning()
         .get() as typeof row;
@@ -552,7 +552,10 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
     postFailed: number,
   ): void {
     this.store.write((tx, emit) => {
-      tx.update(prAgentReviews).set(values).where(eq(prAgentReviews.id, id)).run();
+      tx.update(prAgentReviews)
+        .set({ ...values, finishedAt: new Date().toISOString() })
+        .where(eq(prAgentReviews.id, id))
+        .run();
       emit('pull_request.reviewed', {
         repo_id: repoId,
         number,

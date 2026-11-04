@@ -1,5 +1,6 @@
 import { AgentReviewStatus, type ReplyCheck } from '@ops-console/shared';
 import { StopRun } from '../agents/stop-run';
+import { Elapsed } from '../components/ui/elapsed';
 import { StatusPill } from '../components/ui/pathway';
 import { useRetryReplyCheck } from '../lib/queries';
 import { JobFailure, JobPath, PlaybookLink, runState } from '../playbooks/job-steps';
@@ -26,6 +27,12 @@ export function ReplyCheckStrip({ check, sessionId }: { check: ReplyCheck; sessi
           {check.status === AgentReviewStatus.Running && sessionId && (
             <StopRun sessionId={sessionId} title="Stop the Reply check; it fails and can retry from its step" />
           )}
+          <Elapsed
+            from={check.started_at}
+            to={check.finished_at}
+            running={check.status === AgentReviewStatus.Running}
+            took
+          />
           <StatusPill state={runState(check.status)}>{check.status}</StatusPill>
         </span>
       </header>
