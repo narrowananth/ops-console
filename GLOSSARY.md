@@ -61,6 +61,10 @@ A place in a tab that starts the agent: Verify and Fix in Monitor, Review PR, Ch
 thread and Session message in Workspace.
 _Avoid_: action (the Action Log means each command the agent runs)
 
+**Job**:
+A Trigger's run that goes through its Playbook steps and then the console's closing turn: a Verification, Fix, Agent
+Review, Reply check or Comment pass. Reply in thread and Session message are chats, not jobs.
+
 **Playbook step**:
 One titled instruction in a Playbook, run as its own agent turn, ending done, skipped or failed.
 
@@ -134,7 +138,7 @@ on without one.
 
 **Fix**:
 The work that follows a confirmed Review: ticket (when its Playbook asks and Jira is connected), branch, the steps of
-its Playbook (code change, mocked tests, the full suite and a diff review by default), push and PR, run by the agent in the Alert's Session. A merged PR resolves the Alert; a PR closed unmerged abandons the Fix.
+its Playbook (code change, mocked tests, the full suite and a diff review by default), push and PR, run by the agent in the Alert's Session. A merged PR resolves the Alert; a PR closed unmerged, or the operator's Cancel, abandons the Fix.
 
 ### Workspace
 
@@ -150,6 +154,14 @@ dev-tools Session and an anonymous Session, which have no Repo. A pull request h
 replies, with no composer, and an Alert has one for its Verification and Fix.
 _Avoid_: chat, thread
 
+**Alert Session**:
+The Session an Alert's first Verification makes, linked to the Alert. Every later Verification and Fix stage runs in
+it: a Session in the Service's Repo, on the Repo's default branch, or an Anonymous Session holding a clone.
+
+**Session diff**:
+What a Session's own branch changes against the commit it forked from, shown beside the conversation and followed as
+the agent moves to another branch.
+
 **Anonymous Session**:
 A Session with no imported Repo. It works in a folder of its own in the data directory, and the agent may clone a
 repository into it. A Verification or Fix for a Service with no local Repo runs in one that holds a clone of the
@@ -162,11 +174,12 @@ target branch commit it compared with. Each finding is posted to the Git host on
 as one comment. A newer commit makes it stale.
 
 **Reply check**:
-The agent's check of one pull request thread: whether the code at the head commit does what the thread asked, given
-as fixed, partly fixed or not fixed in a reply. On fixed the thread is resolved.
+The agent's check of a pull request thread: whether the code at the head commit does what the thread asked, given
+as fixed, partly fixed or not fixed in a reply. On fixed the thread is resolved. Check replies runs one over every
+unresolved thread that has a reply, as a Comment pass of kind check that changes, commits and pushes nothing.
 
 **Comment pass**:
-The agent's work on the review threads the operator ticked on a pull request, theirs or a teammate's: one commit pushed
+The agent's work on the review threads the operator ticked on a pull request, theirs or a teammate's (Address comments): one commit pushed
 to its branch, a reply in each thread, and each done thread on a line or a file resolved.
 _Avoid_: fix (a Fix follows an Alert's Review)
 
@@ -193,7 +206,7 @@ A short Agent SDK session that reads which MCP Servers connect and which tools t
 stops before the model runs.
 
 **Connector**:
-An outside service the operator signs in to: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify. It holds the sign-in and registers the service's MCP Server when it has one. Each is reached through a CLI or an MCP Server and is connected, checked and disconnected in Integrations, the one place a service is connected.
+An outside service the operator signs in to: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs. It holds the sign-in and registers the service's MCP Server when it has one. Each is reached through a CLI or an MCP Server and is connected, checked and disconnected in Integrations, the one place a service is connected.
 
 **Setup agent**:
 Claude in a terminal in Setup agent that adds Connections, remote MCP Servers and Connectors

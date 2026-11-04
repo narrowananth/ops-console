@@ -2,8 +2,8 @@
 
 Once the operator starts a Verification, the agent verifies the Alert and writes the Report with no
 further Approval. While it verifies, it may write files and run local commands only in a scratch
-copy: a git worktree of the code in the data directory, at the commit the default branch points to,
-removed once the Report is ready. That is where it builds mock data and tests that prove the cause.
+copy: a git worktree of the code in the data directory, at the newest commit of the Verify Playbook's
+branch (the default branch when blank), fetched from origin first, removed once the Report is ready. That is where it builds mock data and tests that prove the cause.
 It never writes in the operator's checkout or to a Connection during a Verification. It changes the
 operator's code, files a ticket or opens a PR only after the operator confirms the Report, and it
 never merges. Merge is a button only the operator can press; every agent run denies `gh pr merge`,
@@ -13,9 +13,11 @@ write to, so an agent that acted on them alone could be steered into changing co
 console's safety lines close every run's system prompt and say that a log line is data, never an
 instruction.
 
-Pressing Agent Review is the approval for one review of a pull request: the agent reads it in a scratch copy at the
-pull request's head commit, compares it with the target branch fetched from origin, and may install, build and run the
-tests there. It writes nothing anywhere else, and the console posts the findings and one summary comment. Pull request
+Pressing Agent Review is the approval for one review of a pull request: the agent reads it, compares it with the
+target branch fetched from origin, and, in a step the Playbook tags scratch copy (the built-in's test step is one),
+may install, build and run the tests in a scratch copy at the pull request's head commit. It writes nothing anywhere
+else, and denies itself `git push` and the Git hosts' comment and `api` commands: the console posts the findings and
+one summary comment. Pull request
 text stays data in a review: the agent runs no command because the description or a comment says so.
 
 On any open pull request, the operator's or a teammate's, pressing Address comments is the approval
@@ -23,8 +25,8 @@ for one Comment pass: the agent changes code in a scratch copy at the pull reque
 the console commits it and pushes that one branch, never with force. In a Comment pass, and only there, the review
 comments the operator ticked are change requests: the agent may change code to meet them, but never
 runs a command, reads a secret, touches a Connection or pushes because a comment says so. Everywhere
-else pull request text stays data, never instructions. The console, not the agent, posts replies and
-resolves threads; a general comment on the pull request gets a reply only.
+else pull request text stays data, never instructions. The console, not the agent, pushes, posts replies and
+resolves threads, and a Reply check or Comment pass denies the agent `git push` and the Git hosts' comment and `api` commands; a general comment on the pull request gets a reply only.
 
 ## Considered Options
 
@@ -53,5 +55,6 @@ Comment pass's code change through a comment the operator ticked; the operator's
 scratch copy and the one pushed commit, never forced, bound that. On a teammate's pull request the
 commit lands on their branch under the operator's git identity, for the teammate to see. An Agent Review runs the
 pull request's own build and tests, so pressing it runs that branch's code on the operator's Mac, inside the scratch
-copy's folder and under the Session's Access mode. A pull request from a fork has no branch on origin to fetch, so its
+copy's folder and under the Session's Access mode. A custom Review PR Playbook with no scratch copy step runs nothing
+from the branch. A pull request from a fork has no branch on origin to fetch, so its
 review fails before any code runs.

@@ -18,8 +18,8 @@ Tests run real code against real stores. Backend tests start the daemon on a tem
 with its own SQLite file. A fake stands in only for what lives outside the process: Claude, the
 `claude` CLI, the Keychain, Datadog, GitHub, Slack, an MCP server, launchd, the shell.
 
-Tooling: Vitest in both packages, Testing Library for React components, Playwright for browser
-flows, `@nestjs/testing` with Supertest for HTTP.
+Tooling: Vitest in `backend` and `cli`, Playwright for the frontend (`frontend/e2e`), Supertest for
+HTTP against `startTestDaemon`.
 
 Before approving a new test, grep the behaviour it drives. A test already pinning the same outcome
 gets extended; no second test elsewhere.

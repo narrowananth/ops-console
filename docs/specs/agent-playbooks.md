@@ -18,8 +18,8 @@ patch. They have no place to write that down, so they retype it in every Session
 
 ### Triggers and Playbooks
 
-1. The Playbooks page lists five Triggers under their tabs. Monitor: Verify and Fix. Workspace: Review PR, Reply in
-   thread and Session message. Dev tools has none: a Dev tools Session runs with no Playbook rules.
+1. The Playbooks page lists seven Triggers under their tabs. Monitor: Verify and Fix. Workspace: Review PR, Check reply, Address
+   comments, Reply in thread and Session message. Dev tools has none: a Dev tools Session runs with no Playbook rules.
 2. Each Trigger holds exactly one Playbook. A Trigger with none runs its built-in Playbook. Every built-in has rules:
    the Trigger's own method plus the rules every job and chat shares (evidence over assumptions; verified, mocked
    and unverified kept apart; databases read only with writes mocked; only the Connections the work needs; never
@@ -61,7 +61,7 @@ patch. They have no place to write that down, so they retype it in every Session
 
 ### Running a job
 
-13. Verify, Fix and Review PR start jobs. A job copies its Trigger's Playbook (name, rules, steps) when it starts.
+13. Verify, Fix, Review PR, Check reply and Address comments start jobs. A job copies its Trigger's Playbook (name, rules, steps) when it starts.
     Editing, detaching or deleting the Playbook later changes neither the running job nor its record; the Report,
     Fix and Agent Review show the name and steps they ran.
 14. Each step is its own agent turn in the job's Session, in order. The turn carries the step's instructions and asks
@@ -157,7 +157,7 @@ patch. They have no place to write that down, so they retype it in every Session
 - **Jira ticket switch**: a Playbook's own flag, off by default and on no built-in. Fix copies it at start; off, the
   Fix makes no ticket even with Jira connected, and the ticket stage reads "No ticket: the Fix Playbook makes no Jira
   ticket.".
-- **Job Triggers and chat Triggers**: Verify, Fix and Review PR start jobs with an end; only jobs run steps. The rest
+- **Job Triggers and chat Triggers**: Verify, Fix, Review PR, Check reply and Address comments start jobs with an end; only jobs run steps. The rest
   are chats and use rules only.
 - **Steps are turns**: one turn per step, in the job's Session, so progress shows per step and Retry starts at the
   failed one.
@@ -166,10 +166,11 @@ patch. They have no place to write that down, so they retype it in every Session
 - **Step outcome**: `done`, `skipped` or `failed`, plus a summary. `skipped` goes on, `failed` stops. Fix's old Tests
   check (`passed: false` fails) becomes the built-in Tests step answering `failed`.
 - **Fix stages**: `ticket`, `branch`, `steps`, `pr`. The stage `steps` covers the Playbook's steps, in order.
-- **Scratch copy tag**: a step's own flag, set by its block or the Custom step checkbox. Review PR makes its scratch
-  copy only when a step has it.
+- **Scratch copy tag**: a step's own flag, set by its block or the Custom step checkbox. A job that reads only
+  makes its scratch copy only when a step has it.
 - **Copy at start**: jobs copy the Playbook; chats read it per turn because they never end.
-- **Scratch copy at the default branch**: the deployed code is closest to the default branch. The operator's
+- **Scratch copy at the Playbook's branch**: the deployed code is closest to the branch the Verify Playbook names, the
+  default branch when blank. The operator's
   uncommitted work is not in the copy.
 - **Fix conversation**: starts fresh in the checkout, because the Verification's ran in another folder.
 - **Order on the page**: Triggers in the order of Behavior 1; Playbooks A to Z, then the built-ins.
@@ -178,14 +179,10 @@ patch. They have no place to write that down, so they retype it in every Session
 
 - **Resume after a daemon restart**: a step running at restart fails as interrupted. Resuming from the step joins
   the resume work in `persist-selections-and-runs` Behaviors 12 to 23.
-- **Agent Review Retry from a step**: a failed Agent Review runs whole again. Its scratch copy is made afresh, so a
-  rerun costs time, not risk.
 - **Saving your own Step blocks**: a step lives in its Playbook; Duplicate copies a whole Playbook.
 - **Two pages editing one Playbook**: the last Save wins.
 - **Enforcing the mock data rule**: it is an instruction, not a check. The operator sees a PR's diff before merging,
   and real values that slip into a file show there.
-- **Enforcing the scratch copy tag on Review PR**: the tag stops a Playbook that asks for writes from reaching Review
-  PR; the run itself reads only as it does today.
 
 ## Safety
 
@@ -208,6 +205,8 @@ CREATE TABLE playbooks (
   rules TEXT NOT NULL DEFAULT '',
   -- Comma-separated branches Verify and Fix read the code from, tried in order; blank: the Repo's default branch.
   branches TEXT NOT NULL DEFAULT '',
+  -- Whether a Fix makes a Jira ticket (when Jira is connected).
+  jira_ticket INTEGER NOT NULL DEFAULT 0,
   -- [{ "block": "make_mock_data | custom | ...", "title": "...", "instructions": "...", "writes": true }]
   steps TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL,
@@ -218,7 +217,7 @@ CREATE TABLE playbooks (
 -- Which Playbook each Trigger holds. No row: the built-in.
 CREATE TABLE playbook_triggers (
   trigger TEXT PRIMARY KEY NOT NULL
-    CHECK (trigger IN ('verify', 'fix', 'review_pr', 'thread_reply', 'session_message')),
+    CHECK (trigger IN ('verify', 'fix', 'review_pr', 'check_reply', 'address_comments', 'thread_reply', 'session_message')),
   playbook_id TEXT NOT NULL REFERENCES playbooks(id) ON DELETE CASCADE
 );
 CREATE INDEX playbook_triggers_playbook_idx ON playbook_triggers (playbook_id);
@@ -292,7 +291,8 @@ Migration:
   "rules": "string, up to 8000",
   "branches": "comma-separated branch names, up to 200; blank: the Repo's default branch",
   "steps": [Step],
-  "triggers": ["verify | fix | review_pr | thread_reply | session_message"],
+  "jira_ticket": false,
+  "triggers": ["verify | fix | review_pr | check_reply | address_comments | thread_reply | session_message"],
   "updated_at": "ISO 8601 | null"
 }
 ```
@@ -318,7 +318,7 @@ Migration:
 | 400    | `validation_failed` | A limit is broken, an unknown block or Trigger                                           |
 | 404    | `not_found`         | No Playbook with that id                                                                  |
 | 409    | `duplicate`         | Another Playbook has that name                                                           |
-| 409    | `invalid_state`     | Changing or deleting a built-in, a Playbook with a `writes` step on `review_pr`, a retry of a job that has not failed |
+| 409    | `invalid_state`     | Changing or deleting a built-in, a retry of a job that has not failed |
 
 ### `GET /playbooks`
 
@@ -327,11 +327,11 @@ blocks in the order of Behavior 7.
 
 ### `POST /playbooks`
 
-Body: `name`, `rules`, `steps`. 201 `Playbook`. Duplicate is this call with a copy's fields.
+Body: `name`, `rules`, `branches`, `jira_ticket`, `steps`. 201 `Playbook`. Duplicate is this call with a copy's fields.
 
 ### `PATCH /playbooks/:id`
 
-Body: any of `name`, `rules`, `steps`. 200 `Playbook`. `invalid_state` when Review PR holds it and a step `writes`.
+Body: any of `name`, `rules`, `branches`, `jira_ticket`, `steps`. 200 `Playbook`.
 
 ### `DELETE /playbooks/:id`
 
@@ -340,7 +340,6 @@ Body: any of `name`, `rules`, `steps`. 200 `Playbook`. `invalid_state` when Revi
 ### `PUT /playbook-triggers/:trigger`
 
 Body: `{ "playbook_id": "uuid | null" }`. Null detaches. 200 `[Playbook]`, the list as in `GET /playbooks`.
-`invalid_state` for a Playbook with a `writes` step on `review_pr`.
 
 ### `POST /alerts/:id/verifications`, `POST /alerts/:id/review`, `POST /repos/:repo/pull-requests/:number/agent-reviews`
 
@@ -393,7 +392,7 @@ Server to client, each time a job's step changes status.
   A drag over a Trigger outlines it.
 - **Confirms**: Delete and Replace (Behaviors 5 and 6) ask in a modal over a dimmed page, with Cancel focused first.
   Escape, Cancel or a click on the dimmed page closes it.
-- **Left column, Playbooks**: the operator's Playbooks A to Z with the Triggers each holds, then the five built-ins
+- **Left column, Playbooks**: the operator's Playbooks A to Z with the Triggers each holds, then the built-ins
   marked "built-in". New Playbook sits in the page header. The open one is in the address as `?playbook=<id>`. Empty: "No Playbooks
   yet. Duplicate a built-in or start a new one." Loading: "Reading Playbooks…". Error: "Could not read Playbooks:"
   and the reason.

@@ -55,7 +55,7 @@ export function WorkspaceView() {
           }}
         />
       ) : (
-        <aside className="flex w-80 flex-none flex-col overflow-y-auto border-r border-line">
+        <aside className="flex w-80 flex-none flex-col border-r border-line">
           <div className="mx-3 mt-3.5 mb-2 flex items-center gap-1.5">
             <div role="tablist" aria-label="Workspace" className="flex flex-1 gap-0.5 rounded-lg bg-neutral-200 p-1">
               {TABS.map(([id, label]) => (
@@ -74,11 +74,13 @@ export function WorkspaceView() {
             </div>
             <PanelToggle open onToggle={() => setCollapsed(true)} />
           </div>
-          {tab === 'sessions' ? (
-            <SessionsPane selected={sessionId} onSelect={setSessionId} />
-          ) : (
-            <PullRequestsPane selected={pull} onSelect={setPull} />
-          )}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {tab === 'sessions' ? (
+              <SessionsPane selected={sessionId} onSelect={setSessionId} />
+            ) : (
+              <PullRequestsPane selected={pull} onSelect={setPull} />
+            )}
+          </div>
         </aside>
       )}
       <section className="min-w-0 flex-1 overflow-y-auto">

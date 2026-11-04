@@ -387,7 +387,7 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
   return (
     <div className="pb-3">
       {repos.data.data.length > 0 && (
-        <div className="flex flex-col gap-2 border-b border-divider px-3 pt-1 pb-2.5">
+        <div className="sticky top-0 z-10 flex flex-col gap-2 border-b border-divider bg-bg px-3 pt-1 pb-2.5">
           <div className="relative">
             <svg
               width="13"

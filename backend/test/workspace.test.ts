@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ConnectorId, GitHost, HealthStatus, PlaybookTrigger, PrReviewState, type WsEvent } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
@@ -418,6 +418,31 @@ describe('Session diff', () => {
     // Neither Session moved to the branch checked out.
     expect((await ctx.http.get(`/sessions/${idle}`)).body.data.branch).toBe('main');
     expect((await ctx.http.get(`/sessions/${other}`)).body.data.branch).toBe('feature/old');
+  });
+
+  it('keeps a running Session on its own branch until its run checks one out, whatever another Session left checked out', async () => {
+    const ctx = await start();
+    const id = await newSession(ctx);
+    // Another Session's agent left the shared folder on its branch, with work in it.
+    git(ctx.dir, 'checkout', '-q', '-b', 'fix/other');
+    await writeFile(path.join(ctx.dir, 'other.ts'), 'other\n');
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const hold = gate();
+    ctx.daemon.sdk.script({ wait: hold.promise }, { text: 'done' });
+    await ctx.http.post(`/sessions/${id}/messages`, { text: 'work on main' });
+
+    const before = (await ctx.http.get(`/sessions/${id}/diff`)).body.data;
+    expect([before.branch, before.files]).toEqual(['main', []]);
+
+    // The run's own checkout is the Session's branch from then on.
+    await rm(path.join(ctx.dir, 'other.ts'));
+    git(ctx.dir, 'checkout', '-q', 'main');
+    git(ctx.dir, 'checkout', '-q', '-b', 'fix/mine');
+    await writeFile(path.join(ctx.dir, 'mine.ts'), 'mine\n');
+    const during = (await ctx.http.get(`/sessions/${id}/diff`)).body.data;
+    expect(during.branch).toBe('fix/mine');
+    expect(during.files.map((file: { name: string }) => file.name)).toEqual(['mine.ts']);
+    hold.open();
   });
 
   it('has no diff for a Session without a Repo', async () => {

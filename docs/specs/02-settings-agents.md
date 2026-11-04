@@ -214,7 +214,7 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 { "kind": "step",     "text": "string" }
 { "kind": "diff",     "file": "string", "lines": [{ "sign": "+ | - | ' '", "text": "string" }] }
 { "kind": "code",     "lang": "string", "text": "string" }
-{ "kind": "question", "text": "string", "options": ["string"] }
+{ "kind": "question", "text": "string", "header": "string", "multi_select": false, "options": [{ "label": "string", "description": "string" }] }
 ```
 
 `Session`: every `sessions` column except `sdk_session_id`, plus the fields later specs add: `repo_id`, `branch` and `pr_number` (`07-workspace`), `connection_ids` (`09-dev-tools-agent`), and `alert_id`: the Monitor Alert whose Verification or Fix runs in it, null for any other Session (`08-monitor-dashboard`).
