@@ -295,7 +295,10 @@ test('Address comments shows on any open pull request, the operator’s or someo
   ] as const) {
     await routePullRequest(page, { current: pullRequest(extra) });
     await openPullRequest(page);
-    await expect(page.getByRole('button', { name: 'Agent Review' })).toBeVisible();
+    // Agent Review shows on an open pull request only, so on a closed one wait on the files instead.
+    const closed = 'state' in extra && extra.state === 'closed';
+    await expect(page.getByRole('button', { name: 'Agent Review' })).toHaveCount(closed ? 0 : 1);
+    await expect(page.getByRole('region', { name: 'Files' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Address comments' })).toHaveCount(shown ? 1 : 0);
     await page.unrouteAll();
     // The next goto differs only after the #, which would keep this page and its cached pull request.
