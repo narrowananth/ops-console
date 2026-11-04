@@ -139,6 +139,7 @@ export function toAgentReview(row: ReviewRow, headSha: string | null, playbook: 
     finished_at: row.finishedAt,
     stale: headSha !== null && row.headSha !== headSha,
     playbook,
+    note: row.note,
   };
 }
 

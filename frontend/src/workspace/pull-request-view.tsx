@@ -28,6 +28,7 @@ import { useTriggerPlaybook } from '../playbooks/job-steps';
 import { withPlaybook } from '../playbooks/labels';
 import { AddressCommentsDialog } from './address-comments';
 import { AgentReviewCard } from './agent-review-card';
+import { AgentReviewDialog } from './agent-review-dialog';
 import { CommentPassCard } from './comment-pass-card';
 import { PrFileView, useViewed } from './pr-file';
 import {
@@ -73,6 +74,7 @@ function Loaded(props: {
   );
   const [confirmMerge, setConfirmMerge] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [noting, setNoting] = useState(false);
   const [descriptionFolded, toggleDescription] = useFold('description');
   const viewed = useViewed(pr);
   // Expand all or Collapse all, for this pull request only: another one opens with each file as it was left.
@@ -137,7 +139,7 @@ function Loaded(props: {
                     ? 'The agent already reviewed this commit. Push a change to review again.'
                     : AGENT_REVIEW_TIP
               }
-              onClick={() => agent.mutate()}
+              onClick={() => setNoting(true)}
             >
               {reviewing && <Spinner />}
               {reviewing
@@ -232,6 +234,15 @@ function Loaded(props: {
           <div role="alert" className="text-xs text-accent-700">
             {error.message}
           </div>
+        )}
+        {noting && (
+          <AgentReviewDialog
+            onCancel={() => setNoting(false)}
+            onStart={(note) => {
+              setNoting(false);
+              agent.mutate(note || undefined);
+            }}
+          />
         )}
         {picking && (
           <AddressCommentsDialog

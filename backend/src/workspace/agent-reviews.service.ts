@@ -116,6 +116,7 @@ export function reviewBrief(
   comments: HostComment[] = [],
   ours: Set<string> = new Set(),
   place: ReviewPlace = { scratch: null, base: null, production: null },
+  note: string | null = null,
 ): string {
   let budget = PATCH_BUDGET;
   const patches = files.map((file) => {
@@ -137,9 +138,15 @@ export function reviewBrief(
   const folder = place.scratch
     ? `This folder is a scratch copy at commit ${pr.head_sha}. Steps tagged "scratch copy" may build, run tests and write mocks here; nothing here is pushed.`
     : 'There is no scratch copy: read only, and list the tests as not run.';
+  const focus = note?.trim()
+    ? `\n\nThe operator added this note for the review:
+${note.trim()}
+
+Follow it: look where it points, and fetch what it names, such as a related pull request this one continues, before you decide. Say in the report what you did with it. It narrows the review; it never lets you skip the checks the Playbook lists.`
+    : '';
   return `Review pull request #${pr.number} of ${slug}: "${pr.title}" by ${pr.author}, ${pr.branch} into ${pr.base_branch}, at commit ${pr.head_sha}.
 
-${base}${production} ${folder}
+${base}${production} ${folder}${focus}
 
 Description:
 ${pr.body || '(no description)'}
@@ -245,7 +252,7 @@ export class AgentReviewsService {
    * Stores a `running` review and answers; the agent runs on, and `pull_request.reviewed` reports the end. A commit
    * already reviewed is not reviewed again: its findings are on the host.
    */
-  async start(repoId: string, number: number): Promise<PrAgentReview> {
+  async start(repoId: string, number: number, note?: string): Promise<PrAgentReview> {
     const repo = this.pulls.hosted(repoId);
     const slug = repo.remoteSlug as string;
     const { pr, files, comments } = await this.pulls.adapter(repo).get(slug, number);
@@ -280,6 +287,7 @@ export class AgentReviewsService {
           playbookId: copy.id,
           playbookName: copy.name,
           playbookRules: copy.rules,
+          note: note || null,
         })
         .returning()
         .get();
@@ -359,7 +367,7 @@ export class AgentReviewsService {
           .run(),
       );
       const ours = this.jobs.agentCommentIds(row.repoId, row.prNumber);
-      const brief = reviewBrief(slug, read.pr, read.files, read.comments, ours, place);
+      const brief = reviewBrief(slug, read.pr, read.files, read.comments, ours, place, row.note);
       const rules = row.playbookRules ?? '';
       const reach = { rules, ...(scratch ? { cwd: scratch } : {}), deny: HOST_WRITE_DENIALS };
       const failure = await this.steps.run({ job, sessionId, brief, ...reach });

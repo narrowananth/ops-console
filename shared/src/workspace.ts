@@ -101,7 +101,16 @@ export const prAgentReviewSchema = z.object({
   stale: z.boolean(),
   /** Null on Agent Reviews from before Playbooks. */
   playbook: jobPlaybookSchema.nullable(),
+  /** What the operator told the agent when starting: where to look, a related pull request. Null when left empty. */
+  note: z.string().nullable(),
 });
+
+/** Most characters in a Review note. */
+export const REVIEW_NOTE_MAX = 4000;
+
+export const startAgentReviewSchema = z.object({ note: z.string().trim().max(REVIEW_NOTE_MAX).optional() }).strict();
+
+export type StartAgentReview = z.infer<typeof startAgentReviewSchema>;
 
 export type PrAgentReview = z.infer<typeof prAgentReviewSchema>;
 

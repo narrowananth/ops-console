@@ -717,6 +717,7 @@ const agentReview = (extra: Record<string, unknown>) => ({
   finished_at: extra.status === 'running' ? null : NOW,
   stale: false,
   playbook: null,
+  note: null,
   ...extra,
 });
 

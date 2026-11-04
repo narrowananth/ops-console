@@ -21,6 +21,7 @@ import {
   type Session,
   type SessionDiff,
   type SessionPullRequest,
+  startAgentReviewSchema,
   startCommentPassSchema,
   startReplyCheckSchema,
 } from '@ops-console/shared';
@@ -167,9 +168,10 @@ export class PullRequestsController {
 
   @Post('repos/:repo/pull-requests/:number/agent-reviews')
   @HttpCode(202)
-  async startReview(@Param() params: unknown): Promise<{ data: PrAgentReview }> {
+  async startReview(@Param() params: unknown, @Body() body: unknown): Promise<{ data: PrAgentReview }> {
     const { repo, number } = parseInput(pullParams, params, 'params');
-    return { data: await this.reviews.start(repo, number) };
+    const { note } = parseInput(startAgentReviewSchema, body ?? {}, 'body');
+    return { data: await this.reviews.start(repo, number, note) };
   }
 
   @Get('repos/:repo/pull-requests/:number/agent-reviews')

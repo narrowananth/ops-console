@@ -196,7 +196,9 @@ Service's Git URL.
 The agent's written review of a pull request: a verdict (approve, request changes or comment), findings rated
 critical, high, medium, low or info, a PROD readiness checklist and a full report, tied to the commit it read and the
 target branch commit it compared with. Each finding is posted to the Git host on its line, and the verdict and report
-as one comment. A newer commit makes it stale.
+as one comment. A newer commit makes it stale. The operator may add a **Review note** when starting it: free text the
+agent reads with the pull request, such as where to look or a related pull request to read first. The note narrows the
+review; the Playbook's checks stay.
 
 **Reply check**:
 The agent's check of a pull request thread: whether the code at the head commit does what the thread asked, given

@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef } from 'react';
+import { type ReactNode, type RefObject, useEffect, useRef } from 'react';
 import { Button, Spinner } from './button';
 
 /**
@@ -13,6 +13,7 @@ export function ConfirmDialog({
   pending = false,
   disabled = false,
   error,
+  initialFocus,
   onConfirm,
   onCancel,
 }: {
@@ -26,17 +27,20 @@ export function ConfirmDialog({
   /** The action cannot run yet, such as with nothing picked. */
   disabled?: boolean;
   error?: string | null;
+  /** A field in the body that takes focus instead of Cancel, for a dialog the operator opens to type in. */
+  initialFocus?: RefObject<HTMLElement | null>;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: focus is set once, when the dialog opens
   useEffect(() => {
     const box = dialog.current;
     if (!box || box.open) return;
     box.showModal();
-    cancel.current?.focus();
+    (initialFocus?.current ?? cancel.current)?.focus();
     return () => box.close();
   }, []);
 
