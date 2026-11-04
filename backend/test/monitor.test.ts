@@ -820,7 +820,9 @@ describe('Verification without a local Repo', () => {
     await verify(ctx, alert.id);
     const detail = (await ctx.http.get(`/alerts/${alert.id}`)).body.data;
     expect(detail.latest_report).toMatchObject({ status: 'ready', kind: 'bug' });
-    expect(detail.latest_report.steps[0].text).toBe(`$ git clone file://${origin}`);
+    expect(detail.latest_report.steps.map((step: { text: string }) => step.text)).toContain(
+      `$ git clone file://${origin}`,
+    );
     const session = (await ctx.http.get(`/sessions/${detail.session_id}`)).body.data;
     expect(session).toMatchObject({ kind: 'anonymous', repo_id: null, branch: 'main', alert_id: alert.id });
     const prompt = ctx.daemon.sdk.calls[0]?.prompt ?? '';
@@ -986,6 +988,8 @@ describe('Fix', () => {
     expect(prompts[0]).toContain('Atlassian MCP');
     expect(prompts[0]).toContain('priority Medium');
     expect(prompts[3]).toContain('pull request description rule');
+    expect(prompts[3]).toContain('Prod parity');
+    expect(prompts[3]).toContain('Datadog recheck, last hour: still failing');
     expect(prompts[3]).toContain('- Code: defaulted the total');
     expect(prompts[3]).toContain('- Tests: 12 passed');
     expect(prompts[3]).toContain('https://example.atlassian.net/browse/ORD-7');
@@ -1439,7 +1443,9 @@ describe('Playbooks in Monitor jobs', () => {
     const started = await verify(ctx, alert.id, [json(REPORT)], [[outcome('done', 'traced')], [outcome('done', 'ok')]]);
     const report = (await ctx.http.get(`/reports/${started.id}`)).body.data;
     expect(report.status).toBe('ready');
-    expect(report.steps[0].text).toBe(`Code: origin/production at ${released.slice(0, 7)}, fetched from origin`);
+    expect(report.steps.map((step: { text: string }) => step.text)).toContain(
+      `Code: origin/production at ${released.slice(0, 7)}, fetched from origin`,
+    );
     expect(ctx.daemon.sdk.calls[0]?.prompt).toContain(`at origin/production, commit ${released.slice(0, 12)}`);
     expect(ctx.daemon.sdk.calls[0]?.prompt).not.toContain('could not fetch');
     expect(git(ctx.dir, 'branch', '--show-current').toString().trim()).toBe('main');
@@ -1457,7 +1463,9 @@ describe('Playbooks in Monitor jobs', () => {
     const started = await verify(ctx, alert.id, [json(REPORT)], [[outcome('done', 'traced')], [outcome('done', 'ok')]]);
     const report = (await ctx.http.get(`/reports/${started.id}`)).body.data;
     expect(report.status).toBe('ready');
-    expect(report.steps[0].text).toMatch(
+    expect(
+      report.steps.map((step: { text: string }) => step.text).find((text: string) => text.startsWith('Code:')),
+    ).toMatch(
       new RegExp(
         `^Code: main at ${local.slice(0, 7)}, local; could not fetch from origin \\(.+\\), so it may be behind$`,
       ),
@@ -1786,5 +1794,298 @@ describe('Playbooks migration', () => {
     expect(stepsOf('at-ticket').map(([, status]) => status)).toEqual(['pending', 'pending']);
     expect(stepsOf('at-pr').map(([, status]) => status)).toEqual(['done', 'done']);
     db.close();
+  });
+});
+
+describe('Prod parity check', () => {
+  const HOUR = 3_600_000;
+  const ago = (hours: number) => new Date(Date.now() - hours * HOUR).toISOString();
+  const lastScan = (ctx: Ctx) => ctx.store.db.select().from(scans).get() as typeof scans.$inferSelect;
+  const moveScan = (ctx: Ctx, patch: Partial<typeof scans.$inferInsert>) =>
+    ctx.store.write((tx) => tx.update(scans).set(patch).run());
+  const detail = (ctx: Ctx, id: string) => ctx.http.get(`/alerts/${id}`).then((res) => res.body.data);
+  const promptsSince = (ctx: Ctx, from: number) => ctx.daemon.sdk.calls.slice(from).map((call) => call.prompt);
+
+  /** One failing route whose logs carry the version tag, or none. */
+  async function tagged(ctx: Ctx, version: string | null) {
+    const group = route('POST', '/orders', 12);
+    if (version) group.samples = group.samples.map((s) => ({ ...s, tags: [...s.tags, `version:${version}`] }));
+    ctx.datadog.readings = [service('orders-api', [group])];
+    await scan(ctx);
+    return (await alertList(ctx))[0];
+  }
+
+  describe('Freshness', () => {
+    it('counts from the end of the newest ok Scan, and warns past two Check intervals', async () => {
+      const ctx = await start();
+      const alert = await failing(ctx);
+      const finished = lastScan(ctx).finishedAt as string;
+      expect(await detail(ctx, alert.id)).toMatchObject({ last_scanned_at: finished, scan_overdue: false });
+      // 24h is the default interval: 47h is late, not missed; 49h is two intervals gone.
+      moveScan(ctx, { finishedAt: ago(47) });
+      expect((await detail(ctx, alert.id)).scan_overdue).toBe(false);
+      moveScan(ctx, { finishedAt: ago(49) });
+      expect((await detail(ctx, alert.id)).scan_overdue).toBe(true);
+      // The Service's own interval wins over the Connector's.
+      await ctx.http.patch(`/services/${alert.service.id}`, { check_interval: '6h' });
+      moveScan(ctx, { finishedAt: ago(11) });
+      expect((await detail(ctx, alert.id)).scan_overdue).toBe(false);
+      moveScan(ctx, { finishedAt: ago(13) });
+      expect((await detail(ctx, alert.id)).scan_overdue).toBe(true);
+      expect((await alertList(ctx))[0].scan_overdue).toBe(true);
+    });
+
+    it('skips a Scan that failed, is still running or read other status codes', async () => {
+      const ctx = await start();
+      const alert = await failing(ctx);
+      moveScan(ctx, { status: ScanStatus.Failed });
+      expect(await detail(ctx, alert.id)).toMatchObject({ last_scanned_at: null, scan_overdue: true });
+      moveScan(ctx, { status: ScanStatus.Running });
+      expect((await detail(ctx, alert.id)).last_scanned_at).toBeNull();
+      moveScan(ctx, { status: ScanStatus.Ok, statusCodes: JSON.stringify([404]) });
+      expect((await detail(ctx, alert.id)).last_scanned_at).toBeNull();
+      moveScan(ctx, { statusCodes: JSON.stringify([500]) });
+      expect((await detail(ctx, alert.id)).last_scanned_at).not.toBeNull();
+    });
+
+    it('reads never scanned for an Alert no Scan covers', async () => {
+      const ctx = await start();
+      const alert = await failing(ctx);
+      ctx.store.write((tx) => tx.delete(scans).run());
+      expect(await detail(ctx, alert.id)).toMatchObject({ last_scanned_at: null, scan_overdue: true });
+    });
+  });
+
+  describe('merge label', () => {
+    it('awaits a healthy Scan after resolved_at, and not once the Alert is open again', async () => {
+      const ctx = await start();
+      const alert = await failing(ctx);
+      const set = (patch: Partial<typeof alerts.$inferInsert>) =>
+        ctx.store.write((tx) => tx.update(alerts).set(patch).where(eq(alerts.id, alert.id)).run());
+      expect((await detail(ctx, alert.id)).awaiting_prod_check).toBe(false);
+      set({ status: AlertStatus.Resolved, resolvedAt: ago(2), clearedAt: null });
+      expect((await detail(ctx, alert.id)).awaiting_prod_check).toBe(true);
+      set({ clearedAt: ago(3) });
+      expect((await detail(ctx, alert.id)).awaiting_prod_check).toBe(true);
+      set({ clearedAt: ago(1) });
+      expect((await detail(ctx, alert.id)).awaiting_prod_check).toBe(false);
+      set({ status: AlertStatus.Open, resolvedAt: null, clearedAt: null });
+      expect((await detail(ctx, alert.id)).awaiting_prod_check).toBe(false);
+    });
+  });
+
+  describe('Recheck', () => {
+    const recheckOf = (report: { steps: { kind: string; text: string }[] }) =>
+      report.steps[0] as { kind: string; text: string };
+
+    it('reads the last hour for the query of the Alert, writes the first Report step and tells the agent', async () => {
+      const ctx = await start();
+      const alert = await failing(ctx);
+      await linkRepo(ctx, alert.service.id);
+      ctx.datadog.recheckCount = 4;
+      const reads = ctx.datadog.calls.length;
+      const before = ctx.daemon.sdk.calls.length;
+      const report = await verify(ctx, alert.id);
+      expect(ctx.datadog.rechecks).toEqual([{ query: alert.datadog_query, window: '1h' }]);
+      // A count only: the Recheck reads no log lines, as a Scan's read does.
+      expect(ctx.datadog.calls).toHaveLength(reads);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(recheckOf(stored)).toEqual({ kind: 'result', text: 'Datadog recheck, last hour: still failing' });
+      expect(promptsSince(ctx, before)).toContainEqual(
+        expect.stringContaining('Datadog recheck, last hour: still failing'),
+      );
+      expect(stored.status).toBe('ready');
+    });
+
+    it('has written the Recheck step before the agent starts, so a reload mid-Verification shows it', async () => {
+      const ctx = await start();
+      const alert = await failing(ctx);
+      await linkRepo(ctx, alert.service.id);
+      const hold = gate();
+      ctx.daemon.sdk.script({ wait: hold.promise }, outcome('done'));
+      for (const run of VERIFY_STEPS.slice(1)) ctx.daemon.sdk.script(...run);
+      ctx.daemon.sdk.script(json(REPORT));
+      const started = await ctx.http.post(`/alerts/${alert.id}/verifications`);
+      await until(
+        () => ctx.http.get(`/reports/${started.body.data.id}`).then((res) => res.body.data.steps.length),
+        (count) => count >= 1,
+        'the Recheck step',
+      );
+      const midway = (await ctx.http.get(`/reports/${started.body.data.id}`)).body.data;
+      expect([midway.status, recheckOf(midway).text]).toEqual(['running', 'Datadog recheck, last hour: still failing']);
+      hold.open();
+      await until(
+        () => ctx.http.get(`/alerts/${alert.id}`).then((res) => res.body.data.status),
+        (status) => status === 'verified',
+      );
+    });
+
+    it('says not seen when the last hour has none, and still verifies', async () => {
+      const ctx = await start();
+      const alert = await failing(ctx);
+      await linkRepo(ctx, alert.service.id);
+      ctx.datadog.recheckCount = 0;
+      const before = ctx.daemon.sdk.calls.length;
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(recheckOf(stored).text).toBe('Datadog recheck, last hour: not seen');
+      expect(promptsSince(ctx, before)).toContainEqual(expect.stringContaining('Datadog recheck, last hour: not seen'));
+      expect((await detail(ctx, alert.id)).status).toBe('verified');
+    });
+
+    it('writes why a Recheck failed, does not retry, and goes on', async () => {
+      const ctx = await start();
+      const alert = await failing(ctx);
+      await linkRepo(ctx, alert.service.id);
+      ctx.datadog.down = 'rate_limited';
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(recheckOf(stored)).toEqual({ kind: 'warning', text: 'Recheck failed: Datadog rate limit reached' });
+      expect(ctx.datadog.rechecks).toHaveLength(1);
+      expect(stored.status).toBe('ready');
+    });
+
+    it('makes its own Recheck for each Alert, so one failing does not touch the next', async () => {
+      const ctx = await start();
+      ctx.datadog.readings = [
+        service('orders-api', [route('POST', '/orders', 12)]),
+        service('billing-api', [route('POST', '/invoices', 12)]),
+      ];
+      await scan(ctx);
+      const [first, second] = await alertList(ctx);
+      await linkRepo(ctx, first.service.id);
+      await linkRepo(ctx, second.service.id);
+      ctx.datadog.down = 'failed';
+      const one = await verify(ctx, first.id);
+      ctx.datadog.down = null;
+      const two = await verify(ctx, second.id);
+      expect(recheckOf((await ctx.http.get(`/reports/${one.id}`)).body.data).text).toBe(
+        'Recheck failed: `pup logs aggregate` failed',
+      );
+      expect(recheckOf((await ctx.http.get(`/reports/${two.id}`)).body.data).text).toBe(
+        'Datadog recheck, last hour: still failing',
+      );
+      expect(ctx.datadog.rechecks.map((r) => r.query)).toEqual([first.datadog_query, second.datadog_query]);
+    });
+
+    it('rechecks again on a retry, and adds the result as a step', async () => {
+      const ctx = await start();
+      const alert = await failing(ctx);
+      await linkRepo(ctx, alert.service.id);
+      const started = await verify(ctx, alert.id, [], [[outcome('failed', 'no fixture')]]);
+      expect((await ctx.http.get(`/reports/${started.id}`)).body.data.status).toBe('failed');
+      ctx.datadog.recheckCount = 0;
+      for (const run of VERIFY_STEPS) ctx.daemon.sdk.script(...run);
+      ctx.daemon.sdk.script(json(REPORT));
+      expect((await ctx.http.post(`/reports/${started.id}/retry`)).status).toBe(202);
+      await until(
+        () => ctx.http.get(`/reports/${started.id}`).then((res) => res.body.data.status),
+        (status) => status !== 'running',
+      );
+      const report = (await ctx.http.get(`/reports/${started.id}`)).body.data;
+      expect(ctx.datadog.rechecks).toHaveLength(2);
+      expect(
+        report.steps.map((step: { text: string }) => step.text).filter((t: string) => t.startsWith('Datadog')),
+      ).toEqual(['Datadog recheck, last hour: still failing', 'Datadog recheck, last hour: not seen']);
+    });
+  });
+
+  describe('Deployed version', () => {
+    const versionOf = (report: { steps: { kind: string; text: string }[] }) =>
+      report.steps.find((step) => step.text.startsWith('prod ran') || step.text.startsWith('prod version'));
+
+    async function verified(ctx: Ctx, version: string | null) {
+      const alert = await tagged(ctx, version);
+      await linkRepo(ctx, alert.service.id);
+      const report = await verify(ctx, alert.id);
+      return (await ctx.http.get(`/reports/${report.id}`)).body.data;
+    }
+
+    it('shows no warning when the version is the commit the scratch copy was cut at', async () => {
+      const ctx = await start();
+      const alert = await tagged(ctx, null);
+      await linkRepo(ctx, alert.service.id);
+      const sha = git(ctx.dir, 'rev-parse', 'HEAD').toString().trim();
+      ctx.datadog.readings = [
+        service('orders-api', [
+          {
+            ...route('POST', '/orders', 12),
+            samples: samples(3).map((s) => ({ ...s, tags: [...s.tags, `version:${sha}`] })),
+          },
+        ]),
+      ];
+      await scan(ctx);
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(versionOf(stored)).toEqual({
+        kind: 'result',
+        text: `prod ran \`${sha}\`; verified at \`${sha.slice(0, 7)}\` of \`main\``,
+      });
+    });
+
+    it('warns when the version is not the commit, and keeps the copy at the branch tip', async () => {
+      const ctx = await start();
+      const stored = await verified(ctx, 'v2.1.4');
+      const sha = git(ctx.dir, 'rev-parse', 'HEAD').toString().trim().slice(0, 7);
+      expect(versionOf(stored)).toEqual({
+        kind: 'warning',
+        text: `prod ran \`v2.1.4\`; verified at \`${sha}\` of \`main\`; the console cannot confirm they match`,
+      });
+      expect(stored.status).toBe('ready');
+    });
+
+    it('warns when the version only starts like the commit, and is longer than it', async () => {
+      const ctx = await start();
+      const alert = await tagged(ctx, null);
+      await linkRepo(ctx, alert.service.id);
+      const sha = git(ctx.dir, 'rev-parse', 'HEAD').toString().trim();
+      const other = `${sha.slice(0, 7)}${'0'.repeat(33)}`;
+      ctx.datadog.readings = [
+        service('orders-api', [
+          {
+            ...route('POST', '/orders', 12),
+            samples: samples(3).map((s) => ({ ...s, tags: [...s.tags, `version:${other}`] })),
+          },
+        ]),
+      ];
+      await scan(ctx);
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(versionOf(stored)?.kind).toBe('warning');
+    });
+
+    it('warns that the version is unknown when no Sample has the tag', async () => {
+      const ctx = await start();
+      const stored = await verified(ctx, null);
+      const sha = git(ctx.dir, 'rev-parse', 'HEAD').toString().trim().slice(0, 7);
+      expect(versionOf(stored)).toEqual({
+        kind: 'warning',
+        text: `prod version unknown; verified at \`${sha}\` of \`main\``,
+      });
+    });
+  });
+
+  describe('Prod parity', () => {
+    it('asks the Verification’s closing turn for the four lines', async () => {
+      const ctx = await start();
+      const alert = await failing(ctx);
+      await linkRepo(ctx, alert.service.id);
+      const before = ctx.daemon.sdk.calls.length;
+      await verify(ctx, alert.id);
+      const closing =
+        promptsSince(ctx, before).find((prompt) => prompt.includes('Write the Report on this Alert')) ?? '';
+      expect(closing).toContain('Prod parity');
+      for (const line of ['Code version', 'Data', 'Configuration and environment', 'Dependencies']) {
+        expect(closing).toContain(line);
+      }
+    });
+
+    it('saves a Report with no Prod parity section', async () => {
+      const ctx = await start();
+      const alert = await failing(ctx);
+      await linkRepo(ctx, alert.service.id);
+      const report = await verify(ctx, alert.id, [json({ ...REPORT, markdown: '# No parity here' })]);
+      expect((await ctx.http.get(`/reports/${report.id}`)).body.data).toMatchObject({ status: 'ready' });
+    });
   });
 });

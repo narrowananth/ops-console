@@ -89,7 +89,13 @@ export function toAlert(
   row: AlertRow,
   route: RouteRow,
   service: ServiceRow,
-  extra: { waitingSince: string | null; sessionId: string | null },
+  extra: {
+    waitingSince: string | null;
+    sessionId: string | null;
+    lastScannedAt: string | null;
+    scanOverdue: boolean;
+    awaitingProdCheck: boolean;
+  },
 ): Alert {
   return {
     id: row.id,
@@ -116,6 +122,9 @@ export function toAlert(
     waiting_since: row.status === AlertStatus.Verified ? extra.waitingSince : null,
     datadog_query: row.datadogQuery,
     session_id: extra.sessionId,
+    last_scanned_at: extra.lastScannedAt,
+    scan_overdue: extra.scanOverdue,
+    awaiting_prod_check: extra.awaitingProdCheck,
   };
 }
 

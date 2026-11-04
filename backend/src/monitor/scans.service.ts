@@ -7,7 +7,6 @@ import {
   CheckInterval,
   ConnectorId,
   type CreateScan,
-  connectorConfigSchemas,
   type DatadogService,
   ErrorCode,
   type MonitorEnv,
@@ -25,28 +24,22 @@ import {
   WINDOW_HOURS,
 } from '@ops-console/shared';
 import { and, desc, eq, inArray, isNull, max, notInArray } from 'drizzle-orm';
-import type { z } from 'zod';
 import { redact } from '../action-log/redact';
 import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
 import { ConnectorsService } from '../connectors/connectors.service';
-import { alerts, connectors, reports, reviews, routes, scanRouteResults, scans, services } from '../db/schema';
+import { alerts, reports, reviews, routes, scanRouteResults, scans, services } from '../db/schema';
 import { type Emit, STORE, type Store, type Tx } from '../db/store';
 import { Scheduler } from '../scheduler/scheduler';
 import { AlertsService } from './alerts.service';
 import { CodeFinder } from './code-finder';
 import { DATADOG_READER, type DatadogReader, ERROR_LEVEL, type LogGroup, type ServiceReading } from './datadog';
+import { type DatadogConfig, datadogConfig } from './datadog-config';
 import { fingerprint, maskSignature } from './fingerprint';
+import { HOURS, scanReads } from './freshness';
 import { type AlertRow, parseJson, type RouteRow, type ServiceRow, samplesOf } from './mappers';
 
-type DatadogConfig = z.infer<(typeof connectorConfigSchemas)[ConnectorId.Datadog]>;
 type ScanRow = typeof scans.$inferSelect;
-
-const HOURS: Record<CheckInterval, number> = {
-  [CheckInterval.Day]: 24,
-  [CheckInterval.HalfDay]: 12,
-  [CheckInterval.SixHours]: 6,
-};
 
 /** The finest interval; every slot of a longer interval is also one of these. */
 const GRID_HOURS = 6;
@@ -256,8 +249,7 @@ export class ScansService {
   }
 
   config(): DatadogConfig {
-    const raw = this.store.db.select().from(connectors).where(eq(connectors.id, ConnectorId.Datadog)).get();
-    return connectorConfigSchemas[ConnectorId.Datadog].parse(parseJson(raw?.config ?? null, {}));
+    return datadogConfig(this.store.db);
   }
 
   /** The env tags Datadog has logs for, the Connector's own first; read again after 10 minutes. */
@@ -414,12 +406,8 @@ export class ScansService {
     config: DatadogConfig,
     env: string,
   ): boolean {
-    if (!parseJson<string[]>(scan.envs, []).includes(env)) return false;
-    if (scan.serviceId) return existing?.id === scan.serviceId;
-    const names = parseJson<string[] | null>(scan.services, null);
-    if (names && !names.includes(name)) return false;
-    if (scan.triggeredBy === ScanTrigger.Operator) return true;
-    return (existing?.checkInterval ?? config.default_interval) === scan.windowSize;
+    const target = { id: existing?.id, name, env, checkInterval: existing?.checkInterval ?? null };
+    return scanReads(scan, target, config.default_interval as CheckInterval);
   }
 
   private apply(tx: Tx, emit: Emit, scan: ScanRow, config: DatadogConfig, readings: ServiceReading[]): void {

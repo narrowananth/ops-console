@@ -7,21 +7,27 @@ import {
   AlertEventKind,
   AlertStatus,
   alertsQuerySchema,
+  type CheckInterval,
   ErrorCode,
   type Report,
+  ScanStatus,
 } from '@ops-console/shared';
 import { and, asc, desc, eq, inArray, isNull, type SQL, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import { ApiError } from '../common/errors';
-import { alertEvents, alerts, fixes, reports, reviews, routes, services, sessions } from '../db/schema';
+import { alertEvents, alerts, fixes, reports, reviews, routes, scans, services, sessions } from '../db/schema';
 import { STORE, type Store, type Tx } from '../db/store';
 import { jobPlaybook } from '../playbooks/job-steps';
-import { type AlertRow, samplesOf, toAlert, toAlertEvent, toFix, toReport, toReview } from './mappers';
+import { datadogConfig } from './datadog-config';
+import { awaitingProdCheck, freshnessOf } from './freshness';
+import { type AlertRow, type ServiceRow, samplesOf, toAlert, toAlertEvent, toFix, toReport, toReview } from './mappers';
 
 const SEQ = sql`"alert_events"."rowid"`;
 
 /** Events that put an Alert in `verified`: the newest one is when it began waiting (ADR 0002). */
 const ENTERED_VERIFIED = [AlertEventKind.Verified, AlertEventKind.Undone, AlertEventKind.Abandoned];
+
+type ScanRead = { scans: (typeof scans.$inferSelect)[]; interval: CheckInterval };
 
 @Injectable()
 export class AlertsService {
@@ -47,7 +53,8 @@ export class AlertsService {
       .where(and(...filters))
       .orderBy(desc(alerts.lastSeenAt), desc(alerts.id))
       .all();
-    return rows.map(({ alert, route, service }) => toAlert(alert, route, service, this.extra(alert)));
+    const read = this.scanRead();
+    return rows.map(({ alert, route, service }) => toAlert(alert, route, service, this.extra(alert, service, read)));
   }
 
   view(id: string): Alert {
@@ -59,7 +66,7 @@ export class AlertsService {
       .where(eq(alerts.id, id))
       .get();
     if (!found) throw new ApiError(404, ErrorCode.NotFound, 'no such Alert');
-    return toAlert(found.alert, found.route, found.service, this.extra(found.alert));
+    return toAlert(found.alert, found.route, found.service, this.extra(found.alert, found.service, this.scanRead()));
   }
 
   detail(id: string): AlertDetail {
@@ -158,7 +165,18 @@ export class AlertsService {
     }
   }
 
-  private extra(alert: AlertRow): { waitingSince: string | null; sessionId: string | null } {
+  /** The `ok` Scans newest end first, and the interval a Service with none of its own is scanned at. */
+  private scanRead(): ScanRead {
+    const ok = this.store.db
+      .select()
+      .from(scans)
+      .where(eq(scans.status, ScanStatus.Ok))
+      .orderBy(desc(scans.finishedAt))
+      .all();
+    return { scans: ok, interval: datadogConfig(this.store.db).default_interval as CheckInterval };
+  }
+
+  private extra(alert: AlertRow, service: ServiceRow, read: ScanRead) {
     const waiting =
       alert.status === AlertStatus.Verified
         ? this.store.db
@@ -173,6 +191,13 @@ export class AlertsService {
       .from(sessions)
       .where(eq(sessions.alertId, alert.id))
       .get();
-    return { waitingSince: waiting ?? null, sessionId: session?.id ?? null };
+    const fresh = freshnessOf(read.scans, alert, service, read.interval);
+    return {
+      waitingSince: waiting ?? null,
+      sessionId: session?.id ?? null,
+      lastScannedAt: fresh.lastScannedAt,
+      scanOverdue: fresh.overdue,
+      awaitingProdCheck: awaitingProdCheck(alert),
+    };
   }
 }

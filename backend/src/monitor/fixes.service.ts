@@ -37,7 +37,9 @@ import { PullRequestsService } from '../workspace/pull-requests.service';
 import { WorkspaceSessionsService } from '../workspace/workspace-sessions.service';
 import { AlertSessions } from './alert-sessions';
 import { AlertsService } from './alerts.service';
+import { DATADOG_READER, type DatadogReader } from './datadog';
 import { type AlertRow, type FixRow, type ReportRow, type ReviewRow, type ServiceRow, toFix } from './mappers';
+import { PROD_PARITY_ASK, recheck } from './prod-parity';
 
 const ticketSchema = z.object({ key: z.string().min(1), url: z.string().min(1) });
 const prSchema = z.object({ number: z.number().int(), url: z.string().min(1) });
@@ -56,6 +58,8 @@ type Context = {
   review: ReviewRow;
   sessionId: string;
   slug: string;
+  /** What the Recheck found when this run of the Fix started: one line for the agent's brief. */
+  recheckLine: string;
   /** Set until the Fix's first agent turn, which starts a new conversation in the checkout (Behavior 26). */
   fresh: boolean;
 };
@@ -83,6 +87,7 @@ export class FixesService {
     @Inject(GIT) private readonly git: Git,
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
     @Inject(JobSteps) private readonly steps: JobSteps,
+    @Inject(DATADOG_READER) private readonly datadog: DatadogReader,
     @Inject(Scheduler) scheduler: Scheduler,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
@@ -343,7 +348,8 @@ export class FixesService {
     if (found.fix.sessionId !== sessionId) {
       this.store.write((tx) => tx.update(fixes).set({ sessionId }).where(eq(fixes.id, fixId)).run());
     }
-    return { ...found, sessionId, slug: found.report.slug ?? 'fix', fresh };
+    const checked = await recheck(this.datadog, found.alert.datadogQuery);
+    return { ...found, sessionId, slug: found.report.slug ?? 'fix', recheckLine: checked.line, fresh };
   }
 
   private async stage(stage: FixStage, context: Context): Promise<void> {
@@ -367,7 +373,8 @@ export class FixesService {
   private brief(context: Context): string {
     const jira = context.fix.jiraKey ? `Jira: ${context.fix.jiraKey}. ` : '';
     return `Fix for Alert "${context.alert.title}" on ${context.service.name}.
-${jira}Root cause: ${context.report.rootCause}. Proposed fix: ${context.report.proposedFix}.`;
+${jira}Root cause: ${context.report.rootCause}. Proposed fix: ${context.report.proposedFix}.
+${context.recheckLine}`;
   }
 
   /** Jira is optional: with it the Fix makes a ticket and names the branch after its key. */
@@ -559,7 +566,7 @@ Change nothing else. ${JSON_ONLY}
       fix.jiraUrl && `- Jira: ${fix.jiraUrl}`,
       `- Alert: "${context.alert.title}" on ${context.service.name}`,
     ];
-    return `Write the description by the console's pull request description rule, in depth, from this material and from the diff of the branch.
+    return `Write the description by the console's pull request description rule, in depth, from this material and from the diff of the branch. End it with a "Prod parity" section of ${PROD_PARITY_ASK}; for Data and Dependencies, say what this Fix's tests mocked.
 
 The Report:
 ${context.report.markdown ?? `Root cause: ${context.report.rootCause}. Proposed fix: ${context.report.proposedFix}.`}

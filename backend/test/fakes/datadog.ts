@@ -50,6 +50,9 @@ export class FakeDatadog implements DatadogReader {
   envNames: string[] = ['prod', 'staging'];
   down: 'rate_limited' | 'failed' | null = null;
   readonly calls: ReadRequest[] = [];
+  /** What a Recheck finds: how many logs match, and the queries asked. */
+  recheckCount = 1;
+  readonly rechecks: { query: string; window: string }[] = [];
   /** Holds the read until it settles. */
   hold: Promise<unknown> | null = null;
 
@@ -88,6 +91,13 @@ export class FakeDatadog implements DatadogReader {
       }
     }
     return [...counts].map(([code, count]) => ({ code, count })).sort((a, b) => b.count - a.count);
+  }
+
+  async countLogs(query: string, window: string): Promise<number> {
+    this.rechecks.push({ query, window });
+    if (this.down === 'rate_limited') throw new ApiError(429, ErrorCode.RateLimited, 'Datadog rate limit reached');
+    if (this.down) throw new ApiError(502, ErrorCode.UpstreamFailed, '`pup logs aggregate` failed');
+    return this.recheckCount;
   }
 
   async envs(): Promise<string[]> {
