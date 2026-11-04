@@ -56,6 +56,7 @@ import {
 import { withPlaybook } from '../playbooks/labels';
 import { sessionPath } from '../workspace/links';
 import { STATUS_TIP } from './logs-pane';
+import { FreshnessNote, MergeNote, ReportNotes } from './prod-notes';
 import { CodeSource } from './repo-link';
 import { SeverityBadge } from './severity';
 
@@ -192,6 +193,7 @@ function ReportPanel({
                 </div>
               </details>
             )}
+            <ReportNotes steps={shown.steps} />
             {shown.markdown ? (
               <Markdown source={shown.markdown} />
             ) : (
@@ -279,7 +281,7 @@ function Steps({ report }: { report: Report }) {
       {report.steps.map((step, index) => (
         // Steps are an append-only list: the index is their identity.
         // biome-ignore lint/suspicious/noArrayIndexKey: append-only list
-        <li key={index} className={step.kind === 'error' ? 'text-accent-700' : ''}>
+        <li key={index} className={step.kind === 'error' || step.kind === 'warning' ? 'text-accent-700' : ''}>
           {step.text}
         </li>
       ))}
@@ -600,6 +602,8 @@ export function AlertView({ id }: { id: string }) {
               waiting since {new Date(data.waiting_since).toLocaleString()}
             </span>
           )}
+          <FreshnessNote alert={data} />
+          <MergeNote alert={data} />
         </div>
         <h1 className="m-0 mt-1 text-lg break-words">{data.title}</h1>
         <div className="flex flex-wrap items-center gap-x-2 font-mono text-xs text-neutral-700">

@@ -4,6 +4,7 @@ import { Empty } from '../components/ui/empty';
 import { item } from '../components/ui/item';
 import { useAlerts } from '../lib/queries';
 import { useStored } from '../lib/remember';
+import { FreshnessNote, MergeNote } from './prod-notes';
 import { ago, shown as inMonitor } from './scan-scope';
 import { SEVERITY_LABEL, SeverityBadge } from './severity';
 import { StatusBadge } from './status-picker';
@@ -86,6 +87,8 @@ function Row({
               {where}
             </span>
           )}
+          <FreshnessNote alert={alert} />
+          <MergeNote alert={alert} />
           {alert.status !== AlertStatus.Open && (
             <span
               title={STATUS_TIP[alert.status]}

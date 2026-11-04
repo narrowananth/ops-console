@@ -32,7 +32,9 @@ import { type CodeBase, codeBaseStep, GIT, Git, GitFailed } from '../repos/git';
 import { AnonymousSessionsService } from '../workspace/anonymous-sessions.service';
 import { AlertSessions, type CodeSource } from './alert-sessions';
 import { AlertsService } from './alerts.service';
+import { DATADOG_READER, type DatadogReader } from './datadog';
 import { type AlertRow, type ReportRow, type RouteRow, type ServiceRow, samplesOf, toReport } from './mappers';
+import { deployedVersion, PROD_PARITY_ASK, recheck, versionStep } from './prod-parity';
 import { ScansService } from './scans.service';
 
 const outputSchema = z.object({
@@ -62,6 +64,7 @@ export function verificationBrief(
   route: RouteRow,
   source: CodeSource,
   base: CodeBase | null = null,
+  recheckLine: string | null = null,
 ): string {
   const samples = samplesOf(alert)
     .slice(0, 5)
@@ -79,7 +82,7 @@ export function verificationBrief(
 
 Alert: ${alert.title}
 Service: ${service.name} (${service.env}); ${what}
-Events: ${alert.eventCount} since ${alert.firstSeenAt}; Datadog query: ${alert.datadogQuery}
+Events: ${alert.eventCount} since ${alert.firstSeenAt}; Datadog query: ${alert.datadogQuery}${recheckLine ? `\n${recheckLine}` : ''}
 
 Newest log lines:
 ${samples}
@@ -102,7 +105,7 @@ export const REPORT_PROMPT = `Write the Report on this Alert from what you found
 }
 \`\`\`
 
-"replay" and "diff" may be null. The Markdown has these sections, in order: Issue summary (what happens, the observed behaviour); Datadog evidence (log lines, timestamps, trace IDs, error details); Affected services (which service writes the error, which consume the logic); Root cause; Code-level findings (repository, file:line, classes, methods, execution flow); Timeline (when it started and changes around then, where evidence exists); Blast radius (services, APIs, platforms, integrations, user impact); Consumer analysis (mobile, web, internal APIs, background work); Database findings (read only); External dependency findings (Shopify and other third parties); Reproduction and validation (mocks, scenarios, results); Existing PR verification (related pull requests and earlier fixes); Recommended stable fix (exact changes and why this approach); Regression risks and test plan; Final conclusion (confirmed root cause, scope, next action). Mark each finding as verified, mocked or unverified.`;
+"replay" and "diff" may be null. The Markdown has these sections, in order: Issue summary (what happens, the observed behaviour); Datadog evidence (log lines, timestamps, trace IDs, error details); Affected services (which service writes the error, which consume the logic); Root cause; Code-level findings (repository, file:line, classes, methods, execution flow); Timeline (when it started and changes around then, where evidence exists); Blast radius (services, APIs, platforms, integrations, user impact); Consumer analysis (mobile, web, internal APIs, background work); Database findings (read only); External dependency findings (Shopify and other third parties); Reproduction and validation (mocks, scenarios, results); Existing PR verification (related pull requests and earlier fixes); Recommended stable fix (exact changes and why this approach); Regression risks and test plan; Prod parity (${PROD_PARITY_ASK}); Final conclusion (confirmed root cause, scope, next action). Mark each finding as verified, mocked or unverified.`;
 
 function stepOf(part: Part): ReportStep | null {
   if (part.kind === 'step') return { kind: part.text.startsWith('$ ') ? 'command' : 'step', text: part.text };
@@ -132,6 +135,7 @@ export class VerificationsService {
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
     @Inject(JobSteps) private readonly steps: JobSteps,
     @Inject(ScansService) private readonly scans: ScansService,
+    @Inject(DATADOG_READER) private readonly datadog: DatadogReader,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
     recovery.register('monitor verifications', () => this.recover());
@@ -235,13 +239,22 @@ export class VerificationsService {
     const report = this.store.db.select().from(reports).where(eq(reports.id, reportId)).get() as ReportRow;
     const reportSteps: ReportStep[] = z.array(stepSchema).parse(JSON.parse(report.steps));
     const onPart = (part: Part) => this.step(reportId, reportSteps, part);
+    // Before the Session and the scratch copy, so it is the first step the operator reads (Behavior 7).
+    const checked = await recheck(this.datadog, alert.datadogQuery);
+    this.addStep(reportId, reportSteps, checked.step);
     const sessionId = await this.sessions.ensure(alert, service, (text) => onPart({ kind: 'step', text }));
     const made = retry ? null : await this.makeScratch(report, source, sessionId, onPart);
     const scratch = made?.dir ?? (report.scratchPath as string);
     const job = { kind: 'report', id: reportId } as const;
     const hasSteps = this.steps.rows(job).length > 0;
     const rules = report.playbookRules;
-    const brief = verificationBrief(alert, service, route, source, made?.base ?? null);
+    if (made)
+      this.addStep(
+        reportId,
+        reportSteps,
+        versionStep(deployedVersion(samplesOf(alert)), made.base.sha, made.base.branch),
+      );
+    const brief = verificationBrief(alert, service, route, source, made?.base ?? null, checked.line);
     const failure = await this.steps.run({ job, sessionId, brief, rules, cwd: scratch, fresh: !retry, onPart });
     if (failure) throw new VerificationFailed(failure);
     const closing = hasSteps || retry ? REPORT_PROMPT : `${brief}\n\n${REPORT_PROMPT}`;
@@ -317,7 +330,10 @@ export class VerificationsService {
 
   private step(reportId: string, steps: ReportStep[], part: Part): void {
     const step = stepOf(part);
-    if (!step) return;
+    if (step) this.addStep(reportId, steps, step);
+  }
+
+  private addStep(reportId: string, steps: ReportStep[], step: ReportStep): void {
     const safe = { ...step, text: redact(step.text) };
     steps.push(safe);
     this.store.write((tx, emit) => {

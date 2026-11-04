@@ -168,6 +168,13 @@ Fix in the same Session, in the checkout and in a new conversation, stage by sta
 steps, PR), each agent run ending with JSON. The ticket stage runs only when the Fix Playbook's Jira ticket switch is
 on and Jira is connected; otherwise the branch is `fix/<name>`.
 
+**Prod parity.** The Alert read carries Freshness (`last_scanned_at`, `scan_overdue`) and `awaiting_prod_check`, all
+derived from `scans` and the Alert's own `resolved_at` and `cleared_at`. A Verification and a Fix each start with a
+Recheck: one `pup` count of the Alert's query over the last hour. The result is the first step of the Report and a line
+in the agent's brief. The Verification then adds the `version:` tag of the newest Sample, set against the commit of its
+scratch copy. The Report's closing turn and the Fix's pull request brief ask for a Prod parity section. None of this
+blocks a job.
+
 **Playbooks.** Each Trigger holds one Playbook, or its built-in. A job (Verification, Fix, Agent
 Review, Reply check, Comment pass) copies its Trigger's Playbook when it starts and runs each step as its own turn, ending
 done, skipped or failed; a failed step stops the job. After the last step the console's own closing

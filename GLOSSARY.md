@@ -105,6 +105,19 @@ _Avoid_: priority, sev2
 **Regression**:
 A resolved or dismissed Alert that fails again after a healthy Scan. It reopens the same Alert.
 
+**Freshness**:
+How long since the last finished Scan that covered an Alert's Service and status code. It warns past two Check
+intervals.
+_Avoid_: staleness, age
+
+**Recheck**:
+One read of Datadog for an Alert's query over the last hour, made when a Verification or a Fix starts, with no model
+turn. It says whether the failure is still happening.
+
+**Prod parity**:
+The section of a Report or pull request description that says how the run differed from prod: code version, data,
+configuration and environment, dependencies.
+
 **Sample**:
 One Datadog log event kept on an Alert, with secret values and request body values redacted.
 

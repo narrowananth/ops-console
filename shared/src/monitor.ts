@@ -253,6 +253,12 @@ export const alertSchema = z.object({
   datadog_query: z.string(),
   /** The Session the Verification and Fix run in, once there is one. */
   session_id: z.string().nullable(),
+  /** The end of the newest `ok` Scan that covered the Alert's Service and status code; null when none has. */
+  last_scanned_at: z.string().nullable(),
+  /** No Scan has covered the Alert, or the newest ended more than two Check intervals ago. */
+  scan_overdue: z.boolean(),
+  /** Resolved, and no Scan has read its Service without seeing it since. */
+  awaiting_prod_check: z.boolean(),
 });
 
 export type Alert = z.infer<typeof alertSchema>;

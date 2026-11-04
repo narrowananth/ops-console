@@ -56,6 +56,8 @@ export interface DatadogReader {
   services(envs: string[], window: ScanWindow, codes: number[]): Promise<ServiceCount[]>;
   /** Each HTTP status code from 400 up with requests in the window, every env together, busiest first. */
   statusCodes(window: ScanWindow): Promise<{ code: number; count: number }[]>;
+  /** How many logs the query matches in the window: the Recheck of an Alert. */
+  countLogs(query: string, window: ScanWindow): Promise<number>;
 }
 
 export type ServiceCount = { name: string; env: string; errors: number };
@@ -224,6 +226,11 @@ export class PupDatadog implements DatadogReader {
       const code = Number(bucket.by['@http.status_code']);
       return Number.isInteger(code) && code >= 400 ? [{ code, count: Number(bucket.computes.c0 ?? 0) }] : [];
     });
+  }
+
+  async countLogs(query: string, window: ScanWindow): Promise<number> {
+    const buckets = await this.aggregate(query, window, 'service', SERVICE_LIMIT);
+    return buckets.reduce((sum, bucket) => sum + Number(bucket.computes.c0 ?? 0), 0);
   }
 
   /** Every Service the query matches, busiest first: one dimension, so the group cap is no problem. */
