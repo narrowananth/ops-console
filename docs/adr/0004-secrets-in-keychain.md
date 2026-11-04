@@ -2,9 +2,13 @@
 
 Connection passwords, tokens and service-account keys live in the macOS Keychain under the service
 `ops-console`, keyed `connection:<id>`; an MCP Server's env vars are keyed `mcp:<name>`, the GitHub
-Connector's `gh` token included. `state.db` holds only the
+Connector's `gh` token included; the CLIProxy API key is `cliproxy:api-key`. `state.db` holds only the
 Connection's non-secret fields. Secrets are read at the moment of use and never reach the database,
 logs, WebSocket payloads or the browser.
+
+Each release is a new signed app, and macOS asks for the login password once per Keychain item an app did not
+create. The previous version's app hands its items over when a new version first starts, and the daemon's reads wait
+for that; `keychain-owner.json` in the data folder names the app that holds them.
 
 The exception is the headers of an http or sse MCP Server. Claude Code sends them itself, so it
 keeps them in its own config file in plain text. The console cannot hold them while Claude Code

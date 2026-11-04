@@ -180,6 +180,21 @@ Returns `{ "data": { "<key>": <value> } }` for every registered key, stored valu
 
 Body `{ "<key>": <value> }`, one or more keys. Returns the same shape as `GET` after the write. Errors: `validation_failed` naming the first bad or unknown key.
 
+### `GET /api/updates`
+
+200 `UpdateState`: `current`, `latest` (`version`, `published_at`, `url`, `notes`, or null), `status`
+(`dev | unknown | up_to_date | available | waiting | updating | failed`), `checked_at`, `error`, `auto_update`,
+`runs_going` and `updated` (`from`, `at`, `automatic`, set on the first start of a new version).
+
+### `POST /api/updates/checks`
+
+Reads the newest release now. 200 `UpdateState`.
+
+### `POST /api/updates`
+
+Body: `{ "when": "now | idle" }`. `now` installs at once and stops the agent runs going; `idle` waits for them.
+202 `UpdateState`. `invalid_state` in a development build.
+
 ### WebSocket `/ws`
 
 The server sends; the client sends nothing. Each event is sent once, after its transaction commits. After a reload the client refetches over REST and then applies events.
@@ -188,6 +203,14 @@ Envelope for every event:
 
 ```json
 { "event": "string", "at": "string", "data": {} }
+```
+
+### WebSocket `update.changed`
+
+Server to client, when the update status moves.
+
+```json
+{ "status": "dev | unknown | up_to_date | available | waiting | updating | failed" }
 ```
 
 ### WebSocket `settings.updated`

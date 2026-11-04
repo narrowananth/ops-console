@@ -9,7 +9,7 @@ Monitor needs Datadog to scan, the fix flow needs Jira and a Git host, and revie
 
 ## Behavior
 
-1. Listing Connectors returns all eight in a fixed order, each with how it is reached (`via`), status, account label and config. The first start seeds every Connector with status `off`.
+1. Listing Connectors returns all nine in a fixed order, each with how it is reached (`via`), status, account label and config. The first start seeds every Connector with status `off`.
 2. Connect takes no body. It starts the provider's own browser sign-in and answers 202 at once. Nothing is typed in the console before Connect.
 3. Connecting a Connector that rides an MCP Server (Jira, Bitbucket, Slack, Sentry, Shopify) registers that server in every account if it is missing (`03-settings-mcp-servers`), turns it on if it was turned off, then runs its Authenticate; Shopify's Dev MCP needs no sign-in, and its Connect reads the server alone in the active account. A server registered by this Connect holds no sign-in yet, so its browser sign-in opens in the active account without a Probe first, within a second of the click. Connect signs in the active account only, so it opens one browser sign-in; Bitbucket after Jira opens none for `atlassian`. Jira and Bitbucket share the `atlassian` server. The Connector's status follows the server's, except Bitbucket's: after the server, Bitbucket signs `bkt` in with `bkt auth login --kind cloud --web` unless it already is, and its status follows `bkt api /user`. Its `login` is the Bitbucket nickname. With `bkt` not installed, Connect ends `auth` with where to install it from.
 4. Connecting Datadog, GitHub or GitLab runs the CLI's own browser sign-in (`pup auth login`, `gh auth login --web`, `glab auth login --web`). Connecting GitHub first installs `gh` and `github-mcp-server` from Homebrew when they are not on the PATH, and is refused with "install Homebrew from brew.sh" when Homebrew is missing too. After the sign-in it registers the `github` MCP Server (`github-mcp-server stdio`) with the `gh` token (`gh auth token`) as `GITHUB_PERSONAL_ACCESS_TOKEN`, kept in the Keychain and passed through the launcher, so it never reaches Claude Code's config. Connecting Datadog also registers the `datadog-pup` MCP Server (`pup mcp serve`) so the agent can query it, when the installed `pup` has an `mcp` command; `pup` 2.3.5 has none, and then nothing is registered. Connecting GitLab installs `glab` the same way, and skips the sign-in when `glab` is already signed in to the host, because `glab` asks to confirm a second sign-in. Connecting slashdocs signs its CLI in with `slashdocs auth login`, to the server set in the pane or, when that is blank, the CLI's active one. It skips the sign-in when `slashdocs auth whoami` already reads a user, so it connects at once. Its `login` is the user's email, and its account label is the server. With `slashdocs` not installed, Connect ends `auth` with "install the slashdocs CLI". slashdocs has no MCP Server.
@@ -138,7 +138,8 @@ Config shapes:
   "bitbucket": { "workspace": "string", "ssh_key_path": "string", "pr_target_branch": "string" },
   "slack": { "workspace": "string", "alert_channel": "string", "review_dm_to": "string" },
   "sentry": { "org": "string | null" },
-  "shopify": {}
+  "shopify": {},
+  "slashdocs": { "server": "string" }
 }
 ```
 

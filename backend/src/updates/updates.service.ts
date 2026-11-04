@@ -44,7 +44,7 @@ const versionRecord = z.object({
 type VersionRecord = z.infer<typeof versionRecord>;
 
 /**
- * The console's own version against the newest GitHub release. It checks at start and every 6 hours, installs a
+ * The console's own version against the newest GitHub release. It checks 10 seconds after start and every minute, installs a
  * newer release when asked or, with auto-update on, by itself, and always waits for agent runs to finish unless the
  * operator says now. Installing restarts the daemon on the new version.
  */

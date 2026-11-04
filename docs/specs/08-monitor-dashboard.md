@@ -91,7 +91,7 @@ The Monitor screen
 - **Scan of some codes**: it clears only Alerts with those codes, and writes no healthy Route results: a Route quiet for the picked codes may still fail with others.
 - **Schedule slots**: the daily time and every 6 hours after it are the grid. Each distinct interval runs once per slot of its own length, as one Scan of every Service on that interval. A slot that passed while Datadog is not connected is skipped.
 - **Scan on demand**: `POST /scans` needs the Datadog Connector connected, and answers `connector_not_connected` otherwise.
-- **Alert Session**: the first Verification makes one Session linked by `alert_id`: a `repo` Session on the Repo's current branch, or an anonymous Session with the clone. Every later Verification and Fix stage runs in it. `Alert` carries its id as `session_id`. A failed clone deletes that Session, so the next try clones again.
+- **Alert Session**: the first Verification makes one Session linked by `alert_id`: a `repo` Session on the Repo's default branch, or an anonymous Session with the clone. Every later Verification and Fix stage runs in it. `Alert` carries its id as `session_id`. A failed clone deletes that Session, so the next try clones again.
 - **Verification steps**: each tool step and text block of the run is stored, redacted, and sent as `verification.stepped`.
 - **Report file**: written to `reports_folder`, relative to the data folder. A failed write leaves `markdown_path` null and the Report ready.
 - **Fix runs**: each stage is its own run in the Alert Session and ends with a JSON block (`ticket`: key and URL; `code`: summary; `tests`: passed; `pr`: number and URL). Any other answer fails the stage. The `branch` stage is the console's own checkout, with stash, from `07-workspace`.

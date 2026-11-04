@@ -173,6 +173,10 @@ Each branch adds `has_open_pr: boolean`.
 
 Answers 200 with `{ "data": { "session": "Session", "stashed": false } }`. Errors: `invalid_state` (Behavior 7), `upstream_failed` when git refuses.
 
+### `POST /sessions/:id/attachments?name=`
+
+Body: the file's bytes. Saves it under a new name in `attachments/<session id>/` in the data folder. 201 `{ "data": { "name": "string", "path": "string", "size": 1234 } }`.
+
 ### `GET /sessions/:id/attachments/:file`
 
 Answers the bytes of a file saved for the Session's messages, `:file` being the last part of its saved path, with its type: images and PDFs as themselves, `.txt`, `.log`, `.json` and other text as `text/plain`, anything else as bytes. A name that is not a saved file in the Session's folder, or a Session that does not exist, is `not_found`.
@@ -243,7 +247,9 @@ Adds `branch: string | null`.
   any running or picked one, then "Show N more" or "Show fewer". A row shows title and state on one line, with the
   branch under it when it differs from the Repo's. `+` shows the branch picker and Start; a Repo with no Sessions
   shows them at once, and a Repo whose folder is gone has no `+`. Each Repo's "Show N more", its open `+` and the
-  branch picked for a new Session are kept. A row whose run goes, `waiting_input` included, shows `stop` over its
+  branch picked for a new Session are kept. A search box, "Search repo, branch, Session", filters the list and opens
+  every match with no "Show N more"; Expand all and Collapse all beside it open or fold every Repo. The branch picker
+  has a search box too. A row whose run goes, `waiting_input` included, shows `stop` over its
   state on hover or focus. With no Repos: "Import a Repo in Repos to work on its branches." Loading
   reads "Reading Sessions…"; an error, "Could not read Sessions."
 - A "No Repo" group above the Repos lists anonymous Sessions; its `+` starts one at once.

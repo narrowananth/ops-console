@@ -21,10 +21,12 @@ Review with agent, Approve and Request changes, but nothing that acts on the com
 2. Check reply and Address comments are job Triggers: their Playbook's steps run one turn each, then the console's
    closing turn. Under the steps the editor shows "Check reply: give the verdict and the reply" and "Address
    comments: report each thread done or declined".
-3. The built-in Check reply Playbook has two steps that read only: Read the thread, and Read the code now.
-4. The built-in Address comments Playbook has three steps: Read the threads (reads only), Make the changes (scratch
-   copy) and Run the tests (scratch copy).
-5. Check reply and Address comments take a Playbook with steps tagged "scratch copy". Only Review PR refuses them.
+3. The built-in Check reply Playbook has four steps: Read the whole discussion, Prepare the code context and Check the
+   reply against the code read only; Cross-check dependencies and behaviour is tagged scratch copy.
+4. The built-in Address comments Playbook has six steps: Read the selected threads, Prepare the code context, Weigh
+   each comment and decide and Validate each thread and review the diff read only; Implement the agreed changes and
+   Run the tests are tagged scratch copy.
+5. Check reply and Address comments take a Playbook with steps tagged "scratch copy", as do Verify, Fix and Review PR.
 
 ### Check reply
 
@@ -125,14 +127,13 @@ Review with agent, Approve and Request changes, but nothing that acts on the com
 
 - **A fresh diff before the push**: the operator sees the commit on the card and on the host after the push, not
   before it.
-- **Comments with no line**: neither job reads or answers a comment on the pull request as a whole; it cannot be
-  resolved.
+- **Comments with no line**: a comment on the pull request as a whole is read and answered, and cannot be resolved.
 - **Pull requests from forks**: a Reply check whose head commit cannot be fetched fails as in Behavior 26.
 - **Resume after a daemon restart**: the step fails as interrupted; Retry runs it again.
 
 ## Safety
 
-- A Reply check reads only, unless the operator's Playbook adds a step tagged "scratch copy"; then it may write
+- A Reply check reads only, except in a step tagged "scratch copy" (the built-in has one); there it may write
   files and run local commands in its scratch copy.
 - A Comment pass may write files and run local commands in its scratch copy. In this job only, the ticked review
   comments are change requests: the agent may change code to meet them. It never runs a command, reads a secret,
@@ -252,17 +253,18 @@ rows copy over unchanged.
   "id": "uuid",
   "repo_id": "uuid",
   "pr_number": 12,
+  "kind": "address | check",
   "head_sha": "string",
   "status": "running | ready | failed",
   "commit_sha": "string | null",
   "threads": [
     {
       "comment_id": "string",
-      "file_path": "string",
+      "file_path": "string | null",
       "line": 42,
       "author": "string",
       "excerpt": "string",
-      "outcome": "pending | done | declined",
+      "outcome": "pending | done | declined | fixed | partly_fixed | not_fixed",
       "reply": "string | null",
       "posted": false,
       "resolved": false
@@ -300,6 +302,11 @@ Body: `{ "comment_id": "string" }`, the thread's root. 202 `ReplyCheck` in `runn
 
 202 `ReplyCheck` in `running`. From the failed step, or only the post or resolve left undone (Behavior 11).
 
+### `POST /repos/:repo/pull-requests/:number/reply-check-passes`
+
+No body. 202 `CommentPass` of kind `check` in `running`: Check replies over every unresolved thread with a reply
+(Behavior 7).
+
 ### `POST /repos/:repo/pull-requests/:number/comment-passes`
 
 Body: `{ "comment_ids": ["string"] }`, at least one. 202 `CommentPass` in `running`.
@@ -326,7 +333,7 @@ Gains `reply_check_id` and `comment_pass_id`, null unless the step is that job's
 
 ## UI
 
-- **Thread** (`pr-thread`): Check reply sits next to Resolve when Behavior 6 holds. While a Reply check runs, a strip
+- **Thread** (`pr-thread`): has no Check reply button (Behavior 6). While a Reply check runs, a strip
   under the last comment shows "Checking the reply" with the Playbook's name and each step with its status; failed
   reads "Reply check failed" with the error, "Retry from step N" and "Skip step N", or Retry when no step failed. Stop shows
   while it runs (Behavior 30). Disabled while another job runs on the pull
@@ -370,7 +377,7 @@ Gains `reply_check_id` and `comment_pass_id`, null unless the step is that job's
   Address comments, Reply in thread and Session message in Workspace.
 - **Scratch copy** (changed): a throwaway copy of a Repo's code, at its default branch for a Verification or at a
   pull request's head commit for a Reply check or a Comment pass, where the agent may write files and run local
-  commands. A Playbook step that needs one carries the tag "scratch copy"; Review PR takes no such step.
+  commands. A Playbook step that needs one carries the tag "scratch copy".
 
 ## ADR
 
@@ -390,4 +397,3 @@ Gains `reply_check_id` and `comment_pass_id`, null unless the step is that job's
 
 - Waking the agent on a reviewer's new comment.
 - Comment passes on someone else's pull request, as a suggested change in a comment instead of a push.
-- Comments on the pull request as a whole.

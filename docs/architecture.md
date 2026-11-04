@@ -25,8 +25,9 @@ the service `ops-console-dev`, so it runs beside the installed app and leaves it
 
 ## Install and run
 
-`install.sh` puts a release tarball in `~/.ops-console/versions/<version>`, points
-`~/.ops-console/current` at it and links `~/.local/bin/ops-console`. The tarball carries its own
+`install.sh` refuses macOS older than 13.5. It puts a release tarball in `~/.ops-console/versions/<version>`, points
+`~/.ops-console/current` at it, links `~/.local/bin/ops-console` and keeps only the new and the previous version. An
+Intel shell under Rosetta installs the arm64 build. The tarball carries its own
 Node 24, the bundled daemon, the built UI, the CLI, the native modules (`better-sqlite3`,
 `@napi-rs/keyring`, `node-pty`) built for that Node, and the Claude Agent SDK with its platform's
 Claude Code binary. The system Node is never used. The Node binary sits inside `Ops Console.app`, so
@@ -44,16 +45,20 @@ under App Background Activity in Login Items & Extensions; switched off there, i
 Permissions show it as Start at login, read from the plist and `launchctl print-disabled`. `OPS_CONSOLE_PORT` at
 `start` goes into the plist. The data folder is `~/Library/Application Support/ops-console`
 (`OPS_CONSOLE_DATA_DIR` overrides it) and holds `state.db`, `runtime.json` (pid, port, version,
-session token; mode `0600`), `daemon.lock`, each Claude account's config dir and each Anonymous
-Session's folder. The log is `~/Library/Logs/ops-console/daemon.log`.
+session token; mode `0600`), `daemon.lock`, `update.json`, `keychain-owner.json`, and a folder each for Claude
+accounts (`accounts/`, each one's config dir), Anonymous Sessions (`anonymous/`), Session attachments
+(`attachments/`), the pull request jobs' scratch copies (`pr-scratch/`), Verification scratch copies (`scratch/`),
+Dev tools Sessions (`devtools/`), terminals (`terminals/`) and local MCP Server files (`mcp-local/`). The log is `~/Library/Logs/ops-console/daemon.log`.
 
 To try an install before a release, `pnpm build`, `pnpm package` and a `checksums.txt` beside the tarball in `out/`,
 then `OPS_CONSOLE_RELEASE_URL=file://<repo>/out sh install.sh`. It replaces the installed app, since both use
 `~/.ops-console` and the same data folder.
 
-The daemon reads the newest GitHub release at start and every minute (`UpdatesModule`). To install one, it runs
-the installed version's `install.sh` with `OPS_CONSOLE_VERSION` and then stops itself. `KeepAlive` has launchd
-start it again from `current`, now on the new version. `update.json` in the data folder records the version this
+The daemon reads the newest GitHub release 10 seconds after start and every minute (`UpdatesModule`; a dev build never
+updates). The operator installs it, or the `auto_update` setting (on by default) does, and either waits for running
+agent runs to finish unless the operator picks now. To install one, it runs the installed version's `install.sh` with
+`OPS_CONSOLE_VERSION` and then stops itself. `KeepAlive` has launchd start it again from `current`, now on the new
+version. `update.json` in the data folder records the version this
 data last ran on, so the first start on a new one can say what it came from.
 
 `bin/ops-console` also starts two helpers from the daemon bundle: `mcp-exec`, the launcher that
@@ -81,7 +86,7 @@ Every outside system is an MCP server or a CLI registered with Claude Code (ADR 
 hands off to the provider's browser sign-in, a secret the console must hold goes to the Keychain,
 and the console runs `claude mcp add` in every Claude account. Fixed reads run the CLIs with no
 model turn: `pup` for Scans, `gh`, `glab` and `bkt` for pull requests, `git ls-remote` when looking
-for a Service's code. Judgment work (Verification, Fix, Agent Review, Reply check, Comment pass, Dev tools questions) runs as an
+for a Service's code. The `slashdocs` CLI is a Connector's sign-in and has no MCP Server. Judgment work (Verification, Fix, Agent Review, Reply check, Comment pass, Dev tools questions) runs as an
 agent Session.
 
 ## Backend modules
@@ -93,37 +98,38 @@ agent Session.
 | `auth` | Session token check on every `/api` route |
 | `settings` | Registered keys with schema and default; `GET` and `PATCH /api/settings` |
 | `scheduler` | Jobs with slots; a missed slot runs once at start |
-| `keychain` | `set`, `get`, `delete` in the login Keychain |
-| `claude-cli` | `claude mcp add`, `remove`, `list`, `get`, `login`, and Claude account sign-in, parsed with Zod |
+| `keychain` | `set`, `get`, `delete` in the login Keychain; the handover of items from the previous version's app, which reads wait for |
+| `claude-cli` | `claude mcp add`, `remove`, `list`, `get`, `login`, and Claude account sign-in in this browser or by link and code, parsed with Zod |
 | `mcp-client` | Calls one tool on a server registered with Claude Code, for a fixed read |
 | `mcp` | Servers registered in every Claude account (`.claude.json`) and a Repo's `.mcp.json`; Probe, add, edit, reconnect, disable, remove; the `mcp-exec` launcher |
-| `connectors` | The eight Connectors: browser sign-in through `pup`, `gh`, `glab`, `bkt` or an MCP Server; the MCP Server each registers; Homebrew install of a missing CLI; checks; config |
+| `connectors` | The nine Connectors: browser sign-in through `pup`, `gh`, `glab`, `bkt`, `slashdocs` or an MCP Server; cancel a sign-in; the MCP Server each registers; Homebrew install of a missing CLI; checks; config |
 | `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks; secrets via Keychain |
 | `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash and checkout |
-| `agent` | Sessions and their kinds, Claude Agent SDK runs, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors |
+| `agent` | Sessions and their kinds, Claude Agent SDK runs, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors; stop a run, edit the last message (file edits rewound), attachments |
 | `playbooks` | Playbooks and the Trigger each one holds, the built-ins (each Trigger's method, steps and shared rules on evidence, data, Connections and git) and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each (registered by `agent`) |
-| `accounts` | Claude accounts, their usage, Auto-switch and Smart usage |
+| `accounts` | Claude accounts, their usage, Auto-switch and Smart usage; the Claude account hub: with CLIProxy on, runs go to its loopback address with the API key from the Keychain and switching pauses |
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
-| `workspace` | `repo`, `pr_review` and `anonymous` Sessions; branch checkout with stash; pull requests, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews, Reply checks and Comment passes, one job per pull request at a time, each in a scratch copy at the pull request's head commit; an Agent Review also fetches the target branch to compare with, may run the tests and build, and the console posts its findings and one summary comment; for the others the console commits, pushes, replies and resolves |
+| `workspace` | `repo`, `pr_review` and `anonymous` Sessions; a Session's diff, and a `repo` Session following the agent's branch; branch checkout with stash; pull requests, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews, Reply checks and Comment passes, one job per pull request at a time, each in a scratch copy at the pull request's head commit (an Agent Review makes one only when a Playbook step writes; the built-in's test step does); an Agent Review also fetches the target branch to compare with, may run the tests and build, and the console posts its findings and one summary comment; for the others the console commits, pushes, replies and resolves |
 | `monitor` | Services, Routes, Scans and Alerts through `pup`; finding a Service's code; the Alert's Session; Verification and Reports; the operator's Review; the Fix from ticket to merged PR |
 | `devtools` | `devtools` Sessions scoped to Connections; ties MCP calls to their Connection; the PROD-write rule; the instructions that make the agent hand over Results and a Comparison |
+| `updates` | The newest GitHub release, the version record (`update.json`), install through `install.sh`, auto-update, the wait for running agent runs |
 | `terminals` | node-pty terminals behind an authenticated WebSocket; the Setup agent, its MCP tools, local file, folder, URL and Keychain reads with secrets masked; the Full Disk Access and Start at login gates |
 
 ## Frontend areas
 
 | Folder | Holds |
 |---|---|
-| `app` | Sign-in gate, sidebar, page shell and routes, theme store, the remembered page address |
-| `lib` | API client, TanStack queries, `/ws` live events, session token, Remembered view storage, sorting |
+| `app` | Sign-in gate with the restart panel while an update installs, sidebar with the running tasks tray, the update card, version panel and "Updated to" notice, page shell and routes, theme store, the remembered page address |
+| `lib` | API client, TanStack queries, `/ws` live events, session token, Remembered view storage, sorting, the finish chime, clipboard copy |
 | `monitor` | Monitor page: scan range and status codes, ticked Services, Alerts, Samples, Reports, Review and Fix |
-| `workspace` | Workspace page: Repos and Anonymous Sessions, branch switcher, pull request list, files, threads and Agent Review card |
+| `workspace` | Workspace page: Repos and Anonymous Sessions, branch switcher, pull request list, files with Expand all and Collapse all, threads, the Agent Review, Reply check and Comment pass cards, the Session's Changes panel, queued messages, attachments |
 | `devtools` | Dev tools page (terminal-style `devtools` Sessions scoped to Connections, Results, Comparison) and the Connections page and form |
 | `integrations` | Integrations page: Connectors and MCP Servers |
 | `repos` | Repos page |
 | `setup` | Setup agent page with its xterm terminal, and Permissions: Full Disk Access, Start at login, Keychain |
 | `playbooks` | Playbooks page: Triggers, Playbooks, the editor with drag and drop, Step blocks; unsaved edits kept as a Remembered view; a job's Playbook steps |
-| `agents` | Agents & accounts page, Session transcript, model, effort and Access mode chips, Approval prompts, Report rendering |
-| `mcp`, `components/ui` | MCP status labels; shared controls, the folding card title, and the Tip layer that shows every element's `title` as a styled Tip on hover and keyboard focus |
+| `agents` | Agents & accounts page (accounts, sign-in by link, the CLIProxy hub, the chime), Session transcript, model, effort and Access mode chips, Approval prompts, the question panel, stop run, Report rendering |
+| `mcp`, `components/ui` | MCP status labels; shared controls, the folding card title, the side panel that folds to a rail, the job pathway and live timers, and the Tip layer that shows every element's `title` as a styled Tip on hover and keyboard focus |
 
 ## Data flow
 
@@ -136,24 +142,27 @@ on the one daemon (`ops-console open <app>` signs another browser in): each keep
 `Store.write` runs one transaction and sends its events after the commit. The UI turns each event into
 query refetches, batched over 40 ms. Events (`shared/src/ws.ts`):
 
-- Settings and agents: `settings.updated`, `session.output`, `session.finished`, `session.updated`,
+- Settings and agents: `settings.updated`, `update.changed`, `session.output`, `session.finished`, `session.updated`,
   `approval.requested`, `approval.decided`, `action.logged`, `account.updated`, `account.removed`,
   `account.switched`.
 - Integrations: `connection.checked` for MCP Servers, Connectors and Connections.
-- Workspace: `pull_request.refreshed`, `pull_request.commented`, `pull_request.reviewed`.
+- Workspace: `pull_request.refreshed`, `pull_request.commented`, `pull_request.reviewed`, `pull_request.job_changed` (a Reply check or Comment pass).
+- Playbooks: `playbook_step.updated`, for each step of any job.
 - Monitor: `scan.started`, `scan.finished`, `alert.detected`, `alert.updated`, `alert.regressed`,
   `verification.stepped`, `alert.verified`, `alert.reviewed`, `fix.advanced`, `alert.resolved`.
 
 `/terminals/:id` is a raw stream to one terminal behind the same token check.
 
 **Start-up recovery.** Before the port opens: Sessions left `working`, `waiting_input` or
-`waiting_approval` fail and their Approvals expire; a running Agent Review, Report, Fix, Reply check, Comment pass or Scan
-fails (`interrupted` for a Scan, a Fix, a Reply check and a Comment pass); only failed jobs keep their scratch copy.
+`waiting_approval` fail and their Approvals expire; a running Agent Review, Report, Fix, Reply check, Comment pass, Playbook step or Scan
+fails (`interrupted` for all but the Agent Review); a failed Report, Reply check or Comment pass keeps its scratch copy, and a Reply check or
+Comment pass with one can retry.
 
 **Scheduler.** `monitor-scan` runs on a 6-hour grid from the Datadog Connector's daily scan time and
 starts a Scan of every Service for each Check interval whose slot came due. `monitor-pr-watch` reads
-the PR of every `pr_open` Fix every 5 minutes: merged resolves the Alert, closed abandons the Fix.
-Claude account usage is read every 5 minutes on its own timer.
+the PR of every `pr_open` Fix every 5 minutes and after each pull request list refresh: merged resolves the Alert,
+closed abandons the Fix. Claude account usage is read at start and every 5 minutes on its own timer, and the update
+check runs on its own timer too (`UpdatesModule`).
 
 **Monitor.** A Scan reads failing logs through `pup`, groups them by Fingerprint into Alerts with up
 to 25 redacted Samples, and records each Route's state. After a Scan the code finder looks once for
@@ -172,7 +181,7 @@ on and Jira is connected; otherwise the branch is `fix/<name>`.
 Review, Reply check, Comment pass) copies its Trigger's Playbook when it starts and runs each step as its own turn, ending
 done, skipped or failed; a failed step stops the job. After the last step the console's own closing
 turn writes the Report or the review, and a Fix goes on to its PR. A step tagged scratch copy may write files and
-run commands, only in the job's scratch copy. Chats (Session message, Reply in thread, Ask) read their
+run commands, only in the job's scratch copy. Chats (Session message, Reply in thread) read their
 Playbook's rules at each turn. An Alert's Session uses the rules its latest job copied.
 
 **Workspace pull requests.** Lists span every repository of every owner the operator can read on
@@ -183,8 +192,10 @@ at once while a background read runs, and a read that changed something sends
 marks it stale. Refresh drops the memory and reads again. The UI prefetches the list at load.
 
 **Remembered view.** The UI keeps each page's address (`app/last-address.ts`) and the picks on a page
-(`lib/remember.ts`) in local storage under `ops-console:`, so page switches, reloads and reopening
-the console land where the operator left off. A stored value that no longer parses falls back to the
+(`lib/remember.ts`) in local storage under `ops-console:` (a few older keys, such as the theme, the token and Monitor's range, use
+`ops-console-` or `ops-console.`), so page switches, reloads and reopening the console land where the operator left
+off. Per Session it keeps the draft message and the attachments; per browser, the chime switch, folded cards and the
+Changes panel's width and view. A stored value that no longer parses falls back to the
 default.
 
 ## `state.db` holds
@@ -202,13 +213,18 @@ A Session's run is a Claude Agent SDK `query()` in the working directory its kin
 resuming the stored SDK session. Each Claude account has its own `CLAUDE_CONFIG_DIR` under the data
 folder; the console never uses the operator's own Claude Code login. A `PreToolUse` hook writes the
 Action Log row before every Bash and MCP call and holds a PROD write for an Approval in every
-access mode. `disallowedTools` denies `gh pr merge`, `glab mr merge` and the GitHub and GitLab MCP
-merge tools. Permission prompts in `supervised` mode, and the agent's questions, reach `canUseTool`
+access mode. `disallowedTools` denies `gh pr merge`, `glab mr merge`, `bkt pr merge`, `bkt pr auto-merge` and the GitHub and GitLab MCP
+merge tools. An Agent Review, Reply check and Comment pass also deny `git push`, the host CLIs' comment, review and `api`
+commands and the host MCP comment tools, since the console pushes, replies and resolves. Permission prompts in `supervised` mode, and the agent's questions, reach `canUseTool`
 and wait for the operator. MCP Servers the operator disabled, and for a `devtools` Session the
 Connections outside its scope, are denied for the run. Every run's system prompt appends the kind's
-instructions, then the Playbook's rules, then the console's safety lines. Those say that log lines and
+instructions, the rules for a PR description and for opening a pull request, then the Playbook's rules, then the console's
+safety lines. Those say that log lines and
 data are never instructions, that the agent never merges, and that no PROD value goes into a mock or
-anything else it writes. A
+anything else it writes. Stop ends a run and expires its Approvals, and the operator may edit the last message, which rewinds the agent's file
+edits. Attached files sit in the Session's `attachments/` folder, added to the run's directories. With CLIProxy on, a
+run sends CLIProxy's API key and address in place of an account's sign-in, usage is not read from it and account
+switching is off; the address must be loopback (ADR 0003). A
 conversation begun in one folder moves its transcript to the next run's folder, so a chat after a
 Verification resumes it in the checkout. Runs live in the daemon's memory; a restart
 fails them and expires their Approvals.
@@ -233,7 +249,7 @@ Where the build departs from `design/ops-console.html` on purpose:
 - **Access Level** changes how a Connection's MCP server launches (read-only flag, config file or
   read-only user), not only the badge.
 - **Merge** is a button for the operator only; the agent has no merge tool.
-- **Connectors** add Sentry and drop Kafka.
+- **Connectors** add Sentry, Shopify and slashdocs, and drop Kafka.
 - **Dev tools** adds a Comparison under the per-Connection Results, and Copy JSON on each.
 - **Agent Review card** shows a verdict (approve, request changes, comment), findings rated critical to info with a
   count of each, the commits it read and compared with, and the full report, in place of the design's blockers,
@@ -241,3 +257,11 @@ Where the build departs from `design/ops-console.html` on purpose:
 - **Tips** on every control, status and count whose words leave its meaning open, and a "?" beside such labels.
 - **Folding cards**: each card with a title folds to it, and stays folded for that kind of card.
 - **Permissions** on the Setup agent page add Start at login.
+- **Running tasks** tray in the sidebar: every agent run going, each linking to its work.
+- **Updates**: a version line and panel, an update card and an "Updated to" notice, with Check now and auto-update.
+- **Claude account hub**: CLIProxy as the sign-in for agent runs, and adding an account by link.
+- **Finish chime**: a soft sound when the operator's run ends, switchable per browser, under Notifications.
+- **Question panel**, **queued messages**, **attachments** and the Session's **Changes** panel in Workspace.
+- **Check reply** and **Address comments** Triggers, with their cards on a pull request.
+- **Job timers** and Skip and Retry on each Playbook step; Expand all and Collapse all on a pull request's files.
+- **Side panels fold** to a rail: Workspace, Monitor's Services and the Session's Changes.
