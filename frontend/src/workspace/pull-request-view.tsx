@@ -2,7 +2,6 @@ import {
   AgentReviewStatus,
   CommentPassKind,
   PlaybookTrigger,
-  PrChecks,
   PrReviewEvent,
   PrReviewState,
   PrState,
@@ -40,27 +39,9 @@ import {
   openThreads,
   repliedThreads,
 } from './pr-jobs';
+import { PrMeta } from './pr-meta';
 import { PrSessions } from './pr-sessions';
 import { CommentComposer, Thread } from './pr-thread';
-
-const STATE_TIP: Record<PrState, string> = {
-  [PrState.Open]: 'Open: waiting for review and merge',
-  [PrState.Merged]: 'Merged into the target branch',
-  [PrState.Closed]: 'Closed without merging',
-};
-
-const CHECKS_TIP: Record<PrChecks, string> = {
-  [PrChecks.None]: 'No CI checks reported on the newest commit',
-  [PrChecks.Running]: 'CI checks are still running on the newest commit',
-  [PrChecks.Passed]: 'Every CI check passed on the newest commit',
-  [PrChecks.Failed]: 'At least one CI check failed on the newest commit. Open it on the host to see which.',
-};
-
-const REVIEW_TIP: Record<PrReviewState, string> = {
-  [PrReviewState.None]: 'Nobody has approved or asked for changes yet',
-  [PrReviewState.Approved]: 'A reviewer approved it',
-  [PrReviewState.ChangesRequested]: 'A reviewer asked for changes',
-};
 
 const FOLD_ALL =
   'cursor-pointer rounded border-0 bg-transparent px-1.5 py-0.5 text-xs text-neutral-700 hover:bg-neutral-200 hover:text-text';
@@ -123,36 +104,7 @@ function Loaded(props: {
         <h2 className="m-0 text-[17px] font-semibold">
           #{pr.number} {pr.title}
         </h2>
-        <div className="flex flex-wrap gap-x-3 font-mono text-xs text-neutral-700">
-          <a
-            href={pr.url}
-            target="_blank"
-            rel="noreferrer"
-            title={`Open #${pr.number} on ${pr.host} in a new tab`}
-            className="text-text underline"
-          >
-            Open on the host
-          </a>
-          <span title={`Merging brings ${pr.branch} into ${pr.base_branch}`}>
-            {pr.branch} → {pr.base_branch}
-          </span>
-          <span title="Author">{pr.author}</span>
-          <span title={STATE_TIP[pr.state]}>{pr.state}</span>
-          <span title="Lines added and removed across every file">
-            +{pr.additions} −{pr.deletions}
-          </span>
-          <span title={CHECKS_TIP[pr.checks]}>checks {pr.checks}</span>
-          {pr.approved_by.length > 0 ? (
-            <span className="font-semibold text-ok" title={`Approved by ${pr.approved_by.join(', ')}`}>
-              ✓ approved by {pr.approved_by.join(', ')}
-            </span>
-          ) : (
-            <span title={REVIEW_TIP[pr.review_state]}>review {pr.review_state.replace('_', ' ')}</span>
-          )}
-          <span title="Comments on the Git host, and how many of their threads are resolved">
-            {pr.comment_count} comments · {pr.resolved_count} resolved
-          </span>
-        </div>
+        <PrMeta pr={pr} />
         <div className="flex flex-wrap items-center gap-2">
           {open && !pr.is_mine && (
             <>
@@ -173,28 +125,30 @@ function Loaded(props: {
               </Button>
             </>
           )}
-          <Button
-            variant="primary"
-            className="px-3 py-1 text-xs"
-            disabled={agent.isPending || busy || reviewed}
-            title={
-              busy
-                ? BUSY_TITLE
-                : reviewed
-                  ? 'The agent already reviewed this commit. Push a change to review again.'
-                  : AGENT_REVIEW_TIP
-            }
-            onClick={() => agent.mutate()}
-          >
-            {reviewing && <Spinner />}
-            {reviewing
-              ? 'Agent reviewing…'
-              : agent.isPending
-                ? 'Starting…'
-                : reviewed
-                  ? 'Reviewed at this commit'
-                  : withPlaybook('Agent Review', reviewPlaybook)}
-          </Button>
+          {open && (
+            <Button
+              variant="primary"
+              className="px-3 py-1 text-xs"
+              disabled={agent.isPending || busy || reviewed}
+              title={
+                busy
+                  ? BUSY_TITLE
+                  : reviewed
+                    ? 'The agent already reviewed this commit. Push a change to review again.'
+                    : AGENT_REVIEW_TIP
+              }
+              onClick={() => agent.mutate()}
+            >
+              {reviewing && <Spinner />}
+              {reviewing
+                ? 'Agent reviewing…'
+                : agent.isPending
+                  ? 'Starting…'
+                  : reviewed
+                    ? 'Reviewed at this commit'
+                    : withPlaybook('Agent Review', reviewPlaybook)}
+            </Button>
+          )}
           {(replied > 0 || checking) && (
             <Button
               className="px-3 py-1 text-xs"
