@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { SdkUsageSource } from './accounts/usage-source';
 import { AgentModule } from './agent/agent.module';
 import { ClaudeAgentSdk } from './agent/agent-sdk';
+import { quietShadowedPrompt } from './agent/sdk-warnings';
 import { McpConnectionTester } from './connections/connection-tester';
 import { ConnectionsModule } from './connections/connections.module';
 import { CliConnectorTools } from './connectors/connector-tools';
@@ -26,6 +27,8 @@ import { ScriptInstaller } from './updates/installer';
 import { GithubReleases } from './updates/releases';
 import { UpdatesModule } from './updates/updates.module';
 import { WorkspaceModule } from './workspace/workspace.module';
+
+quietShadowedPrompt();
 
 const keychain = new LoginKeychain(process.env.OPS_CONSOLE_KEYCHAIN_SERVICE || undefined);
 

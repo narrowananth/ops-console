@@ -118,10 +118,13 @@ export class UpdatesService implements OnApplicationBootstrap, OnModuleDestroy {
     if (this.dev) return this.state();
     try {
       this.latest = await this.releases.latest();
+      if (this.error !== null) this.log.log('GitHub is reachable again');
       this.error = null;
     } catch (error) {
-      this.error = `Could not reach GitHub: ${(error as Error).message}`;
-      this.log.warn(this.error);
+      const message = `Could not reach GitHub: ${(error as Error).message}`;
+      // A check runs every minute: a lost connection is logged once, not at every check until it returns.
+      if (this.error === null) this.log.warn(message);
+      this.error = message;
     }
     this.checkedAt = new Date().toISOString();
     if (!this.installing && this.status !== UpdateStatus.Waiting && this.status !== UpdateStatus.Failed) {

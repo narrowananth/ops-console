@@ -267,8 +267,10 @@ export const agentRunSchema = z.object({
   outcome: z.enum(RunOutcome).nullable(),
   started_at: z.string().nullable(),
   finished_at: z.string().nullable(),
-  /** The operator can start the run again with Play or Retry: the Session takes messages. */
+  /** The Session takes messages, so the run can pause and a message can queue behind it. */
   can_resume: z.boolean(),
+  /** Play or Retry can start the run again: the Session takes messages, or its kind has a way to run it again. */
+  can_retry: z.boolean(),
   subagents: z.array(subagentSchema),
   health: z.enum(RunHealth),
   /** One line on why the run has this health: what it waits on, what is slow, what failed. */

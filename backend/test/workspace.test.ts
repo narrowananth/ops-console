@@ -1385,6 +1385,42 @@ describe('Agent Review', () => {
     close();
   });
 
+  it('runs a pull request’s failed job again from Retry on its run in the Agent runs page', async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1)];
+    const created = await ctx.http.post('/playbooks', {
+      name: 'PROD readiness',
+      rules: '',
+      steps: [{ block: 'custom', title: 'Migrations', instructions: 'Check Migrations.', writes: false }],
+    });
+    await ctx.http.put('/playbook-triggers/review_pr', { playbook_id: created.body.data.id });
+    const { events, close } = await listen(ctx.daemon);
+    const outcome = (status: string) => ({
+      text: `\`\`\`json\n${JSON.stringify({ outcome: status, summary: 'no rollback plan' })}\n\`\`\``,
+    });
+    ctx.daemon.sdk.script({ rejected: true });
+    await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`);
+    await waitForReview(events);
+
+    const runs = (await ctx.http.get('/agent-runs')).body.data as {
+      session: { id: string; kind: string };
+      can_resume: boolean;
+      can_retry: boolean;
+    }[];
+    const run = runs.find((one) => one.session.kind === 'pr_review');
+    expect(run).toMatchObject({ can_resume: false, can_retry: true });
+
+    events.length = 0;
+    ctx.daemon.sdk.script(outcome('done'));
+    ctx.daemon.sdk.script({ text: REVIEW });
+    const retried = await ctx.http.post(`/sessions/${run?.session.id}/resume`, {});
+    expect(retried.status).toBe(202);
+    await waitForReview(events);
+    const [ready] = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
+    expect(ready).toMatchObject({ status: 'ready', verdict: 'Needs one fix' });
+    close();
+  });
+
   it('takes no message from the operator in a pr_review Session', async () => {
     const ctx = await start();
     await withOrigin(ctx);

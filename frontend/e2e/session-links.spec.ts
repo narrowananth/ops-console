@@ -133,6 +133,7 @@ const run = (id: string, extra: Record<string, unknown> = {}, sessionExtra: Reco
   started_at: NOW,
   finished_at: null,
   can_resume: true,
+  can_retry: true,
   subagents: [],
   health: 'on_track',
   health_reason: 'On track: the agent is thinking',
@@ -152,8 +153,16 @@ test('the sidebar tray lists every agent run going, says which wait on the opera
       json: {
         data: [
           run('s1', {}, { state: 'working', title: 'Add a retry' }),
-          run('s3', {}, { state: 'waiting_approval', title: 'Drop the old index', branch: 'main' }),
-          run('s4', { can_resume: false }, { kind: 'pr_review', state: 'working', pr_number: 7, title: 'PR #7' }),
+          run(
+            's3',
+            { health: 'needs_you', health_reason: 'Waiting on you for 1m' },
+            { state: 'waiting_approval', title: 'Drop the old index', branch: 'main' },
+          ),
+          run(
+            's4',
+            { can_resume: false, can_retry: false },
+            { kind: 'pr_review', state: 'working', pr_number: 7, title: 'PR #7' },
+          ),
         ],
         meta: { next_cursor: null },
       },
@@ -165,14 +174,17 @@ test('the sidebar tray lists every agent run going, says which wait on the opera
   await expect(tray).toHaveText(/Running\s*3/);
   await expect(tray).toHaveAttribute('title', '3 agent runs going, 1 waiting on you');
   await tray.click();
-  const runs = page.getByRole('dialog', { name: 'Agent runs going now' }).getByRole('listitem');
-  await expect(runs).toHaveText([/Add a retry.*working/, /Drop the old index.*needs you/, /Pull request #7.*working/]);
+  const dialog = page.getByRole('dialog', { name: 'Agent runs' });
+  await expect(dialog).toContainText('3 agent runs');
+  await expect(dialog).toContainText('3 going · 1 needs you · 0 ended');
+  const runs = dialog.getByRole('listitem');
+  await expect(runs).toHaveText([/Drop the old index.*needs you/, /Add a retry.*working/, /Pull request #7.*working/]);
 
-  await runs.filter({ hasText: 'Pull request #7' }).getByRole('link').click();
+  await dialog.getByRole('link', { name: 'Pull request #7' }).click();
   await expect(page).toHaveURL(/\/workspace\?tab=pulls&pr=r1%2F7$/);
-  await expect(page.getByRole('dialog', { name: 'Agent runs going now' })).toBeHidden();
+  await expect(dialog).toBeHidden();
   await tray.click();
-  await runs.filter({ hasText: 'Add a retry' }).getByRole('link').click();
+  await dialog.getByRole('link', { name: 'Session · Add a retry' }).click();
   await expect(page).toHaveURL(/\/workspace\?session=s1$/);
 });
 
@@ -233,22 +245,22 @@ test('the tray shows how long a run took, nests its subagents, and pauses, stops
   const tray = page.getByRole('button', { name: 'Running agents' });
   await expect(tray).toHaveAttribute('title', '1 agent run going, 2 ended');
   await tray.click();
-  const runs = page.getByRole('dialog', { name: 'Agent runs going now' }).getByRole('listitem');
+  const runs = page.getByRole('dialog', { name: 'Agent runs' }).getByRole('listitem');
   const main = runs.filter({ hasText: 'Add a retry' }).first();
-  await expect(main).toContainText('2 subagents');
   await expect(page.getByText('Task t1')).toBeHidden();
-  await main.getByRole('button', { name: 'Show 2 subagents' }).click();
+  await main.getByRole('button', { name: 'Show details of Add a retry' }).click();
+  await expect(main).toContainText('2 subagents (1 working)');
   await expect(page.getByText('Task t1')).toBeVisible();
   await expect(page.getByText('Task t2')).toBeVisible();
 
   const limited = runs.filter({ hasText: 'Hit the limit' });
   await expect(limited).toContainText('limit reached');
   await expect(limited).toContainText('4m 05s');
-  await main.getByRole('button', { name: 'Pause' }).click();
-  await main.getByRole('button', { name: 'Stop', exact: true }).click();
-  await limited.getByRole('button', { name: 'Retry' }).click();
+  await main.getByRole('button', { name: /^Pause/ }).click();
+  await main.getByRole('button', { name: 'Stop the run where it is' }).click();
+  await limited.getByRole('button', { name: /^Retry/ }).click();
   const paused = runs.filter({ hasText: 'Paused one' });
-  await paused.getByRole('button', { name: 'Play' }).click();
-  await paused.getByRole('button', { name: 'Dismiss' }).click();
+  await paused.getByRole('button', { name: /^Play/ }).click();
+  await paused.getByRole('button', { name: /^Dismiss/ }).click();
   await expect.poll(() => calls).toEqual(['pause s1', 'stop s1', 'resume s3', 'resume s5', 'dismiss s5']);
 });

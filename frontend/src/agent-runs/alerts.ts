@@ -1,8 +1,8 @@
 import { RunHealth } from '@ops-console/shared';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { useAgentRuns } from '../lib/queries';
-import { readStored } from '../lib/remember';
+import { readStored, useStored } from '../lib/remember';
 import { HEALTH } from './run-look';
 
 export const ALERT_NEEDS_KEY = 'agent-runs.alert-needs-you';
@@ -62,4 +62,27 @@ export function useRunAlerts(): void {
       }
     }
   }, [runs]);
+}
+
+/** The Alerts pill: on when either desktop alert is on; turning it on asks the browser once and turns both on. */
+export function useAlertsToggle(): { on: boolean; refused: boolean; toggle: () => Promise<void> } {
+  const [needs, setNeeds] = useStored(ALERT_NEEDS_KEY, alertSchema, false);
+  const [ends, setEnds] = useStored(ALERT_ENDS_KEY, alertSchema, false);
+  const [refused, setRefused] = useState(false);
+  const on = needs || ends;
+  const toggle = async () => {
+    if (on) {
+      setNeeds(false);
+      setEnds(false);
+      return;
+    }
+    if (!(await allowDesktopAlerts())) {
+      setRefused(true);
+      return;
+    }
+    setRefused(false);
+    setNeeds(true);
+    setEnds(true);
+  };
+  return { on, refused, toggle };
 }

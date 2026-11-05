@@ -130,6 +130,7 @@ export class RunInsights {
       started_at: row.runStartedAt,
       finished_at: row.runFinishedAt,
       can_resume: this.kinds.get(row.kind)?.acceptsMessages ?? false,
+      can_retry: (this.kinds.get(row.kind)?.acceptsMessages ?? false) || this.kinds.retryOf(row.kind) !== undefined,
       subagents: subagentsOf(row),
       health,
       health_reason: reason,

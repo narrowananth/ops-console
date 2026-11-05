@@ -182,8 +182,8 @@ export class SessionsController {
   /** Starts a paused, stopped or failed run again; 409 `session_busy` while a run is going. */
   @Post(':id/resume')
   @HttpCode(202)
-  resume(@Param() params: unknown): { data: { message_id: string } } {
-    return { data: this.runtime.resumeRun(parseInput(idParams, params, 'params').id) };
+  async resume(@Param() params: unknown): Promise<{ data: { message_id: string } }> {
+    return { data: await this.runtime.resumeRun(parseInput(idParams, params, 'params').id) };
   }
 
   @Get(':id/messages')

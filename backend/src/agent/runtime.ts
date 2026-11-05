@@ -479,11 +479,17 @@ export class AgentRuntime {
 
   /**
    * Starts the run again from the conversation as it stands, for Play on a paused or stopped run and Retry on one that
-   * failed. Refused while a run is going or when the Session takes no messages.
+   * failed. Refused while a run is going. A Session that takes no messages runs its last failed job again instead.
    */
-  resumeRun(sessionId: string): { message_id: string } {
+  async resumeRun(sessionId: string): Promise<{ message_id: string }> {
     const session = this.sessions.get(sessionId);
     if (this.runs.get(sessionId)) throw new ApiError(409, ErrorCode.SessionBusy, "the session's run is still going");
+    // A kind that takes no messages, such as a pull request review, runs its last job again its own way.
+    const again = this.kinds.retryOf(session.kind);
+    if (again && !this.kinds.get(session.kind)?.acceptsMessages) {
+      await again(session);
+      return { message_id: crypto.randomUUID() };
+    }
     const retry = session.runOutcome !== RunOutcome.Paused && session.runOutcome !== RunOutcome.Stopped;
     return this.send(sessionId, retry ? RETRY_TEXT : PLAY_TEXT);
   }
