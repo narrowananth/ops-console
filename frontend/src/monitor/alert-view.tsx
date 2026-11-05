@@ -49,6 +49,7 @@ import {
   PlaybookLink,
   runState,
   ScratchTag,
+  SkillsOffered,
   SkipStep,
   stepTally,
   useTriggerPlaybook,
@@ -261,6 +262,7 @@ function VerificationPath({ report }: { report: Report }) {
             playbook={report.playbook}
             title="The Playbook this Verification follows. Its rules and steps were copied when it started."
           />
+          <SkillsOffered playbook={report.playbook} />
         </div>
       )}
       <JobPath
@@ -491,6 +493,7 @@ function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: (skip: boo
             title="The Playbook this Fix follows. Its rules and steps were copied when it started."
           />
         )}
+        {fix.playbook && <SkillsOffered playbook={fix.playbook} />}
         <span className="ml-auto flex items-center gap-3">
           {fix.session_id && (
             <Link

@@ -1,4 +1,4 @@
-import type { Part } from '@ops-console/shared';
+import type { Part, SkillCopy } from '@ops-console/shared';
 
 /** A run in progress. It lives in memory only: a daemon restart ends it (Behavior 18). */
 export type Run = {
@@ -9,6 +9,8 @@ export type Run = {
   workingDir: string;
   /** The Playbook rules this run follows; null for none. */
   rules: string | null;
+  /** The Skills the run's Playbook holds. */
+  skills: SkillCopy[];
   /** Tools denied on top of merging. */
   deny: string[];
   parts: Part[];

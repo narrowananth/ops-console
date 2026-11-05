@@ -4,6 +4,7 @@ import { Button, Spinner } from '../components/ui/button';
 import { Elapsed } from '../components/ui/elapsed';
 import { Pathway, PathwayProgress, type PathwayState, type PathwayStep } from '../components/ui/pathway';
 import { usePlaybooks } from '../lib/queries';
+import { ascending } from '../lib/sort';
 import { holderOf } from './labels';
 
 /** What the "scratch copy" tag means, wherever a step carries it. */
@@ -58,6 +59,32 @@ export function PlaybookLink({
     >
       {text}
     </Link>
+  );
+}
+
+/** "Skills offered: a, b": the Skills the job was offered, each opening on the Skills page; nothing when none. */
+export function SkillsOffered({ playbook }: { playbook: JobPlaybook }) {
+  if (playbook.skills.length === 0) return null;
+  return (
+    <span className="flex flex-wrap items-center gap-1.5 text-xs text-neutral-700">
+      Skills offered:
+      {ascending(playbook.skills, (skill) => skill.name).map((skill) =>
+        skill.id === null ? (
+          <span key={skill.name} title="This Skill has been deleted." className={pill}>
+            {skill.name}
+          </span>
+        ) : (
+          <Link
+            key={skill.id}
+            to={`/skills?skill=${encodeURIComponent(skill.id)}`}
+            title="A Skill the agent could load in this run. Open it on the Skills page."
+            className={pill}
+          >
+            {skill.name}
+          </Link>
+        ),
+      )}
+    </span>
   );
 }
 

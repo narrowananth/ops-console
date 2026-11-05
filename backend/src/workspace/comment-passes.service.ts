@@ -18,6 +18,7 @@ import { prCommentPasses } from '../db/schema';
 import { type Emit, STORE, type Store } from '../db/store';
 import { JobSteps, jobPlaybook } from '../playbooks/job-steps';
 import { PlaybooksService } from '../playbooks/playbooks.service';
+import { parseSkillCopies, skillCopiesJson } from '../playbooks/skills.service';
 import { BranchMoved, GIT, Git, GitFailed } from '../repos/git';
 import type { HostComment, HostPullRequest } from './git-host';
 import {
@@ -195,6 +196,7 @@ export class CommentPassesService {
           playbookId: copy.id,
           playbookName: copy.name,
           playbookRules: copy.rules,
+          playbookSkills: skillCopiesJson(copy.skills),
         })
         .returning()
         .get();
@@ -285,16 +287,18 @@ export class CommentPassesService {
   private async work(row: Row, session: string, brief: string): Promise<Row> {
     const cwd = row.scratchPath ?? undefined;
     const rules = row.playbookRules;
+    const skills = parseSkillCopies(row.playbookSkills);
     const failure = await this.steps.run({
       job: { kind: 'comment_pass', id: row.id },
       sessionId: session,
       brief,
       rules,
+      skills,
       cwd,
       deny: HOST_WRITE_DENIALS,
     });
     if (failure) throw new JobFailed(failure, true);
-    const closing = { rules, cwd, deny: HOST_WRITE_DENIALS };
+    const closing = { rules, skills, cwd, deny: HOST_WRITE_DENIALS };
     const check = row.kind === CommentPassKind.Check;
     const prompt = check ? CHECK_REPLIES_PROMPT : COMMENT_PASS_PROMPT;
     const summary = await this.runtime.runFor(session, prompt, null, closing).finished;

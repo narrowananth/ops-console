@@ -26,6 +26,7 @@ import { agentComments, prAgentReviews } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { JobSteps, jobPlaybook } from '../playbooks/job-steps';
 import { PlaybooksService } from '../playbooks/playbooks.service';
+import { parseSkillCopies, skillCopiesJson } from '../playbooks/skills.service';
 import { GIT, Git, GitFailed } from '../repos/git';
 import type { HostComment, HostPullRequest } from './git-host';
 import { JobFailed, PrJobs } from './pr-jobs';
@@ -287,6 +288,7 @@ export class AgentReviewsService {
           playbookId: copy.id,
           playbookName: copy.name,
           playbookRules: copy.rules,
+          playbookSkills: skillCopiesJson(copy.skills),
           note: note || null,
         })
         .returning()
@@ -369,7 +371,8 @@ export class AgentReviewsService {
       const ours = this.jobs.agentCommentIds(row.repoId, row.prNumber);
       const brief = reviewBrief(slug, read.pr, read.files, read.comments, ours, place, row.note);
       const rules = row.playbookRules ?? '';
-      const reach = { rules, ...(scratch ? { cwd: scratch } : {}), deny: HOST_WRITE_DENIALS };
+      const skills = parseSkillCopies(row.playbookSkills);
+      const reach = { rules, skills, ...(scratch ? { cwd: scratch } : {}), deny: HOST_WRITE_DENIALS };
       const failure = await this.steps.run({ job, sessionId, brief, ...reach });
       if (failure) throw new JobFailed(failure, true);
       const closing = steps.length > 0 ? REVIEW_PROMPT : `${brief}\n\n${REVIEW_PROMPT}`;
@@ -407,7 +410,7 @@ export class AgentReviewsService {
     const rootComment = thread.find((comment) => comment.id === root);
     // A job on the pull request holds its Session between steps; the answer waits for it to end.
     const session = await this.jobs.whenIdle(repo, number);
-    const { rules } = this.playbooks.forSession(this.sessions.get(session));
+    const { rules, skills } = this.playbooks.forSession(this.sessions.get(session));
     const text = `The operator replied in a review thread you started on pull request #${number} of ${slug}${
       rootComment?.file_path ? `, on ${rootComment.file_path}${rootComment.line ? `:${rootComment.line}` : ''}` : ''
     }.
@@ -415,7 +418,7 @@ export class AgentReviewsService {
 ${thread.map((comment) => `${comment.author}: ${comment.body}`).join('\n\n')}
 
 Answer the last message in plain text, in a few sentences. Do not change anything.`;
-    const summary = await this.runtime.runFor(session, text, null, { rules }).finished;
+    const summary = await this.runtime.runFor(session, text, null, { rules, skills }).finished;
     if (!summary.ok || !summary.text.trim()) return;
     const row = this.actionLog.start({
       sessionId: session,

@@ -5,15 +5,18 @@ import {
   type Playbook,
   type PlaybookTrigger,
   PR_DESCRIPTION_RULE,
+  SKILL_LIMITS,
   StepBlock,
   TRIGGER_LABELS,
 } from '@ops-console/shared';
 import { type DragEvent, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button, Spinner } from '../components/ui/button';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { Hint } from '../components/ui/tip';
 import { Toggle } from '../components/ui/toggle';
-import { useCreatePlaybook, useDeletePlaybook, useSavePlaybook } from '../lib/queries';
+import { useCreatePlaybook, useDeletePlaybook, useSavePlaybook, useSkills } from '../lib/queries';
+import { ascending } from '../lib/sort';
 import type { Draft, DraftStep } from './drafts';
 import { type Drag, Grip, leftFor, startDrag } from './drag';
 import { SCRATCH_TIP, ScratchTag } from './job-steps';
@@ -122,6 +125,7 @@ export function PlaybookEditor(props: {
                     branches: playbook.branches,
                     jira_ticket: playbook.jira_ticket,
                     steps: playbook.steps,
+                    skill_ids: playbook.skills.map((skill) => skill.id),
                   },
                   { onSuccess: (made) => props.onOpen(made.id) },
                 )
@@ -222,6 +226,13 @@ export function PlaybookEditor(props: {
             </p>
           </details>
         </section>
+
+        <SkillsSection
+          playbook={playbook}
+          ids={working.skill_ids}
+          readOnly={readOnly}
+          onChange={(skill_ids) => onChange({ ...working, skill_ids })}
+        />
 
         <section aria-label="Branch">
           <div className="mb-1.5 flex items-baseline gap-2">
@@ -373,6 +384,115 @@ export function PlaybookEditor(props: {
             </p>
           )}
         </div>
+      )}
+    </section>
+  );
+}
+
+/** The Skills the Playbook holds, with a picker for the ones it does not. They save with the Playbook. */
+function SkillsSection(props: {
+  playbook: Playbook;
+  ids: string[];
+  readOnly: boolean;
+  onChange: (ids: string[]) => void;
+}) {
+  const { ids, readOnly } = props;
+  const skills = useSkills();
+  const known = [...(skills.data?.items ?? []), ...props.playbook.skills];
+  const held = ascending(
+    ids.map((id) => ({ id, ...known.find((skill) => skill.id === id) })),
+    (skill) => skill.name ?? '',
+  );
+  const free = ascending(
+    (skills.data?.items ?? []).filter((skill) => !ids.includes(skill.id)),
+    (skill) => skill.name,
+  );
+  const full = ids.length >= SKILL_LIMITS.perPlaybook;
+  const noneToAdd = skills.data !== undefined && free.length === 0;
+
+  return (
+    <section aria-label="Skills">
+      <div className="mb-1.5 flex items-baseline gap-2">
+        <h2 className="m-0 text-sm">Skills</h2>
+        <Hint
+          text={`Methods the agent can load while this Playbook runs, when a step needs one. Up to ${SKILL_LIMITS.perPlaybook}. Write them on the Skills page.`}
+        />
+        <span className="text-xs text-neutral-700">The agent sees their names and loads one when it needs it</span>
+        <span
+          title="Skills held, out of the most a Playbook can hold"
+          className="ml-auto font-mono text-xs text-neutral-700"
+        >
+          {ids.length} / {SKILL_LIMITS.perPlaybook}
+        </span>
+      </div>
+      {held.length === 0 ? (
+        <p className="m-0 mb-2 text-xs text-neutral-700">No Skills. The agent follows the rules and steps only.</p>
+      ) : (
+        <ul className="m-0 mb-2 flex list-none flex-col gap-2 p-0">
+          {held.map((skill) => (
+            <li
+              key={skill.id}
+              aria-label={skill.name ?? 'A deleted Skill'}
+              className="flex items-start gap-2.5 rounded-lg border border-line bg-card px-3 py-2 shadow-sm"
+            >
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                {skill.name === undefined ? (
+                  <span className="text-[13px] font-semibold text-neutral-700">A deleted Skill</span>
+                ) : (
+                  <Link
+                    to={`/skills?skill=${encodeURIComponent(skill.id)}`}
+                    title="Open this Skill on the Skills page"
+                    className="font-mono text-[13px] font-semibold"
+                  >
+                    {skill.name}
+                  </Link>
+                )}
+                <span className="text-xs text-neutral-700">{skill.description}</span>
+              </div>
+              {!readOnly && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${skill.name ?? 'the deleted Skill'}`}
+                  title="Take this Skill off the Playbook. Save to keep the change. The Skill is not deleted."
+                  onClick={() => props.onChange(ids.filter((id) => id !== skill.id))}
+                  className={actionButton}
+                >
+                  ×
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!readOnly && (
+        <>
+          <select
+            aria-label="Add a Skill"
+            value=""
+            disabled={full || noneToAdd}
+            title={
+              full
+                ? `A Playbook holds ${SKILL_LIMITS.perPlaybook} Skills at most. Remove one first.`
+                : noneToAdd
+                  ? 'Every Skill is held already, or none is written yet.'
+                  : undefined
+            }
+            onChange={(event) => event.target.value && props.onChange([...ids, event.target.value])}
+            className={`${field} w-auto min-w-56 cursor-pointer text-[13px] disabled:cursor-not-allowed disabled:opacity-50`}
+          >
+            <option value="">Add a Skill…</option>
+            {free.map((skill) => (
+              <option key={skill.id} value={skill.id}>
+                {skill.name}
+              </option>
+            ))}
+          </select>
+          {skills.isError && (
+            <p role="alert" className="m-0 mt-1 text-xs text-accent-700">
+              Could not read Skills: {skills.error.message}
+            </p>
+          )}
+        </>
       )}
     </section>
   );

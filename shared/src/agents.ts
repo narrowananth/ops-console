@@ -53,6 +53,7 @@ export enum ActionKind {
   Git = 'git',
   Pr = 'pr',
   Ticket = 'ticket',
+  Skill = 'skill',
 }
 
 export enum ActionOutcome {

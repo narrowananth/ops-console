@@ -1562,6 +1562,7 @@ describe('Playbooks in Monitor jobs', () => {
     expect({ ...report.playbook, steps: report.playbook.steps.map(untimed) }).toEqual({
       id: playbook.id,
       name: 'Checkout deep check',
+      skills: [],
       steps: [
         { title: 'Trace', writes: false, status: 'done', summary: 'OrderService.total:12 reads a missing total' },
         { title: 'Make mock data', writes: true, status: 'skipped', summary: 'no staging data' },

@@ -12,6 +12,7 @@ import { ReposTab } from '../repos/repos-tab';
 import { PermissionsTab } from '../setup/permissions-tab';
 import { SetupAgentButton } from '../setup/setup-agent-link';
 import { SetupAgentTab } from '../setup/setup-agent-tab';
+import { NewSkillButton, SkillsView } from '../skills/skills-view';
 import { WorkspaceView } from '../workspace/workspace-view';
 import { KeychainWaitBanner } from './keychain-wait';
 import { lastPage, useKeepAddress } from './last-address';
@@ -144,6 +145,18 @@ export function Shell() {
                   actions={<NewPlaybookButton />}
                 >
                   <PlaybooksView />
+                </Page>
+              }
+            />
+            <Route
+              path="/skills"
+              element={
+                <Page
+                  title="Skills"
+                  sub="Methods the agent can load while a Playbook runs. Attach them to Playbooks."
+                  actions={<NewSkillButton />}
+                >
+                  <SkillsView />
                 </Page>
               }
             />

@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   type CreatePlaybook,
   ErrorCode,
+  type HeldSkill,
   PLAYBOOK_TRIGGERS,
   type Playbook,
   type PlaybookList,
@@ -10,14 +11,25 @@ import {
   PlaybookTrigger,
   playbookStepSchema,
   SessionKind,
+  type SkillCopy,
 } from '@ops-console/shared';
-import { and, desc, eq, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
-import { fixes, playbooks, playbookTriggers, reports, reviews, type sessions } from '../db/schema';
+import {
+  fixes,
+  playbookSkills,
+  playbooks,
+  playbookTriggers,
+  reports,
+  reviews,
+  type sessions,
+  skills,
+} from '../db/schema';
 import { STORE, type Store, type Tx } from '../db/store';
 import { builtinId, builtinName, STEP_BLOCKS, WRITING_BLOCKS } from './blocks';
 import { BUILTIN_RULES, BUILTIN_STEPS } from './builtins';
+import { parseSkillCopies, SkillsService } from './skills.service';
 
 type PlaybookRow = typeof playbooks.$inferSelect;
 type SessionRow = typeof sessions.$inferSelect;
@@ -30,6 +42,8 @@ export type PlaybookCopy = {
   branches: string;
   jiraTicket: boolean;
   steps: PlaybookStep[];
+  /** The Skills it holds; none for a built-in. */
+  skills: SkillCopy[];
 };
 
 const stepsOf = (row: PlaybookRow): PlaybookStep[] => {
@@ -47,15 +61,19 @@ const byName = (a: { name: string }, b: { name: string }) =>
 /** Playbooks, the Trigger each one holds, and the rules a chat or a job gets from them. */
 @Injectable()
 export class PlaybooksService {
-  constructor(@Inject(STORE) private readonly store: Store) {}
+  constructor(
+    @Inject(STORE) private readonly store: Store,
+    @Inject(SkillsService) private readonly skills: SkillsService,
+  ) {}
 
   list(): PlaybookList {
     const held = this.held();
+    const heldSkills = this.heldSkills();
     const own = this.store.db
       .select()
       .from(playbooks)
       .all()
-      .map((row) => this.view(row, held))
+      .map((row) => this.view(row, held, heldSkills))
       .sort(byName);
     const builtins = PLAYBOOK_TRIGGERS.map((trigger) => this.builtin(trigger, held));
     return { items: [...own, ...builtins], blocks: STEP_BLOCKS };
@@ -64,7 +82,7 @@ export class PlaybooksService {
   create(input: Required<CreatePlaybook>): Playbook {
     const row = this.store.write((tx) => {
       this.requireFreeName(tx, input.name, null);
-      return tx
+      const created = tx
         .insert(playbooks)
         .values({
           id: crypto.randomUUID(),
@@ -76,8 +94,10 @@ export class PlaybooksService {
         })
         .returning()
         .get();
+      this.holdSkills(tx, created.id, input.skill_ids);
+      return created;
     });
-    return this.view(row, this.held());
+    return this.view(row, this.held(), this.heldSkills());
   }
 
   patch(id: string, patch: PlaybookPatch): Playbook {
@@ -85,6 +105,7 @@ export class PlaybooksService {
       const current = this.row(tx, id);
       if (patch.name !== undefined) this.requireFreeName(tx, patch.name, id);
       const steps = patch.steps ? tagged(patch.steps) : null;
+      if (patch.skill_ids !== undefined) this.holdSkills(tx, id, patch.skill_ids);
       return tx
         .update(playbooks)
         .set({
@@ -99,7 +120,7 @@ export class PlaybooksService {
         .returning()
         .get();
     });
-    return this.view(row, this.held());
+    return this.view(row, this.held(), this.heldSkills());
   }
 
   /** Its Triggers go back to their built-in; jobs that ran it keep their copy. */
@@ -145,6 +166,7 @@ export class PlaybooksService {
         branches: '',
         jiraTicket: false,
         steps: BUILTIN_STEPS[trigger],
+        skills: [],
       };
     }
     return {
@@ -154,6 +176,7 @@ export class PlaybooksService {
       branches: found.playbook.branches,
       jiraTicket: found.playbook.jiraTicket,
       steps: stepsOf(found.playbook),
+      skills: this.skills.copiesFor(found.playbook.id),
     };
   }
 
@@ -162,13 +185,21 @@ export class PlaybooksService {
    * not built-in. An Alert's Session uses what the Alert's latest job copied (Behavior 21). A `devtools` Session has
    * no Trigger: its own instructions already cover Connections and PROD.
    */
-  forSession(session: SessionRow): { rules: string | null; playbook: { id: string; name: string } | null } {
+  forSession(session: SessionRow): {
+    rules: string | null;
+    skills: SkillCopy[];
+    playbook: { id: string; name: string } | null;
+  } {
     if (session.alertId !== null) return this.latestAlertJob(session.alertId);
-    if (session.kind === SessionKind.Devtools) return { rules: null, playbook: null };
+    if (session.kind === SessionKind.Devtools) return { rules: null, skills: [], playbook: null };
     const trigger =
       session.kind === SessionKind.PrReview ? PlaybookTrigger.ThreadReply : PlaybookTrigger.SessionMessage;
     const copy = this.copyFor(trigger);
-    return { rules: copy.rules || null, playbook: copy.id ? { id: copy.id, name: copy.name } : null };
+    return {
+      rules: copy.rules || null,
+      skills: copy.skills,
+      playbook: copy.id ? { id: copy.id, name: copy.name } : null,
+    };
   }
 
   private latestAlertJob(alertId: string): ReturnType<PlaybooksService['forSession']> {
@@ -177,6 +208,7 @@ export class PlaybooksService {
         id: reports.playbookId,
         name: reports.playbookName,
         rules: reports.playbookRules,
+        skills: reports.playbookSkills,
         at: reports.createdAt,
       })
       .from(reports)
@@ -184,7 +216,13 @@ export class PlaybooksService {
       .orderBy(desc(reports.version))
       .get();
     const fix = this.store.db
-      .select({ id: fixes.playbookId, name: fixes.playbookName, rules: fixes.playbookRules, at: fixes.startedAt })
+      .select({
+        id: fixes.playbookId,
+        name: fixes.playbookName,
+        rules: fixes.playbookRules,
+        skills: fixes.playbookSkills,
+        at: fixes.startedAt,
+      })
       .from(fixes)
       .innerJoin(reviews, eq(reviews.id, fixes.reviewId))
       .innerJoin(reports, eq(reports.id, reviews.reportId))
@@ -192,9 +230,10 @@ export class PlaybooksService {
       .orderBy(desc(fixes.startedAt))
       .get();
     const latest = fix && (!report || fix.at >= report.at) ? fix : report;
-    if (!latest) return { rules: null, playbook: null };
+    if (!latest) return { rules: null, skills: [], playbook: null };
     return {
       rules: latest.rules || null,
+      skills: parseSkillCopies(latest.skills),
       playbook: latest.id && latest.name ? { id: latest.id, name: latest.name } : null,
     };
   }
@@ -209,12 +248,13 @@ export class PlaybooksService {
       branches: '',
       jira_ticket: false,
       steps: BUILTIN_STEPS[trigger],
+      skills: [],
       triggers: taken.has(trigger) ? [] : [trigger],
       updated_at: null,
     };
   }
 
-  private view(row: PlaybookRow, held: Map<string, PlaybookTrigger[]>): Playbook {
+  private view(row: PlaybookRow, held: Map<string, PlaybookTrigger[]>, heldSkills: Map<string, HeldSkill[]>): Playbook {
     return {
       id: row.id,
       builtin: false,
@@ -223,9 +263,38 @@ export class PlaybooksService {
       branches: row.branches,
       jira_ticket: row.jiraTicket,
       steps: stepsOf(row),
+      skills: heldSkills.get(row.id) ?? [],
       triggers: held.get(row.id) ?? [],
       updated_at: row.updatedAt,
     };
+  }
+
+  /** Playbook id to the Skills it holds, A to Z. */
+  private heldSkills(): Map<string, HeldSkill[]> {
+    const map = new Map<string, HeldSkill[]>();
+    const rows = this.store.db
+      .select({
+        playbookId: playbookSkills.playbookId,
+        id: skills.id,
+        name: skills.name,
+        description: skills.description,
+      })
+      .from(playbookSkills)
+      .innerJoin(skills, eq(skills.id, playbookSkills.skillId))
+      .all();
+    for (const { playbookId, ...skill } of rows) map.set(playbookId, [...(map.get(playbookId) ?? []), skill]);
+    for (const list of map.values()) list.sort(byName);
+    return map;
+  }
+
+  /** Replaces the Skills the Playbook holds. */
+  private holdSkills(tx: Tx, playbookId: string, skillIds: string[]): void {
+    if (skillIds.length > 0) {
+      const found = tx.select({ id: skills.id }).from(skills).where(inArray(skills.id, skillIds)).all();
+      if (found.length !== skillIds.length) throw new ApiError(404, ErrorCode.NotFound, 'no such Skill');
+    }
+    tx.delete(playbookSkills).where(eq(playbookSkills.playbookId, playbookId)).run();
+    for (const skillId of skillIds) tx.insert(playbookSkills).values({ playbookId, skillId }).run();
   }
 
   /** Playbook id to the Triggers holding it, in page order. */
