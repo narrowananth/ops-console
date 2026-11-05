@@ -142,6 +142,8 @@ export class ScansService {
   private readonly logger = new Logger('monitor');
   private envCache: { at: number; names: string[] } | null = null;
   private readonly serviceCache = new Map<string, { at: number; list: DatadogService[] }>();
+  /** The running Scans' read, to stop it. */
+  private readonly running = new Map<string, AbortController>();
   private readonly codeCache = new Map<ScanWindow, { at: number; list: StatusCodeCount[] }>();
 
   constructor(
@@ -334,22 +336,38 @@ export class ScansService {
     });
   }
 
+  /** Stops a running Scan: its read ends, nothing it read is kept, and it ends `cancelled`. */
+  cancel(id: string): void {
+    this.get(id);
+    const read = this.running.get(id);
+    if (!read) throw new ApiError(409, ErrorCode.InvalidState, 'the Scan is not running');
+    read.abort();
+  }
+
   private async execute(scan: ScanRow): Promise<void> {
+    const read = new AbortController();
+    this.running.set(scan.id, read);
     try {
       const config = this.config();
       const readings = await this.reader.read({
+        signal: read.signal,
         envs: parseJson<string[]>(scan.envs, []),
         window: scan.windowSize,
         services: parseJson<string[] | null>(scan.services, null),
         codes: parseJson<number[]>(scan.statusCodes, []),
         ignore: config.ignore,
       });
+      read.signal.throwIfAborted();
       this.store.write((tx, emit) => {
         this.apply(tx, emit, scan, config, readings);
         this.end(tx, emit, scan.id, ScanStatus.Ok, null, null);
       });
       this.finder.lookForUnlinked();
     } catch (error) {
+      if (read.signal.aborted) {
+        this.store.write((tx, emit) => this.end(tx, emit, scan.id, ScanStatus.Cancelled, null, null));
+        return;
+      }
       const limited = error instanceof ApiError && error.code === ErrorCode.RateLimited;
       const message = error instanceof Error ? error.message : String(error);
       if (!limited) this.logger.warn(`scan ${scan.id} failed: ${message}`);
@@ -363,6 +381,8 @@ export class ScansService {
           message,
         ),
       );
+    } finally {
+      this.running.delete(scan.id);
     }
   }
 

@@ -41,6 +41,27 @@ export enum SessionState {
   Failed = 'failed',
 }
 
+/** How a Session's last run ended. A run that ended any way but `done` stays in the Running tray until dismissed. */
+export enum RunOutcome {
+  Done = 'done',
+  Stopped = 'stopped',
+  /** Stopped by the operator to carry on later with Play. */
+  Paused = 'paused',
+  Failed = 'failed',
+  /** The account's usage limit ended it. */
+  RateLimited = 'rate_limited',
+  SignedOut = 'signed_out',
+  /** The daemon restarted mid-run. */
+  Interrupted = 'interrupted',
+}
+
+export enum SubagentStatus {
+  Working = 'working',
+  Done = 'done',
+  Failed = 'failed',
+  Stopped = 'stopped',
+}
+
 export enum ActionActor {
   Agent = 'agent',
   Operator = 'operator',
@@ -176,6 +197,36 @@ export const sessionSchema = z.object({
 });
 
 export type Session = z.infer<typeof sessionSchema>;
+
+/** A subagent the main agent started in a run, or one a subagent started in turn. */
+export const subagentSchema = z.object({
+  id: z.string(),
+  /** The subagent that started this one; null when the main agent did. */
+  parent_id: z.string().nullable(),
+  description: z.string(),
+  /** The subagent type, such as `Explore`. */
+  type: z.string().nullable(),
+  status: z.enum(SubagentStatus),
+  started_at: z.string(),
+  finished_at: z.string().nullable(),
+});
+
+export type Subagent = z.infer<typeof subagentSchema>;
+
+/** One entry of the Running tray: a Session's run going now, or one that ended without finishing. */
+export const agentRunSchema = z.object({
+  session: sessionSchema,
+  running: z.boolean(),
+  /** How the last run ended; null while the first one is going. */
+  outcome: z.enum(RunOutcome).nullable(),
+  started_at: z.string().nullable(),
+  finished_at: z.string().nullable(),
+  /** The operator can start the run again with Play or Retry: the Session takes messages. */
+  can_resume: z.boolean(),
+  subagents: z.array(subagentSchema),
+});
+
+export type AgentRun = z.infer<typeof agentRunSchema>;
 
 export const sessionListQuerySchema = pageQuerySchema.extend({
   kind: z.enum(SessionKind).optional(),

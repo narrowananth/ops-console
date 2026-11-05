@@ -58,7 +58,12 @@ export class FakeDatadog implements DatadogReader {
 
   async read(request: ReadRequest): Promise<ServiceReading[]> {
     this.calls.push(request);
-    if (this.hold) await this.hold;
+    if (this.hold) {
+      const stopped = new Promise<never>((_resolve, reject) =>
+        request.signal?.addEventListener('abort', () => reject(request.signal?.reason), { once: true }),
+      );
+      await Promise.race([this.hold, stopped]);
+    }
     if (this.down === 'rate_limited') throw new ApiError(429, ErrorCode.RateLimited, 'Datadog rate limit reached');
     if (this.down === 'failed') throw new ApiError(502, ErrorCode.UpstreamFailed, '`pup logs aggregate` failed');
     return structuredClone(this.readings)

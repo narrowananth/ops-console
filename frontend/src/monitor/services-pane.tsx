@@ -1,10 +1,11 @@
 import { type Alert, AlertStatus, SCAN_RANGES, ScanStatus, SEVERITIES, type Severity } from '@ops-console/shared';
 import { useState } from 'react';
 import { z } from 'zod';
+import { StopIcon } from '../agents/stop-run';
 import { Button, Spinner } from '../components/ui/button';
 import { item } from '../components/ui/item';
 import { PanelToggle } from '../components/ui/side-panel';
-import { useAlerts, useDatadogServices, useScans, useStartScan, useStatusCodes } from '../lib/queries';
+import { useAlerts, useCancelScan, useDatadogServices, useScans, useStartScan, useStatusCodes } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
 import { ago, shown as inMonitor, type ScanScope } from './scan-scope';
@@ -73,6 +74,7 @@ export function ServicesPane({
   const alerts = useAlerts();
   const scans = useScans();
   const scan = useStartScan();
+  const cancel = useCancelScan();
   const [filter, setFilter] = useStored('monitor.services-filter', z.string(), '');
   // Services ticked to Scan; picking a row only shows its logs. A ticked one missing from this range stays ticked.
   const [ticked, setTicked] = useStored('monitor.ticked', z.array(z.string()), []);
@@ -281,42 +283,62 @@ export function ServicesPane({
       </div>
 
       <div className="flex flex-col gap-2.5 border-t border-divider px-3.5 pt-3 pb-3.5">
-        <Button
-          variant="primary"
-          className="w-full justify-center py-2 text-[13px]"
-          disabled={!connected || scan.isPending || running || (toScan.length === 0 && !selected && scanCount === 0)}
-          title={scanTip}
-          onClick={() =>
-            scan.mutate({
-              service_id: null,
-              window: scope.range,
-              ...(scope.codes.length > 0 ? { status_codes: scope.codes } : {}),
-              // Ticked Services first; else the picked one; else every listed one.
-              ...(toScan.length > 0 ? { services: toScan } : selected ? { services: [selected] } : {}),
-            })
-          }
-        >
-          {running && <Spinner />}
-          {running
-            ? 'Scanning…'
-            : toScan.length === 1
-              ? `Scan ${toScan[0]} · ${scope.range}`
-              : toScan.length > 1
-                ? `Scan ${toScan.length} ticked · ${scope.range}`
-                : selected
-                  ? `Scan ${selected} · ${scope.range}`
-                  : `Scan ${scanCount} Services · ${scope.range}`}
-        </Button>
-        {scan.isError && (
+        <div className="flex gap-2">
+          <Button
+            variant="primary"
+            className="min-w-0 flex-1 justify-center py-2 text-[13px]"
+            disabled={!connected || scan.isPending || running || (toScan.length === 0 && !selected && scanCount === 0)}
+            title={scanTip}
+            onClick={() =>
+              scan.mutate({
+                service_id: null,
+                window: scope.range,
+                ...(scope.codes.length > 0 ? { status_codes: scope.codes } : {}),
+                // Ticked Services first; else the picked one; else every listed one.
+                ...(toScan.length > 0 ? { services: toScan } : selected ? { services: [selected] } : {}),
+              })
+            }
+          >
+            {running && <Spinner />}
+            {running
+              ? 'Scanning…'
+              : toScan.length === 1
+                ? `Scan ${toScan[0]} · ${scope.range}`
+                : toScan.length > 1
+                  ? `Scan ${toScan.length} ticked · ${scope.range}`
+                  : selected
+                    ? `Scan ${selected} · ${scope.range}`
+                    : `Scan ${scanCount} Services · ${scope.range}`}
+          </Button>
+          {running && last && (
+            <Button
+              title="Stop the Scan now. What it read so far is dropped."
+              className="flex-none py-2 text-[13px]"
+              disabled={cancel.isPending}
+              onClick={() => cancel.mutate(last.id)}
+            >
+              {cancel.isPending ? <Spinner /> : <StopIcon />}
+              Stop
+            </Button>
+          )}
+        </div>
+        {(scan.isError || cancel.isError) && (
           <span role="alert" className="text-xs text-accent-700">
-            {scan.error.message}
+            {(scan.error ?? cancel.error)?.message}
           </span>
         )}
-        {last && (last.status === ScanStatus.Failed || last.status === ScanStatus.RateLimited) ? (
+        {last &&
+        (last.status === ScanStatus.Failed ||
+          last.status === ScanStatus.RateLimited ||
+          last.status === ScanStatus.Cancelled) ? (
           <span role="status" className="text-xs text-accent-700">
             The last Scan{' '}
-            {last.status === ScanStatus.RateLimited ? 'hit a Datadog rate limit' : 'could not read Datadog'}.{' '}
-            {lastGood?.finished_at ? `Last good one ${ago(lastGood.finished_at)}.` : 'No good Scan yet.'}
+            {last.status === ScanStatus.RateLimited
+              ? 'hit a Datadog rate limit'
+              : last.status === ScanStatus.Cancelled
+                ? 'was stopped'
+                : 'could not read Datadog'}
+            . {lastGood?.finished_at ? `Last good one ${ago(lastGood.finished_at)}.` : 'No good Scan yet.'}
           </span>
         ) : (
           last?.finished_at && (

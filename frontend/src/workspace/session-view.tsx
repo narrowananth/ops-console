@@ -29,6 +29,7 @@ import {
   useSendMessage,
   useSessionDiff,
   useSessionPullRequest,
+  useStopSession,
 } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { PlaybookLink } from '../playbooks/job-steps';
@@ -68,6 +69,9 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const pulls = useRepoPullRequests(session?.kind === SessionKind.Repo ? session.repo_id : null);
   // What the operator typed while the agent was working; it goes out when the run ends.
   const [queued, setQueued] = useState<string | null>(null);
+  // The operator stopped the run: the queued message waits for Send now instead of starting the next run by itself.
+  const [held, setHeld] = useState(false);
+  const stopRun = useStopSession(id);
   const sessionState = session?.state;
   const working = sessionState === SessionState.Working || sessionState === SessionState.WaitingApproval;
   const diff = useSessionDiff(id, hasDiff, diffOpen && working);
@@ -93,7 +97,10 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   }, [gone, onGone]);
   const { mutate: sendQueued, isPending: sending } = send;
   useEffect(() => {
-    if (queued === null || working || sessionState === undefined || sending) return;
+    if (working) setHeld(false);
+  }, [working]);
+  useEffect(() => {
+    if (queued === null || held || working || sessionState === undefined || sending) return;
     sendQueued(queued, {
       onSuccess: () => setQueued(null),
       // Not sent: the words go back into the box instead of vanishing.
@@ -102,7 +109,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
         setQueued(null);
       },
     });
-  }, [queued, working, sessionState, sending, sendQueued, setText]);
+  }, [queued, held, working, sessionState, sending, sendQueued, setText]);
 
   if (sessions.isPending) return <Empty>Reading the Session…</Empty>;
   if (session === undefined) return null;
@@ -316,6 +323,12 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             {queued !== null && (
               <QueuedNote
                 text={queued}
+                held={held && !working}
+                sending={stopRun.isPending || sending}
+                onSendNow={() => {
+                  setHeld(false);
+                  if (running) stopRun.mutate();
+                }}
                 onCancel={() => {
                   setText((current) => (current.trim() === '' ? queued : `${queued}\n\n${current}`));
                   setQueued(null);
@@ -380,7 +393,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                   )}
                 </div>
                 <span className="flex flex-none items-center gap-1.5">
-                  {busy && <StopRun sessionId={id} className="px-4 py-1.5" />}
+                  {busy && <StopRun sessionId={id} className="px-4 py-1.5" onStopped={() => setHeld(true)} />}
                   <Button
                     variant="primary"
                     title={
@@ -431,11 +444,37 @@ const SESSION_STATE: Record<SessionState, PathwayState> = {
 };
 
 /** The message waiting for the run to end, with a way to take it back. */
-function QueuedNote({ text, onCancel }: { text: string; onCancel: () => void }) {
+function QueuedNote({
+  text,
+  held,
+  sending,
+  onSendNow,
+  onCancel,
+}: {
+  text: string;
+  /** The operator stopped the run, so the message waits for Send now. */
+  held: boolean;
+  sending: boolean;
+  onSendNow: () => void;
+  onCancel: () => void;
+}) {
   return (
     <div role="status" className="flex items-start gap-2 rounded-lg border border-line bg-card px-3 py-2 text-xs">
-      <span className="flex-none font-semibold text-neutral-700">Queued</span>
+      <span className="flex-none font-semibold text-neutral-700">{held ? 'On hold' : 'Queued'}</span>
       <span className="line-clamp-3 min-w-0 flex-1 whitespace-pre-wrap text-text">{text}</span>
+      <button
+        type="button"
+        disabled={sending}
+        onClick={onSendNow}
+        title={
+          held
+            ? 'You stopped the run, so this did not send. Send it now.'
+            : 'Stop the run and send this message now instead of waiting for the run to end.'
+        }
+        className="cursor-pointer border-0 bg-transparent p-0 text-xs font-semibold text-text hover:text-accent-700 disabled:cursor-default disabled:opacity-50"
+      >
+        Send now
+      </button>
       <button
         type="button"
         onClick={onCancel}

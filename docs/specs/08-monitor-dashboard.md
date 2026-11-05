@@ -61,7 +61,7 @@ Logs, status codes, envs and where the code is
 
 The Monitor screen
 
-34. The Scan button scans the ticked Services, else the picked Service, else every Service listed, over the picked range and codes. A ticked Service missing from the list stays ticked but is not scanned. While the newest Scan is `running`, the button is disabled and reads "Scanning…".
+34. The Scan button scans the ticked Services, else the picked Service, else every Service listed, over the picked range and codes. A ticked Service missing from the list stays ticked but is not scanned. While the newest Scan is `running`, the button is disabled and reads "Scanning…", with a Stop button beside it. Stop calls `POST /scans/:id/cancel`: the read ends, nothing it read is kept, and the Scan ends `cancelled` (`invalid_state` when it is not running).
 35. The logs list shows the Alerts of the picked Service, or of every Service, with a picked code. `resolved` and `dismissed` Alerts show only with Closed ticked. Rows go highest tier first, newest sighting first within a tier, and are drawn 100 at a time; the open Alert stays drawn even past the rows shown.
 36. A Scan that ended `rate_limited` or `failed` shows under the Scan button with the time of the last `ok` Scan, or "No good Scan yet."
 37. The picked Service and Alert are kept in the address, and the Monitor's other choices in the browser, as `persist-selections-and-runs` Behaviors 1 to 11 set out.

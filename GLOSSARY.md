@@ -186,6 +186,12 @@ dev-tools Session and an anonymous Session, which have no Repo. A pull request h
 replies, with no composer, and an Alert has one for its Verification and Fix.
 _Avoid_: chat, thread
 
+**Running tray**:
+The sidebar list of agent runs: the ones going, each with the subagents it started, and the ones that ended unfinished
+(stopped, paused, out of usage, signed out, interrupted by a restart). An unfinished run stays until the operator
+dismisses it. Each entry shows how long the run took and controls to pause, stop, play or retry it.
+_Avoid_: notification panel, running tasks
+
 **Alert Session**:
 The Session an Alert's first Verification makes, linked to the Alert. Every later Verification and Fix stage runs in
 it: a Session in the Service's Repo, on the Repo's default branch, or an Anonymous Session holding a clone.

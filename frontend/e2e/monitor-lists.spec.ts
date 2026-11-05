@@ -240,3 +240,36 @@ test('a pull request row shows when it was opened, and a Session row when it sta
   await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
   await expect(page.getByText(/^Started .* · active 3h ago$/)).toBeVisible();
 });
+
+test('a running Scan shows Scanning… with a Stop button that cancels it', async ({ page }) => {
+  await routeMonitor(page);
+  await page.route(/\/api\/scans(\?.*)?$/, (route) =>
+    route.fulfill(
+      list([
+        {
+          id: 's9',
+          triggered_by: 'operator',
+          service_id: null,
+          window_size: '1h',
+          envs: ['prod'],
+          services: NAMES,
+          status_codes: [],
+          status: 'running',
+          error_code: null,
+          error_message: null,
+          started_at: ago(0.1),
+          finished_at: null,
+        },
+      ]),
+    ),
+  );
+  const cancelled = page.waitForRequest(
+    (request) => request.method() === 'POST' && request.url().endsWith('/api/scans/s9/cancel'),
+  );
+  await page.route('**/api/scans/s9/cancel', (route) => route.fulfill({ status: 204 }));
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+
+  await expect(page.getByRole('button', { name: 'Scanning…' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await cancelled;
+});

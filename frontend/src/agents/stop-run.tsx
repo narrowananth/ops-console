@@ -13,10 +13,13 @@ export function StopRun({
   sessionId,
   title = 'Stop the agent where it is',
   className = 'px-2.5 py-1 text-xs',
+  onStopped,
 }: {
   sessionId: string;
   title?: string;
   className?: string;
+  /** Called once the run has stopped. */
+  onStopped?: () => void;
 }) {
   const stop = useStopSession(sessionId);
   return (
@@ -26,7 +29,12 @@ export function StopRun({
           {stop.error.message}
         </span>
       )}
-      <Button title={title} className={className} disabled={stop.isPending} onClick={() => stop.mutate()}>
+      <Button
+        title={title}
+        className={className}
+        disabled={stop.isPending}
+        onClick={() => stop.mutate(undefined, { onSuccess: onStopped })}
+      >
         {stop.isPending ? <Spinner /> : <StopIcon />}
         Stop
       </Button>
