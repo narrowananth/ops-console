@@ -1,4 +1,6 @@
+import { lstatSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type {
   CanUseTool,
@@ -66,7 +68,7 @@ import {
   type PullRequestOpener,
   type RepoJoiner,
 } from './pull-request-tool';
-import { runSandbox } from './run-sandbox';
+import { gitControl, runSandbox } from './run-sandbox';
 import { RunStepsLog } from './run-steps';
 import { type Run, RunRegistry, type RunSummary } from './runs';
 import { SessionKinds } from './session-kinds';
@@ -109,6 +111,12 @@ export const MERGE_DENIALS = [
   'Bash(bkt pr auto-merge:*)',
   'mcp__github__merge_pull_request',
   'mcp__gitlab__merge_merge_request',
+  // The hosts' own merge endpoints and mutations, reached through `gh api`, `curl` or another client with `GH_TOKEN`.
+  'Bash(*pulls/*/merge*)',
+  'Bash(*merge_requests/*/merge*)',
+  'Bash(*pullrequests/*/merge*)',
+  'Bash(*mergePullRequest*)',
+  'Bash(*enablePullRequestAutoMerge*)',
 ];
 
 /**
@@ -134,7 +142,69 @@ export const HOST_WRITE_DENIALS = [
   'mcp__github__create_pull_request_review',
   'mcp__github__add_comment_to_pending_review',
   'mcp__gitlab__create_merge_request_note',
+  // The token-holding GitHub server's other tools that write, by the verbs its tool names start with.
+  ...[
+    'add',
+    'assign',
+    'close',
+    'create',
+    'delete',
+    'dismiss',
+    'edit',
+    'fork',
+    'lock',
+    'merge',
+    'push',
+    'remove',
+    'reply',
+    'request',
+    'set',
+    'submit',
+    'transfer',
+    'update',
+    'write',
+  ].flatMap((verb) => [`mcp__github__${verb}_*`, `mcp__gitlab__${verb}_*`]),
 ];
+
+/** A run that only reads: it has no tool that edits files, and its sandbox leaves the working folder read-only. */
+export const READ_ONLY_DENIALS = ['Edit', 'MultiEdit', 'NotebookEdit', 'Write'];
+
+/** A permission rule's form of an absolute path. */
+const absolute = (file: string) => `/${file}`;
+
+/**
+ * File tools run in Claude Code's own process, outside the Run sandbox's profile (ADR 0006), so the same limits are
+ * permission rules, which `disallowedTools` holds in every mode: no reading the data folder's secrets or the operator's
+ * credential folders, and no editing the git control files the daemon's `git` later reads.
+ */
+export function fileToolDenials(dataDir: string, workingDir: string, home: string = os.homedir()): string[] {
+  const secrets = [
+    path.join(dataDir, 'runtime.json'),
+    path.join(dataDir, 'state.db'),
+    path.join(dataDir, 'state.db-wal'),
+    path.join(dataDir, 'state.db-shm'),
+    path.join(dataDir, 'keychain-owner.json'),
+    path.join(dataDir, 'accounts', '**'),
+    path.join(dataDir, 'mcp-files', '**'),
+    path.join(home, '.aws', '**'),
+    path.join(home, '.config', 'gcloud', '**'),
+    path.join(home, 'Library', 'Keychains', '**'),
+    path.join(home, '.ssh', '**'),
+  ];
+  return [
+    ...secrets.flatMap((file) => [`Read(${absolute(file)})`, `Edit(${absolute(file)})`]),
+    ...gitControl(workingDir, gitFileOf(workingDir)).map((file) => `Edit(${absolute(file)})`),
+  ];
+}
+
+/** Whether the folder's `.git` is a file, as it is in a worktree. */
+function gitFileOf(workingDir: string): boolean {
+  try {
+    return lstatSync(path.join(workingDir, '.git')).isFile();
+  } catch {
+    return false;
+  }
+}
 
 /** How a run the console starts itself differs from an operator's message. */
 export type RunOptions = {
@@ -150,6 +220,10 @@ export type RunOptions = {
   resumeAt?: string;
   /** Tools denied on top of merging. */
   deny?: string[];
+  /** False for a folder that holds pull request code: no `.claude` settings, `.mcp.json` or CLAUDE.md from it. */
+  projectSettings?: boolean;
+  /** The run may not change its working folder. */
+  readOnly?: boolean;
 };
 
 type RunResult =
@@ -388,6 +462,8 @@ export class AgentRuntime {
       subagents: new Map(),
       resumeAt: options.resumeAt ?? null,
       deny: options.deny ?? [],
+      projectSettings: options.projectSettings ?? true,
+      readOnly: options.readOnly ?? false,
       networkDomains: this.network.forRun(),
       failure: null,
       autoTitle: null,
@@ -593,7 +669,11 @@ export class AgentRuntime {
         dataDir: this.dataDir,
         readable: [...(attached === null ? [] : [attached]), ...(skillFolder === null ? [] : [skillFolder])],
         networkDomains: run.networkDomains,
+        readOnly: run.readOnly,
+        gitFile: gitFileOf(run.workingDir),
       }),
+      // A folder that holds pull request code never adds its own settings, hooks, servers or memory to the run.
+      ...(run.projectSettings ? {} : { settingSources: ['user' as const] }),
       // The operator's attached files sit outside the working folder; the agent reads them without asking.
       ...(attached === null ? {} : { additionalDirectories: [attached] }),
       ...(skillFolder === null
@@ -626,7 +706,13 @@ export class AgentRuntime {
           ? { mcpServers: { [CONSOLE_TOOLS_SERVER]: consoleToolsServer({ opener, joiner }, run.sessionId) } }
           : {};
       })(),
-      disallowedTools: [...MERGE_DENIALS, ...WEB_DENIALS, ...run.deny],
+      disallowedTools: [
+        ...MERGE_DENIALS,
+        ...WEB_DENIALS,
+        ...fileToolDenials(this.dataDir, run.workingDir),
+        ...(run.readOnly ? READ_ONLY_DENIALS : []),
+        ...run.deny,
+      ],
       systemPrompt: { type: 'preset', preset: 'claude_code', append: systemAppend(instructions, run.rules) },
       // Servers the operator disabled stay out of the run.
       settings: {

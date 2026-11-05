@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import type { Keychain } from '../keychain/keychain';
@@ -36,14 +36,26 @@ export const FILE_PREFIX = '@file:';
 /** Stands for that folder in the server's args and env values. */
 export const FILES_DIR = '{{files}}';
 
+/**
+ * Where those files go: a folder under the data folder, which the Run sandbox denies reading (ADR 0006), not the user
+ * temp folder a run's commands can list. The data folder is where the daemon keeps `runtime.json`.
+ */
+export function filesBase(): string {
+  const dataDir =
+    process.env.OPS_CONSOLE_DATA_DIR ?? path.join(homedir(), 'Library', 'Application Support', 'ops-console');
+  return path.join(path.resolve(dataDir), 'mcp-files');
+}
+
 /** The env vars and args with the files written out and `FILES_DIR` filled in; `cleanup` removes the folder. */
 export async function materialize(
   env: Record<string, string>,
   args: string[],
+  base: string = tmpdir(),
 ): Promise<{ env: Record<string, string>; args: string[]; cleanup: () => Promise<void> }> {
   const files = Object.entries(env).filter(([key]) => key.startsWith(FILE_PREFIX));
   if (files.length === 0) return { env, args, cleanup: async () => {} };
-  const dir = await mkdtemp(path.join(tmpdir(), 'ops-console-mcp-'));
+  await mkdir(base, { recursive: true, mode: 0o700 });
+  const dir = await mkdtemp(path.join(base, 'ops-console-mcp-'));
   const cleanup = () => rm(dir, { recursive: true, force: true });
   try {
     for (const [key, content] of files) {
@@ -88,13 +100,13 @@ export function unwrapLauncher(
  * Keychain, so secrets reach that process and nothing else. Prints nothing: stdout belongs to the MCP protocol.
  * Resolves with the exit code.
  */
-export async function runMcpExec(argv: string[], keychain: Keychain): Promise<number> {
+export async function runMcpExec(argv: string[], keychain: Keychain, base: string = filesBase()): Promise<number> {
   const dash = argv.indexOf('--');
   const name = argv[0];
   const command = argv[dash + 1];
   if (!name || dash !== 1 || !command) return 2;
   const stored = await keychain.get(secretsKey(name));
-  const ready = await materialize(stored === null ? {} : parseEnv(stored), argv.slice(dash + 2));
+  const ready = await materialize(stored === null ? {} : parseEnv(stored), argv.slice(dash + 2), base);
   const child = spawn(command, ready.args, { stdio: 'inherit', env: { ...process.env, ...ready.env } });
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => child.kill(signal));
   const code = await new Promise<number>((resolve) => {

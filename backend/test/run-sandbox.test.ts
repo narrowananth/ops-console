@@ -12,6 +12,7 @@ import {
 } from '@ops-console/shared';
 import { sql } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
+import { runSandbox } from '../src/agent/run-sandbox';
 import { AgentRuntime } from '../src/agent/runtime';
 import { repos } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
@@ -195,6 +196,91 @@ describe('Run sandbox on agent runs', () => {
     });
     await converse(daemon, id, 'again');
     expect((await api(daemon).get(`/sessions/${id}`)).body.data.last_error).toBeNull();
+  });
+});
+
+describe('Run sandbox: what a run cannot change or read (ADR 0006)', () => {
+  it('denies writes to the git control files the daemon’s git later reads, and the gitfile of a worktree', () => {
+    const wd = '/work/repo';
+    expect(runSandbox({ workingDir: wd, dataDir: '/data', networkDomains: [] }).filesystem?.denyWrite).toEqual([
+      '/work/repo/.git/hooks',
+      '/work/repo/.git/config',
+      '/work/repo/.git/config.worktree',
+      '/work/repo/.git/commondir',
+      '/work/repo/.git/gitdir',
+    ]);
+    expect(
+      runSandbox({ workingDir: wd, dataDir: '/data', networkDomains: [], gitFile: true }).filesystem?.denyWrite,
+    ).toEqual(['/work/repo/.git']);
+  });
+
+  it('leaves the working folder out of the writable folders of a read-only run', () => {
+    const open = runSandbox({ workingDir: '/work/repo', dataDir: '/data', networkDomains: [] });
+    const readOnly = runSandbox({ workingDir: '/work/repo', dataDir: '/data', networkDomains: [], readOnly: true });
+    expect(open.filesystem?.allowWrite).toContain('/work/repo');
+    expect(readOnly.filesystem?.allowWrite).not.toContain('/work/repo');
+    expect(readOnly.filesystem?.allowWrite).toEqual(expect.arrayContaining(['/tmp', '/private/tmp']));
+    // It still reads its folder.
+    expect(readOnly.filesystem?.allowRead).toContain('/work/repo');
+  });
+
+  it('denies the file tools the data folder’s secrets, the credential folders and the git control files, in every Access mode', async () => {
+    const daemon = await start();
+    for (const mode of Object.values(AccessMode)) {
+      await converse(daemon, daemon.createSession({ access_mode: mode }), 'go');
+      const denied = daemon.sdk.calls.at(-1)?.options.disallowedTools ?? [];
+      const data = daemon.dataDir;
+      expect(denied).toEqual(
+        expect.arrayContaining([
+          `Read(/${path.join(data, 'runtime.json')})`,
+          `Edit(/${path.join(data, 'runtime.json')})`,
+          `Read(/${path.join(data, 'accounts', '**')})`,
+          `Read(/${path.join(home, '.ssh', '**')})`,
+          `Read(/${path.join(home, '.aws', '**')})`,
+          `Edit(/${path.join(WORKING_DIR, '.git', 'config')})`,
+          `Edit(/${path.join(WORKING_DIR, '.git', 'hooks')})`,
+        ]),
+      );
+      // The data folder is not denied as a whole: a scratch copy sits inside it and the run reads it.
+      expect(denied).not.toContain(`Read(/${path.join(data, '**')})`);
+    }
+  });
+
+  it('denies the hosts’ merge endpoints to every run, not only the merge commands', async () => {
+    const daemon = await start();
+    await converse(daemon, daemon.createSession(), 'go');
+    const denied = daemon.sdk.calls.at(-1)?.options.disallowedTools ?? [];
+    expect(denied).toEqual(
+      expect.arrayContaining([
+        'Bash(gh pr merge:*)',
+        'Bash(*pulls/*/merge*)',
+        'Bash(*merge_requests/*/merge*)',
+        'Bash(*pullrequests/*/merge*)',
+        'Bash(*mergePullRequest*)',
+        'Bash(*enablePullRequestAutoMerge*)',
+      ]),
+    );
+  });
+
+  it('loads a Session’s own project settings, and a run in a folder that holds pull request code only the user’s', async () => {
+    const daemon = await start();
+    const runtime = daemon.app.get(AgentRuntime);
+    await converse(daemon, daemon.createSession(), 'go');
+    expect(daemon.sdk.calls.at(-1)?.options.settingSources).toBeUndefined();
+    const id = daemon.createSession();
+    await runtime.runFor(id, 'review', null, { projectSettings: false }).finished;
+    expect(daemon.sdk.calls.at(-1)?.options.settingSources).toEqual(['user']);
+  });
+
+  it('makes a read-only run read-only: no edit tools and no writable working folder', async () => {
+    const daemon = await start();
+    const runtime = daemon.app.get(AgentRuntime);
+    await runtime.runFor(daemon.createSession(), 'answer', null, { readOnly: true }).finished;
+    const call = daemon.sdk.calls.at(-1);
+    expect(call?.options.disallowedTools).toEqual(
+      expect.arrayContaining(['Edit', 'MultiEdit', 'NotebookEdit', 'Write']),
+    );
+    expect(call?.options.sandbox?.filesystem?.allowWrite).not.toContain(WORKING_DIR);
   });
 });
 

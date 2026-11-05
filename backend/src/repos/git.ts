@@ -1,10 +1,17 @@
 import { execFile } from 'node:child_process';
-import { readFile, realpath, rm, stat } from 'node:fs/promises';
+import { lstat, readFile, realpath, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { GitHost, type SessionDiff, type SessionDiffFile, SessionDiffStatus } from '@ops-console/shared';
 
 const run = promisify(execFile);
+
+/**
+ * Repository settings that make `git` run a program: a hook or `core.fsmonitor`. The daemon runs `git` outside the Run
+ * sandbox in folders an agent run wrote in (ADR 0006), so it turns both off on every call; `-c` outranks the
+ * repository's own config.
+ */
+const NO_PROGRAMS = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false'];
 
 /** Lines a file's diff keeps; a lockfile's thousands are cut, with the file marked truncated. */
 const DIFF_LINES = 3000;
@@ -164,7 +171,7 @@ export class Git {
   /** Clones `url` into `dir`, which must be empty or missing. Throws with git's first line when it refuses. */
   async clone(url: string, dir: string): Promise<void> {
     try {
-      await run(this.bin, ['clone', '--quiet', url, dir], {
+      await run(this.bin, [...NO_PROGRAMS, 'clone', '--quiet', '--', url, dir], {
         maxBuffer: 10 * 1024 * 1024,
         // No prompt for a password: a clone the operator's git cannot do alone fails instead of hanging.
         env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
@@ -224,6 +231,27 @@ export class Git {
   /** A detached worktree of `repo` at `ref`, in `dir`. Throws with git's first line when it refuses. */
   async addWorktree(repo: string, dir: string, ref: string): Promise<void> {
     await this.must(repo, ['worktree', 'add', '--detach', '--quiet', dir, ref]);
+  }
+
+  /**
+   * Checks a scratch copy is still the worktree `addWorktree` made: its `.git` is a file that names a folder under
+   * `repo`'s own `worktrees`. A run that rewrote it would point the daemon's `git` at a repository of its own. Throws
+   * `GitFailed` when it differs.
+   */
+  async requireWorktree(dir: string, repo: string): Promise<void> {
+    const changed = new GitFailed('the scratch copy was changed outside the console');
+    const gitFile = path.join(dir, '.git');
+    try {
+      if (!(await lstat(gitFile)).isFile()) throw changed;
+      const named = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(gitFile, 'utf8'))?.[1];
+      const common = (await this.try(repo, ['rev-parse', '--path-format=absolute', '--git-common-dir']))?.trim();
+      if (!named || !common) throw changed;
+      const admin = await realpath(path.resolve(dir, named));
+      const worktrees = path.join(await realpath(common), 'worktrees') + path.sep;
+      if (!admin.startsWith(worktrees)) throw changed;
+    } catch (error) {
+      throw error instanceof GitFailed ? error : changed;
+    }
   }
 
   /** Removes a worktree folder and the record its repository keeps of it. */
@@ -294,7 +322,7 @@ export class Git {
    */
   async pushHead(dir: string, branch: string, source = 'HEAD'): Promise<void> {
     try {
-      await run(this.bin, ['-C', dir, 'push', '--quiet', 'origin', `${source}:refs/heads/${branch}`], {
+      await run(this.bin, [...NO_PROGRAMS, '-C', dir, 'push', '--quiet', 'origin', `${source}:refs/heads/${branch}`], {
         maxBuffer: 10 * 1024 * 1024,
         env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
       });
@@ -309,7 +337,10 @@ export class Git {
   /** The first line of git's own message; it names the problem and holds no secrets. */
   private async must(dir: string, args: string[], env: Record<string, string> = {}): Promise<void> {
     try {
-      await run(this.bin, ['-C', dir, ...args], { maxBuffer: 10 * 1024 * 1024, env: { ...process.env, ...env } });
+      await run(this.bin, [...NO_PROGRAMS, '-C', dir, ...args], {
+        maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env, ...env },
+      });
     } catch (error) {
       const { stderr } = error as { stderr?: unknown };
       throw new GitFailed(typeof stderr === 'string' ? (stderr.trim().split('\n')[0] ?? '') : '');
@@ -318,7 +349,7 @@ export class Git {
 
   private async try(dir: string, args: string[]): Promise<string | null> {
     try {
-      const { stdout } = await run(this.bin, ['-C', dir, ...args], { maxBuffer: 10 * 1024 * 1024 });
+      const { stdout } = await run(this.bin, [...NO_PROGRAMS, '-C', dir, ...args], { maxBuffer: 10 * 1024 * 1024 });
       return stdout;
     } catch {
       return null;

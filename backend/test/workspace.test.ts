@@ -1071,8 +1071,15 @@ describe('Agent Review', () => {
     );
     for (const call of calls) {
       expect(call.options.disallowedTools).toEqual(
-        expect.arrayContaining(['Bash(git push:*)', 'Bash(gh pr comment:*)']),
+        expect.arrayContaining([
+          'Bash(git push:*)',
+          'Bash(gh pr comment:*)',
+          'mcp__github__create_*',
+          'mcp__github__update_*',
+        ]),
       );
+      // The pull request's own settings, hooks, servers and memory never reach the run.
+      expect(call.options.settingSources).toEqual(['user']);
     }
     expect(checkedOut).toBe(head);
     // The copy goes once the review has ended.
@@ -1459,6 +1466,14 @@ describe('Agent Review', () => {
     );
     expect(ctx.daemon.sdk.calls).toHaveLength(calls + 1);
     expect(ctx.daemon.sdk.calls.at(-1)?.prompt).toContain('Can we skip the check?');
+    // The answer is a discussion: it holds the same host-write denials as the review, loads no project settings and
+    // cannot change the checkout it runs in.
+    const answered = ctx.daemon.sdk.calls.at(-1)?.options;
+    expect(answered?.disallowedTools).toEqual(
+      expect.arrayContaining(['Bash(git push:*)', 'Bash(gh api:*)', 'Write', 'Edit']),
+    );
+    expect(answered?.settingSources).toEqual(['user']);
+    expect(answered?.sandbox?.filesystem?.allowWrite).not.toContain(answered?.cwd);
     const answer = ctx.host.posted[5];
     expect(answer).toMatchObject({ body: 'Good point: I will keep the check.', parent_id: agentRoot });
     expect(
