@@ -219,8 +219,20 @@
   .scroll { flex: 1; min-height: 0; overflow-y: auto; }
   .svc-list, .log-list { display: flex; flex-direction: column; gap: 2px; padding: 6px; }
   .svc-list li { position: relative; }
-  .svc-list .tick { position: absolute; top: 10px; left: 10px; z-index: 1; }
-  .svc-row { flex-direction: column; gap: 4px; padding: 8px 10px 8px 32px; }
+  .svc-list .tick { position: absolute; top: 10px; left: 10px; z-index: 1; opacity: 0; }
+  .svc-list li:hover .tick, .svc-list.ticking .tick, .svc-list .tick:focus-visible { opacity: 1; }
+  .svc-row { flex-direction: column; gap: 6px; padding: 8px 10px 8px 32px; }
+  .svc-row .l2 { display: flex; align-items: center; gap: 10px; height: 12px; width: 100%; }
+  .svc-row .l2 .ebar { flex: 1; width: auto; }
+  .tickbar { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px 0; font-size: 12px; color: var(--n700); }
+  .tickbar button { border: 0; background: transparent; padding: 0; font-size: 12px; font-weight: 700; color: var(--accent-700); }
+  .count-chip { border-radius: 999px; background: var(--n200); padding: 0 7px; font: 700 11px var(--mono); color: var(--n700); }
+  .codes-btn { display: flex; flex: none; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--card); padding: 5px 9px; font-size: 12px; white-space: nowrap; }
+  .last-scan { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--n700); }
+  .last-scan .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
+  .last-scan button { margin-left: auto; border: 0; background: transparent; padding: 0; font-size: 12px; color: var(--n700); text-decoration: underline; text-underline-offset: 2px; }
+  .last-names { display: flex; flex-wrap: wrap; gap: 4px; max-height: 96px; overflow: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--card); padding: 8px; font: 11px var(--mono); color: var(--n700); }
+  .last-names span { border-radius: 4px; background: var(--n200); padding: 0 6px; }
   .ebar { display: block; height: 3px; width: 100%; border-radius: 999px; background: var(--n200); overflow: hidden; }
   .ebar b { display: block; height: 100%; border-radius: 999px; background: color-mix(in srgb, var(--accent) 60%, transparent); }
   .tiers { display: flex; justify-content: flex-end; gap: 6px; font: 10px var(--mono); color: var(--n700); }
@@ -233,11 +245,22 @@
   .codes label.kind { padding: 4px 10px; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--n700); }
   .codes label.every { padding-left: 10px; font-weight: 600; }
   .codes .grp { border-top: 1px solid var(--line); padding-top: 4px; }
-  .sevtab { border: 0; background: transparent; border-radius: var(--r); padding: 4px 10px; font-size: 12px; color: var(--n700); }
+  .sevtab { border: 0; background: transparent; border-radius: var(--r); padding: 4px 0; font-size: 12px; color: var(--n700); }
   .sevtab:hover { background: var(--n200); color: var(--text); }
-  .sevtab.on { background: var(--text); color: var(--bg); font-weight: 700; }
+  .sevtab.on { background: var(--card); color: var(--text); font-weight: 700; box-shadow: var(--shadow-sm); }
   .sevtab span { font: 11px var(--mono); opacity: .75; }
-  .log-row { flex-direction: column; gap: 4px; padding: 10px 12px; }
+  .log-row { position: relative; flex-direction: column; gap: 4px; padding: 9px 10px 9px 14px; }
+  .log-row:before { content: ""; position: absolute; left: 4px; top: 10px; bottom: 10px; width: 3px; border-radius: 99px; background: var(--c, var(--n400)); }
+  .log-row[data-sev=high] { --c: var(--accent); } .log-row[data-sev=medium] { --c: var(--warn); }
+  .log-head { display: flex; align-items: baseline; gap: 8px; width: 100%; }
+  .log-head .meth { font: 700 11px var(--mono); color: var(--n700); flex: none; }
+  .log-head .path { font: 700 12.5px var(--mono); }
+  .log-sub { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 12px; color: var(--n700); }
+  .grp-h { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--n600); }
+  .grp-h i { width: 7px; height: 7px; border-radius: 50%; background: var(--c); } .grp-h span { margin-left: auto; font: 11px var(--mono); letter-spacing: 0; text-transform: none; }
+  .tabs3 button { display: flex; justify-content: center; align-items: center; gap: 6px; }
+  .tabs3 i { width: 7px; height: 7px; border-radius: 50%; }
+  .when { margin-left: auto; flex: none; text-align: right; font: 11px/1.25 var(--mono); color: var(--n700); white-space: nowrap; }
   .clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font: 12px var(--mono); word-break: break-all; }
   .alert { display: flex; flex-direction: column; gap: 16px; padding: 20px 24px; }
   .md h3 { font-size: 15px; margin: 4px 0 6px; }
@@ -478,18 +501,16 @@
 
         <!-- Services: range, Status, filter, Services to tick, Scan -->
         <aside class="mon-svc">
-          <div style="display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--divider);padding:12px">
-            <div style="display:flex;align-items:baseline;justify-content:space-between;padding:0 2px">
-              <h2 style="font-size:13px">Services</h2><span class="xs muted">Datadog requests failing, HTTP 400+</span>
-            </div>
+          <div style="display:flex;flex-direction:column;gap:10px;border-bottom:1px solid var(--divider);padding:14px">
+            <div class="row" style="gap:8px"><h2 style="font-size:15px">Services</h2><span class="count-chip">10</span><span class="ml xs muted">fold</span></div>
+            <div class="xs muted" style="margin-top:-6px">Failing requests in Datadog, every env</div>
             <div class="seg" role="group" aria-label="Range">
               <button class="mono xs" data-range="15m">15m</button><button class="mono xs" data-range="1h">1h</button><button class="mono xs" data-range="4h">4h</button><button class="mono xs on" data-range="24h">24h</button><button class="mono xs" data-range="7d">7d</button>
             </div>
-            <div style="position:relative">
-              <button class="picker" data-toggle="#codes" aria-label="Status">
-                <span class="muted">Status</span><span class="grow trunc mono xs">all from 400 up</span><span class="pill mono">all</span>
-              </button>
-              <fieldset class="menu codes" id="codes" hidden data-flow style="top:100%;left:0;right:0;margin:4px 0 0;max-height:384px;overflow:auto">
+            <div style="display:flex;gap:6px">
+              <div style="position:relative">
+                <button class="codes-btn" data-toggle="#codes" aria-label="Status"><span class="muted">HTTP</span><b class="mono">400+</b><span class="muted">▾</span></button>
+                <fieldset class="menu codes" id="codes" hidden data-flow style="top:100%;left:0;width:288px;margin:4px 0 0;max-height:384px;overflow:auto">
                 <label class="every sel"><input type="checkbox" checked> Every code from 400 up</label>
                 <div class="grp">
                   <label class="kind"><input type="checkbox" checked> 4xx · client errors</label>
@@ -505,86 +526,61 @@
                   <label><input type="checkbox" checked><span class="code5">504</span><span class="grow">Gateway Timeout</span><span class="mono xs muted">1.4K</span></label>
                 </div>
               </fieldset>
+              </div>
+              <input class="field" type="search" aria-label="Filter Services" placeholder="Filter 10" style="flex:1;min-width:0">
             </div>
-            <input class="field" type="search" aria-label="Filter Services" placeholder="Filter 10 Services">
           </div>
           <div class="scroll">
+            <div style="padding:8px 8px 0"><button class="it sel" data-go="svc:all" style="display:flex;width:100%;align-items:center;gap:8px;padding:8px 10px"><strong class="s">All Services</strong><span class="ml mono xs muted">10</span></button></div>
+            <div class="tickbar"><span id="tickcount">Tick Services to Scan</span><span style="display:flex;gap:10px"><button id="tickall">Tick all</button><button id="untick" hidden>Clear</button></span></div>
             <ul class="svc-list" aria-label="Services">
-              <li><input class="tick-all" type="checkbox" aria-label="Tick every Service to Scan" style="position:absolute;top:10px;left:10px;z-index:1">
-                <button class="it sel" data-go="svc:all" style="align-items:center;gap:8px;padding:8px 10px 8px 32px"><strong class="s">All Services</strong><span class="ml mono xs muted">10</span></button></li>
-              <li><input class="tick" type="checkbox" aria-label="Scan auth-gateway" data-svc="auth-gateway"><button class="it svc-row" data-go="svc:auth-gateway"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">auth-gateway</span><span class="ml mono xs muted">120</span></span><span class="ebar"><b style="width:2%"></b></span><span class="tiers" style="width:100%"><span><i class="l"></i>3</span></span></button></li>
-              <li><input class="tick" type="checkbox" aria-label="Scan billing-api" data-svc="billing-api"><button class="it svc-row" data-go="svc:billing-api"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">billing-api</span><span class="ml mono xs muted">2.4K</span></span><span class="ebar"><b style="width:13%"></b></span><span class="tiers" style="width:100%"><span><i class="h"></i>1</span><span><i class="md"></i>4</span><span><i class="l"></i>9</span></span></button></li>
-              <li><input class="tick" type="checkbox" aria-label="Scan catalog-sync" data-svc="catalog-sync"><button class="it svc-row" data-go="svc:catalog-sync"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">catalog-sync</span><span class="ml mono xs muted">870</span></span><span class="ebar"><b style="width:5%"></b></span><span class="tiers" style="width:100%"><span><i class="md"></i>6</span><span><i class="l"></i>12</span></span></button></li>
-              <li><input class="tick" type="checkbox" aria-label="Scan checkout-api" data-svc="checkout-api"><button class="it svc-row" data-go="svc:checkout-api"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">checkout-api</span><span class="ml mono xs muted">18.2K</span></span><span class="ebar"><b style="width:100%"></b></span><span class="tiers" style="width:100%"><span><i class="h"></i>3</span><span><i class="md"></i>11</span><span><i class="l"></i>64</span></span></button></li>
-              <li><input class="tick" type="checkbox" aria-label="Scan inventory-api" data-svc="inventory-api"><button class="it svc-row" data-go="svc:inventory-api"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">inventory-api</span><span class="ml mono xs muted">35</span></span><span class="ebar"><b style="width:2%"></b></span><span class="tiers" style="width:100%"><span><i class="l"></i>2</span></span></button></li>
-              <li><input class="tick" type="checkbox" aria-label="Scan notifications-worker" data-svc="notifications-worker"><button class="it svc-row" data-go="svc:notifications-worker"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">notifications-worker</span><span class="ml mono xs muted">1.1K</span></span><span class="ebar"><b style="width:6%"></b></span><span class="tiers" style="width:100%"><span><i class="md"></i>5</span><span><i class="l"></i>31</span></span></button></li>
-              <li><input class="tick" type="checkbox" aria-label="Scan orders-worker" data-svc="orders-worker"><button class="it svc-row" data-go="svc:orders-worker"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">orders-worker</span><span class="ml mono xs muted">6.3K</span></span><span class="ebar"><b style="width:35%"></b></span><span class="tiers" style="width:100%"><span><i class="h"></i>2</span><span><i class="md"></i>9</span><span><i class="l"></i>47</span></span></button></li>
-              <li><input class="tick" type="checkbox" aria-label="Scan search-api" data-svc="search-api"><button class="it svc-row" data-go="svc:search-api"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">search-api</span><span class="ml mono xs muted">9</span></span><span class="ebar"><b style="width:2%"></b></span></button></li>
+              <li><input class="tick" type="checkbox" aria-label="Scan auth-gateway" data-svc="auth-gateway"><button class="it svc-row" data-go="svc:auth-gateway"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">auth-gateway</span><span class="ml mono xs muted">120</span></span><span class="l2"><span class="ebar"><b style="width:2%"></b></span><span class="tiers"><span><i class="l"></i>3</span></span></span></button></li>
+              <li><input class="tick" type="checkbox" aria-label="Scan billing-api" data-svc="billing-api"><button class="it svc-row" data-go="svc:billing-api"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">billing-api</span><span class="ml mono xs muted">2.4K</span></span><span class="l2"><span class="ebar"><b style="width:13%"></b></span><span class="tiers"><span><i class="h"></i>1</span><span><i class="md"></i>4</span><span><i class="l"></i>9</span></span></span></button></li>
+              <li><input class="tick" type="checkbox" aria-label="Scan catalog-sync" data-svc="catalog-sync"><button class="it svc-row" data-go="svc:catalog-sync"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">catalog-sync</span><span class="ml mono xs muted">870</span></span><span class="l2"><span class="ebar"><b style="width:5%"></b></span><span class="tiers"><span><i class="md"></i>6</span><span><i class="l"></i>12</span></span></span></button></li>
+              <li><input class="tick" type="checkbox" aria-label="Scan checkout-api" data-svc="checkout-api"><button class="it svc-row" data-go="svc:checkout-api"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">checkout-api</span><span class="ml mono xs muted">18.2K</span></span><span class="l2"><span class="ebar"><b style="width:100%"></b></span><span class="tiers"><span><i class="h"></i>3</span><span><i class="md"></i>11</span><span><i class="l"></i>64</span></span></span></button></li>
+              <li><input class="tick" type="checkbox" aria-label="Scan inventory-api" data-svc="inventory-api"><button class="it svc-row" data-go="svc:inventory-api"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">inventory-api</span><span class="ml mono xs muted">35</span></span><span class="l2"><span class="ebar"><b style="width:2%"></b></span><span class="tiers"><span><i class="l"></i>2</span></span></span></button></li>
+              <li><input class="tick" type="checkbox" aria-label="Scan notifications-worker" data-svc="notifications-worker"><button class="it svc-row" data-go="svc:notifications-worker"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">notifications-worker</span><span class="ml mono xs muted">1.1K</span></span><span class="l2"><span class="ebar"><b style="width:6%"></b></span><span class="tiers"><span><i class="md"></i>5</span><span><i class="l"></i>31</span></span></span></button></li>
+              <li><input class="tick" type="checkbox" aria-label="Scan orders-worker" data-svc="orders-worker"><button class="it svc-row" data-go="svc:orders-worker"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">orders-worker</span><span class="ml mono xs muted">6.3K</span></span><span class="l2"><span class="ebar"><b style="width:35%"></b></span><span class="tiers"><span><i class="h"></i>2</span><span><i class="md"></i>9</span><span><i class="l"></i>47</span></span></span></button></li>
+              <li><input class="tick" type="checkbox" aria-label="Scan search-api" data-svc="search-api"><button class="it svc-row" data-go="svc:search-api"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">search-api</span><span class="ml mono xs muted">9</span></span><span class="l2"><span class="ebar"><b style="width:2%"></b></span></span></button></li>
               <li><input class="tick" type="checkbox" aria-label="Scan shipping-rates" data-svc="shipping-rates"><button class="it svc-row" data-go="svc:shipping-rates"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">shipping-rates</span><span class="ml mono xs muted" title="None in this range">0</span></span><span class="ebar"><b style="width:2%"></b></span><span class="tiers" style="width:100%"><span><i class="l"></i>4</span></span></button></li>
-              <li><input class="tick" type="checkbox" aria-label="Scan web-frontend" data-svc="web-frontend"><button class="it svc-row" data-go="svc:web-frontend"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">web-frontend</span><span class="ml mono xs muted">640</span></span><span class="ebar"><b style="width:4%"></b></span><span class="tiers" style="width:100%"><span><i class="md"></i>3</span><span><i class="l"></i>24</span></span></button></li>
+              <li><input class="tick" type="checkbox" aria-label="Scan web-frontend" data-svc="web-frontend"><button class="it svc-row" data-go="svc:web-frontend"><span class="row" style="width:100%"><span class="trunc s" style="font-weight:600">web-frontend</span><span class="ml mono xs muted">640</span></span><span class="l2"><span class="ebar"><b style="width:4%"></b></span><span class="tiers"><span><i class="md"></i>3</span><span><i class="l"></i>24</span></span></span></button></li>
             </ul>
           </div>
-          <div style="display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--divider);padding:12px">
-            <button class="btn primary xs" id="scan" style="justify-content:center;padding:6px 0">Scan 9 Services · 24h</button>
-            <button id="untick" hidden style="align-self:flex-start;border:0;background:transparent;padding:0;font-size:11px;color:var(--n700);text-decoration:underline">Untick all</button>
-            <span class="xs muted">Last Scan 2h ago: 24h of every Service, HTTP 400+</span>
+          <div style="display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--divider);padding:12px 14px 14px">
+            <button class="btn primary" id="scan" style="justify-content:center;padding:8px 0">Scan 9 Services · 24h</button>
+            <div class="last-scan"><span class="dot"></span>Last Scan 2h ago<button id="lastnames-btn" aria-expanded="false">Every Service ▾</button></div>
+            <div class="last-names" id="lastnames" hidden><span style="background:none;padding:0;width:100%">24h · HTTP 400+</span></div>
           </div>
         </aside>
 
         <!-- Logs: the Alerts a Scan raised, by tier -->
         <aside class="mon-logs">
-          <div style="display:flex;align-items:baseline;gap:8px;border-bottom:1px solid var(--divider);padding:12px 16px 8px">
-            <h2 class="trunc" style="font-size:13px" id="logs-title">All Services</h2><span class="xs muted">logs</span>
-          </div>
-          <div role="tablist" aria-label="Severity" style="display:flex;gap:4px;border-bottom:1px solid var(--divider);padding:8px 12px">
-            <button class="sevtab on" data-go="sev:all">All <span>240</span></button>
-            <button class="sevtab" data-go="sev:high">High <span>6</span></button>
-            <button class="sevtab" data-go="sev:medium">Medium <span>38</span></button>
-            <button class="sevtab" data-go="sev:low">Low <span>196</span></button>
-            <label class="ml row xs muted" style="gap:6px;cursor:pointer"><input type="checkbox" id="closed"> Closed</label>
+          <div style="display:flex;flex-direction:column;gap:10px;border-bottom:1px solid var(--divider);padding:14px">
+            <div class="row" style="align-items:baseline;gap:8px"><h2 class="trunc" style="font-size:15px" id="logs-title">All Services</h2><span class="xs muted">Failing logs</span><span class="ml mono xs muted">24h · HTTP 400+</span></div>
+            <div class="seg tabs3" role="tablist" aria-label="Severity">
+              <button class="sevtab on" data-go="sev:all">All <span class="mono xs">240</span></button>
+              <button class="sevtab" data-go="sev:high"><i style="background:var(--accent)"></i>High <span class="mono xs">6</span></button>
+              <button class="sevtab" data-go="sev:medium"><i style="background:var(--warn)"></i>Medium <span class="mono xs">38</span></button>
+              <button class="sevtab" data-go="sev:low"><i style="background:var(--n400)"></i>Low <span class="mono xs">196</span></button>
+            </div>
+            <div style="display:flex;gap:6px">
+              <input class="field" type="search" aria-label="Search logs" placeholder="Route, message, code, Service" style="flex:1;min-width:0">
+              <label class="row xs muted" style="gap:6px;cursor:pointer;flex:none;border:1px solid var(--line);background:var(--card);border-radius:var(--r);padding:5px 9px"><input type="checkbox" id="closed"> Closed</label>
+            </div>
           </div>
           <div class="scroll">
             <ul class="log-list" aria-label="Logs">
-              <li><button class="it log-row sel" data-go="alert:a">
-                <span class="row xs"><span class="sev high">High</span><strong class="trunc s">checkout-api</strong><span class="code5">500</span><span class="ml muted" style="white-space:nowrap">×1812 · 12m ago</span></span>
-                <span class="clamp2">TypeError: Cannot read properties of null (reading 'amount') at applyTax (src/tax/apply.ts:88:31)</span>
-                <span class="row xs muted"><span class="trunc mono">POST /v1/orders</span><span class="ml pill mono">verified</span></span>
-              </button></li>
-              <li><button class="it log-row" data-go="alert:b">
-                <span class="row xs"><span class="sev high">High</span><strong class="trunc s">orders-worker</strong><span class="code5">500</span><span class="ml muted" style="white-space:nowrap">×904 · 25m ago</span></span>
-                <span class="clamp2">Error: connect ECONNREFUSED cache.example.com:6379 while reserving stock for order 10422</span>
-                <span class="row xs muted"><span class="trunc mono">POST /jobs/fulfil</span><span class="ml pill mono">verifying</span></span>
-              </button></li>
-              <li><button class="it log-row" data-go="alert:c">
-                <span class="row xs"><span class="sev high">High</span><strong class="trunc s">checkout-api</strong><span class="code5">502</span><span class="ml muted" style="white-space:nowrap">×377 · 1h ago</span></span>
-                <span class="clamp2">payments upstream returned 502 Bad Gateway after 30000ms</span>
-                <span class="row xs muted"><span class="trunc mono">POST /v1/payments</span><span class="ml pill mono">fixing</span></span>
-              </button></li>
-              <li><button class="it log-row" data-go="alert:d">
-                <span class="row xs"><span class="sev high">High</span><strong class="trunc s">billing-api</strong><span class="code5">500</span><span class="ml muted" style="white-space:nowrap">×120 · 2h ago</span></span>
-                <span class="clamp2">QueryFailedError: duplicate key value violates unique constraint "invoices_number_key"</span>
-                <span class="row xs muted"><span class="trunc mono">POST /v1/invoices</span></span>
-              </button></li>
-              <li><button class="it log-row" data-go="alert:d">
-                <span class="row xs"><span class="sev medium">Medium</span><strong class="trunc s">catalog-sync</strong><span class="code4">429</span><span class="ml muted" style="white-space:nowrap">×86 · 3h ago</span></span>
-                <span class="clamp2">Rate limited by the catalog provider: retry after 2s</span>
-                <span class="row xs muted"><span class="trunc mono">GET /v1/products/:id</span></span>
-              </button></li>
-              <li><button class="it log-row" data-go="alert:d">
-                <span class="row xs"><span class="sev medium">Medium</span><strong class="trunc s">notifications-worker</strong><span class="code4">422</span><span class="ml muted" style="white-space:nowrap">×41 · 40m ago</span></span>
-                <span class="clamp2">ValidationError: "email" must be a valid email</span>
-                <span class="row xs muted"><span class="trunc mono">POST /v1/notify</span></span>
-              </button></li>
-              <li><button class="it log-row" data-go="alert:d">
-                <span class="row xs"><span class="sev low">Low</span><strong class="trunc s">web-frontend</strong><span class="code4">404</span><span class="ml muted" style="white-space:nowrap">×18 · 5h ago</span></span>
-                <span class="clamp2">GET /assets/app.3f9c.js 404 Not Found</span>
-                <span class="row xs muted"><span class="trunc mono">GET /assets/:file</span></span>
-              </button></li>
-              <li class="closed-row" hidden data-flow><button class="it log-row" data-go="alert:e">
-                <span class="row xs"><span class="sev low">Low</span><strong class="trunc s">search-api</strong><span class="code4">400</span><span class="ml muted" style="white-space:nowrap">×9 · 6h ago</span></span>
-                <span class="clamp2">Bad request: "q" is required</span>
-                <span class="row xs muted"><span class="trunc mono">GET /v1/search</span><span class="ml pill mono">dismissed</span></span>
-              </button></li>
+              <li class="grp-h" style="--c:var(--accent)"><i></i>High<span>6</span></li>
+              <li><button class="it log-row sel" data-go="alert:a" data-sev="high"><span class="log-head"><span class="meth">POST</span><span class="path trunc">/v1/orders</span><span class="ml xs muted" style="white-space:nowrap">12m ago</span></span><span class="log-sub"><strong class="trunc" style="color:var(--text)">checkout-api</strong><span class="code5">500</span><span class="ml mono">×1812</span><span class="pill mono">verified</span></span><span class="clamp2 muted" style="font-size:11.5px">TypeError: Cannot read properties of null (reading 'amount') at applyTax (src/tax/apply.ts:88:31)</span></button></li>
+              <li><button class="it log-row" data-go="alert:b" data-sev="high"><span class="log-head"><span class="meth">POST</span><span class="path trunc">/jobs/fulfil</span><span class="ml xs muted" style="white-space:nowrap">25m ago</span></span><span class="log-sub"><strong class="trunc" style="color:var(--text)">orders-worker</strong><span class="code5">500</span><span class="ml mono">×904</span><span class="pill mono">verifying</span></span><span class="clamp2 muted" style="font-size:11.5px">Error: connect ECONNREFUSED cache.example.com:6379 while reserving stock for order 10422</span></button></li>
+              <li><button class="it log-row" data-go="alert:c" data-sev="high"><span class="log-head"><span class="meth">POST</span><span class="path trunc">/v1/payments</span><span class="ml xs muted" style="white-space:nowrap">1h ago</span></span><span class="log-sub"><strong class="trunc" style="color:var(--text)">checkout-api</strong><span class="code5">502</span><span class="ml mono">×377</span><span class="pill mono">fixing</span></span><span class="clamp2 muted" style="font-size:11.5px">payments upstream returned 502 Bad Gateway after 30000ms</span></button></li>
+              <li><button class="it log-row" data-go="alert:d" data-sev="high"><span class="log-head"><span class="meth">POST</span><span class="path trunc">/v1/invoices</span><span class="ml xs muted" style="white-space:nowrap">2h ago</span></span><span class="log-sub"><strong class="trunc" style="color:var(--text)">billing-api</strong><span class="code5">500</span><span class="ml mono">×120</span></span><span class="clamp2 muted" style="font-size:11.5px">QueryFailedError: duplicate key value violates unique constraint "invoices_number_key"</span></button></li>
+              <li class="grp-h" style="--c:var(--warn)"><i></i>Medium<span>38</span></li>
+              <li><button class="it log-row" data-go="alert:d" data-sev="medium"><span class="log-head"><span class="meth">GET</span><span class="path trunc">/v1/products/:id</span><span class="ml xs muted" style="white-space:nowrap">3h ago</span></span><span class="log-sub"><strong class="trunc" style="color:var(--text)">catalog-sync</strong><span class="code4">429</span><span class="ml mono">×86</span></span><span class="clamp2 muted" style="font-size:11.5px">Rate limited by the catalog provider: retry after 2s</span></button></li>
+              <li><button class="it log-row" data-go="alert:d" data-sev="medium"><span class="log-head"><span class="meth">POST</span><span class="path trunc">/v1/notify</span><span class="ml xs muted" style="white-space:nowrap">40m ago</span></span><span class="log-sub"><strong class="trunc" style="color:var(--text)">notifications-worker</strong><span class="code4">422</span><span class="ml mono">×41</span></span><span class="clamp2 muted" style="font-size:11.5px">ValidationError: "email" must be a valid email</span></button></li>
+              <li class="grp-h" style="--c:var(--n400)"><i></i>Low<span>196</span></li>
+              <li><button class="it log-row" data-go="alert:d" data-sev="low"><span class="log-head"><span class="meth">GET</span><span class="path trunc">/assets/:file</span><span class="ml xs muted" style="white-space:nowrap">5h ago</span></span><span class="log-sub"><strong class="trunc" style="color:var(--text)">web-frontend</strong><span class="code4">404</span><span class="ml mono">×18</span></span><span class="clamp2 muted" style="font-size:11.5px">GET /assets/app.3f9c.js 404 Not Found</span></button></li>
+              <li class="closed-row" hidden data-flow><button class="it log-row" data-go="alert:e" data-sev="low"><span class="log-head"><span class="meth">GET</span><span class="path trunc">/v1/search</span><span class="ml xs muted" style="white-space:nowrap">6h ago</span></span><span class="log-sub"><strong class="trunc" style="color:var(--text)">search-api</strong><span class="code4">400</span><span class="ml mono">×9</span><span class="pill mono">dismissed</span></span><span class="clamp2 muted" style="font-size:11.5px">Bad request: "q" is required</span></button></li>
               <li style="padding:4px 6px 8px"><button class="btn xs" style="width:100%;justify-content:center;font-weight:600;font-family:var(--sans)">Show 100 more <span class="mono muted" style="font-weight:400">· 100 of 240</span></button></li>
             </ul>
           </div>
@@ -780,7 +776,7 @@
             <section aria-label="billing-api" style="padding:0 8px 6px">
               <div class="rg-head"><button class="rg-btn"><span class="xs muted" style="width:12px">▾</span><span class="bi xs bb">B</span><strong class="mono m">billing-api</strong><span class="grow trunc mono xs muted">main</span><span class="mono xs acc">1 running</span><span class="mono xs muted">1</span></button><button class="plusbtn" title="New Session" aria-label="New Session in billing-api">+</button></div>
               <ul style="display:flex;flex-direction:column;gap:2px">
-                <li><button class="it ses-row" data-go="ses:invoice"><span class="row" style="align-items:baseline"><span class="grow trunc b">Invoice number race</span><span class="pill acc mono">waiting approval</span></span><span class="trunc mono xs muted">fix/invoice-number</span></button></li>
+                <li><button class="it ses-row" data-go="ses:invoice"><span class="row" style="align-items:baseline"><span class="grow trunc b">Invoice number race</span><span class="pill acc mono">waiting approval</span></span><span class="trunc mono xs muted">fix/invoice-number</span><span class="trunc mono xs muted">Started Nov 5 · 8:50 AM · active 4h ago</span></button></li>
               </ul>
             </section>
             <section aria-label="checkout-api" style="padding:0 8px 6px">
@@ -789,9 +785,9 @@
                 <div class="row" style="gap:6px"><button class="drop mono grow" style="padding:6px 10px;font-size:12px"><span class="v">main</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button><button class="btn primary xs" style="padding:6px 14px">Start</button></div>
               </div>
               <ul style="display:flex;flex-direction:column;gap:2px">
-                <li><button class="it ses-row sel" data-go="ses:tax"><span class="row" style="align-items:baseline"><span class="grow trunc b">Fix empty cart tax</span><span class="pill mono">idle</span></span><span class="trunc mono xs muted">fix/empty-cart-tax</span></button></li>
-                <li><button class="it ses-row"><span class="row" style="align-items:baseline"><span class="grow trunc b">Payments timeout</span><span class="pill mono">idle</span></span><span class="trunc mono xs muted">fix/OPS-142-payments-timeout</span></button></li>
-                <li><button class="it ses-row"><span class="row" style="align-items:baseline"><span class="grow trunc b">Bump Node to 22</span><span class="pill mono">idle</span></span><span class="trunc mono xs muted">chore/node-22</span></button></li>
+                <li><button class="it ses-row sel" data-go="ses:tax"><span class="row" style="align-items:baseline"><span class="grow trunc b">Fix empty cart tax</span><span class="pill mono">idle</span></span><span class="trunc mono xs muted">fix/empty-cart-tax</span><span class="trunc mono xs muted">Started Nov 5 · 2:14 PM · active now</span></button></li>
+                <li><button class="it ses-row"><span class="row" style="align-items:baseline"><span class="grow trunc b">Payments timeout</span><span class="pill mono">idle</span></span><span class="trunc mono xs muted">fix/OPS-142-payments-timeout</span><span class="trunc mono xs muted">Started Nov 3 · 5:02 PM · active 2d ago</span></button></li>
+                <li><button class="it ses-row"><span class="row" style="align-items:baseline"><span class="grow trunc b">Bump Node to 22</span><span class="pill mono">idle</span></span><span class="trunc mono xs muted">chore/node-22</span><span class="trunc mono xs muted">Started Oct 29 · 10:48 AM · active 7d ago</span></button></li>
               </ul>
               <button style="margin-top:2px;border:0;background:transparent;padding:4px 0 4px 28px;font-size:12px;color:var(--accent-700)">Show 2 more</button>
             </section>
@@ -800,7 +796,7 @@
             </section>
             <section aria-label="No Repo" style="padding:0 8px 6px">
               <div class="rg-head"><span class="rg-btn" style="cursor:default"><span style="width:12px"></span><span style="display:inline-flex;width:18px;height:18px;align-items:center;justify-content:center;border-radius:5px;border:1px dashed var(--n500);font-size:10px;color:var(--n700)">∅</span><strong class="m">No Repo</strong><span class="grow trunc xs muted">anonymous</span><span class="mono xs muted">1</span></span><button class="plusbtn" title="New anonymous Session: no Repo, its own folder">+</button></div>
-              <ul><li><button class="it ses-row"><span class="row" style="align-items:baseline"><span class="grow trunc b">Clone acme/mobile and find the crash</span><span class="pill mono">idle</span></span></button></li></ul>
+              <ul><li><button class="it ses-row"><span class="row" style="align-items:baseline"><span class="grow trunc b">Clone acme/mobile and find the crash</span><span class="pill mono">idle</span></span><span class="trunc mono xs muted">Started Nov 4 · 3:30 PM · active 1d ago</span></button></li></ul>
             </section>
           </div>
 
@@ -818,19 +814,19 @@
             <div style="display:flex;flex-direction:column;gap:4px;padding:8px 8px 12px">
               <section>
                 <button class="proj-h"><span class="tri open">▶</span><span class="bi xs bb">B</span><span class="trunc mono">acme/billing-api</span><span class="pill" style="background:var(--accent-100);color:var(--accent-900);font-weight:600">local · billing-api</span><span class="ml mono xs muted" style="font-weight:400">1</span></button>
-                <ul><li><button class="it pr-row"><span class="trunc b" style="width:100%">#57 Retry invoice number on conflict</span><span class="pr-meta"><span>sam-lee</span><span class="trunc">fix/invoice-number</span><span>agent</span><span>◐ checks running</span></span></button></li></ul>
+                <ul><li><button class="it pr-row"><span class="row" style="width:100%;align-items:baseline"><span class="trunc b">#57 Retry invoice number on conflict</span><span class="when">Opened Nov 5 · 9:31 AM<br>5h ago</span></span><span class="pr-meta"><span>sam-lee</span><span class="trunc">fix/invoice-number</span><span>agent</span><span>◐ checks running</span></span></button></li></ul>
               </section>
               <section>
                 <button class="proj-h"><span class="tri open">▶</span><span class="bi xs gh">GH</span><span class="trunc mono">acme/checkout-api</span><span class="pill" style="background:var(--accent-100);color:var(--accent-900);font-weight:600">local · checkout-api</span><span class="ml mono xs muted" style="font-weight:400">3</span></button>
                 <ul style="display:flex;flex-direction:column;gap:2px">
-                  <li><button class="it pr-row" data-go="pr:412"><span class="trunc b" style="width:100%">#412 Guard null shipping line in tax</span><span class="pr-meta"><span>sam-lee</span><span class="trunc">fix/empty-cart-tax</span><span>agent</span><span>✓ checks passed</span><span class="okc">✓ approved by priya-rao</span><span>2 comments</span></span></button></li>
-                  <li><button class="it pr-row sel" data-go="pr:415"><span class="trunc b" style="width:100%">#415 Cache tax rates per region</span><span class="pr-meta"><span>priya-rao</span><span class="trunc">perf/tax-rate-cache</span><span>✓ checks passed</span><span>3 comments</span></span></button></li>
-                  <li><button class="it pr-row"><span class="trunc b" style="width:100%">#409 Search facet counts</span><span class="pr-meta"><span>alex-kim</span><span class="trunc">feat/facets</span><span>✕ checks failed</span><span>changes requested</span></span></button></li>
+                  <li><button class="it pr-row" data-go="pr:412"><span class="row" style="width:100%;align-items:baseline"><span class="trunc b">#412 Guard null shipping line in tax</span><span class="when">Opened Nov 5 · 2:14 PM<br>1h ago</span></span><span class="pr-meta"><span>sam-lee</span><span class="trunc">fix/empty-cart-tax</span><span>agent</span><span>✓ checks passed</span><span class="okc">✓ approved by priya-rao</span><span>2 comments</span></span></button></li>
+                  <li><button class="it pr-row sel" data-go="pr:415"><span class="row" style="width:100%;align-items:baseline"><span class="trunc b">#415 Cache tax rates per region</span><span class="when">Opened Nov 4 · 6:40 PM<br>21h ago</span></span><span class="pr-meta"><span>priya-rao</span><span class="trunc">perf/tax-rate-cache</span><span>✓ checks passed</span><span>3 comments</span></span></button></li>
+                  <li><button class="it pr-row"><span class="row" style="width:100%;align-items:baseline"><span class="trunc b">#409 Search facet counts</span><span class="when">Opened Oct 29 · 11:02 AM<br>7d ago</span></span><span class="pr-meta"><span>alex-kim</span><span class="trunc">feat/facets</span><span>✕ checks failed</span><span>changes requested</span></span></button></li>
                 </ul>
               </section>
               <section>
                 <button class="proj-h"><span class="tri open">▶</span><span class="bi xs gl">GL</span><span class="trunc mono">acme/infra</span><span class="pill" style="font-weight:400">not imported</span><span class="ml mono xs muted" style="font-weight:400">1</span></button>
-                <ul><li><a class="it pr-row" href="#" title="Open on gitlab"><span class="row" style="width:100%"><span class="trunc b">#88 Raise worker memory to 1 GiB</span><span class="ml s faint" style="font-weight:400">↗</span></span><span class="pr-meta"><span>alex-kim</span><span class="trunc">ops/worker-memory</span><span>✓ checks passed</span></span></a></li></ul>
+                <ul><li><a class="it pr-row" href="#" title="Open on gitlab"><span class="row" style="width:100%"><span class="trunc b">#88 Raise worker memory to 1 GiB</span><span class="when" style="margin-left:auto">Opened Oct 20 · 4:05 PM<br>16d ago</span><span class="s faint" style="font-weight:400">↗</span></span><span class="pr-meta"><span>alex-kim</span><span class="trunc">ops/worker-memory</span><span>✓ checks passed</span></span></a></li></ul>
               </section>
             </div>
           </div>
@@ -1462,14 +1458,14 @@
     const sel = $('.svc-list .it.sel');
     const one = sel && sel.dataset.go !== 'svc:all' ? sel.dataset.go.slice(4) : null;
     btn.textContent = ticked.length === 1 ? `Scan ${ticked[0]} · ${range}`
-      : ticked.length > 1 ? `Scan ${ticked.length} ticked Services · ${range}`
+      : ticked.length > 1 ? `Scan ${ticked.length} ticked · ${range}`
       : one ? `Scan ${one} · ${range}` : `Scan 9 Services · ${range}`;
     const untick = $('#untick');
     untick.hidden = ticked.length === 0;
-    untick.textContent = `Untick ${ticked.length === 1 ? ticked[0] : 'all ' + ticked.length}`;
-    const all = $('.tick-all');
-    all.checked = ticked.length === $$('.tick').length;
-    all.indeterminate = ticked.length > 0 && !all.checked;
+    $('#tickcount').textContent = ticked.length ? `${ticked.length} ticked` : 'Tick Services to Scan';
+    $('#tickcount').style.fontWeight = ticked.length ? '700' : '400';
+    $('#tickall').hidden = ticked.length === $$('.tick').length;
+    $('.svc-list').classList.toggle('ticking', ticked.length > 0);
   }
   $$('[data-range]').forEach((b) => b.addEventListener('click', () => {
     $$('[data-range]').forEach((o) => o.classList.toggle('on', o === b));
@@ -1477,8 +1473,10 @@
     scanLabel();
   }));
   $$('.tick').forEach((t) => t.addEventListener('change', scanLabel));
-  const tickAll = $('.tick-all');
-  if (tickAll) tickAll.addEventListener('change', () => { $$('.tick').forEach((t) => (t.checked = tickAll.checked)); scanLabel(); });
+  const tickAll = $('#tickall');
+  if (tickAll) tickAll.addEventListener('click', () => { $$('.tick').forEach((t) => (t.checked = true)); scanLabel(); });
+  const lastBtn = $('#lastnames-btn');
+  if (lastBtn) lastBtn.addEventListener('click', () => { const n = $('#lastnames'); n.hidden = !n.hidden; lastBtn.setAttribute('aria-expanded', String(!n.hidden)); });
   const untick = $('#untick');
   if (untick) untick.addEventListener('click', () => { $$('.tick').forEach((t) => (t.checked = false)); scanLabel(); });
   const closed = $('#closed');

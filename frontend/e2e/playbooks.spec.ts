@@ -1019,7 +1019,10 @@ test('the Monitor search keeps the logs whose words match, and the Services pane
   await routeAlerts(page, [a1, a2]);
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
 
-  const logs = page.getByRole('list', { name: 'Logs' }).getByRole('listitem');
+  const logs = page
+    .getByRole('list', { name: 'Logs' })
+    .getByRole('listitem')
+    .filter({ has: page.getByRole('button') });
   await expect(logs).toHaveCount(2);
   const search = page.getByRole('searchbox', { name: 'Search logs' });
   await search.fill('carts 404');

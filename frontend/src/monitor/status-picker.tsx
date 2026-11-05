@@ -3,7 +3,10 @@ import { useEffect, useState } from 'react';
 import { item, menu } from '../components/ui/item';
 import type { ScanScope } from './scan-scope';
 
-const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
+const compact = new Intl.NumberFormat('en', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
 
 const REASON: Record<number, string> = {
   400: 'Bad Request',
@@ -78,7 +81,7 @@ export function StatusPicker({ known, scope }: { known: StatusCodeCount[]; scope
     // Nothing ticked reads nothing; keep at least one code.
     if (next.length > 0) pick(next);
   };
-  const summary = every ? 'all from 400 up' : scope.codes.join(', ');
+  const summary = every ? '400+' : scope.codes.join(', ');
 
   return (
     <div className="relative">
@@ -98,23 +101,25 @@ export function StatusPicker({ known, scope }: { known: StatusCodeCount[]; scope
         aria-label="Status"
         title="The HTTP status codes a Scan reads and the lists show. Every code from 400 up by default."
         onClick={() => setOpen(!open)}
-        className={`flex w-full cursor-pointer items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 text-left text-xs shadow-sm transition-colors hover:border-neutral-400 ${open ? 'border-accent-400 shadow-[0_0_0_3px_var(--color-accent-100)]' : 'border-divider'}`}
+        className={`flex max-w-40 cursor-pointer items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-left text-xs whitespace-nowrap transition-colors hover:border-neutral-400 ${open ? 'border-accent-400 shadow-[0_0_0_3px_var(--color-accent-100)]' : 'border-line'}`}
       >
-        <span className="flex-none text-neutral-700">Status</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-xs">{summary}</span>
+        <span className="flex-none text-neutral-700">HTTP</span>
         <span
           title={
             every
               ? undefined
               : `${scope.codes.length} of the ${known.length} codes Datadog has in this range are picked`
           }
-          className="flex-none rounded-full bg-neutral-200 px-1.5 font-mono text-xs text-neutral-700"
+          className="min-w-0 truncate font-mono font-semibold"
         >
-          {every ? 'all' : `${scope.codes.length}/${known.length}`}
+          {summary}
+        </span>
+        <span aria-hidden className="flex-none text-neutral-600">
+          ▾
         </span>
       </button>
       {open && (
-        <fieldset className={`absolute top-full right-0 left-0 z-51 m-0 mt-1 max-h-96 overflow-auto ${menu}`}>
+        <fieldset className={`absolute top-full left-0 z-51 m-0 mt-1 max-h-96 w-72 overflow-auto ${menu}`}>
           <legend className="sr-only">HTTP status codes to read</legend>
           <label className={`flex items-center gap-2.5 px-2.5 py-1.5 ${item(every)}`}>
             <input
