@@ -59,7 +59,7 @@ import {
 import { runSandbox } from './run-sandbox';
 import { type Run, RunRegistry, type RunSummary } from './runs';
 import { SessionKinds } from './session-kinds';
-import { sessionTitle } from './session-title';
+import { sessionTitle, shortTitle } from './session-title';
 import { emitSessionUpdated, NEW_SESSION_TITLE, type SessionRow, SessionsService } from './sessions.service';
 import { Transcripts } from './transcripts';
 
@@ -69,6 +69,9 @@ import { Transcripts } from './transcripts';
  * wait for them, up to Claude Code's own connect timeout.
  */
 const MCP_STARTUP_WAIT_MS = '30000';
+
+/** When to look for Claude Code's name for a new Session after its first run ends. */
+const TITLE_WAITS_MS = [0, 2000, 5000];
 
 const PERMISSION_MODES: Record<AccessMode, PermissionMode> = {
   [AccessMode.Supervised]: 'default',
@@ -332,14 +335,16 @@ export class AgentRuntime {
       deny: options.deny ?? [],
       networkDomains: this.network.forRun(),
       failure: null,
+      autoTitle: null,
     };
     this.runs.add(run);
     this.sessions.setFailure(sessionId, null);
     if (options.fresh) this.sessions.write(sessionId, { sdkSessionId: null });
     const isFirst = session.title === NEW_SESSION_TITLE && session.sdkSessionId === null;
+    if (isFirst) run.autoTitle = sessionTitle(text) ?? NEW_SESSION_TITLE;
     this.sessions.write(sessionId, {
       state: SessionState.Working,
-      title: isFirst ? (sessionTitle(text) ?? NEW_SESSION_TITLE) : session.title,
+      title: run.autoTitle ?? session.title,
       lastActiveAt: new Date().toISOString(),
     });
     void this.execute(run, text);
@@ -649,6 +654,7 @@ export class AgentRuntime {
         return null;
       }
     })();
+    if (session && run.autoTitle !== null) void this.nameForTask(run.sessionId, run.autoTitle).catch(() => {});
     const after = session ? this.kinds.get(session.kind)?.afterRun : undefined;
     if (session && after) void after(session, { startedAt: run.createdAt, workingDir: run.workingDir }).catch(() => {});
     run.onFinish?.({
@@ -657,6 +663,26 @@ export class AgentRuntime {
       text: run.said.join('\n'),
       failure: run.failure,
     });
+  }
+
+  /**
+   * After a new Session's first run: the name Claude Code gave the conversation replaces the first-sentence title,
+   * unless the operator renamed the Session meanwhile. Claude Code may write it just after the run ends, so it is
+   * looked for again a few times.
+   */
+  private async nameForTask(sessionId: string, autoTitle: string): Promise<void> {
+    for (const wait of TITLE_WAITS_MS) {
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait).unref());
+      const session = this.sessions.get(sessionId);
+      if (session.title !== autoTitle) return;
+      if (session.sdkSessionId === null || session.accountId === null) continue;
+      const configDir = this.accounts.configDir(this.accounts.get(session.accountId));
+      const title = await this.transcripts.aiTitle(session.sdkSessionId, configDir);
+      if (title === null) continue;
+      if (this.sessions.get(sessionId).title === autoTitle)
+        this.sessions.write(sessionId, { title: shortTitle(title) });
+      return;
+    }
   }
 
   /**

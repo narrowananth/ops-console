@@ -509,15 +509,16 @@ describe('pull requests', () => {
     }
   });
 
-  it('asks the host for a number, finding a pull request the list does not hold', async () => {
+  it('asks the host for a number, finding an open pull request the list does not hold, and never a merged one', async () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];
     ctx.host.closed = [hostPr(7, { state: 'merged' as never, title: 'Old work' })];
-    const hit = await ctx.http.get('/pull-requests?q=%237');
-    expect(hit.body.data.map((pr: { number: number; state: string }) => [pr.number, pr.state])).toEqual([
-      [7, 'merged'],
-    ]);
+    expect((await ctx.http.get('/pull-requests?q=%237')).body.data).toEqual([]);
+    expect((await ctx.http.get('/pull-requests?q=%237&mine=true')).body.data).toEqual([]);
     expect(ctx.host.found).toContain(7);
+    ctx.host.closed = [hostPr(8, { title: 'Past the first page' })];
+    const hit = await ctx.http.get('/pull-requests?q=8');
+    expect(hit.body.data.map((pr: { number: number; state: string }) => [pr.number, pr.state])).toEqual([[8, 'open']]);
     // A number the list holds shows once; one nobody has shows nothing.
     expect((await ctx.http.get('/pull-requests?q=1')).body.data.map((pr: { number: number }) => pr.number)).toEqual([
       1,

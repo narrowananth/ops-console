@@ -21,11 +21,11 @@ export class ReposController {
     return this.repos.list();
   }
 
-  /** Opens the folder dialog on this machine. Nothing is imported: the path goes back to the UI. */
+  /** Opens the folder dialog on this machine; it picks one folder or several. Nothing is imported: the paths go back to the UI. */
   @Post('pick-folder')
   @HttpCode(200)
-  async pickFolder(): Promise<{ data: { path: string | null } }> {
-    return { data: { path: await this.picker.pick() } };
+  async pickFolder(): Promise<{ data: { paths: string[] } }> {
+    return { data: { paths: await this.picker.pick() } };
   }
 
   @Post()

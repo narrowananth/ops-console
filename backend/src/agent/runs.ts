@@ -44,6 +44,8 @@ export type Run = {
   networkDomains: string[];
   /** Why the run failed, when the console can say: the Run sandbox is unavailable, or the Keychain did not answer. */
   failure: string | null;
+  /** The title the console gave a new Session from its first message; null when the Session was already named. */
+  autoTitle: string | null;
 };
 
 /** How a run ended, for the code that started it. `stopped` is set when the operator stopped it. */

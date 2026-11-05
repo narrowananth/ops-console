@@ -92,7 +92,7 @@ export function ReposTab() {
   const browse = () =>
     pick.mutate(undefined, {
       onSuccess: (chosen) => {
-        if (chosen !== null) importRepo.mutate(chosen);
+        if (chosen.length > 0) importRepo.mutate(chosen);
       },
     });
 
@@ -103,13 +103,17 @@ export function ReposTab() {
         <button
           type="button"
           disabled={pick.isPending || importRepo.isPending}
-          title="Pick the top folder of a git repository. Sessions then run in it, on its branches."
+          title="Pick the top folder of one git repository or several: ⌘-click to pick more. Sessions then run in them, on their branches."
           onClick={browse}
           className="flex cursor-pointer flex-col items-start gap-0.5 border border-divider bg-card px-3 py-2.5 text-left text-text hover:bg-neutral-200 disabled:cursor-wait"
         >
           <span className="text-[13px] font-semibold">Local folder</span>
           <span className="text-xs text-neutral-700">
-            {pick.isPending ? 'Waiting for the folder dialog…' : 'Browse a folder on disk'}
+            {pick.isPending
+              ? 'Waiting for the folder dialog…'
+              : importRepo.isPending
+                ? 'Importing…'
+                : 'Browse folders on disk: ⌘-click to pick several'}
           </span>
         </button>
         {pick.isError && (
@@ -117,16 +121,17 @@ export function ReposTab() {
             {pick.error.message}
           </div>
         )}
-        {importRepo.isSuccess && (
+        {importRepo.isSuccess && importRepo.data.imported.length > 0 && (
           <div role="status" className="text-xs">
-            Imported {importRepo.data.data.name} · branch {importRepo.data.data.branch}
+            Imported {importRepo.data.imported.map((repo) => `${repo.name} · branch ${repo.branch}`).join(', ')}
           </div>
         )}
-        {importRepo.isError && (
-          <div role="alert" className="text-xs text-accent-700">
-            {importRepo.error.message}
-          </div>
-        )}
+        {importRepo.isSuccess &&
+          importRepo.data.failed.map((failure) => (
+            <div key={failure.path} role="alert" className="text-xs text-accent-700">
+              {failure.path}: {failure.message}
+            </div>
+          ))}
       </div>
       {repos.isPending ? (
         <Empty>Reading repos…</Empty>

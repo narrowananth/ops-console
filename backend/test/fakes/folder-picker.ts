@@ -1,9 +1,9 @@
 import type { FolderPicker } from '../../src/repos/folder-picker';
 
-/** Answers the folder dialog with `next`: a path, or `null` for a closed dialog. */
+/** Answers the folder dialog with `next`: the chosen paths, or none for a closed dialog. */
 export class FakeFolderPicker implements FolderPicker {
-  next: string | null = null;
-  async pick(): Promise<string | null> {
+  next: string[] = [];
+  async pick(): Promise<string[]> {
     return this.next;
   }
 }

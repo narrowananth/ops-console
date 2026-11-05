@@ -19,7 +19,7 @@ Sessions, Verifications and Fixes run inside a local git repository, and Monitor
 8. Listing a Repo's branches reads git each time: local branches by most recent commit, the current one marked. A missing folder returns `not_found`.
 9. A Repo's `.mcp.json` servers appear in Integrations with scope `project` and this Repo (`03-settings-mcp-servers`). A server Claude Code has not approved yet reads `auth` with "pending approval in Claude Code".
 10. Adding a MCP server with scope `project` takes a `repo_id` and writes the Repo's `.mcp.json` once, with one `claude mcp add`; removing it removes it from that file. A project server cannot move to another scope.
-11. Local folder opens the macOS folder dialog on this machine and answers the chosen folder's path without importing it; the UI then imports it. Closing the dialog answers `null` and imports nothing. Off macOS the dialog is refused with `invalid_state`, and a dialog that fails is `upstream_failed`.
+11. Local folder opens the macOS folder dialog on this machine, where the operator picks one folder or several (⌘-click), and answers their paths without importing them; the UI then imports each in turn. A folder the console refuses shows its path and reason, and the others still import. Closing the dialog answers no paths and imports nothing. Off macOS the dialog is refused with `invalid_state`, and a dialog that fails is `upstream_failed`.
 
 ## Settled
 
@@ -75,7 +75,7 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 | Method and path | Body | Returns |
 | --------------- | ---- | ------- |
 | `GET /repos` | | `Repo[]` by name |
-| `POST /repos/pick-folder` | | 200 `{ path }`, `null` when the dialog is closed. Opens the folder dialog on this machine (macOS); `invalid_state` elsewhere, `upstream_failed` when the dialog fails (Behavior 11) |
+| `POST /repos/pick-folder` | | 200 `{ paths }`, empty when the dialog is closed. Opens the folder dialog on this machine (macOS); `invalid_state` elsewhere, `upstream_failed` when the dialog fails (Behavior 11) |
 | `POST /repos` | `{ path }` | 201 `Repo`; `not_a_repo`, `duplicate`, `validation_failed` |
 | `PATCH /repos/:id` | `{ name }` | `Repo` |
 | `DELETE /repos/:id?sessions=keep\|delete` | | 204; `sessions` needed when it has Sessions, else `repo_has_sessions`; `session_busy` for `delete` while one runs |
@@ -83,7 +83,7 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 
 ## UI
 
-Repos: a Local folder button that opens the Finder folder dialog and imports the chosen folder, with the result message below it, then "Imported repos" with a count, one row per Repo A→Z by name (name, host, path, branch, and "uncommitted changes" when dirty), and Remove with an inline "Remove from the list?" confirm.
+Repos: a Local folder button that opens the Finder folder dialog and imports every chosen folder, with the result message below it (the Repos imported, then one line per refused folder), then "Imported repos" with a count, one row per Repo A→Z by name (name, host, path, branch, and "uncommitted changes" when dirty), and Remove with an inline "Remove from the list?" confirm.
 
 - Waiting: the button reads "Waiting for the folder dialog…" until the dialog closes.
 - A Repo with Sessions: the confirm reads "Remove from the list? It has N Sessions. Kept ones come back when you import this folder again." with Keep Sessions, Delete Sessions and Cancel (`07-workspace` Behavior 3).

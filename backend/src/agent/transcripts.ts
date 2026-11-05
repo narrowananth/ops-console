@@ -31,6 +31,26 @@ export class Transcripts {
     return getSessionMessages(sdkSessionId, { dir: workingDir, sessionStore: store });
   }
 
+  /** The newest name Claude Code gave the conversation (`ai-title` entries); null when it has not named it yet. */
+  async aiTitle(sdkSessionId: string, configDir: string): Promise<string | null> {
+    const key = await this.find(sdkSessionId, configDir);
+    if (key === null) return null;
+    const text = await readFile(path.join(configDir, 'projects', key, `${sdkSessionId}.jsonl`), 'utf8');
+    let title: string | null = null;
+    for (const line of text.split('\n')) {
+      if (!line.includes('"ai-title"')) continue;
+      try {
+        const entry = JSON.parse(line) as { type?: unknown; aiTitle?: unknown };
+        if (entry.type === 'ai-title' && typeof entry.aiTitle === 'string' && entry.aiTitle.trim()) {
+          title = entry.aiTitle.trim();
+        }
+      } catch {
+        // A line cut mid-write is read on the next try.
+      }
+    }
+    return title;
+  }
+
   async exists(sdkSessionId: string, configDir: string): Promise<boolean> {
     return (await this.find(sdkSessionId, configDir)) !== null;
   }
