@@ -52,6 +52,7 @@ import { systemAppend } from '../playbooks/prompts';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
 import { Attachments } from './attachments';
 import { ConnectionLookup } from './connection-lookup';
+import { HOOK_BYPASS_REASON, skipsCommitHooks } from './hook-bypass';
 import { MessageInterceptors } from './message-interceptors';
 import { blockParts, contentSchema, EDIT_TOOLS, questionInputSchema, stepText, toMessages } from './parts';
 import { ProdWriteRule } from './prod-write-rule';
@@ -806,6 +807,15 @@ export class AgentRuntime {
       if (input.hook_event_name !== 'PreToolUse') return {};
       const toolInput = asRecord(input.tool_input);
       if (input.tool_name === OPEN_PULL_REQUEST_TOOL) return this.approvePullRequest(run, toolInput);
+      if (input.tool_name === 'Bash' && typeof toolInput.command === 'string' && skipsCommitHooks(toolInput.command)) {
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: HOOK_BYPASS_REASON,
+          },
+        };
+      }
       const prodWrite = this.prodWrites.match({
         toolName: input.tool_name,
         input: toolInput,

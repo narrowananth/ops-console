@@ -1,11 +1,29 @@
 import { z } from 'zod';
 
-/** The hosts every agent run's commands may reach, whatever else is on its Network allowlist. */
+/**
+ * The hosts every agent run's commands may reach, whatever else is on its Network allowlist: Git on GitHub and the
+ * package registries a repo's build and commit hooks fetch from (npm and Yarn, crates.io, the Go module proxy, Maven
+ * Central, Gradle, PyPI, RubyGems).
+ */
 export const BUILT_IN_NETWORK_DOMAINS = [
   'github.com',
   'api.github.com',
   '*.githubusercontent.com',
   'registry.npmjs.org',
+  'registry.yarnpkg.com',
+  'crates.io',
+  '*.crates.io',
+  'proxy.golang.org',
+  'sum.golang.org',
+  'repo.maven.apache.org',
+  'repo1.maven.org',
+  'plugins.gradle.org',
+  'services.gradle.org',
+  'downloads.gradle.org',
+  'pypi.org',
+  'files.pythonhosted.org',
+  'rubygems.org',
+  'index.rubygems.org',
 ] as const;
 
 const LABEL = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?';
