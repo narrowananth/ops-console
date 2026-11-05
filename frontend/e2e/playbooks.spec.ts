@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import type { JobPlaybook, PlaybookStepStatus } from '@ops-console/shared';
 import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
 import { DAEMON_FILE } from './global-setup';
 
@@ -410,13 +411,19 @@ test('the page says while it reads Playbooks, and why it could not', async ({ pa
 
 // Monitor and Workspace jobs come from the Datadog and Git host fakes, so these answer with fixtures.
 
-const jobPlaybook = (id: string | null, name: string, steps: [string, string, string | null, boolean?][]) => ({
+type StepStatus = `${PlaybookStepStatus}`;
+
+const jobPlaybook = (
+  id: string | null,
+  name: string,
+  steps: [string, StepStatus, string | null, boolean?][],
+): JobPlaybook => ({
   id,
   name,
   skills: [],
   steps: steps.map(([title, status, summary, writes = false]) => ({
     title,
-    status,
+    status: status as JobPlaybook['steps'][number]['status'],
     summary,
     writes,
     // A step that ran started at NOW; one that ended, ended then too.

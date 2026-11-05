@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import type { JobPlaybook, PlaybookStepStatus } from '@ops-console/shared';
 import { expect, type Page, test } from '@playwright/test';
 import { DAEMON_FILE } from './global-setup';
 
@@ -37,15 +38,15 @@ const COMMENTS = [
   comment('c5r', { parent_id: 'c5', author: 'reviewer', body: 'Done, cached for an hour.', created_at: LATER }),
 ];
 
-type Step = [title: string, status: string, summary: string | null, writes?: boolean];
+type Step = [title: string, status: `${PlaybookStepStatus}`, summary: string | null, writes?: boolean];
 
-const playbook = (name: string, steps: Step[]) => ({
+const playbook = (name: string, steps: Step[]): JobPlaybook => ({
   id: null,
   name,
   skills: [],
   steps: steps.map(([title, status, summary, writes = false]) => ({
     title,
-    status,
+    status: status as JobPlaybook['steps'][number]['status'],
     summary,
     writes,
     // A step that ran started at LATER; one that ended, ended then too.
