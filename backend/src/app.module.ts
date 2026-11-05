@@ -10,6 +10,7 @@ import { StartupRecovery } from './common/recovery';
 import { SESSION, type Session } from './common/session';
 import { WsHub } from './common/ws-hub';
 import { STORE, type Store } from './db/store';
+import type { KeychainHandoverTracker } from './keychain/handover-state';
 import type { Keychain } from './keychain/keychain';
 import { KeychainModule } from './keychain/keychain.module';
 import type { KeychainWaitTracker } from './keychain/keychain-wait';
@@ -25,6 +26,7 @@ export type AppParts = {
   hub: WsHub;
   keychain: Keychain;
   keychainWait: KeychainWaitTracker;
+  keychainHandover: KeychainHandoverTracker;
   claudeBin: string;
   /** Feature modules; each later spec adds its own. */
   modules: DynamicModule[];
@@ -40,7 +42,7 @@ export class AppModule {
         AuthModule,
         SettingsModule,
         SchedulerModule,
-        KeychainModule.forRoot(parts.keychain, parts.keychainWait),
+        KeychainModule.forRoot(parts.keychain, parts.keychainWait, parts.keychainHandover),
         ClaudeCliModule.forRoot(parts.claudeBin),
         McpClientModule.forRoot(parts.session.version),
         ...parts.modules,

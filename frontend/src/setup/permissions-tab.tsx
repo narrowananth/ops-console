@@ -1,9 +1,10 @@
-import { KEYCHAIN_WAIT_MESSAGE } from '@ops-console/shared';
+import { KEYCHAIN_HANDOVER_MESSAGE, KEYCHAIN_WAIT_MESSAGE } from '@ops-console/shared';
 import type { ReactNode } from 'react';
 import { Logo } from '../app/sidebar';
 import { Button } from '../components/ui/button';
 import {
   useDiskAccess,
+  useKeychainHandover,
   useKeychainWait,
   useOpenDiskAccessSettings,
   useOpenLoginItemsSettings,
@@ -161,6 +162,9 @@ function RunSandboxRow() {
 /** macOS asks before each saved password; a question left unanswered holds up the runs that need it. */
 function KeychainRow() {
   const read = useKeychainWait();
+  const handover = useKeychainHandover();
+  const refused = handover.data?.refused === true;
+  const failure = read.error ?? handover.error;
   const wait = read.data;
   const waiting = wait?.waiting === true;
   const since = wait?.since ? new Date(wait.since).toLocaleTimeString([], { timeStyle: 'short' }) : null;
@@ -182,9 +186,15 @@ function KeychainRow() {
       <span className="text-neutral-700">
         {waiting ? `${KEYCHAIN_WAIT_MESSAGE}. Answer it on the Mac.` : 'macOS asks before each saved password.'}
       </span>
-      {read.error && (
+      {refused && (
+        <div className="flex flex-col gap-0.5 text-accent-700">
+          <span>{KEYCHAIN_HANDOVER_MESSAGE}</span>
+          <span className="font-mono text-xs">{handover.data?.reason}</span>
+        </div>
+      )}
+      {failure && (
         <span role="alert" className="text-accent-700">
-          {read.error.message}
+          {failure.message}
         </span>
       )}
     </li>

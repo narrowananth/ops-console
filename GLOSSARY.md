@@ -262,6 +262,14 @@ Console under App Background Activity. A dev build never starts at login.
 A Keychain call the Mac has not answered, usually because it waits for the login password. The console shows it after
 10 seconds and fails the call after 60.
 
+**Keychain handover**:
+The first start of a new version taking the Keychain items from the previous version's app, so macOS does not ask for the
+login password once per item.
+
+**Handover refusal**:
+The console declining a Keychain handover because the previous app failed its check. It shows on the Permissions page
+until the next start.
+
 **Tip**:
 The words a control, status or label shows on hover or keyboard focus: what it means, what pressing it makes the
 agent do, or why it is off.

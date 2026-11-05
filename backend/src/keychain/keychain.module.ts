@@ -1,5 +1,6 @@
 import { type DynamicModule, Inject, Injectable, Module, type OnModuleInit } from '@nestjs/common';
 import { WsHub } from '../common/ws-hub';
+import { KEYCHAIN_HANDOVER, type KeychainHandoverTracker } from './handover-state';
 import { KEYCHAIN, type Keychain } from './keychain';
 import { KEYCHAIN_WAIT, type KeychainWaitTracker } from './keychain-wait';
 
@@ -18,18 +19,39 @@ class KeychainWaitEvents implements OnModuleInit {
   }
 }
 
+/** Tells every browser when the Keychain handover is refused (`keychain.handover_refused`). */
+@Injectable()
+class KeychainHandoverEvents implements OnModuleInit {
+  constructor(
+    @Inject(KEYCHAIN_HANDOVER) private readonly handover: KeychainHandoverTracker,
+    @Inject(WsHub) private readonly hub: WsHub,
+  ) {}
+
+  onModuleInit(): void {
+    this.handover.onRefused((reason) =>
+      this.hub.publish({
+        event: 'keychain.handover_refused',
+        at: new Date().toISOString(),
+        data: { refused: true, reason },
+      }),
+    );
+  }
+}
+
 @Module({})
 export class KeychainModule {
-  static forRoot(keychain: Keychain, wait: KeychainWaitTracker): DynamicModule {
+  static forRoot(keychain: Keychain, wait: KeychainWaitTracker, handover: KeychainHandoverTracker): DynamicModule {
     return {
       module: KeychainModule,
       global: true,
       providers: [
         { provide: KEYCHAIN, useValue: keychain },
         { provide: KEYCHAIN_WAIT, useValue: wait },
+        { provide: KEYCHAIN_HANDOVER, useValue: handover },
         KeychainWaitEvents,
+        KeychainHandoverEvents,
       ],
-      exports: [KEYCHAIN, KEYCHAIN_WAIT],
+      exports: [KEYCHAIN, KEYCHAIN_WAIT, KEYCHAIN_HANDOVER],
     };
   }
 }

@@ -8,7 +8,11 @@ logs, WebSocket payloads or the browser.
 
 Each release is a new signed app, and macOS asks for the login password once per Keychain item an app did not
 create. The previous version's app hands its items over when a new version first starts, and the daemon's reads wait
-for that; `keychain-owner.json` in the data folder names the app that holds them.
+for that; `keychain-owner.json` in the data folder names the app that holds them. The daemon checks that app before it
+runs it: a real path inside another version folder, a bundle that passes `codesign --verify --strict`, and the same
+bundle identifier as its own. A failed check refuses the handover and the items stay where they are. The check keeps a
+planted or damaged bundle from handing the new app items of its own choosing. It does not stop someone who can already
+replace the installed app, and it pins no `cdhash`, which changes with every Node.
 
 The exception is the headers of an http or sse MCP Server. Claude Code sends them itself, so it
 keeps them in its own config file in plain text. The console cannot hold them while Claude Code

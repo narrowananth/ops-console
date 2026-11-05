@@ -11,7 +11,8 @@ import { CliConnectorTools } from './connectors/connector-tools';
 import { ConnectorsModule } from './connectors/connectors.module';
 import { startDaemon } from './daemon';
 import { DevtoolsModule } from './devtools/devtools.module';
-import { adoptKeychainItems, otherVersionApps } from './keychain/handover';
+import { adoptKeychainItems, HandoverRefused, otherVersionApps } from './keychain/handover';
+import { KeychainHandoverTracker } from './keychain/handover-state';
 import { LoginKeychain } from './keychain/keychain';
 import { KeychainWaitTracker } from './keychain/keychain-wait';
 import { runMcpExec } from './mcp/launcher';
@@ -57,7 +58,7 @@ const dataDir = path.resolve(
  * An installed version takes the Keychain items over from the version before it, in the background so the daemon
  * answers at once; its Keychain waits for the handover. `pnpm dev` hands its items over itself.
  */
-function adoptOnUpdate(): Promise<unknown> {
+function adoptOnUpdate(handover: KeychainHandoverTracker): Promise<unknown> {
   const versionDir = path.dirname(realpathSync(appDir));
   const self = realpathSync(process.execPath);
   if (version === 'dev' || process.platform !== 'darwin' || !self.startsWith(`${versionDir}/`)) {
@@ -69,26 +70,34 @@ function adoptOnUpdate(): Promise<unknown> {
   return adoptKeychainItems({
     self,
     previous: otherVersionApps(versionDir, path.relative(versionDir, self)),
+    versionsDir: path.dirname(versionDir),
     ownerFile: path.join(dataDir, 'keychain-owner.json'),
     script: path.join(appDir, 'keychain-handover.mjs'),
     service: 'ops-console',
     keychain,
   }).then(
     (moved) => moved > 0 && log('INFO', `moved ${moved} items to ${version}'s app`),
-    (error: unknown) => log('WARN', `items stay with the previous version's app: ${(error as Error).message}`),
+    (error: unknown) => {
+      if (error instanceof HandoverRefused) {
+        handover.refuse(error.reason);
+        log('WARN', `refused the handover, items stay with the previous version's app: ${error.reason}`);
+      } else log('WARN', `items stay with the previous version's app: ${(error as Error).message}`);
+    },
   );
 }
 
 const keychainWait = new KeychainWaitTracker();
+const keychainHandover = new KeychainHandoverTracker();
 
 const daemon = await startDaemon({
   dataDir,
   port: env.OPS_CONSOLE_PORT,
   version,
-  keychain: new LoginKeychain(process.env.OPS_CONSOLE_KEYCHAIN_SERVICE || undefined, adoptOnUpdate(), {
+  keychain: new LoginKeychain(process.env.OPS_CONSOLE_KEYCHAIN_SERVICE || undefined, adoptOnUpdate(keychainHandover), {
     wait: keychainWait,
   }),
   keychainWait,
+  keychainHandover,
   uiDir: existsSync(uiDir) ? uiDir : null,
   migrationsDir: path.join(appDir, 'drizzle'),
   writeLog: (line) => process.stdout.write(`${line}\n`),

@@ -98,7 +98,7 @@ agent Session.
 | `auth` | Session token check on every `/api` route |
 | `settings` | Registered keys with schema and default; `GET` and `PATCH /api/settings` |
 | `scheduler` | Jobs with slots; a missed slot runs once at start |
-| `keychain` | `set`, `get`, `delete` in the login Keychain, each bounded at 60 seconds and failing `keychain_timeout`; the handover of items from the previous version's app, which reads wait for (at most 90 seconds); the Keychain wait shown after 10 |
+| `keychain` | `set`, `get`, `delete` in the login Keychain, each bounded at 60 seconds and failing `keychain_timeout`; the handover of items from the previous version's app, which reads wait for (at most 90 seconds) and which refuses an app that fails its check (`codesign`, real path, bundle identifier); the Keychain wait shown after 10 |
 | `claude-cli` | `claude mcp add`, `remove`, `list`, `get`, `login`, and Claude account sign-in in this browser or by link and code, parsed with Zod |
 | `mcp-client` | Calls one tool on a server registered with Claude Code, for a fixed read |
 | `mcp` | Servers registered in every Claude account (`.claude.json`) and a Repo's `.mcp.json`; Probe, add, edit, reconnect, disable, remove; the `mcp-exec` launcher |
@@ -147,7 +147,7 @@ query refetches, batched over 40 ms. Events (`shared/src/ws.ts`):
   `approval.requested`, `approval.decided`, `action.logged`, `account.updated`, `account.removed`,
   `account.switched`.
 - Integrations: `connection.checked` for MCP Servers, Connectors and Connections.
-- Keychain: `keychain.wait_changed` when a call has waited past 10 seconds, and when the wait ends.
+- Keychain: `keychain.wait_changed` when a call has waited past 10 seconds, and when the wait ends; `keychain.handover_refused` when the handover was refused.
 - Workspace: `pull_request.refreshed`, `pull_request.commented`, `pull_request.reviewed`, `pull_request.job_changed` (a Reply check or Comment pass).
 - Playbooks: `playbook_step.updated`, for each step of any job.
 - Monitor: `scan.started`, `scan.finished`, `alert.detected`, `alert.updated`, `alert.regressed`,
