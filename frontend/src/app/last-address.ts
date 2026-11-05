@@ -13,6 +13,7 @@ const PAGE_PATHS = [
   '/setup',
   '/agents',
   '/playbooks',
+  '/skills',
 ];
 const FIRST_PAGE = '/monitor';
 

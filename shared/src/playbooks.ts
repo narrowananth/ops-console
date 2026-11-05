@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { heldSkillSchema, offeredSkillSchema, SKILL_LIMITS } from './skills';
 
 /** A place in a tab that starts the agent. Each holds one Playbook, or its built-in. */
 export enum PlaybookTrigger {
@@ -92,6 +93,8 @@ export const playbookSchema = z.object({
   /** Fix makes a Jira ticket first, when Jira is connected. Off: the Fix goes straight to its branch. */
   jira_ticket: z.boolean(),
   steps: z.array(playbookStepSchema),
+  /** The Skills it holds, A to Z. Empty on a built-in. */
+  skills: z.array(heldSkillSchema),
   /** The Triggers holding it now. A built-in lists its Trigger when no Playbook holds it. */
   triggers: z.array(z.enum(PlaybookTrigger)),
   /** Null on a built-in. */
@@ -112,6 +115,10 @@ export type PlaybookList = z.infer<typeof playbookListSchema>;
 const nameSchema = z.string().trim().min(1).max(PLAYBOOK_LIMITS.name);
 const rulesSchema = z.string().max(PLAYBOOK_LIMITS.rules);
 const stepsSchema = z.array(playbookStepSchema).max(PLAYBOOK_LIMITS.steps);
+const skillIdsSchema = z
+  .array(z.string().min(1))
+  .max(SKILL_LIMITS.perPlaybook)
+  .refine((ids) => new Set(ids).size === ids.length, 'a Skill twice');
 const branchesSchema = z
   .string()
   .trim()
@@ -125,6 +132,7 @@ export const createPlaybookSchema = z
     branches: branchesSchema.default(''),
     jira_ticket: z.boolean().default(false),
     steps: stepsSchema.default([]),
+    skill_ids: skillIdsSchema.default([]),
   })
   .strict();
 
@@ -137,6 +145,7 @@ export const playbookPatchSchema = z
     branches: branchesSchema.optional(),
     jira_ticket: z.boolean().optional(),
     steps: stepsSchema.optional(),
+    skill_ids: skillIdsSchema.optional(),
   })
   .strict();
 
@@ -157,6 +166,8 @@ export const jobPlaybookSchema = z.object({
   /** Null for a built-in and once the Playbook is deleted. */
   id: z.string().nullable(),
   name: z.string(),
+  /** The Skills the job was offered. */
+  skills: z.array(offeredSkillSchema),
   steps: z.array(
     z.object({
       title: z.string(),

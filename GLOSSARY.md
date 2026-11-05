@@ -60,9 +60,9 @@ Repos' remotes and the operator's own domains. Any other host is refused.
 ### Playbooks
 
 **Playbook**:
-The rules and ordered steps the agent follows when a Trigger starts it, written by the operator, the branches
-Verify and Fix read the code from, and whether a Fix makes a Ticket. Each Trigger holds one; one Playbook may be held
-by several. Each Trigger without one runs its built-in.
+The rules and ordered steps the agent follows when a Trigger starts it, written by the operator, the Skills it holds,
+the branches Verify and Fix read the code from, and whether a Fix makes a Ticket. Each Trigger holds one; one Playbook
+may be held by several. Each Trigger without one runs its built-in.
 _Avoid_: rule, pipeline, workflow
 
 **Trigger**:
@@ -73,6 +73,13 @@ _Avoid_: action (the Action Log means each command the agent runs)
 **Job**:
 A Trigger's run that goes through its Playbook steps and then the console's closing turn: a Verification, Fix, Agent
 Review, Reply check or Comment pass. Reply in thread and Session message are chats, not jobs.
+
+**Skill**:
+A named instruction document the operator keeps in the console and attaches to Playbooks: a name, a description of when to
+use it, and Markdown instructions. The agent sees the name and description of each Skill its Playbook holds and loads the
+instructions when a step needs them. Text only, no scripts or files. Not the skills in `.agents/skills/`, which are for
+this repo's developers.
+_Avoid_: plugin, add-on, prompt
 
 **Playbook step**:
 One titled instruction in a Playbook, run as its own agent turn, ending done, skipped or failed.

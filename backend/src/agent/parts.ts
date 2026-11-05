@@ -2,6 +2,7 @@ import type { Cell, Message, Part } from '@ops-console/shared';
 import { z } from 'zod';
 import { mcpTool } from '../action-log/classify';
 import { redact } from '../action-log/redact';
+import { skillNameOf } from './skill-plugin';
 
 const blockSchema = z.union([
   z.object({ type: z.literal('text'), text: z.string() }),
@@ -132,6 +133,7 @@ export type ServerLabel = (server: string) => string | null;
 
 export function stepText(name: string, input: Record<string, unknown>, label?: ServerLabel | null): string {
   if (name === 'Bash') return `$ ${redact(String(input.command ?? ''))}`;
+  if (name === 'Skill' && typeof input.skill === 'string') return `Skill ${skillNameOf(input.skill)}`;
   const mcp = mcpTool(name);
   if (mcp) return `${label?.(mcp.server) ?? mcp.server}: ${mcp.tool}`;
   const subject = input.file_path ?? input.pattern ?? input.url ?? input.query ?? input.description;

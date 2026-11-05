@@ -413,6 +413,7 @@ test('the page says while it reads Playbooks, and why it could not', async ({ pa
 const jobPlaybook = (id: string | null, name: string, steps: [string, string, string | null, boolean?][]) => ({
   id,
   name,
+  skills: [],
   steps: steps.map(([title, status, summary, writes = false]) => ({
     title,
     status,
@@ -433,6 +434,7 @@ const builtinsList = (held: { id: string; name: string; triggers: string[] }[]) 
       branches: '',
       jira_ticket: false,
       steps: [],
+      skills: [],
       updated_at: NOW,
     })),
     blocks: [],

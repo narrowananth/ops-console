@@ -11,7 +11,7 @@ import { FoldTitle, useFold } from '../components/ui/fold';
 import { Markdown } from '../components/ui/markdown';
 import { StatusPill } from '../components/ui/pathway';
 import { useRetryCommentPass, useSkipRunningStep } from '../lib/queries';
-import { JobFailure, JobPath, PlaybookLink, runState } from '../playbooks/job-steps';
+import { JobFailure, JobPath, PlaybookLink, runState, SkillsOffered } from '../playbooks/job-steps';
 import { threadPlace } from './pr-jobs';
 
 /** The commit's page on the host, from the pull request's own URL; null for a host whose URLs it does not know. */
@@ -133,6 +133,7 @@ function PassHeader({ pass, prUrl, sessionId }: { pass: CommentPass; prUrl: stri
   return (
     <>
       {pass.playbook && <PlaybookLink playbook={pass.playbook} />}
+      {pass.playbook && <SkillsOffered playbook={pass.playbook} />}
       {sha &&
         (href ? (
           <a

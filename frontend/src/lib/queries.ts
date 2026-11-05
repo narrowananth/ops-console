@@ -16,6 +16,7 @@ import {
   type CreateConnection,
   type CreatePlaybook,
   type CreateScan,
+  type CreateSkill,
   checkoutResultSchema,
   claudeAccountSchema,
   cliProxySchema,
@@ -67,6 +68,7 @@ import {
   type SessionPatch,
   SessionState,
   SignInVia,
+  type SkillPatch,
   savedNetworkDomainSchema,
   scanSchema,
   serviceSchema,
@@ -74,6 +76,8 @@ import {
   sessionDiffSchema,
   sessionPullRequestSchema,
   sessionSchema,
+  skillListSchema,
+  skillSchema,
   startAtLoginSchema,
   statusCodeCountSchema,
   terminalListSchema,
@@ -116,6 +120,7 @@ export const queryKeys = {
   keychainHandover: ['keychain-handover'] as const,
   terminals: ['terminals'] as const,
   playbooks: ['playbooks'] as const,
+  skills: ['skills'] as const,
   updates: ['updates'] as const,
 };
 
@@ -1327,4 +1332,40 @@ export function useSetTrigger() {
   return usePlaybookMutation(({ trigger, playbookId }: { trigger: PlaybookTrigger; playbookId: string | null }) =>
     apiSend('PUT', `/playbook-triggers/${trigger}`, { playbook_id: playbookId }, z.unknown()),
   );
+}
+
+/** The operator's Skills A to Z, each with the Playbooks that hold it. */
+export function useSkills() {
+  return useQuery({
+    queryKey: queryKeys.skills,
+    queryFn: () => apiGet('/skills', z.object({ data: skillListSchema })).then((b) => b.data),
+  });
+}
+
+/** A Skill's name and description show on the Playbooks holding it, so they are read again with the list. */
+function useSkillMutation<V, R>(send: (variables: V) => Promise<R>) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: send,
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.skills });
+      void client.invalidateQueries({ queryKey: queryKeys.playbooks });
+    },
+  });
+}
+
+const skillResponse = z.object({ data: skillSchema });
+
+export function useCreateSkill() {
+  return useSkillMutation((body: CreateSkill) => apiSend('POST', '/skills', body, skillResponse).then((b) => b.data));
+}
+
+export function useSaveSkill() {
+  return useSkillMutation(({ id, patch }: { id: string; patch: SkillPatch }) =>
+    apiSend('PATCH', `/skills/${id}`, patch, skillResponse).then((b) => b.data),
+  );
+}
+
+export function useDeleteSkill() {
+  return useSkillMutation((id: string) => apiSend('DELETE', `/skills/${id}`, undefined, z.undefined()));
 }

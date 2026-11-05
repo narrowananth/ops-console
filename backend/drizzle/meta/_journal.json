@@ -176,6 +176,13 @@
       "when": 1793822360092,
       "tag": "0024_lovely_sabra",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1793871713755,
+      "tag": "0025_playbook_skills",
+      "breakpoints": true
     }
   ]
 }

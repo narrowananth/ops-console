@@ -107,7 +107,7 @@ agent Session.
 | `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash and checkout |
 | `network` | The Network allowlist an agent run starts with: built-in hosts, the host of each Repo's `origin`, and the operator's own domains in `network_domains`; read, add and remove (`/network-allowlist`), registered by `agent` |
 | `agent` | Sessions and their kinds, Claude Agent SDK runs, the Run sandbox rules, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors; stop a run, edit the last message (file edits rewound), attachments |
-| `playbooks` | Playbooks and the Trigger each one holds, the built-ins (each Trigger's method, steps and shared rules on evidence, data, Connections and git) and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each (registered by `agent`) |
+| `playbooks` | Playbooks and the Trigger each one holds, the built-ins (each Trigger's method, steps and shared rules on evidence, data, Connections and git) and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each; Skills, their `/skills` routes and the Skills each Playbook holds (registered by `agent`) |
 | `accounts` | Claude accounts, their usage, Auto-switch and Smart usage; the Claude account hub: with CLIProxy on, runs go to its loopback address with the API key from the Keychain and switching pauses |
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
 | `workspace` | `repo`, `pr_review` and `anonymous` Sessions; a Session's diff, and a `repo` Session following the agent's branch; branch checkout with stash; pull requests, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews, Reply checks and Comment passes, one job per pull request at a time, each in a scratch copy at the pull request's head commit (an Agent Review makes one only when a Playbook step writes; the built-in's test step does); an Agent Review also fetches the target branch to compare with, may run the tests and build, and the console posts its findings and one summary comment; for the others the console commits, pushes, replies and resolves; Pull request opening: the console pushes a `repo` Session's branch and opens its pull request on the Git host, for a click in the Session header (the agent drafts the text) and for a Fix's PR stage |
@@ -128,7 +128,8 @@ agent Session.
 | `integrations` | Integrations page: Connectors and MCP Servers |
 | `repos` | Repos page |
 | `setup` | Setup agent page with its xterm terminal, and the Permissions page: Full Disk Access, Start at login, Keychain, Run sandbox, Network allowlist |
-| `playbooks` | Playbooks page: Triggers, Playbooks, the editor with drag and drop, Step blocks; unsaved edits kept as a Remembered view; a job's Playbook steps |
+| `playbooks` | Playbooks page: Triggers, Playbooks, the editor with drag and drop, Step blocks, the Skills a Playbook holds; unsaved edits kept as a Remembered view; a job's Playbook steps and the Skills it was offered |
+| `skills` | Skills page: the list, the editor, the Playbooks holding each Skill; unsaved edits kept as a Remembered view |
 | `agents` | Agents & accounts page (accounts, sign-in by link, the CLIProxy hub, the chime), Session transcript, model, effort and Access mode chips, Approval prompts, the question panel, stop run, Report rendering |
 | `mcp`, `components/ui` | MCP status labels; shared controls, the folding card title, the side panel that folds to a rail, the job pathway and live timers, and the Tip layer that shows every element's `title` as a styled Tip on hover and keyboard focus |
 
@@ -149,7 +150,7 @@ query refetches, batched over 40 ms. Events (`shared/src/ws.ts`):
 - Integrations: `connection.checked` for MCP Servers, Connectors and Connections.
 - Keychain: `keychain.wait_changed` when a call has waited past 10 seconds, and when the wait ends; `keychain.handover_refused` when the handover was refused.
 - Workspace: `pull_request.refreshed`, `pull_request.commented`, `pull_request.reviewed`, `pull_request.job_changed` (a Reply check or Comment pass).
-- Playbooks: `playbook_step.updated`, for each step of any job.
+- Playbooks: `playbook_step.updated`, for each step of any job; `skills.changed`, when a Skill is created, edited or deleted.
 - Monitor: `scan.started`, `scan.finished`, `alert.detected`, `alert.updated`, `alert.regressed`,
   `verification.stepped`, `alert.verified`, `alert.reviewed`, `fix.advanced`, `alert.resolved`.
 
@@ -192,6 +193,12 @@ done, skipped or failed; a failed step stops the job. After the last step the co
 turn writes the Report or the review, and a Fix goes on to its PR. A step tagged scratch copy may write files and
 run commands, only in the job's scratch copy. Chats (Session message, Reply in thread) read their
 Playbook's rules at each turn. An Alert's Session uses the rules its latest job copied.
+
+A Playbook also holds Skills. A job copies them with the Playbook, as a snapshot; a chat reads them at each turn. For each run the
+daemon writes the Skills to a folder in the temp folder as a local Claude Code plugin, lists it in the
+Run sandbox's readable folders, and passes it to the SDK with the `skills` option naming only those Skills. The agent sees
+their names and descriptions and loads the text through the `Skill` tool when a step needs it, which the Action Log records
+as kind `skill`. The folder is removed when the run ends. A run whose folder cannot be written fails with the reason.
 
 **Workspace pull requests.** Lists span every repository of every owner the operator can read on
 each connected Git host, plus imported Repos under other owners. The daemon keeps lists in memory and

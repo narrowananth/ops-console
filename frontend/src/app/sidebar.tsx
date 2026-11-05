@@ -83,6 +83,7 @@ const ICONS = {
       <path d="M9 10h6M9 14h6M9 18h3" />
     </>,
   ),
+  skills: icon(<path d="M12 3l2.4 5.6L20 10l-4.2 3.8L17 20l-5-3-5 3 1.2-6.2L4 10l5.6-1.4z" />),
 };
 
 /** Where every view lives, in sidebar order. */
@@ -97,6 +98,7 @@ export const PAGES = [
   { group: 'Connect', path: '/permissions', label: 'Permissions', icon: ICONS.permissions },
   { group: 'Claude', path: '/agents', label: 'Agents & accounts', icon: ICONS.agents },
   { group: 'Claude', path: '/playbooks', label: 'Playbooks', icon: ICONS.playbooks },
+  { group: 'Claude', path: '/skills', label: 'Skills', icon: ICONS.skills },
 ] as const;
 
 const NEEDS_ATTENTION: HealthStatus[] = [HealthStatus.Auth, HealthStatus.Fail];

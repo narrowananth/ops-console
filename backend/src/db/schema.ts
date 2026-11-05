@@ -59,6 +59,8 @@ function jobPlaybookColumns() {
     playbookId: text('playbook_id').references((): AnySQLiteColumn => playbooks.id, { onDelete: 'set null' }),
     playbookName: text('playbook_name'),
     playbookRules: text('playbook_rules'),
+    /** JSON array of the Skills offered, each `{ id, name, description, instructions }`; null for none. */
+    playbookSkills: text('playbook_skills'),
   };
 }
 
@@ -677,6 +679,37 @@ export const playbooks = sqliteTable(
   (table) => [
     uniqueIndex('playbooks_name_idx').on(sql`${table.name} COLLATE NOCASE`),
     check('playbooks_steps_json', sql`json_valid(${table.steps})`),
+  ],
+);
+
+/** A named instruction document the operator attaches to Playbooks; the agent loads it when a step needs it. */
+export const skills = sqliteTable(
+  'skills',
+  {
+    id: text().primaryKey().notNull(),
+    name: text().notNull(),
+    description: text().notNull(),
+    instructions: text().notNull(),
+    createdAt: text('created_at').notNull().default(nowIso),
+    updatedAt: text('updated_at').notNull().default(nowIso),
+  },
+  (table) => [uniqueIndex('skills_name_idx').on(sql`${table.name} COLLATE NOCASE`)],
+);
+
+/** The Skills each Playbook holds. */
+export const playbookSkills = sqliteTable(
+  'playbook_skills',
+  {
+    playbookId: text('playbook_id')
+      .notNull()
+      .references(() => playbooks.id, { onDelete: 'cascade' }),
+    skillId: text('skill_id')
+      .notNull()
+      .references(() => skills.id, { onDelete: 'cascade' }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.playbookId, table.skillId] }),
+    index('playbook_skills_skill_idx').on(table.skillId),
   ],
 );
 

@@ -24,6 +24,7 @@ import {
   type Message,
   type Part,
   SessionState,
+  type SkillCopy,
 } from '@ops-console/shared';
 import { eq, inArray } from 'drizzle-orm';
 import { type AccountRow, AccountsService, rateLimitInfoSchema } from '../accounts/accounts.service';
@@ -61,6 +62,7 @@ import { type Run, RunRegistry, type RunSummary } from './runs';
 import { SessionKinds } from './session-kinds';
 import { sessionTitle, shortTitle } from './session-title';
 import { emitSessionUpdated, NEW_SESSION_TITLE, type SessionRow, SessionsService } from './sessions.service';
+import { removeSkillPlugin, skillNames, skillRunsDir, writeSkillPlugin } from './skill-plugin';
 import { Transcripts } from './transcripts';
 
 /**
@@ -130,6 +132,8 @@ export type RunOptions = {
   cwd?: string;
   /** The Playbook rules the job copied. */
   rules?: string | null;
+  /** The Skills the job copied. */
+  skills?: SkillCopy[];
   /** Starts a new agent conversation instead of resuming the Session's. */
   fresh?: boolean;
   /** Resumes the conversation from this transcript entry, dropping what came after it. */
@@ -218,8 +222,8 @@ export class AgentRuntime {
     }
     if (this.interceptors.handle(session, text)) return { message_id: crypto.randomUUID() };
     // A chat reads its Playbook at each turn, so an edit applies from the next message (Behavior 20).
-    const { rules } = this.playbooks.forSession(session);
-    return { message_id: this.begin(sessionId, text, null, null, { rules }).messageId };
+    const { rules, skills } = this.playbooks.forSession(session);
+    return { message_id: this.begin(sessionId, text, null, null, { rules, skills }).messageId };
   }
 
   /**
@@ -267,14 +271,14 @@ export class AgentRuntime {
           }
         : null;
 
-    const { rules } = this.playbooks.forSession(session);
+    const { rules, skills } = this.playbooks.forSession(session);
     // The first message has nothing before it: the conversation starts over.
     const run = this.begin(
       sessionId,
       text,
       null,
       null,
-      typeof before === 'string' ? { rules, resumeAt: before } : { rules, fresh: true },
+      typeof before === 'string' ? { rules, skills, resumeAt: before } : { rules, skills, fresh: true },
     );
     return {
       message_id: run.messageId,
@@ -318,6 +322,7 @@ export class AgentRuntime {
       accountId: this.accounts.forRun().id,
       workingDir: options.cwd ?? kind.workingDir(session),
       rules: options.rules ?? null,
+      skills: options.skills ?? [],
       parts: [],
       growing: null,
       sdkUuids: new Set(),
@@ -456,16 +461,24 @@ export class AgentRuntime {
     const instructions = this.kinds.get(session.kind)?.instructions;
 
     const attached = this.attachments.existingFolder(run.sessionId);
+    // The run's Skills sit in a folder of their own that the Run sandbox lets it read.
+    const skillFolder = run.skills.length > 0 ? path.join(skillRunsDir(), crypto.randomUUID()) : null;
     const options: Options = {
       cwd: run.workingDir,
       sandbox: runSandbox({
         workingDir: run.workingDir,
         dataDir: this.dataDir,
-        readable: attached === null ? [] : [attached],
+        readable: [...(attached === null ? [] : [attached]), ...(skillFolder === null ? [] : [skillFolder])],
         networkDomains: run.networkDomains,
       }),
       // The operator's attached files sit outside the working folder; the agent reads them without asking.
       ...(attached === null ? {} : { additionalDirectories: [attached] }),
+      ...(skillFolder === null
+        ? {}
+        : {
+            plugins: [{ type: 'local' as const, path: skillFolder, skipMcpDiscovery: true }],
+            skills: skillNames(run.skills),
+          }),
       model: session.model,
       effort: SDK_EFFORT[session.effort],
       permissionMode: PERMISSION_MODES[session.accessMode],
@@ -508,6 +521,15 @@ export class AgentRuntime {
 
     // Stop can land while the transcript moves, before the query listens for the abort.
     if (run.stopped) return 'stopped';
+    if (skillFolder !== null) {
+      try {
+        await writeSkillPlugin(skillFolder, run.skills);
+      } catch (error) {
+        await removeSkillPlugin(skillFolder);
+        run.failure = `could not hand the Skills to the run: ${error instanceof Error ? error.message : String(error)}`;
+        return ErrorCode.UpstreamFailed;
+      }
+    }
     let rejected = false;
     let signInFailed = false;
     let failed = false;
@@ -538,6 +560,8 @@ export class AgentRuntime {
       }
     } catch (error) {
       if (!rejected && !signInFailed && !run.stopped) throw error;
+    } finally {
+      if (skillFolder !== null) await removeSkillPlugin(skillFolder);
     }
     for (const row of run.toolRows.values()) {
       this.actionLog.finish(row, ActionOutcome.Failed, run.stopped ? 'stopped' : 'no result');

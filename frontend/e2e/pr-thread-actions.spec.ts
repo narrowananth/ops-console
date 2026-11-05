@@ -42,6 +42,7 @@ type Step = [title: string, status: string, summary: string | null, writes?: boo
 const playbook = (name: string, steps: Step[]) => ({
   id: null,
   name,
+  skills: [],
   steps: steps.map(([title, status, summary, writes = false]) => ({
     title,
     status,
