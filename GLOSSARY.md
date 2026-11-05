@@ -187,9 +187,10 @@ replies, with no composer, and an Alert has one for its Verification and Fix.
 _Avoid_: chat, thread
 
 **Running tray**:
-The sidebar list of agent runs: the ones going, each with the subagents it started, and the ones that ended unfinished
-(stopped, paused, out of usage, signed out, interrupted by a restart). An unfinished run stays until the operator
-dismisses it. Each entry shows how long the run took and controls to pause, stop, play or retry it.
+The sidebar popup of agent runs, filtered and grouped: the ones that need the operator, the ones going with the
+subagents they started, and the ones that ended unfinished (stopped, paused, out of usage, signed out, interrupted by a
+restart). An unfinished run stays until the operator dismisses it. Each entry shows how long the run took and controls
+to pause, stop, play or retry it, and opens in place to its facts.
 _Avoid_: notification panel, running tasks
 
 **Agent runs page**:

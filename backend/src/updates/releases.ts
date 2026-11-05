@@ -11,7 +11,9 @@ export interface ReleaseSource {
 
 /** The repository `install.sh` downloads from. */
 const REPO = 'narrowananth/ops-console';
-const TIMEOUT_MS = 10_000;
+const TIMEOUT_MS = 15_000;
+/** A request that fails on the network is tried once more after this long: a Wi-Fi switch or a wake from sleep passes. */
+const RETRY_AFTER_MS = 3000;
 
 const githubRelease = z.object({
   tag_name: z.string(),
@@ -28,7 +30,10 @@ const githubRelease = z.object({
 export class GithubReleases implements ReleaseSource {
   private known: Release | null = null;
 
-  constructor(private readonly get: typeof fetch = fetch) {}
+  constructor(
+    private readonly get: typeof fetch = fetch,
+    private readonly retryAfterMs = RETRY_AFTER_MS,
+  ) {}
 
   async latest(): Promise<Release> {
     const tag = await this.newestTag();
@@ -40,11 +45,16 @@ export class GithubReleases implements ReleaseSource {
   }
 
   private async newestTag(): Promise<string> {
-    const response = await this.get(`https://github.com/${REPO}/releases/latest`, {
-      method: 'HEAD',
-      redirect: 'manual',
-      headers: { 'user-agent': 'ops-console' },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+    const ask = () =>
+      this.get(`https://github.com/${REPO}/releases/latest`, {
+        method: 'HEAD',
+        redirect: 'manual',
+        headers: { 'user-agent': 'ops-console' },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+    const response = await ask().catch(async () => {
+      await new Promise((resolve) => setTimeout(resolve, this.retryAfterMs));
+      return ask();
     });
     const tag = /\/releases\/tag\/([^/?#]+)$/.exec(response.headers.get('location') ?? '')?.[1];
     if (!tag) throw new Error(`GitHub answered ${response.status} without the newest release`);

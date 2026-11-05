@@ -70,4 +70,19 @@ describe('GithubReleases', () => {
     const get = (async () => new Response(null, { status: 404 })) as unknown as typeof fetch;
     await expect(new GithubReleases(get).latest()).rejects.toThrow('GitHub answered 404 without the newest release');
   });
+
+  it('asks again once when the first request is lost, and gives up when the second is lost too', async () => {
+    const lost = () => new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    const { get } = github({ tag: 'v0.1.12', api: 200 });
+    let calls = 0;
+    const flaky = ((input: string | URL | Request, init?: RequestInit) => {
+      calls += 1;
+      if (calls === 1) return Promise.reject(lost());
+      return get(input, init);
+    }) as typeof fetch;
+    expect((await new GithubReleases(flaky, 0).latest()).version).toBe('0.1.12');
+
+    const down = (() => Promise.reject(lost())) as typeof fetch;
+    await expect(new GithubReleases(down, 0).latest()).rejects.toThrow('The operation was aborted due to timeout');
+  });
 });

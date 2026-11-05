@@ -207,6 +207,29 @@ describe('stagesOf', () => {
     expect(states(steps, true)[RunStage.Fix]).toBe('now');
   });
 
+  it('moves past Read task on commands that only look, and stays put on one that marks no stage', () => {
+    const looking = [
+      step({ summary: '$ git rev-parse HEAD; git status --short | head', startedAt: 1, finishedAt: 2 }),
+      step({ summary: '$ gh pr diff 12', startedAt: 3 }),
+    ];
+    const now = states(looking, true);
+    expect(now[RunStage.ReadTask]).toBe('done');
+    expect(now[RunStage.Explore]).toBe('now');
+    expect(now[RunStage.Edit]).toBe('todo');
+    const after = [...looking, step({ summary: '$ pnpm install', startedAt: 4 })];
+    expect(states(after, true)[RunStage.Explore]).toBe('now');
+  });
+
+  it('keeps a stage done once passed, when the agent goes back to reading', () => {
+    const steps = [
+      at(1, { summary: 'Edit a.ts', tool: 'Edit', phase: RunPhase.Editing }),
+      step({ summary: 'Read b.ts', tool: 'Read', phase: RunPhase.Reading, startedAt: 3 }),
+    ];
+    const state = states(steps, true);
+    expect(state[RunStage.Edit]).toBe('done');
+    expect(state[RunStage.Explore]).toBe('now');
+  });
+
   it('starts at Read task before any call, and marks every stage reached done once the run ends', () => {
     expect(states([], true)[RunStage.ReadTask]).toBe('now');
     const steps = [at(1, { summary: '$ git commit -m x' })];

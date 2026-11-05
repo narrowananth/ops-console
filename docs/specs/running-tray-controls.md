@@ -19,8 +19,8 @@ and a queued message cannot be sent before the run ends.
 4. A run that ended unfinished stays in the tray: stopped, paused, limit reached, signed out, failed or interrupted
    by a restart. Its chip says which, and the failure reason shows under it when the console has one.
 5. A paused or stopped run has Play, which sends the agent "Carry on from where you stopped." A failed, limit-reached,
-   signed-out or interrupted run has Retry, which asks the agent to try again. Neither shows for a pull request run
-   the console started itself; those retry where they were started.
+   signed-out or interrupted run has Retry, which asks the agent to try again. A pull request run takes no message, so its
+   Retry runs the job that failed last on that pull request again, from its failed step.
 6. Dismiss takes an ended run out of the tray. A finished run leaves by itself. A new run in the Session replaces
    its entry.
 7. An entry's link opens where the run shows: the Session, or the pull request for a pull request run.

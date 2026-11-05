@@ -1,7 +1,6 @@
 import { type AgentRun, RunHealth } from '@ops-console/shared';
 import { useState } from 'react';
 import { PageColumn } from '../app/page';
-import { Button } from '../components/ui/button';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { Toggle } from '../components/ui/toggle';
 import {
@@ -14,7 +13,9 @@ import {
 } from '../lib/queries';
 import { useAddress, useStored } from '../lib/remember';
 import { ALERT_ENDS_KEY, ALERT_NEEDS_KEY, alertSchema, allowDesktopAlerts } from './alerts';
+import { AlertsPill } from './alerts-pill';
 import { RunCard } from './run-card';
+import { HealthIcon, Pill } from './run-controls';
 import { HEALTH, money, tokens } from './run-look';
 
 type Tab = 'all' | 'on_track' | 'slow' | 'needs_you' | 'ended';
@@ -89,9 +90,17 @@ function Donut({ counts, total }: { counts: [RunHealth, number][]; total: number
 function StopOne({ id }: { id: string }) {
   const stop = useStopSession(id);
   return (
-    <Button className="px-3 py-1 text-xs" disabled={stop.isPending} onClick={() => stop.mutate()}>
+    <Pill disabled={stop.isPending} onClick={() => stop.mutate()}>
       Stop it
-    </Button>
+    </Pill>
+  );
+}
+
+function AttentionIcon({ children, tone }: { children: React.ReactNode; tone: string }) {
+  return (
+    <span className={`flex size-9 flex-none items-center justify-center rounded-lg bg-card shadow-sm ${tone}`}>
+      {children}
+    </span>
   );
 }
 
@@ -102,45 +111,77 @@ function Attention({ runs, open }: { runs: AgentRun[]; open: (id: string) => voi
   const failed = runs.filter((run) => run.health === RunHealth.Failed);
   if (slow.length === 0 && failed.length === 0) return null;
   const first = slow[0];
+  const retryable = failed.filter((run) => run.can_retry);
+  const answers = retry.data ?? [];
+  const refused = answers.filter((one) => one.status === 'rejected');
   return (
-    <div className="mt-4 grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
+    <div className="mt-5 grid grid-cols-2 gap-3.5 max-[900px]:grid-cols-1">
       {first && (
-        <div className={`rounded-xl border p-3.5 ${HEALTH[RunHealth.Slow].card}`}>
-          <h3 className="m-0 text-[13px] text-warn">
-            {slow.length} {slow.length === 1 ? 'run is' : 'runs are'} slower than usual
-          </h3>
-          <p className="m-0 mt-1 mb-2.5 text-xs text-neutral-800">{first.health_reason.replace(/^Slow: /, '')}</p>
-          <div className="flex gap-1.5">
-            <Button variant="primary" className="px-3 py-1 text-xs" onClick={() => open(first.session.id)}>
-              Open run
-            </Button>
-            <StopOne id={first.session.id} />
+        <div className={`flex gap-3 rounded-xl border p-4 ${HEALTH[RunHealth.Slow].card}`}>
+          <AttentionIcon tone="text-warn">
+            <HealthIcon health={RunHealth.Slow} running={false} />
+          </AttentionIcon>
+          <div className="min-w-0 flex-1">
+            <h3 className="m-0 text-[13.5px]">
+              {slow.length} {slow.length === 1 ? 'run is' : 'runs are'} slower than usual
+            </h3>
+            <p className="m-0 mt-1 mb-3 text-xs text-neutral-800">{first.health_reason.replace(/^Slow: /, '')}</p>
+            <div className="flex gap-2">
+              <Pill dark onClick={() => open(first.session.id)}>
+                Open run
+              </Pill>
+              <StopOne id={first.session.id} />
+            </div>
           </div>
         </div>
       )}
       {failed[0] && (
-        <div className={`rounded-xl border p-3.5 ${HEALTH[RunHealth.Failed].card}`}>
-          <h3 className="m-0 text-[13px] text-accent-700">
-            {failed.length} {failed.length === 1 ? 'run' : 'runs'} ended with an error
-          </h3>
-          <p className="m-0 mt-1 mb-2.5 text-xs text-neutral-800">
-            {failed
-              .slice(0, 2)
-              .map((run) => `${run.session.title}: ${run.health_reason.replace(/^Failed: /, '')}`)
-              .join(' · ')}
-          </p>
-          <div className="flex gap-1.5">
-            <Button variant="primary" className="px-3 py-1 text-xs" onClick={() => open(failed[0]?.session.id ?? '')}>
-              See why
-            </Button>
-            <Button
-              className="px-3 py-1 text-xs"
-              title="Retry every failed run that takes messages"
-              disabled={retry.isPending}
-              onClick={() => retry.mutate(failed.filter((run) => run.can_resume).map((run) => run.session.id))}
-            >
-              Retry {failed.length > 1 ? 'all' : ''}
-            </Button>
+        <div className={`flex gap-3 rounded-xl border p-4 ${HEALTH[RunHealth.Failed].card}`}>
+          <AttentionIcon tone="text-accent-700">
+            <HealthIcon health={RunHealth.Failed} running={false} />
+          </AttentionIcon>
+          <div className="min-w-0 flex-1">
+            <h3 className="m-0 text-[13.5px]">
+              {failed.length} {failed.length === 1 ? 'run' : 'runs'} ended with an error
+            </h3>
+            <p className="m-0 mt-1 mb-3 text-xs text-neutral-800">
+              {failed.slice(0, 2).map((run, index) => (
+                <span key={run.session.id}>
+                  {index > 0 && ' · '}
+                  <b>{run.session.kind === 'pr_review' ? `#${run.session.pr_number}` : run.session.title}</b>:{' '}
+                  {run.health_reason.replace(/^Failed: /, '')}
+                </span>
+              ))}
+            </p>
+            <div className="flex gap-2">
+              <Pill dark onClick={() => open(failed[0]?.session.id ?? '')}>
+                See why
+              </Pill>
+              <Pill
+                title="Run every failed run again that can"
+                disabled={retry.isPending || retryable.length === 0}
+                onClick={() => retry.mutate(retryable.map((run) => run.session.id))}
+              >
+                {retry.isPending
+                  ? 'Retrying…'
+                  : failed.length === 2
+                    ? 'Retry both'
+                    : failed.length > 1
+                      ? 'Retry all'
+                      : 'Retry'}
+              </Pill>
+            </div>
+            {retry.isSuccess && (
+              <p role="status" className="m-0 mt-2 text-[11px] text-neutral-800">
+                {answers.length - refused.length} of {answers.length} started again.
+                {refused[0] && refused[0].status === 'rejected' && ` ${(refused[0].reason as Error).message}`}
+              </p>
+            )}
+            {retryable.length < failed.length && (
+              <p className="m-0 mt-2 text-[11px] text-neutral-700">
+                {failed.length - retryable.length} cannot run again from here: open it to see why.
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -186,7 +227,7 @@ function AlertSettings() {
   );
 }
 
-/** The page's own buttons: stop everything going, dismiss everything that ended. */
+/** The page's own buttons: the alerts, stop everything going, dismiss everything that ended. */
 export function AgentRunsActions() {
   const runs = useAgentRuns().data ?? [];
   const bulk = useBulkRunControls();
@@ -195,22 +236,23 @@ export function AgentRunsActions() {
   const ended = runs.length - going;
   return (
     <>
-      <Button
-        className="px-3 py-1.5 text-xs"
+      <AlertsPill />
+      <Pill
+        danger
         disabled={going === 0 || bulk.stopAll.isPending}
         title="Stops every run going, in every Session. Asks first."
         onClick={() => setAsking(true)}
       >
+        <span aria-hidden className="size-2 rounded-[2px] bg-current" />
         Stop all
-      </Button>
-      <Button
-        className="px-3 py-1.5 text-xs"
+      </Pill>
+      <Pill
         disabled={ended === 0 || bulk.dismissEnded.isPending}
         title="Takes every ended run off this page. Runs going stay."
         onClick={() => bulk.dismissEnded.mutate()}
       >
         Dismiss ended
-      </Button>
+      </Pill>
       {asking && (
         <ConfirmDialog
           title={`Stop ${going} ${going === 1 ? 'run' : 'runs'}?`}
@@ -268,7 +310,13 @@ export function AgentRunsView() {
   }
   return (
     <PageColumn wide>
-      <section aria-label="Overview" className="rounded-xl border border-line bg-card p-5 shadow-sm">
+      <section aria-label="Overview" className="rounded-2xl border border-line bg-card p-6 shadow-sm">
+        {usage && (
+          <p className="m-0 mb-4 text-xs text-neutral-700">
+            {runs.length} {runs.length === 1 ? 'run' : 'runs'} · {tokens(usage.tokens)} tokens · about{' '}
+            {money(usage.cost_usd)} today (an estimate: a subscription is not billed by the token) · live
+          </p>
+        )}
         <div className="flex items-center gap-6">
           <Donut counts={counts} total={runs.length} />
           <div className="grid flex-1 grid-cols-4 gap-2.5 max-[900px]:grid-cols-2">
@@ -293,12 +341,6 @@ export function AgentRunsView() {
               ))}
           </div>
         </div>
-        {usage && (
-          <p className="m-0 mt-3 text-xs text-neutral-700">
-            Today: {usage.runs} {usage.runs === 1 ? 'run' : 'runs'} ended · {tokens(usage.tokens)} tokens · about{' '}
-            {money(usage.cost_usd)} (an estimate: a subscription is not billed by the token)
-          </p>
-        )}
         <Attention runs={runs} open={open} />
       </section>
 

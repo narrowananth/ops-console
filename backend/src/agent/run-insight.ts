@@ -316,6 +316,13 @@ export function classifyFailure(input: {
 const TEST_STEP =
   /\b(test|tests|jest|vitest|pytest|mocha|playwright|cargo\s+test|go\s+test|mvn|gradle|lint|tsc|check|build)\b/;
 
+/** A command that looks: it reads the repo or the pull request and changes nothing. */
+const LOOKS_ONLY =
+  /^(git\s+(status|log|diff|show|branch|rev-parse|fetch|remote|ls-files|blame|describe|cat-file|merge-base|grep)|gh\s+(pr|issue|repo|run|api)\b|glab\s+(mr|issue)\s+(view|diff|list)|ls|cat|head|tail|grep|rg|find|pwd|wc|file|stat|tree|echo|sed\s+-n|which|cd)\b/;
+
+/** The command's first part decides: `git status && ...` looks, whatever the rest does. */
+const looksOnly = (command: string) => LOOKS_ONLY.test((command.split(/&&|;|\|/)[0] ?? '').trim());
+
 /** The stage one tool call belongs to; null for a call that marks none. */
 function stageOf(step: StepFacts, testSeen: boolean): RunStage | null {
   const command = step.summary.startsWith('$ ') ? step.summary.slice(2) : null;
@@ -329,6 +336,7 @@ function stageOf(step: StepFacts, testSeen: boolean): RunStage | null {
   if (command !== null && TEST_STEP.test(command)) return RunStage.RunTests;
   if (step.phase === RunPhase.Editing) return testSeen ? RunStage.Fix : RunStage.Edit;
   if (step.phase === RunPhase.Reading || step.tool === 'Agent' || step.tool === 'Task') return RunStage.Explore;
+  if (command !== null && looksOnly(command)) return RunStage.Explore;
   return null;
 }
 
@@ -344,31 +352,25 @@ const STAGE_ORDER = [
 
 /**
  * Where the run is in its usual order, read from the tools it used, so a run that works another way shows a stage it
- * skipped as done. `now` is the stage of the newest call while the run goes.
+ * skipped as done. A stage up to the furthest one reached is done; `now` is the stage of the newest call while the run
+ * goes. Any call past the task itself means the task was read, and a call that marks no stage leaves `now` where it was.
  */
 export function stagesOf(steps: StepFacts[], running: boolean): { stage: RunStage; state: 'done' | 'now' | 'todo' }[] {
+  const ordered = [...steps].sort((a, b) => a.startedAt - b.startedAt);
   let testSeen = false;
-  let latest = -1;
-  for (const step of [...steps].sort((a, b) => a.startedAt - b.startedAt)) {
+  let furthest = steps.length > 0 ? 1 : 0;
+  let current = steps.length > 0 ? 1 : 0;
+  for (const step of ordered) {
     const stage = stageOf(step, testSeen);
     if (stage === RunStage.RunTests) testSeen = true;
-    if (stage !== null) latest = Math.max(latest, STAGE_ORDER.indexOf(stage));
+    if (stage === null) continue;
+    const index = STAGE_ORDER.indexOf(stage);
+    furthest = Math.max(furthest, index);
+    current = index;
   }
-  // The newest call may be an earlier stage than the furthest one (a fix after a test): `now` follows the newest.
-  const newest = [...steps].sort((a, b) => a.startedAt - b.startedAt).at(-1);
-  const newestStage = newest ? stageOf(newest, testSeen) : null;
-  const now = running ? (newestStage === null ? Math.max(latest, 0) : STAGE_ORDER.indexOf(newestStage)) : -1;
   return STAGE_ORDER.map((stage, index) => ({
     stage,
-    state: running
-      ? index < now || (index === 0 && steps.length > 0)
-        ? 'done'
-        : index === now
-          ? 'now'
-          : 'todo'
-      : index <= Math.max(latest, 0) && (steps.length > 0 || index === 0)
-        ? 'done'
-        : 'todo',
+    state: running && index === current ? 'now' : index <= furthest ? 'done' : 'todo',
   }));
 }
 

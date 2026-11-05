@@ -25,6 +25,7 @@ export type SessionKindHandler = {
 /** Each kind's spec registers its handler; a kind with none cannot run. */
 export class SessionKinds {
   private readonly handlers = new Map<SessionKind, SessionKindHandler>();
+  private readonly retries = new Map<SessionKind, (session: SessionRow) => Promise<void>>();
 
   register(kind: SessionKind, handler: SessionKindHandler): void {
     if (this.handlers.has(kind)) throw new Error(`session kind ${kind} is registered twice`);
@@ -33,5 +34,14 @@ export class SessionKinds {
 
   get(kind: SessionKind): SessionKindHandler | undefined {
     return this.handlers.get(kind);
+  }
+
+  /** How a kind that takes no messages runs its last run again; throws to refuse. */
+  registerRetry(kind: SessionKind, retry: (session: SessionRow) => Promise<void>): void {
+    this.retries.set(kind, retry);
+  }
+
+  retryOf(kind: SessionKind): ((session: SessionRow) => Promise<void>) | undefined {
+    return this.retries.get(kind);
   }
 }

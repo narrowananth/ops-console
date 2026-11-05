@@ -13,20 +13,26 @@ one browser tab, so no other view can show it.
 ## Behavior
 
 1. A sidebar page, Agent runs, under Claude, at `/agent-runs`. Its badge counts runs that need the operator. The
-   Running tray stays as the quick view and links to the page.
+   Running tray stays as the quick view and links to the page (behavior 15).
 2. The top shows a ring and four counts: on track, slow, needs you, failed. Under them, today's runs ended, tokens and
    estimated cost, and a card for slow runs and one for failed runs, each with the button that deals with it.
 3. Each run is a card, ordered needs you, slow, failed, on track, stopped. It shows title, Repo and branch, subagents,
    one line on why the run has its health, a strip of where its time went, the time elapsed, and Pause, Stop, Play,
    Retry or Dismiss. The title opens the Session, or the pull request for a review. Tabs filter by health or ended.
+   A pull request review takes no messages, so it cannot pause or queue, but Retry runs again the job that failed last
+   on that pull request, from its failed step. Retry all on the failed card does this for every failed run that can,
+   and says how many started and why one did not.
 4. Health is read by the daemon from what it saw. **Needs you**: an Approval or a question waits. **Slow**: a step has
    gone past three times the middle time of that command's earlier runs (at least two minutes), or past five minutes
    for a command seen fewer than three times; time spent waiting on the operator does not count. **Failed** and
    **stopped** follow the run's outcome. Anything else is **on track**.
 5. A card opens to the run's detail, kept in the address (`?run=<session id>`). It shows the stage the run is at, why it
    is slow or ended, where the time went, a timeline with a lane per agent, every step, and the queued message.
-6. Stage is read from the tools the run used: read task, explore, edit, run tests, fix, commit, open pull request. A run
-   that works in another order shows a stage it skipped as done.
+6. Stage is read from the tools the run used: read task, explore, edit, run tests, fix, commit, open pull request. Any
+   call means the task was read. A command that only looks (`git log`, `gh pr diff`, `ls`, `grep`) counts as explore;
+   a command that marks no stage leaves the run where it was. Every stage up to the furthest one reached shows as
+   done, and the stage of the newest call shows as now. A run that works in another order shows a stage it skipped as
+   done.
 7. **Why this run is slow** gives the step and how long it has run against its usual time, a likely cause, and a
    suggestion. The cause comes from the command: one that reaches the network or runs tests names the Run sandbox's
    allowlist as a possible cause; any other says the console cannot see what the step waits on. The console does not
@@ -47,9 +53,16 @@ one browser tab, so no other view can show it.
 13. The queued message is kept by the daemon, one per Session. It goes out when the run ends unless the operator stopped
     or paused the run, which holds it as "On hold". Send now sends it at once and stops a run that is going first. Take
     back clears it. Queue with no run going sends the message.
-14. Desktop alerts, off until the operator turns each on: when a run needs them, and when a run ends. The browser asks
+14. Desktop alerts, off until the operator turns each on: when a run needs them, and when a run ends. The Alerts pill
+    in the page header and in the tray turns both on or off; the page keeps a switch for each. The browser asks
     permission once. An alert shows only while the console is open in a tab that is not in front, and not for what was
     there when the page loaded.
+15. The Running tray shows the same runs in a popup. Its header gives the counts, the Alerts pill and Stop all going
+    (which asks first). Chips filter All, Going, Needs you and Ended, with today's tokens and cost beside them. Runs
+    sit in three groups: needs you, going (the first three, then Show all) and ended, which stay until dismissed. A
+    row opens in place to its facts (kind, start or end, access, model, account, usage), links to the Session, pull
+    request and Alert, the queued message with Send now and Take back, the reason an ended run ended, and its
+    subagents with a link to each. The footer links to the page and has Dismiss all ended.
 
 ## Not required
 

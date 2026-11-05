@@ -1,4 +1,15 @@
-import { type Failure, FailureKind, RunHealth, RunPhase, RunStage } from '@ops-console/shared';
+import {
+  AccessMode,
+  type Failure,
+  FailureKind,
+  Model,
+  RunHealth,
+  RunPhase,
+  RunStage,
+  type Session,
+  SessionKind,
+} from '@ops-console/shared';
+import { pullRequestPath, sessionPath } from '../workspace/links';
 
 /** How each health reads on the Agent runs page: its words, and the colors every part of a card takes. */
 export const HEALTH: Record<
@@ -101,3 +112,77 @@ export function tokens(count: number): string {
 export const money = (usd: number) => `$${usd < 10 ? usd.toFixed(2) : usd.toFixed(0)}`;
 
 export const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+/** Where a run's work shows, and what to call it there. */
+export function placeOf(
+  session: Session,
+  repoName: (id: string | null) => string,
+): { to: string; where: string; what: string; tip: string } {
+  switch (session.kind) {
+    case SessionKind.PrReview:
+      return {
+        to: session.repo_id && session.pr_number ? pullRequestPath(session.repo_id, session.pr_number) : '/workspace',
+        where: repoName(session.repo_id),
+        what: `Pull request #${session.pr_number}`,
+        tip: 'Open the pull request this run works on',
+      };
+    case SessionKind.Devtools:
+      return { to: '/devtools', where: 'Dev tools', what: session.title, tip: 'Open this Session in Dev tools' };
+    case SessionKind.Anonymous:
+      return { to: sessionPath(session.id), where: 'No Repo', what: session.title, tip: 'Open this Session' };
+    default:
+      return {
+        to: sessionPath(session.id),
+        where: repoName(session.repo_id),
+        what: session.title,
+        tip: 'Open this Session',
+      };
+  }
+}
+
+/** A run's title as the lists show it: a Session says so, a pull request already does. */
+export const titleOf = (session: Session, what: string) =>
+  session.kind === SessionKind.PrReview ? what : `Session · ${what}`;
+
+export const ACCESS_NAME: Record<AccessMode, string> = {
+  [AccessMode.Supervised]: 'Supervised',
+  [AccessMode.AcceptEdits]: 'Auto edit',
+  [AccessMode.Auto]: 'Auto',
+  [AccessMode.Full]: 'Full',
+};
+
+export const MODEL_NAME: Record<Model, string> = {
+  [Model.Opus]: 'Opus',
+  [Model.Sonnet]: 'Sonnet',
+  [Model.Haiku]: 'Haiku',
+  [Model.Fable]: 'Fable',
+};
+
+export const KIND_NAME: Record<SessionKind, string> = {
+  [SessionKind.Repo]: 'Session',
+  [SessionKind.Anonymous]: 'Session',
+  [SessionKind.Devtools]: 'Dev tools',
+  [SessionKind.PrReview]: 'Pull request review',
+};
+
+export function PauseIcon() {
+  return (
+    <span aria-hidden className="inline-flex flex-none gap-0.5">
+      <span className="h-2.5 w-0.75 bg-current" />
+      <span className="h-2.5 w-0.75 bg-current" />
+    </span>
+  );
+}
+
+export function PlayIcon() {
+  return (
+    <span
+      aria-hidden
+      className="inline-block size-0 flex-none border-y-[5px] border-l-[8px] border-y-transparent border-l-current"
+    />
+  );
+}
+
+export function RetryIcon() {
+  return <span aria-hidden>↻</span>;
+}

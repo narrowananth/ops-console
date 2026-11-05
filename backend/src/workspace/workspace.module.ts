@@ -6,6 +6,7 @@ import { CliGitHosts } from './cli-git-hosts';
 import { CommentPassesService } from './comment-passes.service';
 import { GIT_HOSTS, type GitHosts } from './git-host';
 import { PrJobs } from './pr-jobs';
+import { PrRunRetry } from './pr-run-retry';
 import { PullRequestOpeningService } from './pull-request-opening.service';
 import { PullRequestsService } from './pull-requests.service';
 import { ReplyChecksService } from './reply-checks.service';
@@ -32,6 +33,7 @@ export class WorkspaceModule {
         PullRequestOpeningService,
         AnonymousSessionsService,
         RepoJoinService,
+        PrRunRetry,
         { provide: OPEN_PR_BRANCHES, useExisting: PullRequestsService },
       ],
       exports: [

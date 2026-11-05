@@ -23,7 +23,7 @@ const REPO = {
 const session = (id: string, extra: Record<string, unknown> = {}) => ({
   id,
   kind: 'repo',
-  title: `Session ${id}`,
+  title: `task ${id}`,
   model: 'claude-sonnet-5-5',
   effort: 'high',
   access_mode: 'supervised',
@@ -58,6 +58,7 @@ const run = (id: string, extra: Record<string, unknown> = {}, sessionExtra: Reco
   started_at: ago(12),
   finished_at: null,
   can_resume: true,
+  can_retry: true,
   subagents: [],
   health: 'on_track',
   health_reason: 'On track: Running pnpm lint',
@@ -229,17 +230,17 @@ test('the page says which runs to look at and why, and the sidebar counts those 
   await expect(overview.getByTitle(/much longer than the same step/)).toContainText('1');
   await expect(overview.getByTitle(/waits for your yes or no/)).toContainText('1');
   await expect(overview.getByTitle(/ended with an error/)).toContainText('1');
-  await expect(overview).toContainText('Today: 4 runs ended · 48k tokens · about $0.31');
+  await expect(overview).toContainText('5 runs · 48k tokens · about $0.31 today');
   await expect(overview).toContainText('1 run is slower than usual');
   await expect(overview).toContainText('1 run ended with an error');
 
   // Needs you first, then slow, then failed.
-  const cards = page.locator('ul > li').filter({ has: page.getByRole('link', { name: /^Session / }) });
-  await expect(cards.nth(0)).toContainText('Session need');
-  await expect(cards.nth(1)).toContainText('Session slow');
+  const cards = page.locator('ul > li').filter({ has: page.getByRole('link', { name: /^Session · / }) });
+  await expect(cards.nth(0)).toContainText('Session · task need');
+  await expect(cards.nth(1)).toContainText('Session · task slow');
   await expect(cards.nth(1)).toContainText('Slow: pnpm test backend running 6m 10s, usual 40s');
   await expect(cards.nth(1)).toContainText('1 subagent (1 working)');
-  await expect(cards.nth(2)).toContainText('Session bad');
+  await expect(cards.nth(2)).toContainText('Session · task bad');
 
   await expect(page.getByRole('link', { name: /Agent runs/ })).toContainText('1');
 
@@ -248,7 +249,7 @@ test('the page says which runs to look at and why, and the sidebar counts those 
   await page.getByRole('tab', { name: /Ended/ }).click();
   await expect(cards).toHaveCount(2);
 
-  await page.getByRole('link', { name: 'Session bad' }).click();
+  await page.getByRole('link', { name: 'Session · task bad' }).click();
   await expect(page).toHaveURL(/\/workspace\?session=bad$/);
 });
 
@@ -282,10 +283,11 @@ test('a failed run says what happened, why and what to do, and Allow and Retry d
   await page.goto(`${daemon.url}/agent-runs?run=bad#token=${daemon.token}`);
 
   await expect(page.getByText('Why this run ended')).toBeVisible();
-  await expect(page.getByText('Network blocked')).toBeVisible();
+  await expect(page.getByText('Network blocked', { exact: true })).toBeVisible();
   await expect(page.getByText(/registry\.example\.com is probably not on the list/)).toBeVisible();
   await expect(page.getByText('ERR_PNPM_FETCH_403')).toBeVisible();
 
+  await expect(page.getByRole('button', { name: 'Retry only' })).toBeVisible();
   await page.getByRole('button', { name: 'Allow registry.example.com and Retry' }).click();
   await expect
     .poll(() => calledPaths(calls, 'POST'))
@@ -298,15 +300,15 @@ test('each run pauses, stops, plays, retries and dismisses, and Stop all asks fi
 
   const card = (title: string) =>
     page.locator('ul > li').filter({ has: page.getByRole('link', { name: title, exact: true }) });
-  await card('Session ok')
+  await card('Session · task ok')
     .getByRole('button', { name: /^Pause/ })
     .click();
-  await card('Session ok').getByRole('button', { name: 'Stop the run where it is' }).click();
-  await card('Session stopped').getByRole('button', { name: /^Play/ }).click();
-  await card('Session bad')
+  await card('Session · task ok').getByRole('button', { name: 'Stop the run where it is' }).click();
+  await card('Session · task stopped').getByRole('button', { name: /^Play/ }).click();
+  await card('Session · task bad')
     .getByRole('button', { name: /^Retry/ })
     .click();
-  await card('Session bad')
+  await card('Session · task bad')
     .getByRole('button', { name: /^Dismiss/ })
     .click();
   await expect
