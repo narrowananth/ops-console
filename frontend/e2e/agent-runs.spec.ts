@@ -341,3 +341,28 @@ test('with nothing running the page says so, and the tray links to it', async ({
   await expect(page).toHaveURL(/\/agent-runs$/);
   await expect(page.getByText(/^No agent runs\./)).toBeVisible();
 });
+
+test('the tray lists three going runs, Show all and Show less fold the rest, and an opened run shows why it is slow', async ({
+  page,
+}) => {
+  await routeRuns(page, [...RUNS, run('ok2'), run('ok3'), run('ok4')]);
+  await page.goto(`${daemon.url}/repos#token=${daemon.token}`);
+  await page.getByRole('button', { name: 'Running agents' }).click();
+  const tray = page.getByRole('dialog', { name: 'Agent runs' });
+  const going = tray.getByRole('link', { name: /^Session · task (slow|ok\d?)$/ });
+
+  await expect(going).toHaveCount(3);
+  await tray.getByRole('button', { name: 'Show all' }).click();
+  await expect(going).toHaveCount(5);
+  await tray.getByRole('button', { name: 'Show less' }).click();
+  await expect(going).toHaveCount(3);
+
+  // The header stays inside the window however many runs there are.
+  const top = await tray.evaluate((node) => node.getBoundingClientRect().top);
+  expect(top).toBeGreaterThanOrEqual(0);
+
+  await tray.getByRole('button', { name: 'Show details of task slow' }).click();
+  await expect(tray.getByText('Why this run is slow')).toBeVisible();
+  await expect(tray.getByText('The command reaches the network.')).toBeVisible();
+  await expect(tray.getByRole('heading', { name: /^Timeline/ })).toBeVisible();
+});
