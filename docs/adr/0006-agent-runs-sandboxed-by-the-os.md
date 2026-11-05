@@ -1,23 +1,35 @@
 # Agent runs are sandboxed by the OS
 
 Every agent run's shell commands run in the Run sandbox: the Claude Agent SDK's own `sandbox` option, which on macOS
-is Seatbelt. A run writes only in its working folder and the temp folders, and reads neither the data folder nor
+is Seatbelt. A run writes only in its working folder, the temp folders and the package-tool caches under the home
+folder (`~/.npm`, `~/.cache`, `~/.cargo/registry`, `~/go/pkg`, `~/.m2/repository`, `~/.gradle`, `~/Library/Caches` and
+a few like them), never in a folder on PATH such as `~/.cargo/bin` or `~/go/bin`. It reads neither the data folder nor
 `~/.aws`, `~/.config/gcloud`, `~/.ssh` or the login Keychain folder. The data folder holds
 `runtime.json`, whose session token lets a command call the console's own API as the operator, Approvals included. The
 console sets the rules and leaves the profile to the SDK. It fails a run when the sandbox is unavailable, never runs a
 command outside it, and has no Setting to turn it off. The Setup agent's terminal is no agent run and is not sandboxed.
 
 A run's commands reach only its Network allowlist, which the SDK's filtering proxy enforces (`network.allowedDomains`
-with `strictAllowlist`). The console builds the list when the run starts: four built-in hosts (`github.com`,
-`api.github.com`, `*.githubusercontent.com`, `registry.npmjs.org`), the host of each Repo's `origin`, and the domains the
-operator added. A raw IP address, a DNS lookup outside the filter and a client that ignores the proxy settings are
+with `strictAllowlist`). The console builds the list when the run starts: the built-in hosts (GitHub, and the package
+registries of npm and Yarn, Cargo, Go, Maven, Gradle, PyPI and RubyGems), the host of each Repo's `origin`, and the
+domains the operator added. A raw IP address, a DNS lookup outside the filter and a client that ignores the proxy settings are
 refused. `WebFetch` and `WebSearch` run outside the filter, so every run denies them.
 
 The daemon bounds every Keychain call at 60 seconds and the wait for the version handover at 90, and shows a call
 pending past 10 seconds on every page. The native call cannot be cancelled, so an answer that comes late is dropped.
 
+Commit hooks run in the sandbox too, in any language. The caches and registries above are what husky, lefthook,
+pre-commit, Cargo, Go, Maven and Gradle need to start, so a hook finishes instead of failing on a blocked write or host.
+The agent is told never to skip a hook, and its `PreToolUse` hook refuses `--no-verify`, `git commit -n`, `HUSKY=0`,
+`SKIP=`, `LEFTHOOK=0` and a `core.hooksPath` pointed at nothing.
+
 ## Considered Options
 
+- **Writes only in the working folder and temp**: the first design. A hook that fetches a crate, a Go module or a Maven
+  artifact, or starts a pre-commit environment, writes to a cache under the home folder, so it failed, and the agent
+  committed with `--no-verify` to get past it. Closed folders that sit on PATH stay closed.
+- **Commits in the daemon, outside the sandbox**: every hook would work, but a steered run could edit a hook and then
+  ask for the commit, which runs the edited hook with the operator's full access.
 - **Docker or a micro-VM**: strong isolation, but the installer is `curl | sh`, and a run in a container cannot reach
   the host's Keychain-backed CLIs, `pup`, `gh` or the operator's checkout.
 - **A hand-written Seatbelt profile**: a `(deny default)` profile also blocks what `node`, `git` and `pnpm` read to
@@ -35,7 +47,8 @@ pending past 10 seconds on every page. The native call cannot be cancelled, so a
 
 ## Consequences
 
-A run steered by log text can still send out what it can read, but only to a host on its Network allowlist. `GH_TOKEN`
+A run steered by log text can still send out what it can read, but only to a host on its Network allowlist. A run can
+write into the package caches, so it could poison a cached package for a later build; the console does not guard that. `GH_TOKEN`
 reaches `api.github.com`, so a steered run can still use it there (`gh gist create`, a push to a repo it controls); no
 domain rule stops that. A command to any other host fails with the host named in its result, and the run goes on. The
 operator adds the host in Permissions and the next run has it.

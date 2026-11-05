@@ -20,7 +20,7 @@ An agent run can read the checkout, the files the operator attached and the `GH_
 ### Where the list comes from
 
 6. A run's allowlist is built when the run starts, from three groups: Built-in, From Repos and Added by you.
-7. Built-in is `github.com`, `api.github.com`, `*.githubusercontent.com` and `registry.npmjs.org`. Every run has them, whatever else is on the list. The operator cannot remove or change them.
+7. Built-in is `github.com`, `api.github.com`, `*.githubusercontent.com`, and the package registries a build or commit hook fetches from: `registry.npmjs.org`, `registry.yarnpkg.com`, `crates.io`, `*.crates.io`, `proxy.golang.org`, `sum.golang.org`, `repo.maven.apache.org`, `repo1.maven.org`, `plugins.gradle.org`, `services.gradle.org`, `downloads.gradle.org`, `pypi.org`, `files.pythonhosted.org`, `rubygems.org` and `index.rubygems.org`. Every run has them, whatever else is on the list. The operator cannot remove or change them.
 8. From Repos is the host of the `origin` remote of each registered Repo, read from either form (`https://host/path` or `git@host:path`). A Repo with no `origin`, or one whose host does not parse or is not a valid domain, adds nothing. The console reads the remotes when a run starts and stores none.
 9. Added by you is the operator's own list (Behavior 13 to 17).
 10. A wildcard `*.example.com` covers subdomains only. `example.com` needs its own entry.

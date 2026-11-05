@@ -49,8 +49,8 @@ The operator's yes or no on one agent action that needs it: a PROD write, or an 
 a mode that asks.
 
 **Run sandbox**:
-The operating-system limit on an agent run's commands: writes only in the run's working folder and temp, no reads of
-the console's data folder or the operator's cloud and login credentials. It applies in every Access mode, and a run
+The operating-system limit on an agent run's commands: writes only in the run's working folder, temp and package-tool caches, no reads of
+the console's data folder or the operator's cloud and login credentials. Package-tool caches under the home folder stay writable so a repo's commit hooks and builds run. It applies in every Access mode, and a run
 fails when the sandbox is unavailable.
 
 **Network allowlist**:
