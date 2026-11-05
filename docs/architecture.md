@@ -280,7 +280,7 @@ Where the build departs from `design/ops-console.html` on purpose:
 - **Tips** on every control, status and count whose words leave its meaning open, and a "?" beside such labels.
 - **Folding cards**: each card with a title folds to it, and stays folded for that kind of card.
 - **Permissions** page under Connect, with Start at login.
-- **Running tasks** tray in the sidebar: every agent run going, each linking to its work.
+- **Running tasks** tray in the sidebar: every agent run going with its subagents under it, and every run that ended unfinished until dismissed. Each shows how long it ran, links to its work, and pauses, stops, plays or retries from the tray.
 - **Updates**: a version line and panel, an update card and an "Updated to" notice, with Check now and auto-update.
 - **Claude account hub**: CLIProxy as the sign-in for agent runs, and adding an account by link.
 - **Finish chime**: a soft sound when the operator's run ends, switchable per browser, under Notifications.

@@ -447,7 +447,7 @@ test('a Session opens at its newest message', async ({ page }) => {
   await expect(marks.nth(39)).not.toHaveAttribute('aria-current', 'location');
 });
 
-test('a message typed while the agent works waits as Queued and sends when the run ends', async ({ page }) => {
+test('a queued message waits through Stop, and Send now sends it', async ({ page }) => {
   let state = 'working';
   const sent: string[] = [];
   await page.route('**/api/repos', (route) =>
@@ -477,9 +477,43 @@ test('a message typed while the agent works waits as Queued and sends when the r
   await expect(box).toHaveText('');
   expect(sent).toEqual([]);
 
+  // Stop ends the run and holds the message: stopping must not start the next run by itself.
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'On hold' })).toContainText('also add a test');
+  await page.waitForTimeout(500);
+  expect(sent).toEqual([]);
+
+  await page.getByRole('button', { name: 'Send now' }).click();
   await expect.poll(() => sent).toEqual(['also add a test']);
-  await expect(page.getByRole('status').filter({ hasText: 'Queued' })).toHaveCount(0);
+  await expect(page.getByRole('status').filter({ hasText: 'On hold' })).toHaveCount(0);
+});
+
+test('Send now stops the run that is going and sends the queued message', async ({ page }) => {
+  let state = 'working';
+  const sent: string[] = [];
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform', state)] } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) => {
+    if (route.request().method() === 'POST') {
+      sent.push(route.request().postDataJSON().text);
+      return route.fulfill({ json: { data: { message_id: 'm9' } } });
+    }
+    return route.fulfill({ json: { data: [] } });
+  });
+  await page.route('**/api/sessions/s1/stop', (route) => {
+    state = 'idle';
+    return route.fulfill({ status: 204 });
+  });
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  await page.getByRole('textbox', { name: 'Message' }).fill('do it now');
+  await page.getByRole('button', { name: 'Queue' }).click();
+  await page.getByRole('button', { name: 'Send now' }).click();
+  await expect.poll(() => sent).toEqual(['do it now']);
 });
 
 test('Scroll to end shows when scrolled up and jumps to the newest message', async ({ page }) => {

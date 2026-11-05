@@ -572,6 +572,124 @@ describe('stopping a run', () => {
   });
 });
 
+describe('the Running tray', () => {
+  const tray = async (daemon: AgentDaemon) => (await api(daemon).get('/agent-runs')).body.data;
+  const stateOf = (daemon: AgentDaemon, id: string, state: string) =>
+    until(
+      async () => (await api(daemon).get(`/sessions/${id}`)).body.data.state,
+      (value) => value === state,
+      state,
+    );
+
+  it('lists a run going with its subagents nested, and drops it once it finishes', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    const hold = gate();
+    daemon.sdk.script(
+      { task: { id: 't1', description: 'Search the repo', type: 'Explore' } },
+      { task: { id: 't2', description: 'Read the router', parent: 't1' } },
+      { taskEnds: { id: 't2', status: 'completed' } },
+      { wait: hold.promise },
+    );
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'look around' });
+    const [run] = await until(
+      () => tray(daemon),
+      (runs) => runs[0]?.subagents.length === 2,
+      'both subagents',
+    );
+    expect(run).toMatchObject({ running: true, outcome: null, can_resume: true, session: { id } });
+    expect(run.started_at).toBeTruthy();
+    expect(run.subagents).toEqual([
+      expect.objectContaining({ id: 't1', parent_id: null, type: 'Explore', status: 'working' }),
+      expect.objectContaining({ id: 't2', parent_id: 't1', status: 'done' }),
+    ]);
+
+    hold.open();
+    await stateOf(daemon, id, 'idle');
+    expect(await tray(daemon)).toEqual([]);
+  });
+
+  it('keeps a stopped run, ends its subagents with it, and lets Play and Dismiss follow', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    daemon.sdk.script({ task: { id: 't1', description: 'Search the repo' } }, { wait: gate().promise });
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'look around' });
+    await until(
+      () => tray(daemon),
+      (runs) => runs[0]?.subagents.length === 1,
+      'the subagent',
+    );
+    await api(daemon).post(`/sessions/${id}/stop`, {});
+    await stateOf(daemon, id, 'idle');
+
+    const [kept] = await tray(daemon);
+    expect(kept).toMatchObject({ running: false, outcome: 'stopped' });
+    expect(kept.finished_at).toBeTruthy();
+    expect(kept.subagents).toEqual([expect.objectContaining({ id: 't1', status: 'stopped' })]);
+
+    const played = await api(daemon).post(`/sessions/${id}/resume`, {});
+    expect(played.status).toBe(202);
+    await stateOf(daemon, id, 'idle');
+    expect(daemon.sdk.calls.at(-1)?.prompt).toBe('Carry on from where you stopped.');
+    expect(await tray(daemon)).toEqual([]);
+  });
+
+  it('keeps a paused run for Play, and a run that hit its limit for Retry, until dismissed', async () => {
+    const daemon = await start();
+    const paused = daemon.createSession();
+    daemon.sdk.script({ wait: gate().promise });
+    await api(daemon).post(`/sessions/${paused}/messages`, { text: 'work' });
+    await stateOf(daemon, paused, 'working');
+    expect((await api(daemon).post(`/sessions/${paused}/pause`, {})).status).toBe(204);
+    await stateOf(daemon, paused, 'idle');
+
+    const limited = daemon.createSession();
+    daemon.sdk.script({ rejected: true });
+    await api(daemon).post(`/sessions/${limited}/messages`, { text: 'work' });
+    await stateOf(daemon, limited, 'failed');
+
+    const runs = await tray(daemon);
+    expect(
+      runs.map((run: { session: { id: string }; outcome: string }) => [run.session.id, run.outcome]).sort(),
+    ).toEqual(
+      [
+        [paused, 'paused'],
+        [limited, 'rate_limited'],
+      ].sort(),
+    );
+
+    await api(daemon).post(`/sessions/${limited}/resume`, {});
+    await stateOf(daemon, limited, 'idle');
+    expect(daemon.sdk.calls.at(-1)?.prompt).toContain('Try again');
+
+    expect((await api(daemon).delete(`/agent-runs/${paused}`)).status).toBe(204);
+    expect(await tray(daemon)).toEqual([]);
+  });
+
+  it('keeps a run the daemon restart interrupted', async () => {
+    const dataDir = (await start()).dataDir;
+    const first = running[0] as AgentDaemon;
+    const id = first.createSession();
+    first.sdk.script({ wait: gate().promise });
+    await api(first).post(`/sessions/${id}/messages`, { text: 'work' });
+    await stateOf(first, id, 'working');
+    await running.pop()?.stop();
+
+    const again = await start({ dataDir });
+    expect(await tray(again)).toEqual([expect.objectContaining({ running: false, outcome: 'interrupted' })]);
+  });
+
+  it('refuses Play while a run is going and Dismiss on it', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    daemon.sdk.script({ wait: gate().promise });
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'work' });
+    await stateOf(daemon, id, 'working');
+    expect((await api(daemon).post(`/sessions/${id}/resume`, {})).body.error.code).toBe('session_busy');
+    expect((await api(daemon).delete(`/agent-runs/${id}`)).body.error.code).toBe('session_busy');
+  });
+});
+
 describe('daemon restart', () => {
   it('fails Sessions left waiting and expires their Approvals', async () => {
     const dataDir = (await start()).dataDir;

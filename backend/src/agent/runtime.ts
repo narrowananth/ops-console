@@ -8,6 +8,8 @@ import type {
   Options,
   PermissionMode,
   SDKMessage,
+  SDKTaskNotificationMessage,
+  SDKTaskStartedMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
@@ -23,8 +25,11 @@ import {
   ErrorCode,
   type Message,
   type Part,
+  RunOutcome,
   SessionState,
   type SkillCopy,
+  type Subagent,
+  SubagentStatus,
 } from '@ops-console/shared';
 import { eq, inArray } from 'drizzle-orm';
 import { type AccountRow, AccountsService, rateLimitInfoSchema } from '../accounts/accounts.service';
@@ -150,6 +155,26 @@ type RunResult =
   | ErrorCode.UpstreamFailed
   | ErrorCode.KeychainTimeout;
 
+/** What Play and Retry say to the agent. */
+const PLAY_TEXT = 'Carry on from where you stopped.';
+const RETRY_TEXT = 'Your last run ended before it finished. Try again and carry on from where it stopped.';
+
+/** How a run that ended with `result` reads in the tray. */
+function outcomeOf(result: RunResult, paused: boolean): RunOutcome {
+  switch (result) {
+    case 'done':
+      return RunOutcome.Done;
+    case 'stopped':
+      return paused ? RunOutcome.Paused : RunOutcome.Stopped;
+    case ErrorCode.RateLimited:
+      return RunOutcome.RateLimited;
+    case ErrorCode.Unauthorized:
+      return RunOutcome.SignedOut;
+    default:
+      return RunOutcome.Failed;
+  }
+}
+
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
@@ -196,7 +221,11 @@ export class AgentRuntime {
     this.store.write((tx, emit) => {
       const interrupted = tx
         .update(sessions)
-        .set({ state: SessionState.Failed })
+        .set({
+          state: SessionState.Failed,
+          runOutcome: RunOutcome.Interrupted,
+          runFinishedAt: new Date().toISOString(),
+        })
         .where(inArray(sessions.state, [SessionState.Working, SessionState.WaitingInput, SessionState.WaitingApproval]))
         .returning()
         .all();
@@ -336,6 +365,8 @@ export class AgentRuntime {
       serverLabel: kind.serverLabel ?? null,
       abort: new AbortController(),
       stopped: false,
+      paused: false,
+      subagents: new Map(),
       resumeAt: options.resumeAt ?? null,
       deny: options.deny ?? [],
       networkDomains: this.network.forRun(),
@@ -350,7 +381,11 @@ export class AgentRuntime {
     this.sessions.write(sessionId, {
       state: SessionState.Working,
       title: run.autoTitle ?? session.title,
-      lastActiveAt: new Date().toISOString(),
+      lastActiveAt: run.createdAt,
+      runStartedAt: run.createdAt,
+      runFinishedAt: null,
+      runOutcome: null,
+      runSubagents: null,
     });
     void this.execute(run, text);
     return run;
@@ -358,17 +393,30 @@ export class AgentRuntime {
 
   /**
    * Ends the Session's run where it is: the SDK query aborts, its pending Approvals expire, and the Session goes back
-   * to `idle`. Refused with `invalid_state` when no run is going.
+   * to `idle`. Refused with `invalid_state` when no run is going. A paused run ends the same way, and its tray entry
+   * offers Play.
    */
-  stop(sessionId: string): void {
+  stop(sessionId: string, paused = false): void {
     this.sessions.get(sessionId);
     const run = this.runs.get(sessionId);
     if (!run) throw new ApiError(409, ErrorCode.InvalidState, 'the session has no run going');
     run.stopped = true;
+    run.paused = paused;
     run.abort.abort();
     this.approvals.expirePending(sessionId);
     // An open question would hold the permission prompt forever; the aborted query ignores the answer.
     run.answer?.('');
+  }
+
+  /**
+   * Starts the run again from the conversation as it stands, for Play on a paused or stopped run and Retry on one that
+   * failed. Refused while a run is going or when the Session takes no messages.
+   */
+  resumeRun(sessionId: string): { message_id: string } {
+    const session = this.sessions.get(sessionId);
+    if (this.runs.get(sessionId)) throw new ApiError(409, ErrorCode.SessionBusy, "the session's run is still going");
+    const retry = session.runOutcome !== RunOutcome.Paused && session.runOutcome !== RunOutcome.Stopped;
+    return this.send(sessionId, retry ? RETRY_TEXT : PLAY_TEXT);
   }
 
   /** True while the Session's run is going. */
@@ -582,6 +630,10 @@ export class AgentRuntime {
       this.reportServers(run, session, message.mcp_servers);
       return;
     }
+    if (message.type === 'system' && (message.subtype === 'task_started' || message.subtype === 'task_notification')) {
+      this.trackSubagent(run, message);
+      return;
+    }
     if (message.type === 'stream_event' && message.parent_tool_use_id === null) {
       const event = message.event;
       if (event.type === 'content_block_start' && event.content_block.type === 'text') {
@@ -613,6 +665,33 @@ export class AgentRuntime {
       for (let index = from; index < from + parts.length; index++) this.output(run, index);
       for (const part of parts) run.onPart?.(part);
     }
+  }
+
+  /** Keeps the run's subagents for the tray: one per `task_started` that names a subagent, ended by its notification. */
+  private trackSubagent(run: Run, message: SDKTaskStartedMessage | SDKTaskNotificationMessage): void {
+    if (message.subtype === 'task_started') {
+      if (message.subagent_type === undefined && message.spawn_depth === undefined) return;
+      run.subagents.set(message.task_id, {
+        id: message.task_id,
+        parent_id: message.parent_task_id ?? null,
+        description: message.description,
+        type: message.subagent_type ?? null,
+        status: SubagentStatus.Working,
+        started_at: new Date().toISOString(),
+        finished_at: null,
+      });
+    } else {
+      const task = run.subagents.get(message.task_id);
+      if (!task) return;
+      task.status =
+        message.status === 'completed'
+          ? SubagentStatus.Done
+          : message.status === 'failed'
+            ? SubagentStatus.Failed
+            : SubagentStatus.Stopped;
+      task.finished_at = new Date().toISOString();
+    }
+    this.sessions.write(run.sessionId, { runSubagents: JSON.stringify([...run.subagents.values()]) });
   }
 
   /**
@@ -647,6 +726,12 @@ export class AgentRuntime {
     this.sessions.setFailure(run.sessionId, run.failure);
     // A run the operator stopped ends `idle`, like one that finished; the job that started it still sees it fail.
     const failed = result !== 'done' && result !== 'stopped';
+    const finishedAt = new Date().toISOString();
+    // Subagents still going when the run ends ended with it.
+    const ending = failed ? SubagentStatus.Failed : result === 'stopped' ? SubagentStatus.Stopped : SubagentStatus.Done;
+    const subagents: Subagent[] = [...run.subagents.values()].map((task) =>
+      task.status === SubagentStatus.Working ? { ...task, status: ending, finished_at: finishedAt } : task,
+    );
     // The agent's first words in the message; its tool steps make a poor preview.
     const newest = run.parts.find((part): part is Extract<Part, { kind: 'text' }> => part.kind === 'text');
     this.store.write((tx, emit) => {
@@ -654,6 +739,9 @@ export class AgentRuntime {
         .update(sessions)
         .set({
           state: failed ? SessionState.Failed : SessionState.Idle,
+          runFinishedAt: finishedAt,
+          runOutcome: outcomeOf(result, run.paused),
+          runSubagents: subagents.length > 0 ? JSON.stringify(subagents) : null,
           ...(newest ? { lastMessagePreview: firstLine(newest.text, 200) } : {}),
           lastActiveAt: nowIso,
         })

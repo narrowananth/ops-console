@@ -22,7 +22,7 @@ import { ProdWriteRule } from './prod-write-rule';
 import { RunRegistry } from './runs';
 import { AgentRuntime } from './runtime';
 import { SessionKinds } from './session-kinds';
-import { SessionsController } from './sessions.controller';
+import { AgentRunsController, SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
 import { Transcripts } from './transcripts';
 
@@ -38,6 +38,7 @@ export class AgentModule {
       global: true,
       controllers: [
         SessionsController,
+        AgentRunsController,
         ActionLogController,
         ApprovalsController,
         AccountsController,

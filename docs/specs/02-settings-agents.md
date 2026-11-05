@@ -233,6 +233,10 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 | `DELETE /sessions/:id` | | 204; `session_busy` |
 | `POST /sessions/:id/messages/:message_id/edit` | `{ text }` | 202 `{ message_id, reverted: { files, insertions, deletions } \| null, revert_error }`; `invalid_state` for any message but the last; `session_busy` (Behavior 8a) |
 | `POST /sessions/:id/stop` | | 204; `invalid_state` with no run going (Behavior 11a) |
+| `POST /sessions/:id/pause` | | 204; ends the run like stop and keeps it in the Running tray for Play; `invalid_state` with no run going |
+| `POST /sessions/:id/resume` | | 202 `{ message_id }`; starts a paused, stopped or failed run again; `session_busy` while one goes |
+| `GET /agent-runs` | | `AgentRun[]`: runs going, then runs that ended unfinished and were not dismissed, newest first |
+| `DELETE /agent-runs/:session_id` | | 204; takes an ended run out of the tray; `session_busy` while it goes |
 | `GET /sessions/:id/messages` | | `Message[]` oldest first, the in-flight message included; empty with no transcript |
 
 `POST /sessions` is defined by each kind's spec. This spec gives them the shared creation step (Behavior 1).

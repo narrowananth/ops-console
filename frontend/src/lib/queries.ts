@@ -4,6 +4,7 @@ import {
   accountListSchema,
   addedAccountSchema,
   agentAccountsSettingSchema,
+  agentRunSchema,
   alertDetailSchema,
   alertEventSchema,
   alertSchema,
@@ -66,7 +67,6 @@ import {
   type Session,
   type SessionDefaults,
   type SessionPatch,
-  SessionState,
   SignInVia,
   type SkillPatch,
   savedNetworkDomainSchema,
@@ -689,17 +689,41 @@ export function useRepoSessions() {
   });
 }
 
-/** Every Session of every kind whose run goes, `waiting_input` included, most recently active first. */
-export function useRunningSessions() {
+/** The Running tray: runs going now, and runs that ended unfinished until dismissed. */
+export function useAgentRuns() {
   return useQuery({
-    queryKey: [...queryKeys.sessions, 'running'],
-    queryFn: () =>
-      apiGet('/sessions?limit=100', z.object({ data: z.array(sessionSchema) })).then((b) =>
-        b.data
-          .filter((session) => session.state !== SessionState.Idle && session.state !== SessionState.Failed)
-          .sort((a, b) => b.last_active_at.localeCompare(a.last_active_at)),
-      ),
+    queryKey: [...queryKeys.sessions, 'runs'],
+    queryFn: () => apiGet('/agent-runs', z.object({ data: z.array(agentRunSchema) })).then((b) => b.data),
   });
+}
+
+/** Pause, Play, Retry and Dismiss on one Running tray entry. */
+export function useRunControls(sessionId: string) {
+  const client = useQueryClient();
+  const settled = () => void client.invalidateQueries({ queryKey: queryKeys.sessions });
+  return {
+    pause: useMutation({
+      mutationFn: () => apiSend('POST', `/sessions/${sessionId}/pause`, undefined, z.undefined()),
+      onSettled: settled,
+    }),
+    resume: useMutation({
+      mutationFn: () =>
+        apiSend(
+          'POST',
+          `/sessions/${sessionId}/resume`,
+          undefined,
+          z.object({ data: z.object({ message_id: z.string() }) }),
+        ),
+      onSettled: () => {
+        settled();
+        void client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) });
+      },
+    }),
+    dismiss: useMutation({
+      mutationFn: () => apiSend('DELETE', `/agent-runs/${sessionId}`, undefined, z.undefined()),
+      onSettled: settled,
+    }),
+  };
 }
 
 export function useCreateAnonymousSession() {
@@ -1113,6 +1137,15 @@ export function useStartScan() {
   return useMutation({
     mutationFn: (input: CreateScan) => apiSend('POST', '/scans', input, z.object({ data: scanSchema })),
     onSuccess: () => refreshMonitor(client),
+  });
+}
+
+/** Stops a running Scan: the read ends and nothing it read is kept. */
+export function useCancelScan() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiSend('POST', `/scans/${id}/cancel`, undefined, z.undefined()),
+    onSettled: () => refreshMonitor(client),
   });
 }
 

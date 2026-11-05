@@ -35,6 +35,10 @@ export type Step =
   | { wait: Promise<unknown> }
   /** The SDK throws, as when the Claude Code process dies. */
   | { crash: string }
+  /** The agent starts a subagent, as Claude Code's `task_started` says; `parent` is the task that launched it. */
+  | { task: { id: string; description: string; type?: string; parent?: string } }
+  /** A subagent ends, as `task_notification` says. */
+  | { taskEnds: { id: string; status: 'completed' | 'failed' | 'stopped' } }
   /** Claude Code names the conversation: an `ai-title` entry in the transcript, outside the message chain. */
   | { aiTitle: string };
 
@@ -152,6 +156,28 @@ export class FakeAgentSdk implements AgentSdk {
     for (const step of steps) {
       if ('wait' in step) {
         await abortable(step.wait);
+      } else if ('task' in step) {
+        yield sdk({
+          type: 'system',
+          subtype: 'task_started',
+          task_id: step.task.id,
+          description: step.task.description,
+          subagent_type: step.task.type ?? 'general-purpose',
+          ...(step.task.parent ? { parent_task_id: step.task.parent } : {}),
+          uuid: crypto.randomUUID(),
+          session_id: sessionId,
+        });
+      } else if ('taskEnds' in step) {
+        yield sdk({
+          type: 'system',
+          subtype: 'task_notification',
+          task_id: step.taskEnds.id,
+          status: step.taskEnds.status,
+          output_file: '',
+          summary: '',
+          uuid: crypto.randomUUID(),
+          session_id: sessionId,
+        });
       } else if ('aiTitle' in step) {
         await appendFile(file, `${JSON.stringify({ type: 'ai-title', aiTitle: step.aiTitle, sessionId })}\n`);
       } else if ('crash' in step) {

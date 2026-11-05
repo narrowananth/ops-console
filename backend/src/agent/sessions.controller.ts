@@ -13,6 +13,7 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import {
+  type AgentRun,
   type Attachment,
   type EditedMessage,
   type Message,
@@ -35,6 +36,24 @@ const idParams = z.object({ id: z.string().min(1) });
 const editParams = idParams.extend({ message_id: z.string().min(1) });
 const fileParams = idParams.extend({ file: z.string().min(1) });
 const attachQuery = z.object({ name: z.string().trim().min(1).max(255) });
+
+/** The Running tray. */
+@Controller('agent-runs')
+export class AgentRunsController {
+  constructor(@Inject(SessionsService) private readonly sessions: SessionsService) {}
+
+  @Get()
+  list(): { data: AgentRun[]; meta: { next_cursor: null } } {
+    return { data: this.sessions.agentRuns(), meta: { next_cursor: null } };
+  }
+
+  /** Dismisses the run of the Session `id`: it leaves the tray. */
+  @Delete(':id')
+  @HttpCode(204)
+  dismiss(@Param() params: unknown): void {
+    this.sessions.dismissRun(parseInput(idParams, params, 'params').id);
+  }
+}
 
 /** Routes shared by every kind; each kind's own fields come from its handler in `SessionKinds`. */
 @Controller('sessions')
@@ -92,6 +111,20 @@ export class SessionsController {
   @HttpCode(204)
   stop(@Param() params: unknown): void {
     this.runtime.stop(parseInput(idParams, params, 'params').id);
+  }
+
+  /** Ends the Session's run like Stop, and keeps it in the Running tray for Play. */
+  @Post(':id/pause')
+  @HttpCode(204)
+  pause(@Param() params: unknown): void {
+    this.runtime.stop(parseInput(idParams, params, 'params').id, true);
+  }
+
+  /** Starts a paused, stopped or failed run again; 409 `session_busy` while a run is going. */
+  @Post(':id/resume')
+  @HttpCode(202)
+  resume(@Param() params: unknown): { data: { message_id: string } } {
+    return { data: this.runtime.resumeRun(parseInput(idParams, params, 'params').id) };
   }
 
   @Get(':id/messages')

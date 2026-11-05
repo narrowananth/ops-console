@@ -31,6 +31,7 @@ import {
   type ReviewDecision,
   type ReviewVerdict,
   type RouteState,
+  type RunOutcome,
   type RunStatus,
   type ScanStatus,
   type ScanTrigger,
@@ -124,6 +125,12 @@ export const sessions = sqliteTable(
     alertId: text('alert_id').references((): AnySQLiteColumn => alerts.id, { onDelete: 'set null' }),
     state: text().$type<SessionState>().notNull().default(SessionState.Idle),
     lastMessagePreview: text('last_message_preview'),
+    /** The last run's start, end and outcome; null outcome while the first run goes or once the operator dismissed it. */
+    runStartedAt: text('run_started_at'),
+    runFinishedAt: text('run_finished_at'),
+    runOutcome: text('run_outcome').$type<RunOutcome>(),
+    /** JSON array of the last run's `Subagent`s. */
+    runSubagents: text('run_subagents'),
     createdAt: text('created_at').notNull().default(nowIso),
     lastActiveAt: text('last_active_at').notNull().default(nowIso),
   },

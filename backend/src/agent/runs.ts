@@ -1,4 +1,4 @@
-import type { Part, SkillCopy } from '@ops-console/shared';
+import type { Part, SkillCopy, Subagent } from '@ops-console/shared';
 
 /** A run in progress. It lives in memory only: a daemon restart ends it (Behavior 18). */
 export type Run = {
@@ -40,6 +40,10 @@ export type Run = {
   abort: AbortController;
   /** Set when the operator stopped the run, so its end reads as stopped, not failed. */
   stopped: boolean;
+  /** Set when the operator paused the run: it ends like a stopped one, kept in the tray for Play. */
+  paused: boolean;
+  /** The subagents the run started, by task id. */
+  subagents: Map<string, Subagent>;
   /** The conversation resumes from this transcript entry, dropping what came after it; null for all of it. */
   resumeAt: string | null;
   /** The Network allowlist the run started with; a retry on another account keeps it. */
