@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import { DAEMON_FILE } from './global-setup';
 
 const daemon: { url: string; token: string } = JSON.parse(readFileSync(DAEMON_FILE, 'utf8'));
@@ -38,6 +38,7 @@ const session = (id: string, repoId: string, title: string, state = 'idle', bran
   created_at: NOW,
   last_active_at: NOW,
   playbook: null,
+  queued_message: null,
 });
 
 test('a Repo shows its 3 newest Sessions and folds, so the next Repo stays in reach', async ({ page }) => {
@@ -447,26 +448,55 @@ test('a Session opens at its newest message', async ({ page }) => {
   await expect(marks.nth(39)).not.toHaveAttribute('aria-current', 'location');
 });
 
-test('a queued message waits through Stop, and Send now sends it', async ({ page }) => {
-  let state = 'working';
-  const sent: string[] = [];
+/** A daemon that keeps the queued message as the real one does: Stop holds it, Send now stops a run and sends it. */
+async function routeQueue(page: Page) {
+  const daemonState: { state: string; queued: string | null; sent: string[]; stops: number } = {
+    state: 'working',
+    queued: null,
+    sent: [],
+    stops: 0,
+  };
   await page.route('**/api/repos', (route) =>
     route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
   );
   await page.route(/\/api\/sessions\?kind=repo/, (route) =>
-    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform', state)] } }),
+    route.fulfill({
+      json: {
+        data: [
+          {
+            ...session('s1', 'r1', 'engage platform', daemonState.state),
+            queued_message: daemonState.queued,
+          },
+        ],
+      },
+    }),
   );
-  await page.route('**/api/sessions/s1/messages', (route) => {
-    if (route.request().method() === 'POST') {
-      sent.push(route.request().postDataJSON().text);
-      return route.fulfill({ json: { data: { message_id: 'm9' } } });
+  await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
+  await page.route('**/api/sessions/s1/queue', (route) => {
+    const method = route.request().method();
+    if (method === 'PUT') {
+      daemonState.queued = route.request().postDataJSON().text;
+      return route.fulfill({ json: { data: { queued: true } } });
     }
-    return route.fulfill({ json: { data: [] } });
-  });
-  await page.route('**/api/sessions/s1/stop', (route) => {
-    state = 'idle';
+    daemonState.queued = null;
     return route.fulfill({ status: 204 });
   });
+  await page.route('**/api/sessions/s1/stop', (route) => {
+    daemonState.state = 'idle';
+    daemonState.stops++;
+    return route.fulfill({ status: 204 });
+  });
+  await page.route('**/api/sessions/s1/queue/send', (route) => {
+    if (daemonState.queued !== null) daemonState.sent.push(daemonState.queued);
+    daemonState.queued = null;
+    daemonState.state = 'working';
+    return route.fulfill({ status: 204 });
+  });
+  return daemonState;
+}
+
+test('a queued message waits through Stop, and Send now sends it', async ({ page }) => {
+  const daemonState = await routeQueue(page);
   await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
 
   const box = page.getByRole('textbox', { name: 'Message' });
@@ -475,45 +505,36 @@ test('a queued message waits through Stop, and Send now sends it', async ({ page
   await page.getByRole('button', { name: 'Queue' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Queued' })).toContainText('also add a test');
   await expect(box).toHaveText('');
-  expect(sent).toEqual([]);
+  expect(daemonState.sent).toEqual([]);
 
   // Stop ends the run and holds the message: stopping must not start the next run by itself.
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'On hold' })).toContainText('also add a test');
   await page.waitForTimeout(500);
-  expect(sent).toEqual([]);
+  expect(daemonState.sent).toEqual([]);
 
   await page.getByRole('button', { name: 'Send now' }).click();
-  await expect.poll(() => sent).toEqual(['also add a test']);
+  await expect.poll(() => daemonState.sent).toEqual(['also add a test']);
   await expect(page.getByRole('status').filter({ hasText: 'On hold' })).toHaveCount(0);
 });
 
-test('Send now stops the run that is going and sends the queued message', async ({ page }) => {
-  let state = 'working';
-  const sent: string[] = [];
-  await page.route('**/api/repos', (route) =>
-    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
-  );
-  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
-    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform', state)] } }),
-  );
-  await page.route('**/api/sessions/s1/messages', (route) => {
-    if (route.request().method() === 'POST') {
-      sent.push(route.request().postDataJSON().text);
-      return route.fulfill({ json: { data: { message_id: 'm9' } } });
-    }
-    return route.fulfill({ json: { data: [] } });
-  });
-  await page.route('**/api/sessions/s1/stop', (route) => {
-    state = 'idle';
-    return route.fulfill({ status: 204 });
-  });
+test('Send now sends the queued message of a run that is going, and Take back puts it in the box', async ({ page }) => {
+  const daemonState = await routeQueue(page);
   await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
 
-  await page.getByRole('textbox', { name: 'Message' }).fill('do it now');
+  const box = page.getByRole('textbox', { name: 'Message' });
+  await box.fill('do it now');
   await page.getByRole('button', { name: 'Queue' }).click();
   await page.getByRole('button', { name: 'Send now' }).click();
-  await expect.poll(() => sent).toEqual(['do it now']);
+  await expect.poll(() => daemonState.sent).toEqual(['do it now']);
+
+  daemonState.state = 'working';
+  await box.fill('never mind this');
+  await page.getByRole('button', { name: 'Queue' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Queued' })).toContainText('never mind this');
+  await page.getByRole('button', { name: 'Take back' }).click();
+  await expect(box).toHaveText('never mind this');
+  await expect(page.getByRole('status').filter({ hasText: 'Queued' })).toHaveCount(0);
 });
 
 test('Scroll to end shows when scrolled up and jumps to the newest message', async ({ page }) => {

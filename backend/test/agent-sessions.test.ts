@@ -713,3 +713,230 @@ describe('daemon restart', () => {
     ]);
   });
 });
+
+describe('the Agent runs page', () => {
+  const detail = async (daemon: AgentDaemon, id: string) => (await api(daemon).get(`/agent-runs/${id}`)).body.data;
+  const stateOf = (daemon: AgentDaemon, id: string, state: string) =>
+    until(
+      async () => (await api(daemon).get(`/sessions/${id}`)).body.data.state,
+      (value) => value === state,
+      state,
+    );
+
+  it('keeps each tool call with its phase and time, and says where the run is', async () => {
+    const daemon = await start();
+    const id = daemon.createSession({ access_mode: AccessMode.Full });
+    const hold = gate();
+    daemon.sdk.script(
+      { tool: 'Read', input: { file_path: 'a.ts' } },
+      { tool: 'Edit', input: { file_path: 'a.ts', old_string: 'a', new_string: 'b' } },
+      { tool: 'Bash', input: { command: 'pnpm test backend' }, hold: hold.promise },
+    );
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'fix it' });
+    const open = await until(
+      () => detail(daemon, id),
+      (value) => value.steps.some((step: { finished_at: string | null }) => step.finished_at === null),
+      'the open command',
+    );
+
+    expect(open.steps.map((step: { tool: string; phase: string }) => [step.tool, step.phase])).toEqual([
+      ['Read', 'reading'],
+      ['Edit', 'editing'],
+      ['Bash', 'commands'],
+    ]);
+    expect(open.run).toMatchObject({ running: true, health: 'on_track', activity: 'Running pnpm test backend' });
+    expect(open.stages.find((one: { state: string }) => one.state === 'now').stage).toBe('run_tests');
+    expect(open.run.split.map((one: { phase: string }) => one.phase)).toEqual([
+      'thinking',
+      'reading',
+      'editing',
+      'commands',
+      'waiting_you',
+    ]);
+
+    hold.open();
+    await stateOf(daemon, id, 'idle');
+    const done = await detail(daemon, id);
+    expect(done.steps.every((step: { ok: boolean | null }) => step.ok === true)).toBe(true);
+    expect(done.failure).toBeNull();
+  });
+
+  it('says a run waits on the operator, and for what', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    daemon.sdk.script({ tool: 'Bash', input: { command: 'rm -rf build' } });
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'clean' });
+    const [run] = await until(
+      async () => (await api(daemon).get('/agent-runs')).body.data,
+      (runs) => runs[0]?.health === 'needs_you',
+      'needs you',
+    );
+    expect(run.health_reason).toMatch(/^Waiting on you for \d+s: Running rm -rf build$/);
+    const [approval] = (await api(daemon).get('/approvals')).body.data;
+    await api(daemon).post(`/approvals/${approval.id}/decision`, { decision: 'approved' });
+    await stateOf(daemon, id, 'idle');
+    // Time spent on the Approval is kept apart from the call's own time.
+    const ended = await detail(daemon, id);
+    expect(ended.run.split.find((one: { phase: string }) => one.phase === 'waiting_you').ms).toBeGreaterThanOrEqual(0);
+  });
+
+  it('explains a run the network blocked, with the host to allow', async () => {
+    const daemon = await start();
+    const id = daemon.createSession({ access_mode: AccessMode.Full });
+    daemon.sdk.script(
+      {
+        tool: 'Bash',
+        input: { command: 'pnpm install' },
+        fails: 'ERR_PNPM_FETCH_403 GET https://registry.example.com/left-pad: Forbidden',
+      },
+      { crash: 'process died' },
+    );
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'bump deps' });
+    await stateOf(daemon, id, 'failed');
+
+    const [run] = (await api(daemon).get('/agent-runs')).body.data;
+    expect(run).toMatchObject({ health: 'failed', outcome: 'failed' });
+    expect(run.health_reason).toContain('pnpm install');
+    const { failure } = await detail(daemon, id);
+    expect(failure).toMatchObject({ kind: 'network_blocked', blocked_host: 'registry.example.com' });
+    expect(failure.raw).toContain('Forbidden');
+  });
+
+  it('explains a usage limit, and reports 404 for a Session that never ran', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    expect((await api(daemon).get(`/agent-runs/${id}`)).status).toBe(404);
+    daemon.sdk.script({ rejected: true });
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'work' });
+    await stateOf(daemon, id, 'failed');
+    expect((await detail(daemon, id)).failure).toMatchObject({ kind: 'rate_limited' });
+  });
+
+  it('keeps what a run cost and adds the day up', async () => {
+    const daemon = await start();
+    const first = daemon.createSession();
+    const second = daemon.createSession();
+    daemon.sdk.script({ cost: { usd: 0.25, tokens: 1000 } }, { text: 'ok' });
+    await api(daemon).post(`/sessions/${first}/messages`, { text: 'one' });
+    await stateOf(daemon, first, 'idle');
+    daemon.sdk.script({ cost: { usd: 0.5, tokens: 2000 } }, { text: 'ok' });
+    await api(daemon).post(`/sessions/${second}/messages`, { text: 'two' });
+    await stateOf(daemon, second, 'idle');
+
+    expect((await detail(daemon, first)).run).toMatchObject({ cost_usd: 0.25, tokens: 1000 });
+    expect((await api(daemon).get('/agent-runs/usage')).body.data).toEqual({ cost_usd: 0.75, tokens: 3000, runs: 2 });
+  });
+
+  describe('queued messages', () => {
+    const queued = async (daemon: AgentDaemon, id: string) =>
+      (await api(daemon).get(`/sessions/${id}`)).body.data.queued_message;
+
+    it('sends the queued message when the run ends', async () => {
+      const daemon = await start();
+      const id = daemon.createSession();
+      const hold = gate();
+      daemon.sdk.script({ wait: hold.promise });
+      await api(daemon).post(`/sessions/${id}/messages`, { text: 'first' });
+      await stateOf(daemon, id, 'working');
+      expect((await api(daemon).put(`/sessions/${id}/queue`, { text: 'then this' })).body.data).toEqual({
+        queued: true,
+      });
+      expect(await queued(daemon, id)).toBe('then this');
+
+      hold.open();
+      await until(
+        () => daemon.sdk.calls.length,
+        (count) => count === 2,
+        'the queued run',
+      );
+      expect(daemon.sdk.calls[1]?.prompt).toBe('then this');
+      await stateOf(daemon, id, 'idle');
+      expect(await queued(daemon, id)).toBeNull();
+    });
+
+    it('holds the message when the operator stops the run, until Send now', async () => {
+      const daemon = await start();
+      const id = daemon.createSession();
+      daemon.sdk.script({ wait: gate().promise });
+      await api(daemon).post(`/sessions/${id}/messages`, { text: 'first' });
+      await stateOf(daemon, id, 'working');
+      await api(daemon).put(`/sessions/${id}/queue`, { text: 'held text' });
+      await api(daemon).post(`/sessions/${id}/stop`, {});
+      await stateOf(daemon, id, 'idle');
+      expect(daemon.sdk.calls).toHaveLength(1);
+      expect(await queued(daemon, id)).toBe('held text');
+
+      expect((await api(daemon).post(`/sessions/${id}/queue/send`, {})).status).toBe(204);
+      await until(
+        () => daemon.sdk.calls.length,
+        (count) => count === 2,
+        'the sent run',
+      );
+      expect(daemon.sdk.calls[1]?.prompt).toBe('held text');
+      expect(await queued(daemon, id)).toBeNull();
+    });
+
+    it('stops a run going and sends the message when Send now comes while it runs', async () => {
+      const daemon = await start();
+      const id = daemon.createSession();
+      daemon.sdk.script({ wait: gate().promise });
+      await api(daemon).post(`/sessions/${id}/messages`, { text: 'first' });
+      await stateOf(daemon, id, 'working');
+      await api(daemon).put(`/sessions/${id}/queue`, { text: 'now please' });
+      await api(daemon).post(`/sessions/${id}/queue/send`, {});
+      await until(
+        () => daemon.sdk.calls.length,
+        (count) => count === 2,
+        'the sent run',
+      );
+      expect(daemon.sdk.calls[1]?.prompt).toBe('now please');
+    });
+
+    it('takes the message back, and sends at once when no run goes', async () => {
+      const daemon = await start();
+      const id = daemon.createSession();
+      daemon.sdk.script({ wait: gate().promise });
+      await api(daemon).post(`/sessions/${id}/messages`, { text: 'first' });
+      await stateOf(daemon, id, 'working');
+      await api(daemon).put(`/sessions/${id}/queue`, { text: 'never mind' });
+      expect((await api(daemon).delete(`/sessions/${id}/queue`)).status).toBe(204);
+      expect(await queued(daemon, id)).toBeNull();
+      await api(daemon).post(`/sessions/${id}/stop`, {});
+      await stateOf(daemon, id, 'idle');
+
+      expect((await api(daemon).put(`/sessions/${id}/queue`, { text: 'nothing runs' })).body.data).toEqual({
+        queued: false,
+      });
+      await until(
+        () => daemon.sdk.calls.at(-1)?.prompt,
+        (prompt) => prompt === 'nothing runs',
+        'the message to start',
+      );
+      expect((await api(daemon).post(`/sessions/${id}/queue/send`, {})).body.error.code).toBe('invalid_state');
+    });
+  });
+
+  it('stops every run going and dismisses every ended run', async () => {
+    const daemon = await start();
+    const a = daemon.createSession();
+    const b = daemon.createSession();
+    const limited = daemon.createSession();
+    daemon.sdk.script({ rejected: true });
+    await api(daemon).post(`/sessions/${limited}/messages`, { text: 'x' });
+    await stateOf(daemon, limited, 'failed');
+    daemon.sdk.script({ wait: gate().promise });
+    daemon.sdk.script({ wait: gate().promise });
+    await api(daemon).post(`/sessions/${a}/messages`, { text: 'x' });
+    await api(daemon).post(`/sessions/${b}/messages`, { text: 'x' });
+    await stateOf(daemon, a, 'working');
+    await stateOf(daemon, b, 'working');
+
+    expect((await api(daemon).post('/agent-runs/stop-all', {})).body.data).toEqual({ stopped: 2 });
+    await stateOf(daemon, a, 'idle');
+    await stateOf(daemon, b, 'idle');
+    expect((await api(daemon).get('/agent-runs')).body.data).toHaveLength(3);
+
+    expect((await api(daemon).delete('/agent-runs')).body.data).toEqual({ dismissed: 3 });
+    expect((await api(daemon).get('/agent-runs')).body.data).toEqual([]);
+  });
+});

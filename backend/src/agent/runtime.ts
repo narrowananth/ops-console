@@ -64,6 +64,7 @@ import {
   type PullRequestOpener,
 } from './pull-request-tool';
 import { runSandbox } from './run-sandbox';
+import { RunStepsLog } from './run-steps';
 import { type Run, RunRegistry, type RunSummary } from './runs';
 import { SessionKinds } from './session-kinds';
 import { sessionTitle, shortTitle } from './session-title';
@@ -205,6 +206,7 @@ export class AgentRuntime {
     @Inject(ConnectionLookup) private readonly connections: ConnectionLookup,
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
     @Inject(NetworkAllowlistService) private readonly network: NetworkAllowlistService,
+    @Inject(RunStepsLog) private readonly steps: RunStepsLog,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
     recovery.register('agent sessions and approvals', () => this.recover());
@@ -232,6 +234,7 @@ export class AgentRuntime {
         .all();
       for (const row of interrupted) emitSessionUpdated(emit, row);
     });
+    this.steps.closeAllOpen('the console restarted');
     this.approvals.expirePending();
   }
 
@@ -367,6 +370,8 @@ export class AgentRuntime {
       abort: new AbortController(),
       stopped: false,
       paused: false,
+      waitingSince: null,
+      sendQueuedAfter: false,
       subagents: new Map(),
       resumeAt: options.resumeAt ?? null,
       deny: options.deny ?? [],
@@ -375,6 +380,7 @@ export class AgentRuntime {
       autoTitle: null,
     };
     this.runs.add(run);
+    this.steps.prune();
     this.sessions.setFailure(sessionId, null);
     if (options.fresh) this.sessions.write(sessionId, { sdkSessionId: null });
     const isFirst = session.title === NEW_SESSION_TITLE && session.sdkSessionId === null;
@@ -407,6 +413,55 @@ export class AgentRuntime {
     this.approvals.expirePending(sessionId);
     // An open question would hold the permission prompt forever; the aborted query ignores the answer.
     run.answer?.('');
+  }
+
+  /**
+   * Queues a message behind the Session's run: it goes out when the run ends, unless the operator stops the run. With no
+   * run going there is nothing to wait for, so it goes out now.
+   */
+  queue(sessionId: string, text: string): { queued: boolean } {
+    this.sessions.get(sessionId);
+    if (!this.runs.get(sessionId)) {
+      this.send(sessionId, text);
+      return { queued: false };
+    }
+    this.sessions.write(sessionId, { queuedText: text });
+    return { queued: true };
+  }
+
+  /** Takes the queued message back: it stays out of the next run. */
+  takeBack(sessionId: string): void {
+    this.sessions.get(sessionId);
+    this.sessions.write(sessionId, { queuedText: null });
+  }
+
+  /** Sends the queued message now. A run going stops first, and the message starts the next. */
+  sendQueuedNow(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session.queuedText === null) throw new ApiError(409, ErrorCode.InvalidState, 'no message is queued');
+    const run = this.runs.get(sessionId);
+    if (run) {
+      run.sendQueuedAfter = true;
+      this.stop(sessionId);
+      return;
+    }
+    this.releaseQueued(sessionId);
+  }
+
+  /** Clears the queued message and starts the run it asks for; a message that cannot start stays queued. */
+  private releaseQueued(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session.queuedText === null) return;
+    const text = session.queuedText;
+    this.sessions.write(sessionId, { queuedText: null });
+    try {
+      this.send(sessionId, text);
+    } catch (error) {
+      this.logger.error(
+        `queued message of session ${sessionId} did not start: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      this.sessions.write(sessionId, { queuedText: text });
+    }
   }
 
   /**
@@ -598,6 +653,11 @@ export class AgentRuntime {
             if (row) this.actionLog.finish(row, ActionOutcome.Denied);
           }
           failed = message.is_error;
+          this.steps.addUsage(
+            run,
+            message.total_cost_usd ?? 0,
+            (message.usage?.input_tokens ?? 0) + (message.usage?.output_tokens ?? 0),
+          );
           // Only a sandbox refusal is worth the operator's eyes; other result text stays in the transcript.
           const said = message.subtype === 'success' ? message.result : message.errors?.join('; ');
           if (failed && typeof said === 'string' && /sandbox/i.test(said)) run.failure = said;
@@ -724,6 +784,7 @@ export class AgentRuntime {
 
   private finish(run: Run, result: RunResult): void {
     this.runs.remove(run.sessionId);
+    this.steps.closeOpen(run.sessionId, run.stopped ? 'stopped' : 'no result');
     this.sessions.setFailure(run.sessionId, run.failure);
     // A run the operator stopped ends `idle`, like one that finished; the job that started it still sees it fail.
     const failed = result !== 'done' && result !== 'stopped';
@@ -776,6 +837,8 @@ export class AgentRuntime {
       text: run.said.join('\n'),
       failure: run.failure,
     });
+    // The message queued behind the run goes out now, unless the operator stopped the run and did not ask for it.
+    if (session && (!run.stopped || run.sendQueuedAfter)) this.releaseQueued(run.sessionId);
   }
 
   /**
@@ -806,8 +869,15 @@ export class AgentRuntime {
     return async (input): Promise<HookJSONOutput> => {
       if (input.hook_event_name !== 'PreToolUse') return {};
       const toolInput = asRecord(input.tool_input);
-      if (input.tool_name === OPEN_PULL_REQUEST_TOOL) return this.approvePullRequest(run, toolInput);
+      this.steps.start(run, {
+        id: input.tool_use_id,
+        agentId: input.agent_id ?? null,
+        tool: input.tool_name,
+        summary: stepText(input.tool_name, toolInput),
+      });
+      if (input.tool_name === OPEN_PULL_REQUEST_TOOL) return this.approvePullRequest(run, toolInput, input.tool_use_id);
       if (input.tool_name === 'Bash' && typeof toolInput.command === 'string' && skipsCommitHooks(toolInput.command)) {
+        this.steps.finish(input.tool_use_id, { ok: false, error: HOOK_BYPASS_REASON });
         return {
           hookSpecificOutput: {
             hookEventName: 'PreToolUse',
@@ -836,14 +906,19 @@ export class AgentRuntime {
       });
       run.toolRows.set(input.tool_use_id, row);
       if (!prodWrite) return {};
-      const decision = await this.ask(run, {
-        actionLogId: row,
-        sessionId: run.sessionId,
-        kind: ApprovalKind.ProdWrite,
-        summary: prodWrite.summary,
-        isProd: true,
-      });
+      const decision = await this.ask(
+        run,
+        {
+          actionLogId: row,
+          sessionId: run.sessionId,
+          kind: ApprovalKind.ProdWrite,
+          summary: prodWrite.summary,
+          isProd: true,
+        },
+        input.tool_use_id,
+      );
       const approved = decision === ApprovalStatus.Approved;
+      if (!approved) this.steps.finish(input.tool_use_id, { ok: false, error: 'denied by the operator' });
       return {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
@@ -859,6 +934,8 @@ export class AgentRuntime {
   private afterTool(run: Run): HookCallback {
     return async (input): Promise<HookJSONOutput> => {
       if (input.hook_event_name !== 'PostToolUse' && input.hook_event_name !== 'PostToolUseFailure') return {};
+      if (input.hook_event_name === 'PostToolUse') this.steps.finish(input.tool_use_id, { ok: true });
+      else this.steps.finish(input.tool_use_id, { ok: false, error: input.error });
       const row = run.toolRows.get(input.tool_use_id);
       if (!row) return {};
       if (input.hook_event_name === 'PostToolUse') this.actionLog.finish(row, ActionOutcome.Ok);
@@ -871,7 +948,7 @@ export class AgentRuntime {
   private permissionPrompt(run: Run): CanUseTool {
     return async (toolName, input, { toolUseID }) => {
       if (toolName === 'AskUserQuestion') {
-        const answer = await this.question(run);
+        const answer = await this.question(run, toolUseID);
         const parsed = questionInputSchema.safeParse(input);
         const questions = parsed.success ? parsed.data.questions : [];
         return {
@@ -883,13 +960,19 @@ export class AgentRuntime {
         };
       }
       const isEdit = EDIT_TOOLS.has(toolName);
-      const decision = await this.ask(run, {
-        actionLogId: isEdit ? null : (run.toolRows.get(toolUseID) ?? null),
-        sessionId: run.sessionId,
-        kind: isEdit ? ApprovalKind.Edit : ApprovalKind.Command,
-        summary: isEdit ? `Edit ${String(input.file_path ?? input.notebook_path ?? '')}` : stepText(toolName, input),
-        isProd: false,
-      });
+      const decision = await this.ask(
+        run,
+        {
+          actionLogId: isEdit ? null : (run.toolRows.get(toolUseID) ?? null),
+          sessionId: run.sessionId,
+          kind: isEdit ? ApprovalKind.Edit : ApprovalKind.Command,
+          summary: isEdit ? `Edit ${String(input.file_path ?? input.notebook_path ?? '')}` : stepText(toolName, input),
+          isProd: false,
+        },
+        toolUseID,
+      );
+      if (decision !== ApprovalStatus.Approved)
+        this.steps.finish(toolUseID, { ok: false, error: 'denied by the operator' });
       return decision === ApprovalStatus.Approved
         ? { behavior: 'allow', updatedInput: input }
         : { behavior: 'deny', message: 'The operator denied this.' };
@@ -900,10 +983,21 @@ export class AgentRuntime {
    * Opening a pull request asks in every Access mode, `full` included: the operator reads what will be pushed and where,
    * and the daemon pushes and opens only after a yes. A call that cannot open anything is refused before it asks.
    */
-  private async approvePullRequest(run: Run, toolInput: Record<string, unknown>): Promise<HookJSONOutput> {
-    const refuse = (reason: string): HookJSONOutput => ({
-      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
-    });
+  private async approvePullRequest(
+    run: Run,
+    toolInput: Record<string, unknown>,
+    stepId: string,
+  ): Promise<HookJSONOutput> {
+    const refuse = (reason: string): HookJSONOutput => {
+      this.steps.finish(stepId, { ok: false, error: reason });
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: reason,
+        },
+      };
+    };
     const parsed = openPullRequestInputSchema.safeParse(toolInput);
     if (!this.opener || !parsed.success) return refuse('Give the pull request a title and a description.');
     let summary: string;
@@ -912,14 +1006,13 @@ export class AgentRuntime {
     } catch (error) {
       return refuse(error instanceof ApiError ? error.message : 'No pull request can open here.');
     }
-    const decision = await this.ask(run, {
-      actionLogId: null,
-      sessionId: run.sessionId,
-      kind: ApprovalKind.Command,
-      summary,
-      isProd: false,
-    });
+    const decision = await this.ask(
+      run,
+      { actionLogId: null, sessionId: run.sessionId, kind: ApprovalKind.Command, summary, isProd: false },
+      stepId,
+    );
     const approved = decision === ApprovalStatus.Approved;
+    if (!approved) this.steps.finish(stepId, { ok: false, error: 'denied by the operator' });
     return {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
@@ -932,7 +1025,9 @@ export class AgentRuntime {
   }
 
   /** The Session waits for the operator's next message, which answers the question (Behavior 8). */
-  private async question(run: Run): Promise<string> {
+  private async question(run: Run, stepId: string): Promise<string> {
+    const since = Date.now();
+    run.waitingSince ??= since;
     const answer = new Promise<string>((resolve) => {
       run.answer = (text) => {
         run.answer = null;
@@ -941,21 +1036,28 @@ export class AgentRuntime {
     });
     this.sessions.setState(run.sessionId, SessionState.WaitingInput);
     const text = await answer;
+    this.steps.waited(stepId, Date.now() - since);
     this.resume(run);
     return text;
   }
 
-  private async ask(run: Run, request: ApprovalRequest): Promise<Decision> {
+  private async ask(run: Run, request: ApprovalRequest, stepId: string | null = null): Promise<Decision> {
+    const since = Date.now();
+    run.waitingSince ??= since;
     run.waits++;
     this.sessions.setState(run.sessionId, SessionState.WaitingApproval);
     const decision = await this.approvals.request(request);
     run.waits--;
+    if (stepId !== null) this.steps.waited(stepId, Date.now() - since);
     this.resume(run);
     return decision;
   }
 
   /** Back to `working` once nothing is left to wait on. */
   private resume(run: Run): void {
-    if (run.waits === 0 && run.answer === null) this.sessions.setState(run.sessionId, SessionState.Working);
+    if (run.waits === 0 && run.answer === null) {
+      run.waitingSince = null;
+      this.sessions.setState(run.sessionId, SessionState.Working);
+    }
   }
 }

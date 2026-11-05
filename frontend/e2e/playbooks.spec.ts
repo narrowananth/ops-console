@@ -959,6 +959,7 @@ const session = (id: string, kind: string, playbook: { id: string; name: string 
   created_at: NOW,
   last_active_at: NOW,
   playbook,
+  queued_message: null,
 });
 
 test('a Session names the Playbook its rules come from and links to it', async ({ page, request }) => {

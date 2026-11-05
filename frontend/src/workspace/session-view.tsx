@@ -26,10 +26,10 @@ import {
   useRepoPullRequests,
   useRepoSessions,
   useRepos,
+  useRunQueue,
   useSendMessage,
   useSessionDiff,
   useSessionPullRequest,
-  useStopSession,
 } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { PlaybookLink } from '../playbooks/job-steps';
@@ -67,11 +67,9 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const hasDiff = session?.kind === SessionKind.Repo;
   const gone = sessions.isSuccess && session === undefined;
   const pulls = useRepoPullRequests(session?.kind === SessionKind.Repo ? session.repo_id : null);
-  // What the operator typed while the agent was working; it goes out when the run ends.
-  const [queued, setQueued] = useState<string | null>(null);
-  // The operator stopped the run: the queued message waits for Send now instead of starting the next run by itself.
-  const [held, setHeld] = useState(false);
-  const stopRun = useStopSession(id);
+  // What the operator typed while the agent was working: the daemon keeps it and sends it when the run ends, unless the
+  // operator stops the run, which holds it for Send now.
+  const queue = useRunQueue(id);
   const sessionState = session?.state;
   const working = sessionState === SessionState.Working || sessionState === SessionState.WaitingApproval;
   const diff = useSessionDiff(id, hasDiff, diffOpen && working);
@@ -95,26 +93,12 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   useEffect(() => {
     if (gone) onGone();
   }, [gone, onGone]);
-  const { mutate: sendQueued, isPending: sending } = send;
-  useEffect(() => {
-    if (working) setHeld(false);
-  }, [working]);
-  useEffect(() => {
-    if (queued === null || held || working || sessionState === undefined || sending) return;
-    sendQueued(queued, {
-      onSuccess: () => setQueued(null),
-      // Not sent: the words go back into the box instead of vanishing.
-      onError: () => {
-        setText((current) => (current.trim() === '' ? queued : `${queued}\n\n${current}`));
-        setQueued(null);
-      },
-    });
-  }, [queued, held, working, sessionState, sending, sendQueued, setText]);
 
   if (sessions.isPending) return <Empty>Reading the Session…</Empty>;
   if (session === undefined) return null;
   const repo = repos.data?.data.find((candidate) => candidate.id === session.repo_id);
   const running = session.state === SessionState.Working || session.state === SessionState.WaitingApproval;
+  const queued = session.queued_message;
   // A question waiting on the operator still holds the run: the next message answers it.
   const busy = running || session.state === SessionState.WaitingInput;
   // Only the last thing the operator asked can be edited and run again.
@@ -134,9 +118,12 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
     if (empty || queued !== null || uploading) return;
     setReverted(null);
     if (running) {
-      setQueued(withAttachments(text, files));
-      setText('');
-      attachments.remove(placed);
+      queue.queue.mutate(withAttachments(text, files), {
+        onSuccess: () => {
+          setText('');
+          attachments.remove(placed);
+        },
+      });
       return;
     }
     send.mutate(withAttachments(text, files), {
@@ -323,15 +310,12 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             {queued !== null && (
               <QueuedNote
                 text={queued}
-                held={held && !working}
-                sending={stopRun.isPending || sending}
-                onSendNow={() => {
-                  setHeld(false);
-                  if (running) stopRun.mutate();
-                }}
+                held={!busy}
+                sending={queue.sendNow.isPending}
+                onSendNow={() => queue.sendNow.mutate()}
                 onCancel={() => {
                   setText((current) => (current.trim() === '' ? queued : `${queued}\n\n${current}`));
-                  setQueued(null);
+                  queue.takeBack.mutate();
                 }}
               />
             )}
@@ -393,7 +377,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                   )}
                 </div>
                 <span className="flex flex-none items-center gap-1.5">
-                  {busy && <StopRun sessionId={id} className="px-4 py-1.5" onStopped={() => setHeld(true)} />}
+                  {busy && <StopRun sessionId={id} className="px-4 py-1.5" />}
                   <Button
                     variant="primary"
                     title={
@@ -404,7 +388,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                           : 'Enter sends. Shift+Enter adds a new line.'
                     }
                     className="px-4 py-1.5"
-                    disabled={empty || queued !== null || uploading || send.isPending}
+                    disabled={empty || queued !== null || uploading || send.isPending || queue.queue.isPending}
                     onClick={submit}
                   >
                     {running ? 'Queue' : 'Send'}

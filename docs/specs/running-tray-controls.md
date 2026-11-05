@@ -25,8 +25,10 @@ and a queued message cannot be sent before the run ends.
    its entry.
 7. An entry's link opens where the run shows: the Session, or the pull request for a pull request run.
 8. Stop in a Session ends the run and holds the queued message. The note reads "On hold" until the operator clicks
-   Send now. While the run goes, Send now stops it and sends the message.
-9. While a Scan runs, Stop sits beside "Scanning…". It ends the read, keeps nothing the Scan read and ends the Scan
+   Send now. While the run goes, Send now stops it and sends the message. The daemon keeps the queued message
+   (`agent-runs-page` Behavior 13).
+9. The tray ends with a link to the Agent runs page (`agent-runs-page`).
+10. While a Scan runs, Stop sits beside "Scanning…". It ends the read, keeps nothing the Scan read and ends the Scan
    `cancelled`. The line under the button says the last Scan was stopped.
 
 ## Not required
@@ -47,7 +49,7 @@ Loading, empty and error states follow the tray's. An error from a control shows
 ## Seams
 
 - **Daemon** (`backend/test/agent-sessions.test.ts`, `backend/test/monitor.test.ts`): 1 to 6 and 9.
-- **Browser** (`frontend/e2e/session-links.spec.ts`, `workspace.spec.ts`, `monitor-lists.spec.ts`): 1 to 9.
+- **Browser** (`frontend/e2e/session-links.spec.ts`, `workspace.spec.ts`, `monitor-lists.spec.ts`): 1 to 10.
 
 ## Out of scope
 

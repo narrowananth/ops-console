@@ -19,6 +19,8 @@ import { Attachments } from './attachments';
 import { ConnectionLookup } from './connection-lookup';
 import { MessageInterceptors } from './message-interceptors';
 import { ProdWriteRule } from './prod-write-rule';
+import { RunInsights } from './run-insights.service';
+import { RunStepsLog } from './run-steps';
 import { RunRegistry } from './runs';
 import { AgentRuntime } from './runtime';
 import { SessionKinds } from './session-kinds';
@@ -62,6 +64,8 @@ export class AgentModule {
         AccountsService,
         CliProxyService,
         SessionsService,
+        RunStepsLog,
+        RunInsights,
         NetworkAllowlistService,
         AgentRuntime,
         PlaybooksService,

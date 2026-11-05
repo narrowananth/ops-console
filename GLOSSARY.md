@@ -192,6 +192,15 @@ The sidebar list of agent runs: the ones going, each with the subagents it start
 dismisses it. Each entry shows how long the run took and controls to pause, stop, play or retry it.
 _Avoid_: notification panel, running tasks
 
+**Agent runs page**:
+The sidebar page for every agent run: whether to look at it (its health), what it does, where its time went, and why it
+is slow or ended. It has the controls of the Running tray, plus the queued message and desktop alerts.
+_Avoid_: dashboard, monitor
+
+**Run health**:
+What the Agent runs page says about a run: on track, slow, needs you, failed or stopped. The daemon reads it from the
+run's steps, its Approvals and its outcome.
+
 **Alert Session**:
 The Session an Alert's first Verification makes, linked to the Alert. Every later Verification and Fix stage runs in
 it: a Session in the Service's Repo, on the Repo's default branch, or an Anonymous Session holding a clone.

@@ -38,6 +38,7 @@ const session = (id: string, extra: Record<string, unknown> = {}) => ({
   created_at: NOW,
   last_active_at: NOW,
   playbook: null,
+  queued_message: null,
   ...extra,
 });
 
@@ -133,6 +134,12 @@ const run = (id: string, extra: Record<string, unknown> = {}, sessionExtra: Reco
   finished_at: null,
   can_resume: true,
   subagents: [],
+  health: 'on_track',
+  health_reason: 'On track: the agent is thinking',
+  activity: null,
+  cost_usd: null,
+  tokens: null,
+  split: [],
   ...extra,
 });
 
