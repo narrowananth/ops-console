@@ -44,6 +44,8 @@ export type Run = {
   paused: boolean;
   /** Set when an Approval or the agent's question waits on the operator: since when (epoch ms). */
   waitingSince: number | null;
+  /** Set when the agent moved the Session into a Repo: the next turn starts there once this run ends. */
+  joinedRepo: boolean;
   /** Set when Send now stopped the run: its queued message goes out as the run ends. */
   sendQueuedAfter: boolean;
   /** The subagents the run started, by task id. */

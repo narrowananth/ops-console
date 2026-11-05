@@ -211,7 +211,8 @@ the agent moves to another branch.
 
 **Anonymous Session**:
 A Session with no imported Repo. It works in a folder of its own in the data directory, and the agent may clone a
-repository into it. A Verification or Fix for a Service with no local Repo runs in one that holds a clone of the
+repository into it. When the operator names an imported Repo, the agent asks to join it: once approved the Session
+becomes a Session in that Repo. A Verification or Fix for a Service with no local Repo runs in one that holds a clone of the
 Service's Git URL.
 
 **Agent Review**:

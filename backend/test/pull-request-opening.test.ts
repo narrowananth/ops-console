@@ -266,10 +266,11 @@ describe('Pull request opening', () => {
     ctx.daemon.sdk.script({ text: 'ok' }, { text: 'ok' }, { text: 'ok' });
     await converse(ctx.daemon, await session(ctx), 'hi');
     expect(Object.keys(ctx.daemon.sdk.calls.at(-1)?.options.mcpServers ?? {})).toEqual([CONSOLE_TOOLS_SERVER]);
-    // An anonymous Session has no Repo, and a run in a scratch copy is not in the Repo's folder.
+    // An anonymous Session has no Repo to open a pull request in; it gets the tool that moves it into one instead.
     const anonymous = (await ctx.http.post('/sessions', { kind: 'anonymous' })).body.data.id as string;
     await converse(ctx.daemon, anonymous, 'hi');
-    expect(ctx.daemon.sdk.calls.at(-1)?.options.mcpServers).toBeUndefined();
+    expect(Object.keys(ctx.daemon.sdk.calls.at(-1)?.options.mcpServers ?? {})).toEqual([CONSOLE_TOOLS_SERVER]);
+    // A run in a scratch copy is not in the Repo's folder.
     const scratch = await tempDir('ops-console-scratch-');
     const runtime = ctx.daemon.app.get(AgentRuntime);
     await runtime.runFor(await session(ctx), 'hi', null, { cwd: scratch }).finished;
