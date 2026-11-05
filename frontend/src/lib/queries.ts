@@ -51,6 +51,7 @@ import {
   pullRequestDraftSchema,
   pullRequestListSchema,
   type RemovedRepoSessions,
+  type Repo,
   type ReviewAlert,
   replyCheckSchema,
   repoListSchema,
@@ -607,10 +608,24 @@ export function useRepos() {
   return useQuery({ queryKey: queryKeys.repos, queryFn: () => apiGet('/repos', repoListSchema) });
 }
 
+/** What importing several folders did: the Repos made, and each folder the console refused with its reason. */
+export type ImportedRepos = { imported: Repo[]; failed: { path: string; message: string }[] };
+
+/** Imports the folders one after another; one refused folder does not stop the rest. */
 export function useImportRepo() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (path: string) => apiSend('POST', '/repos', { path }, z.object({ data: repoSchema })),
+    mutationFn: async (paths: string[]): Promise<ImportedRepos> => {
+      const out: ImportedRepos = { imported: [], failed: [] };
+      for (const path of paths) {
+        try {
+          out.imported.push((await apiSend('POST', '/repos', { path }, z.object({ data: repoSchema }))).data);
+        } catch (error) {
+          out.failed.push({ path, message: error instanceof Error ? error.message : 'import failed' });
+        }
+      }
+      return out;
+    },
     // A Repo removed with its Sessions kept brings them back.
     onSuccess: () => {
       client.invalidateQueries({ queryKey: queryKeys.repos });
@@ -619,7 +634,7 @@ export function useImportRepo() {
   });
 }
 
-/** Opens the Finder folder dialog on this machine; the path is `null` when the operator closes it. */
+/** Opens the Finder folder dialog on this machine; one folder or several. Empty when the operator closes it. */
 export function usePickFolder() {
   return useMutation({
     mutationFn: () =>
@@ -627,8 +642,8 @@ export function usePickFolder() {
         'POST',
         '/repos/pick-folder',
         undefined,
-        z.object({ data: z.object({ path: z.string().nullable() }) }),
-      ).then((body) => body.data.path),
+        z.object({ data: z.object({ paths: z.array(z.string()) }) }),
+      ).then((body) => body.data.paths),
   });
 }
 

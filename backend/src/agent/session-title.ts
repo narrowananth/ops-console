@@ -18,7 +18,12 @@ export function sessionTitle(text: string): string | null {
   if (line === undefined) return /\[📎 [^\]\n]+\]/.test(text) ? 'Attached files' : null;
   const sentence = (line.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? line).replace(/[.!?:;,\s]+$/, '');
   const plain = sentence.replace(LEAD_IN, '').replace(/\s+/g, ' ').trim() || sentence;
-  const titled = plain.charAt(0).toUpperCase() + plain.slice(1);
+  return shortTitle(plain.charAt(0).toUpperCase() + plain.slice(1));
+}
+
+/** A title cut at a word within `MAX_TITLE` characters. */
+export function shortTitle(text: string): string {
+  const titled = text.replace(/\s+/g, ' ').trim();
   if (titled.length <= MAX_TITLE) return titled;
   const cut = titled.slice(0, MAX_TITLE);
   return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), 24)).replace(/[.,;:\s]+$/, '')}…`;

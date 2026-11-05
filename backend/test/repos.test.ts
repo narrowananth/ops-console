@@ -45,15 +45,16 @@ async function start() {
 type Repo = Record<string, unknown> & { id: string; name: string };
 
 describe('the folder dialog', () => {
-  it('answers the chosen folder without importing it, and null when the dialog is closed', async () => {
+  it('answers the chosen folders without importing them, and none when the dialog is closed', async () => {
     const { daemon, picker } = await start();
-    const dir = await makeRepo('orders-api', 'git@github.com:acme/orders-api.git');
-    picker.next = dir;
+    const one = await makeRepo('orders-api', 'git@github.com:acme/orders-api.git');
+    const two = await makeRepo('billing-api', 'git@github.com:acme/billing-api.git');
+    picker.next = [one, two];
     const chosen = await api(daemon).post('/repos/pick-folder');
-    expect([chosen.status, chosen.body.data]).toEqual([200, { path: dir }]);
+    expect([chosen.status, chosen.body.data]).toEqual([200, { paths: [one, two] }]);
     expect((await api(daemon).get('/repos')).body.data).toEqual([]);
-    picker.next = null;
-    expect((await api(daemon).post('/repos/pick-folder')).body.data).toEqual({ path: null });
+    picker.next = [];
+    expect((await api(daemon).post('/repos/pick-folder')).body.data).toEqual({ paths: [] });
   });
 });
 

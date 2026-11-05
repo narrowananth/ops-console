@@ -61,6 +61,36 @@ describe('runs', () => {
     });
   });
 
+  it("takes Claude Code's name for the task after the first run; an operator's rename and a later name stay", async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    daemon.sdk.script({ aiTitle: 'Hermes Atlas stores API response' }, { text: 'Done.' });
+    await converse(daemon, id, "curl --url 'https://hermes.example.com/api/v1/stores' -H 'accept: */*'");
+    const named = await until(
+      async () => (await api(daemon).get(`/sessions/${id}`)).body.data.title,
+      (title) => title === 'Hermes Atlas stores API response',
+      'the title from the transcript',
+    );
+    expect(named).toBe('Hermes Atlas stores API response');
+
+    daemon.sdk.script({ aiTitle: 'Something else' }, { text: 'Done.' });
+    await converse(daemon, id, 'and the reviews route?');
+    expect((await api(daemon).get(`/sessions/${id}`)).body.data.title).toBe('Hermes Atlas stores API response');
+
+    // The operator renames the Session while its first run goes: Claude Code's name does not replace theirs.
+    const renamed = daemon.createSession();
+    const held = gate();
+    daemon.sdk.script({ wait: held.promise }, { aiTitle: 'Cart totals' }, { text: 'Done.' });
+    const { events, close } = await listen(daemon);
+    expect((await api(daemon).post(`/sessions/${renamed}/messages`, { text: 'look at the cart' })).status).toBe(202);
+    expect((await api(daemon).patch(`/sessions/${renamed}`, { title: 'Cart check' })).status).toBe(200);
+    held.open();
+    await until(async () => events.some((e) => e.event === 'session.finished'), Boolean, 'the run to end');
+    close();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect((await api(daemon).get(`/sessions/${renamed}`)).body.data.title).toBe('Cart check');
+  });
+
   it('waits for its MCP servers to connect before the first turn', async () => {
     const daemon = await start();
     await converse(daemon, daemon.createSession(), 'read /apps/1 from example-dev');

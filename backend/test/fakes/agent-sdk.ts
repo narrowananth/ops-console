@@ -34,7 +34,9 @@ export type Step =
   /** Holds the run until the promise settles. */
   | { wait: Promise<unknown> }
   /** The SDK throws, as when the Claude Code process dies. */
-  | { crash: string };
+  | { crash: string }
+  /** Claude Code names the conversation: an `ai-title` entry in the transcript, outside the message chain. */
+  | { aiTitle: string };
 
 export type Call = { prompt: string; options: Options; configDir: string; sessionId: string };
 
@@ -150,6 +152,8 @@ export class FakeAgentSdk implements AgentSdk {
     for (const step of steps) {
       if ('wait' in step) {
         await abortable(step.wait);
+      } else if ('aiTitle' in step) {
+        await appendFile(file, `${JSON.stringify({ type: 'ai-title', aiTitle: step.aiTitle, sessionId })}\n`);
       } else if ('crash' in step) {
         throw new Error(step.crash);
       } else if ('text' in step) {

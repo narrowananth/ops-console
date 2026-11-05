@@ -259,7 +259,8 @@ export class PullRequestsService implements OpenPrBranches {
     if (number !== null && query.repo_id === undefined) {
       const looked = await this.lookup(number, data);
       stale ||= looked.failed;
-      data.push(...looked.found);
+      // The host answers in any state; the search keeps the list's own, so a merged or closed one stays out.
+      data.push(...looked.found.filter((pr) => pr.state === query.state));
     }
     const mine = query.mine === true;
     const logins = new Map<GitHost, string | null>();
@@ -281,8 +282,8 @@ export class PullRequestsService implements OpenPrBranches {
   }
 
   /**
-   * Pull request `number` asked of the host in every project the list knows and every imported Repo, so one that is
-   * closed, or on a page the list did not read, is found too. `failed` when a host could not be asked.
+   * Pull request `number` asked of the host in every project the list knows and every imported Repo, so one on a page
+   * the list did not read is found too. `failed` when a host could not be asked.
    */
   private async lookup(number: number, listed: PullRequest[]): Promise<{ found: PullRequest[]; failed: boolean }> {
     const imported = this.hostedRepos();
