@@ -20,6 +20,7 @@ import { WsHub } from './common/ws-hub';
 import { applyMigrations } from './db/migrate';
 import { openSqlite } from './db/open';
 import { Store } from './db/store';
+import { KeychainHandoverTracker } from './keychain/handover-state';
 import { type Keychain, LoginKeychain } from './keychain/keychain';
 import { KeychainWaitTracker } from './keychain/keychain-wait';
 import { Scheduler } from './scheduler/scheduler';
@@ -38,6 +39,8 @@ export type DaemonOptions = {
   keychain?: Keychain;
   /** The Keychain calls `keychain` has pending; give the one `keychain` reports to. */
   keychainWait?: KeychainWaitTracker;
+  /** Whether the start refused the Keychain handover; give the one the handover reports to. */
+  keychainHandover?: KeychainHandoverTracker;
   claudeBin?: string;
 };
 
@@ -82,6 +85,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         hub,
         keychain: options.keychain ?? new LoginKeychain(undefined, undefined, { wait: keychainWait }),
         keychainWait,
+        keychainHandover: options.keychainHandover ?? new KeychainHandoverTracker(),
         claudeBin: options.claudeBin ?? 'claude',
         modules: options.modules ?? [],
       }),

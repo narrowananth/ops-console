@@ -10,6 +10,7 @@ import { SessionKinds } from '../src/agent/session-kinds';
 import { type NewSession, SessionsService } from '../src/agent/sessions.service';
 import { repos } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
+import type { KeychainHandoverTracker } from '../src/keychain/handover-state';
 import type { Keychain } from '../src/keychain/keychain';
 import type { KeychainWaitTracker } from '../src/keychain/keychain-wait';
 import { BUILTIN_STEPS } from '../src/playbooks/builtins';
@@ -85,6 +86,7 @@ export async function startAgentDaemon(
     fixtureKinds?: boolean;
     keychain?: Keychain;
     keychainWait?: KeychainWaitTracker;
+    keychainHandover?: KeychainHandoverTracker;
   } = {},
 ): Promise<AgentDaemon> {
   const dataDir = options.dataDir ?? (await tempDir());
@@ -95,6 +97,7 @@ export async function startAgentDaemon(
     dataDir,
     ...(options.keychain ? { keychain: options.keychain } : {}),
     ...(options.keychainWait ? { keychainWait: options.keychainWait } : {}),
+    ...(options.keychainHandover ? { keychainHandover: options.keychainHandover } : {}),
     modules: [
       AgentModule.forRoot({ sdk, usage }),
       ...(options.fixtureKinds === false ? [] : [{ module: KindsFixtureModule }]),

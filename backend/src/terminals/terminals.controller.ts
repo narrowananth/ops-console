@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post } from '@n
 import {
   createTerminalSchema,
   type DiskAccess,
+  type KeychainHandover,
   type KeychainWait,
   type RunSandbox,
   type StartAtLogin,
@@ -10,6 +11,7 @@ import {
 } from '@ops-console/shared';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
+import { KEYCHAIN_HANDOVER, type KeychainHandoverTracker } from '../keychain/handover-state';
 import { KEYCHAIN_WAIT, type KeychainWaitTracker } from '../keychain/keychain-wait';
 import { DISK_ACCESS, type DiskAccessGate } from './disk-access';
 import { RUN_SANDBOX, type RunSandboxGate } from './run-sandbox-gate';
@@ -27,6 +29,7 @@ export class TerminalsController {
     @Inject(START_AT_LOGIN) private readonly startAtLogin: StartAtLoginGate,
     @Inject(RUN_SANDBOX) private readonly runSandbox: RunSandboxGate,
     @Inject(KEYCHAIN_WAIT) private readonly keychainWait: KeychainWaitTracker,
+    @Inject(KEYCHAIN_HANDOVER) private readonly keychainHandover: KeychainHandoverTracker,
   ) {}
 
   @Get('disk-access')
@@ -59,6 +62,11 @@ export class TerminalsController {
   @Get('keychain-wait')
   readKeychainWait(): { data: KeychainWait } {
     return { data: this.keychainWait.state() };
+  }
+
+  @Get('keychain-handover')
+  readKeychainHandover(): { data: KeychainHandover } {
+    return { data: this.keychainHandover.state() };
   }
 
   @Get()

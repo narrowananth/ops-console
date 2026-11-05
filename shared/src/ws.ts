@@ -26,6 +26,7 @@ export const wsEventSchema = z.discriminatedUnion('event', [
   event('settings.updated', z.object({ keys: z.array(z.string()) })),
   event('update.changed', z.object({ status: z.enum(UpdateStatus) })),
   event('keychain.wait_changed', keychainWaitSchema),
+  event('keychain.handover_refused', z.object({ refused: z.literal(true), reason: z.string() })),
   event(
     'session.output',
     z.object({ session_id: z.string(), message_id: z.string(), part_index: z.number().int(), part: partSchema }),

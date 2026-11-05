@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { DynamicModule } from '@nestjs/common';
 import { type Daemon, startDaemon } from '../src/daemon';
+import type { KeychainHandoverTracker } from '../src/keychain/handover-state';
 import type { Keychain } from '../src/keychain/keychain';
 import type { KeychainWaitTracker } from '../src/keychain/keychain-wait';
 import { FakeKeychain } from './fakes/keychain';
@@ -28,6 +29,7 @@ export async function startTestDaemon(
     /** Stands in for the login Keychain; give `keychainWait` too when it reports to one. */
     keychain?: Keychain;
     keychainWait?: KeychainWaitTracker;
+    keychainHandover?: KeychainHandoverTracker;
   } = {},
 ): Promise<TestDaemon> {
   const log = options.log ?? [];
@@ -42,6 +44,7 @@ export async function startTestDaemon(
     claudeBin: options.claudeBin ?? FAKE_CLAUDE,
     keychain: options.keychain ?? new FakeKeychain(),
     ...(options.keychainWait ? { keychainWait: options.keychainWait } : {}),
+    ...(options.keychainHandover ? { keychainHandover: options.keychainHandover } : {}),
   });
   return Object.assign(daemon, { log });
 }

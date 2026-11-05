@@ -221,6 +221,14 @@ export const keychainWaitSchema = z.object({
 
 export type KeychainWait = z.infer<typeof keychainWaitSchema>;
 
+/** Whether this start refused the Keychain handover from the previous app, and why. `reason` holds no secret. */
+export const keychainHandoverSchema = z.object({ refused: z.boolean(), reason: z.string().nullable() });
+
+export type KeychainHandover = z.infer<typeof keychainHandoverSchema>;
+
+/** What the Permissions Keychain row says when the handover was refused; the reason follows it. */
+export const KEYCHAIN_HANDOVER_MESSAGE = 'Handover refused: previous app failed its check';
+
 /** What the Keychain wait banner and the Permissions row say. */
 export const KEYCHAIN_WAIT_MESSAGE = "Keychain is waiting for the Mac's password prompt";
 

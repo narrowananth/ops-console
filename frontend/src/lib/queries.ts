@@ -32,6 +32,7 @@ import {
   findCodeResultSchema,
   fixSchema,
   healthSchema,
+  keychainHandoverSchema,
   keychainWaitSchema,
   mcpServerListSchema,
   mcpServerSchema,
@@ -112,6 +113,7 @@ export const queryKeys = {
   runSandbox: ['run-sandbox'] as const,
   networkAllowlist: ['network-allowlist'] as const,
   keychainWait: ['keychain-wait'] as const,
+  keychainHandover: ['keychain-handover'] as const,
   terminals: ['terminals'] as const,
   playbooks: ['playbooks'] as const,
   updates: ['updates'] as const,
@@ -587,6 +589,15 @@ export function useKeychainWait() {
   return useQuery({
     queryKey: queryKeys.keychainWait,
     queryFn: () => apiGet('/terminals/keychain-wait', z.object({ data: keychainWaitSchema })).then((r) => r.data),
+  });
+}
+
+/** Whether this start refused the Keychain handover; `/ws` sends `keychain.handover_refused` when it does. */
+export function useKeychainHandover() {
+  return useQuery({
+    queryKey: queryKeys.keychainHandover,
+    queryFn: () =>
+      apiGet('/terminals/keychain-handover', z.object({ data: keychainHandoverSchema })).then((r) => r.data),
   });
 }
 
