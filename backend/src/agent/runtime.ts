@@ -59,9 +59,12 @@ import { ProdWriteRule } from './prod-write-rule';
 import {
   CONSOLE_TOOLS_SERVER,
   consoleToolsServer,
+  JOIN_REPO_TOOL,
+  joinRepoInputSchema,
   OPEN_PULL_REQUEST_TOOL,
   openPullRequestInputSchema,
   type PullRequestOpener,
+  type RepoJoiner,
 } from './pull-request-tool';
 import { runSandbox } from './run-sandbox';
 import { RunStepsLog } from './run-steps';
@@ -159,6 +162,8 @@ type RunResult =
 
 /** What Play and Retry say to the agent. */
 const PLAY_TEXT = 'Carry on from where you stopped.';
+const JOINED_TEXT =
+  "You are now in the Repo, in its own folder. Carry on with what the operator asked. Do the work on a new branch, not on the default branch: make one with git switch -c, commit the change (the repo's commit hooks run and must pass), and when the work is done call the open_pull_request tool. The operator approves it, then the console pushes the branch and opens the pull request. If that tool is not in your tool list, the Repo has no Git host the console can open on: say so, and leave the commit on its branch.";
 const RETRY_TEXT = 'Your last run ended before it finished. Try again and carry on from where it stopped.';
 
 /** How a run that ended with `result` reads in the tray. */
@@ -217,6 +222,13 @@ export class AgentRuntime {
 
   setPullRequestOpener(opener: PullRequestOpener): void {
     this.opener = opener;
+  }
+
+  /** Who moves an Anonymous Session into a Repo when the agent asks. Set once by the Workspace. */
+  private joiner: RepoJoiner | null = null;
+
+  setRepoJoiner(joiner: RepoJoiner): void {
+    this.joiner = joiner;
   }
 
   /** A run does not survive a restart: its Session fails and its Approvals expire (Behavior 18). */
@@ -372,6 +384,7 @@ export class AgentRuntime {
       paused: false,
       waitingSince: null,
       sendQueuedAfter: false,
+      joinedRepo: false,
       subagents: new Map(),
       resumeAt: options.resumeAt ?? null,
       deny: options.deny ?? [],
@@ -599,9 +612,14 @@ export class AgentRuntime {
       includePartialMessages: true,
       abortController: run.abort,
       // The console's own tools: the agent asks, the operator approves, the daemon pushes and opens the pull request.
-      ...(this.opener?.offers(run.sessionId, run.workingDir)
-        ? { mcpServers: { [CONSOLE_TOOLS_SERVER]: consoleToolsServer(this.opener, run.sessionId) } }
-        : {}),
+      ...(() => {
+        const opener = this.opener?.offers(run.sessionId, run.workingDir) ? this.opener : null;
+        // Only a run the operator started: a Playbook step or a Verification in an Anonymous Session stays where it is.
+        const joiner = run.onFinish === null && this.joiner?.offers(run.sessionId) ? this.joiner : null;
+        return opener || joiner
+          ? { mcpServers: { [CONSOLE_TOOLS_SERVER]: consoleToolsServer({ opener, joiner }, run.sessionId) } }
+          : {};
+      })(),
       disallowedTools: [...MERGE_DENIALS, ...WEB_DENIALS, ...run.deny],
       systemPrompt: { type: 'preset', preset: 'claude_code', append: systemAppend(instructions, run.rules) },
       // Servers the operator disabled stay out of the run.
@@ -837,6 +855,17 @@ export class AgentRuntime {
       text: run.said.join('\n'),
       failure: run.failure,
     });
+    // A run that moved the Session into a Repo hands over: its next turn starts in the Repo's folder.
+    if (session && run.joinedRepo && result === 'done') {
+      try {
+        this.send(run.sessionId, JOINED_TEXT);
+        return;
+      } catch (error) {
+        this.logger.error(
+          `session ${run.sessionId} joined a Repo but its next turn did not start: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
     // The message queued behind the run goes out now, unless the operator stopped the run and did not ask for it.
     if (session && (!run.stopped || run.sendQueuedAfter)) this.releaseQueued(run.sessionId);
   }
@@ -876,6 +905,7 @@ export class AgentRuntime {
         summary: stepText(input.tool_name, toolInput),
       });
       if (input.tool_name === OPEN_PULL_REQUEST_TOOL) return this.approvePullRequest(run, toolInput, input.tool_use_id);
+      if (input.tool_name === JOIN_REPO_TOOL) return this.approveJoinRepo(run, toolInput, input.tool_use_id);
       if (input.tool_name === 'Bash' && typeof toolInput.command === 'string' && skipsCommitHooks(toolInput.command)) {
         this.steps.finish(input.tool_use_id, { ok: false, error: HOOK_BYPASS_REASON });
         return {
@@ -1020,6 +1050,48 @@ export class AgentRuntime {
         permissionDecisionReason: approved
           ? 'The operator approved this pull request.'
           : 'The operator denied this pull request. Do not retry it.',
+      },
+    };
+  }
+
+  /**
+   * Moving into a Repo asks in every Access mode: the Session's work then happens in the operator's own checkout. A
+   * call that matches no imported Repo is refused before it asks.
+   */
+  private async approveJoinRepo(run: Run, toolInput: Record<string, unknown>, stepId: string): Promise<HookJSONOutput> {
+    const refuse = (reason: string): HookJSONOutput => {
+      this.steps.finish(stepId, { ok: false, error: reason });
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: reason,
+        },
+      };
+    };
+    const parsed = joinRepoInputSchema.safeParse(toolInput);
+    if (!this.joiner || !parsed.success) return refuse('Name the Repo: its name, its path or its Git URL.');
+    let summary: string;
+    try {
+      summary = this.joiner.describe(run.sessionId, parsed.data);
+    } catch (error) {
+      return refuse(error instanceof ApiError ? error.message : 'No Repo can be joined here.');
+    }
+    const decision = await this.ask(
+      run,
+      { actionLogId: null, sessionId: run.sessionId, kind: ApprovalKind.Command, summary, isProd: false },
+      stepId,
+    );
+    const approved = decision === ApprovalStatus.Approved;
+    if (approved) run.joinedRepo = true;
+    else this.steps.finish(stepId, { ok: false, error: 'denied by the operator' });
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: approved ? 'allow' : 'deny',
+        permissionDecisionReason: approved
+          ? 'The operator approved joining the Repo.'
+          : 'The operator denied joining the Repo. Do not ask again: work in this folder or ask the operator.',
       },
     };
   }

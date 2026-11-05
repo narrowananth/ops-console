@@ -9,6 +9,7 @@ import { PrJobs } from './pr-jobs';
 import { PullRequestOpeningService } from './pull-request-opening.service';
 import { PullRequestsService } from './pull-requests.service';
 import { ReplyChecksService } from './reply-checks.service';
+import { RepoJoinService } from './repo-join.service';
 import { PullRequestsController, WorkspaceSessionsController } from './workspace.controller';
 import { WorkspaceSessionsService } from './workspace-sessions.service';
 
@@ -30,6 +31,7 @@ export class WorkspaceModule {
         WorkspaceSessionsService,
         PullRequestOpeningService,
         AnonymousSessionsService,
+        RepoJoinService,
         { provide: OPEN_PR_BRANCHES, useExisting: PullRequestsService },
       ],
       exports: [

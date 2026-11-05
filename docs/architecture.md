@@ -185,7 +185,7 @@ on and Jira is connected; otherwise the branch is `fix/<name>`.
 derived from `scans` and the Alert's own `resolved_at` and `cleared_at`. A Verification and a Fix each start with a
 Recheck: one `pup` count of the Alert's query over the last hour. The result is the first step of the Report and a line
 in the agent's brief. The Verification then adds the `version:` tag of the newest Sample, set against the commit of its
-scratch copy. The Report's closing turn and the Fix's pull request brief ask for a Prod parity section; the Fix's PR stage asks the agent for the description only, and the console pushes the branch and opens the pull request. A chat run in a Repo's folder also has the console's in-process MCP server `ops-console` with the `open_pull_request` tool; the PreToolUse hook raises an Approval for it in every Access mode, and only a yes has the daemon push and open. None of this
+scratch copy. The Report's closing turn and the Fix's pull request brief ask for a Prod parity section; the Fix's PR stage asks the agent for the description only, and the console pushes the branch and opens the pull request. A chat run in a Repo's folder also has the console's in-process MCP server `ops-console` with the `open_pull_request` tool; the PreToolUse hook raises an Approval for it in every Access mode, and only a yes has the daemon push and open. An Anonymous Session's run in the same server has a `join_repo` tool instead, with the same Approval in every Access mode (`anonymous-joins-repo`). None of this
 blocks a job.
 
 **Playbooks.** Each Trigger holds one Playbook, or its built-in. A job (Verification, Fix, Agent

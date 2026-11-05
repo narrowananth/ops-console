@@ -873,6 +873,7 @@ describe('the Agent runs page', () => {
         'the sent run',
       );
       expect(daemon.sdk.calls[1]?.prompt).toBe('held text');
+      await stateOf(daemon, id, 'idle');
       expect(await queued(daemon, id)).toBeNull();
     });
 
@@ -890,6 +891,7 @@ describe('the Agent runs page', () => {
         'the sent run',
       );
       expect(daemon.sdk.calls[1]?.prompt).toBe('now please');
+      await stateOf(daemon, id, 'idle');
     });
 
     it('takes the message back, and sends at once when no run goes', async () => {

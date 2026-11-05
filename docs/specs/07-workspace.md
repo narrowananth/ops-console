@@ -61,6 +61,7 @@ Anonymous Sessions
 
 21. Creating an `anonymous` Session needs no Repo and no branch. It works in its own folder, `anonymous/<session id>` in the data directory, made when the Session is. The agent may clone into it; the Monitor clones a Service's Git URL into one (`08-monitor-dashboard`).
 22. An `anonymous` Session's `branch` is the branch of the clone in its folder, null before there is one. It has no branch switcher. Deleting it leaves its folder.
+22a. When the operator names an imported Repo in an `anonymous` Session, the agent asks to move the Session into it and, once approved, the Session becomes a `repo` Session (`anonymous-joins-repo`).
 
 ## Settled
 
