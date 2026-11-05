@@ -1,7 +1,7 @@
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { launcherArgv, runMcpExec, unwrapLauncher } from '../src/mcp/launcher';
+import { filesBase, launcherArgv, runMcpExec, unwrapLauncher } from '../src/mcp/launcher';
 import { FakeKeychain } from './fakes/keychain';
 import { tempDir } from './helpers';
 
@@ -49,11 +49,39 @@ describe('ops-console mcp-exec', () => {
 const file = process.env.KEY_PATH; const folder = process.argv[2];
 writeFileSync(${JSON.stringify(out)}, JSON.stringify({ key: readFileSync(file, 'utf8'), mode: (statSync(file).mode & 0o777).toString(8), folderMode: (statSync(folder).mode & 0o777).toString(8), same: path.dirname(file) === folder, names: readdirSync(folder), folder }));`,
     );
-    expect(await runMcpExec(['fb', '--', process.execPath, script, '{{files}}'], keychain)).toBe(0);
+    expect(await runMcpExec(['fb', '--', process.execPath, script, '{{files}}'], keychain, await tempDir())).toBe(0);
     const seen = JSON.parse(await readFile(out, 'utf8'));
     expect(seen).toMatchObject({ key: '{"k":1}', mode: '600', folderMode: '700', same: true, names: ['key.json'] });
     // The folder, key included, is gone once the command ends.
     await expect(stat(seen.folder)).rejects.toThrow();
+  });
+
+  it('keeps the key files under the data folder, which a run cannot read, and not in the user temp folder', async () => {
+    const keychain = new FakeKeychain();
+    await keychain.set('mcp:fb', JSON.stringify({ '@file:key.json': '{"k":1}', KEY_PATH: '{{files}}/key.json' }));
+    const base = path.join(await tempDir(), 'mcp-files');
+    const dir = await tempDir();
+    const out = path.join(dir, 'out.json');
+    const script = path.join(dir, 'where.mjs');
+    await writeFile(
+      script,
+      `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(out)}, JSON.stringify({ file: process.env.KEY_PATH }));`,
+    );
+    expect(await runMcpExec(['fb', '--', process.execPath, script], keychain, base)).toBe(0);
+    const { file } = JSON.parse(await readFile(out, 'utf8'));
+    expect(file.startsWith(`${base}${path.sep}ops-console-mcp-`)).toBe(true);
+    await expect(stat(file)).rejects.toThrow();
+  });
+
+  it('puts the files under mcp-files in the data folder by default', () => {
+    const was = process.env.OPS_CONSOLE_DATA_DIR;
+    process.env.OPS_CONSOLE_DATA_DIR = '/data/ops-console';
+    try {
+      expect(filesBase()).toBe('/data/ops-console/mcp-files');
+    } finally {
+      if (was === undefined) delete process.env.OPS_CONSOLE_DATA_DIR;
+      else process.env.OPS_CONSOLE_DATA_DIR = was;
+    }
   });
 
   it('runs the command without extra env when the Keychain holds nothing', async () => {

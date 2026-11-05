@@ -107,6 +107,10 @@ export type StepRun = {
   fresh?: boolean;
   /** Tools denied on top of merging. */
   deny?: string[];
+  /** False for a folder that holds pull request code. */
+  projectSettings?: boolean;
+  /** The run may not change its working folder. */
+  readOnly?: boolean;
   onPart?: (part: Part) => void;
   /** True once the job is being cancelled: no further step starts. */
   halted?: () => boolean;
@@ -178,6 +182,8 @@ export class JobSteps {
         ...(options.cwd ? { cwd: options.cwd } : {}),
         fresh: first && options.fresh === true,
         ...(options.deny ? { deny: options.deny } : {}),
+        ...(options.projectSettings === undefined ? {} : { projectSettings: options.projectSettings }),
+        ...(options.readOnly === undefined ? {} : { readOnly: options.readOnly }),
       });
       const summary = await finished;
       const parsed = summary.ok ? parseAgentJson(summary.text, stepOutcomeSchema) : null;

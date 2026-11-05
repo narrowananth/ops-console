@@ -13,6 +13,10 @@ export type Run = {
   skills: SkillCopy[];
   /** Tools denied on top of merging. */
   deny: string[];
+  /** The run loads the folder's own `.claude` settings, `.mcp.json` and CLAUDE.md; false for a folder that holds pull request code. */
+  projectSettings: boolean;
+  /** The run may not change its working folder. */
+  readOnly: boolean;
   parts: Part[];
   /** The text part growing from stream deltas, until its block arrives whole. */
   growing: number | null;

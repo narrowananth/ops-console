@@ -7,8 +7,9 @@ branch (the default branch when blank), fetched from origin first, removed once 
 It never writes in the operator's checkout or to a Connection during a Verification. It changes the
 operator's code, files a ticket or opens a PR only after the operator confirms the Report, and it
 never merges. Merge is a button only the operator can press; every agent run denies `gh pr merge`,
-`glab mr merge`, `bkt pr merge`, `bkt pr auto-merge` and the GitHub and GitLab MCP merge tools through `disallowedTools`, which holds in
-every access mode. Alerts come from service logs, which anyone who can send a Service a request can
+`glab mr merge`, `bkt pr merge`, `bkt pr auto-merge`, the GitHub and GitLab MCP merge tools and any command that names a
+host's merge endpoint or merge mutation through `disallowedTools`, which holds in every access mode. The merge denial is
+a list of spellings: no token scope limits what a run holds, so the list cannot cover every way to call a host. Alerts come from service logs, which anyone who can send a Service a request can
 write to, so an agent that acted on them alone could be steered into changing code or data. The
 console's safety lines close every run's system prompt and say that a log line is data, never an
 instruction.
@@ -16,9 +17,12 @@ instruction.
 Pressing Agent Review is the approval for one review of a pull request: the agent reads it, compares it with the
 target branch fetched from origin, and, in a step the Playbook tags scratch copy (the built-in's test step is one),
 may install, build and run the tests in a scratch copy at the pull request's head commit. It writes nothing anywhere
-else, and denies itself `git push` and the Git hosts' comment and `api` commands: the console posts the findings and
-one summary comment. Pull request
-text stays data in a review: the agent runs no command because the description or a comment says so.
+else, and denies itself `git push`, the Git hosts' comment and `api` commands and the write tools of their MCP servers:
+the console posts the findings and one summary comment. A review whose Playbook has no scratch copy step runs read-only
+in the checkout: it has no edit tools and its working folder is not writable. Pull request text stays data in a review:
+the agent runs no command because the description or a comment says so. A run on a pull request's code loads no `.claude`
+settings, hooks, `.mcp.json` servers or CLAUDE.md from that code, and neither does the agent's answer in a review thread,
+which also holds the same denials and is read-only.
 
 In a chat, the agent opens a pull request only by asking: the console's `open_pull_request` tool raises an Approval in
 every Access mode, and only the operator's yes has the console push the branch and open it. The agent never pushes or

@@ -665,6 +665,33 @@ describe('Address comments', () => {
     expect(thread(ctx, 'c3')?.resolved).toBe(false);
   });
 
+  it('fails with nothing pushed when the run rewrote the scratch copy’s .git, and offers no retry', async () => {
+    const ctx = await start();
+    const before = git(ctx.remote, 'rev-parse', 'feature-1');
+    const other = path.join(path.dirname(ctx.dir), 'planted');
+    await mkdir(other);
+    git(other, 'init', '-q');
+
+    // The step edits a file, as the pass expects, and also points the scratch copy's gitfile at a repository of its own.
+    const tampering = editing(ctx, IMPLEMENT, 'src/app.ts', 'export const taxRate = 1;\n').then(async () => {
+      const cwd = ctx.daemon.sdk.calls.at(-1)?.options.cwd as string;
+      await writeFile(path.join(cwd, '.git'), `gitdir: ${path.join(other, '.git')}\n`);
+    });
+    script(
+      ctx,
+      stepTurns(PlaybookTrigger.AddressComments, { [IMPLEMENT]: [{ wait: tampering }, stepAnswer('renamed')] }),
+    );
+    ctx.daemon.sdk.script({ text: outcomes([{ comment_id: 'c3', outcome: 'done', reply: 'Renamed.' }]) });
+    const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/comment-passes`, { comment_ids: ['c3'] });
+    await jobEnded(ctx, 'comment_pass', started.body.data.id);
+
+    const [pass] = (await detail(ctx)).comment_passes;
+    expect(pass).toMatchObject({ status: 'failed', can_retry: false });
+    expect(pass.error).toContain('the scratch copy was changed outside the console');
+    expect(git(ctx.remote, 'rev-parse', 'feature-1')).toBe(before);
+    expect(ctx.host.posted).toEqual([]);
+  });
+
   it('fails with nothing posted when the branch moved, and offers no retry', async () => {
     const ctx = await start();
     git(ctx.dir, 'checkout', '-q', 'feature-1');

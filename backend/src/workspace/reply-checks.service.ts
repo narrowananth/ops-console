@@ -175,9 +175,10 @@ export class ReplyChecksService {
         skills,
         cwd,
         deny: HOST_WRITE_DENIALS,
+        projectSettings: false,
       });
       if (failure) throw new JobFailed(failure, true);
-      const closing = { rules, skills, cwd, deny: HOST_WRITE_DENIALS };
+      const closing = { rules, skills, cwd, deny: HOST_WRITE_DENIALS, projectSettings: false };
       const summary = await this.runtime.runFor(session, REPLY_CHECK_PROMPT, null, closing).finished;
       if (summary.stopped) throw new JobFailed(`The verdict was not given: ${STOPPED}`, true);
       if (summary.failure) throw new JobFailed(summary.failure, true);

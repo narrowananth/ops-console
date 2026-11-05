@@ -9,6 +9,15 @@ a few like them), never in a folder on PATH such as `~/.cargo/bin` or `~/go/bin`
 console sets the rules and leaves the profile to the SDK. It fails a run when the sandbox is unavailable, never runs a
 command outside it, and has no Setting to turn it off. The Setup agent's terminal is no agent run and is not sandboxed.
 
+The sandbox filters a run's commands, not the agent's file tools, which run in Claude Code's own process. The console
+holds those to the same limits with permission rules in `disallowedTools`: no reading the data folder's secrets
+(`runtime.json`, `state.db`, the account folders, the key files of MCP Servers) or the credential folders, and no editing
+the git control files. A run's commands may not write `.git/hooks`, `.git/config` or `.git/commondir`, nor the `.git`
+file of a worktree. The daemon runs `git` in those folders outside the sandbox, so it turns off hooks and `core.fsmonitor`
+on every call, and checks a scratch copy is still its own worktree before it commits or pushes there. A MCP Server that
+needs a key as a file gets it in a folder under the data folder, which the sandbox denies reading, not the user temp
+folder.
+
 A run's commands reach only its Network allowlist, which the SDK's filtering proxy enforces (`network.allowedDomains`
 with `strictAllowlist`). The console builds the list when the run starts: the built-in hosts (GitHub, and the package
 registries of npm and Yarn, Cargo, Go, Maven, Gradle, PyPI and RubyGems), the host of each Repo's `origin`, and the

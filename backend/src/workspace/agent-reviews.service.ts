@@ -372,7 +372,15 @@ export class AgentReviewsService {
       const brief = reviewBrief(slug, read.pr, read.files, read.comments, ours, place, row.note);
       const rules = row.playbookRules ?? '';
       const skills = parseSkillCopies(row.playbookSkills);
-      const reach = { rules, skills, ...(scratch ? { cwd: scratch } : {}), deny: HOST_WRITE_DENIALS };
+      // The pull request's text and code steer this run: it never loads the folder's own settings, and with no scratch
+      // copy it cannot write in the operator's checkout (ADR 0002).
+      const reach = {
+        rules,
+        skills,
+        ...(scratch ? { cwd: scratch } : { readOnly: true }),
+        deny: HOST_WRITE_DENIALS,
+        projectSettings: false,
+      };
       const failure = await this.steps.run({ job, sessionId, brief, ...reach });
       if (failure) throw new JobFailed(failure, true);
       const closing = steps.length > 0 ? REVIEW_PROMPT : `${brief}\n\n${REVIEW_PROMPT}`;
@@ -418,7 +426,13 @@ export class AgentReviewsService {
 ${thread.map((comment) => `${comment.author}: ${comment.body}`).join('\n\n')}
 
 Answer the last message in plain text, in a few sentences. Do not change anything.`;
-    const summary = await this.runtime.runFor(session, text, null, { rules, skills }).finished;
+    const summary = await this.runtime.runFor(session, text, null, {
+      rules,
+      skills,
+      deny: HOST_WRITE_DENIALS,
+      projectSettings: false,
+      readOnly: true,
+    }).finished;
     if (!summary.ok || !summary.text.trim()) return;
     const row = this.actionLog.start({
       sessionId: session,

@@ -11,6 +11,10 @@ export type SandboxRun = {
   readable?: string[];
   /** The run's Network allowlist (ADR 0006): the only hosts its commands reach. */
   networkDomains: string[];
+  /** The run may not change its working folder: a review of pull request text, or an answer in a thread. */
+  readOnly?: boolean;
+  /** The working folder's `.git` is a file, as in a worktree: the run may not rewrite it. */
+  gitFile?: boolean;
   home?: string;
 };
 
@@ -38,6 +42,17 @@ const TOOL_CACHES = [
 ];
 
 /**
+ * Git control files the daemon's own `git` later reads outside the sandbox (Pull request opening, Comment passes, the
+ * Network allowlist). A run's commands may not write them, whatever the SDK's own profile adds.
+ */
+export function gitControl(workingDir: string, gitFile: boolean): string[] {
+  const git = path.join(workingDir, '.git');
+  return gitFile
+    ? [git]
+    : ['hooks', 'config', 'config.worktree', 'commondir', 'gitdir'].map((name) => path.join(git, name));
+}
+
+/**
  * The Run sandbox for one agent run (ADR 0006): macOS Seatbelt through the SDK. Commands write only in the working
  * folder, the temp folders and the tool caches, and read neither the data folder, which holds the session token, nor the operator's
  * cloud and Keychain credentials. The working folder stays readable though it sits inside the data folder. The run
@@ -56,7 +71,12 @@ export function runSandbox(run: SandboxRun): SandboxSettings {
     enableWeakerNetworkIsolation: true,
     network: { allowedDomains: run.networkDomains, strictAllowlist: true },
     filesystem: {
-      allowWrite: [run.workingDir, ...TEMP, ...TOOL_CACHES.map((folder) => path.join(home, folder))],
+      allowWrite: [
+        ...(run.readOnly ? [] : [run.workingDir]),
+        ...TEMP,
+        ...TOOL_CACHES.map((folder) => path.join(home, folder)),
+      ],
+      denyWrite: gitControl(run.workingDir, run.gitFile === true),
       denyRead: [
         run.dataDir,
         path.join(home, '.aws'),

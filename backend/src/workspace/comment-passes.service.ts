@@ -296,9 +296,10 @@ export class CommentPassesService {
       skills,
       cwd,
       deny: HOST_WRITE_DENIALS,
+      projectSettings: false,
     });
     if (failure) throw new JobFailed(failure, true);
-    const closing = { rules, skills, cwd, deny: HOST_WRITE_DENIALS };
+    const closing = { rules, skills, cwd, deny: HOST_WRITE_DENIALS, projectSettings: false };
     const check = row.kind === CommentPassKind.Check;
     const prompt = check ? CHECK_REPLIES_PROMPT : COMMENT_PASS_PROMPT;
     const summary = await this.runtime.runFor(session, prompt, null, closing).finished;
@@ -324,6 +325,12 @@ export class CommentPassesService {
     const dir = row.scratchPath as string;
     if (!threads.some((thread) => thread.outcome === ThreadOutcome.Done)) {
       return this.update(row.id, { stage: 'post' });
+    }
+    // A run wrote in this folder: the daemon's `git` runs here only while it is still the worktree the console made.
+    try {
+      await this.git.requireWorktree(dir, this.pulls.repoRow(row.repoId).path);
+    } catch (error) {
+      throw new JobFailed(error instanceof GitFailed ? error.message : 'git failed', false);
     }
     try {
       // A retry after a failed push finds its commit already made, so the scratch copy's head is read back.

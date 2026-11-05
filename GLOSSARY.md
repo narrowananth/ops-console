@@ -50,7 +50,7 @@ a mode that asks.
 
 **Run sandbox**:
 The operating-system limit on an agent run's commands: writes only in the run's working folder, temp and package-tool caches, no reads of
-the console's data folder or the operator's cloud and login credentials. Package-tool caches under the home folder stay writable so a repo's commit hooks and builds run. It applies in every Access mode, and a run
+the console's data folder or the operator's cloud and login credentials, and no writes to git hooks or config. Package-tool caches under the home folder stay writable so a repo's commit hooks and builds run. It applies in every Access mode, and a run
 fails when the sandbox is unavailable.
 
 **Network allowlist**:
