@@ -2,8 +2,13 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { BUILT_IN_NETWORK_DOMAINS } from '@ops-console/shared';
 import { expect, type Page, test } from '@playwright/test';
 import { DAEMON_FILE } from './global-setup';
+
+const BUILT_IN = BUILT_IN_NETWORK_DOMAINS.length;
+const inOrder = (domains: string[]) =>
+  domains.toSorted(new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare);
 
 const daemon: { url: string; token: string } = JSON.parse(readFileSync(DAEMON_FILE, 'utf8'));
 const api = (method: string, url: string, body?: unknown) =>
@@ -50,19 +55,15 @@ test('Permissions counts the allowed domains and shows Built-in and Added by you
   try {
     await api('POST', '/network-allowlist/domains', { domain: 'npm.example.com' });
     const row = await openRow(page);
-    await expect(row).toContainText('Network allowlist: 6 domains');
+    await expect(row).toContainText(`Network allowlist: ${BUILT_IN + 2} domains`);
     await expect(row.getByRole('switch')).toHaveCount(0);
 
-    await row.getByRole('button', { name: /Network allowlist: 6 domains/ }).click();
+    await row.getByRole('button', { name: new RegExp(`Network allowlist: ${BUILT_IN + 2} domains`) }).click();
     const builtIn = row.getByRole('list', { name: 'Built-in' });
     // A Repo's host is built in; the list never names the Repo.
-    await expect(builtIn.getByRole('listitem')).toHaveText([
-      '*.githubusercontent.com',
-      'api.github.com',
-      'github.com',
-      'gitlab.example.com',
-      'registry.npmjs.org',
-    ]);
+    await expect(builtIn.getByRole('listitem')).toHaveText(
+      inOrder([...BUILT_IN_NETWORK_DOMAINS, 'gitlab.example.com']),
+    );
     await expect(row).not.toContainText('billing');
     await expect(builtIn.getByRole('button')).toHaveCount(0);
     await expect(row.getByRole('list', { name: 'Added by you' })).toContainText('npm.example.com');
@@ -81,7 +82,7 @@ test('the operator adds, repeats and removes a domain, and a reload shows the sa
   await input.fill('  NPM.example.com ');
   await row.getByRole('button', { name: 'Add' }).click();
   await expect(added.getByRole('listitem')).toContainText(['npm.example.com']);
-  await expect(row).toContainText('Network allowlist: 5 domains');
+  await expect(row).toContainText(`Network allowlist: ${BUILT_IN + 1} domains`);
   await expect(input).toHaveValue('');
 
   // The same domain again, and a built-in one, change nothing.
@@ -91,16 +92,16 @@ test('the operator adds, repeats and removes a domain, and a reload shows the sa
     await expect(input).toHaveValue('');
   }
   await expect(added.getByRole('listitem')).toHaveCount(1);
-  await expect(row).toContainText('Network allowlist: 5 domains');
+  await expect(row).toContainText(`Network allowlist: ${BUILT_IN + 1} domains`);
 
   // A browser that opens the page later reads the same list.
   await page.reload();
-  await expect(row).toContainText('Network allowlist: 5 domains');
+  await expect(row).toContainText(`Network allowlist: ${BUILT_IN + 1} domains`);
 
   await row.getByRole('button', { name: /Network allowlist/ }).click();
   await added.getByRole('button', { name: 'Remove npm.example.com' }).click();
   await expect(added).toContainText('None added');
-  await expect(row).toContainText('Network allowlist: 4 domains');
+  await expect(row).toContainText(`Network allowlist: ${BUILT_IN} domains`);
 });
 
 test('a value the console refuses shows why, saves nothing and clears when edited', async ({ page }) => {
@@ -134,5 +135,5 @@ test('a list that cannot be read shows the error and reads again on retry', asyn
   await expect(row).toContainText('Could not read the list');
   failing = false;
   await row.getByRole('button', { name: 'Retry' }).click();
-  await expect(row).toContainText('Network allowlist: 4 domains');
+  await expect(row).toContainText(`Network allowlist: ${BUILT_IN} domains`);
 });

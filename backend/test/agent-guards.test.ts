@@ -207,6 +207,34 @@ describe('merging', () => {
   });
 });
 
+describe('commit hooks', () => {
+  it('refuses a command that skips them, in full mode, and runs the same command without the skip', async () => {
+    const daemon = await start();
+    const id = daemon.createSession({ access_mode: AccessMode.Full });
+    daemon.sdk.script(
+      { tool: 'Bash', input: { command: 'git add -A && git commit --no-verify -m "wip"' } },
+      { tool: 'Bash', input: { command: 'HUSKY=0 git commit -m "wip"' } },
+      { tool: 'Bash', input: { command: 'git commit -n -m "wip"' } },
+      { tool: 'Bash', input: { command: 'git -c core.hooksPath=/dev/null commit -m "wip"' } },
+      { tool: 'Bash', input: { command: 'git commit -m "fix the -n and --no-verify flags"' } },
+    );
+    await converse(daemon, id, 'commit it');
+
+    // Only the commit whose message merely names the flags runs.
+    expect(daemon.sdk.ran).toEqual([
+      { tool: 'Bash', input: { command: 'git commit -m "fix the -n and --no-verify flags"' } },
+    ]);
+  });
+
+  it('tells every run to let the repo hooks finish and never skip them', async () => {
+    const daemon = await start();
+    await converse(daemon, daemon.createSession(), 'go');
+    const append = (daemon.sdk.calls.at(-1)?.options.systemPrompt as { append: string } | undefined)?.append ?? '';
+    expect(append).toContain('Commit hooks.');
+    expect(append).toContain('--no-verify');
+  });
+});
+
 describe('Action Log', () => {
   it('writes a pending row before every Bash and MCP call, then its outcome, with the kind and target of the call', async () => {
     const daemon = await start();

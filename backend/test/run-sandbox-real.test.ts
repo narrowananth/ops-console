@@ -4,6 +4,7 @@ import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { BUILT_IN_NETWORK_DOMAINS } from '@ops-console/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runSandbox } from '../src/agent/run-sandbox';
 import { SeatbeltRunSandbox } from '../src/terminals/run-sandbox-gate';
@@ -189,7 +190,7 @@ function run(command: string, cwd: string, sandbox: object | null): Promise<stri
   });
 }
 
-const BUILT_IN = ['github.com', 'api.github.com', '*.githubusercontent.com', 'registry.npmjs.org'];
+const BUILT_IN: string[] = [...BUILT_IN_NETWORK_DOMAINS];
 const rules = (workingDir: string, networkDomains = BUILT_IN) =>
   runSandbox({ workingDir, dataDir: data, home, networkDomains });
 
@@ -219,6 +220,18 @@ describe.skipIf(process.platform !== 'darwin' || CLAUDE === null)('Run sandbox, 
       'not permitted',
     );
     expect(existsSync(path.join(data, 'scratch', 'job-2'))).toBe(false);
+  }, 240_000);
+
+  it('writes in the tool caches a commit hook or build needs, and in no folder on PATH', async () => {
+    // The sandbox matches real paths, so the folder exists first, as it does once a tool has used it.
+    mkdirSync(path.join(home, '.cache'), { recursive: true });
+    const cache = `mkdir -p ${home}/.cache/pre-commit && echo ok > ${home}/.cache/pre-commit/probe && cat ${home}/.cache/pre-commit/probe`;
+    expect(await run(cache, checkout, rules(checkout))).toContain('ok');
+    mkdirSync(path.join(home, '.cargo', 'bin'), { recursive: true });
+    expect(await run(`echo x > ${home}/.cargo/bin/planted; echo exit=$?`, checkout, rules(checkout))).toContain(
+      'not permitted',
+    );
+    expect(existsSync(path.join(home, '.cargo', 'bin', 'planted'))).toBe(false);
   }, 240_000);
 
   it('denies ~/.ssh to every run (console-opens-pull-request 16)', async () => {
