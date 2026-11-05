@@ -21,7 +21,16 @@ type RateLimit = {
 /** One scripted step of a run. */
 export type Step =
   | { text: string }
-  | { tool: string; input: Record<string, unknown>; fails?: string; classifierAsks?: boolean }
+  | {
+      tool: string;
+      input: Record<string, unknown>;
+      fails?: string;
+      classifierAsks?: boolean;
+      /** Holds the call open, between its `PreToolUse` and its result, until the promise settles. */
+      hold?: Promise<unknown>;
+    }
+  /** What the run's final `result` message reports as its cost. */
+  | { cost: { usd: number; tokens: number } }
   | { rateLimit: RateLimit }
   /** A rate-limit event exactly as given, for shapes a later SDK might send. */
   | { rateLimitInfo: object }
@@ -152,9 +161,12 @@ export class FakeAgentSdk implements AgentSdk {
     });
     await write('user', prompt);
     const denials: SDKPermissionDenial[] = [];
+    let cost = { usd: 0, tokens: 0 };
 
     for (const step of steps) {
-      if ('wait' in step) {
+      if ('cost' in step) {
+        cost = step.cost;
+      } else if ('wait' in step) {
         await abortable(step.wait);
       } else if ('task' in step) {
         yield sdk({
@@ -312,6 +324,7 @@ export class FakeAgentSdk implements AgentSdk {
           }
           input = answer.updatedInput ?? input;
         }
+        if (step.hold) await abortable(step.hold);
         this.ran.push({ tool: step.tool, input });
         if (step.fails) {
           await hooks(
@@ -334,6 +347,8 @@ export class FakeAgentSdk implements AgentSdk {
       type: 'result',
       subtype: 'success',
       is_error: false,
+      total_cost_usd: cost.usd,
+      usage: { input_tokens: cost.tokens, output_tokens: 0 },
       permission_denials: denials,
       session_id: sessionId,
     });

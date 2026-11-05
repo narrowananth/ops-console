@@ -51,7 +51,7 @@ const SUBAGENT_TONE: Record<SubagentStatus, string> = {
 };
 
 /** Where a running Session's work shows, and what to call it there. */
-function placeOf(
+export function placeOf(
   session: Session,
   repoName: (id: string | null) => string,
 ): { to: string; where: string; what: string; tip: string } {
@@ -188,7 +188,7 @@ function Controls({ run }: { run: AgentRun }) {
   );
 }
 
-function PauseIcon() {
+export function PauseIcon() {
   return (
     <span aria-hidden className="inline-flex flex-none gap-0.5">
       <span className="h-2.5 w-0.75 bg-current" />
@@ -197,7 +197,7 @@ function PauseIcon() {
   );
 }
 
-function PlayIcon() {
+export function PlayIcon() {
   return (
     <span
       aria-hidden
@@ -206,7 +206,7 @@ function PlayIcon() {
   );
 }
 
-function RetryIcon() {
+export function RetryIcon() {
   return <span aria-hidden>↻</span>;
 }
 
@@ -364,6 +364,11 @@ export function RunningTasks({ collapsed }: { collapsed: boolean }) {
               ))}
             </ul>
           )}
+          <footer className="border-t border-divider px-4 py-2 text-xs">
+            <Link to="/agent-runs" title="Health, time, errors and the steps of every run">
+              Open Agent runs →
+            </Link>
+          </footer>
         </div>
       )}
     </div>

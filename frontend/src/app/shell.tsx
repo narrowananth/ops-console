@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { AgentRunsActions, AgentRunsView } from '../agent-runs/agent-runs-view';
+import { useRunAlerts } from '../agent-runs/alerts';
 import { AgentsTab } from '../agents/agents-tab';
 import { DevToolsTab } from '../devtools/devtools-tab';
 import { DevToolsView } from '../devtools/terminal-view';
@@ -33,6 +35,7 @@ export function Shell() {
   useLiveEvents();
   usePrefetchPullRequests();
   useKeepAddress();
+  useRunAlerts();
   return (
     <div className="flex min-h-0 flex-1">
       <Sidebar />
@@ -54,6 +57,19 @@ export function Shell() {
               element={
                 <Page title="Workspace" sub="Sessions in your Repos and their pull requests">
                   <WorkspaceView />
+                </Page>
+              }
+            />
+            <Route
+              path="/agent-runs"
+              element={
+                <Page
+                  title="Agent runs"
+                  sub="Every agent run: how it goes, why it is slow, why it failed"
+                  width="wide"
+                  actions={<AgentRunsActions />}
+                >
+                  <AgentRunsView />
                 </Page>
               }
             />

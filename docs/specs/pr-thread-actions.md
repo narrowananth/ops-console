@@ -89,7 +89,8 @@ Review with agent, Approve and Request changes, but nothing that acts on the com
     that mode, and a PROD write still asks.
 25. A job's scratch copy is removed when the job finishes ready, and kept when it fails so Retry can use it. A new
     Reply check on the same thread, or a new Comment pass on the same pull request, removes the failed one's copy.
-    At start-up the console removes every copy except those of failed jobs.
+    At start-up the console removes every copy except those of failed jobs. The removal runs after the port opens, so a
+    large copy never delays start-up.
 26. A scratch copy that cannot be made (the head commit cannot be fetched) fails the job before step 1 with "Could
     not make a scratch copy:" and git's message.
 27. A Git host that is down or rate limited when the operator presses a button starts no job, and the button shows

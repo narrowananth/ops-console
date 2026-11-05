@@ -62,6 +62,50 @@ export enum SubagentStatus {
   Stopped = 'stopped',
 }
 
+/** What the Agent runs page says about a run: whether to look at it. */
+export enum RunHealth {
+  OnTrack = 'on_track',
+  /** A step has gone on much longer than the same step usually takes. */
+  Slow = 'slow',
+  /** The agent waits for an Approval or an answer. */
+  NeedsYou = 'needs_you',
+  /** Ended: failed, usage limit, signed out or interrupted. */
+  Failed = 'failed',
+  /** Ended: the operator stopped or paused it. */
+  Stopped = 'stopped',
+}
+
+/** Where a run's time goes. Time between steps is the agent thinking. */
+export enum RunPhase {
+  Thinking = 'thinking',
+  Reading = 'reading',
+  Editing = 'editing',
+  Commands = 'commands',
+  WaitingYou = 'waiting_you',
+}
+
+/** Why a run ended badly, as far as the console can tell from what it saw. */
+export enum FailureKind {
+  NetworkBlocked = 'network_blocked',
+  WriteBlocked = 'write_blocked',
+  RateLimited = 'rate_limited',
+  SignedOut = 'signed_out',
+  HookFailed = 'hook_failed',
+  Interrupted = 'interrupted',
+  Unknown = 'unknown',
+}
+
+/** The stages a run goes through, in order. A stage is read from the tools the run used, so it can be wrong. */
+export enum RunStage {
+  ReadTask = 'read_task',
+  Explore = 'explore',
+  Edit = 'edit',
+  RunTests = 'run_tests',
+  Fix = 'fix',
+  Commit = 'commit',
+  OpenPr = 'open_pr',
+}
+
 export enum ActionActor {
   Agent = 'agent',
   Operator = 'operator',
@@ -194,6 +238,8 @@ export const sessionSchema = z.object({
   last_active_at: z.string(),
   /** The Playbook its rules come from, when it is not built-in. */
   playbook: sessionPlaybookSchema.nullable(),
+  /** The message queued behind the run: sent when the run ends, or held when the operator stopped it. */
+  queued_message: z.string().nullable(),
 });
 
 export type Session = z.infer<typeof sessionSchema>;
@@ -224,9 +270,71 @@ export const agentRunSchema = z.object({
   /** The operator can start the run again with Play or Retry: the Session takes messages. */
   can_resume: z.boolean(),
   subagents: z.array(subagentSchema),
+  health: z.enum(RunHealth),
+  /** One line on why the run has this health: what it waits on, what is slow, what failed. */
+  health_reason: z.string(),
+  /** What the agent does now: its open step. Null when nothing is open. */
+  activity: z.string().nullable(),
+  /** The cost and tokens the last run reported when it ended; null while it goes or when the SDK gave none. */
+  cost_usd: z.number().nullable(),
+  tokens: z.number().int().nullable(),
+  /** Milliseconds per phase over the run, in `RunPhase` order. */
+  split: z.array(z.object({ phase: z.enum(RunPhase), ms: z.number().int() })),
 });
 
 export type AgentRun = z.infer<typeof agentRunSchema>;
+
+/** One tool call of a run: what the agent did, how long it took and whether it worked. */
+export const runStepSchema = z.object({
+  id: z.string(),
+  /** The subagent that made the call; null for the main agent. */
+  agent_id: z.string().nullable(),
+  tool: z.string(),
+  summary: z.string(),
+  phase: z.enum(RunPhase),
+  started_at: z.string(),
+  finished_at: z.string().nullable(),
+  /** Null while the step goes. */
+  ok: z.boolean().nullable(),
+  error: z.string().nullable(),
+});
+
+export type RunStep = z.infer<typeof runStepSchema>;
+
+/** Why a run is slow, in rows the page prints under "Why this run is slow". */
+export const slowDiagnosisSchema = z.object({
+  right_now: z.string(),
+  likely_cause: z.string(),
+  also: z.string().nullable(),
+  suggestion: z.string(),
+  /** A host the Run sandbox refused, when the run's errors name one. */
+  blocked_host: z.string().nullable(),
+});
+
+/** Why a run ended badly: what happened, the likely cause and what to do, with the raw error under it. */
+export const failureSchema = z.object({
+  kind: z.enum(FailureKind),
+  what_happened: z.string(),
+  likely_cause: z.string(),
+  what_to_do: z.string(),
+  raw: z.string().nullable(),
+  /** The host to allow, for `network_blocked`. */
+  blocked_host: z.string().nullable(),
+});
+
+export type SlowDiagnosis = z.infer<typeof slowDiagnosisSchema>;
+export type Failure = z.infer<typeof failureSchema>;
+
+/** `GET /agent-runs/:id`: one run with its steps, where the time went and why it is slow or failed. */
+export const runDetailSchema = z.object({
+  run: agentRunSchema,
+  steps: z.array(runStepSchema),
+  stages: z.array(z.object({ stage: z.enum(RunStage), state: z.enum(['done', 'now', 'todo']) })),
+  slow: slowDiagnosisSchema.nullable(),
+  failure: failureSchema.nullable(),
+});
+
+export type RunDetail = z.infer<typeof runDetailSchema>;
 
 export const sessionListQuerySchema = pageQuerySchema.extend({
   kind: z.enum(SessionKind).optional(),

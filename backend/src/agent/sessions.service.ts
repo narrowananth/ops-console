@@ -1,7 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   type AccessMode,
-  type AgentRun,
   type Effort,
   ErrorCode,
   type Model,
@@ -14,7 +13,6 @@ import {
   SessionState,
   sessionDefaultsSchema,
   type sessionListQuerySchema,
-  subagentSchema,
 } from '@ops-console/shared';
 import { and, desc, eq, inArray, lt, or, type SQL, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -32,7 +30,7 @@ export const SESSION_DEFAULTS_KEY = 'session_defaults';
 export const NEW_SESSION_TITLE = 'New session';
 
 /** Runs that ended unfinished stay in the Running tray until the operator dismisses them. */
-const KEPT_OUTCOMES = [
+export const KEPT_OUTCOMES = [
   RunOutcome.Stopped,
   RunOutcome.Paused,
   RunOutcome.Failed,
@@ -73,6 +71,7 @@ export function toSession(row: SessionRow): Session {
     created_at: row.createdAt,
     last_active_at: row.lastActiveAt,
     playbook: null,
+    queued_message: row.queuedText,
   };
 }
 
@@ -157,9 +156,9 @@ export class SessionsService {
     );
   }
 
-  /** The Running tray: every run going, then every run that ended unfinished and was not dismissed, newest first. */
-  agentRuns(): AgentRun[] {
-    const rows = this.store.db
+  /** The Sessions the Running tray lists: a run going now, or one that ended unfinished and was not dismissed. */
+  runRows(): SessionRow[] {
+    return this.store.db
       .select()
       .from(sessions)
       .where(
@@ -173,15 +172,6 @@ export class SessionsService {
       )
       .orderBy(desc(sessions.lastActiveAt), desc(sessions.id))
       .all();
-    return rows.map((row) => ({
-      session: this.view(row),
-      running: this.runs.get(row.id) !== undefined,
-      outcome: row.runOutcome,
-      started_at: row.runStartedAt,
-      finished_at: row.runFinishedAt,
-      can_resume: this.kinds.get(row.kind)?.acceptsMessages ?? false,
-      subagents: row.runSubagents === null ? [] : z.array(subagentSchema).parse(JSON.parse(row.runSubagents)),
-    }));
   }
 
   /** Takes an ended run out of the tray. Refused with `session_busy` while the Session's run is going. */
@@ -189,6 +179,25 @@ export class SessionsService {
     this.get(id);
     if (this.runs.get(id)) throw new ApiError(409, ErrorCode.SessionBusy, "the session's run is still going");
     this.write(id, { runOutcome: null });
+  }
+
+  /** Takes every ended run out of the tray; runs going stay. Returns how many left. */
+  dismissEndedRuns(): number {
+    return this.store.write((tx, emit) => {
+      const rows = tx
+        .update(sessions)
+        .set({ runOutcome: null })
+        .where(
+          and(
+            inArray(sessions.runOutcome, KEPT_OUTCOMES),
+            sql`${sessions.state} not in ('working', 'waiting_input', 'waiting_approval')`,
+          ),
+        )
+        .returning()
+        .all();
+      for (const row of rows) emitSessionUpdated(emit, row);
+      return rows.length;
+    });
   }
 
   /** Remembers why a Session's run failed, or forgets it with `null`. */

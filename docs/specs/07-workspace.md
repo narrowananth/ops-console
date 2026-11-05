@@ -275,9 +275,10 @@ Adds `branch: string | null`.
   text in place with Cancel and Revert and rerun (`02-settings-agents` Behavior 8a). A note above the composer then
   names the files put back with their line counts, or says why none were, until closed or the next Send.
   Enter sends and Shift+Enter adds a line. While the agent works the box stays open and Send reads Queue: the
-  message waits in a "Queued" note with Send now and Take back, and sends when the run ends. Send now stops the run
-  and sends it at once. When the operator stops the run, the note reads "On hold" and the message does not send until
-  Send now. A failed send puts it back in the box. Its draft is kept per Session.
+  message waits in a "Queued" note with Send now and Take back, and sends when the run ends. The daemon keeps the
+  queued message, so the Agent runs page shows it too (`agent-runs-page` Behavior 13). Send now stops the run and sends
+  it at once. When the operator stops the run, the note reads "On hold" and the message does not send until Send now.
+  Take back puts it in the box. Its draft is kept per Session.
   Files attach to the next message three ways: the paperclip, dropping them on the box, or pasting them (a
   screenshot, a file copied in Finder). Each uploads at once to `POST /api/sessions/:id/attachments?name=` and is
   saved under a new name in `attachments/<session id>/` in the data folder. A file sits in the text as a chip where

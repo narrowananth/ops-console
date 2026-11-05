@@ -973,6 +973,11 @@ describe('Restart', () => {
       scratchPath: kept,
     });
     expect(rows.find((row) => row.id === 'was-ready')?.scratchPath).toBeNull();
-    expect([existsSync(kept), existsSync(done), existsSync(stray)]).toEqual([true, false, false]);
+    // The copies go after recovery ends, so a large one never holds up start-up.
+    await until(
+      () => [existsSync(kept), existsSync(done), existsSync(stray)],
+      (exists) => exists.join() === 'true,false,false',
+      'the copies to be removed',
+    );
   });
 });

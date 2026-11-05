@@ -32,6 +32,7 @@ import {
   type ReviewVerdict,
   type RouteState,
   type RunOutcome,
+  type RunPhase,
   type RunStatus,
   type ScanStatus,
   type ScanTrigger,
@@ -131,6 +132,8 @@ export const sessions = sqliteTable(
     runOutcome: text('run_outcome').$type<RunOutcome>(),
     /** JSON array of the last run's `Subagent`s. */
     runSubagents: text('run_subagents'),
+    /** The message the operator queued behind the run; the daemon sends it when the run ends, unless the operator stopped it. */
+    queuedText: text('queued_text'),
     createdAt: text('created_at').notNull().default(nowIso),
     lastActiveAt: text('last_active_at').notNull().default(nowIso),
   },
@@ -138,6 +141,53 @@ export const sessions = sqliteTable(
     index('sessions_active_idx').on(sql`${table.lastActiveAt} DESC`),
     index('sessions_repo_idx').on(table.repoId, sql`${table.lastActiveAt} DESC`),
     uniqueIndex('sessions_one_pr_review_idx').on(table.repoId, table.prNumber).where(sql`${table.kind} = 'pr_review'`),
+  ],
+);
+
+/** One tool call of a run, kept so the Agent runs page can say where the time went and what was slow. */
+export const runSteps = sqliteTable(
+  'run_steps',
+  {
+    /** The SDK's tool call id. */
+    id: text().primaryKey().notNull(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    /** The run's start (`sessions.run_started_at`), which ties the step to its run. */
+    runStartedAt: text('run_started_at').notNull(),
+    /** The subagent that made the call; null for the main agent. */
+    agentId: text('agent_id'),
+    tool: text().notNull(),
+    /** Redacted. */
+    summary: text().notNull(),
+    phase: text().$type<RunPhase>().notNull(),
+    startedAt: text('started_at').notNull(),
+    finishedAt: text('finished_at'),
+    /** Time the call spent waiting for an Approval or an answer. */
+    waitedMs: integer('waited_ms').notNull().default(0),
+    ok: bool('ok'),
+    /** Redacted. */
+    error: text(),
+  },
+  (table) => [index('run_steps_session_idx').on(table.sessionId, table.startedAt)],
+);
+
+/** What each run cost, as the SDK reported when it ended; the page adds a day up from these. */
+export const runUsage = sqliteTable(
+  'run_usage',
+  {
+    id: text().primaryKey().notNull(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    runStartedAt: text('run_started_at').notNull(),
+    finishedAt: text('finished_at').notNull(),
+    costUsd: real('cost_usd').notNull(),
+    tokens: integer().notNull(),
+  },
+  (table) => [
+    index('run_usage_finished_idx').on(table.finishedAt),
+    unique('run_usage_run').on(table.sessionId, table.runStartedAt),
   ],
 );
 

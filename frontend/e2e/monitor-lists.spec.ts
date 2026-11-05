@@ -194,6 +194,7 @@ test('a pull request row shows when it was opened, and a Session row when it sta
           created_at: started,
           last_active_at: started,
           playbook: null,
+          queued_message: null,
         },
       ]),
     ),

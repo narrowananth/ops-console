@@ -106,7 +106,7 @@ agent Session.
 | `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks; secrets via Keychain |
 | `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash and checkout |
 | `network` | The Network allowlist an agent run starts with: built-in hosts, the host of each Repo's `origin`, and the operator's own domains in `network_domains`; read, add and remove (`/network-allowlist`), registered by `agent` |
-| `agent` | Sessions and their kinds, Claude Agent SDK runs, the Run sandbox rules, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors; stop a run, edit the last message (file edits rewound), attachments |
+| `agent` | Sessions and their kinds, Claude Agent SDK runs, the Run sandbox rules, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors; stop a run, edit the last message (file edits rewound), attachments; every tool call of a run kept with its time (`run_steps`) and each run's cost (`run_usage`); run health, slow and failure reasons, stages and time split read from them; the message queued behind a run |
 | `playbooks` | Playbooks and the Trigger each one holds, the built-ins (each Trigger's method, steps and shared rules on evidence, data, Connections and git) and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each; Skills, their `/skills` routes and the Skills each Playbook holds (registered by `agent`) |
 | `accounts` | Claude accounts, their usage, Auto-switch and Smart usage; the Claude account hub: with CLIProxy on, runs go to its loopback address with the API key from the Keychain and switching pauses |
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
@@ -123,6 +123,7 @@ agent Session.
 | `app` | Sign-in gate with the restart panel while an update installs, sidebar with the running tasks tray, the update card, version panel and "Updated to" notice, page shell and routes, theme store, the remembered page address |
 | `lib` | API client, TanStack queries, `/ws` live events, session token, Remembered view storage, sorting, the finish chime, clipboard copy |
 | `monitor` | Monitor page: scan range and status codes, ticked Services, Alerts, Samples, Reports, Review and Fix |
+| `agent-runs` | Agent runs page: run health, why a run is slow or ended, time split, timeline, steps, queued messages, desktop alerts |
 | `workspace` | Workspace page: Repos and Anonymous Sessions, branch switcher, pull request list, files with Expand all and Collapse all, threads, the Agent Review, Reply check and Comment pass cards, the Session's Changes panel, the Open pull request form, queued messages, attachments |
 | `devtools` | Dev tools page (terminal-style `devtools` Sessions scoped to Connections, Results, Comparison) and the Connections page and form |
 | `integrations` | Integrations page: Connectors and MCP Servers |
