@@ -59,10 +59,11 @@ one browser tab, so no other view can show it.
     there when the page loaded.
 15. The Running tray shows the same runs in a popup. Its header gives the counts, the Alerts pill and Stop all going
     (which asks first). Chips filter All, Going, Needs you and Ended, with today's tokens and cost beside them. Runs
-    sit in three groups: needs you, going (the first three, then Show all) and ended, which stay until dismissed. A
-    row opens in place to its facts (kind, start or end, access, model, account, usage), links to the Session, pull
-    request and Alert, the queued message with Send now and Take back, the reason an ended run ended, and its
-    subagents with a link to each. The footer links to the page and has Dismiss all ended.
+    sit in three groups: needs you, going (the first three, then Show all, which becomes Show less) and ended, which
+    stay until dismissed. The popup is never taller than the room above the Running button, so its header stays in
+    view. A row opens in place to its facts (kind, start or end, access, model, account, usage), links to the
+    Session, pull request and Alert, the queued message with Send now and Take back, the same stage, why it is slow
+    or ended, time split, timeline and steps as the page (5 to 9), and its subagents with a link to each. The footer links to the page and has Dismiss all ended.
 
 ## Not required
 

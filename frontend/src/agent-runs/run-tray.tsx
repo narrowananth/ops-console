@@ -8,11 +8,13 @@ import {
   useAgentUsage,
   useBulkRunControls,
   useRepos,
+  useRunDetail,
   useRunQueue,
 } from '../lib/queries';
 import { alertPath, pullRequestPath } from '../workspace/links';
 import { AlertsPill } from './alerts-pill';
 import { Pill, RunButtons } from './run-controls';
+import { RunAnalytics } from './run-detail';
 import { ACCESS_NAME, clock, HEALTH, KIND_NAME, MODEL_NAME, money, placeOf, titleOf, tokens } from './run-look';
 
 type Tab = 'all' | 'going' | 'needs_you' | 'ended';
@@ -111,6 +113,7 @@ const CHIP =
 function RunBody({ run, to, where }: { run: AgentRun; to: string; where: string }) {
   const { session } = run;
   const queue = useRunQueue(session.id);
+  const detail = useRunDetail(session.id);
   const accounts = useAgentAccounts().data?.data ?? [];
   const account = accounts.find((one) => one.id === session.account_id);
   const working = run.subagents.filter((one) => one.status === SubagentStatus.Working).length;
@@ -127,7 +130,7 @@ function RunBody({ run, to, where }: { run: AgentRun; to: string; where: string 
   ];
   return (
     <div className="mx-2.5 mb-3 flex flex-col gap-2.5">
-      {ended && run.outcome !== RunOutcome.Stopped && run.outcome !== RunOutcome.Paused && (
+      {ended && run.outcome !== RunOutcome.Stopped && run.outcome !== RunOutcome.Paused && !detail.data?.failure && (
         <div className="rounded-lg border border-accent-300 bg-accent-100 px-3 py-2 text-xs text-accent-800">
           <b className="block text-accent-700">Why it ended</b>
           {run.health_reason.replace(/^(Failed|Stopped): /, '')}
@@ -178,6 +181,17 @@ function RunBody({ run, to, where }: { run: AgentRun; to: string; where: string 
           </div>
         )}
       </div>
+      {detail.isPending && <p className="m-0 px-1 text-xs text-neutral-700">Reading the run…</p>}
+      {detail.isError && (
+        <p role="alert" className="m-0 px-1 text-xs text-accent-700">
+          {detail.error.message}
+        </p>
+      )}
+      {detail.data && (
+        <div className="px-1">
+          <RunAnalytics run={run} detail={detail.data} />
+        </div>
+      )}
       {run.subagents.length > 0 && (
         <div className="ml-2 border-l-2 border-line pl-3">
           <p className="m-0 mb-0.5 text-[11.5px] text-neutral-700">
@@ -388,10 +402,10 @@ export function RunTray() {
             {(tab === 'all' || tab === 'going') && only.length > 0 && (
               <Section title="Going">
                 {shownGoing.map(row)}
-                {cut && (
+                {tab === 'all' && only.length > GOING_SHOWN && (
                   <li className="flex items-center justify-between px-4 py-2 text-xs text-neutral-700">
-                    … {only.length - GOING_SHOWN} more going
-                    <Pill onClick={() => setShowAll(true)}>Show all</Pill>
+                    {showAll ? `All ${only.length} going shown` : `… ${only.length - GOING_SHOWN} more going`}
+                    <Pill onClick={() => setShowAll(!showAll)}>{showAll ? 'Show less' : 'Show all'}</Pill>
                   </li>
                 )}
               </Section>

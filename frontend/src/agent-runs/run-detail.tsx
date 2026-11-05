@@ -524,6 +524,25 @@ function QueueBox({ run }: { run: AgentRun }) {
   );
 }
 
+/** The analytics of one run: where it is, why it is slow or ended, where its time went, every call. */
+export function RunAnalytics({ run, detail }: { run: AgentRun; detail: RunDetail }) {
+  return (
+    <>
+      <Stepper stages={detail.stages} />
+      <SlowBox detail={detail} run={run} />
+      {detail.failure && <FailureBox failure={detail.failure} run={run} />}
+      <Split split={detail.run.split} />
+      <Timeline run={detail.run} steps={detail.steps} />
+      <Trace steps={detail.steps} running={detail.run.running} />
+      {detail.steps.length === 0 && (
+        <p className="m-0 text-xs text-neutral-700">
+          The console kept no steps for this run: it started before steps were kept.
+        </p>
+      )}
+    </>
+  );
+}
+
 /** Everything about one run that does not fit its card: where it runs, why, where the time went, every call. */
 export function RunDetailPanel({ run, repoName }: { run: AgentRun; repoName: (id: string | null) => string }) {
   const detail = useRunDetail(run.session.id);
@@ -570,21 +589,7 @@ export function RunDetailPanel({ run, repoName }: { run: AgentRun; repoName: (id
           {detail.error.message}
         </p>
       )}
-      {detail.data && (
-        <>
-          <Stepper stages={detail.data.stages} />
-          <SlowBox detail={detail.data} run={run} />
-          {detail.data.failure && <FailureBox failure={detail.data.failure} run={run} />}
-          <Split split={detail.data.run.split} />
-          <Timeline run={detail.data.run} steps={detail.data.steps} />
-          <Trace steps={detail.data.steps} running={detail.data.run.running} />
-          {detail.data.steps.length === 0 && (
-            <p className="m-0 text-xs text-neutral-700">
-              The console kept no steps for this run: it started before steps were kept.
-            </p>
-          )}
-        </>
-      )}
+      {detail.data && <RunAnalytics run={run} detail={detail.data} />}
     </div>
   );
 }

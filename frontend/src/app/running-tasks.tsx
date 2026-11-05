@@ -1,5 +1,5 @@
 import { SessionState } from '@ops-console/shared';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { RunTray } from '../agent-runs/run-tray';
 import { useAgentRuns } from '../lib/queries';
@@ -14,6 +14,7 @@ export function RunningTasks({ collapsed }: { collapsed: boolean }) {
   const runs = useAgentRuns().data ?? [];
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState<number | null>(null);
   const location = useLocation();
   const going = runs.filter((run) => run.running);
   const ended = runs.length - going.length;
@@ -21,6 +22,14 @@ export function RunningTasks({ collapsed }: { collapsed: boolean }) {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: moving to another page closes the list
   useEffect(() => setOpen(false), [location.pathname, location.search]);
+  // The list grows up from the button, so it may be as tall as the room above the button's bottom edge.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const fit = () => setRoom(Math.max(240, (box.current?.getBoundingClientRect().bottom ?? window.innerHeight) - 12));
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const away = (event: MouseEvent) => {
@@ -71,6 +80,7 @@ export function RunningTasks({ collapsed }: { collapsed: boolean }) {
         <div
           role="dialog"
           aria-label="Agent runs"
+          style={room === null ? undefined : { maxHeight: room }}
           className="absolute bottom-0 left-full z-50 ml-2 flex max-h-[85vh] w-168 max-w-[calc(100vw-20rem)] flex-col overflow-hidden rounded-2xl border border-line bg-card shadow-lg"
         >
           <RunTray />
