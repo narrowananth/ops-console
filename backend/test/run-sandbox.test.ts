@@ -2,7 +2,14 @@ import { execFileSync } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AccessMode, CONNECTOR_SERVERS, ConnectorId, GitHost, StepBlock } from '@ops-console/shared';
+import {
+  AccessMode,
+  BUILT_IN_NETWORK_DOMAINS,
+  CONNECTOR_SERVERS,
+  ConnectorId,
+  GitHost,
+  StepBlock,
+} from '@ops-console/shared';
 import { sql } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AgentRuntime } from '../src/agent/runtime';
@@ -25,7 +32,7 @@ async function start(dataDir?: string) {
 }
 
 const home = os.homedir();
-const BUILT_IN = ['github.com', 'api.github.com', '*.githubusercontent.com', 'registry.npmjs.org'];
+const BUILT_IN = [...BUILT_IN_NETWORK_DOMAINS];
 
 /** A git folder the console knows as a Repo, with `origin` at `origin` or none. */
 async function addRepo(daemon: AgentDaemon, name: string, origin: string | null, removedAt: string | null = null) {
@@ -69,7 +76,18 @@ describe('Run sandbox on agent runs', () => {
     const daemon = await start();
     await converse(daemon, daemon.createSession(), 'go');
     const { filesystem } = sandboxOf(daemon);
-    expect(filesystem?.allowWrite).toEqual([WORKING_DIR, '/tmp', '/private/tmp']);
+    expect(filesystem?.allowWrite?.slice(0, 3)).toEqual([WORKING_DIR, '/tmp', '/private/tmp']);
+    // Tool caches are writable so commit hooks and builds can fetch; a folder on PATH never is.
+    expect(filesystem?.allowWrite).toEqual(
+      expect.arrayContaining([
+        path.join(home, '.cargo', 'registry'),
+        path.join(home, 'go', 'pkg'),
+        path.join(home, '.m2', 'repository'),
+      ]),
+    );
+    expect(filesystem?.allowWrite).not.toContain(path.join(home, '.cargo', 'bin'));
+    expect(filesystem?.allowWrite).not.toContain(path.join(home, 'go', 'bin'));
+    expect(filesystem?.allowWrite).not.toContain(home);
     expect(filesystem?.denyRead).toContain(daemon.dataDir);
     expect(filesystem?.denyRead).toContain(path.join(home, '.ssh'));
     expect(filesystem?.allowRead).toContain(WORKING_DIR);
@@ -83,9 +101,9 @@ describe('Run sandbox on agent runs', () => {
     const second = runtime.runFor(daemon.createSession(), 'two', null, { cwd: b });
     await Promise.all([first.finished, second.finished]);
     const writes = daemon.sdk.calls.map((call) => call.options.sandbox?.filesystem?.allowWrite);
-    expect(writes).toContainEqual([a, '/tmp', '/private/tmp']);
-    expect(writes).toContainEqual([b, '/tmp', '/private/tmp']);
-    expect(writes.flat()).toHaveLength(6);
+    expect(writes.map((folders) => folders?.[0]).toSorted()).toEqual([a, b].toSorted());
+    // The working folder is the only one that differs between the two.
+    expect(writes[0]?.slice(1)).toEqual(writes[1]?.slice(1));
   });
 
   it('sandboxes a resumed conversation too (Behavior 7)', async () => {
@@ -151,14 +169,7 @@ describe('Run sandbox on agent runs', () => {
     await addRepo(daemon, 'old', 'https://old.example.net/acme/old.git', '2026-01-01T00:00:00.000Z');
     await converse(daemon, daemon.createSession(), 'go');
     expect(sandboxOf(daemon).network?.allowedDomains?.toSorted()).toEqual(
-      [
-        'github.com',
-        'api.github.com',
-        '*.githubusercontent.com',
-        'registry.npmjs.org',
-        'gitlab.example.com',
-        'git.example.org',
-      ].toSorted(),
+      [...BUILT_IN, 'gitlab.example.com', 'git.example.org'].toSorted(),
     );
   });
 

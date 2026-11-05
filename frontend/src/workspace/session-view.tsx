@@ -26,6 +26,7 @@ import {
   useRepoPullRequests,
   useRepoSessions,
   useRepos,
+  useRunQueue,
   useSendMessage,
   useSessionDiff,
   useSessionPullRequest,
@@ -66,8 +67,9 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const hasDiff = session?.kind === SessionKind.Repo;
   const gone = sessions.isSuccess && session === undefined;
   const pulls = useRepoPullRequests(session?.kind === SessionKind.Repo ? session.repo_id : null);
-  // What the operator typed while the agent was working; it goes out when the run ends.
-  const [queued, setQueued] = useState<string | null>(null);
+  // What the operator typed while the agent was working: the daemon keeps it and sends it when the run ends, unless the
+  // operator stops the run, which holds it for Send now.
+  const queue = useRunQueue(id);
   const sessionState = session?.state;
   const working = sessionState === SessionState.Working || sessionState === SessionState.WaitingApproval;
   const diff = useSessionDiff(id, hasDiff, diffOpen && working);
@@ -91,23 +93,12 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   useEffect(() => {
     if (gone) onGone();
   }, [gone, onGone]);
-  const { mutate: sendQueued, isPending: sending } = send;
-  useEffect(() => {
-    if (queued === null || working || sessionState === undefined || sending) return;
-    sendQueued(queued, {
-      onSuccess: () => setQueued(null),
-      // Not sent: the words go back into the box instead of vanishing.
-      onError: () => {
-        setText((current) => (current.trim() === '' ? queued : `${queued}\n\n${current}`));
-        setQueued(null);
-      },
-    });
-  }, [queued, working, sessionState, sending, sendQueued, setText]);
 
   if (sessions.isPending) return <Empty>Reading the Session…</Empty>;
   if (session === undefined) return null;
   const repo = repos.data?.data.find((candidate) => candidate.id === session.repo_id);
   const running = session.state === SessionState.Working || session.state === SessionState.WaitingApproval;
+  const queued = session.queued_message;
   // A question waiting on the operator still holds the run: the next message answers it.
   const busy = running || session.state === SessionState.WaitingInput;
   // Only the last thing the operator asked can be edited and run again.
@@ -127,9 +118,12 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
     if (empty || queued !== null || uploading) return;
     setReverted(null);
     if (running) {
-      setQueued(withAttachments(text, files));
-      setText('');
-      attachments.remove(placed);
+      queue.queue.mutate(withAttachments(text, files), {
+        onSuccess: () => {
+          setText('');
+          attachments.remove(placed);
+        },
+      });
       return;
     }
     send.mutate(withAttachments(text, files), {
@@ -316,9 +310,12 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             {queued !== null && (
               <QueuedNote
                 text={queued}
+                held={!busy}
+                sending={queue.sendNow.isPending}
+                onSendNow={() => queue.sendNow.mutate()}
                 onCancel={() => {
                   setText((current) => (current.trim() === '' ? queued : `${queued}\n\n${current}`));
-                  setQueued(null);
+                  queue.takeBack.mutate();
                 }}
               />
             )}
@@ -391,7 +388,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                           : 'Enter sends. Shift+Enter adds a new line.'
                     }
                     className="px-4 py-1.5"
-                    disabled={empty || queued !== null || uploading || send.isPending}
+                    disabled={empty || queued !== null || uploading || send.isPending || queue.queue.isPending}
                     onClick={submit}
                   >
                     {running ? 'Queue' : 'Send'}
@@ -431,11 +428,37 @@ const SESSION_STATE: Record<SessionState, PathwayState> = {
 };
 
 /** The message waiting for the run to end, with a way to take it back. */
-function QueuedNote({ text, onCancel }: { text: string; onCancel: () => void }) {
+function QueuedNote({
+  text,
+  held,
+  sending,
+  onSendNow,
+  onCancel,
+}: {
+  text: string;
+  /** The operator stopped the run, so the message waits for Send now. */
+  held: boolean;
+  sending: boolean;
+  onSendNow: () => void;
+  onCancel: () => void;
+}) {
   return (
     <div role="status" className="flex items-start gap-2 rounded-lg border border-line bg-card px-3 py-2 text-xs">
-      <span className="flex-none font-semibold text-neutral-700">Queued</span>
+      <span className="flex-none font-semibold text-neutral-700">{held ? 'On hold' : 'Queued'}</span>
       <span className="line-clamp-3 min-w-0 flex-1 whitespace-pre-wrap text-text">{text}</span>
+      <button
+        type="button"
+        disabled={sending}
+        onClick={onSendNow}
+        title={
+          held
+            ? 'You stopped the run, so this did not send. Send it now.'
+            : 'Stop the run and send this message now instead of waiting for the run to end.'
+        }
+        className="cursor-pointer border-0 bg-transparent p-0 text-xs font-semibold text-text hover:text-accent-700 disabled:cursor-default disabled:opacity-50"
+      >
+        Send now
+      </button>
       <button
         type="button"
         onClick={onCancel}

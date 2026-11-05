@@ -18,6 +18,7 @@
   --color-line: color-mix(in srgb, #201e1d 11%, transparent);
   --color-ok: #2f7d3b;
   --color-warn: #b26b00;
+  --color-info: #2a5db0;
   --color-diff-add: #e7f5ea;
   --color-diff-add-strong: #c6e9cf;
   --color-diff-add-text: #1d6b30;
@@ -88,6 +89,7 @@
   --color-line: color-mix(in srgb, #ecebea 10%, transparent);
   --color-ok: #6cc47a;
   --color-warn: #f0a940;
+  --color-info: #7aa7f0;
   --color-diff-add: #15281a;
   --color-diff-add-strong: #1f3d27;
   --color-diff-add-text: #8bd699;

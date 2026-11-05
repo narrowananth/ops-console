@@ -30,6 +30,7 @@ import { alerts, fixes, reports, repos, reviews, routes, services, sessions } fr
 import { type Emit, STORE, type Store, type Tx } from '../db/store';
 import { CANCELLED, JobSteps, jobPlaybook } from '../playbooks/job-steps';
 import { PlaybooksService } from '../playbooks/playbooks.service';
+import { parseSkillCopies, skillCopiesJson } from '../playbooks/skills.service';
 import { type CodeBase, cloneUrl, codeBaseStep, GIT, Git, GitFailed, parseRemote } from '../repos/git';
 import { everyMinutes, Scheduler } from '../scheduler/scheduler';
 import { AnonymousSessionsService } from '../workspace/anonymous-sessions.service';
@@ -122,6 +123,7 @@ export class FixesService {
         playbookId: copy.id,
         playbookName: copy.name,
         playbookRules: copy.rules,
+        playbookSkills: skillCopiesJson(copy.skills),
         playbookBranches: copy.branches,
         playbookJiraTicket: copy.jiraTicket,
       })
@@ -363,6 +365,7 @@ export class FixesService {
         sessionId: context.sessionId,
         brief: `${this.brief(context)}\nThe console sends the work as steps, one per turn, on branch ${context.fix.branch}.`,
         rules: context.fix.playbookRules,
+        skills: parseSkillCopies(context.fix.playbookSkills),
         fresh: this.takeFresh(context),
         halted: () => this.cancelling.has(context.fix.id),
       });
@@ -402,6 +405,7 @@ ${context.recheckLine}`;
     try {
       finished = this.runtime.runFor(context.sessionId, prompt, null, {
         rules: context.fix.playbookRules,
+        skills: parseSkillCopies(context.fix.playbookSkills),
         fresh: this.takeFresh(context),
       }).finished;
     } catch (error) {

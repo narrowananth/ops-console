@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { AgentRunsActions, AgentRunsView } from '../agent-runs/agent-runs-view';
+import { useRunAlerts } from '../agent-runs/alerts';
 import { AgentsTab } from '../agents/agents-tab';
 import { DevToolsTab } from '../devtools/devtools-tab';
 import { DevToolsView } from '../devtools/terminal-view';
@@ -12,6 +14,7 @@ import { ReposTab } from '../repos/repos-tab';
 import { PermissionsTab } from '../setup/permissions-tab';
 import { SetupAgentButton } from '../setup/setup-agent-link';
 import { SetupAgentTab } from '../setup/setup-agent-tab';
+import { NewSkillButton, SkillsView } from '../skills/skills-view';
 import { WorkspaceView } from '../workspace/workspace-view';
 import { KeychainWaitBanner } from './keychain-wait';
 import { lastPage, useKeepAddress } from './last-address';
@@ -32,6 +35,7 @@ export function Shell() {
   useLiveEvents();
   usePrefetchPullRequests();
   useKeepAddress();
+  useRunAlerts();
   return (
     <div className="flex min-h-0 flex-1">
       <Sidebar />
@@ -53,6 +57,19 @@ export function Shell() {
               element={
                 <Page title="Workspace" sub="Sessions in your Repos and their pull requests">
                   <WorkspaceView />
+                </Page>
+              }
+            />
+            <Route
+              path="/agent-runs"
+              element={
+                <Page
+                  title="Agent runs"
+                  sub="Every agent run: how it goes, why it is slow, why it failed"
+                  width="wide"
+                  actions={<AgentRunsActions />}
+                >
+                  <AgentRunsView />
                 </Page>
               }
             />
@@ -144,6 +161,18 @@ export function Shell() {
                   actions={<NewPlaybookButton />}
                 >
                   <PlaybooksView />
+                </Page>
+              }
+            />
+            <Route
+              path="/skills"
+              element={
+                <Page
+                  title="Skills"
+                  sub="Methods the agent can load while a Playbook runs. Attach them to Playbooks."
+                  actions={<NewSkillButton />}
+                >
+                  <SkillsView />
                 </Page>
               }
             />

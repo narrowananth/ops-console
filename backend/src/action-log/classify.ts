@@ -1,4 +1,5 @@
 import { ActionKind } from '@ops-console/shared';
+import { skillNameOf } from '../agent/skill-plugin';
 
 export type LoggedCall = { kind: ActionKind; target: string; command: string };
 
@@ -18,7 +19,7 @@ function field(input: Record<string, unknown>, ...keys: string[]): string | null
 }
 
 /**
- * The Action Log row for a tool call, before redaction: every Bash call and every MCP tool call. Other tools (reads, edits inside
+ * The Action Log row for a tool call, before redaction: every Bash call, every MCP tool call and every Skill load. Other tools (reads, edits inside
  * the working directory, web fetches) return `null` and are not logged.
  */
 export function classifyCall(toolName: string, input: Record<string, unknown>, workingDir: string): LoggedCall | null {
@@ -29,6 +30,11 @@ export function classifyCall(toolName: string, input: Record<string, unknown>, w
     const kind = pr ? ActionKind.Pr : words[0] === 'git' ? ActionKind.Git : ActionKind.Shell;
     const number = pr ? words.slice(3).find((word) => /^\d+$/.test(word)) : undefined;
     return { kind, target: number ? `${workingDir}#${number}` : workingDir, command };
+  }
+  if (toolName === 'Skill') {
+    // A console Skill arrives as `<plugin>:<name>`; the row names the Skill.
+    const name = skillNameOf(field(input, 'skill') ?? '');
+    return { kind: ActionKind.Skill, target: workingDir, command: `Skill ${name}`.trim() };
   }
   const mcp = mcpTool(toolName);
   if (!mcp) return null;

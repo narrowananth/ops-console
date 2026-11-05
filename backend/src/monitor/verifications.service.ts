@@ -28,6 +28,7 @@ import { reports, routes, services } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { JobSteps, jobPlaybook } from '../playbooks/job-steps';
 import { PlaybooksService } from '../playbooks/playbooks.service';
+import { parseSkillCopies, skillCopiesJson } from '../playbooks/skills.service';
 import { type CodeBase, codeBaseStep, GIT, Git, GitFailed } from '../repos/git';
 import { AnonymousSessionsService } from '../workspace/anonymous-sessions.service';
 import { AlertSessions, type CodeSource } from './alert-sessions';
@@ -169,6 +170,7 @@ export class VerificationsService {
           playbookId: copy.id,
           playbookName: copy.name,
           playbookRules: copy.rules,
+          playbookSkills: skillCopiesJson(copy.skills),
           playbookBranches: copy.branches,
         })
         .returning()
@@ -248,6 +250,7 @@ export class VerificationsService {
     const job = { kind: 'report', id: reportId } as const;
     const hasSteps = this.steps.rows(job).length > 0;
     const rules = report.playbookRules;
+    const skills = parseSkillCopies(report.playbookSkills);
     if (made)
       this.addStep(
         reportId,
@@ -255,12 +258,13 @@ export class VerificationsService {
         versionStep(deployedVersion(samplesOf(alert)), made.base.sha, made.base.branch),
       );
     const brief = verificationBrief(alert, service, route, source, made?.base ?? null, checked.line);
-    const failure = await this.steps.run({ job, sessionId, brief, rules, cwd: scratch, fresh: !retry, onPart });
+    const failure = await this.steps.run({ job, sessionId, brief, rules, skills, cwd: scratch, fresh: !retry, onPart });
     if (failure) throw new VerificationFailed(failure);
     const closing = hasSteps || retry ? REPORT_PROMPT : `${brief}\n\n${REPORT_PROMPT}`;
     const summary = await this.runtime.runFor(sessionId, closing, onPart, {
       cwd: scratch,
       rules,
+      skills,
       fresh: !retry && !hasSteps,
     }).finished;
     await this.complete(reportId, alert, summary);

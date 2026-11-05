@@ -12,15 +12,19 @@ import { NetworkAllowlistService } from '../network/network-allowlist.service';
 import { JobSteps } from '../playbooks/job-steps';
 import { PlaybooksController } from '../playbooks/playbooks.controller';
 import { PlaybooksService } from '../playbooks/playbooks.service';
+import { SkillsController } from '../playbooks/skills.controller';
+import { SkillsService } from '../playbooks/skills.service';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
 import { Attachments } from './attachments';
 import { ConnectionLookup } from './connection-lookup';
 import { MessageInterceptors } from './message-interceptors';
 import { ProdWriteRule } from './prod-write-rule';
+import { RunInsights } from './run-insights.service';
+import { RunStepsLog } from './run-steps';
 import { RunRegistry } from './runs';
 import { AgentRuntime } from './runtime';
 import { SessionKinds } from './session-kinds';
-import { SessionsController } from './sessions.controller';
+import { AgentRunsController, SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
 import { Transcripts } from './transcripts';
 
@@ -36,11 +40,13 @@ export class AgentModule {
       global: true,
       controllers: [
         SessionsController,
+        AgentRunsController,
         ActionLogController,
         ApprovalsController,
         AccountsController,
         CliProxyController,
         PlaybooksController,
+        SkillsController,
         NetworkAllowlistController,
       ],
       providers: [
@@ -58,9 +64,12 @@ export class AgentModule {
         AccountsService,
         CliProxyService,
         SessionsService,
+        RunStepsLog,
+        RunInsights,
         NetworkAllowlistService,
         AgentRuntime,
         PlaybooksService,
+        SkillsService,
         JobSteps,
       ],
       exports: [
@@ -76,6 +85,7 @@ export class AgentModule {
         AgentRuntime,
         AccountsService,
         PlaybooksService,
+        SkillsService,
         JobSteps,
       ],
     };

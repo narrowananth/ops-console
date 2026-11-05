@@ -18,6 +18,12 @@ import { DATA_DIR } from '../common/data-dir';
 import { ApiError, parseInput } from '../common/errors';
 import { GIT, Git, GitFailed } from '../repos/git';
 
+/**
+ * What an Anonymous Session's agent is told about Repos. The folder it works in is empty and belongs to no Repo, so
+ * work on a Repo the operator names happens only after the Session moves into it.
+ */
+const ANONYMOUS_INSTRUCTIONS = `This Session has no Repo: you work in an empty folder of its own. When the operator names a repository, a service or a folder on this machine, or describes an issue in one, call the join_repo tool first with the Repo's name, its path or its Git URL. The operator approves, the Session moves into their checkout on a branch, and your next turn starts there with the conversation so far. If the tool says no imported Repo matches, clone the repository into this folder if it is on a Git host, work there, and tell the operator to import the Repo in the console to get branches and pull requests. Do not edit a Repo's files through its path from this folder: the Run sandbox does not allow it.`;
+
 /** Sessions with no imported Repo. Each works in its own folder under the data directory, and may clone into it. */
 @Injectable()
 export class AnonymousSessionsService {
@@ -32,6 +38,7 @@ export class AnonymousSessionsService {
       workingDir: (session) => this.folder(session.id),
       acceptsMessages: true,
       create: (body) => this.create(parseInput(createAnonymousSessionSchema, body, 'body')),
+      instructions: ANONYMOUS_INSTRUCTIONS,
     });
   }
 

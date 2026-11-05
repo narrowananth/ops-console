@@ -51,6 +51,8 @@ export enum ScanStatus {
   Ok = 'ok',
   Failed = 'failed',
   RateLimited = 'rate_limited',
+  /** The operator stopped it. */
+  Cancelled = 'cancelled',
 }
 
 export enum RouteState {

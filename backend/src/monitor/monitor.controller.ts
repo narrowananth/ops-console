@@ -91,6 +91,13 @@ export class MonitorController {
     return { data: await this.scans.start(parseInput(createScanSchema, body, 'body')) };
   }
 
+  /** Stops a running Scan; 409 `invalid_state` when it is not running. */
+  @Post('scans/:id/cancel')
+  @HttpCode(204)
+  cancelScan(@Param() params: unknown): void {
+    this.scans.cancel(parseInput(idParams, params, 'params').id);
+  }
+
   @Get('monitor/envs')
   async envs(): Promise<{ data: MonitorEnv[] }> {
     return { data: await this.scans.envs() };

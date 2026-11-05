@@ -3,7 +3,7 @@ import { StopRun } from '../agents/stop-run';
 import { Elapsed } from '../components/ui/elapsed';
 import { StatusPill } from '../components/ui/pathway';
 import { useRetryReplyCheck, useSkipRunningStep } from '../lib/queries';
-import { JobFailure, JobPath, PlaybookLink, runState } from '../playbooks/job-steps';
+import { JobFailure, JobPath, PlaybookLink, runState, SkillsOffered } from '../playbooks/job-steps';
 
 /** A running or failed Reply check under its thread. A ready one shows nothing: its verdict is the agent's reply. */
 export function ReplyCheckStrip({ check, sessionId }: { check: ReplyCheck; sessionId: string | null }) {
@@ -24,6 +24,7 @@ export function ReplyCheckStrip({ check, sessionId }: { check: ReplyCheck; sessi
           {failed ? 'Reply check failed' : 'Checking the reply'}
         </strong>
         {check.playbook && <PlaybookLink playbook={check.playbook} />}
+        {check.playbook && <SkillsOffered playbook={check.playbook} />}
         <span className="ml-auto flex items-center gap-2">
           {check.status === AgentReviewStatus.Running && sessionId && (
             <StopRun sessionId={sessionId} title="Stop the Reply check; it fails and can retry from its step" />

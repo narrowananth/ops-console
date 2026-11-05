@@ -38,6 +38,7 @@ const session = (id: string, extra: Record<string, unknown> = {}) => ({
   created_at: NOW,
   last_active_at: NOW,
   playbook: null,
+  queued_message: null,
   ...extra,
 });
 
@@ -125,15 +126,39 @@ test('a Session links its pull request and its Monitor Alert', async ({ page }) 
   await expect(page.getByRole('heading', { name: '#7 Guard empty carts' })).toBeVisible();
 });
 
+const run = (id: string, extra: Record<string, unknown> = {}, sessionExtra: Record<string, unknown> = {}) => ({
+  session: session(id, sessionExtra),
+  running: true,
+  outcome: null,
+  started_at: NOW,
+  finished_at: null,
+  can_resume: true,
+  subagents: [],
+  health: 'on_track',
+  health_reason: 'On track: the agent is thinking',
+  activity: null,
+  cost_usd: null,
+  tokens: null,
+  split: [],
+  ...extra,
+});
+
 test('the sidebar tray lists every agent run going, says which wait on the operator, and opens each', async ({
   page,
 }) => {
-  await routeWorkspace(page, [
-    session('s1', { state: 'working', title: 'Add a retry' }),
-    session('s3', { state: 'waiting_approval', title: 'Drop the old index', branch: 'main' }),
-    session('s4', { kind: 'pr_review', state: 'working', pr_number: 7, title: 'PR #7' }),
-    session('s5', { state: 'idle', title: 'Done already' }),
-  ]);
+  await routeWorkspace(page);
+  await page.route('**/api/agent-runs', (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          run('s1', {}, { state: 'working', title: 'Add a retry' }),
+          run('s3', {}, { state: 'waiting_approval', title: 'Drop the old index', branch: 'main' }),
+          run('s4', { can_resume: false }, { kind: 'pr_review', state: 'working', pr_number: 7, title: 'PR #7' }),
+        ],
+        meta: { next_cursor: null },
+      },
+    }),
+  );
   await page.goto(`${daemon.url}/repos#token=${daemon.token}`);
 
   const tray = page.getByRole('button', { name: 'Running agents' });
@@ -149,4 +174,81 @@ test('the sidebar tray lists every agent run going, says which wait on the opera
   await tray.click();
   await runs.filter({ hasText: 'Add a retry' }).getByRole('link').click();
   await expect(page).toHaveURL(/\/workspace\?session=s1$/);
+});
+
+test('the tray shows how long a run took, nests its subagents, and pauses, stops, plays and retries runs', async ({
+  page,
+}) => {
+  await routeWorkspace(page);
+  const calls: string[] = [];
+  const subagent = (id: string, parent: string | null, status: string) => ({
+    id,
+    parent_id: parent,
+    description: `Task ${id}`,
+    type: 'Explore',
+    status,
+    started_at: NOW,
+    finished_at: status === 'working' ? null : '2026-11-02T09:02:05.000Z',
+  });
+  await page.route('**/api/agent-runs', (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          run(
+            's1',
+            { subagents: [subagent('t1', null, 'working'), subagent('t2', 't1', 'done')] },
+            { state: 'working', title: 'Add a retry' },
+          ),
+          run(
+            's3',
+            { running: false, outcome: 'rate_limited', finished_at: '2026-11-02T09:04:05.000Z' },
+            { title: 'Hit the limit' },
+          ),
+          run(
+            's5',
+            { running: false, outcome: 'paused', finished_at: '2026-11-02T09:01:00.000Z' },
+            { title: 'Paused one' },
+          ),
+        ],
+        meta: { next_cursor: null },
+      },
+    }),
+  );
+  for (const action of ['pause', 'stop']) {
+    await page.route(`**/api/sessions/s1/${action}`, (route) => {
+      calls.push(`${action} s1`);
+      return route.fulfill({ status: 204 });
+    });
+  }
+  await page.route('**/api/sessions/s*/resume', (route) => {
+    calls.push(`resume ${route.request().url().split('/').at(-2)}`);
+    return route.fulfill({ status: 202, json: { data: { message_id: 'm1' } } });
+  });
+  await page.route('**/api/agent-runs/s5', (route) => {
+    calls.push('dismiss s5');
+    return route.fulfill({ status: 204 });
+  });
+  await page.goto(`${daemon.url}/repos#token=${daemon.token}`);
+
+  const tray = page.getByRole('button', { name: 'Running agents' });
+  await expect(tray).toHaveAttribute('title', '1 agent run going, 2 ended');
+  await tray.click();
+  const runs = page.getByRole('dialog', { name: 'Agent runs going now' }).getByRole('listitem');
+  const main = runs.filter({ hasText: 'Add a retry' }).first();
+  await expect(main).toContainText('2 subagents');
+  await expect(page.getByText('Task t1')).toBeHidden();
+  await main.getByRole('button', { name: 'Show 2 subagents' }).click();
+  await expect(page.getByText('Task t1')).toBeVisible();
+  await expect(page.getByText('Task t2')).toBeVisible();
+
+  const limited = runs.filter({ hasText: 'Hit the limit' });
+  await expect(limited).toContainText('limit reached');
+  await expect(limited).toContainText('4m 05s');
+  await main.getByRole('button', { name: 'Pause' }).click();
+  await main.getByRole('button', { name: 'Stop', exact: true }).click();
+  await limited.getByRole('button', { name: 'Retry' }).click();
+  const paused = runs.filter({ hasText: 'Paused one' });
+  await paused.getByRole('button', { name: 'Play' }).click();
+  await paused.getByRole('button', { name: 'Dismiss' }).click();
+  await expect.poll(() => calls).toEqual(['pause s1', 'stop s1', 'resume s3', 'resume s5', 'dismiss s5']);
 });

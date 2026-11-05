@@ -8,6 +8,7 @@ import { item } from '../components/ui/item';
 import { usePullRequests, useRefreshPullRequests, useRepos } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
+import { ago, when } from '../monitor/scan-scope';
 
 type Pull = { repoId: string; number: number };
 
@@ -281,8 +282,16 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                                   {pr.state}
                                 </span>
                               )}
+                              <span
+                                className="ml-auto flex-none text-right font-mono text-[11px] leading-tight font-normal whitespace-nowrap text-neutral-700"
+                                title={`Opened ${new Date(pr.opened_at).toLocaleString()}`}
+                              >
+                                Opened {when(pr.opened_at)}
+                                <br />
+                                {ago(pr.opened_at)}
+                              </span>
                               {!here && (
-                                <span aria-hidden className="ml-auto flex-none text-xs font-normal text-neutral-600">
+                                <span aria-hidden className="flex-none text-xs font-normal text-neutral-600">
                                   ↗
                                 </span>
                               )}

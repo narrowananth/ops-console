@@ -10,6 +10,8 @@ const draftSchema = z.object({
   branches: z.string().default(''),
   // Drafts kept from before the Jira ticket switch have none.
   jira_ticket: z.boolean().default(false),
+  // A draft with no `skill_ids` holds none.
+  skill_ids: z.array(z.string()).default([]),
   steps: z.array(
     z.object({ block: z.enum(StepBlock), title: z.string(), instructions: z.string(), writes: z.boolean() }),
   ),
@@ -26,6 +28,7 @@ export const draftOf = (playbook: Playbook): Draft => ({
   rules: playbook.rules,
   branches: playbook.branches,
   jira_ticket: playbook.jira_ticket,
+  skill_ids: playbook.skills.map((skill) => skill.id),
   steps: playbook.steps,
 });
 
@@ -34,6 +37,8 @@ const same = (a: Draft, b: Draft) =>
   a.rules === b.rules &&
   a.branches === b.branches &&
   a.jira_ticket === b.jira_ticket &&
+  a.skill_ids.length === b.skill_ids.length &&
+  a.skill_ids.every((id) => b.skill_ids.includes(id)) &&
   a.steps.length === b.steps.length &&
   a.steps.every(
     (step, index) =>

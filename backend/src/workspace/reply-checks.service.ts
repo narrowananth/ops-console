@@ -17,6 +17,7 @@ import { prReplyChecks } from '../db/schema';
 import { type Emit, STORE, type Store } from '../db/store';
 import { JobSteps, jobPlaybook } from '../playbooks/job-steps';
 import { PlaybooksService } from '../playbooks/playbooks.service';
+import { parseSkillCopies, skillCopiesJson } from '../playbooks/skills.service';
 import type { HostComment, HostPullRequest } from './git-host';
 import { fileLine, JobFailed, PrJobs, threadOf, threadText, toReplyCheck } from './pr-jobs';
 import { PullRequestsService } from './pull-requests.service';
@@ -102,6 +103,7 @@ export class ReplyChecksService {
           playbookId: copy.id,
           playbookName: copy.name,
           playbookRules: copy.rules,
+          playbookSkills: skillCopiesJson(copy.skills),
         })
         .returning()
         .get();
@@ -162,11 +164,20 @@ export class ReplyChecksService {
     }
     const cwd = row.scratchPath ?? undefined;
     const rules = row.playbookRules;
+    const skills = parseSkillCopies(row.playbookSkills);
     if (row.verdict === null) {
       const job = { kind: 'reply_check', id } as const;
-      const failure = await this.steps.run({ job, sessionId: session, brief, rules, cwd, deny: HOST_WRITE_DENIALS });
+      const failure = await this.steps.run({
+        job,
+        sessionId: session,
+        brief,
+        rules,
+        skills,
+        cwd,
+        deny: HOST_WRITE_DENIALS,
+      });
       if (failure) throw new JobFailed(failure, true);
-      const closing = { rules, cwd, deny: HOST_WRITE_DENIALS };
+      const closing = { rules, skills, cwd, deny: HOST_WRITE_DENIALS };
       const summary = await this.runtime.runFor(session, REPLY_CHECK_PROMPT, null, closing).finished;
       if (summary.stopped) throw new JobFailed(`The verdict was not given: ${STOPPED}`, true);
       if (summary.failure) throw new JobFailed(summary.failure, true);

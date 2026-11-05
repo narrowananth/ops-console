@@ -398,6 +398,37 @@ describe('Check reply', () => {
   });
 });
 
+describe('Skills on a job', () => {
+  it("offers a Check reply the Playbook's Skills, as copied at the start, and shows them on the job (Behavior 10, 14)", async () => {
+    const ctx = await start();
+    const made = await ctx.http.post('/skills', {
+      name: 'reply-method',
+      description: 'Use when checking a reply.',
+      instructions: 'Read the diff first.',
+    });
+    const playbook = await ctx.http.post('/playbooks', {
+      name: 'With a Skill',
+      steps: [{ block: 'run_tests', title: 'Run the tests', instructions: 'Run them.', writes: false }],
+      skill_ids: [made.body.data.id],
+    });
+    await ctx.http.put('/playbook-triggers/check_reply', { playbook_id: playbook.body.data.id });
+    ctx.daemon.sdk.script(stepAnswer('ok'));
+    ctx.daemon.sdk.script({ text: verdict('fixed', 'Fine.') });
+    const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-checks`, { comment_id: 'c1' });
+    expect(started.body.data.playbook.skills).toEqual([{ id: made.body.data.id, name: 'reply-method' }]);
+    await jobEnded(ctx, 'reply_check', started.body.data.id);
+    // The step turn and the closing turn both had the Skill.
+    for (const call of ctx.daemon.sdk.calls.slice(-2)) {
+      expect(call.options.skills).toEqual(['ops-console-skills:reply-method']);
+    }
+
+    // Deleting the Skill leaves the job's record of it, by name only.
+    await ctx.http.delete(`/skills/${made.body.data.id}`);
+    const [check] = (await detail(ctx)).reply_checks;
+    expect(check.playbook.skills).toEqual([{ id: null, name: 'reply-method' }]);
+  });
+});
+
 describe('Check replies', () => {
   /** A second replied thread, on the same line. */
   const secondReplied = (ctx: Ctx) => {
@@ -942,6 +973,11 @@ describe('Restart', () => {
       scratchPath: kept,
     });
     expect(rows.find((row) => row.id === 'was-ready')?.scratchPath).toBeNull();
-    expect([existsSync(kept), existsSync(done), existsSync(stray)]).toEqual([true, false, false]);
+    // The copies go after recovery ends, so a large one never holds up start-up.
+    await until(
+      () => [existsSync(kept), existsSync(done), existsSync(stray)],
+      (exists) => exists.join() === 'true,false,false',
+      'the copies to be removed',
+    );
   });
 });

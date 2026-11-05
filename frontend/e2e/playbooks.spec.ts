@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import type { JobPlaybook, PlaybookStepStatus } from '@ops-console/shared';
 import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
 import { DAEMON_FILE } from './global-setup';
 
@@ -410,12 +411,19 @@ test('the page says while it reads Playbooks, and why it could not', async ({ pa
 
 // Monitor and Workspace jobs come from the Datadog and Git host fakes, so these answer with fixtures.
 
-const jobPlaybook = (id: string | null, name: string, steps: [string, string, string | null, boolean?][]) => ({
+type StepStatus = `${PlaybookStepStatus}`;
+
+const jobPlaybook = (
+  id: string | null,
+  name: string,
+  steps: [string, StepStatus, string | null, boolean?][],
+): JobPlaybook => ({
   id,
   name,
+  skills: [],
   steps: steps.map(([title, status, summary, writes = false]) => ({
     title,
-    status,
+    status: status as JobPlaybook['steps'][number]['status'],
     summary,
     writes,
     // A step that ran started at NOW; one that ended, ended then too.
@@ -433,6 +441,7 @@ const builtinsList = (held: { id: string; name: string; triggers: string[] }[]) 
       branches: '',
       jira_ticket: false,
       steps: [],
+      skills: [],
       updated_at: NOW,
     })),
     blocks: [],
@@ -950,6 +959,7 @@ const session = (id: string, kind: string, playbook: { id: string; name: string 
   created_at: NOW,
   last_active_at: NOW,
   playbook,
+  queued_message: null,
 });
 
 test('a Session names the Playbook its rules come from and links to it', async ({ page, request }) => {
@@ -1010,7 +1020,10 @@ test('the Monitor search keeps the logs whose words match, and the Services pane
   await routeAlerts(page, [a1, a2]);
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
 
-  const logs = page.getByRole('list', { name: 'Logs' }).getByRole('listitem');
+  const logs = page
+    .getByRole('list', { name: 'Logs' })
+    .getByRole('listitem')
+    .filter({ has: page.getByRole('button') });
   await expect(logs).toHaveCount(2);
   const search = page.getByRole('searchbox', { name: 'Search logs' });
   await search.fill('carts 404');

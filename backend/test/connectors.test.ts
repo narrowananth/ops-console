@@ -1,5 +1,4 @@
-import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { CONNECTOR_ORDER, ConnectorId, type WsEvent } from '@ops-console/shared';
@@ -41,16 +40,16 @@ async function start(): Promise<Ctx> {
 
 const list = async (ctx: Ctx): Promise<Row[]> => (await api(ctx.daemon).get('/connectors')).body.data;
 const one = async (ctx: Ctx, id: string): Promise<Row> => (await list(ctx)).find((row) => row.id === id) as Row;
-/** Fake `claude mcp login <name>` processes still running. */
-const logins = async (name: string): Promise<number> => {
-  try {
-    return execFileSync('pgrep', ['-f', `claude.mjs mcp login ${name}`], { encoding: 'utf8' })
-      .trim()
-      .split('\n').length;
-  } catch {
-    return 0;
-  }
-};
+/** Fake `claude mcp login <name>` processes of this test's accounts still running. */
+const logins = async (ctx: Ctx, name: string): Promise<number> =>
+  ctx.dirs.filter((dir) => {
+    try {
+      process.kill(Number(readFileSync(path.join(dir, `fake-mcp-login-${name}.pid`), 'utf8')), 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }).length;
 const mcpServer = async (ctx: Ctx, name: string): Promise<Row | undefined> =>
   (await api(ctx.daemon).get('/mcp-servers')).body.data.find((s: Row) => s.name === name);
 const checks = (events: WsEvent[]) =>
@@ -572,7 +571,7 @@ describe('disconnecting', () => {
       const reads = ctx.probe.ones;
       await api(ctx.daemon).post('/connectors/sentry/connect', {});
       await until(
-        () => logins('sentry'),
+        () => logins(ctx, 'sentry'),
         (count) => count === 1,
         'claude mcp login',
       );
@@ -580,7 +579,7 @@ describe('disconnecting', () => {
       expect(ctx.probe.ones).toBe(reads);
       await api(ctx.daemon).delete('/connectors/sentry/credentials');
       await until(
-        () => logins('sentry'),
+        () => logins(ctx, 'sentry'),
         (count) => count === 0,
         'the login to stop',
       );
@@ -629,14 +628,14 @@ describe('disconnecting', () => {
     try {
       await api(ctx.daemon).post('/connectors/jira/connect', {});
       await until(
-        () => logins('atlassian'),
+        () => logins(ctx, 'atlassian'),
         (count) => count === 1,
         'claude mcp login',
       );
       const cancelled = await api(ctx.daemon).delete('/connectors/jira/sign-in');
       expect(cancelled.body.data).toMatchObject({ status: 'ok', sign_in: null });
       await until(
-        () => logins('atlassian'),
+        () => logins(ctx, 'atlassian'),
         (count) => count === 0,
         'the login to stop',
       );

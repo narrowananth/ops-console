@@ -60,3 +60,14 @@ export function ago(iso: string): string {
   if (minutes < 48 * 60) return `${Math.round(minutes / 60)}h ago`;
   return `${Math.round(minutes / 1440)}d ago`;
 }
+
+/** `Nov 5 · 2:14 PM`, with the year past this one. */
+export function when(iso: string): string {
+  const at = new Date(iso);
+  const day = at.toLocaleDateString([], {
+    month: 'short',
+    day: 'numeric',
+    ...(at.getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }),
+  });
+  return `${day} · ${at.toLocaleTimeString([], { timeStyle: 'short' })}`;
+}

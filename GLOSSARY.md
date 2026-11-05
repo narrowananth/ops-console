@@ -49,8 +49,8 @@ The operator's yes or no on one agent action that needs it: a PROD write, or an 
 a mode that asks.
 
 **Run sandbox**:
-The operating-system limit on an agent run's commands: writes only in the run's working folder and temp, no reads of
-the console's data folder or the operator's cloud and login credentials. It applies in every Access mode, and a run
+The operating-system limit on an agent run's commands: writes only in the run's working folder, temp and package-tool caches, no reads of
+the console's data folder or the operator's cloud and login credentials. Package-tool caches under the home folder stay writable so a repo's commit hooks and builds run. It applies in every Access mode, and a run
 fails when the sandbox is unavailable.
 
 **Network allowlist**:
@@ -60,9 +60,9 @@ Repos' remotes and the operator's own domains. Any other host is refused.
 ### Playbooks
 
 **Playbook**:
-The rules and ordered steps the agent follows when a Trigger starts it, written by the operator, the branches
-Verify and Fix read the code from, and whether a Fix makes a Ticket. Each Trigger holds one; one Playbook may be held
-by several. Each Trigger without one runs its built-in.
+The rules and ordered steps the agent follows when a Trigger starts it, written by the operator, the Skills it holds,
+the branches Verify and Fix read the code from, and whether a Fix makes a Ticket. Each Trigger holds one; one Playbook
+may be held by several. Each Trigger without one runs its built-in.
 _Avoid_: rule, pipeline, workflow
 
 **Trigger**:
@@ -73,6 +73,13 @@ _Avoid_: action (the Action Log means each command the agent runs)
 **Job**:
 A Trigger's run that goes through its Playbook steps and then the console's closing turn: a Verification, Fix, Agent
 Review, Reply check or Comment pass. Reply in thread and Session message are chats, not jobs.
+
+**Skill**:
+A named instruction document the operator keeps in the console and attaches to Playbooks: a name, a description of when to
+use it, and Markdown instructions. The agent sees the name and description of each Skill its Playbook holds and loads the
+instructions when a step needs them. Text only, no scripts or files. Not the skills in `.agents/skills/`, which are for
+this repo's developers.
+_Avoid_: plugin, add-on, prompt
 
 **Playbook step**:
 One titled instruction in a Playbook, run as its own agent turn, ending done, skipped or failed.
@@ -179,6 +186,21 @@ dev-tools Session and an anonymous Session, which have no Repo. A pull request h
 replies, with no composer, and an Alert has one for its Verification and Fix.
 _Avoid_: chat, thread
 
+**Running tray**:
+The sidebar list of agent runs: the ones going, each with the subagents it started, and the ones that ended unfinished
+(stopped, paused, out of usage, signed out, interrupted by a restart). An unfinished run stays until the operator
+dismisses it. Each entry shows how long the run took and controls to pause, stop, play or retry it.
+_Avoid_: notification panel, running tasks
+
+**Agent runs page**:
+The sidebar page for every agent run: whether to look at it (its health), what it does, where its time went, and why it
+is slow or ended. It has the controls of the Running tray, plus the queued message and desktop alerts.
+_Avoid_: dashboard, monitor
+
+**Run health**:
+What the Agent runs page says about a run: on track, slow, needs you, failed or stopped. The daemon reads it from the
+run's steps, its Approvals and its outcome.
+
 **Alert Session**:
 The Session an Alert's first Verification makes, linked to the Alert. Every later Verification and Fix stage runs in
 it: a Session in the Service's Repo, on the Repo's default branch, or an Anonymous Session holding a clone.
@@ -189,7 +211,8 @@ the agent moves to another branch.
 
 **Anonymous Session**:
 A Session with no imported Repo. It works in a folder of its own in the data directory, and the agent may clone a
-repository into it. A Verification or Fix for a Service with no local Repo runs in one that holds a clone of the
+repository into it. When the operator names an imported Repo, the agent asks to join it: once approved the Session
+becomes a Session in that Repo. A Verification or Fix for a Service with no local Repo runs in one that holds a clone of the
 Service's Git URL.
 
 **Agent Review**:

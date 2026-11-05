@@ -1,4 +1,4 @@
-import type { Part } from '@ops-console/shared';
+import type { Part, SkillCopy, Subagent } from '@ops-console/shared';
 
 /** A run in progress. It lives in memory only: a daemon restart ends it (Behavior 18). */
 export type Run = {
@@ -9,6 +9,8 @@ export type Run = {
   workingDir: string;
   /** The Playbook rules this run follows; null for none. */
   rules: string | null;
+  /** The Skills the run's Playbook holds. */
+  skills: SkillCopy[];
   /** Tools denied on top of merging. */
   deny: string[];
   parts: Part[];
@@ -38,6 +40,16 @@ export type Run = {
   abort: AbortController;
   /** Set when the operator stopped the run, so its end reads as stopped, not failed. */
   stopped: boolean;
+  /** Set when the operator paused the run: it ends like a stopped one, kept in the tray for Play. */
+  paused: boolean;
+  /** Set when an Approval or the agent's question waits on the operator: since when (epoch ms). */
+  waitingSince: number | null;
+  /** Set when the agent moved the Session into a Repo: the next turn starts there once this run ends. */
+  joinedRepo: boolean;
+  /** Set when Send now stopped the run: its queued message goes out as the run ends. */
+  sendQueuedAfter: boolean;
+  /** The subagents the run started, by task id. */
+  subagents: Map<string, Subagent>;
   /** The conversation resumes from this transcript entry, dropping what came after it; null for all of it. */
   resumeAt: string | null;
   /** The Network allowlist the run started with; a retry on another account keeps it. */
@@ -71,6 +83,11 @@ export class RunRegistry {
 
   remove(sessionId: string): void {
     this.runs.delete(sessionId);
+  }
+
+  /** The Sessions with a run going. */
+  sessionIds(): string[] {
+    return [...this.runs.keys()];
   }
 
   onAccount(accountId: string): boolean {

@@ -450,6 +450,23 @@ describe('Scans and Alerts', () => {
     expect(await alertList(ctx)).toEqual([before]);
   });
 
+  it('stops a running Scan: it ends cancelled and keeps nothing it read', async () => {
+    const ctx = await start();
+    ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 4)])];
+    ctx.datadog.hold = new Promise(() => {});
+    const started = await ctx.http.post('/scans', { service_id: null });
+    expect((await ctx.http.post(`/scans/${started.body.data.id}/cancel`, {})).status).toBe(204);
+    const ended = await until(
+      () => ctx.http.get(`/scans/${started.body.data.id}`).then((res) => res.body.data),
+      (found) => found.status !== 'running',
+      'the Scan to end',
+    );
+    expect(ended).toMatchObject({ status: 'cancelled', error_code: null });
+    expect(await alertList(ctx)).toEqual([]);
+    const again = await ctx.http.post(`/scans/${started.body.data.id}/cancel`, {});
+    expect([again.status, again.body.error.code]).toEqual([409, 'invalid_state']);
+  });
+
   it('refuses a Scan while Datadog is not connected', async () => {
     const ctx = await start({ connected: false });
     const response = await ctx.http.post('/scans', { service_id: null });
@@ -1562,6 +1579,7 @@ describe('Playbooks in Monitor jobs', () => {
     expect({ ...report.playbook, steps: report.playbook.steps.map(untimed) }).toEqual({
       id: playbook.id,
       name: 'Checkout deep check',
+      skills: [],
       steps: [
         { title: 'Trace', writes: false, status: 'done', summary: 'OrderService.total:12 reads a missing total' },
         { title: 'Make mock data', writes: true, status: 'skipped', summary: 'no staging data' },

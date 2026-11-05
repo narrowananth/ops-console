@@ -8,6 +8,8 @@ import type {
   Options,
   PermissionMode,
   SDKMessage,
+  SDKTaskNotificationMessage,
+  SDKTaskStartedMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
@@ -23,7 +25,11 @@ import {
   ErrorCode,
   type Message,
   type Part,
+  RunOutcome,
   SessionState,
+  type SkillCopy,
+  type Subagent,
+  SubagentStatus,
 } from '@ops-console/shared';
 import { eq, inArray } from 'drizzle-orm';
 import { type AccountRow, AccountsService, rateLimitInfoSchema } from '../accounts/accounts.service';
@@ -46,21 +52,27 @@ import { systemAppend } from '../playbooks/prompts';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
 import { Attachments } from './attachments';
 import { ConnectionLookup } from './connection-lookup';
+import { HOOK_BYPASS_REASON, skipsCommitHooks } from './hook-bypass';
 import { MessageInterceptors } from './message-interceptors';
 import { blockParts, contentSchema, EDIT_TOOLS, questionInputSchema, stepText, toMessages } from './parts';
 import { ProdWriteRule } from './prod-write-rule';
 import {
   CONSOLE_TOOLS_SERVER,
   consoleToolsServer,
+  JOIN_REPO_TOOL,
+  joinRepoInputSchema,
   OPEN_PULL_REQUEST_TOOL,
   openPullRequestInputSchema,
   type PullRequestOpener,
+  type RepoJoiner,
 } from './pull-request-tool';
 import { runSandbox } from './run-sandbox';
+import { RunStepsLog } from './run-steps';
 import { type Run, RunRegistry, type RunSummary } from './runs';
 import { SessionKinds } from './session-kinds';
 import { sessionTitle, shortTitle } from './session-title';
 import { emitSessionUpdated, NEW_SESSION_TITLE, type SessionRow, SessionsService } from './sessions.service';
+import { removeSkillPlugin, skillNames, skillRunsDir, writeSkillPlugin } from './skill-plugin';
 import { Transcripts } from './transcripts';
 
 /**
@@ -130,6 +142,8 @@ export type RunOptions = {
   cwd?: string;
   /** The Playbook rules the job copied. */
   rules?: string | null;
+  /** The Skills the job copied. */
+  skills?: SkillCopy[];
   /** Starts a new agent conversation instead of resuming the Session's. */
   fresh?: boolean;
   /** Resumes the conversation from this transcript entry, dropping what came after it. */
@@ -145,6 +159,28 @@ type RunResult =
   | ErrorCode.Unauthorized
   | ErrorCode.UpstreamFailed
   | ErrorCode.KeychainTimeout;
+
+/** What Play and Retry say to the agent. */
+const PLAY_TEXT = 'Carry on from where you stopped.';
+const JOINED_TEXT =
+  "You are now in the Repo, in its own folder. Carry on with what the operator asked. Do the work on a new branch, not on the default branch: make one with git switch -c, commit the change (the repo's commit hooks run and must pass), and when the work is done call the open_pull_request tool. The operator approves it, then the console pushes the branch and opens the pull request. If that tool is not in your tool list, the Repo has no Git host the console can open on: say so, and leave the commit on its branch.";
+const RETRY_TEXT = 'Your last run ended before it finished. Try again and carry on from where it stopped.';
+
+/** How a run that ended with `result` reads in the tray. */
+function outcomeOf(result: RunResult, paused: boolean): RunOutcome {
+  switch (result) {
+    case 'done':
+      return RunOutcome.Done;
+    case 'stopped':
+      return paused ? RunOutcome.Paused : RunOutcome.Stopped;
+    case ErrorCode.RateLimited:
+      return RunOutcome.RateLimited;
+    case ErrorCode.Unauthorized:
+      return RunOutcome.SignedOut;
+    default:
+      return RunOutcome.Failed;
+  }
+}
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -175,6 +211,7 @@ export class AgentRuntime {
     @Inject(ConnectionLookup) private readonly connections: ConnectionLookup,
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
     @Inject(NetworkAllowlistService) private readonly network: NetworkAllowlistService,
+    @Inject(RunStepsLog) private readonly steps: RunStepsLog,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
     recovery.register('agent sessions and approvals', () => this.recover());
@@ -187,17 +224,29 @@ export class AgentRuntime {
     this.opener = opener;
   }
 
+  /** Who moves an Anonymous Session into a Repo when the agent asks. Set once by the Workspace. */
+  private joiner: RepoJoiner | null = null;
+
+  setRepoJoiner(joiner: RepoJoiner): void {
+    this.joiner = joiner;
+  }
+
   /** A run does not survive a restart: its Session fails and its Approvals expire (Behavior 18). */
   private recover(): void {
     this.store.write((tx, emit) => {
       const interrupted = tx
         .update(sessions)
-        .set({ state: SessionState.Failed })
+        .set({
+          state: SessionState.Failed,
+          runOutcome: RunOutcome.Interrupted,
+          runFinishedAt: new Date().toISOString(),
+        })
         .where(inArray(sessions.state, [SessionState.Working, SessionState.WaitingInput, SessionState.WaitingApproval]))
         .returning()
         .all();
       for (const row of interrupted) emitSessionUpdated(emit, row);
     });
+    this.steps.closeAllOpen('the console restarted');
     this.approvals.expirePending();
   }
 
@@ -218,8 +267,8 @@ export class AgentRuntime {
     }
     if (this.interceptors.handle(session, text)) return { message_id: crypto.randomUUID() };
     // A chat reads its Playbook at each turn, so an edit applies from the next message (Behavior 20).
-    const { rules } = this.playbooks.forSession(session);
-    return { message_id: this.begin(sessionId, text, null, null, { rules }).messageId };
+    const { rules, skills } = this.playbooks.forSession(session);
+    return { message_id: this.begin(sessionId, text, null, null, { rules, skills }).messageId };
   }
 
   /**
@@ -267,14 +316,14 @@ export class AgentRuntime {
           }
         : null;
 
-    const { rules } = this.playbooks.forSession(session);
+    const { rules, skills } = this.playbooks.forSession(session);
     // The first message has nothing before it: the conversation starts over.
     const run = this.begin(
       sessionId,
       text,
       null,
       null,
-      typeof before === 'string' ? { rules, resumeAt: before } : { rules, fresh: true },
+      typeof before === 'string' ? { rules, skills, resumeAt: before } : { rules, skills, fresh: true },
     );
     return {
       message_id: run.messageId,
@@ -318,6 +367,7 @@ export class AgentRuntime {
       accountId: this.accounts.forRun().id,
       workingDir: options.cwd ?? kind.workingDir(session),
       rules: options.rules ?? null,
+      skills: options.skills ?? [],
       parts: [],
       growing: null,
       sdkUuids: new Set(),
@@ -331,6 +381,11 @@ export class AgentRuntime {
       serverLabel: kind.serverLabel ?? null,
       abort: new AbortController(),
       stopped: false,
+      paused: false,
+      waitingSince: null,
+      sendQueuedAfter: false,
+      joinedRepo: false,
+      subagents: new Map(),
       resumeAt: options.resumeAt ?? null,
       deny: options.deny ?? [],
       networkDomains: this.network.forRun(),
@@ -338,6 +393,7 @@ export class AgentRuntime {
       autoTitle: null,
     };
     this.runs.add(run);
+    this.steps.prune();
     this.sessions.setFailure(sessionId, null);
     if (options.fresh) this.sessions.write(sessionId, { sdkSessionId: null });
     const isFirst = session.title === NEW_SESSION_TITLE && session.sdkSessionId === null;
@@ -345,7 +401,11 @@ export class AgentRuntime {
     this.sessions.write(sessionId, {
       state: SessionState.Working,
       title: run.autoTitle ?? session.title,
-      lastActiveAt: new Date().toISOString(),
+      lastActiveAt: run.createdAt,
+      runStartedAt: run.createdAt,
+      runFinishedAt: null,
+      runOutcome: null,
+      runSubagents: null,
     });
     void this.execute(run, text);
     return run;
@@ -353,17 +413,79 @@ export class AgentRuntime {
 
   /**
    * Ends the Session's run where it is: the SDK query aborts, its pending Approvals expire, and the Session goes back
-   * to `idle`. Refused with `invalid_state` when no run is going.
+   * to `idle`. Refused with `invalid_state` when no run is going. A paused run ends the same way, and its tray entry
+   * offers Play.
    */
-  stop(sessionId: string): void {
+  stop(sessionId: string, paused = false): void {
     this.sessions.get(sessionId);
     const run = this.runs.get(sessionId);
     if (!run) throw new ApiError(409, ErrorCode.InvalidState, 'the session has no run going');
     run.stopped = true;
+    run.paused = paused;
     run.abort.abort();
     this.approvals.expirePending(sessionId);
     // An open question would hold the permission prompt forever; the aborted query ignores the answer.
     run.answer?.('');
+  }
+
+  /**
+   * Queues a message behind the Session's run: it goes out when the run ends, unless the operator stops the run. With no
+   * run going there is nothing to wait for, so it goes out now.
+   */
+  queue(sessionId: string, text: string): { queued: boolean } {
+    this.sessions.get(sessionId);
+    if (!this.runs.get(sessionId)) {
+      this.send(sessionId, text);
+      return { queued: false };
+    }
+    this.sessions.write(sessionId, { queuedText: text });
+    return { queued: true };
+  }
+
+  /** Takes the queued message back: it stays out of the next run. */
+  takeBack(sessionId: string): void {
+    this.sessions.get(sessionId);
+    this.sessions.write(sessionId, { queuedText: null });
+  }
+
+  /** Sends the queued message now. A run going stops first, and the message starts the next. */
+  sendQueuedNow(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session.queuedText === null) throw new ApiError(409, ErrorCode.InvalidState, 'no message is queued');
+    const run = this.runs.get(sessionId);
+    if (run) {
+      run.sendQueuedAfter = true;
+      this.stop(sessionId);
+      return;
+    }
+    this.releaseQueued(sessionId);
+  }
+
+  /** Clears the queued message and starts the run it asks for; a message that cannot start stays queued. */
+  private releaseQueued(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session.queuedText === null) return;
+    const text = session.queuedText;
+    this.sessions.write(sessionId, { queuedText: null });
+    try {
+      this.send(sessionId, text);
+    } catch (error) {
+      this.logger.error(
+        `queued message of session ${sessionId} did not start: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      this.sessions.write(sessionId, { queuedText: text });
+    }
+  }
+
+  /**
+   * Starts the run again from the conversation as it stands, for Play on a paused or stopped run and Retry on one that
+   * failed. Refused while a run is going or when the Session takes no messages.
+   */
+  resumeRun(sessionId: string): { message_id: string } {
+    const session = this.sessions.get(sessionId);
+    if (this.runs.get(sessionId)) throw new ApiError(409, ErrorCode.SessionBusy, "the session's run is still going");
+    const retry = session.runOutcome !== RunOutcome.Paused && session.runOutcome !== RunOutcome.Stopped;
+    return this.send(sessionId, retry ? RETRY_TEXT : PLAY_TEXT);
   }
 
   /** True while the Session's run is going. */
@@ -456,16 +578,24 @@ export class AgentRuntime {
     const instructions = this.kinds.get(session.kind)?.instructions;
 
     const attached = this.attachments.existingFolder(run.sessionId);
+    // The run's Skills sit in a folder of their own that the Run sandbox lets it read.
+    const skillFolder = run.skills.length > 0 ? path.join(skillRunsDir(), crypto.randomUUID()) : null;
     const options: Options = {
       cwd: run.workingDir,
       sandbox: runSandbox({
         workingDir: run.workingDir,
         dataDir: this.dataDir,
-        readable: attached === null ? [] : [attached],
+        readable: [...(attached === null ? [] : [attached]), ...(skillFolder === null ? [] : [skillFolder])],
         networkDomains: run.networkDomains,
       }),
       // The operator's attached files sit outside the working folder; the agent reads them without asking.
       ...(attached === null ? {} : { additionalDirectories: [attached] }),
+      ...(skillFolder === null
+        ? {}
+        : {
+            plugins: [{ type: 'local' as const, path: skillFolder, skipMcpDiscovery: true }],
+            skills: skillNames(run.skills),
+          }),
       model: session.model,
       effort: SDK_EFFORT[session.effort],
       permissionMode: PERMISSION_MODES[session.accessMode],
@@ -482,9 +612,14 @@ export class AgentRuntime {
       includePartialMessages: true,
       abortController: run.abort,
       // The console's own tools: the agent asks, the operator approves, the daemon pushes and opens the pull request.
-      ...(this.opener?.offers(run.sessionId, run.workingDir)
-        ? { mcpServers: { [CONSOLE_TOOLS_SERVER]: consoleToolsServer(this.opener, run.sessionId) } }
-        : {}),
+      ...(() => {
+        const opener = this.opener?.offers(run.sessionId, run.workingDir) ? this.opener : null;
+        // Only a run the operator started: a Playbook step or a Verification in an Anonymous Session stays where it is.
+        const joiner = run.onFinish === null && this.joiner?.offers(run.sessionId) ? this.joiner : null;
+        return opener || joiner
+          ? { mcpServers: { [CONSOLE_TOOLS_SERVER]: consoleToolsServer({ opener, joiner }, run.sessionId) } }
+          : {};
+      })(),
       disallowedTools: [...MERGE_DENIALS, ...WEB_DENIALS, ...run.deny],
       systemPrompt: { type: 'preset', preset: 'claude_code', append: systemAppend(instructions, run.rules) },
       // Servers the operator disabled stay out of the run.
@@ -508,6 +643,15 @@ export class AgentRuntime {
 
     // Stop can land while the transcript moves, before the query listens for the abort.
     if (run.stopped) return 'stopped';
+    if (skillFolder !== null) {
+      try {
+        await writeSkillPlugin(skillFolder, run.skills);
+      } catch (error) {
+        await removeSkillPlugin(skillFolder);
+        run.failure = `could not hand the Skills to the run: ${error instanceof Error ? error.message : String(error)}`;
+        return ErrorCode.UpstreamFailed;
+      }
+    }
     let rejected = false;
     let signInFailed = false;
     let failed = false;
@@ -527,6 +671,11 @@ export class AgentRuntime {
             if (row) this.actionLog.finish(row, ActionOutcome.Denied);
           }
           failed = message.is_error;
+          this.steps.addUsage(
+            run,
+            message.total_cost_usd ?? 0,
+            (message.usage?.input_tokens ?? 0) + (message.usage?.output_tokens ?? 0),
+          );
           // Only a sandbox refusal is worth the operator's eyes; other result text stays in the transcript.
           const said = message.subtype === 'success' ? message.result : message.errors?.join('; ');
           if (failed && typeof said === 'string' && /sandbox/i.test(said)) run.failure = said;
@@ -538,6 +687,8 @@ export class AgentRuntime {
       }
     } catch (error) {
       if (!rejected && !signInFailed && !run.stopped) throw error;
+    } finally {
+      if (skillFolder !== null) await removeSkillPlugin(skillFolder);
     }
     for (const row of run.toolRows.values()) {
       this.actionLog.finish(row, ActionOutcome.Failed, run.stopped ? 'stopped' : 'no result');
@@ -556,6 +707,10 @@ export class AgentRuntime {
         this.sessions.write(run.sessionId, { sdkSessionId: message.session_id });
       }
       this.reportServers(run, session, message.mcp_servers);
+      return;
+    }
+    if (message.type === 'system' && (message.subtype === 'task_started' || message.subtype === 'task_notification')) {
+      this.trackSubagent(run, message);
       return;
     }
     if (message.type === 'stream_event' && message.parent_tool_use_id === null) {
@@ -591,6 +746,33 @@ export class AgentRuntime {
     }
   }
 
+  /** Keeps the run's subagents for the tray: one per `task_started` that names a subagent, ended by its notification. */
+  private trackSubagent(run: Run, message: SDKTaskStartedMessage | SDKTaskNotificationMessage): void {
+    if (message.subtype === 'task_started') {
+      if (message.subagent_type === undefined && message.spawn_depth === undefined) return;
+      run.subagents.set(message.task_id, {
+        id: message.task_id,
+        parent_id: message.parent_task_id ?? null,
+        description: message.description,
+        type: message.subagent_type ?? null,
+        status: SubagentStatus.Working,
+        started_at: new Date().toISOString(),
+        finished_at: null,
+      });
+    } else {
+      const task = run.subagents.get(message.task_id);
+      if (!task) return;
+      task.status =
+        message.status === 'completed'
+          ? SubagentStatus.Done
+          : message.status === 'failed'
+            ? SubagentStatus.Failed
+            : SubagentStatus.Stopped;
+      task.finished_at = new Date().toISOString();
+    }
+    this.sessions.write(run.sessionId, { runSubagents: JSON.stringify([...run.subagents.values()]) });
+  }
+
   /**
    * A Connection's server that is down or needs a login is named in a step and skipped; the run goes on with the
    * others. Servers left out of this run are not reported.
@@ -620,9 +802,16 @@ export class AgentRuntime {
 
   private finish(run: Run, result: RunResult): void {
     this.runs.remove(run.sessionId);
+    this.steps.closeOpen(run.sessionId, run.stopped ? 'stopped' : 'no result');
     this.sessions.setFailure(run.sessionId, run.failure);
     // A run the operator stopped ends `idle`, like one that finished; the job that started it still sees it fail.
     const failed = result !== 'done' && result !== 'stopped';
+    const finishedAt = new Date().toISOString();
+    // Subagents still going when the run ends ended with it.
+    const ending = failed ? SubagentStatus.Failed : result === 'stopped' ? SubagentStatus.Stopped : SubagentStatus.Done;
+    const subagents: Subagent[] = [...run.subagents.values()].map((task) =>
+      task.status === SubagentStatus.Working ? { ...task, status: ending, finished_at: finishedAt } : task,
+    );
     // The agent's first words in the message; its tool steps make a poor preview.
     const newest = run.parts.find((part): part is Extract<Part, { kind: 'text' }> => part.kind === 'text');
     this.store.write((tx, emit) => {
@@ -630,6 +819,9 @@ export class AgentRuntime {
         .update(sessions)
         .set({
           state: failed ? SessionState.Failed : SessionState.Idle,
+          runFinishedAt: finishedAt,
+          runOutcome: outcomeOf(result, run.paused),
+          runSubagents: subagents.length > 0 ? JSON.stringify(subagents) : null,
           ...(newest ? { lastMessagePreview: firstLine(newest.text, 200) } : {}),
           lastActiveAt: nowIso,
         })
@@ -663,6 +855,19 @@ export class AgentRuntime {
       text: run.said.join('\n'),
       failure: run.failure,
     });
+    // A run that moved the Session into a Repo hands over: its next turn starts in the Repo's folder.
+    if (session && run.joinedRepo && result === 'done') {
+      try {
+        this.send(run.sessionId, JOINED_TEXT);
+        return;
+      } catch (error) {
+        this.logger.error(
+          `session ${run.sessionId} joined a Repo but its next turn did not start: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    // The message queued behind the run goes out now, unless the operator stopped the run and did not ask for it.
+    if (session && (!run.stopped || run.sendQueuedAfter)) this.releaseQueued(run.sessionId);
   }
 
   /**
@@ -693,7 +898,24 @@ export class AgentRuntime {
     return async (input): Promise<HookJSONOutput> => {
       if (input.hook_event_name !== 'PreToolUse') return {};
       const toolInput = asRecord(input.tool_input);
-      if (input.tool_name === OPEN_PULL_REQUEST_TOOL) return this.approvePullRequest(run, toolInput);
+      this.steps.start(run, {
+        id: input.tool_use_id,
+        agentId: input.agent_id ?? null,
+        tool: input.tool_name,
+        summary: stepText(input.tool_name, toolInput),
+      });
+      if (input.tool_name === OPEN_PULL_REQUEST_TOOL) return this.approvePullRequest(run, toolInput, input.tool_use_id);
+      if (input.tool_name === JOIN_REPO_TOOL) return this.approveJoinRepo(run, toolInput, input.tool_use_id);
+      if (input.tool_name === 'Bash' && typeof toolInput.command === 'string' && skipsCommitHooks(toolInput.command)) {
+        this.steps.finish(input.tool_use_id, { ok: false, error: HOOK_BYPASS_REASON });
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: HOOK_BYPASS_REASON,
+          },
+        };
+      }
       const prodWrite = this.prodWrites.match({
         toolName: input.tool_name,
         input: toolInput,
@@ -714,14 +936,19 @@ export class AgentRuntime {
       });
       run.toolRows.set(input.tool_use_id, row);
       if (!prodWrite) return {};
-      const decision = await this.ask(run, {
-        actionLogId: row,
-        sessionId: run.sessionId,
-        kind: ApprovalKind.ProdWrite,
-        summary: prodWrite.summary,
-        isProd: true,
-      });
+      const decision = await this.ask(
+        run,
+        {
+          actionLogId: row,
+          sessionId: run.sessionId,
+          kind: ApprovalKind.ProdWrite,
+          summary: prodWrite.summary,
+          isProd: true,
+        },
+        input.tool_use_id,
+      );
       const approved = decision === ApprovalStatus.Approved;
+      if (!approved) this.steps.finish(input.tool_use_id, { ok: false, error: 'denied by the operator' });
       return {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
@@ -737,6 +964,8 @@ export class AgentRuntime {
   private afterTool(run: Run): HookCallback {
     return async (input): Promise<HookJSONOutput> => {
       if (input.hook_event_name !== 'PostToolUse' && input.hook_event_name !== 'PostToolUseFailure') return {};
+      if (input.hook_event_name === 'PostToolUse') this.steps.finish(input.tool_use_id, { ok: true });
+      else this.steps.finish(input.tool_use_id, { ok: false, error: input.error });
       const row = run.toolRows.get(input.tool_use_id);
       if (!row) return {};
       if (input.hook_event_name === 'PostToolUse') this.actionLog.finish(row, ActionOutcome.Ok);
@@ -749,7 +978,7 @@ export class AgentRuntime {
   private permissionPrompt(run: Run): CanUseTool {
     return async (toolName, input, { toolUseID }) => {
       if (toolName === 'AskUserQuestion') {
-        const answer = await this.question(run);
+        const answer = await this.question(run, toolUseID);
         const parsed = questionInputSchema.safeParse(input);
         const questions = parsed.success ? parsed.data.questions : [];
         return {
@@ -761,13 +990,19 @@ export class AgentRuntime {
         };
       }
       const isEdit = EDIT_TOOLS.has(toolName);
-      const decision = await this.ask(run, {
-        actionLogId: isEdit ? null : (run.toolRows.get(toolUseID) ?? null),
-        sessionId: run.sessionId,
-        kind: isEdit ? ApprovalKind.Edit : ApprovalKind.Command,
-        summary: isEdit ? `Edit ${String(input.file_path ?? input.notebook_path ?? '')}` : stepText(toolName, input),
-        isProd: false,
-      });
+      const decision = await this.ask(
+        run,
+        {
+          actionLogId: isEdit ? null : (run.toolRows.get(toolUseID) ?? null),
+          sessionId: run.sessionId,
+          kind: isEdit ? ApprovalKind.Edit : ApprovalKind.Command,
+          summary: isEdit ? `Edit ${String(input.file_path ?? input.notebook_path ?? '')}` : stepText(toolName, input),
+          isProd: false,
+        },
+        toolUseID,
+      );
+      if (decision !== ApprovalStatus.Approved)
+        this.steps.finish(toolUseID, { ok: false, error: 'denied by the operator' });
       return decision === ApprovalStatus.Approved
         ? { behavior: 'allow', updatedInput: input }
         : { behavior: 'deny', message: 'The operator denied this.' };
@@ -778,10 +1013,21 @@ export class AgentRuntime {
    * Opening a pull request asks in every Access mode, `full` included: the operator reads what will be pushed and where,
    * and the daemon pushes and opens only after a yes. A call that cannot open anything is refused before it asks.
    */
-  private async approvePullRequest(run: Run, toolInput: Record<string, unknown>): Promise<HookJSONOutput> {
-    const refuse = (reason: string): HookJSONOutput => ({
-      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
-    });
+  private async approvePullRequest(
+    run: Run,
+    toolInput: Record<string, unknown>,
+    stepId: string,
+  ): Promise<HookJSONOutput> {
+    const refuse = (reason: string): HookJSONOutput => {
+      this.steps.finish(stepId, { ok: false, error: reason });
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: reason,
+        },
+      };
+    };
     const parsed = openPullRequestInputSchema.safeParse(toolInput);
     if (!this.opener || !parsed.success) return refuse('Give the pull request a title and a description.');
     let summary: string;
@@ -790,14 +1036,13 @@ export class AgentRuntime {
     } catch (error) {
       return refuse(error instanceof ApiError ? error.message : 'No pull request can open here.');
     }
-    const decision = await this.ask(run, {
-      actionLogId: null,
-      sessionId: run.sessionId,
-      kind: ApprovalKind.Command,
-      summary,
-      isProd: false,
-    });
+    const decision = await this.ask(
+      run,
+      { actionLogId: null, sessionId: run.sessionId, kind: ApprovalKind.Command, summary, isProd: false },
+      stepId,
+    );
     const approved = decision === ApprovalStatus.Approved;
+    if (!approved) this.steps.finish(stepId, { ok: false, error: 'denied by the operator' });
     return {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
@@ -809,8 +1054,52 @@ export class AgentRuntime {
     };
   }
 
+  /**
+   * Moving into a Repo asks in every Access mode: the Session's work then happens in the operator's own checkout. A
+   * call that matches no imported Repo is refused before it asks.
+   */
+  private async approveJoinRepo(run: Run, toolInput: Record<string, unknown>, stepId: string): Promise<HookJSONOutput> {
+    const refuse = (reason: string): HookJSONOutput => {
+      this.steps.finish(stepId, { ok: false, error: reason });
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: reason,
+        },
+      };
+    };
+    const parsed = joinRepoInputSchema.safeParse(toolInput);
+    if (!this.joiner || !parsed.success) return refuse('Name the Repo: its name, its path or its Git URL.');
+    let summary: string;
+    try {
+      summary = this.joiner.describe(run.sessionId, parsed.data);
+    } catch (error) {
+      return refuse(error instanceof ApiError ? error.message : 'No Repo can be joined here.');
+    }
+    const decision = await this.ask(
+      run,
+      { actionLogId: null, sessionId: run.sessionId, kind: ApprovalKind.Command, summary, isProd: false },
+      stepId,
+    );
+    const approved = decision === ApprovalStatus.Approved;
+    if (approved) run.joinedRepo = true;
+    else this.steps.finish(stepId, { ok: false, error: 'denied by the operator' });
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: approved ? 'allow' : 'deny',
+        permissionDecisionReason: approved
+          ? 'The operator approved joining the Repo.'
+          : 'The operator denied joining the Repo. Do not ask again: work in this folder or ask the operator.',
+      },
+    };
+  }
+
   /** The Session waits for the operator's next message, which answers the question (Behavior 8). */
-  private async question(run: Run): Promise<string> {
+  private async question(run: Run, stepId: string): Promise<string> {
+    const since = Date.now();
+    run.waitingSince ??= since;
     const answer = new Promise<string>((resolve) => {
       run.answer = (text) => {
         run.answer = null;
@@ -819,21 +1108,28 @@ export class AgentRuntime {
     });
     this.sessions.setState(run.sessionId, SessionState.WaitingInput);
     const text = await answer;
+    this.steps.waited(stepId, Date.now() - since);
     this.resume(run);
     return text;
   }
 
-  private async ask(run: Run, request: ApprovalRequest): Promise<Decision> {
+  private async ask(run: Run, request: ApprovalRequest, stepId: string | null = null): Promise<Decision> {
+    const since = Date.now();
+    run.waitingSince ??= since;
     run.waits++;
     this.sessions.setState(run.sessionId, SessionState.WaitingApproval);
     const decision = await this.approvals.request(request);
     run.waits--;
+    if (stepId !== null) this.steps.waited(stepId, Date.now() - since);
     this.resume(run);
     return decision;
   }
 
   /** Back to `working` once nothing is left to wait on. */
   private resume(run: Run): void {
-    if (run.waits === 0 && run.answer === null) this.sessions.setState(run.sessionId, SessionState.Working);
+    if (run.waits === 0 && run.answer === null) {
+      run.waitingSince = null;
+      this.sessions.setState(run.sessionId, SessionState.Working);
+    }
   }
 }

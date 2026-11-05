@@ -305,6 +305,7 @@ export class PrJobs {
    */
   private async sweepScratch(): Promise<void> {
     const kept = new Set<string>();
+    const drop = new Set<string>();
     for (const table of [prReplyChecks, prCommentPasses] as const) {
       const rows = this.store.db
         .select({ id: table.id, path: table.scratchPath, status: table.status })
@@ -316,7 +317,7 @@ export class PrJobs {
           kept.add(row.path as string);
           continue;
         }
-        await this.dropScratch(row.path);
+        drop.add(row.path as string);
         this.store.write((tx) => tx.update(table).set({ scratchPath: null }).where(eq(table.id, row.id)).run());
       }
     }
@@ -324,8 +325,13 @@ export class PrJobs {
     const names = await readdir(folder).catch(() => [] as string[]);
     for (const name of names) {
       const dir = path.join(folder, name);
-      if (!kept.has(dir)) await this.dropScratch(dir);
+      if (!kept.has(dir)) drop.add(dir);
     }
+    // Removing copies of big repos takes seconds, and the port stays shut until recovery ends. The list is taken
+    // now, so a job that starts meanwhile keeps its copy.
+    void (async () => {
+      for (const dir of drop) await this.dropScratch(dir);
+    })();
   }
 
   /**

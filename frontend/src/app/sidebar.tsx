@@ -1,8 +1,9 @@
-import { AlertStatus, type ClaudeAccount, CliProxyStatus, HealthStatus } from '@ops-console/shared';
+import { AlertStatus, type ClaudeAccount, CliProxyStatus, HealthStatus, RunHealth } from '@ops-console/shared';
 import type { ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   useAgentAccounts,
+  useAgentRuns,
   useAlerts,
   useCliProxy,
   useConnections,
@@ -83,6 +84,8 @@ const ICONS = {
       <path d="M9 10h6M9 14h6M9 18h3" />
     </>,
   ),
+  runs: icon(<path d="M3 12h4l3-8 4 16 3-8h4" />),
+  skills: icon(<path d="M12 3l2.4 5.6L20 10l-4.2 3.8L17 20l-5-3-5 3 1.2-6.2L4 10l5.6-1.4z" />),
 };
 
 /** Where every view lives, in sidebar order. */
@@ -96,7 +99,9 @@ export const PAGES = [
   { group: 'Connect', path: '/setup', label: 'Setup agent', icon: ICONS.setup },
   { group: 'Connect', path: '/permissions', label: 'Permissions', icon: ICONS.permissions },
   { group: 'Claude', path: '/agents', label: 'Agents & accounts', icon: ICONS.agents },
+  { group: 'Claude', path: '/agent-runs', label: 'Agent runs', icon: ICONS.runs },
   { group: 'Claude', path: '/playbooks', label: 'Playbooks', icon: ICONS.playbooks },
+  { group: 'Claude', path: '/skills', label: 'Skills', icon: ICONS.skills },
 ] as const;
 
 const NEEDS_ATTENTION: HealthStatus[] = [HealthStatus.Auth, HealthStatus.Fail];
@@ -108,6 +113,7 @@ function useBadges(): Record<string, { text: string; tip: string; tone: 'alert' 
   const servers = useMcpServers().data?.data ?? [];
   const connections = useConnections().data?.data;
   const repos = useRepos().data?.data;
+  const waiting = (useAgentRuns().data ?? []).filter((run) => run.health === RunHealth.NeedsYou).length;
   const open = alerts.filter(
     (alert) => alert.status !== AlertStatus.Resolved && alert.status !== AlertStatus.Dismissed && shown(alert),
   ).length;
@@ -124,6 +130,8 @@ function useBadges(): Record<string, { text: string; tip: string; tone: 'alert' 
     '/connections': connections?.length
       ? { text: String(connections.length), tip: `${connections.length} Connections`, tone: 'count' }
       : undefined,
+    '/agent-runs':
+      waiting > 0 ? { text: String(waiting), tip: `${waiting} agent runs wait on you`, tone: 'attention' } : undefined,
     '/repos': repos?.length
       ? { text: String(repos.length), tip: `${repos.length} imported Repos`, tone: 'count' }
       : undefined,

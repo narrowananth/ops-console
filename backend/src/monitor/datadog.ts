@@ -44,6 +44,8 @@ export type ReadRequest = {
   /** Only these HTTP status codes; every code from 400 up when empty. */
   codes: number[];
   ignore: IgnoreRule[];
+  /** Aborts the read when the operator stops the Scan. */
+  signal?: AbortSignal;
 };
 
 /** Datadog as a Scan reads it (ADR 0005: fixed reads, no model turn). Tests replace it with a scripted fake. */
@@ -194,11 +196,14 @@ export class PupDatadog implements DatadogReader {
       return range ? [range] : [];
     });
     for (const env of request.envs) {
+      request.signal?.throwIfAborted();
       const scope = [envQuery(env), failingQuery(request.codes), ...ignored].join(' ');
-      const names = request.services ?? (await this.counts(scope, request.window)).map((count) => count.name);
+      const names =
+        request.services ?? (await this.counts(scope, request.window, request.signal)).map((count) => count.name);
       for (const name of names) {
+        request.signal?.throwIfAborted();
         const query = `${scope} service:${name}`;
-        const logs = await this.search(query, request.window);
+        const logs = await this.search(query, request.window, request.signal);
         out.push({ name, env, groups: groupLogs(logs, query), repoUrl: repoUrlOf(logs) });
       }
     }
@@ -234,15 +239,19 @@ export class PupDatadog implements DatadogReader {
   }
 
   /** Every Service the query matches, busiest first: one dimension, so the group cap is no problem. */
-  private async counts(query: string, window: ScanWindow): Promise<{ name: string; errors: number }[]> {
-    const buckets = await this.aggregate(query, window, 'service', SERVICE_LIMIT);
+  private async counts(
+    query: string,
+    window: ScanWindow,
+    signal?: AbortSignal,
+  ): Promise<{ name: string; errors: number }[]> {
+    const buckets = await this.aggregate(query, window, 'service', SERVICE_LIMIT, signal);
     return buckets.flatMap((bucket) => {
       const count = Number(bucket.computes.c0 ?? 0);
       return typeof bucket.by.service === 'string' ? [{ name: bucket.by.service, errors: count }] : [];
     });
   }
 
-  private async aggregate(query: string, from: string, groupBy: string, limit: number) {
+  private async aggregate(query: string, from: string, groupBy: string, limit: number, signal?: AbortSignal) {
     const args = [
       'logs',
       'aggregate',
@@ -260,13 +269,13 @@ export class PupDatadog implements DatadogReader {
       '--storage',
       'indexes',
     ];
-    return aggregateSchema.parse(JSON.parse(await this.exec(args))).data.buckets;
+    return aggregateSchema.parse(JSON.parse(await this.exec(args, signal))).data.buckets;
   }
 
   /** The newest logs in the window, newest first. */
-  private async search(query: string, window: ScanWindow): Promise<Sample[]> {
+  private async search(query: string, window: ScanWindow, signal?: AbortSignal): Promise<Sample[]> {
     const args = ['logs', 'search', `--query=${query}`, '--from', window, '--limit', String(LOGS_PER_SERVICE)];
-    const out = searchSchema.parse(JSON.parse(await this.exec([...args, '--storage', 'indexes'])));
+    const out = searchSchema.parse(JSON.parse(await this.exec([...args, '--storage', 'indexes'], signal)));
     return out.data.map((log) => ({
       id: log.id,
       timestamp: log.attributes.timestamp ?? '',
@@ -277,12 +286,18 @@ export class PupDatadog implements DatadogReader {
     }));
   }
 
-  private async exec(args: string[]): Promise<string> {
+  private async exec(args: string[], signal?: AbortSignal): Promise<string> {
     try {
-      const pending = run(this.bin, [...args, '--output', 'json'], { maxBuffer: 50 * 1024 * 1024, timeout: 120_000 });
+      const pending = run(this.bin, [...args, '--output', 'json'], {
+        maxBuffer: 50 * 1024 * 1024,
+        timeout: 120_000,
+        signal,
+      });
       pending.child.stdin?.end();
       return (await pending).stdout;
     } catch (error) {
+      // A stopped Scan is the caller's to end, not an upstream failure.
+      if (signal?.aborted) throw signal.reason;
       const { stderr } = error as { stderr?: unknown };
       if (typeof stderr === 'string' && /\bHTTP 429\b|too many requests/i.test(stderr)) {
         throw new ApiError(429, ErrorCode.RateLimited, 'Datadog rate limit reached');

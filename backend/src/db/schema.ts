@@ -31,6 +31,8 @@ import {
   type ReviewDecision,
   type ReviewVerdict,
   type RouteState,
+  type RunOutcome,
+  type RunPhase,
   type RunStatus,
   type ScanStatus,
   type ScanTrigger,
@@ -59,6 +61,8 @@ function jobPlaybookColumns() {
     playbookId: text('playbook_id').references((): AnySQLiteColumn => playbooks.id, { onDelete: 'set null' }),
     playbookName: text('playbook_name'),
     playbookRules: text('playbook_rules'),
+    /** JSON array of the Skills offered, each `{ id, name, description, instructions }`; null for none. */
+    playbookSkills: text('playbook_skills'),
   };
 }
 
@@ -122,6 +126,14 @@ export const sessions = sqliteTable(
     alertId: text('alert_id').references((): AnySQLiteColumn => alerts.id, { onDelete: 'set null' }),
     state: text().$type<SessionState>().notNull().default(SessionState.Idle),
     lastMessagePreview: text('last_message_preview'),
+    /** The last run's start, end and outcome; null outcome while the first run goes or once the operator dismissed it. */
+    runStartedAt: text('run_started_at'),
+    runFinishedAt: text('run_finished_at'),
+    runOutcome: text('run_outcome').$type<RunOutcome>(),
+    /** JSON array of the last run's `Subagent`s. */
+    runSubagents: text('run_subagents'),
+    /** The message the operator queued behind the run; the daemon sends it when the run ends, unless the operator stopped it. */
+    queuedText: text('queued_text'),
     createdAt: text('created_at').notNull().default(nowIso),
     lastActiveAt: text('last_active_at').notNull().default(nowIso),
   },
@@ -129,6 +141,53 @@ export const sessions = sqliteTable(
     index('sessions_active_idx').on(sql`${table.lastActiveAt} DESC`),
     index('sessions_repo_idx').on(table.repoId, sql`${table.lastActiveAt} DESC`),
     uniqueIndex('sessions_one_pr_review_idx').on(table.repoId, table.prNumber).where(sql`${table.kind} = 'pr_review'`),
+  ],
+);
+
+/** One tool call of a run, kept so the Agent runs page can say where the time went and what was slow. */
+export const runSteps = sqliteTable(
+  'run_steps',
+  {
+    /** The SDK's tool call id. */
+    id: text().primaryKey().notNull(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    /** The run's start (`sessions.run_started_at`), which ties the step to its run. */
+    runStartedAt: text('run_started_at').notNull(),
+    /** The subagent that made the call; null for the main agent. */
+    agentId: text('agent_id'),
+    tool: text().notNull(),
+    /** Redacted. */
+    summary: text().notNull(),
+    phase: text().$type<RunPhase>().notNull(),
+    startedAt: text('started_at').notNull(),
+    finishedAt: text('finished_at'),
+    /** Time the call spent waiting for an Approval or an answer. */
+    waitedMs: integer('waited_ms').notNull().default(0),
+    ok: bool('ok'),
+    /** Redacted. */
+    error: text(),
+  },
+  (table) => [index('run_steps_session_idx').on(table.sessionId, table.startedAt)],
+);
+
+/** What each run cost, as the SDK reported when it ended; the page adds a day up from these. */
+export const runUsage = sqliteTable(
+  'run_usage',
+  {
+    id: text().primaryKey().notNull(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    runStartedAt: text('run_started_at').notNull(),
+    finishedAt: text('finished_at').notNull(),
+    costUsd: real('cost_usd').notNull(),
+    tokens: integer().notNull(),
+  },
+  (table) => [
+    index('run_usage_finished_idx').on(table.finishedAt),
+    unique('run_usage_run').on(table.sessionId, table.runStartedAt),
   ],
 );
 
@@ -677,6 +736,37 @@ export const playbooks = sqliteTable(
   (table) => [
     uniqueIndex('playbooks_name_idx').on(sql`${table.name} COLLATE NOCASE`),
     check('playbooks_steps_json', sql`json_valid(${table.steps})`),
+  ],
+);
+
+/** A named instruction document the operator attaches to Playbooks; the agent loads it when a step needs it. */
+export const skills = sqliteTable(
+  'skills',
+  {
+    id: text().primaryKey().notNull(),
+    name: text().notNull(),
+    description: text().notNull(),
+    instructions: text().notNull(),
+    createdAt: text('created_at').notNull().default(nowIso),
+    updatedAt: text('updated_at').notNull().default(nowIso),
+  },
+  (table) => [uniqueIndex('skills_name_idx').on(sql`${table.name} COLLATE NOCASE`)],
+);
+
+/** The Skills each Playbook holds. */
+export const playbookSkills = sqliteTable(
+  'playbook_skills',
+  {
+    playbookId: text('playbook_id')
+      .notNull()
+      .references(() => playbooks.id, { onDelete: 'cascade' }),
+    skillId: text('skill_id')
+      .notNull()
+      .references(() => skills.id, { onDelete: 'cascade' }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.playbookId, table.skillId] }),
+    index('playbook_skills_skill_idx').on(table.skillId),
   ],
 );
 

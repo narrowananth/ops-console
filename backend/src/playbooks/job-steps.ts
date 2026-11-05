@@ -6,6 +6,7 @@ import {
   PLAYBOOK_LIMITS,
   type PlaybookStep,
   PlaybookStepStatus,
+  type SkillCopy,
 } from '@ops-console/shared';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { redact } from '../action-log/redact';
@@ -14,9 +15,10 @@ import { AgentRuntime } from '../agent/runtime';
 import { parseAgentJson } from '../common/agent-json';
 import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
-import { playbookSteps } from '../db/schema';
+import { playbookSteps, skills } from '../db/schema';
 import { type Emit, STORE, type Store, type Tx } from '../db/store';
 import { stepOutcomeSchema, stepPrompt } from './prompts';
+import { parseSkillCopies } from './skills.service';
 
 /** The job a step belongs to. */
 export type JobRef = { kind: 'report' | 'fix' | 'agent_review' | 'reply_check' | 'comment_pass'; id: string };
@@ -57,12 +59,29 @@ function stepRows(db: Db, job: JobRef): StepRow[] {
 export function jobPlaybook(
   db: Db,
   kind: JobRef['kind'],
-  job: { id: string; playbookId: string | null; playbookName: string | null },
+  job: { id: string; playbookId: string | null; playbookName: string | null; playbookSkills: string | null },
 ): JobPlaybook | null {
   if (job.playbookName === null) return null;
+  const offered = parseSkillCopies(job.playbookSkills);
+  const kept = new Set(
+    offered.length === 0
+      ? []
+      : db
+          .select({ id: skills.id })
+          .from(skills)
+          .where(
+            inArray(
+              skills.id,
+              offered.map((skill) => skill.id),
+            ),
+          )
+          .all()
+          .map((row) => row.id),
+  );
   return {
     id: job.playbookId,
     name: job.playbookName,
+    skills: offered.map((skill) => ({ id: kept.has(skill.id) ? skill.id : null, name: skill.name })),
     steps: stepRows(db, { kind, id: job.id }).map((row) => ({
       title: row.title,
       writes: row.writes,
@@ -81,6 +100,8 @@ export type StepRun = {
   /** The job's context, sent before the first step this run takes. */
   brief: string;
   rules: string | null;
+  /** The Skills the job copied. */
+  skills?: SkillCopy[];
   cwd?: string;
   /** Starts a new agent conversation for the first step. */
   fresh?: boolean;
@@ -153,6 +174,7 @@ export class JobSteps {
     try {
       const { finished } = this.runtime.runFor(options.sessionId, prompt, options.onPart ?? null, {
         rules: options.rules,
+        skills: options.skills,
         ...(options.cwd ? { cwd: options.cwd } : {}),
         fresh: first && options.fresh === true,
         ...(options.deny ? { deny: options.deny } : {}),

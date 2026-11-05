@@ -12,7 +12,7 @@ import { Markdown } from '../components/ui/markdown';
 import { StatusPill } from '../components/ui/pathway';
 import { Hint } from '../components/ui/tip';
 import { useRetryAgentReview, useSkipRunningStep } from '../lib/queries';
-import { JobFailure, JobPath, PlaybookLink, runState } from '../playbooks/job-steps';
+import { JobFailure, JobPath, PlaybookLink, runState, SkillsOffered } from '../playbooks/job-steps';
 
 const MARK = { pass: '✓', warn: '!', fail: '✕', na: '–' } as const;
 
@@ -91,6 +91,7 @@ export function AgentReviewCard({ review, sessionId }: { review: PrAgentReview; 
           </span>
         )}
         {review.playbook && <PlaybookLink playbook={review.playbook} />}
+        {review.playbook && <SkillsOffered playbook={review.playbook} />}
         {review.decision && (
           <span
             title={VERDICT[review.decision].tip}

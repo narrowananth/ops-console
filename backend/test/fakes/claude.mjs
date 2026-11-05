@@ -197,6 +197,8 @@ To remove this server, run: claude mcp remove "sentry" -s local
     }
     if (process.env.FAKE_MCP_LOGIN === 'hang') {
       // The operator never finishes in the browser; the process waits until it is stopped.
+      // The pid file lets a test count its own logins, not those of another run on the machine.
+      writeFileSync(path.join(process.env.CLAUDE_CONFIG_DIR, `fake-mcp-login-${rest[0]}.pid`), String(process.pid));
       setInterval(() => {}, 60_000);
     } else if (process.env.FAKE_MCP_LOGIN === 'fail') {
       console.error(`Couldn't complete authentication for "${rest[0]}": SDK auth failed: Incompatible auth server`);

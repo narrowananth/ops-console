@@ -179,6 +179,7 @@ export const wsEventSchema = z.discriminatedUnion('event', [
       pr_number: z.number().int().nullable(),
     }),
   ),
+  event('skills.changed', z.object({})),
   event(
     'playbook_step.updated',
     z.object({

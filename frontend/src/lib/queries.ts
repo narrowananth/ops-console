@@ -4,6 +4,7 @@ import {
   accountListSchema,
   addedAccountSchema,
   agentAccountsSettingSchema,
+  agentRunSchema,
   alertDetailSchema,
   alertEventSchema,
   alertSchema,
@@ -16,6 +17,7 @@ import {
   type CreateConnection,
   type CreatePlaybook,
   type CreateScan,
+  type CreateSkill,
   checkoutResultSchema,
   claudeAccountSchema,
   cliProxySchema,
@@ -60,13 +62,14 @@ import {
   repoSchema,
   reviewSchema,
   routeViewSchema,
+  runDetailSchema,
   runSandboxSchema,
   type ScanWindow,
   type Session,
   type SessionDefaults,
   type SessionPatch,
-  SessionState,
   SignInVia,
+  type SkillPatch,
   savedNetworkDomainSchema,
   scanSchema,
   serviceSchema,
@@ -74,6 +77,8 @@ import {
   sessionDiffSchema,
   sessionPullRequestSchema,
   sessionSchema,
+  skillListSchema,
+  skillSchema,
   startAtLoginSchema,
   statusCodeCountSchema,
   terminalListSchema,
@@ -116,6 +121,7 @@ export const queryKeys = {
   keychainHandover: ['keychain-handover'] as const,
   terminals: ['terminals'] as const,
   playbooks: ['playbooks'] as const,
+  skills: ['skills'] as const,
   updates: ['updates'] as const,
 };
 
@@ -684,17 +690,129 @@ export function useRepoSessions() {
   });
 }
 
-/** Every Session of every kind whose run goes, `waiting_input` included, most recently active first. */
-export function useRunningSessions() {
+/** The Running tray and the Agent runs page: runs going now, and runs that ended unfinished until dismissed. */
+export function useAgentRuns() {
   return useQuery({
-    queryKey: [...queryKeys.sessions, 'running'],
-    queryFn: () =>
-      apiGet('/sessions?limit=100', z.object({ data: z.array(sessionSchema) })).then((b) =>
-        b.data
-          .filter((session) => session.state !== SessionState.Idle && session.state !== SessionState.Failed)
-          .sort((a, b) => b.last_active_at.localeCompare(a.last_active_at)),
-      ),
+    queryKey: [...queryKeys.sessions, 'runs'],
+    queryFn: () => apiGet('/agent-runs', z.object({ data: z.array(agentRunSchema) })).then((b) => b.data),
+    // A run turns slow with no event, so the page asks again while one goes.
+    refetchInterval: (query) => (query.state.data?.some((run) => run.running) ? 5000 : false),
   });
+}
+
+/** One run with its steps, where the time went, and why it is slow or failed. */
+export function useRunDetail(sessionId: string | null) {
+  return useQuery({
+    queryKey: [...queryKeys.sessions, 'runs', sessionId, 'detail'],
+    queryFn: () => apiGet(`/agent-runs/${sessionId}`, z.object({ data: runDetailSchema })).then((b) => b.data),
+    enabled: sessionId !== null,
+    refetchInterval: (query) => (query.state.data?.run.running ? 5000 : false),
+  });
+}
+
+/** What runs that ended today cost together. */
+export function useAgentUsage() {
+  return useQuery({
+    queryKey: [...queryKeys.sessions, 'runs', 'usage'],
+    queryFn: () =>
+      apiGet(
+        '/agent-runs/usage',
+        z.object({ data: z.object({ cost_usd: z.number(), tokens: z.number(), runs: z.number() }) }),
+      ).then((b) => b.data),
+  });
+}
+
+/** Stop all runs going, and dismiss all ended runs. */
+export function useBulkRunControls() {
+  const client = useQueryClient();
+  const settled = () => void client.invalidateQueries({ queryKey: queryKeys.sessions });
+  return {
+    stopAll: useMutation({
+      mutationFn: () =>
+        apiSend('POST', '/agent-runs/stop-all', undefined, z.object({ data: z.object({ stopped: z.number() }) })),
+      onSettled: settled,
+    }),
+    dismissEnded: useMutation({
+      mutationFn: () =>
+        apiSend('DELETE', '/agent-runs', undefined, z.object({ data: z.object({ dismissed: z.number() }) })),
+      onSettled: settled,
+    }),
+  };
+}
+
+/** Retry several ended runs at once. A run that cannot start again does not stop the others. */
+export function useRetryRuns() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionIds: string[]) =>
+      Promise.allSettled(
+        sessionIds.map((id) =>
+          apiSend(
+            'POST',
+            `/sessions/${id}/resume`,
+            undefined,
+            z.object({ data: z.object({ message_id: z.string() }) }),
+          ),
+        ),
+      ),
+    onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.sessions }),
+  });
+}
+
+/** The message queued behind a Session's run: queue it, take it back, or send it now. */
+export function useRunQueue(sessionId: string) {
+  const client = useQueryClient();
+  const settled = () => void client.invalidateQueries({ queryKey: queryKeys.sessions });
+  return {
+    queue: useMutation({
+      mutationFn: (text: string) =>
+        apiSend('PUT', `/sessions/${sessionId}/queue`, { text }, z.object({ data: z.object({ queued: z.boolean() }) })),
+      onSettled: () => {
+        settled();
+        void client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) });
+      },
+    }),
+    takeBack: useMutation({
+      mutationFn: () => apiSend('DELETE', `/sessions/${sessionId}/queue`, undefined, z.undefined()),
+      onSettled: settled,
+    }),
+    sendNow: useMutation({
+      mutationFn: () => apiSend('POST', `/sessions/${sessionId}/queue/send`, undefined, z.undefined()),
+      onSettled: () => {
+        settled();
+        void client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) });
+      },
+    }),
+  };
+}
+
+/** Pause, Play, Retry and Dismiss on one Running tray entry. */
+export function useRunControls(sessionId: string) {
+  const client = useQueryClient();
+  const settled = () => void client.invalidateQueries({ queryKey: queryKeys.sessions });
+  return {
+    pause: useMutation({
+      mutationFn: () => apiSend('POST', `/sessions/${sessionId}/pause`, undefined, z.undefined()),
+      onSettled: settled,
+    }),
+    resume: useMutation({
+      mutationFn: () =>
+        apiSend(
+          'POST',
+          `/sessions/${sessionId}/resume`,
+          undefined,
+          z.object({ data: z.object({ message_id: z.string() }) }),
+        ),
+      onSettled: () => {
+        settled();
+        void client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) });
+      },
+    }),
+    dismiss: useMutation({
+      mutationFn: () => apiSend('DELETE', `/agent-runs/${sessionId}`, undefined, z.undefined()),
+      onSettled: settled,
+    }),
+  };
 }
 
 export function useCreateAnonymousSession() {
@@ -1111,6 +1229,15 @@ export function useStartScan() {
   });
 }
 
+/** Stops a running Scan: the read ends and nothing it read is kept. */
+export function useCancelScan() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiSend('POST', `/scans/${id}/cancel`, undefined, z.undefined()),
+    onSettled: () => refreshMonitor(client),
+  });
+}
+
 /**
  * The Services Datadog has failing requests for in the range, every env together, busiest first: HTTP status 400 or
  * more, or only `codes`.
@@ -1327,4 +1454,40 @@ export function useSetTrigger() {
   return usePlaybookMutation(({ trigger, playbookId }: { trigger: PlaybookTrigger; playbookId: string | null }) =>
     apiSend('PUT', `/playbook-triggers/${trigger}`, { playbook_id: playbookId }, z.unknown()),
   );
+}
+
+/** The operator's Skills A to Z, each with the Playbooks that hold it. */
+export function useSkills() {
+  return useQuery({
+    queryKey: queryKeys.skills,
+    queryFn: () => apiGet('/skills', z.object({ data: skillListSchema })).then((b) => b.data),
+  });
+}
+
+/** A Skill's name and description show on the Playbooks holding it, so they are read again with the list. */
+function useSkillMutation<V, R>(send: (variables: V) => Promise<R>) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: send,
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.skills });
+      void client.invalidateQueries({ queryKey: queryKeys.playbooks });
+    },
+  });
+}
+
+const skillResponse = z.object({ data: skillSchema });
+
+export function useCreateSkill() {
+  return useSkillMutation((body: CreateSkill) => apiSend('POST', '/skills', body, skillResponse).then((b) => b.data));
+}
+
+export function useSaveSkill() {
+  return useSkillMutation(({ id, patch }: { id: string; patch: SkillPatch }) =>
+    apiSend('PATCH', `/skills/${id}`, patch, skillResponse).then((b) => b.data),
+  );
+}
+
+export function useDeleteSkill() {
+  return useSkillMutation((id: string) => apiSend('DELETE', `/skills/${id}`, undefined, z.undefined()));
 }

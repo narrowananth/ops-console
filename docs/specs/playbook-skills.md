@@ -1,6 +1,6 @@
 # Playbook Skills
 
-**Status:** draft
+**Status:** shipped
 **Design:** Playbooks in `design/ops-console.html` (sidebar item under Claude, after Playbooks; the open Playbook in the
 middle column). The Skills page, the Skills section of a Playbook and the Skills line on a job card are new to the
 design.
@@ -54,7 +54,8 @@ methods once, attach them to the Playbooks that need them, and let the agent pic
     come last and win. A Skill that says to merge, to push, to read a secret or to write to a PROD Connection changes
     nothing: PROD writes still ask for Approval in every Access mode.
 13. A Playbook with no Skills runs as before.
-14. When the agent loads a Skill, the Action Log shows it as an action of that run with the Skill's name. The job card
+14. When the agent loads a Skill, the Action Log records it as an action of kind `skill` in that run, with the Skill's
+    name. The transcript shows the step as `Skill <name>`. The job card
     shows the Skills the job was offered. Nothing in the console counts or scores Skill use.
 15. A run whose Skills cannot be handed to it fails with the reason, the way a run fails when the Run sandbox is
     unavailable. It does not run without them.
@@ -69,12 +70,15 @@ methods once, attach them to the Playbooks that need them, and let the agent pic
   its Skills.
 - **Choice at run time**: the agent's, through Claude Code's own skill listing. The console enables only the held
   Skills for the run and does not force one.
-- **Hand-off**: the daemon writes the held Skills to a throwaway folder per run, readable by the Run sandbox, and loads
-  it as a local plugin with the `skills` option listing them. It removes the folder when the run ends.
+- **Hand-off**: the daemon writes the held Skills to a throwaway folder per run in the temp folder, outside the data
+  folder, readable by the Run sandbox, and loads it as a local plugin with the `skills` option listing them. It
+  removes the folder when the run ends; a folder a crash leaves is the operating system's to clear.
+- **New Skill**: saves at once with placeholder text the operator then edits.
 - **Limits**: 8 Skills per Playbook; 20000 characters of instructions.
 - **Order**: lists sort A to Z by name, ignoring case.
-- **Job copy**: a job stores the names of the Skills it was offered, with its Playbook name and rules. A Skill's text
-  is not copied into the job.
+- **Job copy**: a job stores a snapshot of the Skills it was offered (id, name, description, instructions) with its
+  Playbook name and rules, so an edit or delete never changes a job in flight. A chat reads the live Playbook at each
+  message; a Session tied to an Alert reads the snapshot of the Alert's latest job, as it does for the rules.
 
 ## Not required
 
@@ -109,11 +113,11 @@ CREATE TABLE playbook_skills (
   skill_id TEXT NOT NULL REFERENCES skills (id) ON DELETE CASCADE,
   PRIMARY KEY (playbook_id, skill_id)
 );
+CREATE INDEX playbook_skills_skill_idx ON playbook_skills (skill_id);
 
--- On each job table that already holds playbook_name and playbook_rules:
-ALTER TABLE reports ADD COLUMN playbook_skills TEXT; -- JSON array of Skill names offered; null for none
-ALTER TABLE fixes ADD COLUMN playbook_skills TEXT;
-ALTER TABLE reviews ADD COLUMN playbook_skills TEXT;
+-- On each job table that holds playbook_name and playbook_rules (reports, fixes, pr_agent_reviews,
+-- pr_reply_checks, pr_comment_passes):
+ALTER TABLE reports ADD COLUMN playbook_skills TEXT; -- JSON array of {id, name, description, instructions}; null for none
 ```
 
 Existing rows keep `playbook_skills` null and no Playbook holds a Skill.
@@ -130,9 +134,9 @@ Existing rows keep `playbook_skills` null and no Playbook holds a Skill.
 
 | Status | Error code | When |
 | ------ | ---------- | ---- |
-| 400 | `invalid_input` | A field is empty, over its limit, or the name has other characters |
+| 400 | `validation_failed` | A field is empty, over its limit, or the name has other characters |
 | 404 | `not_found` | No Skill with that id |
-| 409 | `name_taken` | Another Skill has the name, ignoring case |
+| 409 | `duplicate` | Another Skill has the name, ignoring case |
 
 ### `GET /api/skills`
 
@@ -153,7 +157,7 @@ Any of the three fields. Returns `{ "data": Skill }`.
 ### `POST /api/playbooks`, `PATCH /api/playbooks/:id`
 
 Add `skill_ids: string[]` (default `[]`, at most 8, no repeats). An unknown id is `404 not_found`; a ninth is
-`400 invalid_input`. `Playbook` gains `skills: { id, name, description }[]`, sorted A to Z.
+`400 validation_failed`. `Playbook` gains `skills: { id, name, description }[]`, sorted A to Z.
 
 ### WebSocket `skills.changed`
 
@@ -166,7 +170,7 @@ Server to client, `{}`. Fires after a Skill is created, edited or deleted. The U
   from the design: new page.
 - **Playbook editor**: Skills section under Rules with the picker and the count. With no Skills, the section reads
   "No Skills. The agent follows the rules and steps only."
-- **Job cards** (Report panel, Fix, Agent Review, Comment pass): one line, "Skills offered: a, b", linking to each
+- **Job cards** (Report panel, Fix, Agent Review, Reply check, Comment pass): one line, "Skills offered: a, b", linking to each
   Skill. Hidden when none. A Skill since deleted shows its name as plain text.
 - No PROD state: a Skill reaches no Connection.
 
@@ -196,8 +200,8 @@ None. Reversible, and it follows ADR 0005: Claude Code's own skill loading is th
 - **Skills service** (backend + SQLite): 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 15.
 - **Run options** (unit, over the Agent SDK fake): 11, 12, 14, 16. Asserts the options a run passes: the plugin folder,
   the `skills` list, the readable folder, and that a run with none changes nothing.
-- **Skills page and Playbook editor** (frontend component): 1, 2, 3, 4, 6, 7.
-- **Skill to job** (browser, Playwright): 6, 10, 14. Attach a Skill, start a job, see "Skills offered" on its card.
+- **Skills page and Playbook editor** (browser, Playwright against the built daemon): 1, 2, 3, 4, 6, 7.
+- **Skills offered on a job card** (browser, Playwright with a mocked job payload): 14.
 
 ## Out of scope
 

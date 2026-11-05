@@ -5,16 +5,17 @@ import {
   ErrorCode,
   type Model,
   type Page,
+  RunOutcome,
   SESSION_DEFAULTS,
   type Session,
   SessionKind,
   type SessionPatch,
-  type SessionState,
+  SessionState,
   sessionDefaultsSchema,
   type sessionListQuerySchema,
 } from '@ops-console/shared';
-import { and, desc, eq, lt, or, type SQL, sql } from 'drizzle-orm';
-import type { z } from 'zod';
+import { and, desc, eq, inArray, lt, or, type SQL, sql } from 'drizzle-orm';
+import { z } from 'zod';
 import { ApiError, validationFailed } from '../common/errors';
 import { afterCursor, toPage } from '../common/pagination';
 import { repos, sessions } from '../db/schema';
@@ -27,6 +28,16 @@ import { SessionKinds } from './session-kinds';
 
 export const SESSION_DEFAULTS_KEY = 'session_defaults';
 export const NEW_SESSION_TITLE = 'New session';
+
+/** Runs that ended unfinished stay in the Running tray until the operator dismisses them. */
+export const KEPT_OUTCOMES = [
+  RunOutcome.Stopped,
+  RunOutcome.Paused,
+  RunOutcome.Failed,
+  RunOutcome.RateLimited,
+  RunOutcome.SignedOut,
+  RunOutcome.Interrupted,
+];
 
 export type SessionRow = typeof sessions.$inferSelect;
 
@@ -60,6 +71,7 @@ export function toSession(row: SessionRow): Session {
     created_at: row.createdAt,
     last_active_at: row.lastActiveAt,
     playbook: null,
+    queued_message: row.queuedText,
   };
 }
 
@@ -142,6 +154,50 @@ export class SessionsService {
       query.limit,
       (row) => `${row.last_active_at}|${row.id}`,
     );
+  }
+
+  /** The Sessions the Running tray lists: a run going now, or one that ended unfinished and was not dismissed. */
+  runRows(): SessionRow[] {
+    return this.store.db
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          or(
+            inArray(sessions.state, [SessionState.Working, SessionState.WaitingInput, SessionState.WaitingApproval]),
+            inArray(sessions.runOutcome, KEPT_OUTCOMES),
+          ),
+          sql`(${sessions.repoId} is null or ${sessions.repoId} not in (select ${repos.id} from ${repos} where ${repos.removedAt} is not null))`,
+        ),
+      )
+      .orderBy(desc(sessions.lastActiveAt), desc(sessions.id))
+      .all();
+  }
+
+  /** Takes an ended run out of the tray. Refused with `session_busy` while the Session's run is going. */
+  dismissRun(id: string): void {
+    this.get(id);
+    if (this.runs.get(id)) throw new ApiError(409, ErrorCode.SessionBusy, "the session's run is still going");
+    this.write(id, { runOutcome: null });
+  }
+
+  /** Takes every ended run out of the tray; runs going stay. Returns how many left. */
+  dismissEndedRuns(): number {
+    return this.store.write((tx, emit) => {
+      const rows = tx
+        .update(sessions)
+        .set({ runOutcome: null })
+        .where(
+          and(
+            inArray(sessions.runOutcome, KEPT_OUTCOMES),
+            sql`${sessions.state} not in ('working', 'waiting_input', 'waiting_approval')`,
+          ),
+        )
+        .returning()
+        .all();
+      for (const row of rows) emitSessionUpdated(emit, row);
+      return rows.length;
+    });
   }
 
   /** Remembers why a Session's run failed, or forgets it with `null`. */

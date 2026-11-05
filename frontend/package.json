@@ -1,6 +1,6 @@
 {
   "name": "@ops-console/frontend",
-  "version": "0.1.22",
+  "version": "0.1.27",
   "private": true,
   "type": "module",
   "scripts": {

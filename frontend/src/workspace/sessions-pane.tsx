@@ -17,6 +17,7 @@ import {
 } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
+import { ago, when } from '../monitor/scan-scope';
 
 /** An open Repo lists this many of its Sessions, most recently active first, before "Show N more". */
 const SHOWN = 3;
@@ -140,6 +141,12 @@ function SessionRow({
         {session.branch && session.branch !== repoBranch && (
           <span className="truncate font-mono text-xs text-neutral-700">{session.branch}</span>
         )}
+        <span
+          className="truncate font-mono text-xs text-neutral-700"
+          title={`Started ${new Date(session.created_at).toLocaleString()}, last active ${new Date(session.last_active_at).toLocaleString()}`}
+        >
+          Started {when(session.created_at)} · active {ago(session.last_active_at)}
+        </span>
       </button>
       {isBusy(session) && <RowStop session={session} />}
     </li>

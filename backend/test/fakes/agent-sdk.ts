@@ -21,7 +21,16 @@ type RateLimit = {
 /** One scripted step of a run. */
 export type Step =
   | { text: string }
-  | { tool: string; input: Record<string, unknown>; fails?: string; classifierAsks?: boolean }
+  | {
+      tool: string;
+      input: Record<string, unknown>;
+      fails?: string;
+      classifierAsks?: boolean;
+      /** Holds the call open, between its `PreToolUse` and its result, until the promise settles. */
+      hold?: Promise<unknown>;
+    }
+  /** What the run's final `result` message reports as its cost. */
+  | { cost: { usd: number; tokens: number } }
   | { rateLimit: RateLimit }
   /** A rate-limit event exactly as given, for shapes a later SDK might send. */
   | { rateLimitInfo: object }
@@ -35,6 +44,10 @@ export type Step =
   | { wait: Promise<unknown> }
   /** The SDK throws, as when the Claude Code process dies. */
   | { crash: string }
+  /** The agent starts a subagent, as Claude Code's `task_started` says; `parent` is the task that launched it. */
+  | { task: { id: string; description: string; type?: string; parent?: string } }
+  /** A subagent ends, as `task_notification` says. */
+  | { taskEnds: { id: string; status: 'completed' | 'failed' | 'stopped' } }
   /** Claude Code names the conversation: an `ai-title` entry in the transcript, outside the message chain. */
   | { aiTitle: string };
 
@@ -148,10 +161,35 @@ export class FakeAgentSdk implements AgentSdk {
     });
     await write('user', prompt);
     const denials: SDKPermissionDenial[] = [];
+    let cost = { usd: 0, tokens: 0 };
 
     for (const step of steps) {
-      if ('wait' in step) {
+      if ('cost' in step) {
+        cost = step.cost;
+      } else if ('wait' in step) {
         await abortable(step.wait);
+      } else if ('task' in step) {
+        yield sdk({
+          type: 'system',
+          subtype: 'task_started',
+          task_id: step.task.id,
+          description: step.task.description,
+          subagent_type: step.task.type ?? 'general-purpose',
+          ...(step.task.parent ? { parent_task_id: step.task.parent } : {}),
+          uuid: crypto.randomUUID(),
+          session_id: sessionId,
+        });
+      } else if ('taskEnds' in step) {
+        yield sdk({
+          type: 'system',
+          subtype: 'task_notification',
+          task_id: step.taskEnds.id,
+          status: step.taskEnds.status,
+          output_file: '',
+          summary: '',
+          uuid: crypto.randomUUID(),
+          session_id: sessionId,
+        });
       } else if ('aiTitle' in step) {
         await appendFile(file, `${JSON.stringify({ type: 'ai-title', aiTitle: step.aiTitle, sessionId })}\n`);
       } else if ('crash' in step) {
@@ -286,6 +324,7 @@ export class FakeAgentSdk implements AgentSdk {
           }
           input = answer.updatedInput ?? input;
         }
+        if (step.hold) await abortable(step.hold);
         this.ran.push({ tool: step.tool, input });
         if (step.fails) {
           await hooks(
@@ -308,6 +347,8 @@ export class FakeAgentSdk implements AgentSdk {
       type: 'result',
       subtype: 'success',
       is_error: false,
+      total_cost_usd: cost.usd,
+      usage: { input_tokens: cost.tokens, output_tokens: 0 },
       permission_denials: denials,
       session_id: sessionId,
     });

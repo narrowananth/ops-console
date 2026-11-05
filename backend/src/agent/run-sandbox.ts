@@ -17,8 +17,29 @@ export type SandboxRun = {
 const TEMP = ['/tmp', '/private/tmp'];
 
 /**
+ * Where build tools and commit hooks keep their downloads, under the operator's home: npm, pnpm, Yarn, Cargo's crate
+ * cache, Go modules, Maven, Gradle, pre-commit, pip and the macOS cache folder. Never a folder on PATH, such as
+ * `~/.cargo/bin` or `~/go/bin`, so a run cannot leave a program there for a later command.
+ */
+const TOOL_CACHES = [
+  '.npm',
+  '.pnpm-store',
+  '.yarn',
+  '.cache',
+  '.cargo/registry',
+  '.cargo/git',
+  '.cargo/.package-cache',
+  'go/pkg',
+  '.m2/repository',
+  '.gradle',
+  '.nuget/packages',
+  'Library/Caches',
+  'Library/pnpm',
+];
+
+/**
  * The Run sandbox for one agent run (ADR 0006): macOS Seatbelt through the SDK. Commands write only in the working
- * folder and the temp folders, and read neither the data folder, which holds the session token, nor the operator's
+ * folder, the temp folders and the tool caches, and read neither the data folder, which holds the session token, nor the operator's
  * cloud and Keychain credentials. The working folder stays readable though it sits inside the data folder. The run
  * fails when the sandbox is unavailable and can never ask to leave it. Commands reach only the Network allowlist.
  */
@@ -35,7 +56,7 @@ export function runSandbox(run: SandboxRun): SandboxSettings {
     enableWeakerNetworkIsolation: true,
     network: { allowedDomains: run.networkDomains, strictAllowlist: true },
     filesystem: {
-      allowWrite: [run.workingDir, ...TEMP],
+      allowWrite: [run.workingDir, ...TEMP, ...TOOL_CACHES.map((folder) => path.join(home, folder))],
       denyRead: [
         run.dataDir,
         path.join(home, '.aws'),
