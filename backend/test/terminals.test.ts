@@ -98,8 +98,16 @@ describe('the setup terminal', () => {
 
   it('pre-approves its own tools, so auto mode never turns down a read of a credential file', async () => {
     const ctx = await start();
-    await waitFor(ctx, 'setup agent allows mcp__ops-console__test_connection,');
+    await waitFor(ctx, 'setup agent allows mcp__ops-console__save_connection,');
     expect(output(ctx)).toContain('mcp__ops-console__read_local_file,mcp__ops-console__list_local_folder');
+  });
+
+  it('leaves the tools that send a secret or a registration to a host of the agent’s choosing for the operator to approve', async () => {
+    const ctx = await start();
+    await waitFor(ctx, 'setup agent allows ');
+    const allowed = /setup agent allows (\S+)/.exec(output(ctx))?.[1] ?? '';
+    expect(allowed).not.toContain('test_connection');
+    expect(allowed).not.toContain('add_mcp_server');
   });
 
   it('runs on the model and effort from the defaults in Settings › Agents', async () => {

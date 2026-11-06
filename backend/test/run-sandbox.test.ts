@@ -8,12 +8,13 @@ import {
   CONNECTOR_SERVERS,
   ConnectorId,
   GitHost,
+  RunPurpose,
   StepBlock,
 } from '@ops-console/shared';
 import { sql } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runSandbox } from '../src/agent/run-sandbox';
-import { AgentRuntime } from '../src/agent/runtime';
+import { AgentRuntime, HOST_WRITE_DENIALS } from '../src/agent/runtime';
 import { repos } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { KEYCHAIN, type Keychain } from '../src/keychain/keychain';
@@ -227,6 +228,16 @@ describe('Run sandbox: what a run cannot change or read (ADR 0006)', () => {
     expect(fs?.denyRead).toContain('/data');
   });
 
+  it('denies reading the installed app, whose bundled node macOS may trust with the Keychain items', () => {
+    const fs = runSandbox({
+      workingDir: '/work/repo',
+      dataDir: '/data',
+      networkDomains: [],
+      home: '/home/op',
+    }).filesystem;
+    expect(fs?.denyRead).toContain('/home/op/.ops-console');
+  });
+
   it('leaves the working folder out of the writable folders of a read-only run', () => {
     const open = runSandbox({ workingDir: '/work/repo', dataDir: '/data', networkDomains: [] });
     const readOnly = runSandbox({ workingDir: '/work/repo', dataDir: '/data', networkDomains: [], readOnly: true });
@@ -283,6 +294,16 @@ describe('Run sandbox: what a run cannot change or read (ADR 0006)', () => {
     const id = daemon.createSession();
     await runtime.runFor(id, 'review', null, { projectSettings: false }).finished;
     expect(daemon.sdk.calls.at(-1)?.options.settingSources).toEqual(['user']);
+  });
+
+  it('holds a Verification away from Git host writes and writable Connections', async () => {
+    const daemon = await start();
+    const runtime = daemon.app.get(AgentRuntime);
+    await runtime.runFor(daemon.createSession(), 'verify', null, { purpose: RunPurpose.Verify }).finished;
+    const verify = daemon.sdk.calls.at(-1)?.options.disallowedTools ?? [];
+    expect(verify).toEqual(expect.arrayContaining(HOST_WRITE_DENIALS));
+    await runtime.runFor(daemon.createSession(), 'chat', null, {}).finished;
+    expect(daemon.sdk.calls.at(-1)?.options.disallowedTools).not.toContain('Bash(git push:*)');
   });
 
   it('makes a read-only run read-only: no edit tools and no writable working folder', async () => {

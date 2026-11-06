@@ -69,7 +69,8 @@ export class SdkProbe implements Probe {
         cwd,
         env: claudeEnv(configDir),
         persistSession: false,
-        settings: { disableAllHooks: true },
+        // A folder's own `.mcp.json` may only be listed, never started on its say-so: a sandboxed run can write one.
+        settings: { disableAllHooks: true, enableAllProjectMcpServers: false, enabledMcpjsonServers: [] },
         allowedTools: [],
         stderr: () => {},
         ...options,

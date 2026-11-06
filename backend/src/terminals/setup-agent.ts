@@ -20,6 +20,12 @@ export const SETUP_TOOLS = [
   'add_mcp_server',
 ] as const;
 
+/**
+ * The tools that send a resolved secret or a registration to a destination the agent chose. Claude Code asks the
+ * operator in the terminal before each call, so a page or file that steers the agent cannot use them unseen.
+ */
+export const ASKED_SETUP_TOOLS: readonly string[] = ['test_connection', 'add_mcp_server'];
+
 const DEFINITION = `---
 name: ${SETUP_AGENT}
 description: Sets up database Connections, remote MCP Servers and Connectors for Ops Console

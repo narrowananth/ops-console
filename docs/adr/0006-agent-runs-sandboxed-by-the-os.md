@@ -12,7 +12,9 @@ command outside it, and has no Setting to turn it off. The Setup agent's termina
 The sandbox filters a run's commands, not the agent's file tools, which run in Claude Code's own process. The console
 holds those to the same limits with permission rules in `disallowedTools`: no reading the data folder's secrets
 (`runtime.json`, `state.db`, the account folders, the key files of MCP Servers) or the credential folders, and no editing
-the git control files. A run's commands may not write `.git/hooks`, `.git/config` or `.git/commondir`, nor the `.git`
+the git control files. A `PreToolUse` hook also holds the file tools' write paths to the folders the sandbox lets commands write in
+(plus the account's Claude Code config folder), in every Access mode. The sandbox denies reading the install folder
+`~/.ops-console`, so a command cannot start the app's bundled `node`, which macOS may trust with the Keychain items. A run's commands may not write `.git/hooks`, `.git/config` or `.git/commondir`, nor the `.git`
 file of a worktree. The daemon runs `git` in those folders outside the sandbox, so it turns off hooks and `core.fsmonitor`
 on every call, and checks a scratch copy is still its own worktree before it commits or pushes there. A MCP Server that
 needs a key as a file gets it in a folder under the data folder, which the sandbox denies reading, not the user temp

@@ -1,6 +1,8 @@
+import os from 'node:os';
+import path from 'node:path';
 import { AccessMode, type WsEvent } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { type AgentDaemon, api, converse, listen, startAgentDaemon, until } from './agent-fixtures';
+import { type AgentDaemon, api, converse, listen, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
 import type { Step } from './fakes/agent-sdk';
 
 const running: AgentDaemon[] = [];
@@ -72,6 +74,19 @@ describe('access modes', () => {
     expect(daemon.sdk.ran).toEqual([{ tool: 'Bash', input: { command: 'pnpm build' } }]);
   });
 
+  it('supervised warns when a secret-looking assignment hides part of a command', async () => {
+    const daemon = await start();
+    const hidden: Step = { tool: 'Bash', input: { command: `export X_TOKEN='echo hi'; eval "$X_TOKEN"` } };
+    const { approvals } = await runTool(daemon, AccessMode.Supervised, hidden, 'denied');
+    const [approval] = approvals as { summary: string }[];
+    expect(approval?.summary).toContain('[redacted]');
+    expect(approval?.summary).toContain('Part of this command is hidden as a secret, and it runs as written');
+    // A plain command carries no warning.
+    const plain = await runTool(daemon, AccessMode.Supervised, bash, 'approved');
+    const summaries = (plain.approvals as { summary: string }[]).map((item) => item.summary);
+    expect(summaries).toContain('$ pnpm build');
+  });
+
   it('supervised asks before an edit; the edit Approval has no Action Log row', async () => {
     const daemon = await start();
     const { approvals } = await runTool(daemon, AccessMode.Supervised, edit, 'approved');
@@ -108,6 +123,26 @@ describe('access modes', () => {
     const { approvals } = await runTool(daemon, AccessMode.Full, bash);
     expect(approvals).toEqual([]);
     expect(daemon.sdk.ran.map((call) => call.tool)).toEqual(['Edit', 'Bash']);
+  });
+});
+
+describe('file tool write scope', () => {
+  const outside = (file: string): Step => ({ tool: 'Write', input: { file_path: file, content: 'x' } });
+
+  it('refuses a write outside the run folders in every Access mode, full included', async () => {
+    const daemon = await start();
+    for (const mode of Object.values(AccessMode)) {
+      daemon.sdk.ran.length = 0;
+      await runTool(daemon, mode, outside(path.join(os.homedir(), '.zshrc')));
+      await runTool(daemon, mode, outside(path.join(os.homedir(), '.ops-console', 'current', 'bin', 'ops-console')));
+      expect(daemon.sdk.ran).toEqual([]);
+    }
+  });
+
+  it('lets a write in the working folder through', async () => {
+    const daemon = await start();
+    await runTool(daemon, AccessMode.Full, outside(path.join(WORKING_DIR, 'notes.md')));
+    expect(daemon.sdk.ran).toEqual([expect.objectContaining({ tool: 'Write' })]);
   });
 });
 
