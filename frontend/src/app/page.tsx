@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 
-type Width = 'full' | 'narrow' | 'wide';
+type Width = 'full' | 'narrow' | 'wide' | 'xwide';
 
-const WIDTH: Record<Width, string> = { full: '', narrow: 'max-w-250', wide: 'max-w-280' };
+const WIDTH: Record<Width, string> = { full: '', narrow: 'max-w-250', wide: 'max-w-280', xwide: 'max-w-350' };
 
 /**
  * A sidebar page: its title and one line under it, its main actions on the right, then its body. A page whose body is
@@ -25,7 +25,7 @@ export function Page({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="flex-none border-b border-line">
         <div className={`mx-auto flex h-17 w-full items-center gap-3.5 px-8 ${WIDTH[width]}`}>
-          <h1 className="m-0 text-[21px]">{title}</h1>
+          <h1 className="m-0 flex-none text-[21px] whitespace-nowrap">{title}</h1>
           <span className="truncate text-[13px] text-neutral-700">{sub}</span>
           <span className="flex-1" />
           {actions}
@@ -37,8 +37,20 @@ export function Page({
 }
 
 /** A settings-style page body: a readable column, centered, with room around it. */
-export function PageColumn({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
-  return <div className={`mx-auto w-full self-start px-8 py-7 ${WIDTH[wide ? 'wide' : 'narrow']}`}>{children}</div>;
+export function PageColumn({
+  children,
+  wide = false,
+  xwide = false,
+}: {
+  children: ReactNode;
+  wide?: boolean;
+  xwide?: boolean;
+}) {
+  return (
+    <div className={`mx-auto w-full self-start px-8 py-7 ${WIDTH[xwide ? 'xwide' : wide ? 'wide' : 'narrow']}`}>
+      {children}
+    </div>
+  );
 }
 
 /** One group of settings on a column page: a heading and a line under it, then its rows in a card. */

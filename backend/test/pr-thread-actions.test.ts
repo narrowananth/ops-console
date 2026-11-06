@@ -692,15 +692,46 @@ describe('Address comments', () => {
     expect(ctx.host.posted).toEqual([]);
   });
 
-  it('fails with nothing posted when the branch moved, and offers no retry', async () => {
-    const ctx = await start();
+  const teammatePushes = async (ctx: Awaited<ReturnType<typeof start>>, file: string, text: string) => {
     git(ctx.dir, 'checkout', '-q', 'feature-1');
-    await writeFile(path.join(ctx.dir, 'NOTES.md'), 'a teammate pushed\n');
+    await writeFile(path.join(ctx.dir, file), text);
     git(ctx.dir, 'add', '.');
     git(ctx.dir, 'commit', '-q', '-m', 'teammate');
     git(ctx.dir, 'push', '-q', 'origin', 'feature-1');
     git(ctx.dir, 'checkout', '-q', 'main');
-    const moved = git(ctx.remote, 'rev-parse', 'feature-1');
+    return git(ctx.remote, 'rev-parse', 'feature-1');
+  };
+
+  it('catches up with a branch that moved and pushes on top of it, without force (19)', async () => {
+    const ctx = await start();
+    const moved = await teammatePushes(ctx, 'NOTES.md', 'a teammate pushed\n');
+
+    script(
+      ctx,
+      stepTurns(PlaybookTrigger.AddressComments, {
+        [IMPLEMENT]: [
+          { wait: editing(ctx, IMPLEMENT, 'src/app.ts', 'export const taxRate = 1;\n') },
+          stepAnswer('renamed'),
+        ],
+      }),
+    );
+    ctx.daemon.sdk.script({ text: outcomes([{ comment_id: 'c3', outcome: 'done', reply: 'Renamed.' }]) });
+    const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/comment-passes`, { comment_ids: ['c3'] });
+    await jobEnded(ctx, 'comment_pass', started.body.data.id);
+    const [pass] = (await detail(ctx)).comment_passes;
+    const pushed = git(ctx.remote, 'rev-parse', 'feature-1');
+    expect(pass).toMatchObject({ status: 'ready', commit_sha: pushed });
+    expect(pushed).not.toBe(moved);
+    // The teammate's commit is the parent: nothing was dropped.
+    expect(git(ctx.remote, 'rev-parse', 'feature-1~1')).toBe(moved);
+    expect(git(ctx.remote, 'show', 'feature-1:NOTES.md')).toBe('a teammate pushed');
+    expect(git(ctx.remote, 'show', 'feature-1:src/app.ts')).toBe('export const taxRate = 1;');
+    expect(ctx.host.posted.length).toBeGreaterThan(0);
+  });
+
+  it('fails with nothing posted when the branch moved onto the same lines, and offers no retry (19)', async () => {
+    const ctx = await start();
+    const moved = await teammatePushes(ctx, 'src/app.ts', 'export const taxRate = 7;\n');
 
     script(
       ctx,

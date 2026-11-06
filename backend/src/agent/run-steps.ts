@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { redact } from '../action-log/redact';
 import { runSteps, runUsage } from '../db/schema';
 import { STORE, type Store } from '../db/store';
+import { mergeLines, sumTokens, type UsageLine } from './pricing';
 import { phaseOf, type StepFacts } from './run-insight';
 import type { Run } from './runs';
 
@@ -110,30 +111,47 @@ export class RunStepsLog {
     );
   }
 
-  /** What a run cost, added to any earlier part of the same run (a retry on another account). */
-  addUsage(run: Run, costUsd: number, tokens: number): void {
-    if (costUsd === 0 && tokens === 0) return;
-    this.store.write((tx) =>
-      tx
-        .insert(runUsage)
+  /**
+   * What a run used, added to any earlier part of the same run (a retry on another account). `lines` are the raw token
+   * counts since the last save, so adding them never counts a message twice. `reportedCostUsd` is the SDK's own figure,
+   * `reportedTokens` its token total, used only when no raw lines were seen.
+   */
+  addUsage(run: Run, reportedCostUsd: number, lines: UsageLine[], reportedTokens = 0): void {
+    // Without raw lines, the tokens are what the result message said.
+    const added = lines.length > 0 ? lines.reduce((sum, line) => sum + sumTokens(line), 0) : reportedTokens;
+    if (reportedCostUsd === 0 && added === 0) return;
+    this.store.write((tx) => {
+      const had = tx
+        .select()
+        .from(runUsage)
+        .where(and(eq(runUsage.sessionId, run.sessionId), eq(runUsage.runStartedAt, run.createdAt)))
+        .get();
+      const all = mergeLines([...(had?.breakdown ? (JSON.parse(had.breakdown) as UsageLine[]) : []), ...lines]);
+      const now = new Date().toISOString();
+      if (had) {
+        tx.update(runUsage)
+          .set({
+            finishedAt: now,
+            costUsd: had.costUsd + reportedCostUsd,
+            tokens: had.tokens + added,
+            breakdown: had.breakdown === null && lines.length === 0 ? null : JSON.stringify(all),
+          })
+          .where(eq(runUsage.id, had.id))
+          .run();
+        return;
+      }
+      tx.insert(runUsage)
         .values({
           id: crypto.randomUUID(),
           sessionId: run.sessionId,
           runStartedAt: run.createdAt,
-          finishedAt: new Date().toISOString(),
-          costUsd,
-          tokens,
+          finishedAt: now,
+          costUsd: reportedCostUsd,
+          tokens: added,
+          breakdown: lines.length === 0 ? null : JSON.stringify(all),
         })
-        .onConflictDoUpdate({
-          target: [runUsage.sessionId, runUsage.runStartedAt],
-          set: {
-            finishedAt: new Date().toISOString(),
-            costUsd: sql`${runUsage.costUsd} + ${costUsd}`,
-            tokens: sql`${runUsage.tokens} + ${tokens}`,
-          },
-        })
-        .run(),
-    );
+        .run();
+    });
   }
 
   /** The steps of the run that began at `startedAt` in each Session, oldest first. */
@@ -159,22 +177,33 @@ export class RunStepsLog {
       .map(factsOf);
   }
 
-  usageOf(sessionIds: string[]): { sessionId: string; runStartedAt: string; costUsd: number; tokens: number }[] {
+  usageOf(sessionIds: string[]): UsageRow[] {
     if (sessionIds.length === 0) return [];
-    return this.store.db.select().from(runUsage).where(inArray(runUsage.sessionId, sessionIds)).all();
+    return this.store.db.select().from(runUsage).where(inArray(runUsage.sessionId, sessionIds)).all().map(usageRowOf);
   }
 
-  /** What runs that ended since `since` cost together. */
-  usageSince(since: string): { costUsd: number; tokens: number; runs: number } {
-    const row = this.store.db
-      .select({
-        costUsd: sql<number>`coalesce(sum(${runUsage.costUsd}), 0)`,
-        tokens: sql<number>`coalesce(sum(${runUsage.tokens}), 0)`,
-        runs: sql<number>`count(*)`,
-      })
-      .from(runUsage)
-      .where(sql`${runUsage.finishedAt} >= ${since}`)
-      .get();
-    return { costUsd: row?.costUsd ?? 0, tokens: row?.tokens ?? 0, runs: row?.runs ?? 0 };
+  /** The usage of every run that ended since `since`, for the day's total. */
+  usageRowsSince(since: string): UsageRow[] {
+    return this.store.db.select().from(runUsage).where(gte(runUsage.finishedAt, since)).all().map(usageRowOf);
   }
+}
+
+/** One run's saved usage: the SDK's cost, every token, and the raw counts when they were kept. */
+export type UsageRow = {
+  sessionId: string;
+  runStartedAt: string;
+  /** What the SDK reported. */
+  costUsd: number;
+  tokens: number;
+  lines: UsageLine[] | null;
+};
+
+function usageRowOf(row: typeof runUsage.$inferSelect): UsageRow {
+  return {
+    sessionId: row.sessionId,
+    runStartedAt: row.runStartedAt,
+    costUsd: row.costUsd,
+    tokens: row.tokens,
+    lines: row.breakdown === null ? null : (JSON.parse(row.breakdown) as UsageLine[]),
+  };
 }

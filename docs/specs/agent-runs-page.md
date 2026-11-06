@@ -28,11 +28,12 @@ one browser tab, so no other view can show it.
    **stopped** follow the run's outcome. Anything else is **on track**.
 5. A card opens to the run's detail, kept in the address (`?run=<session id>`). It shows the stage the run is at, why it
    is slow or ended, where the time went, a timeline with a lane per agent, every step, and the queued message.
-6. Stage is read from the tools the run used: read task, explore, edit, run tests, fix, commit, open pull request. Any
-   call means the task was read. A command that only looks (`git log`, `gh pr diff`, `ls`, `grep`) counts as explore;
-   a command that marks no stage leaves the run where it was. Every stage up to the furthest one reached shows as
-   done, and the stage of the newest call shows as now. A run that works in another order shows a stage it skipped as
-   done.
+6. The stages come from the run, not a fixed list. A pull request review goes Read PR, Explore, Analyze, Write comments,
+   Post review. A run that edits, tests, commits or opens a pull request goes Read task, Explore, Edit, Run tests, Fix,
+   Commit + hooks, Open PR. A run that only reads, searches and uses subagents goes Read task, Explore, Analyze, Report.
+   A stage is done only with evidence: an edit for Edit, a test command for Run tests, a commit for Commit, and so on.
+   A stage the run went past with none shows as skipped, and the stage of the newest call shows as now. A run that
+   ended early marks the stage it stopped in with why: usage limit, failed or stopped.
 7. **Why this run is slow** gives the step and how long it has run against its usual time, a likely cause, and a
    suggestion. The cause comes from the command: one that reaches the network or runs tests names the Run sandbox's
    allowlist as a possible cause; any other says the console cannot see what the step waits on. The console does not
@@ -43,13 +44,23 @@ one browser tab, so no other view can show it.
    says the console has no more than the error. A commit hook failure tells the operator to fix what the hook reports;
    it never offers to skip the hook. A blocked host offers Allow and Retry, which adds the host to the Network
    allowlist and then retries.
-9. The time split sorts a run's time into thinking, reading, editing, commands and tools, and waiting on the operator.
-   The main agent's calls make the split; the rest of the run's time counts as thinking. Subagents show in the timeline.
+9. The time split gives every millisecond of the main agent's run to one phase: thinking (the gaps between calls),
+   reading, editing, commands and tools, subagents (the main agent is blocked on a subagent call), waiting on the
+   operator, and waiting on the usage limit. The total equals the elapsed time in the run's header, read from one clock.
+   Percentages add up to 100 by largest remainder. A phase of 0s draws no segment; under one second reads "<1s". The
+   headline names the largest phase, one command over half the run, or "62% waiting on 12 subagents". A table lists each
+   subagent by duration with its own split, tokens and cost; a row filters the steps. The timeline draws thinking on
+   every lane, folds a stretch with no call in any lane over a fifth of the width into a marker the operator can open,
+   and zooms to Fit, 1m, 5m or a dragged range. Time accounting lives in `shared/src/run-time.ts`.
 10. Every tool call of a run is kept with its time, outcome and error for 30 days. A run that ended before this
     shipped has none, and its detail says so.
-11. A run's cost and tokens are kept from the SDK's result when the run ends, and added over the day. A subscription is
-    not billed by the token, so the figure is an estimate.
-12. Stop all stops every run going, after the operator confirms. Dismiss ended takes every ended run off the page.
+11. A run's tokens are kept as raw counts per agent and model (input, output, cache read, cache write), each message
+    once. The cost is those counts times one price table (`backend/src/agent/pricing.ts`); the SDK's own figure is kept
+    beside it to compare. The run's total is the main agent plus every subagent. The day's total uses the same path. A
+    subscription is not billed by the token, so the figure is an estimate. A run kept before raw counts shows the SDK's
+    figure.
+12. Stop all stops every run going, after the operator confirms. Play all carries on every paused or stopped run that
+    can. Dismiss ended takes every ended run off the page.
 13. The queued message is kept by the daemon, one per Session. It goes out when the run ends unless the operator stopped
     or paused the run, which holds it as "On hold". Send now sends it at once and stops a run that is going first. Take
     back clears it. Queue with no run going sends the message.

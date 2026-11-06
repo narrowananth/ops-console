@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 
 /** `42s`, `4m 05s`, `1h 02m`: how long, to the second under an hour. */
 export function duration(ms: number): string {
@@ -9,16 +9,36 @@ export function duration(ms: number): string {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
-/** The time now, a second at a time, while `live`. */
-function useNow(live: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!live) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [live]);
-  return now;
+/** One clock for every live counter on the page, so two of them never disagree by a tick. */
+let tickNow = Date.now();
+let timer: ReturnType<typeof setInterval> | undefined;
+const listeners = new Set<() => void>();
+
+function subscribe(listener: () => void): () => void {
+  if (listeners.size === 0) {
+    tickNow = Date.now();
+    timer = setInterval(() => {
+      tickNow = Date.now();
+      for (const one of listeners) one();
+    }, 1000);
+  }
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0 && timer !== undefined) {
+      clearInterval(timer);
+      timer = undefined;
+    }
+  };
+}
+
+const quiet = () => () => {};
+
+/** The time now, a second at a time and the same for every caller, while `live`. */
+export function useNow(live: boolean): number {
+  const shared = useSyncExternalStore(live ? subscribe : quiet, () => tickNow);
+  // Not live: the moment of this render, which nothing counts on.
+  return live ? shared : Date.now();
 }
 
 /**

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Elapsed } from '../components/ui/elapsed';
 import { HealthIcon, RunButtons } from './run-controls';
 import { RunDetailPanel } from './run-detail';
-import { ACCESS_NAME, HEALTH, MODEL_NAME, money, PHASE, placeOf, titleOf, tokens } from './run-look';
+import { ACCESS_NAME, clock, HEALTH, MODEL_NAME, PHASE, placeOf, statusLabel, titleOf, usageText } from './run-look';
 
 /** The time a run spent in each phase, as one strip. */
 export function PhaseStrip({ run }: { run: AgentRun }) {
@@ -41,8 +41,7 @@ export function RunCard({
   const look = HEALTH[run.health];
   const place = placeOf(session, repoName);
   const going = run.subagents.filter((one) => one.status === SubagentStatus.Working).length;
-  const usage =
-    run.cost_usd !== null ? `${money(run.cost_usd)}${run.tokens ? ` · ${tokens(run.tokens)} tokens` : ''}` : null;
+  const usage = usageText(run);
   const facts = [
     place.where,
     session.branch,
@@ -58,7 +57,21 @@ export function RunCard({
     <li
       className={`list-none rounded-xl border bg-card shadow-sm transition-shadow hover:shadow-md ${look.card} ${open ? 'shadow-md' : ''}`}
     >
-      <div className="flex items-center gap-3.5 px-3.5 py-3.5">
+      <div
+        className={`flex items-center gap-3.5 px-3.5 py-3.5 ${open ? 'sticky top-0 z-20 rounded-t-xl border-b border-line bg-card' : ''}`}
+      >
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={`${open ? 'Hide' : 'Show'} details of ${place.what}`}
+          title={open ? 'Hide details' : 'Show details'}
+          onClick={onToggle}
+          className="-mr-1.5 flex size-6 flex-none cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-0 text-neutral-700 hover:bg-neutral-200 hover:text-text"
+        >
+          <span aria-hidden className={`text-[15px] leading-none transition-transform ${open ? 'rotate-90' : ''}`}>
+            ›
+          </span>
+        </button>
         <span title={look.tip} className={`flex size-11 flex-none items-center justify-center rounded-xl ${look.icon}`}>
           <HealthIcon health={run.health} running={run.running} />
         </span>
@@ -75,18 +88,20 @@ export function RunCard({
           {session.queued_message !== null && (
             <span className="mt-0.5 block truncate text-[11px] text-info">queued: “{session.queued_message}”</span>
           )}
-          <PhaseStrip run={run} />
+          {!open && <PhaseStrip run={run} />}
         </div>
         <div className="flex flex-none flex-col items-end gap-1.5">
           <span title={look.tip} className={`rounded-full px-2.5 py-px font-mono text-[11px] ${look.chip}`}>
-            {look.label}
+            {statusLabel(run)}
           </span>
           <Elapsed from={run.started_at} to={run.finished_at} running={run.running} took={!run.running} />
+          {!run.running && run.finished_at && (
+            <span className="font-mono text-[11px] text-neutral-700">ended {clock(run.finished_at)}</span>
+          )}
           <RunButtons run={run} />
           <button
             type="button"
             aria-expanded={open}
-            aria-label={`${open ? 'Hide' : 'Show'} details of ${place.what}`}
             title="Where the time went, the steps, and why it is slow or failed"
             onClick={onToggle}
             className="cursor-pointer border-0 bg-transparent p-0 text-[11px] text-neutral-700 hover:text-text"

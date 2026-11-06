@@ -75,13 +75,18 @@ export enum RunHealth {
   Stopped = 'stopped',
 }
 
-/** Where a run's time goes. Time between steps is the agent thinking. */
+/**
+ * Where a run's time goes, in the order the legend lists it. Time between steps is the agent thinking; time the main
+ * agent is blocked on a subagent call is `Subagents`; time lost to the account's usage limit is `WaitingLimit`.
+ */
 export enum RunPhase {
   Thinking = 'thinking',
   Reading = 'reading',
   Editing = 'editing',
   Commands = 'commands',
+  Subagents = 'subagents',
   WaitingYou = 'waiting_you',
+  WaitingLimit = 'waiting_limit',
 }
 
 /** Why a run ended badly, as far as the console can tell from what it saw. */
@@ -93,17 +98,6 @@ export enum FailureKind {
   HookFailed = 'hook_failed',
   Interrupted = 'interrupted',
   Unknown = 'unknown',
-}
-
-/** The stages a run goes through, in order. A stage is read from the tools the run used, so it can be wrong. */
-export enum RunStage {
-  ReadTask = 'read_task',
-  Explore = 'explore',
-  Edit = 'edit',
-  RunTests = 'run_tests',
-  Fix = 'fix',
-  Commit = 'commit',
-  OpenPr = 'open_pr',
 }
 
 export enum ActionActor {
@@ -259,6 +253,50 @@ export const subagentSchema = z.object({
 
 export type Subagent = z.infer<typeof subagentSchema>;
 
+/** Raw token counts, each priced on its own: the cost is never kept without them. */
+export const tokenCountsSchema = z.object({
+  input: z.number().int(),
+  output: z.number().int(),
+  cache_read: z.number().int(),
+  cache_write: z.number().int(),
+});
+
+export type TokenCounts = z.infer<typeof tokenCountsSchema>;
+
+/** What one agent of a run used: the main agent (`agent_id` null) or one subagent. */
+export const agentUsageSchema = z.object({
+  agent_id: z.string().nullable(),
+  tokens: tokenCountsSchema,
+  /** From `tokens` and the price table of the model each message ran on. */
+  cost_usd: z.number(),
+});
+
+export type AgentUsage = z.infer<typeof agentUsageSchema>;
+
+/** What a run used, from the raw token counts of every message, once each. `total` equals main plus every subagent. */
+export const runUsageSchema = z.object({
+  total: z.object({ tokens: tokenCountsSchema, cost_usd: z.number() }),
+  main: z.object({ tokens: tokenCountsSchema, cost_usd: z.number() }),
+  subagents: z.object({ tokens: tokenCountsSchema, cost_usd: z.number() }),
+  by_agent: z.array(agentUsageSchema),
+  /** What the SDK reported for the run, to compare with `total`; null when it gave none. */
+  reported_cost_usd: z.number().nullable(),
+  /** Models the run's messages ran on. */
+  models: z.array(z.string()),
+});
+
+export type RunUsage = z.infer<typeof runUsageSchema>;
+
+/** The usage limit a run ended on or waits on. */
+export const runLimitSchema = z.object({
+  /** When the run began to wait on the limit; null when the console did not see it. */
+  since: z.string().nullable(),
+  /** When the account's window resets, when the SDK said. */
+  resets_at: z.string().nullable(),
+});
+
+export type RunLimit = z.infer<typeof runLimitSchema>;
+
 /** One entry of the Running tray: a Session's run going now, or one that ended without finishing. */
 export const agentRunSchema = z.object({
   session: sessionSchema,
@@ -277,9 +315,13 @@ export const agentRunSchema = z.object({
   health_reason: z.string(),
   /** What the agent does now: its open step. Null when nothing is open. */
   activity: z.string().nullable(),
-  /** The cost and tokens the last run reported when it ended; null while it goes or when the SDK gave none. */
+  /** `usage.total.cost_usd`; null when the run has no usage. */
   cost_usd: z.number().nullable(),
+  /** Every token of the run: input, output, cache read and cache write. */
   tokens: z.number().int().nullable(),
+  usage: runUsageSchema.nullable(),
+  /** The usage limit the run waits on or ended on; null otherwise. */
+  limit: runLimitSchema.nullable(),
   /** Milliseconds per phase over the run, in `RunPhase` order. */
   split: z.array(z.object({ phase: z.enum(RunPhase), ms: z.number().int() })),
 });
@@ -296,6 +338,8 @@ export const runStepSchema = z.object({
   phase: z.enum(RunPhase),
   started_at: z.string(),
   finished_at: z.string().nullable(),
+  /** Milliseconds of the call spent waiting on the operator's Approval or answer. */
+  waited_ms: z.number().int(),
   /** Null while the step goes. */
   ok: z.boolean().nullable(),
   error: z.string().nullable(),
@@ -322,16 +366,34 @@ export const failureSchema = z.object({
   raw: z.string().nullable(),
   /** The host to allow, for `network_blocked`. */
   blocked_host: z.string().nullable(),
+  /** When the usage window resets, for `rate_limited`, when known. */
+  resets_at: z.string().nullable(),
+  /** What a Retry carries on with: the subagent or step the run stopped at. Null when nothing is known. */
+  resume_point: z.string().nullable(),
 });
 
 export type SlowDiagnosis = z.infer<typeof slowDiagnosisSchema>;
 export type Failure = z.infer<typeof failureSchema>;
 
+/**
+ * One phase of the run's own order of work. The set is read from the run: a run that only reads and searches has no
+ * Edit or Run tests. `done` means the run has evidence of it, `skipped` that the run went past it with none.
+ */
+export const runPhaseStepSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  state: z.enum(['done', 'now', 'skipped', 'todo']),
+  /** Set on the phase an ended run stopped in: why, and the tone the marker takes. */
+  stopped: z.object({ tone: z.enum(['limit', 'failed', 'stopped']), label: z.string() }).nullable(),
+});
+
+export type RunPhaseStep = z.infer<typeof runPhaseStepSchema>;
+
 /** `GET /agent-runs/:id`: one run with its steps, where the time went and why it is slow or failed. */
 export const runDetailSchema = z.object({
   run: agentRunSchema,
   steps: z.array(runStepSchema),
-  stages: z.array(z.object({ stage: z.enum(RunStage), state: z.enum(['done', 'now', 'todo']) })),
+  stages: z.array(runPhaseStepSchema),
   slow: slowDiagnosisSchema.nullable(),
   failure: failureSchema.nullable(),
 });

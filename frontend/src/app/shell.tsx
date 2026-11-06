@@ -66,7 +66,7 @@ export function Shell() {
                 <Page
                   title="Agent runs"
                   sub="Every agent run: how it goes, why it is slow, why it failed"
-                  width="wide"
+                  width="xwide"
                   actions={<AgentRunsActions />}
                 >
                   <AgentRunsView />

@@ -289,7 +289,7 @@ ${SHARED_RULES}`,
   [PlaybookTrigger.AddressComments]: `Work through the review threads the operator ticked: understand each one, make only the agreed and necessary changes, validate them, and answer every thread with what happened.
 - Work only on the ticked threads; ignore the rest. Never accept or reject a suggestion blindly.
 - A general comment on the pull request (not on a file) gets a reply only: never change code for it.
-- The developer's existing changes stay; the console makes one commit of every validated change and pushes it without force. When the branch moved, it stops and posts nothing.
+- The developer's existing changes stay; the console makes one commit of every validated change and pushes it without force. When the branch moved, it rebases the commit onto the new tip; only a conflict there stops it, and then it posts nothing.
 - Report each thread as done or declined:
   - done: AGREE, implemented and validated; or ALREADY ADDRESSED, with the reply naming the code that already resolves it. The console resolves done threads.
   - declined: DECLINE with the technical reason, NEEDS CLARIFICATION with the question, or a change whose validation failed, with what is left. These stay open.

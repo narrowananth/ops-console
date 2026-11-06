@@ -140,6 +140,8 @@ const run = (id: string, extra: Record<string, unknown> = {}, sessionExtra: Reco
   activity: null,
   cost_usd: null,
   tokens: null,
+  usage: null,
+  limit: null,
   split: [],
   ...extra,
 });
@@ -171,7 +173,7 @@ test('the sidebar tray lists every agent run going, says which wait on the opera
   await page.goto(`${daemon.url}/repos#token=${daemon.token}`);
 
   const tray = page.getByRole('button', { name: 'Running agents' });
-  await expect(tray).toHaveText(/Running\s*3/);
+  await expect(tray).toHaveText(/3 running/);
   await expect(tray).toHaveAttribute('title', '3 agent runs going, 1 waiting on you');
   await tray.click();
   const dialog = page.getByRole('dialog', { name: 'Agent runs' });

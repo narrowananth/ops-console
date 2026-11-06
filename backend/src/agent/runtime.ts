@@ -9,6 +9,7 @@ import type {
   HookJSONOutput,
   Options,
   PermissionMode,
+  SDKAssistantMessage,
   SDKMessage,
   SDKTaskNotificationMessage,
   SDKTaskStartedMessage,
@@ -57,6 +58,7 @@ import { ConnectionLookup } from './connection-lookup';
 import { HOOK_BYPASS_REASON, skipsCommitHooks } from './hook-bypass';
 import { MessageInterceptors } from './message-interceptors';
 import { blockParts, contentSchema, EDIT_TOOLS, questionInputSchema, stepText, toMessages } from './parts';
+import { mergeLines, type UsageLine } from './pricing';
 import { ProdWriteRule } from './prod-write-rule';
 import {
   CONSOLE_TOOLS_SERVER,
@@ -460,6 +462,9 @@ export class AgentRuntime {
       sendQueuedAfter: false,
       joinedRepo: false,
       subagents: new Map(),
+      taskOfToolUse: new Map(),
+      messageUsage: new Map(),
+      limitSince: null,
       resumeAt: options.resumeAt ?? null,
       deny: options.deny ?? [],
       projectSettings: options.projectSettings ?? true,
@@ -482,6 +487,8 @@ export class AgentRuntime {
       runFinishedAt: null,
       runOutcome: null,
       runSubagents: null,
+      runLimitSince: null,
+      runLimitResetsAt: null,
     });
     void this.execute(run, text);
     return run;
@@ -747,6 +754,8 @@ export class AgentRuntime {
     let rejected = false;
     let signInFailed = false;
     let failed = false;
+    let reportedCost = 0;
+    let reportedTokens = 0;
     try {
       for await (const message of this.config.sdk.query(text, options)) {
         if (message.type === 'rate_limit_event') {
@@ -756,6 +765,7 @@ export class AgentRuntime {
             // Through CLIProxy the numbers are of whichever account CLIProxy picked, not this one.
             if (!this.cliProxy.enabled()) this.accounts.recordUsage(account.id, info.data);
             rejected ||= info.data.status === 'rejected';
+            if (info.data.status === 'rejected') this.noteLimit(run, info.data.resetsAt);
           }
         } else if (message.type === 'result') {
           for (const denial of message.permission_denials) {
@@ -763,15 +773,21 @@ export class AgentRuntime {
             if (row) this.actionLog.finish(row, ActionOutcome.Denied);
           }
           failed = message.is_error;
-          this.steps.addUsage(
-            run,
-            message.total_cost_usd ?? 0,
-            (message.usage?.input_tokens ?? 0) + (message.usage?.output_tokens ?? 0),
-          );
+          reportedCost += message.total_cost_usd ?? 0;
+          const used = message.usage;
+          reportedTokens +=
+            (used?.input_tokens ?? 0) +
+            (used?.output_tokens ?? 0) +
+            (used?.cache_read_input_tokens ?? 0) +
+            (used?.cache_creation_input_tokens ?? 0);
           // Only a sandbox refusal is worth the operator's eyes; other result text stays in the transcript.
           const said = message.subtype === 'success' ? message.result : message.errors?.join('; ');
           if (failed && typeof said === 'string' && /sandbox/i.test(said)) run.failure = said;
         } else {
+          if (message.type === 'assistant') {
+            this.noteUsage(run, message);
+            if (message.error === 'rate_limit') this.noteLimit(run, undefined);
+          }
           rejected ||= message.type === 'assistant' && message.error === 'rate_limit';
           signInFailed ||= message.type === 'assistant' && message.error === 'authentication_failed';
           this.stream(run, message);
@@ -780,6 +796,8 @@ export class AgentRuntime {
     } catch (error) {
       if (!rejected && !signInFailed && !run.stopped) throw error;
     } finally {
+      // Saved even when the query threw: a run the limit cut off still used what it used.
+      this.steps.addUsage(run, reportedCost, this.takeUsage(run), reportedTokens);
       if (skillFolder !== null) await removeSkillPlugin(skillFolder);
     }
     for (const row of run.toolRows.values()) {
@@ -789,6 +807,48 @@ export class AgentRuntime {
     if (rejected) return ErrorCode.RateLimited;
     if (signInFailed) return ErrorCode.Unauthorized;
     return failed ? ErrorCode.UpstreamFailed : 'done';
+  }
+
+  /** Keeps what a model message used, once per message id; the subagent it came from is found by its Task call. */
+  private noteUsage(run: Run, message: SDKAssistantMessage): void {
+    const { id, model, usage } = message.message;
+    if (!id || !usage) return;
+    const agentId =
+      message.parent_tool_use_id === null
+        ? null
+        : (run.taskOfToolUse.get(message.parent_tool_use_id) ?? message.parent_tool_use_id);
+    run.messageUsage.set(id, {
+      agentId,
+      model: String(model),
+      tokens: {
+        input: usage.input_tokens ?? 0,
+        output: usage.output_tokens ?? 0,
+        cache_read: usage.cache_read_input_tokens ?? 0,
+        cache_write: usage.cache_creation_input_tokens ?? 0,
+      },
+    });
+  }
+
+  /** The usage of the messages seen since the last save, summed per agent and model; the messages are forgotten. */
+  private takeUsage(run: Run): UsageLine[] {
+    const lines = [...run.messageUsage.values()].map((one) => ({
+      agent_id: one.agentId,
+      model: one.model,
+      ...one.tokens,
+    }));
+    run.messageUsage.clear();
+    return mergeLines(lines);
+  }
+
+  /** The run hit the account's usage limit: when, and when the window resets (the SDK gives seconds). */
+  private noteLimit(run: Run, resetsAtSeconds: number | undefined): void {
+    const resets = resetsAtSeconds === undefined ? null : new Date(resetsAtSeconds * 1000).toISOString();
+    if (run.limitSince !== null && resets === null) return;
+    run.limitSince ??= new Date().toISOString();
+    this.sessions.write(run.sessionId, {
+      runLimitSince: run.limitSince,
+      ...(resets === null ? {} : { runLimitResetsAt: resets }),
+    });
   }
 
   /** Turns SDK messages into parts. Text grows from stream deltas, then is replaced by its finished block. */
@@ -842,6 +902,7 @@ export class AgentRuntime {
   private trackSubagent(run: Run, message: SDKTaskStartedMessage | SDKTaskNotificationMessage): void {
     if (message.subtype === 'task_started') {
       if (message.subagent_type === undefined && message.spawn_depth === undefined) return;
+      if (message.tool_use_id) run.taskOfToolUse.set(message.tool_use_id, message.task_id);
       run.subagents.set(message.task_id, {
         id: message.task_id,
         parent_id: message.parent_task_id ?? null,

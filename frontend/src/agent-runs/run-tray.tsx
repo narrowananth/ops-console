@@ -8,6 +8,7 @@ import {
   useAgentUsage,
   useBulkRunControls,
   useRepos,
+  useRetryRuns,
   useRunDetail,
   useRunQueue,
 } from '../lib/queries';
@@ -15,7 +16,19 @@ import { alertPath, pullRequestPath } from '../workspace/links';
 import { AlertsPill } from './alerts-pill';
 import { Pill, RunButtons } from './run-controls';
 import { RunAnalytics } from './run-detail';
-import { ACCESS_NAME, clock, HEALTH, KIND_NAME, MODEL_NAME, money, placeOf, titleOf, tokens } from './run-look';
+import {
+  ACCESS_NAME,
+  canPlay,
+  clock,
+  HEALTH,
+  KIND_NAME,
+  MODEL_NAME,
+  PlayIcon,
+  placeOf,
+  titleOf,
+  usageLine,
+  usageTip,
+} from './run-look';
 
 type Tab = 'all' | 'going' | 'needs_you' | 'ended';
 
@@ -124,9 +137,7 @@ function RunBody({ run, to, where }: { run: AgentRun; to: string; where: string 
     ['Access', ACCESS_NAME[session.access_mode]],
     ['Model', MODEL_NAME[session.model]],
     ...(account ? ([['Account', account.email ?? account.label]] as [string, string][]) : []),
-    ...(run.cost_usd !== null
-      ? ([['Usage', `${run.tokens ? `${tokens(run.tokens)} tok · ` : ''}${money(run.cost_usd)}`]] as [string, string][])
-      : []),
+    ...(run.cost_usd !== null ? ([['Usage', usageLine(run.tokens, run.cost_usd)]] as [string, string][]) : []),
   ];
   return (
     <div className="mx-2.5 mb-3 flex flex-col gap-2.5">
@@ -141,7 +152,9 @@ function RunBody({ run, to, where }: { run: AgentRun; to: string; where: string 
           {facts.map(([name, value]) => (
             <div key={name} className="flex gap-3">
               <dt className="w-14 flex-none text-neutral-700">{name}</dt>
-              <dd className="m-0 min-w-0 truncate font-mono">{value}</dd>
+              <dd title={name === 'Usage' ? usageTip(run) : value} className="m-0 min-w-0 font-mono break-words">
+                {value}
+              </dd>
             </div>
           ))}
         </dl>
@@ -299,6 +312,7 @@ export function RunTray() {
   const usage = useAgentUsage().data;
   const repos = useRepos().data?.data ?? [];
   const bulk = useBulkRunControls();
+  const retry = useRetryRuns();
   const [tab, setTab] = useState<Tab>('all');
   const [openIds, setOpenIds] = useState<string[]>([]);
   const [showAll, setShowAll] = useState(false);
@@ -308,6 +322,7 @@ export function RunTray() {
   const waiting = runs.filter(needsYou);
   const ended = runs.filter((run) => !run.running);
   const only = going.filter((run) => !needsYou(run));
+  const playable = runs.filter(canPlay);
   const tabs: [Tab, string, number][] = [
     ['all', 'All', runs.length],
     ['going', 'Going', going.length],
@@ -338,6 +353,18 @@ export function RunTray() {
         </span>
         <span className="flex-1" />
         <AlertsPill />
+        <Pill
+          disabled={playable.length === 0 || retry.isPending}
+          title={
+            playable.length === 0
+              ? 'No run is paused or stopped.'
+              : `Carries on every paused or stopped run (${playable.length}).`
+          }
+          onClick={() => retry.mutate(playable.map((run) => run.session.id))}
+        >
+          <PlayIcon />
+          Play all
+        </Pill>
         {confirming ? (
           <span className="flex items-center gap-1.5 text-xs">
             Stop {going.length}?
@@ -384,7 +411,7 @@ export function RunTray() {
         <span className="flex-1" />
         {usage && (
           <span className="font-mono text-[11px] text-neutral-700">
-            {tokens(usage.tokens)} tokens · {money(usage.cost_usd)} today
+            {usageLine(usage.tokens, usage.cost_usd)} today
           </span>
         )}
       </div>
