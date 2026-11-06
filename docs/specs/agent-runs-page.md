@@ -52,7 +52,7 @@ one browser tab, so no other view can show it.
    subagent by duration with its own split, tokens and cost; a row filters the steps. The timeline draws thinking on
    every lane, folds a stretch with no call in any lane over a fifth of the width into a marker the operator can open,
    and zooms to Fit, 1m, 5m or a dragged range. Time accounting lives in `shared/src/run-time.ts`.
-10. Every tool call of a run is kept with its time, outcome and error for 30 days. A run that ended before this
+10. Every tool call of a run is kept with its time, outcome and error for 90 days. A run that ended before this
     shipped has none, and its detail says so.
 11. A run's tokens are kept as raw counts per agent and model (input, output, cache read, cache write), each message
     once. The cost is those counts times one price table (`backend/src/agent/pricing.ts`); the SDK's own figure is kept
@@ -63,7 +63,8 @@ one browser tab, so no other view can show it.
     can. Dismiss ended takes every ended run off the page.
 13. The queued message is kept by the daemon, one per Session. It goes out when the run ends unless the operator stopped
     or paused the run, which holds it as "On hold". Send now sends it at once and stops a run that is going first. Take
-    back clears it. Queue with no run going sends the message.
+    back clears it. Queue with no run going sends the message. A Session whose run is paused or stopped shows Play
+    beside Send in its chat; Play carries the run on from the conversation, as it does on the page.
 14. Desktop alerts, off until the operator turns each on: when a run needs them, and when a run ends. The Alerts pill
     in the page header and in the tray turns both on or off; the page keeps a switch for each. The browser asks
     permission once. An alert shows only while the console is open in a tab that is not in front, and not for what was
@@ -97,7 +98,7 @@ Loading, empty and error states follow the other pages. A control's error shows 
 ## Seams
 
 - **Daemon** (`backend/test/run-insight.test.ts`, `backend/test/agent-sessions.test.ts`): 4 to 11, 13 and 12.
-- **Browser** (`frontend/e2e/agent-runs.spec.ts`, `workspace.spec.ts`): 1 to 3, 5, 7, 8, 12 and 13.
+- **Browser** (`frontend/e2e/agent-runs.spec.ts`, `session-links.spec.ts`, `workspace.spec.ts`): 1 to 3, 5, 7, 8, 12 and 13.
 
 ## Out of scope
 

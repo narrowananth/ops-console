@@ -4,6 +4,7 @@ const WEEK_DAYS = 7;
 export type AccountUsage = {
   id: string;
   signedIn: boolean;
+  enabled: boolean;
   fiveHourPct: number | null;
   fiveHourResetsAt: string | null;
   weeklyPct: number | null;
@@ -43,7 +44,8 @@ export function smartRank(
   for (const account of accounts) {
     const fiveHour = effectivePct(account.fiveHourPct, account.fiveHourResetsAt, now);
     const weekly = effectivePct(account.weeklyPct, account.weeklyResetsAt, now);
-    if (!account.signedIn) notes.set(account.id, 'not signed in, skipped');
+    if (!account.enabled) notes.set(account.id, 'disabled, skipped');
+    else if (!account.signedIn) notes.set(account.id, 'not signed in, skipped');
     else if (fiveHour === null || weekly === null) notes.set(account.id, 'no usage yet, skipped');
     else if (fiveHour >= threshold) notes.set(account.id, '5-hour window nearly full, skipped');
     else if (weekly >= 100) notes.set(account.id, 'weekly quota used up, skipped');

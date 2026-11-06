@@ -112,6 +112,7 @@ export function signInCode(pasted: string): string {
 const usageOf = (row: AccountRow): AccountUsage => ({
   id: row.id,
   signedIn: row.signedIn,
+  enabled: row.enabled,
   fiveHourPct: row.fiveHourPct,
   fiveHourResetsAt: row.fiveHourResetsAt,
   weeklyPct: row.weeklyPct,
@@ -169,8 +170,15 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
   /** The account runs go under. */
   active(): AccountRow {
     const row = this.activeRow();
-    if (!row?.signedIn) {
-      throw new ApiError(409, ErrorCode.InvalidState, 'no Claude account is signed in; add one in Settings › Agents');
+    if (!row?.signedIn || !row.enabled) {
+      const disabled = this.rows().some((one) => one.signedIn && !one.enabled);
+      throw new ApiError(
+        409,
+        ErrorCode.InvalidState,
+        disabled && !this.rows().some((one) => one.signedIn && one.enabled)
+          ? 'every Claude account is disabled; enable one in Accounts & Usage'
+          : 'no Claude account is signed in; add one in Settings › Agents',
+      );
     }
     return row;
   }
@@ -390,7 +398,8 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
     // The active account is always signed in: the first account to sign in becomes active, and so does one that signs
     // in while the active one is signed out. An active account that signs out hands over, or leaves none active.
     const active = this.activeRow();
-    if (status.signedIn && id !== active?.id && !active?.signedIn) this.switchTo(id, SwitchReason.Manual);
+    if (status.signedIn && this.get(id).enabled && id !== active?.id && !active?.signedIn)
+      this.switchTo(id, SwitchReason.Manual);
     else if (!status.signedIn) this.handOver(id);
     if (status.signedIn) void this.pollUsage();
     this.autoSwitch();
@@ -430,7 +439,7 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
   /** An active account that signed out hands over to the next signed-in one, or leaves none active. */
   private handOver(id: string): void {
     if (id !== this.activeRow()?.id) return;
-    const next = this.rows().find((row) => row.id !== id && row.signedIn);
+    const next = this.rows().find((row) => row.id !== id && row.signedIn && row.enabled);
     if (next) this.switchTo(next.id, SwitchReason.Manual);
     else this.clearActive();
   }
@@ -445,10 +454,40 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
     return this.check(id);
   }
 
+  /**
+   * The operator's Enable or Disable. A disabled account stays signed in; no run starts or moves onto it. Disabling the
+   * active account hands over to the account Auto-switch would pick, else any enabled signed-in one, else none.
+   * Enabling with no account active makes this one active, so runs can start again.
+   */
+  setEnabled(id: string, enabled: boolean): ClaudeAccount {
+    if (this.cliProxy.enabled()) throw new ApiError(409, ErrorCode.InvalidState, 'CLIProxy picks the account');
+    const account = this.get(id);
+    if (account.enabled === enabled) return this.one(id);
+    this.store.write((tx, emit) => {
+      const row = tx.update(claudeAccounts).set({ enabled }).where(eq(claudeAccounts.id, id)).returning().get();
+      if (row) this.emitUpdated(emit, row);
+    });
+    if (!enabled && id === this.setting().active_account_id) {
+      const next = this.candidate(id) ?? this.rows().find((row) => row.id !== id && row.signedIn && row.enabled)?.id;
+      if (next) this.switchTo(next, SwitchReason.Disabled);
+      else this.clearActive();
+    } else if (enabled && account.signedIn && this.setting().active_account_id === null) {
+      this.switchTo(id, SwitchReason.Manual);
+    }
+    this.autoSwitch();
+    return this.one(id);
+  }
+
+  /** The account a run's usage counts for: none through CLIProxy, which picks the account itself. */
+  attributedTo(accountId: string): string | null {
+    return this.cliProxy.enabled() ? null : accountId;
+  }
+
   /** The operator's Use: `smart` when the account is the Smart pick, `manual` otherwise. */
   activate(id: string): ClaudeAccount {
     const account = this.get(id);
     if (!account.signedIn) throw new ApiError(409, ErrorCode.InvalidState, 'the account is not signed in');
+    if (!account.enabled) throw new ApiError(409, ErrorCode.InvalidState, 'the account is disabled; enable it first');
     const pick = this.list().meta.smart_pick;
     if (id !== this.setting().active_account_id) {
       this.switchTo(id, pick?.account_id === id ? SwitchReason.Smart : SwitchReason.Manual);
@@ -546,7 +585,8 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
     });
     if (accountId === this.activeRow()?.id) {
       // The account Auto-switch would pick, else any signed-in one: one under its limit beats the first in the list.
-      const next = this.candidate(accountId) ?? this.rows().find((row) => row.id !== accountId && row.signedIn)?.id;
+      const next =
+        this.candidate(accountId) ?? this.rows().find((row) => row.id !== accountId && row.signedIn && row.enabled)?.id;
       if (next) this.switchTo(next, SwitchReason.SignInFailed);
       else this.clearActive();
     }
@@ -564,7 +604,9 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
       throw new ApiError(409, ErrorCode.InvalidState, 'a run on this account is still going');
     this.logins.get(id)?.abort.abort();
     const wasActive = id === this.setting().active_account_id;
-    const target = wasActive ? (this.rows().find((row) => row.id !== id && row.signedIn) ?? null) : this.activeRow();
+    const target = wasActive
+      ? (this.rows().find((row) => row.id !== id && row.signedIn && row.enabled) ?? null)
+      : this.activeRow();
     const moved = this.store.db.select().from(sessions).where(eq(sessions.accountId, id)).all();
     for (const session of moved) {
       if (session.sdkSessionId !== null && target) {
@@ -616,7 +658,7 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
     const others = this.rows().filter((row) => row.id !== excludeId);
     if (setting.smart_usage) return smartRank(others.map(usageOf), setting.threshold, now).ranked[0]?.id ?? null;
     const lowest = others
-      .filter((row) => row.signedIn)
+      .filter((row) => row.signedIn && row.enabled)
       .map((row) => ({ id: row.id, used: effectivePct(row.fiveHourPct, row.fiveHourResetsAt, now) }))
       .filter((row): row is { id: string; used: number } => row.used !== null && row.used < setting.threshold)
       .sort((a, b) => a.used - b.used)[0];
@@ -665,6 +707,7 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
       position: row.position,
       signed_in: row.signedIn,
       signing_in: this.logins.has(row.id),
+      enabled: row.enabled,
       sign_in_link: signInLink(this.logins.get(row.id)),
       email: row.email,
       plan: row.plan,
@@ -690,6 +733,7 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
     emit('account.updated', {
       account_id: row.id,
       signed_in: row.signedIn,
+      enabled: row.enabled,
       five_hour_pct: effectivePct(row.fiveHourPct, row.fiveHourResetsAt, now),
       weekly_pct: effectivePct(row.weeklyPct, row.weeklyResetsAt, now),
       usage_seen_at: row.usageSeenAt,

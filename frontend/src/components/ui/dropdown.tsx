@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { type CSSProperties, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { item, menu } from './item';
 
 export type DropdownOption<T extends string> = { value: T; label: string; description?: string };
@@ -24,6 +24,7 @@ export function Dropdown<T extends string>({
   defaultValue,
   title,
   disabled = false,
+  compact = false,
 }: {
   label: string;
   /** The text a chip shows before its value; empty for none. */
@@ -45,6 +46,8 @@ export function Dropdown<T extends string>({
   defaultValue?: T;
   title?: string;
   disabled?: boolean;
+  /** A field button as small as a row's own buttons, for a strip of controls. */
+  compact?: boolean;
 }) {
   const [place, setPlace] = useState<CSSProperties | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -63,7 +66,11 @@ export function Dropdown<T extends string>({
   useEffect(() => {
     if (!open) return;
     const close = () => setPlace(null);
-    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && close();
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      close();
+      trigger.current?.focus();
+    };
     // A scroll anywhere but inside the list would leave it floating away from its button.
     const scroll = (event: Event) => {
       if (!(event.target instanceof Element && event.target.closest('[role=listbox]'))) close();
@@ -104,6 +111,33 @@ export function Dropdown<T extends string>({
     setMeasured(true);
   }, [open, measured, opens]);
 
+  // The list takes the keyboard when it opens: the current option is focused, and the arrow keys move between options.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once the list is measured and shown
+  useEffect(() => {
+    if (!open || !measured || searchable) return;
+    const options = list.current?.querySelectorAll<HTMLElement>('[role=option]');
+    const at = options && [...options].find((option) => option.getAttribute('aria-selected') === 'true');
+    (at ?? options?.[0])?.focus({ preventScroll: true });
+  }, [open, measured]);
+
+  const onListKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
+    if (!keys.includes(event.key)) return;
+    const options = [...(list.current?.querySelectorAll<HTMLElement>('[role=option]') ?? [])];
+    if (options.length === 0) return;
+    event.preventDefault();
+    const at = options.indexOf(document.activeElement as HTMLElement);
+    const to =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? options.length - 1
+          : event.key === 'ArrowDown'
+            ? (at + 1) % options.length
+            : (at - 1 + options.length) % options.length;
+    options[to]?.focus();
+  };
+
   const toggle = () => {
     const box = trigger.current?.getBoundingClientRect();
     if (open || !box) return setPlace(null);
@@ -141,7 +175,7 @@ export function Dropdown<T extends string>({
             ? `flex flex-none cursor-pointer items-center gap-1.25 rounded-full border px-2.5 py-1 text-xs text-text transition-colors hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-50 ${
                 open ? 'border-divider bg-neutral-200' : 'border-transparent bg-transparent'
               }`
-            : `flex w-full cursor-pointer items-center gap-2 rounded-md border bg-card px-3 py-2 text-left text-[13px] text-text shadow-sm transition-colors hover:border-neutral-400 disabled:cursor-not-allowed disabled:opacity-50 ${
+            : `flex w-full cursor-pointer items-center gap-2 rounded-md border bg-card ${compact ? 'px-2.5 py-1 text-xs' : 'px-3 py-2 text-[13px]'} text-left text-text shadow-sm transition-colors hover:border-neutral-400 disabled:cursor-not-allowed disabled:opacity-50 ${
                 open ? 'border-accent-400 shadow-[0_0_0_3px_var(--color-accent-100)]' : 'border-divider'
               }`
         }
@@ -163,6 +197,7 @@ export function Dropdown<T extends string>({
           role="listbox"
           aria-label={label}
           ref={list}
+          onKeyDown={onListKey}
           style={{ ...place, visibility: measured ? undefined : 'hidden' }}
           className={`fixed z-51 max-h-80 max-w-[calc(100vw-16px)] overflow-auto ${menu} ${listClassName}`}
         >
@@ -194,9 +229,10 @@ export function Dropdown<T extends string>({
                 aria-selected={selected}
                 onClick={() => {
                   setPlace(null);
+                  trigger.current?.focus();
                   if (!selected) onChange(option.value);
                 }}
-                className={`flex w-full items-start gap-2.5 px-2.5 py-2 ${item(selected)}`}
+                className={`flex w-full items-start gap-2.5 px-2.5 py-2 outline-none focus-visible:bg-neutral-200 ${item(selected)} ${selected ? 'focus-visible:bg-accent-200' : ''}`}
               >
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className={`text-[13px] break-words ${selected ? 'font-semibold' : ''}`}>{option.label}</span>

@@ -13,6 +13,7 @@ type UpgradeRoute = {
 
 export class WsHub {
   private readonly routes: UpgradeRoute[] = [];
+  private readonly listeners: ((event: WsEvent) => void)[] = [];
 
   private readonly server = new WebSocketServer({
     noServer: true,
@@ -47,7 +48,13 @@ export class WsHub {
     this.routes.push({ pattern, handle });
   }
 
+  /** Called with every event as it goes out, for code that keeps what happened. */
+  tap(listener: (event: WsEvent) => void): void {
+    this.listeners.push(listener);
+  }
+
   publish(event: WsEvent): void {
+    for (const listener of this.listeners) listener(event);
     const message = JSON.stringify(event);
     for (const client of this.server.clients) {
       if (client.readyState === WebSocket.OPEN) client.send(message);

@@ -86,7 +86,7 @@ export function FailureBox({ failure, run }: { failure: Failure; run: AgentRun }
             title={
               other
                 ? `Makes ${other.email ?? other.label} the active account, then runs again`
-                : 'No other signed-in account. Add one in Agents & accounts.'
+                : 'No other signed-in account. Add one in Accounts & Usage.'
             }
             onClick={() => other && activate.mutate(other.id, { onSuccess: () => controls.resume.mutate() })}
           >
@@ -119,7 +119,7 @@ export function FailureBox({ failure, run }: { failure: Failure; run: AgentRun }
             Retry
           </Pill>
         )}
-        {needsAccount && <PillLink to="/agents">Open Agents &amp; accounts</PillLink>}
+        {needsAccount && <PillLink to="/agents">Open Account &amp; Usage</PillLink>}
         {failure.raw && <Pill onClick={() => copy(failure.raw as string)}>{copyLabel(copied, 'Copy error')}</Pill>}
       </div>
       {error && (

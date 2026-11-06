@@ -254,3 +254,28 @@ test('a PROD Connection can only be read: Read / write greys out, and picking PR
   ).toBeChecked();
   await expect(page.getByLabel('Service account key (JSON or base64)')).toBeVisible();
 });
+
+test("changing the scope of a terminal that has a Session works while the tray holds today's usage", async ({
+  page,
+}) => {
+  await mock(page, [SESSION]);
+  await page.route('**/api/agent-runs/usage', (route) =>
+    route.fulfill({ json: { data: { cost_usd: 1.5, tokens: 1200, runs: 2 } } }),
+  );
+  let patched: unknown;
+  await page.route('**/api/sessions/s1', (route) => {
+    patched = route.request().postDataJSON();
+    return route.fulfill({ json: { data: { ...SESSION, connection_ids: ['c1'] } } });
+  });
+  await page.goto(`${daemon.url}/devtools#token=${daemon.token}`);
+
+  await page.getByRole('button', { name: 'Running agents' }).click();
+  await expect(page.getByText('today', { exact: false }).first()).toBeVisible();
+  await page
+    .getByRole('complementary', { name: 'Synced dev tools' })
+    .getByRole('button', { name: /pg-tenant/ })
+    .click();
+  await expect(page.getByText('scope: pg-tenant')).toBeVisible();
+  await expect.poll(() => patched).toEqual({ connection_ids: ['c1'] });
+  await expect(page.getByText('is not a function')).toBeHidden();
+});

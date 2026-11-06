@@ -29,6 +29,7 @@ import {
   type Message,
   type Part,
   RunOutcome,
+  RunPurpose,
   SessionState,
   type SkillCopy,
   type Subagent,
@@ -226,6 +227,8 @@ export type RunOptions = {
   projectSettings?: boolean;
   /** The run may not change its working folder. */
   readOnly?: boolean;
+  /** What the run is for; a chat message when absent. */
+  purpose?: RunPurpose;
 };
 
 type RunResult =
@@ -469,12 +472,12 @@ export class AgentRuntime {
       deny: options.deny ?? [],
       projectSettings: options.projectSettings ?? true,
       readOnly: options.readOnly ?? false,
+      purpose: options.purpose ?? RunPurpose.Chat,
       networkDomains: this.network.forRun(),
       failure: null,
       autoTitle: null,
     };
     this.runs.add(run);
-    this.steps.prune();
     this.sessions.setFailure(sessionId, null);
     if (options.fresh) this.sessions.write(sessionId, { sdkSessionId: null });
     const isFirst = session.title === NEW_SESSION_TITLE && session.sdkSessionId === null;
@@ -797,7 +800,14 @@ export class AgentRuntime {
       if (!rejected && !signInFailed && !run.stopped) throw error;
     } finally {
       // Saved even when the query threw: a run the limit cut off still used what it used.
-      this.steps.addUsage(run, reportedCost, this.takeUsage(run), reportedTokens);
+      this.steps.addUsage(
+        run,
+        reportedCost,
+        this.takeUsage(run),
+        reportedTokens,
+        this.accounts.attributedTo(run.accountId),
+        run.purpose,
+      );
       if (skillFolder !== null) await removeSkillPlugin(skillFolder);
     }
     for (const row of run.toolRows.values()) {
@@ -831,11 +841,15 @@ export class AgentRuntime {
 
   /** The usage of the messages seen since the last save, summed per agent and model; the messages are forgotten. */
   private takeUsage(run: Run): UsageLine[] {
-    const lines = [...run.messageUsage.values()].map((one) => ({
-      agent_id: one.agentId,
-      model: one.model,
-      ...one.tokens,
-    }));
+    const lines = [...run.messageUsage.values()].map((one) => {
+      const subagent = one.agentId === null ? undefined : run.subagents.get(one.agentId);
+      return {
+        agent_id: one.agentId,
+        model: one.model,
+        ...(subagent ? { agent_type: subagent.type, agent_description: subagent.description.slice(0, 120) } : {}),
+        ...one.tokens,
+      };
+    });
     run.messageUsage.clear();
     return mergeLines(lines);
   }
@@ -912,6 +926,7 @@ export class AgentRuntime {
         started_at: new Date().toISOString(),
         finished_at: null,
       });
+      this.steps.agentStarted(run, run.subagents.get(message.task_id) as Subagent);
     } else {
       const task = run.subagents.get(message.task_id);
       if (!task) return;
@@ -922,6 +937,7 @@ export class AgentRuntime {
             ? SubagentStatus.Failed
             : SubagentStatus.Stopped;
       task.finished_at = new Date().toISOString();
+      this.steps.agentEnded(run, task);
     }
     this.sessions.write(run.sessionId, { runSubagents: JSON.stringify([...run.subagents.values()]) });
   }
@@ -955,7 +971,6 @@ export class AgentRuntime {
 
   private finish(run: Run, result: RunResult): void {
     this.runs.remove(run.sessionId);
-    this.steps.closeOpen(run.sessionId, run.stopped ? 'stopped' : 'no result');
     this.sessions.setFailure(run.sessionId, run.failure);
     // A run the operator stopped ends `idle`, like one that finished; the job that started it still sees it fail.
     const failed = result !== 'done' && result !== 'stopped';
@@ -965,6 +980,9 @@ export class AgentRuntime {
     const subagents: Subagent[] = [...run.subagents.values()].map((task) =>
       task.status === SubagentStatus.Working ? { ...task, status: ending, finished_at: finishedAt } : task,
     );
+    for (const task of subagents)
+      if (run.subagents.get(task.id)?.status === SubagentStatus.Working) this.steps.agentEnded(run, task);
+    this.steps.closeOpen(run.sessionId, run.stopped ? 'stopped' : 'no result');
     // The agent's first words in the message; its tool steps make a poor preview.
     const newest = run.parts.find((part): part is Extract<Part, { kind: 'text' }> => part.kind === 'text');
     this.store.write((tx, emit) => {

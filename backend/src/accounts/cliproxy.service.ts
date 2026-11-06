@@ -134,4 +134,4 @@ export class CliProxyService implements OnApplicationBootstrap {
 
 const base = (address: string) => address.trim().replace(/\/+$/, '');
 
-const noKey = () => new ApiError(409, ErrorCode.InvalidState, 'CLIProxy has no API key: add one in Agents & accounts');
+const noKey = () => new ApiError(409, ErrorCode.InvalidState, 'CLIProxy has no API key: add one in Accounts & Usage');

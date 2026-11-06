@@ -2,6 +2,7 @@ import {
   type AgentAccountsSetting,
   ApprovalStatus,
   accountListSchema,
+  accountUsageSchema,
   addedAccountSchema,
   agentAccountsSettingSchema,
   agentRunSchema,
@@ -33,6 +34,12 @@ import {
   editedMessageSchema,
   findCodeResultSchema,
   fixSchema,
+  HEALTH_CHECKS_DEFAULT,
+  type HealthArea,
+  type HealthChecksSetting,
+  type HealthInterval,
+  healthChecksSettingSchema,
+  healthOverviewSchema,
   healthSchema,
   keychainHandoverSchema,
   keychainWaitSchema,
@@ -97,6 +104,8 @@ export const queryKeys = {
   health: ['health'] as const,
   settings: ['settings'] as const,
   accounts: ['agent-accounts'] as const,
+  accountUsage: ['account-usage'] as const,
+  healthWatch: ['health-watch'] as const,
   cliProxy: ['cliproxy'] as const,
   approvals: ['approvals'] as const,
   mcpServers: ['mcp-servers'] as const,
@@ -185,7 +194,14 @@ export function useAutoUpdate() {
 
 /** The keys this spec owns; other keys pass through untouched. */
 const agentSettingsSchema = z.object({
-  data: z.object({ session_defaults: sessionDefaultsSchema, agent_accounts: agentAccountsSettingSchema }).loose(),
+  data: z
+    .object({
+      session_defaults: sessionDefaultsSchema,
+      agent_accounts: agentAccountsSettingSchema,
+      /** Optional so a daemon that does not send it yet still parses. */
+      health_checks: healthChecksSettingSchema.optional(),
+    })
+    .loose(),
 });
 
 export function useAgentSettings() {
@@ -208,6 +224,7 @@ export function usePatchSettings() {
       session_defaults?: SessionDefaults;
       agent_accounts?: AgentAccountsSetting;
       cliproxy?: CliProxySetting;
+      health_checks?: HealthChecksSetting;
     }) => apiSend('PATCH', '/settings', patch, agentSettingsSchema),
     onMutate: async (patch) => {
       await client.cancelQueries({ queryKey: queryKeys.settings });
@@ -228,6 +245,53 @@ export function usePatchSettings() {
     onSettled: (_settings, _error, patch) => {
       if (patch.cliproxy) void client.invalidateQueries({ queryKey: queryKeys.cliProxy });
     },
+  });
+}
+
+const HEALTH_POLL_MS = 2000;
+
+/**
+ * The automatic health checks of Connections and Integrations (not the daemon's own `useHealth`): every item's status and history, and where each area's
+ * run stands. It polls every 2 seconds while a run goes; `connection.checked` and `health.changed` refetch it. A daemon
+ * that does not answer leaves no data: the pages show no banner and no strip, never an error.
+ */
+export function useHealthWatch() {
+  return useQuery({
+    queryKey: queryKeys.healthWatch,
+    queryFn: () => apiGet('/health-watch', z.object({ data: healthOverviewSchema })).then((body) => body.data),
+    retry: false,
+    refetchInterval: (query) => {
+      const areas = query.state.data?.areas;
+      return areas && (areas.connections.checking !== null || areas.integrations.checking !== null)
+        ? HEALTH_POLL_MS
+        : false;
+    },
+  });
+}
+
+/** How often each area checks itself: the `health_checks` setting, with the defaults before the daemon sends it. */
+export function useHealthChecksSetting() {
+  const client = useQueryClient();
+  const settings = useAgentSettings();
+  const patch = usePatchSettings();
+  const current = settings.data?.data.health_checks ?? HEALTH_CHECKS_DEFAULT;
+  return {
+    current,
+    set: (area: HealthArea, interval: HealthInterval) =>
+      patch.mutate(
+        { health_checks: { ...current, [area]: interval } },
+        { onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.healthWatch }) },
+      ),
+    error: patch.error,
+  };
+}
+
+/** Check now: starts a run of the area at once; progress comes from `useHealthWatch`. */
+export function useCheckArea(area: HealthArea) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('POST', `/health-watch/${area}/checks`, undefined, z.unknown()),
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.healthWatch }),
   });
 }
 
@@ -338,13 +402,56 @@ export function useActivateAccount() {
   });
 }
 
-/** The Session composer chips: model, effort and access apply from the next run. */
-/** Every cached Session list shows the change at once; the reply, or a refetch after a failure, settles it. */
+/**
+ * Enable or Disable an account. The switch moves at once in the cached list; the reply, or a refetch after a failure,
+ * settles it. Disabling the active account moves the active role, which `account.switched` brings over `/ws`.
+ */
+export function useSetAccountEnabled(id: string) {
+  const client = useQueryClient();
+  const apply = (enabled: boolean) =>
+    client.setQueryData<z.infer<typeof accountListSchema>>(queryKeys.accounts, (list) =>
+      list ? { ...list, data: list.data.map((one) => (one.id === id ? { ...one, enabled } : one)) } : list,
+    );
+  return useMutation({
+    mutationFn: (enabled: boolean) => apiSend('PATCH', `/agent-accounts/${id}`, { enabled }, accountResponse),
+    onMutate: async (enabled) => {
+      await client.cancelQueries({ queryKey: queryKeys.accounts });
+      apply(enabled);
+    },
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.accounts });
+      void client.invalidateQueries({ queryKey: queryKeys.accountUsage });
+    },
+  });
+}
+
+/** What the console recorded for the accounts in a range; `account` is an id, `none`, or absent for every account. */
+export function useAccountUsage(range: string, account: string | null) {
+  return useQuery({
+    queryKey: [...queryKeys.accountUsage, range, account],
+    // The page has Try again; a slow read of a local daemon is not worth three quiet retries first.
+    retry: false,
+    queryFn: () =>
+      apiGet(
+        `/agent-accounts/usage?${new URLSearchParams({ range, ...(account === null ? {} : { account }) })}`,
+        z.object({ data: accountUsageSchema }),
+      ).then((body) => body.data),
+  });
+}
+
+const isSession = (value: unknown): value is Session =>
+  typeof value === 'object' && value !== null && 'id' in value && 'kind' in value && 'state' in value;
+
+/**
+ * The Session composer chips: model, effort and access apply from the next run. Every cached Session list shows the
+ * change at once; the reply, or a refetch after a failure, settles it. Other queries share the `sessions` key prefix
+ * (a run's detail and usage are objects, the run list holds runs), and those are left to the refetch.
+ */
 export function useUpdateSession(id: string) {
   const client = useQueryClient();
   const apply = (change: (session: Session) => Session) =>
-    client.setQueriesData<Session[]>({ queryKey: queryKeys.sessions }, (list) =>
-      list?.map((session) => (session.id === id ? change(session) : session)),
+    client.setQueriesData({ queryKey: queryKeys.sessions }, (cached: unknown) =>
+      Array.isArray(cached) ? cached.map((item) => (isSession(item) && item.id === id ? change(item) : item)) : cached,
     );
   return useMutation({
     mutationFn: (patch: SessionPatch) =>

@@ -124,7 +124,7 @@ describe('CLIProxy as the Claude account hub', () => {
     const sent = await api(daemon).post(`/sessions/${daemon.createSession()}/messages`, { text: 'hello' });
     expect([sent.status, sent.body.error.message]).toEqual([
       409,
-      'CLIProxy has no API key: add one in Agents & accounts',
+      'CLIProxy has no API key: add one in Accounts & Usage',
     ]);
     await api(daemon).put('/cliproxy/key', { key: KEY });
     const removed = await api(daemon).delete('/cliproxy/key');

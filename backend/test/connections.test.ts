@@ -327,6 +327,22 @@ describe('testing and checking', () => {
     expect([...ctx.keychain.values.keys()]).toEqual([]);
   });
 
+  it('says the saved password is missing, and does not start the server, when the Keychain no longer holds it', async () => {
+    const ctx = await start();
+    const { body } = await api(ctx.daemon).post('/connections', PG);
+    await until(
+      () => list(ctx),
+      (rows) => rows[0]?.status === 'ok',
+      'the first check',
+    );
+    await ctx.keychain.delete(`connection:${body.data.id}`);
+    const started = ctx.tester.runs.length;
+    const checked = await api(ctx.daemon).post(`/connections/${body.data.id}/checks`);
+    expect(checked.body.data).toMatchObject({ status: 'auth', latency_ms: null });
+    expect(checked.body.data.status_detail).toContain('missing from the Keychain');
+    expect(ctx.tester.runs.length).toBe(started);
+  });
+
   it('records a check with the stored secret, and a server that does not answer reads fail', async () => {
     const ctx = await start();
     const { body } = await api(ctx.daemon).post('/connections', PG);

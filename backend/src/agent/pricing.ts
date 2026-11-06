@@ -50,7 +50,13 @@ export function addTokens(a: TokenCounts, b: TokenCounts): TokenCounts {
 export const sumTokens = (tokens: TokenCounts) => tokens.input + tokens.output + tokens.cache_read + tokens.cache_write;
 
 /** The tokens of one agent on one model: a line of a run's usage. `agent_id` is null for the main agent. */
-export type UsageLine = { agent_id: string | null; model: string } & TokenCounts;
+export type UsageLine = {
+  agent_id: string | null;
+  model: string;
+  /** The subagent type and what it was asked, kept when the line was saved. Lines saved earlier have neither. */
+  agent_type?: string | null;
+  agent_description?: string | null;
+} & TokenCounts;
 
 /** Adds lines that name the same agent and model. */
 export function mergeLines(lines: UsageLine[]): UsageLine[] {

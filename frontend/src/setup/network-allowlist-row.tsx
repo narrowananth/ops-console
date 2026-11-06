@@ -126,10 +126,16 @@ function DomainGroup({
   return (
     <div className="flex flex-col gap-1">
       <span className="text-xs font-semibold text-neutral-700">{label}</span>
-      <ul aria-label={label} className="m-0 flex list-none flex-col gap-0.5 p-0 font-mono text-xs">
+      <ul
+        aria-label={label}
+        className={`m-0 flex list-none p-0 font-mono text-xs ${onRemove ? 'flex-col gap-0.5' : 'flex-wrap gap-x-1 gap-y-0.5'}`}
+      >
         {domains.length === 0 && <li className="text-neutral-700">{empty}</li>}
         {domains.map(({ domain }) => (
-          <li key={domain} className="flex items-center gap-2">
+          <li
+            key={domain}
+            className={onRemove ? 'flex items-center gap-2' : 'after:content-[","] last:after:content-none'}
+          >
             <span>{domain}</span>
             {onRemove && (
               <Button

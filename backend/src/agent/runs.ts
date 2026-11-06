@@ -1,4 +1,4 @@
-import type { Part, SkillCopy, Subagent, TokenCounts } from '@ops-console/shared';
+import type { Part, RunPurpose, SkillCopy, Subagent, TokenCounts } from '@ops-console/shared';
 
 /** A run in progress. It lives in memory only: a daemon restart ends it (Behavior 18). */
 export type Run = {
@@ -17,6 +17,8 @@ export type Run = {
   projectSettings: boolean;
   /** The run may not change its working folder. */
   readOnly: boolean;
+  /** What the run is for, kept with its usage. */
+  purpose: RunPurpose;
   parts: Part[];
   /** The text part growing from stream deltas, until its block arrives whole. */
   growing: number | null;

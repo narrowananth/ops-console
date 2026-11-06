@@ -8,7 +8,7 @@ browser (127.0.0.1:4545)                 operator's Mac
 │ frontend/  React 18    │ ───────────▶ │ daemon: backend/ NestJS (127.0.0.1:4545)      │
 │ Monitor · Workspace ·  │ ◀─────────── │  serves the built UI, /api, /ws, /terminals   │
 │ Dev tools · Connect ·  │              │  agent ──▶ Claude Agent SDK ──▶ MCP servers   │
-│ Agents & accounts      │              │  monitor ──▶ pup (Datadog)                    │
+│ Accounts & Usage      │              │  monitor ──▶ pup (Datadog)                    │
 └────────────────────────┘              │  workspace ──▶ gh · glab · bkt (Git hosts)    │
                                         │  terminals ──▶ node-pty (Setup agent claude)  │
                                         │  claude-cli ──▶ claude mcp add/list/get       │
@@ -131,7 +131,7 @@ agent Session.
 | `setup` | Setup agent page with its xterm terminal, and the Permissions page: Full Disk Access, Start at login, Keychain, Run sandbox, Network allowlist |
 | `playbooks` | Playbooks page: Triggers, Playbooks, the editor with drag and drop, Step blocks, the Skills a Playbook holds; unsaved edits kept as a Remembered view; a job's Playbook steps and the Skills it was offered |
 | `skills` | Skills page: the list, the editor, the Playbooks holding each Skill; unsaved edits kept as a Remembered view |
-| `agents` | Agents & accounts page (accounts, sign-in by link, the CLIProxy hub, the chime), Session transcript, model, effort and Access mode chips, Approval prompts, the question panel, stop run, Report rendering |
+| `agents` | Accounts & Usage page (accounts, sign-in by link, the CLIProxy hub, the chime), Session transcript, model, effort and Access mode chips, Approval prompts, the question panel, stop run, Report rendering |
 | `mcp`, `components/ui` | MCP status labels; shared controls, the folding card title, the side panel that folds to a rail, the job pathway and live timers, and the Tip layer that shows every element's `title` as a styled Tip on hover and keyboard focus |
 
 ## Data flow

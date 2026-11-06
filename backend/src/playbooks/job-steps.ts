@@ -6,6 +6,7 @@ import {
   PLAYBOOK_LIMITS,
   type PlaybookStep,
   PlaybookStepStatus,
+  RunPurpose,
   type SkillCopy,
 } from '@ops-console/shared';
 import { and, asc, eq, inArray } from 'drizzle-orm';
@@ -19,6 +20,15 @@ import { playbookSteps, skills } from '../db/schema';
 import { type Emit, STORE, type Store, type Tx } from '../db/store';
 import { stepOutcomeSchema, stepPrompt } from './prompts';
 import { parseSkillCopies } from './skills.service';
+
+/** What a job's runs are for. */
+const PURPOSE: Record<JobRef['kind'], RunPurpose> = {
+  report: RunPurpose.Verify,
+  fix: RunPurpose.Fix,
+  agent_review: RunPurpose.AgentReview,
+  reply_check: RunPurpose.ReplyCheck,
+  comment_pass: RunPurpose.CommentPass,
+};
 
 /** The job a step belongs to. */
 export type JobRef = { kind: 'report' | 'fix' | 'agent_review' | 'reply_check' | 'comment_pass'; id: string };
@@ -179,6 +189,7 @@ export class JobSteps {
       const { finished } = this.runtime.runFor(options.sessionId, prompt, options.onPart ?? null, {
         rules: options.rules,
         skills: options.skills,
+        purpose: PURPOSE[options.job.kind],
         ...(options.cwd ? { cwd: options.cwd } : {}),
         fresh: first && options.fresh === true,
         ...(options.deny ? { deny: options.deny } : {}),

@@ -14,8 +14,10 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import {
+  type AccountUsageReport,
   type AgentRun,
   type Attachment,
+  accountUsageQuerySchema,
   type EditedMessage,
   type Message,
   type Page,
@@ -29,6 +31,7 @@ import {
 import type { Request } from 'express';
 import { z } from 'zod';
 import { parseInput, validationFailed } from '../common/errors';
+import { AccountUsage } from './account-usage';
 import { Attachments } from './attachments';
 import { RunInsights } from './run-insights.service';
 import { RunRegistry } from './runs';
@@ -40,6 +43,17 @@ const idParams = z.object({ id: z.string().min(1) });
 const editParams = idParams.extend({ message_id: z.string().min(1) });
 const fileParams = idParams.extend({ file: z.string().min(1) });
 const attachQuery = z.object({ name: z.string().trim().min(1).max(255) });
+
+/** What the console recorded for each Claude account: totals, per day, per kind, per subagent type and top runs. */
+@Controller('agent-accounts/usage')
+export class AccountUsageController {
+  constructor(@Inject(AccountUsage) private readonly usage: AccountUsage) {}
+
+  @Get()
+  read(@Query() query: unknown): { data: AccountUsageReport } {
+    return { data: this.usage.read(parseInput(accountUsageQuerySchema, query, 'query')) };
+  }
+}
 
 /** The Running tray. */
 @Controller('agent-runs')

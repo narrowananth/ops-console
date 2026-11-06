@@ -187,7 +187,17 @@ export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
   async check(id: string) {
     const row = this.row(id);
     const secret = await this.keychain.get(secretKey(id));
-    const result = await this.test(row.type, JSON.parse(row.config) as Record<string, unknown>, secret);
+    // A server started with no password or key falls back to whatever the machine has, such as a Firebase CLI login,
+    // and fails with that tool's own words. Say what is wrong here instead.
+    const result =
+      secret === null && SECRET_REQUIRED.includes(row.type)
+        ? {
+            status: HealthStatus.Auth,
+            latency_ms: null,
+            detail:
+              'The saved password or key for this Connection is missing from the Keychain. Edit it and enter it again.',
+          }
+        : await this.test(row.type, JSON.parse(row.config) as Record<string, unknown>, secret);
     const at = new Date().toISOString();
     this.store.write((tx, emit) => {
       tx.update(connections)

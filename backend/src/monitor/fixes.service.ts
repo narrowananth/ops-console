@@ -14,6 +14,7 @@ import {
   PlaybookStepStatus,
   PlaybookTrigger,
   PrState,
+  RunPurpose,
   SessionKind,
   SessionState,
   Severity,
@@ -407,6 +408,7 @@ ${context.recheckLine}`;
         rules: context.fix.playbookRules,
         skills: parseSkillCopies(context.fix.playbookSkills),
         fresh: this.takeFresh(context),
+        purpose: RunPurpose.Fix,
       }).finished;
     } catch (error) {
       throw new StageFailed(error instanceof Error ? error.message : 'the agent could not start');

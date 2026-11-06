@@ -1,4 +1,11 @@
-import { CONNECTOR_NAMES, type ConnectorId, HealthStatus, type McpServer, McpTransport } from '@ops-console/shared';
+import {
+  CONNECTOR_NAMES,
+  type ConnectorId,
+  type HealthItem,
+  HealthStatus,
+  type McpServer,
+  McpTransport,
+} from '@ops-console/shared';
 import { useState } from 'react';
 import { BrandIcon, serverBrand } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
@@ -14,7 +21,8 @@ import { IntegrationRow, rowAction, rowActionAttention } from './integration-row
 
 const mono = 'font-mono';
 
-function RowAction({ server, onManage }: { server: McpServer; onManage: () => void }) {
+/** The row's one action: Sign in, Reconnect or Manage. The health banner offers the same. */
+export function RowAction({ server, onManage }: { server: McpServer; onManage: () => void }) {
   const authenticate = useAuthenticateMcpServer();
   const reconnect = useReconnectMcpServer();
   const signIn = (
@@ -61,7 +69,17 @@ const DETAIL_TIPS: Record<string, string> = {
 };
 
 /** An MCP Server in the Integrations list. */
-export function ServerRow({ server, selected, onOpen }: { server: McpServer; selected: boolean; onOpen: () => void }) {
+export function ServerRow({
+  server,
+  health,
+  selected,
+  onOpen,
+}: {
+  server: McpServer;
+  health?: HealthItem;
+  selected: boolean;
+  onOpen: () => void;
+}) {
   const failed = server.status === HealthStatus.Fail && server.status_detail;
   const tools = server.tool_count > 0 ? ` · ${server.tool_count} tools` : '';
   return (
@@ -72,6 +90,7 @@ export function ServerRow({ server, selected, onOpen }: { server: McpServer; sel
       kind="MCP"
       line={failed ? (server.status_detail ?? '') : `${server.scope} · ${server.target}${tools}`}
       alert={Boolean(failed)}
+      health={health}
       selected={selected}
       status={server.registered ? statusGlyph[server.status] : REMOVED}
       onOpen={onOpen}

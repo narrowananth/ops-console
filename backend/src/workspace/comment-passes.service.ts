@@ -6,6 +6,7 @@ import {
   ErrorCode,
   PlaybookTrigger,
   PrState,
+  RunPurpose,
   ThreadOutcome,
 } from '@ops-console/shared';
 import { and, eq } from 'drizzle-orm';
@@ -299,7 +300,14 @@ export class CommentPassesService {
       projectSettings: false,
     });
     if (failure) throw new JobFailed(failure, true);
-    const closing = { rules, skills, cwd, deny: HOST_WRITE_DENIALS, projectSettings: false };
+    const closing = {
+      rules,
+      skills,
+      cwd,
+      deny: HOST_WRITE_DENIALS,
+      projectSettings: false,
+      purpose: RunPurpose.CommentPass,
+    };
     const check = row.kind === CommentPassKind.Check;
     const prompt = check ? CHECK_REPLIES_PROMPT : COMMENT_PASS_PROMPT;
     const summary = await this.runtime.runFor(session, prompt, null, closing).finished;

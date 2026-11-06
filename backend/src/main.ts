@@ -12,6 +12,7 @@ import { CliConnectorTools } from './connectors/connector-tools';
 import { ConnectorsModule } from './connectors/connectors.module';
 import { startDaemon } from './daemon';
 import { DevtoolsModule } from './devtools/devtools.module';
+import { HealthWatchModule } from './health-watch/health-watch.module';
 import { adoptKeychainItems, HandoverRefused, otherVersionApps } from './keychain/handover';
 import { KeychainHandoverTracker } from './keychain/handover-state';
 import { LoginKeychain } from './keychain/keychain';
@@ -114,6 +115,7 @@ const daemon = await startDaemon({
     ConnectionsModule.forRoot({ tester: new McpConnectionTester(version), launchDir: path.join(appDir, 'launch') }),
     ConnectorsModule.forRoot({ tools: new CliConnectorTools() }),
     UpdatesModule.forRoot({ releases: new GithubReleases(), installer: new ScriptInstaller(path.join(appDir, '..')) }),
+    HealthWatchModule.forRoot(),
     McpServersModule.forRoot({
       probe: new SdkProbe(),
       launcher: env.OPS_CONSOLE_LAUNCHER ?? path.join(homedir(), '.ops-console', 'current', 'bin', 'ops-console'),

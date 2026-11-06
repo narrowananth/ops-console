@@ -266,3 +266,35 @@ test('the tray shows how long a run took, nests its subagents, and pauses, stops
   await paused.getByRole('button', { name: /^Dismiss/ }).click();
   await expect.poll(() => calls).toEqual(['pause s1', 'stop s1', 'resume s3', 'resume s5', 'dismiss s5']);
 });
+
+test('a paused Session shows Play beside Send, and Play carries the run on', async ({ page }) => {
+  await routeWorkspace(page);
+  const calls: string[] = [];
+  await page.route('**/api/agent-runs', (route) =>
+    route.fulfill({
+      json: {
+        data: [run('s1', { running: false, outcome: 'paused', finished_at: '2026-11-02T09:01:00.000Z' })],
+        meta: { next_cursor: null },
+      },
+    }),
+  );
+  await page.route('**/api/sessions/s1/resume', (route) => {
+    calls.push('resume s1');
+    return route.fulfill({ status: 202, json: { data: { message_id: 'm1' } } });
+  });
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  await page.getByRole('button', { name: /^Play/ }).click();
+  await expect.poll(() => calls).toEqual(['resume s1']);
+});
+
+test('a Session whose run is not paused or stopped shows no Play', async ({ page }) => {
+  await routeWorkspace(page);
+  await page.route('**/api/agent-runs', (route) =>
+    route.fulfill({ json: { data: [run('s1', { running: false, outcome: 'done' })], meta: { next_cursor: null } } }),
+  );
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Play/ })).toBeHidden();
+});

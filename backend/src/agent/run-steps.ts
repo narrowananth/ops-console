@@ -1,19 +1,18 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { type RunPurpose, type Subagent, SubagentStatus } from '@ops-console/shared';
+import { and, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
 import { redact } from '../action-log/redact';
-import { runSteps, runUsage } from '../db/schema';
+import { runAgents, runSteps, runUsage } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { mergeLines, sumTokens, type UsageLine } from './pricing';
 import { phaseOf, type StepFacts } from './run-insight';
 import type { Run } from './runs';
 
-/** How long the console keeps the steps and costs of finished runs. */
-const KEEP_MS = 30 * 24 * 3600_000;
-
 /** Steps rows kept to say how long a command usually takes. */
 const HISTORY_ROWS = 3000;
 
 type StepRow = typeof runSteps.$inferSelect;
+export type AgentRow = typeof runAgents.$inferSelect;
 
 export function factsOf(row: StepRow): StepFacts {
   return {
@@ -35,13 +34,69 @@ export function factsOf(row: StepRow): StepFacts {
 export class RunStepsLog {
   constructor(@Inject(STORE) private readonly store: Store) {}
 
-  /** A run starts: steps and costs older than the keep time go. */
-  prune(): void {
-    const before = new Date(Date.now() - KEEP_MS).toISOString();
-    this.store.write((tx) => {
-      tx.delete(runSteps).where(lt(runSteps.startedAt, before)).run();
-      tx.delete(runUsage).where(lt(runUsage.finishedAt, before)).run();
-    });
+  /** A subagent starts (the run's `task_started`): kept past the run, with how it ends. */
+  agentStarted(run: Run, agent: Subagent): void {
+    this.store.write((tx) =>
+      tx
+        .insert(runAgents)
+        .values({
+          id: crypto.randomUUID(),
+          sessionId: run.sessionId,
+          runStartedAt: run.createdAt,
+          taskId: agent.id,
+          parentId: agent.parent_id,
+          type: agent.type,
+          description: redact(agent.description).slice(0, 200),
+          status: SubagentStatus.Working,
+          startedAt: agent.started_at,
+        })
+        .onConflictDoNothing()
+        .run(),
+    );
+  }
+
+  /** A subagent ends (`task_notification`). */
+  agentEnded(run: Run, agent: Subagent): void {
+    this.store.write((tx) =>
+      tx
+        .update(runAgents)
+        .set({ status: agent.status, finishedAt: agent.finished_at ?? new Date().toISOString() })
+        .where(
+          and(
+            eq(runAgents.sessionId, run.sessionId),
+            eq(runAgents.runStartedAt, run.createdAt),
+            eq(runAgents.taskId, agent.id),
+          ),
+        )
+        .run(),
+    );
+  }
+
+  /** A run ended with subagents still going: they stop with it. */
+  closeOpenAgents(sessionId: string): void {
+    this.store.write((tx) =>
+      tx
+        .update(runAgents)
+        .set({ status: SubagentStatus.Stopped, finishedAt: new Date().toISOString() })
+        .where(and(eq(runAgents.sessionId, sessionId), isNull(runAgents.finishedAt)))
+        .run(),
+    );
+  }
+
+  /** The daemon restarted: no subagent is going any more. */
+  closeAllOpenAgents(): void {
+    this.store.write((tx) =>
+      tx
+        .update(runAgents)
+        .set({ status: SubagentStatus.Stopped, finishedAt: new Date().toISOString() })
+        .where(isNull(runAgents.finishedAt))
+        .run(),
+    );
+  }
+
+  /** The subagents of every run that began since `since`, for account usage. */
+  agentsSince(since: string): AgentRow[] {
+    return this.store.db.select().from(runAgents).where(gte(runAgents.startedAt, since)).all();
   }
 
   start(run: Run, step: { id: string; agentId: string | null; tool: string; summary: string }): void {
@@ -91,6 +146,7 @@ export class RunStepsLog {
 
   /** A run ends with calls still open: the abort or the crash cut them off. */
   closeOpen(sessionId: string, why: string): void {
+    this.closeOpenAgents(sessionId);
     this.store.write((tx) =>
       tx
         .update(runSteps)
@@ -102,6 +158,7 @@ export class RunStepsLog {
 
   /** The daemon restarted: no call is open any more. */
   closeAllOpen(why: string): void {
+    this.closeAllOpenAgents();
     this.store.write((tx) =>
       tx
         .update(runSteps)
@@ -116,7 +173,14 @@ export class RunStepsLog {
    * counts since the last save, so adding them never counts a message twice. `reportedCostUsd` is the SDK's own figure,
    * `reportedTokens` its token total, used only when no raw lines were seen.
    */
-  addUsage(run: Run, reportedCostUsd: number, lines: UsageLine[], reportedTokens = 0): void {
+  addUsage(
+    run: Run,
+    reportedCostUsd: number,
+    lines: UsageLine[],
+    reportedTokens = 0,
+    accountId: string | null = null,
+    purpose: RunPurpose | null = null,
+  ): void {
     // Without raw lines, the tokens are what the result message said.
     const added = lines.length > 0 ? lines.reduce((sum, line) => sum + sumTokens(line), 0) : reportedTokens;
     if (reportedCostUsd === 0 && added === 0) return;
@@ -132,6 +196,8 @@ export class RunStepsLog {
         tx.update(runUsage)
           .set({
             finishedAt: now,
+            accountId,
+            purpose: had.purpose ?? purpose,
             costUsd: had.costUsd + reportedCostUsd,
             tokens: had.tokens + added,
             breakdown: had.breakdown === null && lines.length === 0 ? null : JSON.stringify(all),
@@ -146,6 +212,8 @@ export class RunStepsLog {
           sessionId: run.sessionId,
           runStartedAt: run.createdAt,
           finishedAt: now,
+          accountId,
+          purpose,
           costUsd: reportedCostUsd,
           tokens: added,
           breakdown: lines.length === 0 ? null : JSON.stringify(all),
@@ -191,7 +259,12 @@ export class RunStepsLog {
 /** One run's saved usage: the SDK's cost, every token, and the raw counts when they were kept. */
 export type UsageRow = {
   sessionId: string;
+  /** The account the run ended on; null for CLIProxy and runs kept before accounts were recorded. */
+  accountId: string | null;
+  /** What the run was for; null for a run kept before purposes were recorded. */
+  purpose: string | null;
   runStartedAt: string;
+  finishedAt: string;
   /** What the SDK reported. */
   costUsd: number;
   tokens: number;
@@ -201,7 +274,10 @@ export type UsageRow = {
 function usageRowOf(row: typeof runUsage.$inferSelect): UsageRow {
   return {
     sessionId: row.sessionId,
+    accountId: row.accountId,
+    purpose: row.purpose,
     runStartedAt: row.runStartedAt,
+    finishedAt: row.finishedAt,
     costUsd: row.costUsd,
     tokens: row.tokens,
     lines: row.breakdown === null ? null : (JSON.parse(row.breakdown) as UsageLine[]),

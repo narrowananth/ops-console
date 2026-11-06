@@ -9,6 +9,7 @@ import {
   SwitchReason,
 } from './agents';
 import { keychainWaitSchema } from './connections';
+import { HealthArea } from './health-watch';
 import { CheckTarget, HealthStatus } from './mcp';
 import { FixStage, FixStatus, ReviewDecision, ScanStatus, Severity } from './monitor';
 import { PlaybookStepStatus } from './playbooks';
@@ -85,12 +86,28 @@ export const wsEventSchema = z.discriminatedUnion('event', [
     z.object({
       account_id: z.string(),
       signed_in: z.boolean(),
+      enabled: z.boolean(),
       five_hour_pct: z.number().nullable(),
       weekly_pct: z.number().nullable(),
       usage_seen_at: z.string().nullable(),
     }),
   ),
   event('account.removed', z.object({ account_id: z.string() })),
+  event(
+    'health.changed',
+    z.object({
+      area: z.enum(HealthArea),
+      target: z.enum(CheckTarget),
+      id: z.string(),
+      name: z.string(),
+      status: z.enum(HealthStatus),
+      detail: z.string().nullable(),
+      /** When it began failing; null on a recovery. */
+      since: z.string().nullable(),
+      /** True when it answers again after failing. */
+      recovered: z.boolean(),
+    }),
+  ),
   event(
     'connection.checked',
     z.object({

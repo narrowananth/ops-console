@@ -7,6 +7,7 @@ const inHours = (hours: number) => new Date(now.getTime() + hours * 3_600_000).t
 const account = (id: string, usage: Partial<AccountUsage>): AccountUsage => ({
   id,
   signedIn: true,
+  enabled: true,
   fiveHourPct: null,
   fiveHourResetsAt: null,
   weeklyPct: null,
@@ -21,6 +22,7 @@ describe('Smart rank', () => {
     account('full', { fiveHourPct: 96, fiveHourResetsAt: inHours(2), weeklyPct: 5, weeklyResetsAt: inHours(24) }),
     account('spent', { fiveHourPct: 10, fiveHourResetsAt: inHours(2), weeklyPct: 100, weeklyResetsAt: inHours(24) }),
     account('fresh', {}),
+    account('disabled', { enabled: false, fiveHourPct: 0, weeklyPct: 0, weeklyResetsAt: inHours(24) }),
     account('signed-out', { signedIn: false, fiveHourPct: 0, weeklyPct: 0, weeklyResetsAt: inHours(24) }),
     // Both windows reset since the numbers were seen: 0% used, and a new week ahead.
     account('stale', { fiveHourPct: 99, fiveHourResetsAt: inHours(-1), weeklyPct: 60, weeklyResetsAt: inHours(-2) }),
@@ -44,6 +46,7 @@ describe('Smart rank', () => {
       spent: 'weekly quota used up, skipped',
       fresh: 'no usage yet, skipped',
       'signed-out': 'not signed in, skipped',
+      disabled: 'disabled, skipped',
       stale: '100% weekly left ÷ 7d = 14.3% / day',
     });
   });
