@@ -64,7 +64,7 @@ a mode that asks.
 **Run sandbox**:
 The operating-system limit on an agent run's commands: writes only in the run's working folder, the Session's output folder, temp and package-tool caches, no reads of
 the console's data folder or the operator's cloud and login credentials, and no writes to git hooks or config. Package-tool caches under the home folder stay writable so a repo's commit hooks and builds run. It applies in every Access mode, and a run
-fails when the sandbox is unavailable.
+fails when the sandbox is unavailable. The agent's file tools write only in the same folders; the console checks their paths.
 
 **Output file**:
 A file the agent wrote in its Session's output folder for the operator: a PDF, a spreadsheet, a chart, an archive. It shows

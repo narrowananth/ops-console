@@ -20,14 +20,14 @@ export type SandboxRun = {
   home?: string;
 };
 
-const TEMP = ['/tmp', '/private/tmp'];
+export const TEMP = ['/tmp', '/private/tmp'];
 
 /**
  * Where build tools and commit hooks keep their downloads, under the operator's home: npm, pnpm, Yarn, Cargo's crate
  * cache, Go modules, Maven, Gradle, pre-commit, pip and the macOS cache folder. Never a folder on PATH, such as
  * `~/.cargo/bin` or `~/go/bin`, so a run cannot leave a program there for a later command.
  */
-const TOOL_CACHES = [
+export const TOOL_CACHES = [
   '.npm',
   '.pnpm-store',
   '.yarn',
@@ -82,6 +82,8 @@ export function runSandbox(run: SandboxRun): SandboxSettings {
       denyWrite: gitControl(run.workingDir, run.gitFile === true),
       denyRead: [
         run.dataDir,
+        // The installed app and its bundled `node`: macOS may trust that binary's Keychain items without a prompt.
+        path.join(home, '.ops-console'),
         path.join(home, '.aws'),
         path.join(home, '.config', 'gcloud'),
         path.join(home, 'Library', 'Keychains'),

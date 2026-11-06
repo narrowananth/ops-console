@@ -259,7 +259,19 @@ export class VerificationsService {
         versionStep(deployedVersion(samplesOf(alert)), made.base.sha, made.base.branch),
       );
     const brief = verificationBrief(alert, service, route, source, made?.base ?? null, checked.line);
-    const failure = await this.steps.run({ job, sessionId, brief, rules, skills, cwd: scratch, fresh: !retry, onPart });
+    // A clone of a URL the operator never imported may hold hostile settings, hooks and servers: leave them out.
+    const projectSettings = source.kind === 'repo';
+    const failure = await this.steps.run({
+      job,
+      sessionId,
+      brief,
+      rules,
+      skills,
+      cwd: scratch,
+      fresh: !retry,
+      projectSettings,
+      onPart,
+    });
     if (failure) throw new VerificationFailed(failure);
     const closing = hasSteps || retry ? REPORT_PROMPT : `${brief}\n\n${REPORT_PROMPT}`;
     const summary = await this.runtime.runFor(sessionId, closing, onPart, {
@@ -267,6 +279,7 @@ export class VerificationsService {
       rules,
       skills,
       fresh: !retry && !hasSteps,
+      projectSettings,
       purpose: RunPurpose.Verify,
     }).finished;
     await this.complete(reportId, alert, summary);

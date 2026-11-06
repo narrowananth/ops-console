@@ -7,12 +7,19 @@ on:
   # A run again by hand, from the Actions tab or `gh workflow run ci.yml`.
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   check:
+    # A pull request from a fork would run its own scripts on the operator's Mac: only branches of this repo do.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # The operator's own Mac, through a self-hosted runner: GitHub's macOS runners queue for 15 minutes or more.
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:

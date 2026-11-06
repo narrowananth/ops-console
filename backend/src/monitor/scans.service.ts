@@ -13,6 +13,7 @@ import {
   NO_ENV,
   ReviewDecision,
   RouteState,
+  repoUrlSchema,
   SAMPLE_LIMIT,
   type Sample,
   type Scan,
@@ -446,7 +447,8 @@ export class ScansService {
         .values({ id: crypto.randomUUID(), name: reading.name, env: reading.env })
         .returning()
         .get();
-      if (reading.repoUrl && service.repoUrl === null) {
+      // A URL from log content must look like a Git host URL, as one the operator types does.
+      if (reading.repoUrl && repoUrlSchema.safeParse(reading.repoUrl).success && service.repoUrl === null) {
         service = tx
           .update(services)
           .set({ repoUrl: reading.repoUrl })

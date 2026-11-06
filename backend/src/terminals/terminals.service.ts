@@ -33,7 +33,7 @@ import { SettingsService } from '../settings/settings.service';
 import { fetchUrl, LOCAL_KEYCHAIN, type LocalKeychain, listLocalDir, readLocalFile } from './local-sources';
 import { loadPty } from './pty';
 import { maskLine, PLACEHOLDER } from './secret-masking';
-import { SETUP_AGENT, SETUP_SERVER, SETUP_TOOLS, writeSetupFiles } from './setup-agent';
+import { ASKED_SETUP_TOOLS, SETUP_AGENT, SETUP_SERVER, SETUP_TOOLS, writeSetupFiles } from './setup-agent';
 
 const ENTER_DELAY_MS = 80;
 /** Bracketed paste: what a terminal sends around pasted text, so Claude Code takes its line breaks as text. */
@@ -122,9 +122,12 @@ export class TerminalsService implements OnModuleDestroy {
         mcpConfig,
         '--strict-mcp-config',
         // Pre-approved: the daemon already masks secrets and only adds, so the auto mode classifier must not turn a
-        // read of a credential file down as credential exploration.
+        // read of a credential file down as credential exploration. Not the tools that resolve a secret for, or
+        // register, a host the agent chose: Claude Code asks the operator first.
         '--allowedTools',
-        SETUP_TOOLS.map((tool) => `mcp__${SETUP_SERVER}__${tool}`).join(','),
+        SETUP_TOOLS.filter((tool) => !ASKED_SETUP_TOOLS.includes(tool))
+          .map((tool) => `mcp__${SETUP_SERVER}__${tool}`)
+          .join(','),
         '--tools',
         '',
         '--disable-slash-commands',

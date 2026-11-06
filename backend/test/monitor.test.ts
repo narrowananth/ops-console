@@ -381,6 +381,16 @@ describe('Scans and Alerts', () => {
     expect(services[0]).toMatchObject({ repo_url: 'github.com/acme/billing', routes: [] });
   });
 
+  it('ignores a Git URL from the logs that is not a Git host URL', async () => {
+    const ctx = await start();
+    const job = samples(6, 'Job 812 failed: queue timeout');
+    ctx.datadog.readings = [
+      service('billing-worker', [route('', '', 6, { samples: job })], 'prod', 'ext::sh -c "touch /tmp/x"'),
+    ];
+    await scan(ctx);
+    expect((await ctx.http.get('/services')).body.data[0]).toMatchObject({ repo_url: null });
+  });
+
   it('updates the same Alert on a later Scan with the same Fingerprint', async () => {
     const ctx = await start();
     const first = await failing(ctx, 12);
@@ -850,6 +860,8 @@ describe('Verification without a local Repo', () => {
     expect(session).toMatchObject({ kind: 'anonymous', repo_id: null, branch: 'main', alert_id: alert.id });
     const prompt = ctx.daemon.sdk.calls[0]?.prompt ?? '';
     expect(prompt).toContain(`a fresh clone of file://${origin}`);
+    // A clone of a URL no one imported adds none of its own settings, hooks or servers.
+    expect(ctx.daemon.sdk.calls.at(-1)?.options.settingSources).toEqual(['user']);
   });
 
   it('refuses a Service with neither a Repo nor a Git URL', async () => {

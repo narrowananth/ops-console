@@ -69,6 +69,8 @@ export type Run = {
   resumeAt: string | null;
   /** The Network allowlist the run started with; a retry on another account keeps it. */
   networkDomains: string[];
+  /** The folders the agent's file tools may write in; set when the run starts. */
+  editRoots: string[];
   /** Why the run failed, when the console can say: the Run sandbox is unavailable, or the Keychain did not answer. */
   failure: string | null;
   /** The title the console gave a new Session from its first message; null when the Session was already named. */

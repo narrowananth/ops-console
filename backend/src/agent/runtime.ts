@@ -16,6 +16,7 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
+  AccessLevel,
   AccessMode,
   ActionKind,
   ActionOutcome,
@@ -46,7 +47,7 @@ import { claudeEnv } from '../claude-cli/claude-cli';
 import { DATA_DIR } from '../common/data-dir';
 import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
-import { disabledMcpServers, nowIso, sessions } from '../db/schema';
+import { connections as connectionRows, disabledMcpServers, nowIso, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { KEYCHAIN, type Keychain, KeychainTimeout } from '../keychain/keychain';
 import { storedEnvVar } from '../mcp/launcher';
@@ -56,6 +57,7 @@ import { systemAppend } from '../playbooks/prompts';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
 import { Attachments } from './attachments';
 import { ConnectionLookup } from './connection-lookup';
+import { editRoots, outsideEditRoots } from './edit-scope';
 import { HOOK_BYPASS_REASON, skipsCommitHooks } from './hook-bypass';
 import { MessageInterceptors } from './message-interceptors';
 import { OutputFiles, saveFileInputSchema } from './output-files';
@@ -173,6 +175,20 @@ export const HOST_WRITE_DENIALS = [
 
 /** A run that only reads: it has no tool that edits files, and its sandbox leaves the working folder read-only. */
 export const READ_ONLY_DENIALS = ['Edit', 'MultiEdit', 'NotebookEdit', 'Write'];
+
+const HIDDEN_TEXT_WARNING =
+  'Part of this command is hidden as a secret, and it runs as written. Deny it unless you know what the hidden part does.';
+
+/** What an Approval shows for a command. Redaction can hide a script inside a secret-looking assignment: say so. */
+function commandSummary(toolName: string, input: Record<string, unknown>): string {
+  const shown = stepText(toolName, input);
+  return toolName === 'Bash' && shown !== `$ ${String(input.command ?? '')}`
+    ? `${shown}\n${HIDDEN_TEXT_WARNING}`
+    : shown;
+}
+
+const EDIT_SCOPE_REASON =
+  "File tools write only in the run's working folder, its output folder and the temp folders. Write the file there, or tell the operator where it belongs.";
 
 /** A permission rule's form of an absolute path. */
 const absolute = (file: string) => `/${file}`;
@@ -477,6 +493,7 @@ export class AgentRuntime {
       readOnly: options.readOnly ?? false,
       purpose: options.purpose ?? RunPurpose.Chat,
       networkDomains: this.network.forRun(),
+      editRoots: [],
       failure: null,
       autoTitle: null,
     };
@@ -654,6 +671,16 @@ export class AgentRuntime {
     return token ? { GH_TOKEN: token } : {};
   }
 
+  /** The MCP servers of Connections whose Access Level lets them write. */
+  private writableConnections(): string[] {
+    return this.store.db
+      .select()
+      .from(connectionRows)
+      .all()
+      .filter((row) => row.access === AccessLevel.Write)
+      .map((row) => row.name);
+  }
+
   private async runOnce(run: Run, text: string, account: AccountRow): Promise<RunResult> {
     const session = this.sessions.get(run.sessionId);
     const configDir = this.accounts.configDir(account);
@@ -678,6 +705,7 @@ export class AgentRuntime {
     // The run's Skills sit in a folder of their own that the Run sandbox lets it read.
     const skillFolder = run.skills.length > 0 ? path.join(skillRunsDir(), crypto.randomUUID()) : null;
     const extraDirs = [attached, outputFolder].filter((folder) => folder !== null);
+    run.editRoots = editRoots({ workingDir: run.workingDir, outputFolder, configDir });
     const options: Options = {
       cwd: run.workingDir,
       sandbox: runSandbox({
@@ -729,6 +757,8 @@ export class AgentRuntime {
         ...WEB_DENIALS,
         ...fileToolDenials(this.dataDir, run.workingDir),
         ...(run.readOnly ? READ_ONLY_DENIALS : []),
+        // Log text steers a Verification: it writes to no Git host and to no Connection (ADR 0002).
+        ...(run.purpose === RunPurpose.Verify ? HOST_WRITE_DENIALS : []),
         ...run.deny,
       ],
       systemPrompt: {
@@ -745,6 +775,7 @@ export class AgentRuntime {
             .all()
             .map(({ name }) => name),
           ...(this.kinds.get(session.kind)?.deniedServers?.(session) ?? []),
+          ...(run.purpose === RunPurpose.Verify ? this.writableConnections() : []),
         ].map((name) => ({ serverName: name })),
       },
       hooks: {
@@ -1087,6 +1118,17 @@ export class AgentRuntime {
         tool: input.tool_name,
         summary: stepText(input.tool_name, toolInput),
       });
+      const target = EDIT_TOOLS.has(input.tool_name) ? (toolInput.file_path ?? toolInput.notebook_path) : null;
+      if (typeof target === 'string' && outsideEditRoots(target, run.editRoots, run.workingDir)) {
+        this.steps.finish(input.tool_use_id, { ok: false, error: EDIT_SCOPE_REASON });
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: EDIT_SCOPE_REASON,
+          },
+        };
+      }
       if (input.tool_name === OPEN_PULL_REQUEST_TOOL) return this.approvePullRequest(run, toolInput, input.tool_use_id);
       if (input.tool_name === JOIN_REPO_TOOL) return this.approveJoinRepo(run, toolInput, input.tool_use_id);
       if (input.tool_name === SAVE_FILE_TOOL) return this.approveSaveFile(run, toolInput, input.tool_use_id);
@@ -1180,7 +1222,9 @@ export class AgentRuntime {
           actionLogId: isEdit ? null : (run.toolRows.get(toolUseID) ?? null),
           sessionId: run.sessionId,
           kind: isEdit ? ApprovalKind.Edit : ApprovalKind.Command,
-          summary: isEdit ? `Edit ${String(input.file_path ?? input.notebook_path ?? '')}` : stepText(toolName, input),
+          summary: isEdit
+            ? `Edit ${String(input.file_path ?? input.notebook_path ?? '')}`
+            : commandSummary(toolName, input),
           isProd: false,
         },
         toolUseID,
