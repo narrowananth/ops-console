@@ -81,6 +81,7 @@ export function useLiveEvents(): void {
         refetch(queryKeys.messages(event.data.session_id));
       }
       if (event.event === 'session.finished') {
+        refetch(queryKeys.outputs(event.data.session_id));
         refetch(queryKeys.sessionDiff(event.data.session_id));
         // Only the operator's own runs: a Monitor job's steps would chime once per step.
         if (event.data.started_by === 'operator') playChime(event.data.status);

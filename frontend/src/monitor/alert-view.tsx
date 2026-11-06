@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { REPORT_KIND_TIP } from '../agents/report-document';
 import { StopRun } from '../agents/stop-run';
 import { Button, Spinner } from '../components/ui/button';
+import { CodeBlock } from '../components/ui/code-block';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { DiffLines } from '../components/ui/diff';
 import { Dropdown } from '../components/ui/dropdown';
@@ -92,9 +93,10 @@ function SampleList({ samples }: { samples: Sample[] }) {
         </button>
       </div>
       {asJson ? (
-        <pre className="m-0 max-h-80 overflow-auto bg-neutral-900 p-3 font-mono text-xs text-neutral-100">
-          {JSON.stringify(samples, null, 2)}
-        </pre>
+        <CodeBlock
+          text={JSON.stringify(samples, null, 2)}
+          className="m-0 max-h-80 overflow-auto bg-neutral-900 p-3 font-mono text-xs text-neutral-100"
+        />
       ) : (
         <ul className="m-0 flex max-h-80 list-none flex-col gap-1 overflow-auto p-0 font-mono text-xs">
           {samples.map((sample) => (
@@ -223,8 +225,17 @@ function ReportPanel({
                 >
                   Replay
                 </summary>
-                <pre className="m-0 mt-1.5 overflow-auto font-mono text-xs">{shown.replay.request}</pre>
-                <pre className="m-0 overflow-auto font-mono text-xs text-neutral-700">{shown.replay.response}</pre>
+                <CodeBlock
+                  text={shown.replay.request}
+                  wrapperClassName="mt-1.5"
+                  className="m-0 overflow-auto font-mono text-xs text-text"
+                  tone="light"
+                />
+                <CodeBlock
+                  text={shown.replay.response}
+                  className="m-0 overflow-auto font-mono text-xs text-neutral-700"
+                  tone="light"
+                />
               </details>
             )}
             {shown.steps.length > 0 && (
@@ -632,9 +643,11 @@ export function AlertView({ id }: { id: string }) {
           {data.event_count} events · first {new Date(data.first_seen_at).toLocaleString()} · last{' '}
           {new Date(data.last_seen_at).toLocaleString()}
         </div>
-        <pre className="m-0 mt-2 rounded-lg bg-neutral-900 p-3 font-mono text-xs whitespace-pre-wrap break-all text-neutral-100">
-          {data.log_line}
-        </pre>
+        <CodeBlock
+          text={data.log_line}
+          wrapperClassName="mt-2"
+          className="m-0 rounded-lg bg-neutral-900 p-3 font-mono text-xs whitespace-pre-wrap break-all text-neutral-100"
+        />
         <div
           className="mt-1 font-mono text-xs break-all text-neutral-700"
           title="The Datadog log search that finds these failures. Paste it into Datadog Logs to see them there."

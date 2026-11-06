@@ -315,7 +315,10 @@ describe('attachments', () => {
     const text = withAttachments('why does this page break?', [saved.body.data]);
     await converse(daemon, id, text);
     expect(daemon.sdk.calls[0]).toMatchObject({ prompt: text });
-    expect(daemon.sdk.calls[0]?.options.additionalDirectories).toEqual([folder]);
+    expect(daemon.sdk.calls[0]?.options.additionalDirectories).toEqual([
+      folder,
+      path.join(daemon.dataDir, 'outputs', id),
+    ]);
     const messages = await api(daemon).get(`/sessions/${id}/messages`);
     expect(splitAttachments(messages.body.data[0].parts[0].text)).toEqual({
       text: 'why does this page break?',

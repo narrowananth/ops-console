@@ -62,9 +62,19 @@ The operator's yes or no on one agent action that needs it: a PROD write, or an 
 a mode that asks.
 
 **Run sandbox**:
-The operating-system limit on an agent run's commands: writes only in the run's working folder, temp and package-tool caches, no reads of
+The operating-system limit on an agent run's commands: writes only in the run's working folder, the Session's output folder, temp and package-tool caches, no reads of
 the console's data folder or the operator's cloud and login credentials, and no writes to git hooks or config. Package-tool caches under the home folder stay writable so a repo's commit hooks and builds run. It applies in every Access mode, and a run
 fails when the sandbox is unavailable.
+
+**Output file**:
+A file the agent wrote in its Session's output folder for the operator: a PDF, a spreadsheet, a chart, an archive. It shows
+in the transcript on the turn that wrote it and opens in the console, never launched on this Mac. The agent saves a copy in
+another folder only through `save_file`, which the operator approves.
+_Avoid_: artifact, download
+
+**Code block**:
+Preformatted text the console draws in a box with a copy icon, however it got there: a fenced block in the agent's text, an
+Approval's command, a raw error, a step's output, a request or a text file.
 
 **Network allowlist**:
 The hosts an agent run's commands may reach, built when the run starts from the built-in hosts, the hosts of the

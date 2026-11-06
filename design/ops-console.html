@@ -302,6 +302,20 @@
   .tri.open { transform: rotate(90deg); }
   .pr-row { flex-direction: column; gap: 2px; padding: 8px 12px; font-size: 13px; text-decoration: none; }
   .pr-meta { display: flex; flex-wrap: wrap; gap: 0 8px; font: 11px var(--mono); color: var(--n700); }
+  /* Code block: a copy icon in the corner on hover or focus; a check for 1.5 s after the copy. */
+  .cb { position: relative; min-width: 0; }
+  .cb pre { margin: 0; padding-right: 40px; }
+  .cb .cp { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-sm); border: 1px solid rgba(255,255,255,.2); background: rgba(45,43,43,.9); color: var(--n100); opacity: 0; transition: opacity .12s; cursor: pointer; }
+  .cb:hover .cp, .cb:focus-within .cp, .cb .cp:focus-visible { opacity: 1; }
+  .cb .cp:hover { background: var(--n700); }
+  @media (hover: none) { .cb .cp { opacity: 1; } }
+  .cb.light .cp { border-color: var(--line); background: var(--card); color: var(--n800, var(--text)); }
+  .cb.light .cp:hover { background: var(--n200); }
+  /* Output files: chips under the agent turn that wrote them. */
+  .outs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .outs li { display: flex; align-items: center; gap: 4px; }
+  .outchip { display: inline-flex; align-items: center; gap: 6px; max-width: 288px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg); padding: 2px 8px; font: 12px var(--mono); color: var(--n800, var(--text)); cursor: pointer; }
+  .outchip:hover { border-color: var(--accent-300); color: var(--text); }
   .file { border-radius: var(--r); border: 1px solid var(--divider); background: var(--card); overflow: hidden; }
   .file-h { display: flex; align-items: center; gap: 8px; background: var(--surface); padding: 4px 8px; font: 12px var(--mono); }
   .file-h.open { border-bottom: 1px solid var(--divider); }
@@ -596,9 +610,9 @@
               <h1 style="font-size:18px;margin-top:4px">POST /v1/orders returns 500 when the guest cart is empty</h1>
               <div class="wrapr mono s muted" style="gap:0 8px"><span class="b" style="color:var(--text)">checkout-api</span><span>prod</span><span>·</span><span>POST /v1/orders</span><button style="border:0;background:transparent;padding:0;font:11px var(--sans);color:var(--accent)">Ignore this Route</button></div>
               <div class="mono s muted">1812 events · first 10/31/2026, 6:02:11 PM · last 11/1/2026, 9:41:03 AM</div>
-              <pre class="logline" style="margin-top:8px">TypeError: Cannot read properties of null (reading 'amount')
+              <div class="cb" style="margin-top:8px"><pre class="logline" style="margin:0">TypeError: Cannot read properties of null (reading 'amount')
     at applyTax (src/tax/apply.ts:88:31)
-    at checkout (src/orders/checkout.ts:142:9)</pre>
+    at checkout (src/orders/checkout.ts:142:9)</pre><button class="cp" aria-label="Copy" title="Copy"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3v5.5A1.5 1.5 0 0 0 3.5 10H4"/></svg></button></div>
               <div class="mono xs muted" style="margin-top:4px;word-break:break-all">service:checkout-api env:prod @http.status_code:500 @http.url_details.path:"/v1/orders"</div>
             </header>
             <section class="card" aria-label="Code" style="display:flex;flex-direction:column;gap:8px;padding:12px 16px;font-size:12px">
@@ -854,7 +868,14 @@
                   <tr class="d"><td class="g">86</td><td class="g"></td><td class="sg">−</td><td class="tx">  lines.push(shippingTax(cart.shipping.amount));</td></tr>
                   <tr class="a"><td class="g"></td><td class="g">86</td><td class="sg">+</td><td class="tx">  if (cart.shipping) lines.push(shippingTax(cart.shipping.amount));</td></tr>
                 </table></div></div>
-                <div>Tests pass. Say so and I will push the branch and open a pull request.</div>
+                <div>Tests pass. I wrote the report and the cases in my output folder; open either below. To keep a copy elsewhere, I can save it to a folder you name once you approve.</div>
+                <div class="cb"><pre class="logline">pnpm test tax --run
+pnpm build</pre><button class="cp" aria-label="Copy" title="Copy"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3v5.5A1.5 1.5 0 0 0 3.5 10H4"/></svg></button></div>
+                <ul class="outs" aria-label="Output files">
+                  <li><button class="outchip" title="Open tax-fix-report.pdf"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 7.5 8 12.5a3.2 3.2 0 0 1-4.5-4.5l5.3-5.3a2.1 2.1 0 0 1 3 3L6.6 10.9a1 1 0 0 1-1.5-1.5L10 4.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="trunc">tax-fix-report.pdf</span></button><span class="mono xs muted">184 KB</span></li>
+                  <li><button class="outchip" title="Open cart-cases.csv"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 7.5 8 12.5a3.2 3.2 0 0 1-4.5-4.5l5.3-5.3a2.1 2.1 0 0 1 3 3L6.6 10.9a1 1 0 0 1-1.5-1.5L10 4.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="trunc">cart-cases.csv</span></button><span class="mono xs muted">3 KB</span></li>
+                </ul>
+                <div>Say so and I will push the branch and open a pull request.</div>
               </li>
             </ul>
             <div style="display:flex;flex-direction:column;gap:8px;padding:0 24px 18px">

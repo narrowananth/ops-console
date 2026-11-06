@@ -22,6 +22,12 @@ const TYPES: Record<string, string> = {
 };
 const TEXT = new Set(['.csv', '.json', '.log', '.md', '.sql', '.txt', '.xml', '.yaml', '.yml']);
 
+/** The type a file is served with: never one a browser renders as a page or runs (HTML, SVG), so those download. */
+export function fileType(name: string): string {
+  const ext = path.extname(name).toLowerCase();
+  return TYPES[ext] ?? (TEXT.has(ext) ? 'text/plain; charset=utf-8' : 'application/octet-stream');
+}
+
 /**
  * Files the operator attaches to a Session's messages, one folder per Session under the data folder. The agent reads
  * them by path; each is saved under a new name, so the operator's file name never picks where it goes.
@@ -53,8 +59,6 @@ export class Attachments {
   read(sessionId: string, file: string): { stream: ReadStream; type: string; size: number } {
     const full = path.join(this.folder(sessionId), file);
     if (!SAVED.test(file) || !existsSync(full)) throw new ApiError(404, ErrorCode.NotFound, 'No such attached file');
-    const ext = path.extname(file).toLowerCase();
-    const type = TYPES[ext] ?? (TEXT.has(ext) ? 'text/plain; charset=utf-8' : 'application/octet-stream');
-    return { stream: createReadStream(full), type, size: statSync(full).size };
+    return { stream: createReadStream(full), type: fileType(file), size: statSync(full).size };
   }
 }

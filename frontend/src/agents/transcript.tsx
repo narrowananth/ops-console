@@ -1,7 +1,15 @@
-import { fileToken, type Message, namesInText, type Part, splitAttachments } from '@ops-console/shared';
+import {
+  fileToken,
+  type Message,
+  namesInText,
+  type OutputFile,
+  type Part,
+  splitAttachments,
+} from '@ops-console/shared';
 import { useState } from 'react';
-import { AttachmentViewer, PaperClip, type Viewed } from '../components/ui/attachment-viewer';
+import { AttachmentViewer, outputAddress, PaperClip, size, type Viewed } from '../components/ui/attachment-viewer';
 import { Button, Spinner } from '../components/ui/button';
+import { CodeBlock } from '../components/ui/code-block';
 import { DiffLines } from '../components/ui/diff';
 import { Elapsed } from '../components/ui/elapsed';
 import { Markdown } from '../components/ui/markdown';
@@ -24,7 +32,7 @@ function PartView({ part }: { part: Part }) {
   if (part.kind === 'code') {
     const report = asReport(part.text);
     if (report) return <ReportDocument report={report} />;
-    return <pre className="m-0 overflow-x-auto rounded-md bg-surface p-2.5 font-mono text-xs">{part.text}</pre>;
+    return <CodeBlock text={part.text} className="m-0 overflow-x-auto rounded-md bg-surface p-2.5 font-mono text-xs" />;
   }
   if (part.kind === 'diff') {
     return (
@@ -56,7 +64,16 @@ function PartView({ part }: { part: Part }) {
  * One message. The operator's messages have Copy; the last one also has Edit, given `onEdit`, which reruns the edited
  * text after putting back the files the agent edited since it.
  */
-export function MessageView({ message, onEdit }: { message: Message; onEdit?: (text: string) => Promise<unknown> }) {
+export function MessageView({
+  message,
+  onEdit,
+  outputs,
+}: {
+  message: Message;
+  onEdit?: (text: string) => Promise<unknown>;
+  /** The files the agent wrote during this message's turn, and the Session they belong to. */
+  outputs?: { sessionId: string; files: OutputFile[] };
+}) {
   const agent = message.role === 'agent';
   const text = message.parts.map((part) => ('text' in part ? part.text : '')).join('\n');
   const [draft, setDraft] = useState<string | null>(null);
@@ -113,7 +130,10 @@ export function MessageView({ message, onEdit }: { message: Message; onEdit?: (t
       </div>
       {draft === null ? (
         agent ? (
-          <MessageParts message={message} />
+          <>
+            <MessageParts message={message} />
+            {outputs && message.status !== 'streaming' && <OutputChips {...outputs} />}
+          </>
         ) : (
           <SentText text={text} />
         )
@@ -212,6 +232,42 @@ function SentText({ text }: { text: string }) {
 
 /** Splits text around file tokens: odd pieces are the names. */
 const FILE_TOKEN_SPLIT = /\[📎 ([^\]\n]+)\]/;
+
+/** The files the agent wrote for the operator in a turn, each a chip that opens it over the page. */
+function OutputChips({ sessionId, files }: { sessionId: string; files: OutputFile[] }) {
+  const [viewed, setViewed] = useState<Viewed | null>(null);
+  if (files.length === 0) return null;
+  return (
+    <>
+      <ul aria-label="Output files" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+        {files.map((file) => (
+          <li key={file.name} className="flex items-center gap-1">
+            <FileChip
+              name={file.name}
+              onOpen={() => setViewed({ name: file.name, address: outputAddress(sessionId, file.name) })}
+            />
+            <span className="font-mono text-xs text-neutral-700">{size(file.size)}</span>
+          </li>
+        ))}
+      </ul>
+      {viewed && <AttachmentViewer viewed={viewed} onClose={() => setViewed(null)} />}
+    </>
+  );
+}
+
+/**
+ * Gives each output file to the agent message of the turn that wrote it: the last agent message that started at or
+ * before the file's last change.
+ */
+export function outputsByMessage(messages: Message[], files: OutputFile[]): Map<string, OutputFile[]> {
+  const turns = messages.filter((message) => message.role === 'agent');
+  const byMessage = new Map<string, OutputFile[]>();
+  for (const file of files) {
+    const owner = turns.findLast((message) => message.created_at <= file.modified_at) ?? turns[0];
+    if (owner) byMessage.set(owner.id, [...(byMessage.get(owner.id) ?? []), file]);
+  }
+  return byMessage;
+}
 
 function FileChip({ name, onOpen }: { name: string; onOpen: () => void }) {
   return (

@@ -20,6 +20,7 @@ import {
   accountUsageQuerySchema,
   type EditedMessage,
   type Message,
+  type OutputFile,
   type Page,
   type RunDetail,
   type Session,
@@ -33,6 +34,7 @@ import { z } from 'zod';
 import { parseInput, validationFailed } from '../common/errors';
 import { AccountUsage } from './account-usage';
 import { Attachments } from './attachments';
+import { OutputFiles } from './output-files';
 import { RunInsights } from './run-insights.service';
 import { RunRegistry } from './runs';
 import { AgentRuntime } from './runtime';
@@ -114,6 +116,7 @@ export class SessionsController {
     @Inject(AgentRuntime) private readonly runtime: AgentRuntime,
     @Inject(SessionKinds) private readonly kinds: SessionKinds,
     @Inject(Attachments) private readonly attachments: Attachments,
+    @Inject(OutputFiles) private readonly outputs: OutputFiles,
   ) {}
 
   /** Each kind's spec makes its own Sessions; a body without a `kind` is a `repo` Session. */
@@ -145,8 +148,10 @@ export class SessionsController {
 
   @Delete(':id')
   @HttpCode(204)
-  remove(@Param() params: unknown): void {
-    this.sessions.remove(parseInput(idParams, params, 'params').id);
+  async remove(@Param() params: unknown): Promise<void> {
+    const { id } = parseInput(idParams, params, 'params');
+    this.sessions.remove(id);
+    await this.outputs.remove(id);
   }
 
   /** Edits the last message and runs it again (Behavior 8a). */
@@ -231,6 +236,23 @@ export class SessionsController {
       length: found.size,
       disposition: 'inline',
     });
+  }
+
+  /** Files the agent wrote for the operator in the Session's output folder. */
+  @Get(':id/outputs')
+  async outputFiles(@Param() params: unknown): Promise<{ data: OutputFile[] }> {
+    const { id } = parseInput(idParams, params, 'params');
+    this.sessions.get(id);
+    return { data: await this.outputs.list(id) };
+  }
+
+  /** One output file, to open in the console. */
+  @Get(':id/outputs/:file')
+  async outputFile(@Param() params: unknown): Promise<StreamableFile> {
+    const { id, file } = parseInput(fileParams, params, 'params');
+    this.sessions.get(id);
+    const found = await this.outputs.read(id, file);
+    return new StreamableFile(found.stream, { type: found.type, length: found.size, disposition: 'inline' });
   }
 
   @Post(':id/messages')

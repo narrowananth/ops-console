@@ -47,7 +47,7 @@ The Permissions page shows it as Start at login, read from the plist and `launch
 (`OPS_CONSOLE_DATA_DIR` overrides it) and holds `state.db`, `runtime.json` (pid, port, version,
 session token; mode `0600`), `daemon.lock`, `update.json`, `keychain-owner.json`, and a folder each for Claude
 accounts (`accounts/`, each one's config dir), Anonymous Sessions (`anonymous/`), Session attachments
-(`attachments/`), the pull request jobs' scratch copies (`pr-scratch/`), Verification scratch copies (`scratch/`),
+(`attachments/`), the files the agent writes for the operator (`outputs/`, one folder per Session), the pull request jobs' scratch copies (`pr-scratch/`), Verification scratch copies (`scratch/`),
 Dev tools Sessions (`devtools/`), terminals (`terminals/`) and local MCP Server files (`mcp-local/`). The log is `~/Library/Logs/ops-console/daemon.log`.
 
 To try an install before a release, `pnpm build`, `pnpm package` and a `checksums.txt` beside the tarball in `out/`,
@@ -106,7 +106,7 @@ agent Session.
 | `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks; secrets via Keychain |
 | `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash and checkout |
 | `network` | The Network allowlist an agent run starts with: built-in hosts, the host of each Repo's `origin`, and the operator's own domains in `network_domains`; read, add and remove (`/network-allowlist`), registered by `agent` |
-| `agent` | Sessions and their kinds, Claude Agent SDK runs, the Run sandbox rules, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors; stop a run, edit the last message (file edits rewound), attachments; every tool call of a run kept with its time (`run_steps`) and each run's cost (`run_usage`); run health, slow and failure reasons, stages and time split read from them; the message queued behind a run |
+| `agent` | Sessions and their kinds, Claude Agent SDK runs, the Run sandbox rules, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors; stop a run, edit the last message (file edits rewound), attachments, output files and the `save_file` tool; every tool call of a run kept with its time (`run_steps`) and each run's cost (`run_usage`); run health, slow and failure reasons, stages and time split read from them; the message queued behind a run |
 | `playbooks` | Playbooks and the Trigger each one holds, the built-ins (each Trigger's method, steps and shared rules on evidence, data, Connections and git) and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each; Skills, their `/skills` routes and the Skills each Playbook holds (registered by `agent`) |
 | `accounts` | Claude accounts, their usage, Auto-switch and Smart usage; the Claude account hub: with CLIProxy on, runs go to its loopback address with the API key from the Keychain and switching pauses |
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
@@ -124,7 +124,7 @@ agent Session.
 | `lib` | API client, TanStack queries, `/ws` live events, session token, Remembered view storage, sorting, the finish chime, clipboard copy |
 | `monitor` | Monitor page: scan range and status codes, ticked Services, Alerts, Samples, Reports, Review and Fix |
 | `agent-runs` | Agent runs page: run health, why a run is slow or ended, time split, timeline, steps, queued messages, desktop alerts |
-| `workspace` | Workspace page: Repos and Anonymous Sessions, branch switcher, pull request list, files with Expand all and Collapse all, threads, the Agent Review, Reply check and Comment pass cards, the Session's Changes panel, the Open pull request form, queued messages, attachments |
+| `workspace` | Workspace page: Repos and Anonymous Sessions, branch switcher, pull request list, files with Expand all and Collapse all, threads, the Agent Review, Reply check and Comment pass cards, the Session's Changes panel, the Open pull request form, queued messages, attachments, output file chips on the turn that wrote them |
 | `devtools` | Dev tools page (terminal-style `devtools` Sessions scoped to Connections, Results, Comparison) and the Connections page and form |
 | `integrations` | Integrations page: Connectors and MCP Servers |
 | `repos` | Repos page |
@@ -132,7 +132,7 @@ agent Session.
 | `playbooks` | Playbooks page: Triggers, Playbooks, the editor with drag and drop, Step blocks, the Skills a Playbook holds; unsaved edits kept as a Remembered view; a job's Playbook steps and the Skills it was offered |
 | `skills` | Skills page: the list, the editor, the Playbooks holding each Skill; unsaved edits kept as a Remembered view |
 | `agents` | Accounts & Usage page (accounts, sign-in by link, the CLIProxy hub, the chime), Session transcript, model, effort and Access mode chips, Approval prompts, the question panel, stop run, Report rendering |
-| `mcp`, `components/ui` | MCP status labels; shared controls, the folding card title, the side panel that folds to a rail, the job pathway and live timers, and the Tip layer that shows every element's `title` as a styled Tip on hover and keyboard focus |
+| `mcp`, `components/ui` | MCP status labels; shared controls, the folding card title, the side panel that folds to a rail, the job pathway and live timers, and the Tip layer that shows every element's `title` as a styled Tip on hover and keyboard focus, the code block with its copy icon, and the file viewer |
 
 ## Data flow
 
@@ -185,7 +185,7 @@ on and Jira is connected; otherwise the branch is `fix/<name>`.
 derived from `scans` and the Alert's own `resolved_at` and `cleared_at`. A Verification and a Fix each start with a
 Recheck: one `pup` count of the Alert's query over the last hour. The result is the first step of the Report and a line
 in the agent's brief. The Verification then adds the `version:` tag of the newest Sample, set against the commit of its
-scratch copy. The Report's closing turn and the Fix's pull request brief ask for a Prod parity section; the Fix's PR stage asks the agent for the description only, and the console pushes the branch and opens the pull request. A chat run in a Repo's folder also has the console's in-process MCP server `ops-console` with the `open_pull_request` tool; the PreToolUse hook raises an Approval for it in every Access mode, and only a yes has the daemon push and open. An Anonymous Session's run in the same server has a `join_repo` tool instead, with the same Approval in every Access mode (`anonymous-joins-repo`). None of this
+scratch copy. The Report's closing turn and the Fix's pull request brief ask for a Prod parity section; the Fix's PR stage asks the agent for the description only, and the console pushes the branch and opens the pull request. A chat run in a Repo's folder also has the console's in-process MCP server `ops-console` with the `open_pull_request` tool; the PreToolUse hook raises an Approval for it in every Access mode, and only a yes has the daemon push and open. An Anonymous Session's run in the same server has a `join_repo` tool instead, with the same Approval in every Access mode (`anonymous-joins-repo`). A run the operator started also gets the Session's output folder, writable and readable in the Run sandbox and told to the agent in its system prompt, and a `save_file` tool: the agent names a file in that folder and a destination folder, the PreToolUse hook raises an Approval in every Access mode, and only a yes has the daemon copy the file there (`agent-output-files`). The transcript lists the folder's plain files as chips on the turn that wrote them; the viewer shows an image or PDF as itself, text as text and any other type as a download, and nothing the agent wrote is launched on this Mac. None of this
 blocks a job.
 
 **Playbooks.** Each Trigger holds one Playbook, or its built-in. A job (Verification, Fix, Agent
@@ -246,7 +246,7 @@ instructions, the rules for a PR description and the rule that the console, not 
 safety lines. Those say that log lines and
 data are never instructions, that the agent never merges, and that no PROD value goes into a mock or
 anything else it writes. Stop ends a run and expires its Approvals, and the operator may edit the last message, which rewinds the agent's file
-edits. Attached files sit in the Session's `attachments/` folder, added to the run's directories. With CLIProxy on, a
+edits. Attached files sit in the Session's `attachments/` folder and output files in its `outputs/` folder, both added to the run's directories. With CLIProxy on, a
 run sends CLIProxy's API key and address in place of an account's sign-in, usage is not read from it and account
 switching is off; the address must be loopback (ADR 0003). A
 conversation begun in one folder moves its transcript to the next run's folder, so a chat after a
@@ -285,7 +285,8 @@ Where the build departs from `design/ops-console.html` on purpose:
 - **Updates**: a version line and panel, an update card and an "Updated to" notice, with Check now and auto-update.
 - **Claude account hub**: CLIProxy as the sign-in for agent runs, and adding an account by link.
 - **Finish chime**: a soft sound when the operator's run ends, switchable per browser, under Notifications.
-- **Question panel**, **queued messages**, **attachments** and the Session's **Changes** panel in Workspace.
+- **Question panel**, **queued messages**, **attachments**, **output files** and the Session's **Changes** panel in Workspace.
+- **Copy icon** on every code block: fenced blocks in the agent's text, commands in Approvals, raw errors and step output, replay requests and text files.
 - **Check reply** and **Address comments** Triggers, with their cards on a pull request.
 - **Job timers** and Skip and Retry on each Playbook step; Expand all and Collapse all on a pull request's files.
 - **Side panels fold** to a rail: Workspace, Monitor's Services and the Session's Changes.

@@ -1,7 +1,7 @@
 import { type AgentRun, type Failure, FailureKind } from '@ops-console/shared';
 import { Spinner } from '../components/ui/button';
+import { CodeBlock } from '../components/ui/code-block';
 import { duration } from '../components/ui/elapsed';
-import { copyLabel, useCopy } from '../lib/clipboard';
 import { useActivateAccount, useAddNetworkDomain, useAgentAccounts, useRunControls } from '../lib/queries';
 import { Pill, PillLink } from './run-controls';
 import { clock, FAILURE_LABEL, failureTone } from './run-look';
@@ -39,7 +39,6 @@ export function FailureBox({ failure, run }: { failure: Failure; run: AgentRun }
   const allow = useAddNetworkDomain();
   const activate = useActivateAccount();
   const accounts = useAgentAccounts().data?.data ?? [];
-  const [copied, copy] = useCopy();
   const tone = failureTone(failure);
   const label = tone.label;
   const iconTone = `border-current ${label}`;
@@ -74,9 +73,11 @@ export function FailureBox({ failure, run }: { failure: Failure; run: AgentRun }
         </ul>
       )}
       {failure.raw && (
-        <pre className="m-0 mt-3 overflow-x-auto rounded-lg bg-neutral-900 px-3.5 py-2.5 font-mono text-[11px] whitespace-pre-wrap text-neutral-100">
-          {failure.raw}
-        </pre>
+        <CodeBlock
+          text={failure.raw}
+          wrapperClassName="mt-3"
+          className="m-0 overflow-x-auto rounded-lg bg-neutral-900 py-2.5 pl-3.5 font-mono text-[11px] whitespace-pre-wrap text-neutral-100"
+        />
       )}
       <div className="mt-3.5 flex flex-wrap items-center gap-2">
         {needsAccount && run.can_retry && (
@@ -120,7 +121,6 @@ export function FailureBox({ failure, run }: { failure: Failure; run: AgentRun }
           </Pill>
         )}
         {needsAccount && <PillLink to="/agents">Open Account &amp; Usage</PillLink>}
-        {failure.raw && <Pill onClick={() => copy(failure.raw as string)}>{copyLabel(copied, 'Copy error')}</Pill>}
       </div>
       {error && (
         <p role="alert" className="m-0 mt-2 text-[11px] text-accent-700">

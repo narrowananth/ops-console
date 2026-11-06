@@ -28,6 +28,13 @@ In a chat, the agent opens a pull request only by asking: the console's `open_pu
 every Access mode, and only the operator's yes has the console push the branch and open it. The agent never pushes or
 opens one itself.
 
+The agent saves a file outside its folders the same way. The sandbox keeps a run's commands from writing anywhere but its
+working folder, its Session's output folder, temp and the package-tool caches, so a file for the operator goes in the
+output folder, where the console shows it. To put one in another folder, such as `~/Downloads`, the agent calls the
+console's `save_file` tool with a file name from that folder and an absolute folder path. The tool raises an Approval in
+every Access mode that shows the file, its size and the destination, and only the operator's yes has the daemon, outside
+the sandbox, copy the file. A no is final: the agent does not retry by a command or ask the operator to run `mv`.
+
 On any open pull request, the operator's or a teammate's, pressing Address comments is the approval
 for one Comment pass: the agent changes code in a scratch copy at the pull request's head commit, and
 the console commits it and pushes that one branch, never with force. In a Comment pass, and only there, the review
@@ -51,10 +58,17 @@ resolves threads, and a Reply check or Comment pass denies the agent `git push` 
   a commit the teammate did not write, but the operator would fix review comments on a teammate's
   pull request by hand. It lost because the operator wants the agent on those too; the push never
   forces, so a teammate's newer commit stops the Comment pass and nothing of theirs is dropped.
+- **Widen the sandbox's write list to `~/Downloads` or any path the operator names**: the agent could move a file at one
+  word from the operator. It lost because the sandbox cannot tell the operator's words from text injected through a log,
+  so a writable folder would be writable to a steered run, and a run could write into `~/.zshrc`, `~/Library/LaunchAgents`
+  or a folder on PATH. The copy goes through an Approval instead, and the daemon writes the destination.
 - **Show the Comment pass diff and wait before the push**: one more stop, but the operator already
   chose the threads, and the commit is on the card and on the host to look at after.
 
 ## Consequences
+
+An approved `save_file` writes where the operator was shown: the daemon replaces a file of that name in the destination
+and checks nothing but that the folder exists. The operator reads the path on the card.
 
 A fix waits for the operator. The console shows how long each verified Alert has waited for its
 Review. A run steered by log text can execute local commands in the scratch copy; the safety lines,

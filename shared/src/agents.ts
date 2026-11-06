@@ -426,6 +426,10 @@ export const sendMessageSchema = z.object({ text: z.string().trim().min(1) });
 export const attachmentSchema = z.object({ name: z.string(), path: z.string(), size: z.number().int() });
 export type Attachment = z.infer<typeof attachmentSchema>;
 
+/** A file the agent wrote in its Session's output folder for the operator. `modified_at` is an ISO time. */
+export const outputFileSchema = z.object({ name: z.string(), size: z.number().int(), modified_at: z.string() });
+export type OutputFile = z.infer<typeof outputFileSchema>;
+
 const ATTACHED = 'Attached files (open each with the Read tool):';
 
 /** A message with its attachments: the text, then one `- <name>: <path>` line per file under a heading. */

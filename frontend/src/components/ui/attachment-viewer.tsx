@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiBlob } from '../../lib/api';
 import { Button } from './button';
+import { CodeBlock } from './code-block';
 
 export const size = (bytes: number) =>
   bytes < 1024
@@ -15,8 +16,12 @@ export function attachmentAddress(path: string): string {
   return `/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(file)}`;
 }
 
-/** What the viewer opens: a file on this page, or one saved by the daemon. */
-export type Viewed = { name: string; file: File } | { name: string; path: string };
+/** The daemon's address for a file the agent wrote for the operator. */
+export const outputAddress = (sessionId: string, name: string) =>
+  `/sessions/${encodeURIComponent(sessionId)}/outputs/${encodeURIComponent(name)}`;
+
+/** What the viewer opens: a file on this page, an attachment saved by the daemon, or a file at a daemon address. */
+export type Viewed = { name: string; file: File } | { name: string; path: string } | { name: string; address: string };
 
 /**
  * An attached file opened over the page: an image or PDF as itself, text as text, anything else to download.
@@ -36,8 +41,8 @@ export function AttachmentViewer({ viewed, onClose }: { viewed: Viewed; onClose:
     return () => box.close();
   }, []);
   useEffect(() => {
-    if (!('path' in viewed)) return;
-    apiBlob(attachmentAddress(viewed.path)).then(setBlob, (failure: unknown) =>
+    if ('file' in viewed) return;
+    apiBlob('address' in viewed ? viewed.address : attachmentAddress(viewed.path)).then(setBlob, (failure: unknown) =>
       setError(failure instanceof Error ? failure.message : String(failure)),
     );
   }, [viewed]);
@@ -96,10 +101,13 @@ export function AttachmentViewer({ viewed, onClose }: { viewed: Viewed; onClose:
         ) : kind === 'pdf' ? (
           <iframe title={viewed.name} src={url} className="h-[calc(100vh-120px)] w-full border-0" />
         ) : kind === 'text' ? (
-          <pre className="m-0 h-full w-full self-start overflow-auto p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap">
-            {text ?? ''}
-            {blob && blob.size > TEXT_SHOWN && '\n… the rest is cut here. Download shows all of it.'}
-          </pre>
+          <CodeBlock
+            text={text ?? ''}
+            note={blob && blob.size > TEXT_SHOWN ? '\n… the rest is cut here. Download shows all of it.' : undefined}
+            tone="light"
+            wrapperClassName="h-full w-full self-start"
+            className="m-0 h-full w-full overflow-auto p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap"
+          />
         ) : (
           <p className="m-0 p-6 text-sm text-neutral-700">No preview for this kind of file. Download opens it.</p>
         )}

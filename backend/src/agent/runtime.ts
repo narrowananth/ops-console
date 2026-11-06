@@ -58,6 +58,7 @@ import { Attachments } from './attachments';
 import { ConnectionLookup } from './connection-lookup';
 import { HOOK_BYPASS_REASON, skipsCommitHooks } from './hook-bypass';
 import { MessageInterceptors } from './message-interceptors';
+import { OutputFiles, saveFileInputSchema } from './output-files';
 import { blockParts, contentSchema, EDIT_TOOLS, questionInputSchema, stepText, toMessages } from './parts';
 import { mergeLines, type UsageLine } from './pricing';
 import { ProdWriteRule } from './prod-write-rule';
@@ -70,6 +71,7 @@ import {
   openPullRequestInputSchema,
   type PullRequestOpener,
   type RepoJoiner,
+  SAVE_FILE_TOOL,
 } from './pull-request-tool';
 import { gitControl, runSandbox } from './run-sandbox';
 import { RunStepsLog } from './run-steps';
@@ -286,6 +288,7 @@ export class AgentRuntime {
     @Inject(ProdWriteRule) private readonly prodWrites: ProdWriteRule,
     @Inject(Transcripts) private readonly transcripts: Transcripts,
     @Inject(Attachments) private readonly attachments: Attachments,
+    @Inject(OutputFiles) private readonly outputs: OutputFiles,
     @Inject(MessageInterceptors) private readonly interceptors: MessageInterceptors,
     @Inject(ConnectionLookup) private readonly connections: ConnectionLookup,
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
@@ -670,14 +673,18 @@ export class AgentRuntime {
     const instructions = this.kinds.get(session.kind)?.instructions;
 
     const attached = this.attachments.existingFolder(run.sessionId);
+    // A run the operator started writes its files for them in the Session's output folder (a read-only run has none).
+    const outputFolder = run.onFinish === null && !run.readOnly ? this.outputs.ensure(run.sessionId) : null;
     // The run's Skills sit in a folder of their own that the Run sandbox lets it read.
     const skillFolder = run.skills.length > 0 ? path.join(skillRunsDir(), crypto.randomUUID()) : null;
+    const extraDirs = [attached, outputFolder].filter((folder) => folder !== null);
     const options: Options = {
       cwd: run.workingDir,
       sandbox: runSandbox({
         workingDir: run.workingDir,
         dataDir: this.dataDir,
         readable: [...(attached === null ? [] : [attached]), ...(skillFolder === null ? [] : [skillFolder])],
+        writable: outputFolder === null ? [] : [outputFolder],
         networkDomains: run.networkDomains,
         readOnly: run.readOnly,
         gitFile: gitFileOf(run.workingDir),
@@ -685,7 +692,7 @@ export class AgentRuntime {
       // A folder that holds pull request code never adds its own settings, hooks, servers or memory to the run.
       ...(run.projectSettings ? {} : { settingSources: ['user' as const] }),
       // The operator's attached files sit outside the working folder; the agent reads them without asking.
-      ...(attached === null ? {} : { additionalDirectories: [attached] }),
+      ...(extraDirs.length === 0 ? {} : { additionalDirectories: extraDirs }),
       ...(skillFolder === null
         ? {}
         : {
@@ -712,8 +719,9 @@ export class AgentRuntime {
         const opener = this.opener?.offers(run.sessionId, run.workingDir) ? this.opener : null;
         // Only a run the operator started: a Playbook step or a Verification in an Anonymous Session stays where it is.
         const joiner = run.onFinish === null && this.joiner?.offers(run.sessionId) ? this.joiner : null;
-        return opener || joiner
-          ? { mcpServers: { [CONSOLE_TOOLS_SERVER]: consoleToolsServer({ opener, joiner }, run.sessionId) } }
+        const saver = outputFolder === null ? null : this.outputs;
+        return opener || joiner || saver
+          ? { mcpServers: { [CONSOLE_TOOLS_SERVER]: consoleToolsServer({ opener, joiner, saver }, run.sessionId) } }
           : {};
       })(),
       disallowedTools: [
@@ -723,7 +731,11 @@ export class AgentRuntime {
         ...(run.readOnly ? READ_ONLY_DENIALS : []),
         ...run.deny,
       ],
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: systemAppend(instructions, run.rules) },
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        append: systemAppend(instructions, run.rules, outputFolder),
+      },
       // Servers the operator disabled stay out of the run.
       settings: {
         deniedMcpServers: [
@@ -1077,6 +1089,7 @@ export class AgentRuntime {
       });
       if (input.tool_name === OPEN_PULL_REQUEST_TOOL) return this.approvePullRequest(run, toolInput, input.tool_use_id);
       if (input.tool_name === JOIN_REPO_TOOL) return this.approveJoinRepo(run, toolInput, input.tool_use_id);
+      if (input.tool_name === SAVE_FILE_TOOL) return this.approveSaveFile(run, toolInput, input.tool_use_id);
       if (input.tool_name === 'Bash' && typeof toolInput.command === 'string' && skipsCommitHooks(toolInput.command)) {
         this.steps.finish(input.tool_use_id, { ok: false, error: HOOK_BYPASS_REASON });
         return {
@@ -1263,6 +1276,47 @@ export class AgentRuntime {
         permissionDecisionReason: approved
           ? 'The operator approved joining the Repo.'
           : 'The operator denied joining the Repo. Do not ask again: work in this folder or ask the operator.',
+      },
+    };
+  }
+
+  /**
+   * Saving an output file outside the run's folders asks in every Access mode: the daemon, outside the sandbox, writes
+   * where the operator says. A call with no such file or no such folder is refused before it asks.
+   */
+  private async approveSaveFile(run: Run, toolInput: Record<string, unknown>, stepId: string): Promise<HookJSONOutput> {
+    const refuse = (reason: string): HookJSONOutput => {
+      this.steps.finish(stepId, { ok: false, error: reason });
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: reason,
+        },
+      };
+    };
+    const parsed = saveFileInputSchema.safeParse(toolInput);
+    if (!parsed.success) return refuse("Give the file's name in your output folder and the folder's absolute path.");
+    let summary: string;
+    try {
+      summary = await this.outputs.describe(run.sessionId, parsed.data);
+    } catch (error) {
+      return refuse(error instanceof ApiError ? error.message : 'That file cannot be saved.');
+    }
+    const decision = await this.ask(
+      run,
+      { actionLogId: null, sessionId: run.sessionId, kind: ApprovalKind.Command, summary, isProd: false },
+      stepId,
+    );
+    const approved = decision === ApprovalStatus.Approved;
+    if (!approved) this.steps.finish(stepId, { ok: false, error: 'denied by the operator' });
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: approved ? 'allow' : 'deny',
+        permissionDecisionReason: approved
+          ? 'The operator approved saving this file.'
+          : 'The operator denied saving this file. Do not retry it, by this tool or by a command.',
       },
     };
   }
