@@ -7,3 +7,11 @@ allowBuilds:
   esbuild: true
   better-sqlite3: true
   node-pty: true
+# Two self-hosted runners, arm64 and x64, share one pnpm; install the native packages of both so biome, esbuild and
+# the others start under whichever node the job gets.
+supportedArchitectures:
+  os:
+    - current
+  cpu:
+    - arm64
+    - x64
