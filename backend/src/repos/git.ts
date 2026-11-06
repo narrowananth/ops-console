@@ -334,6 +334,33 @@ export class Git {
     }
   }
 
+  /**
+   * `pushHead`, and when the branch moved on the remote, rebases the commits `dir` is at onto the new tip and pushes
+   * again, never with force; up to `tries` times, since the branch can move again. A rebase that conflicts is undone
+   * and throws `BranchMoved`: only a person can settle that.
+   */
+  async pushHeadRebasing(dir: string, branch: string, tries = 3): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await this.pushHead(dir, branch);
+        return;
+      } catch (error) {
+        if (!(error instanceof BranchMoved) || attempt >= tries) throw error;
+        try {
+          await this.remoteHead(dir, branch);
+        } catch {
+          throw new BranchMoved(branch);
+        }
+        try {
+          await this.must(dir, ['rebase', '--quiet', `refs/remotes/origin/${branch}`]);
+        } catch {
+          await this.try(dir, ['rebase', '--abort']);
+          throw new BranchMoved(branch);
+        }
+      }
+    }
+  }
+
   /** The first line of git's own message; it names the problem and holds no secrets. */
   private async must(dir: string, args: string[], env: Record<string, string> = {}): Promise<void> {
     try {

@@ -1,4 +1,4 @@
-import { FailureKind, RunHealth, RunOutcome, RunPhase, RunStage } from '@ops-console/shared';
+import { FailureKind, RunHealth, RunOutcome, RunPhase, SessionKind, SubagentStatus } from '@ops-console/shared';
 import { describe, expect, it } from 'vitest';
 import {
   classifyFailure,
@@ -7,9 +7,10 @@ import {
   fmtMs,
   healthOf,
   historyOf,
+  phasesOf,
+  resumePointOf,
   type StepFacts,
   splitTime,
-  stagesOf,
   usualMs,
 } from '../src/agent/run-insight';
 
@@ -122,6 +123,45 @@ describe('diagnoseSlow', () => {
   });
 });
 
+describe('classifyFailure resume and reset', () => {
+  it('gives a usage-limit failure its reset time and a resume point; other kinds have no reset time', () => {
+    const subagents = [
+      {
+        id: 'a',
+        parent_id: null,
+        description: 'Finding 1',
+        type: null,
+        status: SubagentStatus.Done,
+        started_at: 'x',
+        finished_at: null,
+      },
+      {
+        id: 'b',
+        parent_id: null,
+        description: 'Finding 2',
+        type: null,
+        status: SubagentStatus.Failed,
+        started_at: 'x',
+        finished_at: null,
+      },
+    ];
+    const limit = classifyFailure({
+      outcome: RunOutcome.RateLimited,
+      lastError: 'rate_limit_error',
+      steps: [],
+      subagents,
+      resetsAt: '2026-11-06T08:30:00.000Z',
+    });
+    expect(limit).toMatchObject({
+      resets_at: '2026-11-06T08:30:00.000Z',
+      resume_point: 'Finding 2 (1 of 2 subagents finished)',
+    });
+    const failed = classifyFailure({ outcome: RunOutcome.Failed, lastError: null, steps: [], subagents });
+    expect(failed?.resets_at).toBeNull();
+    expect(failed?.resume_point).toBe('Finding 2 (1 of 2 subagents finished)');
+  });
+});
+
 describe('classifyFailure', () => {
   const failed = (summary: string, error: string) => [step({ summary, startedAt: 0, finishedAt: 1, ok: false, error })];
 
@@ -176,84 +216,162 @@ describe('classifyFailure', () => {
   });
 });
 
-describe('stagesOf', () => {
+describe('phasesOf', () => {
   const at = (n: number, over: Partial<StepFacts> & { summary: string }) =>
     step({ startedAt: n, finishedAt: n + 1, ok: true, ...over });
-  const states = (steps: StepFacts[], running: boolean) =>
-    Object.fromEntries(stagesOf(steps, running).map(({ stage, state }) => [stage, state]));
+  const states = (
+    steps: StepFacts[],
+    running: boolean,
+    over: { kind?: SessionKind; outcome?: RunOutcome | null; subagents?: number } = {},
+  ) =>
+    Object.fromEntries(
+      phasesOf({
+        steps,
+        kind: over.kind ?? SessionKind.Repo,
+        running,
+        outcome: over.outcome ?? null,
+        subagents: over.subagents ?? 0,
+      }).map(({ id, state }) => [id, state]),
+    );
+  const read = (n: number) => at(n, { summary: `Read ${n}.ts`, tool: 'Read', phase: RunPhase.Reading });
+  const edit = (n: number) => at(n, { summary: `Edit ${n}.ts`, tool: 'Edit', phase: RunPhase.Editing });
 
-  it('puts a run that is running its tests at Run tests, with the earlier stages done', () => {
-    const steps = [
-      at(1, { summary: 'Read a.ts', tool: 'Read', phase: RunPhase.Reading }),
-      at(2, { summary: 'Edit a.ts', tool: 'Edit', phase: RunPhase.Editing }),
-      step({ summary: '$ pnpm test', startedAt: 3 }),
-    ];
+  it('puts a run that is running its tests at Run tests; Edit has evidence, Fix has none', () => {
+    const steps = [read(1), edit(2), step({ summary: '$ pnpm test', startedAt: 3 })];
     expect(states(steps, true)).toEqual({
-      [RunStage.ReadTask]: 'done',
-      [RunStage.Explore]: 'done',
-      [RunStage.Edit]: 'done',
-      [RunStage.RunTests]: 'now',
-      [RunStage.Fix]: 'todo',
-      [RunStage.Commit]: 'todo',
-      [RunStage.OpenPr]: 'todo',
+      read_task: 'done',
+      explore: 'done',
+      edit: 'done',
+      run_tests: 'now',
+      fix: 'todo',
+      commit: 'todo',
+      open_pr: 'todo',
     });
   });
 
+  it('marks a phase the run went past with no evidence as skipped, not done', () => {
+    const steps = [read(1), at(2, { summary: '$ git commit -m x' })];
+    expect(states(steps, true)).toMatchObject({ edit: 'skipped', run_tests: 'skipped', fix: 'skipped' });
+    const edits = [edit(1), at(2, { summary: '$ git commit -m x' })];
+    expect(states(edits, true)).toMatchObject({ edit: 'done', run_tests: 'skipped', commit: 'now' });
+  });
+
   it('reads an edit after a test as a fix', () => {
-    const steps = [
-      at(1, { summary: '$ pnpm test' }),
-      step({ summary: 'Edit a.ts', tool: 'Edit', phase: RunPhase.Editing, startedAt: 3 }),
-    ];
-    expect(states(steps, true)[RunStage.Fix]).toBe('now');
+    const steps = [at(1, { summary: '$ pnpm test' }), step({ ...edit(3), finishedAt: null })];
+    expect(states(steps, true).fix).toBe('now');
   });
 
-  it('moves past Read task on commands that only look, and stays put on one that marks no stage', () => {
-    const looking = [
-      step({ summary: '$ git rev-parse HEAD; git status --short | head', startedAt: 1, finishedAt: 2 }),
-      step({ summary: '$ gh pr diff 12', startedAt: 3 }),
-    ];
-    const now = states(looking, true);
-    expect(now[RunStage.ReadTask]).toBe('done');
-    expect(now[RunStage.Explore]).toBe('now');
-    expect(now[RunStage.Edit]).toBe('todo');
-    const after = [...looking, step({ summary: '$ pnpm install', startedAt: 4 })];
-    expect(states(after, true)[RunStage.Explore]).toBe('now');
+  it('gives a run that only reads and searches Read task, Explore, Analyze and Report', () => {
+    const steps = [read(1), at(2, { summary: '$ grep -rn foo src' })];
+    expect(phasesOf({ steps, kind: SessionKind.Repo, running: true, outcome: null }).map((one) => one.label)).toEqual([
+      'Read task',
+      'Explore',
+      'Analyze',
+      'Report',
+    ]);
+    expect(states(steps, true)).toEqual({ read_task: 'done', explore: 'now', analyze: 'todo', report: 'todo' });
+    const sub = [...steps, step({ summary: 'Task Explore', tool: 'Task', startedAt: 5 })];
+    expect(states(sub, true)).toMatchObject({ explore: 'done', analyze: 'now' });
   });
 
-  it('keeps a stage done once passed, when the agent goes back to reading', () => {
-    const steps = [
-      at(1, { summary: 'Edit a.ts', tool: 'Edit', phase: RunPhase.Editing }),
-      step({ summary: 'Read b.ts', tool: 'Read', phase: RunPhase.Reading, startedAt: 3 }),
-    ];
-    const state = states(steps, true);
-    expect(state[RunStage.Edit]).toBe('done');
-    expect(state[RunStage.Explore]).toBe('now');
+  it('gives a pull request review its own phases', () => {
+    const steps = [at(1, { summary: '$ gh pr diff 12' })];
+    expect(
+      phasesOf({ steps, kind: SessionKind.PrReview, running: true, outcome: null }).map((one) => one.label),
+    ).toEqual(['Read PR', 'Explore', 'Analyze', 'Write comments', 'Post review']);
   });
 
-  it('starts at Read task before any call, and marks every stage reached done once the run ends', () => {
-    expect(states([], true)[RunStage.ReadTask]).toBe('now');
-    const steps = [at(1, { summary: '$ git commit -m x' })];
-    const ended = states(steps, false);
-    expect(ended[RunStage.Commit]).toBe('done');
-    expect(ended[RunStage.OpenPr]).toBe('todo');
+  it('marks a finished run done where it has evidence and skipped where it has none', () => {
+    const ended = states([read(1), edit(2), at(3, { summary: '$ git commit -m x' })], false, {
+      outcome: RunOutcome.Done,
+    });
+    expect(ended).toMatchObject({ commit: 'done', run_tests: 'skipped', open_pr: 'skipped' });
+    expect(states([read(1)], false, { outcome: RunOutcome.Done })).toMatchObject({ analyze: 'done', report: 'done' });
+  });
+
+  it('marks where an ended run stopped, by why it ended', () => {
+    const steps = [read(1), at(2, { summary: '$ grep x src' })];
+    const stopped = (outcome: RunOutcome) =>
+      phasesOf({ steps, kind: SessionKind.Repo, running: false, outcome }).find((one) => one.stopped !== null);
+    expect(stopped(RunOutcome.RateLimited)).toMatchObject({
+      id: 'explore',
+      state: 'now',
+      stopped: { tone: 'limit', label: 'Stopped here: usage limit' },
+    });
+    expect(stopped(RunOutcome.Failed)?.stopped).toEqual({ tone: 'failed', label: 'Stopped here: failed' });
+    expect(stopped(RunOutcome.Stopped)?.stopped).toEqual({ tone: 'stopped', label: 'Stopped here' });
+    expect(stopped(RunOutcome.Done)).toBeUndefined();
+  });
+
+  it('starts at Read task before any call', () => {
+    expect(states([], true).read_task).toBe('now');
+  });
+});
+
+describe('resumePointOf', () => {
+  const sub = (n: number, status: SubagentStatus) => ({
+    id: `t${n}`,
+    parent_id: null,
+    description: `Finding ${n}`,
+    type: null,
+    status,
+    started_at: '2026-11-06T05:50:00.000Z',
+    finished_at: null,
+  });
+  it('names the first subagent not done and how many finished', () => {
+    const subagents = [
+      ...Array.from({ length: 11 }, (_, i) => sub(i + 1, SubagentStatus.Done)),
+      sub(12, SubagentStatus.Failed),
+    ];
+    expect(resumePointOf([], subagents)).toBe('Finding 12 (11 of 12 subagents finished)');
+  });
+  it('falls back to the last call, or null with nothing seen', () => {
+    expect(resumePointOf([step({ summary: '$ make', startedAt: 1 })], [])).toBe('Running make');
+    expect(resumePointOf([], [])).toBeNull();
   });
 });
 
 describe('splitTime', () => {
-  it('counts a call by its phase, the wait apart, and the rest as thinking', () => {
+  const ms = (split: { phase: RunPhase; ms: number }[]) =>
+    Object.fromEntries(split.map(({ phase, ms }) => [phase, ms]));
+
+  it('counts a call by its phase, the wait apart, and the rest as thinking; subagent calls are not the main agent', () => {
     const steps = [
       step({ summary: 'Read a', tool: 'Read', phase: RunPhase.Reading, startedAt: 10_000, finishedAt: 30_000 }),
       step({ summary: '$ make', startedAt: 40_000, finishedAt: 100_000, waitedMs: 20_000 }),
       step({ summary: '$ sub', agentId: 't1', startedAt: 0, finishedAt: 100_000 }),
     ];
-    const ms = Object.fromEntries(splitTime(steps, 0, 120_000).map(({ phase, ms }) => [phase, ms]));
-    expect(ms).toEqual({
-      [RunPhase.Reading]: 20_000,
-      [RunPhase.Commands]: 40_000,
-      [RunPhase.WaitingYou]: 20_000,
-      [RunPhase.Editing]: 0,
+    const split = splitTime({ steps, startedAt: 0, endedAt: 120_000, now: 999_000 });
+    expect(ms(split)).toEqual({
       [RunPhase.Thinking]: 40_000,
+      [RunPhase.Reading]: 20_000,
+      [RunPhase.Editing]: 0,
+      [RunPhase.Commands]: 40_000,
+      [RunPhase.Subagents]: 0,
+      [RunPhase.WaitingYou]: 20_000,
+      [RunPhase.WaitingLimit]: 0,
     });
+    expect(split.reduce((sum, part) => sum + part.ms, 0)).toBe(120_000);
+  });
+
+  it('counts the time blocked on a subagent as Subagents, and the wait on the limit', () => {
+    const steps = [step({ summary: 'Task x', tool: 'Task', startedAt: 0, finishedAt: 60_000 })];
+    const split = splitTime({ steps, startedAt: 0, endedAt: 100_000, now: 100_000, limitSince: 80_000 });
+    expect(ms(split)).toMatchObject({
+      [RunPhase.Subagents]: 60_000,
+      [RunPhase.Thinking]: 20_000,
+      [RunPhase.WaitingLimit]: 20_000,
+    });
+  });
+
+  it('counts a running call to now', () => {
+    const split = splitTime({
+      steps: [step({ summary: '$ make', startedAt: 0 })],
+      startedAt: 0,
+      endedAt: null,
+      now: 50_000,
+    });
+    expect(ms(split)[RunPhase.Commands]).toBe(50_000);
   });
 });
 

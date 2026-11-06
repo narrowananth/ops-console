@@ -1,11 +1,17 @@
 import {
   type Failure,
   FailureKind,
+  lanesOf,
+  PHASE_ORDER,
   RunHealth,
   RunOutcome,
   RunPhase,
-  RunStage,
+  type RunPhaseStep,
+  SessionKind,
   type SlowDiagnosis,
+  type Subagent,
+  SubagentStatus,
+  type TimedStep,
 } from '@ops-console/shared';
 
 /** One tool call of a run, as the page reads it. Times are epoch milliseconds. */
@@ -221,6 +227,10 @@ export function classifyFailure(input: {
   outcome: RunOutcome | null;
   lastError: string | null;
   steps: StepFacts[];
+  /** The run's subagents, for what a Retry resumes at. */
+  subagents?: Subagent[];
+  /** When the account's usage window resets (ISO), when the SDK said. */
+  resetsAt?: string | null;
 }): Failure | null {
   const { outcome } = input;
   if (
@@ -231,7 +241,8 @@ export function classifyFailure(input: {
   ) {
     return null;
   }
-  const none = { raw: null, blocked_host: null };
+  const resume_point = resumePointOf(input.steps, input.subagents ?? []);
+  const none = { raw: null, blocked_host: null, resets_at: null, resume_point };
   if (outcome === RunOutcome.RateLimited) {
     return {
       kind: FailureKind.RateLimited,
@@ -241,6 +252,7 @@ export function classifyFailure(input: {
         'Switch to another account in Agents & accounts, or Retry after the limit resets. Work so far stays in the Session.',
       ...none,
       raw: input.lastError,
+      resets_at: input.resetsAt ?? null,
     };
   }
   if (outcome === RunOutcome.SignedOut) {
@@ -276,6 +288,8 @@ export function classifyFailure(input: {
       what_to_do: 'Fix what the hook reports and commit again. The console does not skip hooks. Retry carries on.',
       blocked_host: null,
       raw,
+      resets_at: null,
+      resume_point,
     };
   }
   if (NETWORK_ERROR.test(text)) {
@@ -291,6 +305,8 @@ export function classifyFailure(input: {
         : 'Allow the host in the Network allowlist, then Retry.',
       blocked_host: host,
       raw,
+      resets_at: null,
+      resume_point,
     };
   }
   if (WRITE_ERROR.test(text)) {
@@ -301,6 +317,8 @@ export function classifyFailure(input: {
       what_to_do: 'Tell the agent to write inside the working folder, then Retry.',
       blocked_host: null,
       raw,
+      resets_at: null,
+      resume_point,
     };
   }
   return {
@@ -310,7 +328,24 @@ export function classifyFailure(input: {
     what_to_do: "Open the Session to read the agent's last messages, then Retry.",
     blocked_host: null,
     raw,
+    resets_at: null,
+    resume_point,
   };
+}
+
+/**
+ * What a Retry carries on with: the first subagent that is not done, with how many finished, else the call the run
+ * stopped in. Null when the run did nothing the console saw.
+ */
+export function resumePointOf(steps: StepFacts[], subagents: Subagent[]): string | null {
+  if (subagents.length > 0) {
+    const done = subagents.filter((one) => one.status === SubagentStatus.Done).length;
+    const next = subagents.find((one) => one.status !== SubagentStatus.Done);
+    if (!next) return `all ${subagents.length} subagents finished`;
+    return `${next.description} (${done} of ${subagents.length} subagents finished)`;
+  }
+  const last = steps.at(-1);
+  return last ? activityOf(last) : null;
 }
 
 const TEST_STEP =
@@ -323,76 +358,182 @@ const LOOKS_ONLY =
 /** The command's first part decides: `git status && ...` looks, whatever the rest does. */
 const looksOnly = (command: string) => LOOKS_ONLY.test((command.split(/&&|;|\|/)[0] ?? '').trim());
 
-/** The stage one tool call belongs to; null for a call that marks none. */
-function stageOf(step: StepFacts, testSeen: boolean): RunStage | null {
+/** What one call is evidence of. */
+type Mark = 'explore' | 'edit' | 'test' | 'commit' | 'open_pr' | 'subagent' | 'other';
+
+function markOf(step: StepFacts): Mark {
   const command = step.summary.startsWith('$ ') ? step.summary.slice(2) : null;
   if (
     step.tool.endsWith('open_pull_request') ||
     (command !== null && /\b(gh\s+pr\s+create|glab\s+mr\s+create)\b/.test(command))
   ) {
-    return RunStage.OpenPr;
+    return 'open_pr';
   }
-  if (command !== null && /\bgit\s+commit\b/.test(command)) return RunStage.Commit;
-  if (command !== null && TEST_STEP.test(command)) return RunStage.RunTests;
-  if (step.phase === RunPhase.Editing) return testSeen ? RunStage.Fix : RunStage.Edit;
-  if (step.phase === RunPhase.Reading || step.tool === 'Agent' || step.tool === 'Task') return RunStage.Explore;
-  if (command !== null && looksOnly(command)) return RunStage.Explore;
-  return null;
+  if (command !== null && /\bgit\s+commit\b/.test(command)) return 'commit';
+  if (command !== null && TEST_STEP.test(command)) return 'test';
+  if (step.phase === RunPhase.Editing) return 'edit';
+  if (step.tool === 'Agent' || step.tool === 'Task') return 'subagent';
+  if (step.phase === RunPhase.Reading) return 'explore';
+  if (command !== null && looksOnly(command)) return 'explore';
+  return 'other';
 }
 
-const STAGE_ORDER = [
-  RunStage.ReadTask,
-  RunStage.Explore,
-  RunStage.Edit,
-  RunStage.RunTests,
-  RunStage.Fix,
-  RunStage.Commit,
-  RunStage.OpenPr,
+type PhaseDef = { id: string; label: string };
+
+const CODE_PHASES: PhaseDef[] = [
+  { id: 'read_task', label: 'Read task' },
+  { id: 'explore', label: 'Explore' },
+  { id: 'edit', label: 'Edit' },
+  { id: 'run_tests', label: 'Run tests' },
+  { id: 'fix', label: 'Fix' },
+  { id: 'commit', label: 'Commit + hooks' },
+  { id: 'open_pr', label: 'Open PR' },
+];
+const READ_PHASES: PhaseDef[] = [
+  { id: 'read_task', label: 'Read task' },
+  { id: 'explore', label: 'Explore' },
+  { id: 'analyze', label: 'Analyze' },
+  { id: 'report', label: 'Report' },
+];
+const REVIEW_PHASES: PhaseDef[] = [
+  { id: 'read_pr', label: 'Read PR' },
+  { id: 'explore', label: 'Explore' },
+  { id: 'analyze', label: 'Analyze' },
+  { id: 'write_comments', label: 'Write comments' },
+  { id: 'post_review', label: 'Post review' },
 ];
 
-/**
- * Where the run is in its usual order, read from the tools it used, so a run that works another way shows a stage it
- * skipped as done. A stage up to the furthest one reached is done; `now` is the stage of the newest call while the run
- * goes. Any call past the task itself means the task was read, and a call that marks no stage leaves `now` where it was.
- */
-export function stagesOf(steps: StepFacts[], running: boolean): { stage: RunStage; state: 'done' | 'now' | 'todo' }[] {
-  const ordered = [...steps].sort((a, b) => a.startedAt - b.startedAt);
-  let testSeen = false;
-  let furthest = steps.length > 0 ? 1 : 0;
-  let current = steps.length > 0 ? 1 : 0;
-  for (const step of ordered) {
-    const stage = stageOf(step, testSeen);
-    if (stage === RunStage.RunTests) testSeen = true;
-    if (stage === null) continue;
-    const index = STAGE_ORDER.indexOf(stage);
-    furthest = Math.max(furthest, index);
-    current = index;
+/** The words and tone of the phase an ended run stopped in; null for one that finished. */
+function stoppedOf(outcome: RunOutcome | null): RunPhaseStep['stopped'] {
+  switch (outcome) {
+    case RunOutcome.RateLimited:
+      return { tone: 'limit', label: 'Stopped here: usage limit' };
+    case RunOutcome.Failed:
+    case RunOutcome.SignedOut:
+    case RunOutcome.Interrupted:
+      return { tone: 'failed', label: 'Stopped here: failed' };
+    case RunOutcome.Stopped:
+    case RunOutcome.Paused:
+      return { tone: 'stopped', label: 'Stopped here' };
+    default:
+      return null;
   }
-  return STAGE_ORDER.map((stage, index) => ({
-    stage,
-    state: running && index === current ? 'now' : index <= furthest ? 'done' : 'todo',
-  }));
 }
 
-/** Milliseconds per phase over the run: the main agent's calls, time waiting on the operator, and the rest as thinking. */
-export function splitTime(steps: StepFacts[], startedAt: number, endedAt: number): { phase: RunPhase; ms: number }[] {
-  const ms: Record<RunPhase, number> = {
-    [RunPhase.Thinking]: 0,
-    [RunPhase.Reading]: 0,
-    [RunPhase.Editing]: 0,
-    [RunPhase.Commands]: 0,
-    [RunPhase.WaitingYou]: 0,
+/**
+ * The phases of this run and where it is in them. The set follows the run: a pull request review has its own, a run
+ * that edits, tests, commits or opens a pull request has the code phases, and one that only reads and searches reads,
+ * explores, analyzes and reports. A phase is `done` only with evidence of it; one the run went past without any is
+ * `skipped`, and so is every phase after the last one reached once the run finished. `now` is the phase of the newest
+ * call while the run goes, and of the call an ended run stopped at, which also carries why in `stopped`.
+ */
+export function phasesOf(input: {
+  steps: StepFacts[];
+  kind: SessionKind;
+  running: boolean;
+  outcome: RunOutcome | null;
+  subagents?: number;
+}): RunPhaseStep[] {
+  const ordered = [...input.steps].sort((a, b) => a.startedAt - b.startedAt);
+  const marks = ordered.map(markOf);
+  const finished = !input.running && input.outcome === RunOutcome.Done;
+  const has = (...wanted: Mark[]) => marks.some((mark) => wanted.includes(mark));
+  const subagents = has('subagent') || (input.subagents ?? 0) > 0;
+  const review = input.kind === SessionKind.PrReview;
+  const code = !review && has('edit', 'test', 'commit', 'open_pr');
+  const defs = review ? REVIEW_PHASES : code ? CODE_PHASES : READ_PHASES;
+
+  /** Which phase of this run's set a call puts the run in. */
+  const phaseOf = (mark: Mark, testSeen: boolean): string => {
+    if (review) return mark === 'explore' ? 'explore' : 'analyze';
+    if (!code) return mark === 'explore' ? 'explore' : 'analyze';
+    switch (mark) {
+      case 'open_pr':
+        return 'open_pr';
+      case 'commit':
+        return 'commit';
+      case 'test':
+        return 'run_tests';
+      case 'edit':
+        return testSeen ? 'fix' : 'edit';
+      default:
+        return 'explore';
+    }
   };
-  let busy = 0;
-  for (const step of steps) {
-    if (step.agentId !== null) continue;
-    const end = step.finishedAt ?? endedAt;
-    const took = Math.max(0, end - step.startedAt);
-    const waited = Math.min(step.waitedMs, took);
-    ms[step.phase] += took - waited;
-    ms[RunPhase.WaitingYou] += waited;
-    busy += took;
+
+  const evidence = new Set<string>();
+  if (ordered.length > 0) evidence.add(defs[0]?.id as string);
+  let testSeen = false;
+  let currentId: string | null = ordered.length > 0 ? 'explore' : (defs[0]?.id ?? null);
+  let furthest = ordered.length > 0 ? 1 : -1;
+  ordered.forEach((_step, index) => {
+    const mark = marks[index] as Mark;
+    const id = phaseOf(mark, testSeen);
+    if (mark === 'test') testSeen = true;
+    if (mark === 'other' && !review && code) return; // a command that marks no phase leaves the run where it was
+    evidence.add(id);
+    currentId = id;
+    furthest = Math.max(
+      furthest,
+      defs.findIndex((def) => def.id === id),
+    );
+  });
+  if (subagents && !code) evidence.add('analyze');
+  if (finished) {
+    for (const id of ['report', 'write_comments', 'post_review']) evidence.add(id);
+    if (!code) evidence.add('analyze');
+    furthest = defs.length - 1;
   }
-  ms[RunPhase.Thinking] = Math.max(0, endedAt - startedAt - busy);
-  return Object.values(RunPhase).map((phase) => ({ phase, ms: Math.round(ms[phase]) }));
+  const current = defs.findIndex((def) => def.id === currentId);
+  const stopped = input.running || finished ? null : stoppedOf(input.outcome);
+  return defs.map((def, index): RunPhaseStep => {
+    const here = index === current;
+    const state: RunPhaseStep['state'] =
+      (input.running || stopped !== null) && here
+        ? 'now'
+        : evidence.has(def.id) && (index <= furthest || finished)
+          ? 'done'
+          : index < furthest || (finished && index >= furthest)
+            ? 'skipped'
+            : 'todo';
+    return { id: def.id, label: def.label, state, stopped: stopped !== null && here ? stopped : null };
+  });
+}
+
+const timed = (step: StepFacts): TimedStep => ({
+  id: step.id,
+  agentId: step.agentId,
+  tool: step.tool,
+  phase: step.phase,
+  startedAt: step.startedAt,
+  finishedAt: step.finishedAt,
+  waitedMs: step.waitedMs,
+  ok: step.ok,
+  summary: step.summary,
+  error: step.error,
+});
+
+/**
+ * Milliseconds per phase over the main agent's run, in the legend's order. Every millisecond of the run is in exactly
+ * one phase, so the parts add up to the run's elapsed time; a gap between calls is thinking, time blocked on a
+ * subagent is `Subagents`, and the wait on the usage limit is `WaitingLimit`. The shared lane code the page draws
+ * its timeline from does the counting.
+ */
+export function splitTime(input: {
+  steps: StepFacts[];
+  startedAt: number;
+  /** When the run ended; null while it goes, which counts to `now`. */
+  endedAt: number | null;
+  now: number;
+  limitSince?: number | null;
+}): { phase: RunPhase; ms: number }[] {
+  const [main] = lanesOf({
+    steps: input.steps.map(timed),
+    subagents: [],
+    runStart: input.startedAt,
+    runEnd: input.endedAt,
+    now: input.now,
+    limitSince: input.limitSince ?? null,
+  });
+  return main?.split ?? PHASE_ORDER.map((phase) => ({ phase, ms: 0 }));
 }

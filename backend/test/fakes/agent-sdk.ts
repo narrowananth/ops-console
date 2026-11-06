@@ -46,6 +46,22 @@ export type Step =
   | { crash: string }
   /** The agent starts a subagent, as Claude Code's `task_started` says; `parent` is the task that launched it. */
   | { task: { id: string; description: string; type?: string; parent?: string } }
+  /**
+   * A model message with its usage, as Claude Code emits one per content block: `repeat` sends the same message id
+   * again. `task` names the subagent it came from; none means the main agent.
+   */
+  | {
+      usage: {
+        id: string;
+        model?: string;
+        task?: string;
+        input: number;
+        output: number;
+        cacheRead?: number;
+        cacheWrite?: number;
+        repeat?: number;
+      };
+    }
   /** A subagent ends, as `task_notification` says. */
   | { taskEnds: { id: string; status: 'completed' | 'failed' | 'stopped' } }
   /** Claude Code names the conversation: an `ai-title` entry in the transcript, outside the message chain. */
@@ -173,12 +189,35 @@ export class FakeAgentSdk implements AgentSdk {
           type: 'system',
           subtype: 'task_started',
           task_id: step.task.id,
+          tool_use_id: `tu-${step.task.id}`,
           description: step.task.description,
           subagent_type: step.task.type ?? 'general-purpose',
           ...(step.task.parent ? { parent_task_id: step.task.parent } : {}),
           uuid: crypto.randomUUID(),
           session_id: sessionId,
         });
+      } else if ('usage' in step) {
+        const { usage } = step;
+        for (let again = 0; again <= (usage.repeat ?? 0); again++) {
+          yield sdk({
+            type: 'assistant',
+            message: {
+              id: usage.id,
+              role: 'assistant',
+              model: usage.model ?? 'claude-sonnet-5-5',
+              content: [{ type: 'text', text: 'working' }],
+              usage: {
+                input_tokens: usage.input,
+                output_tokens: usage.output,
+                cache_read_input_tokens: usage.cacheRead ?? 0,
+                cache_creation_input_tokens: usage.cacheWrite ?? 0,
+              },
+            },
+            parent_tool_use_id: usage.task ? `tu-${usage.task}` : null,
+            uuid: crypto.randomUUID(),
+            session_id: sessionId,
+          });
+        }
       } else if ('taskEnds' in step) {
         yield sdk({
           type: 'system',

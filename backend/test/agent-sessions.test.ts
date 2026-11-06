@@ -745,13 +745,15 @@ describe('the Agent runs page', () => {
       ['Bash', 'commands'],
     ]);
     expect(open.run).toMatchObject({ running: true, health: 'on_track', activity: 'Running pnpm test backend' });
-    expect(open.stages.find((one: { state: string }) => one.state === 'now').stage).toBe('run_tests');
+    expect(open.stages.find((one: { state: string }) => one.state === 'now').id).toBe('run_tests');
     expect(open.run.split.map((one: { phase: string }) => one.phase)).toEqual([
       'thinking',
       'reading',
       'editing',
       'commands',
+      'subagents',
       'waiting_you',
+      'waiting_limit',
     ]);
 
     hold.open();

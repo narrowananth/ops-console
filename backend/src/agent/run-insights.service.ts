@@ -4,6 +4,8 @@ import {
   ErrorCode,
   type RunDetail,
   RunHealth,
+  type RunLimit,
+  RunOutcome,
   type Subagent,
   subagentSchema,
 } from '@ops-console/shared';
@@ -16,11 +18,12 @@ import {
   healthOf,
   historyOf,
   openStep,
+  phasesOf,
   type StepFacts,
   splitTime,
-  stagesOf,
 } from './run-insight';
-import { factsOf, RunStepsLog } from './run-steps';
+import { factsOf, RunStepsLog, type UsageRow } from './run-steps';
+import { costAndTokens, runUsageOf, totalOf } from './run-usage';
 import { RunRegistry } from './runs';
 import { SessionKinds } from './session-kinds';
 import type { SessionRow } from './sessions.service';
@@ -79,17 +82,30 @@ export class RunInsights {
         phase: step.phase,
         started_at: new Date(step.startedAt).toISOString(),
         finished_at: step.finishedAt === null ? null : new Date(step.finishedAt).toISOString(),
+        waited_ms: Math.round(step.waitedMs),
         ok: step.ok,
         error: step.error,
       })),
-      stages: stagesOf(facts, run.running),
+      stages: phasesOf({
+        steps: facts,
+        kind: row.kind,
+        running: run.running,
+        outcome: row.runOutcome,
+        subagents: run.subagents.length,
+      }),
       slow:
         run.health === RunHealth.Slow
           ? diagnoseSlow({ steps: facts, history, now, queued: row.queuedText !== null })
           : null,
       failure: run.running
         ? null
-        : classifyFailure({ outcome: row.runOutcome, lastError: this.sessions.view(row).last_error, steps: facts }),
+        : classifyFailure({
+            outcome: row.runOutcome,
+            lastError: this.sessions.view(row).last_error,
+            steps: facts,
+            subagents: run.subagents,
+            resetsAt: row.runLimitResetsAt,
+          }),
     };
   }
 
@@ -97,14 +113,13 @@ export class RunInsights {
   usageToday(): { cost_usd: number; tokens: number; runs: number } {
     const midnight = new Date();
     midnight.setHours(0, 0, 0, 0);
-    const total = this.log.usageSince(midnight.toISOString());
-    return { cost_usd: total.costUsd, tokens: total.tokens, runs: total.runs };
+    return totalOf(this.log.usageRowsSince(midnight.toISOString()));
   }
 
   private build(
     row: SessionRow,
     steps: StepFacts[],
-    usage: { costUsd: number; tokens: number } | null,
+    usage: UsageRow | null,
     history: ReturnType<typeof historyOf>,
     now: number,
   ): AgentRun {
@@ -112,7 +127,16 @@ export class RunInsights {
     const running = run !== undefined;
     const session = this.sessions.view(row);
     const waiting = run?.waitingSince != null ? { since: run.waitingSince, on: waitingOn(run.parts, steps) } : null;
-    const failure = running ? null : classifyFailure({ outcome: row.runOutcome, lastError: session.last_error, steps });
+    const subagents = subagentsOf(row);
+    const failure = running
+      ? null
+      : classifyFailure({
+          outcome: row.runOutcome,
+          lastError: session.last_error,
+          steps,
+          subagents,
+          resetsAt: row.runLimitResetsAt,
+        });
     const { health, reason } = healthOf({
       running,
       waiting,
@@ -131,22 +155,32 @@ export class RunInsights {
       finished_at: row.runFinishedAt,
       can_resume: this.kinds.get(row.kind)?.acceptsMessages ?? false,
       can_retry: (this.kinds.get(row.kind)?.acceptsMessages ?? false) || this.kinds.retryOf(row.kind) !== undefined,
-      subagents: subagentsOf(row),
+      subagents,
       health,
       health_reason: reason,
       activity: open ? activityOf(open) : null,
-      cost_usd: usage?.costUsd ?? null,
-      tokens: usage?.tokens ?? null,
+      cost_usd: usage ? costAndTokens(usage).cost_usd : null,
+      tokens: usage ? costAndTokens(usage).tokens : null,
+      usage: usage ? runUsageOf(usage) : null,
+      limit: limitOf(row),
       split:
         row.runStartedAt === null
           ? []
-          : splitTime(
+          : splitTime({
               steps,
-              Date.parse(row.runStartedAt),
-              running || row.runFinishedAt === null ? now : Date.parse(row.runFinishedAt),
-            ),
+              startedAt: Date.parse(row.runStartedAt),
+              endedAt: running || row.runFinishedAt === null ? null : Date.parse(row.runFinishedAt),
+              now,
+              limitSince: row.runLimitSince === null ? null : Date.parse(row.runLimitSince),
+            }),
     };
   }
+}
+
+/** The usage limit a run waits on or ended on. */
+function limitOf(row: SessionRow): RunLimit | null {
+  if (row.runLimitSince === null && row.runOutcome !== RunOutcome.RateLimited) return null;
+  return { since: row.runLimitSince, resets_at: row.runLimitResetsAt };
 }
 
 function subagentsOf(row: SessionRow): Subagent[] {

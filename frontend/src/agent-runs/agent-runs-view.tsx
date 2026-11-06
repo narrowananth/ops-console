@@ -16,7 +16,7 @@ import { ALERT_ENDS_KEY, ALERT_NEEDS_KEY, alertSchema, allowDesktopAlerts } from
 import { AlertsPill } from './alerts-pill';
 import { RunCard } from './run-card';
 import { HealthIcon, Pill } from './run-controls';
-import { HEALTH, money, tokens } from './run-look';
+import { canPlay, HEALTH, money, PlayIcon, tokens } from './run-look';
 
 type Tab = 'all' | 'on_track' | 'slow' | 'needs_you' | 'ended';
 
@@ -231,12 +231,26 @@ function AlertSettings() {
 export function AgentRunsActions() {
   const runs = useAgentRuns().data ?? [];
   const bulk = useBulkRunControls();
+  const retry = useRetryRuns();
   const [asking, setAsking] = useState(false);
   const going = runs.filter((run) => run.running).length;
   const ended = runs.length - going;
+  const playable = runs.filter(canPlay);
   return (
     <>
       <AlertsPill />
+      <Pill
+        disabled={playable.length === 0 || retry.isPending}
+        title={
+          playable.length === 0
+            ? 'No run is paused or stopped.'
+            : `Carries on every paused or stopped run (${playable.length}) from its conversation.`
+        }
+        onClick={() => retry.mutate(playable.map((run) => run.session.id))}
+      >
+        <PlayIcon />
+        Play all{playable.length > 0 ? ` ${playable.length}` : ''}
+      </Pill>
       <Pill
         danger
         disabled={going === 0 || bulk.stopAll.isPending}
@@ -298,10 +312,10 @@ export function AgentRunsView() {
     setAddress({ run: id });
   };
 
-  if (runsQuery.isPending) return <PageColumn wide>Reading the runs…</PageColumn>;
+  if (runsQuery.isPending) return <PageColumn xwide>Reading the runs…</PageColumn>;
   if (runsQuery.isError) {
     return (
-      <PageColumn wide>
+      <PageColumn xwide>
         <p role="alert" className="text-accent-700">
           {runsQuery.error.message}
         </p>
@@ -309,7 +323,7 @@ export function AgentRunsView() {
     );
   }
   return (
-    <PageColumn wide>
+    <PageColumn xwide>
       <section aria-label="Overview" className="rounded-2xl border border-line bg-card p-6 shadow-sm">
         {usage && (
           <p className="m-0 mb-4 text-xs text-neutral-700">

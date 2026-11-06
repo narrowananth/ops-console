@@ -1,4 +1,4 @@
-import type { Part, SkillCopy, Subagent } from '@ops-console/shared';
+import type { Part, SkillCopy, Subagent, TokenCounts } from '@ops-console/shared';
 
 /** A run in progress. It lives in memory only: a daemon restart ends it (Behavior 18). */
 export type Run = {
@@ -54,6 +54,15 @@ export type Run = {
   sendQueuedAfter: boolean;
   /** The subagents the run started, by task id. */
   subagents: Map<string, Subagent>;
+  /** The subagent each Task call started: the call's tool use id to the subagent's task id. */
+  taskOfToolUse: Map<string, string>;
+  /**
+   * What each model message used, by message id, not yet saved. A message arrives once per content block with the same
+   * id, so a later copy replaces an earlier one instead of adding to it.
+   */
+  messageUsage: Map<string, { agentId: string | null; model: string; tokens: TokenCounts }>;
+  /** When the run began to wait on the usage limit (ISO); null until it does. */
+  limitSince: string | null;
   /** The conversation resumes from this transcript entry, dropping what came after it; null for all of it. */
   resumeAt: string | null;
   /** The Network allowlist the run started with; a retry on another account keeps it. */

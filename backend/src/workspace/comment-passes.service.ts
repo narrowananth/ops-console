@@ -338,7 +338,8 @@ export class CommentPassesService {
         (await this.git.commitAll(dir, commitMessage(row.prNumber, threads))) ?? (await this.git.head(dir));
       if (!commit || commit === row.headSha) return this.update(row.id, { stage: 'post' });
       await this.jobs.push(this.pulls.repoRow(row.repoId), row.prNumber, session, dir, row.branch);
-      return this.update(row.id, { stage: 'post', commitSha: commit });
+      // A branch that moved is caught up with by a rebase, which gives the commit a new sha.
+      return this.update(row.id, { stage: 'post', commitSha: (await this.git.head(dir)) ?? commit });
     } catch (error) {
       if (error instanceof BranchMoved) throw new JobFailed(MOVED, false);
       const message = error instanceof GitFailed && error.message ? error.message : 'git failed';

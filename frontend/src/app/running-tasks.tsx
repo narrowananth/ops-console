@@ -72,9 +72,14 @@ export function RunningTasks({ collapsed }: { collapsed: boolean }) {
           aria-hidden
           className={`size-2 flex-none rounded-full ${going.length > 0 ? 'animate-pulse bg-accent' : ended > 0 ? 'bg-accent-300' : 'bg-neutral-400'}`}
         />
-        {!collapsed && <span className="min-w-0 flex-1 truncate text-left">Running</span>}
-        <span className="font-mono font-semibold">{going.length}</span>
-        {!collapsed && ended > 0 && <span className="font-mono text-neutral-700">+{ended}</span>}
+        {collapsed ? (
+          <span className="font-mono font-semibold">{going.length}</span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-left font-mono">
+            <b>{going.length}</b> running
+            {ended > 0 && <span className="text-neutral-700"> · {ended} ended</span>}
+          </span>
+        )}
       </button>
       {open && (
         <div

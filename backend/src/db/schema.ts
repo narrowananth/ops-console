@@ -132,6 +132,9 @@ export const sessions = sqliteTable(
     runOutcome: text('run_outcome').$type<RunOutcome>(),
     /** JSON array of the last run's `Subagent`s. */
     runSubagents: text('run_subagents'),
+    /** When the last run began to wait on the account's usage limit, and when the window resets (ISO). */
+    runLimitSince: text('run_limit_since'),
+    runLimitResetsAt: text('run_limit_resets_at'),
     /** The message the operator queued behind the run; the daemon sends it when the run ends, unless the operator stopped it. */
     queuedText: text('queued_text'),
     createdAt: text('created_at').notNull().default(nowIso),
@@ -172,7 +175,7 @@ export const runSteps = sqliteTable(
   (table) => [index('run_steps_session_idx').on(table.sessionId, table.startedAt)],
 );
 
-/** What each run cost, as the SDK reported when it ended; the page adds a day up from these. */
+/** What each run used: raw token counts per agent and model, and the cost the SDK reported. */
 export const runUsage = sqliteTable(
   'run_usage',
   {
@@ -182,8 +185,12 @@ export const runUsage = sqliteTable(
       .references(() => sessions.id, { onDelete: 'cascade' }),
     runStartedAt: text('run_started_at').notNull(),
     finishedAt: text('finished_at').notNull(),
+    /** What the SDK reported; the page prices the raw tokens in `breakdown` itself. */
     costUsd: real('cost_usd').notNull(),
+    /** Every token of the run: input, output, cache read and cache write. */
     tokens: integer().notNull(),
+    /** JSON array of `UsageLine`: raw token counts per agent and model. Null for a run kept before they were. */
+    breakdown: text(),
   },
   (table) => [
     index('run_usage_finished_idx').on(table.finishedAt),

@@ -70,8 +70,10 @@ Review with agent, Approve and Request changes, but nothing that acts on the com
     have no thread to resolve there. Declined threads stay open.
 18. A Comment pass that changed no file, or declined every thread, makes no commit and no push, posts the replies
     and finishes ready.
-19. A push the host refuses because the branch moved fails the Comment pass with "The branch moved; run Address
-    comments again." Nothing is posted and Retry is not offered.
+19. A push the host refuses because the branch moved is not a failure: the console fetches the new tip, rebases its
+    commit onto it and pushes again, never with force, up to three times. Only a rebase that conflicts with the new
+    commits fails the Comment pass, with "The branch moved; run Address comments again."; the rebase is undone,
+    nothing is posted and Retry is not offered. The reply names the sha that was pushed, after the rebase.
 20. A failed step, or a closing answer the console cannot read, fails the Comment pass with nothing pushed or posted.
     The card shows "Retry from step N", which runs in the kept scratch copy.
 21. A push that worked but replies or resolves that failed fail the Comment pass and list the threads left without

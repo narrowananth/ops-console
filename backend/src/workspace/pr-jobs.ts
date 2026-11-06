@@ -250,7 +250,10 @@ export class PrJobs {
     }
   }
 
-  /** Pushes the scratch copy's commit to the pull request's branch, with an Action Log row first. */
+  /**
+   * Pushes the scratch copy's commit to the pull request's branch, with an Action Log row first. A branch that moved
+   * meanwhile is caught up with by rebasing the commit onto it.
+   */
   async push(repo: RepoRow, number: number, sessionId: string, dir: string, branch: string): Promise<void> {
     const row = this.actionLog.start({
       sessionId,
@@ -260,7 +263,7 @@ export class PrJobs {
       isProd: false,
     });
     try {
-      await this.git.pushHead(dir, branch);
+      await this.git.pushHeadRebasing(dir, branch);
       this.actionLog.finish(row, ActionOutcome.Ok);
     } catch (error) {
       this.actionLog.finish(row, ActionOutcome.Failed, error instanceof Error ? error.message : 'push failed');
