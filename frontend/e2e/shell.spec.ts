@@ -39,7 +39,7 @@ test('the sidebar holds every page, and the Setup agent buttons open it', async 
     'Repos',
     'Setup agent',
     'Permissions',
-    'Agents & accounts',
+    'Accounts & Usage',
     'Agent runs',
     'Playbooks',
     'Skills',

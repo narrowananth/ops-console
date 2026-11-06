@@ -1,11 +1,12 @@
-import type { ConnectorId } from '@ops-console/shared';
+import { CheckTarget, type ConnectorId, HealthArea, type HealthItem } from '@ops-console/shared';
 import { PageColumn } from '../app/page';
 import { Empty } from '../components/ui/empty';
+import { HealthBanner, HealthStrip, useAreaHealth } from '../health/health-parts';
 import { useConnectors, useMcpServers } from '../lib/queries';
 import { useAddress } from '../lib/remember';
 import { ascending } from '../lib/sort';
-import { ConnectorDrawer, ConnectorRow } from './connector';
-import { McpDetail, ServerRow } from './mcp-server';
+import { ConnectorAction, ConnectorDrawer, ConnectorRow } from './connector';
+import { McpDetail, RowAction, ServerRow } from './mcp-server';
 
 type Open = { kind: 'connector'; id: ConnectorId } | { kind: 'mcp'; name: string } | null;
 
@@ -28,6 +29,9 @@ export function IntegrationsTab() {
       open: next === null ? null : next.kind === 'connector' ? `connector:${next.id}` : `mcp:${next.name}`,
     });
   const back = () => setOpen(null);
+  const { items } = useAreaHealth(HealthArea.Integrations);
+  const healthOf = (target: CheckTarget, key: string) =>
+    items.find((item) => item.target === target && (target === CheckTarget.McpServer ? item.name : item.id) === key);
 
   if (connectors.isPending || servers.isPending) return <Empty>Loading integrations…</Empty>;
   if (connectors.isError) return <Empty>Could not read Connectors: {connectors.error.message}</Empty>;
@@ -45,11 +49,28 @@ export function IntegrationsTab() {
       <div className="min-w-0 flex-1 overflow-auto">
         <PageColumn wide>
           <div className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
+            <HealthStrip area={HealthArea.Integrations} />
+            <HealthBanner
+              area={HealthArea.Integrations}
+              action={(item: HealthItem) => {
+                const own =
+                  item.target === CheckTarget.Connector
+                    ? connectorList.find((one) => one.id === item.id)
+                    : serverList.find((one) => one.name === item.name);
+                if (!own) return null;
+                return 'via' in own ? (
+                  <ConnectorAction connector={own} onOpen={() => setOpen({ kind: 'connector', id: own.id })} />
+                ) : (
+                  <RowAction server={own} onManage={() => setOpen({ kind: 'mcp', name: own.name })} />
+                );
+              }}
+            />
             <ul aria-label="Integrations" className="m-0 flex list-none flex-col gap-0.5 p-1.5">
               {ascending(connectorList, (item) => item.name).map((item) => (
                 <ConnectorRow
                   key={item.id}
                   connector={item}
+                  health={healthOf(CheckTarget.Connector, item.id)}
                   selected={connector?.id === item.id}
                   onOpen={() => setOpen({ kind: 'connector', id: item.id })}
                 />
@@ -58,6 +79,7 @@ export function IntegrationsTab() {
                 <ServerRow
                   key={item.name}
                   server={item}
+                  health={healthOf(CheckTarget.McpServer, item.name)}
                   selected={server?.name === item.name}
                   onOpen={() => setOpen({ kind: 'mcp', name: item.name })}
                 />

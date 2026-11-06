@@ -142,6 +142,8 @@ export enum SwitchReason {
   RateLimited = 'rate_limited',
   /** The active account's sign-in stopped working mid-run. */
   SignInFailed = 'sign_in_failed',
+  /** The operator disabled the active account. */
+  Disabled = 'disabled',
 }
 
 const cellSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
@@ -523,6 +525,8 @@ export const claudeAccountSchema = z.object({
   position: z.number().int(),
   signed_in: z.boolean(),
   signing_in: z.boolean(),
+  /** A disabled account stays signed in, but no run starts or moves onto it. */
+  enabled: z.boolean(),
   email: z.string().nullable(),
   plan: z.string().nullable(),
   five_hour_pct: z.number().nullable(),
@@ -554,6 +558,9 @@ export enum SignInVia {
 
 /** `POST /agent-accounts/:id/logins` */
 export const startLoginSchema = z.object({ via: z.enum(SignInVia).default(SignInVia.Browser) });
+
+/** `PATCH /agent-accounts/:id` */
+export const accountPatchSchema = z.object({ enabled: z.boolean() });
 
 /** `POST /agent-accounts/:id/logins/code`: the code Anthropic showed, or the address of the page it showed it on. */
 export const signInCodeSchema = z.object({ code: z.string().trim().min(1).max(4096) });
@@ -639,3 +646,129 @@ export type CliProxy = z.infer<typeof cliProxySchema>;
 
 /** `PUT /cliproxy/key`: one of the keys in CLIProxy's `access.api-keys`. */
 export const cliProxyKeySchema = z.object({ key: z.string().trim().min(1).max(512) });
+
+/** What a run was for, kept with its usage so the dashboard can say where the credit went. */
+export enum RunPurpose {
+  /** A message the operator sent in a Session. */
+  Chat = 'chat',
+  Verify = 'verify',
+  Fix = 'fix',
+  CommentPass = 'comment_pass',
+  ReplyCheck = 'reply_check',
+  AgentReview = 'agent_review',
+  OpenPullRequest = 'open_pull_request',
+}
+
+export enum UsageRange {
+  Today = 'today',
+  Week = '7d',
+  Month = '30d',
+  /** The longest range: usage is kept 90 days. */
+  Quarter = '90d',
+}
+
+/** `GET /agent-accounts/usage`: `account` is an account id, or `none` for runs that have no account. */
+export const accountUsageQuerySchema = z.object({
+  range: z.enum(UsageRange).default(UsageRange.Week),
+  account: z.string().min(1).optional(),
+});
+
+export type AccountUsageQuery = z.infer<typeof accountUsageQuerySchema>;
+
+const accountIdOrNull = z.string().nullable();
+
+/** What the console recorded for the accounts in a range: totals, per day, per account, per kind and per agent. */
+export const accountUsageSchema = z.object({
+  range: z.enum(UsageRange),
+  account_id: z.string().nullable(),
+  from: z.string(),
+  to: z.string(),
+  totals: z.object({
+    /** Raw counts of the runs that kept them. */
+    tokens: tokenCountsSchema,
+    /** Every token of every run, kept raw or not. */
+    total_tokens: z.number(),
+    cost_usd: z.number(),
+    runs: z.number().int(),
+    subagents: z.number().int(),
+  }),
+  days: z.array(
+    z.object({
+      date: z.string(),
+      cost_usd: z.number(),
+      tokens: z.number(),
+      runs: z.number().int(),
+      by_account: z.array(z.object({ account_id: accountIdOrNull, cost_usd: z.number() })),
+      by_work: z.array(z.object({ work: z.string(), cost_usd: z.number() })),
+    }),
+  ),
+  accounts: z.array(
+    z.object({
+      account_id: accountIdOrNull,
+      label: z.string(),
+      removed: z.boolean(),
+      enabled: z.boolean(),
+      tokens: z.number(),
+      cost_usd: z.number(),
+      runs: z.number().int(),
+      subagents: z.number().int(),
+    }),
+  ),
+  /**
+   * What the runs were for. `work` is a `RunPurpose`, or `kind:<session kind>` for a run kept before purposes were
+   * recorded, which knows only its Session's kind.
+   */
+  work: z.array(
+    z.object({
+      work: z.string(),
+      tokens: z.number(),
+      cost_usd: z.number(),
+      runs: z.number().int(),
+      subagents: z.number().int(),
+    }),
+  ),
+  subagent_types: z.array(
+    z.object({
+      type: z.string().nullable(),
+      /** The main agents of every run, which have no type. */
+      main: z.boolean(),
+      tokens: z.number(),
+      cost_usd: z.number(),
+      agents: z.number().int(),
+      /** Subagents of this type that failed; 0 for main agents. */
+      failed: z.number().int(),
+      /** How long the finished ones took, on average; null when none finished or none was timed. */
+      avg_ms: z.number().nullable(),
+    }),
+  ),
+  runs: z.array(
+    z.object({
+      session_id: z.string(),
+      title: z.string(),
+      kind: z.string(),
+      /** As `work` above. */
+      work: z.string(),
+      account_id: accountIdOrNull,
+      finished_at: z.string(),
+      tokens: z.number(),
+      cost_usd: z.number(),
+      subagents: z.number().int(),
+      agents: z.array(
+        z.object({
+          agent_id: z.string().nullable(),
+          /** The subagent that started this one; null for the main agent and for a subagent the main agent started. */
+          parent_id: z.string().nullable(),
+          type: z.string().nullable(),
+          description: z.string().nullable(),
+          status: z.enum(SubagentStatus).nullable(),
+          started_at: z.string().nullable(),
+          finished_at: z.string().nullable(),
+          tokens: z.number(),
+          cost_usd: z.number(),
+        }),
+      ),
+    }),
+  ),
+});
+
+export type AccountUsageReport = z.infer<typeof accountUsageSchema>;

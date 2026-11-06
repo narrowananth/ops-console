@@ -859,3 +859,109 @@ describe('the agent_accounts setting', () => {
     }
   });
 });
+
+describe('disabling an account', () => {
+  const setEnabled = (daemon: AgentDaemon, id: string, enabled: boolean) =>
+    api(daemon).patch(`/agent-accounts/${id}`, { enabled });
+
+  it('enables every account at first, and keeps the switch', async () => {
+    const daemon = await start();
+    const [primary] = (await accounts(daemon)).data;
+    expect(primary).toMatchObject({ enabled: true });
+
+    const off = await setEnabled(daemon, primary?.id ?? '', false);
+    expect(off.status).toBe(200);
+    expect(off.body.data).toMatchObject({ enabled: false, signed_in: true });
+    expect((await accounts(daemon)).data[0]).toMatchObject({ enabled: false });
+    expect((await setEnabled(daemon, primary?.id ?? '', true)).body.data).toMatchObject({ enabled: true });
+  });
+
+  it('refuses a body that is not an enabled flag, and an account that does not exist', async () => {
+    const daemon = await start();
+    const [primary] = (await accounts(daemon)).data;
+    expect((await api(daemon).patch(`/agent-accounts/${primary?.id}`, { enabled: 'no' })).status).toBe(400);
+    expect((await setEnabled(daemon, 'missing', false)).status).toBe(404);
+  });
+
+  it('refuses Use of a disabled account', async () => {
+    const daemon = await start();
+    const personal = await addSignedIn(daemon, 'personal');
+    await setEnabled(daemon, personal.id, false);
+    const used = await api(daemon).post(`/agent-accounts/${personal.id}/activate`);
+    expect(used.status).toBe(409);
+    expect(used.body.error.code).toBe('invalid_state');
+  });
+
+  it('hands the active role over, with reason disabled, when the active account is disabled', async () => {
+    const daemon = await start();
+    const { events, close } = await listen(daemon);
+    const [primary] = (await accounts(daemon)).data;
+    const personal = await addSignedIn(daemon, 'personal');
+
+    await setEnabled(daemon, primary?.id ?? '', false);
+    expect((await accounts(daemon)).meta.active_account_id).toBe(personal.id);
+    expect(switched(events).at(-1)).toMatchObject({ from: primary?.id, to: personal.id, reason: 'disabled' });
+    close();
+  });
+
+  it('runs on the account that stays enabled, never on the disabled one', async () => {
+    const daemon = await start();
+    const [primary] = (await accounts(daemon)).data;
+    const personal = await addSignedIn(daemon, 'personal');
+    await setEnabled(daemon, primary?.id ?? '', false);
+    await converse(daemon, daemon.createSession(), 'go');
+    expect(daemon.sdk.calls.map((call) => call.configDir)).toEqual([personal.configDir]);
+  });
+
+  it('skips a disabled account in Smart pick and says so in its note', async () => {
+    const daemon = await start();
+    const personal = await addSignedIn(daemon, 'personal');
+    await reportUsage(daemon, 50, 90, 72);
+    await api(daemon).post(`/agent-accounts/${personal.id}/activate`);
+    await reportUsage(daemon, 10, 35, 48);
+    const [primary] = (await accounts(daemon)).data;
+    await api(daemon).post(`/agent-accounts/${primary?.id}/activate`);
+    expect((await accounts(daemon)).meta.smart_pick).toMatchObject({ account_id: personal.id });
+
+    await setEnabled(daemon, personal.id, false);
+    const list = await accounts(daemon);
+    expect(list.meta.smart_pick).toMatchObject({ account_id: primary?.id });
+    expect(list.data.find((account) => account.id === personal.id)?.smart_note).toBe('disabled, skipped');
+    expect(list.meta.active_account_id).toBe(primary?.id);
+  });
+
+  it('leaves no account active when the last enabled one is disabled, and refuses runs with a reason', async () => {
+    const daemon = await start();
+    const [primary] = (await accounts(daemon)).data;
+    await setEnabled(daemon, primary?.id ?? '', false);
+    expect((await accounts(daemon)).meta.active_account_id).toBeNull();
+
+    const sent = await api(daemon).post(`/sessions/${daemon.createSession()}/messages`, { text: 'hello' });
+    expect(sent.status).toBe(409);
+    expect(sent.body.error.code).toBe('invalid_state');
+    expect(sent.body.error.message).toContain('every Claude account is disabled');
+  });
+
+  it('makes an account active when it is enabled while none is, and not otherwise', async () => {
+    const daemon = await start();
+    const [primary] = (await accounts(daemon)).data;
+    await setEnabled(daemon, primary?.id ?? '', false);
+    await setEnabled(daemon, primary?.id ?? '', true);
+    expect((await accounts(daemon)).meta.active_account_id).toBe(primary?.id);
+
+    const personal = await addSignedIn(daemon, 'personal');
+    await setEnabled(daemon, personal.id, false);
+    await setEnabled(daemon, personal.id, true);
+    expect((await accounts(daemon)).meta.active_account_id).toBe(primary?.id);
+  });
+
+  it('does not take a disabled account as active when it signs in', async () => {
+    const daemon = await start({ signedIn: false });
+    const added = await api(daemon).post('/agent-accounts');
+    const id = added.body.data.account.id;
+    await setEnabled(daemon, id, false);
+    await signIn(path.join(daemon.dataDir, 'accounts', id), 'later@example.com', 'pro');
+    await api(daemon).post(`/agent-accounts/${id}/checks`);
+    expect((await accounts(daemon)).meta.active_account_id).toBeNull();
+  });
+});

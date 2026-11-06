@@ -2,7 +2,6 @@ import { type AgentRun, RunHealth } from '@ops-console/shared';
 import { useState } from 'react';
 import { PageColumn } from '../app/page';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
-import { Toggle } from '../components/ui/toggle';
 import {
   useAgentRuns,
   useAgentUsage,
@@ -11,8 +10,7 @@ import {
   useRetryRuns,
   useStopSession,
 } from '../lib/queries';
-import { useAddress, useStored } from '../lib/remember';
-import { ALERT_ENDS_KEY, ALERT_NEEDS_KEY, alertSchema, allowDesktopAlerts } from './alerts';
+import { useAddress } from '../lib/remember';
 import { AlertsPill } from './alerts-pill';
 import { RunCard } from './run-card';
 import { HealthIcon, Pill } from './run-controls';
@@ -189,44 +187,6 @@ function Attention({ runs, open }: { runs: AgentRun[]; open: (id: string) => voi
   );
 }
 
-/** Desktop alerts: the browser asks once; they show only while the console is open in a tab behind another. */
-function AlertSettings() {
-  const [needs, setNeeds] = useStored(ALERT_NEEDS_KEY, alertSchema, false);
-  const [ends, setEnds] = useStored(ALERT_ENDS_KEY, alertSchema, false);
-  const [refused, setRefused] = useState(false);
-  const change = (set: (value: boolean) => void) => async (value: boolean) => {
-    if (value && !(await allowDesktopAlerts())) {
-      setRefused(true);
-      return;
-    }
-    setRefused(false);
-    set(value);
-  };
-  return (
-    <section aria-label="Alerts" className="mt-6 rounded-xl border border-line bg-card p-4 shadow-sm">
-      <h2 className="m-0 mb-0.5 text-[15px]">Alerts</h2>
-      <p className="m-0 mb-3 text-xs text-neutral-700">
-        A desktop alert shows while this console is open in a tab you are not looking at.
-      </p>
-      <div className="flex flex-col gap-2.5 text-[13px]">
-        <div className="flex items-center gap-3">
-          <Toggle checked={needs} label="Alert when a run needs me" onChange={change(setNeeds)} />
-          Alert when a run needs me
-        </div>
-        <div className="flex items-center gap-3">
-          <Toggle checked={ends} label="Alert when a run ends" onChange={change(setEnds)} />
-          Alert when a run ends
-        </div>
-      </div>
-      {refused && (
-        <p role="alert" className="m-0 mt-2 text-xs text-accent-700">
-          The browser did not allow alerts. Allow notifications for this site in the browser, then turn this on again.
-        </p>
-      )}
-    </section>
-  );
-}
-
 /** The page's own buttons: the alerts, stop everything going, dismiss everything that ended. */
 export function AgentRunsActions() {
   const runs = useAgentRuns().data ?? [];
@@ -399,7 +359,6 @@ export function AgentRunsView() {
           ))}
         </ul>
       )}
-      <AlertSettings />
     </PageColumn>
   );
 }

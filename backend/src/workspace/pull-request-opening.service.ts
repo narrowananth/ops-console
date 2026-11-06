@@ -10,6 +10,7 @@ import {
   PR_DESCRIPTION_RULE,
   PrState,
   type PullRequestDraft,
+  RunPurpose,
   SessionKind,
   type SessionPullRequest,
 } from '@ops-console/shared';
@@ -105,7 +106,8 @@ Change nothing: no commit, no push, no pull request. The console pushes and open
 { "title": "short title", "description": "markdown description" }
 \`\`\``;
     try {
-      const summary = await this.runtime.runFor(sessionId, prompt).finished;
+      const summary = await this.runtime.runFor(sessionId, prompt, null, { purpose: RunPurpose.OpenPullRequest })
+        .finished;
       const parsed = summary.ok ? parseAgentJson(summary.text, draftAnswerSchema) : null;
       return parsed
         ? { title: parsed.title.trim(), description: parsed.description }

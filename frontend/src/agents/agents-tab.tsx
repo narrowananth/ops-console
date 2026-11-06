@@ -5,14 +5,16 @@ import {
   type SessionDefaults,
   SignInVia,
 } from '@ops-console/shared';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { useDesktopAlerts } from '../agent-runs/alerts';
 import { Section } from '../app/page';
 import { BrandIcon } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Dropdown } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
 import { Toggle } from '../components/ui/toggle';
-import { CHIME_KEY, chimeSchema, playChime, unlockChime } from '../lib/chime';
+import { CHIME_KEY, chimeSchema, DEFAULT_VOLUME, playChime, unlockChime, VOLUME_KEY, volumeSchema } from '../lib/chime';
 import {
   useActivateAccount,
   useAddAccount,
@@ -25,74 +27,30 @@ import {
   useRemoveAccount,
   useStartLogin,
 } from '../lib/queries';
-import { useStored } from '../lib/remember';
+import { useAddress, useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
+import { AccountSwitch, AllDisabledBanner, allDisabled, successorOf } from './account-switch';
+import { AccountUsageView } from './account-usage-view';
 import { CliProxyHub } from './cliproxy-hub';
 import { ACCESS_MODES, EFFORTS, MODELS } from './options';
 import { SignInLinkDialog } from './sign-in-link-dialog';
-
-const HOUR_MS = 3_600_000;
-
-function resetsIn(iso: string | null): string {
-  if (iso === null) return '';
-  const left = Date.parse(iso) - Date.now();
-  if (left <= 0) return 'reset';
-  if (left >= 24 * HOUR_MS) return `resets in ${Math.round(left / (24 * HOUR_MS))}d`;
-  const hours = Math.floor(left / HOUR_MS);
-  const minutes = Math.floor((left % HOUR_MS) / 60_000);
-  return `resets in ${hours ? `${hours}h ` : ''}${minutes}m`;
-}
-
-function ago(iso: string): string {
-  const minutes = Math.round((Date.now() - Date.parse(iso)) / 60_000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  return hours < 48 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
-}
-
-function UsageBar({
-  label,
-  tip,
-  pct,
-  resetsAt,
-  accentAt,
-}: {
-  label: string;
-  tip: string;
-  pct: number | null;
-  resetsAt: string | null;
-  accentAt: number;
-}) {
-  const hot = pct !== null && pct >= accentAt;
-  return (
-    <div className="grid grid-cols-[48px_minmax(0,1fr)_160px] items-center gap-2.5">
-      <span title={tip} className="text-xs text-neutral-700">
-        {label}
-      </span>
-      <span className="block h-1.5 overflow-hidden rounded-full bg-neutral-200" aria-hidden>
-        <span
-          className={`block h-1.5 rounded-full ${hot ? 'bg-accent' : 'bg-text'}`}
-          style={{ width: `${Math.min(pct ?? 0, 100)}%` }}
-        />
-      </span>
-      <span className={`font-mono text-xs ${hot ? 'text-accent-700' : 'text-neutral-800'}`}>
-        {pct === null ? 'no usage yet' : `${Math.round(pct)}% · ${resetsIn(resetsAt)}`}
-      </span>
-    </div>
-  );
-}
+import { ago, UsageBar } from './usage-bar';
 
 function AccountRow({
   account,
   number,
   isPick,
+  successor,
+  proxied,
   onUse,
   onShowLink,
 }: {
   account: ClaudeAccount;
   number: number;
   isPick: boolean;
+  /** The account runs move to when this one, if it is active, is disabled. */
+  successor: ClaudeAccount | null;
+  proxied: boolean;
   onUse: () => void;
   onShowLink: () => void;
 }) {
@@ -110,7 +68,7 @@ function AccountRow({
     >
       <span className="font-mono text-xs text-neutral-700">{String(number).padStart(2, '0')}</span>
       <BrandIcon brand="claude" />
-      <div className="flex min-w-0 flex-col gap-1.25">
+      <div className={`flex min-w-0 flex-col gap-1.25 ${account.enabled ? '' : 'opacity-55'}`}>
         <div className="flex flex-wrap items-center gap-2">
           <strong className="font-mono text-[13px]">{account.label}</strong>
           {account.plan && <span className="text-xs text-neutral-700">{account.plan}</span>}
@@ -120,6 +78,14 @@ function AccountRow({
               className="rounded-full bg-ok/12 px-2 py-px text-xs font-semibold text-ok"
             >
               ACTIVE
+            </span>
+          )}
+          {!account.enabled && (
+            <span
+              title="Agents never use this account: Use, Smart pick and failover skip it"
+              className="rounded-full bg-neutral-200 px-2 py-px text-xs font-semibold text-neutral-700"
+            >
+              DISABLED
             </span>
           )}
           {isPick && (
@@ -164,90 +130,102 @@ function AccountRow({
         )}
         {account.signed_in && (
           <div className="text-xs text-neutral-700">
-            {[account.smart_note, account.usage_seen_at && `usage seen ${ago(account.usage_seen_at)}`]
-              .filter(Boolean)
-              .join(' · ')}
+            {account.enabled
+              ? [account.smart_note, account.usage_seen_at && `usage seen ${ago(account.usage_seen_at)}`]
+                  .filter(Boolean)
+                  .join(' · ')
+              : 'Disabled: skipped by Use, Smart pick and failover. Runs going on it finish.'}
           </div>
         )}
       </div>
-      <div className="flex items-center gap-1.5">
-        {account.signing_in ? (
-          <>
-            {account.sign_in_link ? (
+      <div className="flex flex-col items-end gap-2">
+        <div className="flex items-center gap-1.5">
+          {account.signing_in ? (
+            <>
+              {account.sign_in_link ? (
+                <Button
+                  className="px-3 py-1.25 text-xs"
+                  title="Show the sign-in link and the box for the code Anthropic shows"
+                  onClick={onShowLink}
+                >
+                  Show link
+                </Button>
+              ) : (
+                <Button className="px-3 py-1.25 text-xs" disabled={login.isPending} onClick={startLogin}>
+                  Re-login
+                </Button>
+              )}
               <Button
                 className="px-3 py-1.25 text-xs"
-                title="Show the sign-in link and the box for the code Anthropic shows"
-                onClick={onShowLink}
+                disabled={cancel.isPending}
+                onClick={() => cancel.mutate(account.id)}
               >
-                Show link
+                Cancel
               </Button>
-            ) : (
-              <Button className="px-3 py-1.25 text-xs" disabled={login.isPending} onClick={startLogin}>
+            </>
+          ) : !account.signed_in ? (
+            <Button variant="primary" className="px-3 py-1.25 text-xs" disabled={login.isPending} onClick={startLogin}>
+              Sign in
+            </Button>
+          ) : (
+            <>
+              {!current && (
+                <Button
+                  className="px-3 py-1.25 text-xs"
+                  title={
+                    account.enabled
+                      ? 'Make this the active account. The agent runs under it from now on.'
+                      : 'Enable this account first'
+                  }
+                  disabled={!account.enabled}
+                  onClick={onUse}
+                >
+                  Use
+                </Button>
+              )}
+              <Button
+                className="px-3 py-1.25 text-xs"
+                title="Sign in to this account again, in your browser"
+                disabled={login.isPending}
+                onClick={startLogin}
+              >
                 Re-login
               </Button>
-            )}
-            <Button
-              className="px-3 py-1.25 text-xs"
-              disabled={cancel.isPending}
-              onClick={() => cancel.mutate(account.id)}
-            >
-              Cancel
-            </Button>
-          </>
-        ) : !account.signed_in ? (
-          <Button variant="primary" className="px-3 py-1.25 text-xs" disabled={login.isPending} onClick={startLogin}>
-            Sign in
-          </Button>
-        ) : (
-          <>
-            {!current && (
               <Button
                 className="px-3 py-1.25 text-xs"
-                title="Make this the active account. The agent runs under it from now on."
-                onClick={onUse}
+                title="Sign this account out. It stays in the list so you can sign in again."
+                disabled={logout.isPending}
+                onClick={() => logout.mutate(account.id)}
               >
-                Use
+                Log out
               </Button>
-            )}
+            </>
+          )}
+          {!account.signing_in && (
             <Button
-              className="px-3 py-1.25 text-xs"
-              title="Sign in to this account again, in your browser"
-              disabled={login.isPending}
-              onClick={startLogin}
+              icon
+              className="size-7 text-neutral-700 hover:text-accent-700"
+              aria-label={`Remove ${account.label}`}
+              title="Remove this account from the console. You can add it again later."
+              disabled={remove.isPending}
+              onClick={() => remove.mutate(account.id)}
             >
-              Re-login
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden
+              >
+                <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v6M14 10v6" />
+              </svg>
             </Button>
-            <Button
-              className="px-3 py-1.25 text-xs"
-              title="Sign this account out. It stays in the list so you can sign in again."
-              disabled={logout.isPending}
-              onClick={() => logout.mutate(account.id)}
-            >
-              Log out
-            </Button>
-          </>
-        )}
+          )}
+        </div>
         {!account.signing_in && (
-          <Button
-            icon
-            className="size-7 text-neutral-700 hover:text-accent-700"
-            aria-label={`Remove ${account.label}`}
-            title="Remove this account from the console. You can add it again later."
-            disabled={remove.isPending}
-            onClick={() => remove.mutate(account.id)}
-          >
-            <svg
-              width="15"
-              height="15"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden
-            >
-              <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v6M14 10v6" />
-            </svg>
-          </Button>
+          <AccountSwitch account={account} current={current} successor={successor} proxied={proxied} />
         )}
       </div>
     </li>
@@ -408,14 +386,131 @@ function Paused({ paused, children }: { paused: boolean; children: ReactNode }) 
   );
 }
 
-/** Agents & accounts: Claude accounts and their usage, Auto-switch, Smart usage and the defaults for new Sessions. */
+const TABS = [
+  { id: 'accounts', label: 'Accounts', icon: <PersonIcon /> },
+  { id: 'usage', label: 'Usage', icon: <BarsIcon /> },
+] as const;
+
+function PersonIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21c0-4 4-6 8-6s8 2 8 6" />
+    </svg>
+  );
+}
+
+function BarsIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
+    </svg>
+  );
+}
+
+/** Accounts & Usage: the Claude accounts with their Enable switch, and what each account's credit was spent on. */
 export function AgentsTab() {
+  const [address, setAddress] = useAddress('tab', 'account', 'range');
+  const accounts = useAgentAccounts();
+  const tab = address.tab === 'usage' ? 'usage' : 'accounts';
+  const buttons = useRef<Record<string, HTMLButtonElement | null>>({});
+  const { hash } = useLocation();
+  // A link to `#notifications` means the Accounts tab, where that section is.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the address gains the hash, not on every tab change
+  useEffect(() => {
+    if (hash === '#notifications' && address.tab !== null)
+      setAddress({ tab: null, account: null, range: null }, { replace: true });
+  }, [hash]);
+  const pick = (id: (typeof TABS)[number]['id']) =>
+    setAddress({ tab: id === 'accounts' ? null : id, account: null, range: null });
+  // Arrow keys move between the tabs, Home and End go to the first and last, and focus follows.
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const at = TABS.findIndex((one) => one.id === tab);
+    const to =
+      event.key === 'ArrowRight'
+        ? (at + 1) % TABS.length
+        : event.key === 'ArrowLeft'
+          ? (at - 1 + TABS.length) % TABS.length
+          : event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? TABS.length - 1
+              : -1;
+    const next = TABS[to];
+    if (!next) return;
+    event.preventDefault();
+    pick(next.id);
+    buttons.current[next.id]?.focus();
+  };
+  return (
+    <div className="text-sm">
+      <div
+        role="tablist"
+        aria-label="Account and usage"
+        onKeyDown={onKeyDown}
+        className="mb-6 flex w-max gap-1 rounded-xl bg-neutral-200 p-1"
+      >
+        {TABS.map((one) => (
+          <button
+            key={one.id}
+            ref={(node) => {
+              buttons.current[one.id] = node;
+            }}
+            type="button"
+            role="tab"
+            id={`agents-tab-${one.id}`}
+            aria-selected={tab === one.id}
+            aria-controls="agents-panel"
+            tabIndex={tab === one.id ? 0 : -1}
+            onClick={() => pick(one.id)}
+            className={`flex cursor-pointer items-center gap-2 rounded-lg border-0 px-5 py-2 text-[13px] transition-colors ${
+              tab === one.id
+                ? 'bg-card font-bold text-text shadow-md'
+                : 'bg-transparent font-semibold text-neutral-700 hover:text-text'
+            }`}
+          >
+            <span className={tab === one.id ? 'text-accent' : ''}>{one.icon}</span>
+            {one.label}
+            {one.id === 'accounts' && accounts.data && (
+              <span className="rounded-full bg-neutral-300 px-1.75 py-px font-mono text-[10px] font-semibold text-neutral-800">
+                {accounts.data.data.length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" id="agents-panel" aria-labelledby={`agents-tab-${tab}`}>
+        {tab === 'usage' ? (
+          <AccountUsageView
+            account={address.account}
+            range={address.range}
+            onChange={(next) => setAddress(next, { replace: true })}
+            onOpenAccounts={() => setAddress({ tab: null, account: null, range: null })}
+          />
+        ) : (
+          <AccountsPane />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The Claude accounts, Auto-switch, Smart usage and the defaults for new Sessions. */
+function AccountsPane() {
   const accounts = useAgentAccounts();
   const settings = useAgentSettings();
   const hub = useCliProxy();
   const patch = usePatchSettings();
   const activate = useActivateAccount();
   const [linkFor, setLinkFor] = useState<string | null>(null);
+  const { hash } = useLocation();
+  const loaded = accounts.isSuccess && settings.isSuccess;
+  // A link to `#notifications` lands on that section once the page has drawn it.
+  useEffect(() => {
+    if (hash !== '#notifications' || !loaded) return;
+    const frame = requestAnimationFrame(() => document.getElementById('notifications')?.scrollIntoView());
+    return () => cancelAnimationFrame(frame);
+  }, [hash, loaded]);
 
   if (accounts.isPending || settings.isPending) return <Empty>Loading agents…</Empty>;
   if (accounts.isError || settings.isError) {
@@ -453,6 +548,8 @@ export function AgentsTab() {
           number={index + 1}
           account={account}
           isPick={account.id === pick?.account_id}
+          successor={successorOf(account, list, pick?.account_id)}
+          proxied={proxied}
           onUse={() => activate.mutate(account.id)}
           onShowLink={() => setLinkFor(account.id)}
         />
@@ -461,7 +558,8 @@ export function AgentsTab() {
   );
 
   return (
-    <div className="text-sm">
+    <div>
+      {allDisabled(list) && !proxied && <AllDisabledBanner />}
       {hub.data && <CliProxyHub key={hub.data.data.address} hub={hub.data.data} />}
       {proxied && (
         <div
@@ -559,36 +657,95 @@ export function AgentsTab() {
           </Section>
         </>
       )}
-      <SoundSection />
+      <NotificationsSection />
     </div>
   );
 }
 
-/** Per browser, like the theme: whether a run the operator started chimes when it ends. */
-function SoundSection() {
-  const [on, setOn] = useStored(CHIME_KEY, chimeSchema, true);
+/** One row of Notifications: what it does, and the control that sets it. */
+function NotifyRow({ title, text, children }: { title: string; text: string; children: ReactNode }) {
   return (
-    <Section title="Notifications" sub="What this browser does when the agent is done.">
-      <div className="flex items-center gap-4 px-5 py-4">
-        <div className="flex-1">
-          <div className="font-semibold">Sound when the agent finishes</div>
-          <div className="text-xs text-neutral-700">
-            A soft two-note chime when a run you started ends: rising when it finished, falling when it failed. Monitor
-            and pull request jobs stay quiet.
-          </div>
-        </div>
-        <Button
-          className="px-3 py-1.25 text-xs"
-          title="Hear the chime"
-          onClick={() => {
-            unlockChime();
-            playChime('done', true);
-          }}
-        >
-          Play
-        </Button>
-        <Toggle label="Sound when the agent finishes" checked={on} onChange={setOn} />
+    <div className="flex items-center gap-4 px-5 py-4">
+      <div className="min-w-0 flex-1">
+        <div className="font-semibold">{title}</div>
+        <div className="text-xs text-neutral-700">{text}</div>
       </div>
-    </Section>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * What this browser does when the agent is done: the chime and how loud it is, and the desktop alerts. Every choice is
+ * kept per browser, like the theme.
+ */
+function NotificationsSection() {
+  const [on, setOn] = useStored(CHIME_KEY, chimeSchema, true);
+  const [volume, setVolume] = useStored(VOLUME_KEY, volumeSchema, DEFAULT_VOLUME);
+  const alerts = useDesktopAlerts();
+  const hear = () => {
+    unlockChime();
+    playChime('done', true);
+  };
+  return (
+    <div id="notifications" className="scroll-mt-6">
+      <Section title="Notifications" sub="What this browser does when the agent is done, or needs you.">
+        <div className="divide-y divide-line">
+          <NotifyRow
+            title="Sound when the agent finishes"
+            text="A soft two-note chime when a run you started ends: rising when it finished, falling when it failed. Monitor and pull request jobs stay quiet."
+          >
+            <Button className="px-3 py-1.25 text-xs" title="Hear the chime" onClick={hear}>
+              Play
+            </Button>
+            <Toggle label="Sound when the agent finishes" checked={on} onChange={setOn} />
+          </NotifyRow>
+          <NotifyRow title="Volume" text="How loud the chime is. Release the slider to hear it.">
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={volume}
+              disabled={!on}
+              aria-label="Volume"
+              title={on ? `${volume}%` : 'Turn the sound on to set the volume'}
+              onChange={(event) => setVolume(Number(event.target.value))}
+              onPointerUp={hear}
+              onKeyUp={hear}
+              className="w-44 accent-accent disabled:cursor-default disabled:opacity-40"
+            />
+            <span className={`w-10 text-right font-mono text-xs ${on ? '' : 'opacity-40'}`}>{volume}%</span>
+          </NotifyRow>
+          <NotifyRow
+            title="Alert when a run needs me"
+            text="A desktop alert while this console is open in a tab you are not looking at."
+          >
+            <Toggle label="Alert when a run needs me" checked={alerts.needs} onChange={alerts.setNeeds} />
+          </NotifyRow>
+          <NotifyRow
+            title="Alert when a run ends"
+            text="A desktop alert when a run finishes, fails or stops, in a tab you are not looking at."
+          >
+            <Toggle label="Alert when a run ends" checked={alerts.ends} onChange={alerts.setEnds} />
+          </NotifyRow>
+          <NotifyRow
+            title="Alert when a connection or integration breaks"
+            text="A desktop alert when a Connection, Connector or MCP server stops working, and when it recovers."
+          >
+            <Toggle
+              label="Alert when a connection or integration breaks"
+              checked={alerts.health}
+              onChange={alerts.setHealth}
+            />
+          </NotifyRow>
+        </div>
+        {alerts.refused && (
+          <p role="alert" className="m-0 border-t border-line px-5 py-3 text-xs text-accent-700">
+            The browser did not allow alerts. Allow notifications for this site in the browser, then turn this on again.
+          </p>
+        )}
+      </Section>
+    </div>
   );
 }

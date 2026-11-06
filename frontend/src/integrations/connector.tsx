@@ -1,4 +1,4 @@
-import { CONNECTOR_NAMES, type Connector, ConnectorId, HealthStatus } from '@ops-console/shared';
+import { CONNECTOR_NAMES, type Connector, ConnectorId, type HealthItem, HealthStatus } from '@ops-console/shared';
 import { useState } from 'react';
 import { BrandIcon, CONNECTOR_BRAND } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
@@ -219,16 +219,7 @@ function SignInStep(props: {
 }
 
 /** A Connector in the Integrations list. Off reads "not connected": a Connector is never disabled. */
-export function ConnectorRow({
-  connector,
-  selected,
-  onOpen,
-}: {
-  connector: Connector;
-  selected: boolean;
-  onOpen: () => void;
-}) {
-  const status = connectorStatus(connector);
+export function ConnectorAction({ connector, onOpen }: { connector: Connector; onOpen: () => void }) {
   const action =
     connector.status === HealthStatus.Off
       ? 'Connect'
@@ -239,6 +230,25 @@ export function ConnectorRow({
           : 'Manage';
   const attention = connector.status === HealthStatus.Auth || connector.status === HealthStatus.Fail;
   return (
+    <button type="button" className={attention ? rowActionAttention : rowAction} onClick={onOpen}>
+      {action}
+    </button>
+  );
+}
+
+export function ConnectorRow({
+  connector,
+  health,
+  selected,
+  onOpen,
+}: {
+  connector: Connector;
+  health?: HealthItem;
+  selected: boolean;
+  onOpen: () => void;
+}) {
+  const status = connectorStatus(connector);
+  return (
     <IntegrationRow
       label={CONNECTOR_NAMES[connector.id]}
       brand={CONNECTOR_BRAND[connector.id]}
@@ -246,13 +256,10 @@ export function ConnectorRow({
       kind="Connector"
       line={`${connector.via}${connector.account_label ? ` · ${connector.account_label}` : ''}`}
       status={status}
+      health={health}
       selected={selected}
       onOpen={onOpen}
-      action={
-        <button type="button" className={attention ? rowActionAttention : rowAction} onClick={onOpen}>
-          {action}
-        </button>
-      }
+      action={<ConnectorAction connector={connector} onOpen={onOpen} />}
     />
   );
 }

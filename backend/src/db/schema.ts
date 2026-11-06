@@ -40,6 +40,7 @@ import {
   type SessionKind,
   SessionState,
   type Severity,
+  type SubagentStatus,
 } from '@ops-console/shared';
 import { sql } from 'drizzle-orm';
 import {
@@ -90,6 +91,8 @@ export const claudeAccounts = sqliteTable(
     configDir: text('config_dir'),
     position: integer().notNull(),
     signedIn: bool('signed_in').notNull().default(false),
+    /** A disabled account stays signed in, but no run starts or moves onto it. */
+    enabled: bool('enabled').notNull().default(true),
     email: text(),
     plan: text(),
     fiveHourPct: real('five_hour_pct'),
@@ -147,6 +150,27 @@ export const sessions = sqliteTable(
   ],
 );
 
+/** One check of a Connection, Connector or MCP server, kept for the history stripe and to tell a break from a recovery. */
+export const healthChecks = sqliteTable(
+  'health_checks',
+  {
+    id: text().primaryKey().notNull(),
+    /** `CheckTarget`. */
+    target: text().notNull(),
+    targetId: text('target_id').notNull(),
+    /** `HealthStatus`: `ok`, `fail` or `auth`. */
+    status: text().notNull(),
+    detail: text(),
+    latencyMs: integer('latency_ms'),
+    checkedAt: text('checked_at').notNull(),
+  },
+  (table) => [
+    index('health_checks_target_idx').on(table.target, table.targetId, table.checkedAt),
+    // Retention deletes the oldest rows first.
+    index('health_checks_checked_idx').on(table.checkedAt),
+  ],
+);
+
 /** One tool call of a run, kept so the Agent runs page can say where the time went and what was slow. */
 export const runSteps = sqliteTable(
   'run_steps',
@@ -172,7 +196,38 @@ export const runSteps = sqliteTable(
     /** Redacted. */
     error: text(),
   },
-  (table) => [index('run_steps_session_idx').on(table.sessionId, table.startedAt)],
+  (table) => [
+    index('run_steps_session_idx').on(table.sessionId, table.startedAt),
+    // Retention deletes the oldest steps first, in small batches.
+    index('run_steps_started_idx').on(table.startedAt),
+  ],
+);
+
+/** One subagent a run started, kept after the run so account usage can say what each subagent did and how it ended. */
+export const runAgents = sqliteTable(
+  'run_agents',
+  {
+    id: text().primaryKey().notNull(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    /** The run's start (`sessions.run_started_at`), which ties the subagent to its run. */
+    runStartedAt: text('run_started_at').notNull(),
+    /** The SDK's task id; the `agent_id` of this subagent's steps and usage lines. */
+    taskId: text('task_id').notNull(),
+    /** The subagent that started this one; null when the main agent did. */
+    parentId: text('parent_id'),
+    type: text(),
+    /** Redacted, cut to 200 characters. */
+    description: text().notNull(),
+    status: text().$type<SubagentStatus>().notNull(),
+    startedAt: text('started_at').notNull(),
+    finishedAt: text('finished_at'),
+  },
+  (table) => [
+    unique('run_agents_task').on(table.sessionId, table.runStartedAt, table.taskId),
+    index('run_agents_started_idx').on(table.startedAt),
+  ],
 );
 
 /** What each run used: raw token counts per agent and model, and the cost the SDK reported. */
@@ -185,6 +240,10 @@ export const runUsage = sqliteTable(
       .references(() => sessions.id, { onDelete: 'cascade' }),
     runStartedAt: text('run_started_at').notNull(),
     finishedAt: text('finished_at').notNull(),
+    /** The account the run ended on; null for CLIProxy and for runs kept before this column. No key: a removed account's runs stay. */
+    accountId: text('account_id'),
+    /** What the run was for (`RunPurpose`); null for a run kept before purposes were recorded. */
+    purpose: text(),
     /** What the SDK reported; the page prices the raw tokens in `breakdown` itself. */
     costUsd: real('cost_usd').notNull(),
     /** Every token of the run: input, output, cache read and cache write. */
@@ -194,6 +253,7 @@ export const runUsage = sqliteTable(
   },
   (table) => [
     index('run_usage_finished_idx').on(table.finishedAt),
+    index('run_usage_account_idx').on(table.accountId, table.finishedAt),
     unique('run_usage_run').on(table.sessionId, table.runStartedAt),
   ],
 );

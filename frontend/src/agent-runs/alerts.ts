@@ -1,12 +1,14 @@
-import { RunHealth } from '@ops-console/shared';
+import { CheckTarget, isFailing, RunHealth } from '@ops-console/shared';
 import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
+import { useLiveEvent } from '../lib/live';
 import { useAgentRuns } from '../lib/queries';
 import { readStored, useStored } from '../lib/remember';
 import { HEALTH } from './run-look';
 
 export const ALERT_NEEDS_KEY = 'agent-runs.alert-needs-you';
 export const ALERT_ENDS_KEY = 'agent-runs.alert-ends';
+export const ALERT_HEALTH_KEY = 'notify.alert-health';
 export const alertSchema = z.boolean();
 
 /** Asks the browser for permission to show desktop alerts; false when it is refused or not offered. */
@@ -64,25 +66,60 @@ export function useRunAlerts(): void {
   }, [runs]);
 }
 
-/** The Alerts pill: on when either desktop alert is on; turning it on asks the browser once and turns both on. */
-export function useAlertsToggle(): { on: boolean; refused: boolean; toggle: () => Promise<void> } {
+/** The three desktop alerts, each kept in the browser and each asking the browser for permission when turned on. */
+export function useDesktopAlerts() {
   const [needs, setNeeds] = useStored(ALERT_NEEDS_KEY, alertSchema, false);
   const [ends, setEnds] = useStored(ALERT_ENDS_KEY, alertSchema, false);
+  const [health, setHealth] = useStored(ALERT_HEALTH_KEY, alertSchema, false);
   const [refused, setRefused] = useState(false);
-  const on = needs || ends;
-  const toggle = async () => {
-    if (on) {
-      setNeeds(false);
-      setEnds(false);
-      return;
-    }
-    if (!(await allowDesktopAlerts())) {
+  const change = (set: (value: boolean) => void) => async (value: boolean) => {
+    if (value && !(await allowDesktopAlerts())) {
       setRefused(true);
       return;
     }
     setRefused(false);
-    setNeeds(true);
-    setEnds(true);
+    set(value);
   };
-  return { on, refused, toggle };
+  return {
+    needs,
+    ends,
+    health,
+    refused,
+    setNeeds: change(setNeeds),
+    setEnds: change(setEnds),
+    setHealth: change(setHealth),
+  };
+}
+
+export type AlertsStatus = 'on' | 'off' | 'blocked';
+
+/** What the Alerts pill says: blocked when the browser refused, on when an alert is on and allowed, else off. */
+export function useAlertsStatus(): AlertsStatus {
+  const [needs] = useStored(ALERT_NEEDS_KEY, alertSchema, false);
+  const [ends] = useStored(ALERT_ENDS_KEY, alertSchema, false);
+  const [health] = useStored(ALERT_HEALTH_KEY, alertSchema, false);
+  if (typeof Notification !== 'undefined' && Notification.permission === 'denied') return 'blocked';
+  const allowed = typeof Notification !== 'undefined' && Notification.permission === 'granted';
+  return allowed && (needs || ends || health) ? 'on' : 'off';
+}
+
+const clock = (iso: string) =>
+  new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+/**
+ * Desktop alerts for a Connection, Connector or MCP server that starts failing, and for one that answers again, when
+ * the operator turned that on. Same rules as run alerts: allowed by the browser, console open in a tab not in front.
+ */
+export function useHealthAlerts(): void {
+  useLiveEvent((event) => {
+    if (event.event !== 'health.changed') return;
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    if (document.hasFocus() || !readStored(ALERT_HEALTH_KEY, alertSchema, false)) return;
+    const { name, target, detail, since, recovered } = event.data;
+    if (recovered) return show(`Recovered: ${name}`, 'Answers again.');
+    if (!isFailing(event.data.status)) return;
+    const what = target === CheckTarget.Connection ? 'Connection' : 'Integration';
+    const from = since ? `Failing since ${clock(since)}` : null;
+    show(`${what} failing: ${name}`, [detail, from].filter(Boolean).join('. '));
+  });
 }

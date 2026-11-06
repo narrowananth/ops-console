@@ -12,6 +12,7 @@ import {
   type Report,
   ReportKind,
   type ReportStep,
+  RunPurpose,
   RunStatus,
   stepSchema,
 } from '@ops-console/shared';
@@ -266,6 +267,7 @@ export class VerificationsService {
       rules,
       skills,
       fresh: !retry && !hasSteps,
+      purpose: RunPurpose.Verify,
     }).finished;
     await this.complete(reportId, alert, summary);
   }

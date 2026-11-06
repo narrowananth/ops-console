@@ -20,6 +20,19 @@ _Avoid_: bot, AI
 One Claude subscription signed in on this machine, named by its email, with its own 5-hour and
 weekly usage windows. Each is added once. The agent runs under the active one.
 
+**Disabled account**:
+A Claude account the console never starts or moves a run onto: Use, Smart usage, Auto-switch and the
+retry after a limit all skip it. It stays signed in, and a run already going on it finishes.
+
+**Account usage**:
+The tokens, estimated cost, runs and subagents the console recorded for each Claude account, by day,
+run kind and subagent type. Runs with no account (from before it was recorded, or through CLIProxy)
+count as Not attributed.
+
+**Health check**:
+The console's own scheduled check of a Connection, Connector or MCP server, kept as a history, and
+the alert when one breaks or recovers.
+
 **Sign-in by link**:
 Adding a Claude account without a browser tab on this Mac: the console shows Anthropic's sign-in
 link, anyone opens it in any browser, and the one-time code Anthropic shows comes back to the

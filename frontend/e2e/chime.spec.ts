@@ -7,11 +7,15 @@ const daemon: { url: string; token: string } = JSON.parse(readFileSync(DAEMON_FI
 /** Records each note the page plays in place of the speaker. */
 const STUB_AUDIO = () => {
   const played: number[] = [];
-  (window as unknown as { played: number[] }).played = played;
+  const peaks: number[] = [];
+  (window as unknown as { played: number[]; peaks: number[] }).played = played;
+  (window as unknown as { peaks: number[] }).peaks = peaks;
   class Param {
     value = 0;
     setValueAtTime() {}
-    linearRampToValueAtTime() {}
+    linearRampToValueAtTime(value: number) {
+      peaks.push(value);
+    }
     exponentialRampToValueAtTime() {}
   }
   class Node {
@@ -84,4 +88,29 @@ test("a run the operator started chimes when it ends; a job's run and a turned-o
   await page.getByRole('button', { name: 'Play' }).click();
   // Play still sounds with the chime off; the run did not.
   await expect.poll(played).toEqual([784, 1046.5, 659.3, 523.3, 784, 1046.5]);
+});
+
+test('Volume sets how loud the chime is, is kept in the browser, and is off limits while the sound is off', async ({
+  page,
+}) => {
+  await page.addInitScript(STUB_AUDIO);
+  await page.goto(`${daemon.url}/agents#token=${daemon.token}`);
+  const peaks = () => page.evaluate(() => (window as unknown as { peaks: number[] }).peaks);
+  const volume = page.getByRole('slider', { name: 'Volume' });
+  await expect(volume).toHaveValue('100');
+
+  await page.getByRole('button', { name: 'Play' }).click();
+  await expect.poll(peaks).toEqual([0.5, 0.5]);
+
+  await volume.focus();
+  for (let press = 0; press < 10; press++) await volume.press('ArrowLeft');
+  await expect(volume).toHaveValue('50');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('ops-console:notify.volume'))).toBe('50');
+  await page.getByRole('button', { name: 'Play' }).click();
+  await expect.poll(async () => (await peaks()).slice(-2)).toEqual([0.25, 0.25]);
+
+  await page.reload();
+  await expect(page.getByRole('slider', { name: 'Volume' })).toHaveValue('50');
+  await page.getByRole('switch', { name: 'Sound when the agent finishes' }).click();
+  await expect(page.getByRole('slider', { name: 'Volume' })).toBeDisabled();
 });

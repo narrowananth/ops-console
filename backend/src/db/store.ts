@@ -14,10 +14,15 @@ export class Store {
   readonly db: Db;
 
   constructor(
-    sqlite: Database.Database,
+    private readonly sqlite: Database.Database,
     private readonly hub: WsHub,
   ) {
     this.db = drizzle({ client: sqlite, schema });
+  }
+
+  /** Moves the write-ahead log into the database file without blocking readers or writers. */
+  checkpoint(): void {
+    this.sqlite.pragma('wal_checkpoint(PASSIVE)');
   }
 
   /**

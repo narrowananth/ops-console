@@ -12,6 +12,7 @@ const account = (change: Record<string, unknown>) => ({
   position: 1,
   signed_in: false,
   signing_in: false,
+  enabled: true,
   email: null,
   plan: null,
   five_hour_pct: null,
@@ -71,7 +72,7 @@ async function accounts(page: Page) {
 test('Add by sign-in link shows the link and signs in with the pasted code', async ({ page }) => {
   const sent = await accounts(page);
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('navigation').getByRole('link', { name: 'Agents & accounts' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Accounts & Usage' }).click();
 
   await expect(page.getByRole('button', { name: '+ Add in this browser' })).toBeVisible();
   await page.getByRole('button', { name: '+ Add by sign-in link' }).click();
@@ -179,4 +180,130 @@ test('Use CLIProxy needs a key first, then pauses the accounts and switching and
 
   await page.getByLabel('CLIProxy address').fill('https://proxy.example.com');
   await expect(page.getByRole('button', { name: 'Save' }).first()).toBeDisabled();
+});
+
+const hub = (enabled: boolean) => ({
+  enabled,
+  address: 'http://127.0.0.1:8317',
+  has_key: true,
+  status: 'connected',
+  status_detail: null,
+  checked_at: null,
+});
+
+const signedIn = (id: string, email: string, change: Record<string, unknown> = {}) =>
+  account({ id, label: email, email, signed_in: true, plan: 'pro', ...change });
+
+/** The accounts the page lists, and what it sends when a switch or Use is clicked. */
+async function listAccounts(page: Page, list: ReturnType<typeof account>[], active: string | null, proxied = false) {
+  const sent: { method: string; path: string; body: unknown }[] = [];
+  await page.route('**/api/cliproxy**', (route) => route.fulfill({ json: { data: hub(proxied) } }));
+  await page.route('**/api/agent-accounts**', (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname.replace('/api', '');
+    if (request.method() === 'GET') {
+      return route.fulfill({
+        json: { data: list, meta: { next_cursor: null, active_account_id: active, smart_pick: null } },
+      });
+    }
+    const body = request.postDataJSON();
+    sent.push({ method: request.method(), path, body });
+    const target = list.find((one) => path.startsWith(`/agent-accounts/${one.id}`));
+    if (request.method() === 'PATCH' && target) target.enabled = (body as { enabled: boolean }).enabled;
+    return route.fulfill({ json: { data: target } });
+  });
+  return sent;
+}
+
+test('the Enable switch of an account sends the change, and a disabled account reads Disabled with Use off', async ({
+  page,
+}) => {
+  const list = [
+    signedIn('a1', 'ops@example.com', { is_active: true }),
+    signedIn('a2', 'sam@example.com'),
+    signedIn('a3', 'dev@example.com'),
+  ];
+  const sent = await listAccounts(page, list, 'a1');
+  await page.goto(`${daemon.url}/agents#token=${daemon.token}`);
+
+  const sam = page.getByRole('listitem', { name: 'sam@example.com' });
+  await expect(page.getByRole('switch', { name: 'Enabled sam@example.com' })).toHaveAttribute('aria-checked', 'true');
+  await expect(sam.getByRole('button', { name: 'Use' })).toBeEnabled();
+
+  await page.getByRole('switch', { name: 'Enabled sam@example.com' }).click();
+  await expect.poll(() => sent).toEqual([{ method: 'PATCH', path: '/agent-accounts/a2', body: { enabled: false } }]);
+  await expect(page.getByRole('switch', { name: 'Enabled sam@example.com' })).toHaveAttribute('aria-checked', 'false');
+  await expect(sam).toContainText('DISABLED');
+  await expect(sam).toContainText('Disabled: skipped by Use, Smart pick and failover. Runs going on it finish.');
+  await expect(sam.getByRole('button', { name: 'Use' })).toBeDisabled();
+  await expect(sam.getByRole('button', { name: 'Use' })).toHaveAttribute('title', 'Enable this account first');
+
+  await page.getByRole('switch', { name: 'Enabled sam@example.com' }).click();
+  await expect
+    .poll(() => sent.at(-1))
+    .toEqual({ method: 'PATCH', path: '/agent-accounts/a2', body: { enabled: true } });
+  await expect(sam.getByRole('button', { name: 'Use' })).toBeEnabled();
+});
+
+test('disabling the active account asks first and names the account runs move to', async ({ page }) => {
+  const list = [
+    signedIn('a1', 'ops@example.com', { is_active: true }),
+    signedIn('a2', 'sam@example.com', { five_hour_pct: 60 }),
+    signedIn('a3', 'dev@example.com', { five_hour_pct: 10 }),
+  ];
+  const sent = await listAccounts(page, list, 'a1');
+  await page.goto(`${daemon.url}/agents#token=${daemon.token}`);
+
+  await page.getByRole('switch', { name: 'Enabled ops@example.com' }).click();
+  const dialog = page.getByRole('alertdialog', { name: 'Disable ops@example.com?' });
+  await expect(dialog).toContainText('It is the active account. Runs going on it finish.');
+  await expect(dialog).toContainText('New runs move to dev@example.com.');
+  expect(sent).toEqual([]);
+
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(sent).toEqual([]);
+
+  await page.getByRole('switch', { name: 'Enabled ops@example.com' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Disable' }).click();
+  await expect.poll(() => sent).toEqual([{ method: 'PATCH', path: '/agent-accounts/a1', body: { enabled: false } }]);
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+});
+
+test('disabling the only enabled account says no account will be active, and the page shows every account is disabled', async ({
+  page,
+}) => {
+  const list = [signedIn('a1', 'ops@example.com', { is_active: true })];
+  const sent = await listAccounts(page, list, 'a1');
+  await page.goto(`${daemon.url}/agents#token=${daemon.token}`);
+
+  await expect(page.getByText('Every Claude account is disabled.')).toHaveCount(0);
+  await page.getByRole('switch', { name: 'Enabled ops@example.com' }).click();
+  await expect(page.getByRole('alertdialog')).toContainText('No account will be active');
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Disable' }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  await expect(page.getByRole('alert').filter({ hasText: 'Every Claude account is disabled.' })).toBeVisible();
+});
+
+test('the switch of a signed-out account and every switch under CLIProxy are dimmed with the reason', async ({
+  page,
+}) => {
+  const list = [
+    signedIn('a1', 'ops@example.com', { is_active: true }),
+    account({ id: 'a2', label: 'team@example.com' }),
+  ];
+  await listAccounts(page, list, 'a1');
+  await page.goto(`${daemon.url}/agents#token=${daemon.token}`);
+
+  const out = page.getByRole('switch', { name: 'Enabled team@example.com' });
+  await expect(out).toBeDisabled();
+  await expect(out).toHaveAttribute('title', 'Sign in first');
+  await expect(page.getByRole('switch', { name: 'Enabled ops@example.com' })).toBeEnabled();
+
+  const proxied = await page.context().newPage();
+  await listAccounts(proxied, [signedIn('a1', 'ops@example.com', { is_active: true })], 'a1', true);
+  await proxied.goto(`${daemon.url}/agents#token=${daemon.token}`);
+  const sw = proxied.locator('[role=switch][aria-label="Enabled ops@example.com"]');
+  await expect(sw).toBeDisabled();
+  await expect(sw).toHaveAttribute('title', 'CLIProxy picks the account');
 });

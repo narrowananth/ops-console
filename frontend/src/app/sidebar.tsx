@@ -1,4 +1,12 @@
-import { AlertStatus, type ClaudeAccount, CliProxyStatus, HealthStatus, RunHealth } from '@ops-console/shared';
+import {
+  AlertStatus,
+  type ClaudeAccount,
+  CliProxyStatus,
+  HealthArea,
+  HealthStatus,
+  isFailing,
+  RunHealth,
+} from '@ops-console/shared';
 import type { ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
@@ -8,6 +16,7 @@ import {
   useCliProxy,
   useConnections,
   useConnectors,
+  useHealthWatch,
   useMcpServers,
   useRepos,
 } from '../lib/queries';
@@ -98,7 +107,7 @@ export const PAGES = [
   { group: 'Connect', path: '/repos', label: 'Repos', icon: ICONS.repos },
   { group: 'Connect', path: '/setup', label: 'Setup agent', icon: ICONS.setup },
   { group: 'Connect', path: '/permissions', label: 'Permissions', icon: ICONS.permissions },
-  { group: 'Claude', path: '/agents', label: 'Agents & accounts', icon: ICONS.agents },
+  { group: 'Claude', path: '/agents', label: 'Accounts & Usage', icon: ICONS.agents },
   { group: 'Claude', path: '/agent-runs', label: 'Agent runs', icon: ICONS.runs },
   { group: 'Claude', path: '/playbooks', label: 'Playbooks', icon: ICONS.playbooks },
   { group: 'Claude', path: '/skills', label: 'Skills', icon: ICONS.skills },
@@ -113,6 +122,10 @@ function useBadges(): Record<string, { text: string; tip: string; tone: 'alert' 
   const servers = useMcpServers().data?.data ?? [];
   const connections = useConnections().data?.data;
   const repos = useRepos().data?.data;
+  const watched = useHealthWatch().data?.items ?? [];
+  const failingIn = (area: HealthArea) => watched.filter((item) => item.area === area && isFailing(item.status)).length;
+  const brokenConnections = failingIn(HealthArea.Connections);
+  const brokenIntegrations = failingIn(HealthArea.Integrations);
   const waiting = (useAgentRuns().data ?? []).filter((run) => run.health === RunHealth.NeedsYou).length;
   const open = alerts.filter(
     (alert) => alert.status !== AlertStatus.Resolved && alert.status !== AlertStatus.Dismissed && shown(alert),
@@ -124,12 +137,25 @@ function useBadges(): Record<string, { text: string; tip: string; tone: 'alert' 
     '/monitor':
       open > 0 ? { text: String(open), tip: `${open} Alerts not yet resolved or dismissed`, tone: 'alert' } : undefined,
     '/integrations':
-      attention > 0
-        ? { text: String(attention), tip: `${attention} need you: sign in again or reconnect`, tone: 'attention' }
-        : undefined,
-    '/connections': connections?.length
-      ? { text: String(connections.length), tip: `${connections.length} Connections`, tone: 'count' }
-      : undefined,
+      brokenIntegrations > 0
+        ? {
+            text: String(brokenIntegrations),
+            tip: `${brokenIntegrations} Integrations failing their automatic check`,
+            tone: 'alert',
+          }
+        : attention > 0
+          ? { text: String(attention), tip: `${attention} need you: sign in again or reconnect`, tone: 'attention' }
+          : undefined,
+    '/connections':
+      brokenConnections > 0
+        ? {
+            text: String(brokenConnections),
+            tip: `${brokenConnections} Connections failing their automatic check`,
+            tone: 'alert',
+          }
+        : connections?.length
+          ? { text: String(connections.length), tip: `${connections.length} Connections`, tone: 'count' }
+          : undefined,
     '/agent-runs':
       waiting > 0 ? { text: String(waiting), tip: `${waiting} agent runs wait on you`, tone: 'attention' } : undefined,
     '/repos': repos?.length
@@ -256,7 +282,7 @@ export function Sidebar() {
 const footButton =
   'inline-flex h-8.5 flex-1 cursor-pointer items-center justify-center gap-1.5 border border-line bg-card px-2.5 text-xs text-text transition-colors hover:bg-neutral-200';
 
-/** The account Sessions run on now, with its 5-hour and weekly usage; opens Agents & accounts. */
+/** The account Sessions run on now, with its 5-hour and weekly usage; opens Accounts & Usage. */
 function ActiveAccount() {
   const accounts = useAgentAccounts().data?.data ?? [];
   const hub = useCliProxy().data?.data;
@@ -266,7 +292,7 @@ function ActiveAccount() {
       <NavLink
         to="/agents"
         aria-label="Claude account hub"
-        title="CLIProxy signs the agent in to Claude and tracks the quota. Opens Agents & accounts."
+        title="CLIProxy signs the agent in to Claude and tracks the quota. Opens Accounts & Usage."
         className="flex items-center justify-between gap-2 rounded-lg border border-line bg-card px-3.5 py-3 text-xs text-text no-underline shadow-sm hover:text-text"
       >
         <span className="font-mono font-semibold">CLIProxy</span>
@@ -283,7 +309,7 @@ function ActiveAccount() {
     <NavLink
       to="/agents"
       aria-label="Active Claude account"
-      title="The Claude account the agent runs under, and how much of its usage is used. Opens Agents & accounts."
+      title="The Claude account the agent runs under, and how much of its usage is used. Opens Accounts & Usage."
       className="block rounded-lg border border-line bg-card px-3.5 py-3 text-xs text-text no-underline shadow-sm hover:text-text"
     >
       <div className="mb-1 flex items-center justify-between gap-2">

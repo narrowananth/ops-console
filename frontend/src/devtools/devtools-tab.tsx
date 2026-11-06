@@ -1,8 +1,28 @@
-import { AccessLevel, type Connection, ConnectionType, HealthStatus } from '@ops-console/shared';
+import {
+  AccessLevel,
+  CheckTarget,
+  type Connection,
+  ConnectionType,
+  HealthArea,
+  type HealthItem,
+  HealthStatus,
+  isFailing,
+} from '@ops-console/shared';
+import { useQueryClient } from '@tanstack/react-query';
 import { BrandIcon, CONNECTION_BRAND } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
-import { useConnections } from '../lib/queries';
+import {
+  FailingPill,
+  HealthBanner,
+  HealthLine,
+  HealthStrip,
+  isRecovered,
+  RecoveredPill,
+  rowDomId,
+  useAreaHealth,
+} from '../health/health-parts';
+import { queryKeys, useCheckConnection, useConnections } from '../lib/queries';
 import { useAddress } from '../lib/remember';
 import { ascending } from '../lib/sort';
 import { statusGlyph } from '../mcp/status';
@@ -27,15 +47,34 @@ const ACCESS_LABEL: Record<AccessLevel, string> = {
   [AccessLevel.Write]: 'Claude: read / write',
 };
 
-function Row({ connection, onOpen }: { connection: Connection; onOpen: () => void }) {
+function Row({
+  connection,
+  health,
+  onOpen,
+}: {
+  connection: Connection;
+  health: HealthItem | undefined;
+  onOpen: () => void;
+}) {
+  const client = useQueryClient();
+  const retry = useCheckConnection();
+  const failing = health !== undefined && isFailing(health.status);
   const status = statusGlyph[connection.status];
-  const failed = connection.status === HealthStatus.Fail && connection.status_detail;
+  const detail = failing ? (health.detail ?? connection.status_detail) : null;
+  const failed = detail ?? (connection.status === HealthStatus.Fail ? connection.status_detail : null);
   return (
-    <li aria-label={connection.name}>
+    <li
+      aria-label={connection.name}
+      id={health ? rowDomId(health) : undefined}
+      tabIndex={-1}
+      className={`rounded-lg outline-none transition-colors ${
+        failing ? 'bg-accent-100/50 shadow-[inset_0_0_0_1px_var(--color-accent-200)]' : ''
+      }`}
+    >
       <button
         type="button"
         onClick={onOpen}
-        className="grid w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_120px_130px] items-center gap-3 rounded-lg border-0 bg-transparent px-3.5 py-2.5 text-left text-text transition-colors hover:bg-neutral-200/70"
+        className="grid w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_minmax(120px,auto)_130px] items-center gap-3 rounded-lg border-0 bg-transparent px-3.5 py-2.5 text-left text-text transition-colors hover:bg-neutral-200/70"
       >
         <BrandIcon brand={CONNECTION_BRAND[connection.type]} />
         <span className="min-w-0">
@@ -49,18 +88,57 @@ function Row({ connection, onOpen }: { connection: Connection; onOpen: () => voi
                 PROD
               </span>
             )}
+            {health && !failing && isRecovered(health) && <RecoveredPill />}
           </span>
           <span className={`block truncate font-mono text-xs ${failed ? 'text-accent-700' : 'text-neutral-700'}`}>
-            {failed ? connection.status_detail : `${TYPE_LABELS[connection.type]} · ${hostOf(connection.config)}`}
+            {failed ? failed : `${TYPE_LABELS[connection.type]} · ${hostOf(connection.config)}`}
           </span>
         </span>
-        <span title={status.tip} className={`font-mono text-xs ${status.className}`}>
-          {status.glyph}
-        </span>
+        {failing ? (
+          <FailingPill since={health.failing_since} />
+        ) : (
+          <span title={status.tip} className={`font-mono text-xs ${status.className}`}>
+            {status.glyph}
+          </span>
+        )}
         <span title={ACCESS_TIPS[connection.access]} className="text-right text-xs text-neutral-700">
           {ACCESS_LABEL[connection.access]}
         </span>
       </button>
+      {health && (
+        <div className="pr-3.5 pb-2.5 pl-14.5">
+          <HealthLine item={health}>
+            {failing && (
+              <button
+                type="button"
+                disabled={retry.isPending}
+                onClick={() =>
+                  retry.mutate(connection.id, {
+                    onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.healthWatch }),
+                  })
+                }
+                className="cursor-pointer rounded-md border border-divider bg-card px-2.5 py-0.75 text-xs font-semibold text-text shadow-sm hover:bg-neutral-200 disabled:cursor-default disabled:opacity-50"
+              >
+                {retry.isPending ? 'Retrying…' : 'Retry'}
+              </button>
+            )}
+            {failing && health.status === HealthStatus.Auth && (
+              <button
+                type="button"
+                onClick={onOpen}
+                className="cursor-pointer rounded-md border border-accent/45 bg-accent-100 px-2.5 py-0.75 text-xs font-semibold text-accent-700 shadow-sm hover:bg-accent-200"
+              >
+                Edit credentials
+              </button>
+            )}
+            {retry.isError && (
+              <span role="alert" className="text-accent-700">
+                {retry.error.message}
+              </span>
+            )}
+          </HealthLine>
+        </div>
+      )}
     </li>
   );
 }
@@ -76,6 +154,7 @@ export function DevToolsTab() {
         next.kind === 'list' ? null : next.kind === 'pick' ? 'new' : next.kind === 'new' ? `new:${next.type}` : next.id,
     });
   const list = () => setView({ kind: 'list' });
+  const { items } = useAreaHealth(HealthArea.Connections);
 
   if (connections.isPending) return <Empty>Loading connections…</Empty>;
   if (connections.isError) return <Empty>Could not read connections: {connections.error.message}</Empty>;
@@ -134,6 +213,8 @@ export function DevToolsTab() {
           + Add connection
         </Button>
       </div>
+      <HealthStrip area={HealthArea.Connections} />
+      <HealthBanner area={HealthArea.Connections} />
       {data.length === 0 ? (
         <Empty>No connections yet. Ask the Setup agent, or pick a type.</Empty>
       ) : (
@@ -142,6 +223,7 @@ export function DevToolsTab() {
             <Row
               key={connection.id}
               connection={connection}
+              health={items.find((item) => item.target === CheckTarget.Connection && item.id === connection.id)}
               onOpen={() => setView({ kind: 'edit', id: connection.id })}
             />
           ))}

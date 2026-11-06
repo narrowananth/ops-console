@@ -1,9 +1,23 @@
-import { WS_PATH, WS_PROTOCOL, wsEventSchema } from '@ops-console/shared';
+import { WS_PATH, WS_PROTOCOL, type WsEvent, wsEventSchema } from '@ops-console/shared';
 import { type QueryKey, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { playChime, unlockChime } from './chime';
 import { queryKeys } from './queries';
 import { sessionToken } from './session';
+
+type Listener = (event: WsEvent) => void;
+const listeners = new Set<Listener>();
+
+/** Runs `listener` for every event the console's one socket brings, for as long as the caller is mounted. */
+export function useLiveEvent(listener: Listener): void {
+  const latest = useRef(listener);
+  latest.current = listener;
+  useEffect(() => {
+    const call: Listener = (event) => latest.current(event);
+    listeners.add(call);
+    return () => void listeners.delete(call);
+  }, []);
+}
 
 /** Events that land this close together refetch each query once. */
 const BATCH_MS = 40;
@@ -34,6 +48,7 @@ export function useLiveEvents(): void {
       const parsed = wsEventSchema.safeParse(JSON.parse(String(message.data)));
       if (!parsed.success) return;
       const event = parsed.data;
+      for (const listener of listeners) listener(event);
       if (event.event === 'settings.updated') {
         refetch(queryKeys.settings);
         refetch(queryKeys.cliProxy);
@@ -49,6 +64,7 @@ export function useLiveEvents(): void {
       ) {
         refetch(queryKeys.accounts);
       }
+      if (event.event === 'connection.checked' || event.event === 'health.changed') refetch(queryKeys.healthWatch);
       if (event.event === 'connection.checked') {
         refetch(queryKeys.mcpServers);
         refetch(queryKeys.connectors);

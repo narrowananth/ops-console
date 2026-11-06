@@ -66,8 +66,26 @@ describe('a run usage from raw lines', () => {
   });
 
   it('adds a day up through the same pricing, and falls back to the SDK figure for a run kept without raw counts', () => {
-    const priced = { sessionId: 's', runStartedAt: 'r', costUsd: 999, tokens: 1, lines };
-    const legacy = { sessionId: 't', runStartedAt: 'r', costUsd: 0.5, tokens: 1234, lines: null };
+    const priced = {
+      sessionId: 's',
+      accountId: null,
+      purpose: null,
+      finishedAt: 'f',
+      runStartedAt: 'r',
+      costUsd: 999,
+      tokens: 1,
+      lines,
+    };
+    const legacy = {
+      sessionId: 't',
+      accountId: null,
+      purpose: null,
+      finishedAt: 'f',
+      runStartedAt: 'r',
+      costUsd: 0.5,
+      tokens: 1234,
+      lines: null,
+    };
     const day = totalOf([priced, legacy]);
     expect(day.cost_usd).toBeCloseTo(usageOfLines(lines, null).total.cost_usd + 0.5, 10);
     expect(day.tokens).toBe(1700 + 3300 + 150_000 + 15_000 + 1234);

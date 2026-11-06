@@ -4,6 +4,7 @@ export * from './connections';
 export * from './connectors';
 export * from './devtools';
 export * from './errors';
+export * from './health-watch';
 export * from './mcp';
 export * from './monitor';
 export * from './network';

@@ -249,7 +249,7 @@ export function classifyFailure(input: {
       what_happened: 'The Claude account hit its usage limit.',
       likely_cause: 'The account used up its usage window. Longer runs and larger models use it fastest.',
       what_to_do:
-        'Switch to another account in Agents & accounts, or Retry after the limit resets. Work so far stays in the Session.',
+        'Switch to another account in Accounts & Usage, or Retry after the limit resets. Work so far stays in the Session.',
       ...none,
       raw: input.lastError,
       resets_at: input.resetsAt ?? null,
@@ -260,7 +260,7 @@ export function classifyFailure(input: {
       kind: FailureKind.SignedOut,
       what_happened: 'The Claude sign-in stopped working.',
       likely_cause: 'The login expired and could not refresh.',
-      what_to_do: 'Sign in again in Agents & accounts, then Retry.',
+      what_to_do: 'Sign in again in Accounts & Usage, then Retry.',
       ...none,
       raw: input.lastError,
     };

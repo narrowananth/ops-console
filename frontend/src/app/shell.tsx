@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AgentRunsActions, AgentRunsView } from '../agent-runs/agent-runs-view';
-import { useRunAlerts } from '../agent-runs/alerts';
+import { useHealthAlerts, useRunAlerts } from '../agent-runs/alerts';
 import { AgentsTab } from '../agents/agents-tab';
 import { DevToolsTab } from '../devtools/devtools-tab';
 import { DevToolsView } from '../devtools/terminal-view';
@@ -36,6 +36,7 @@ export function Shell() {
   usePrefetchPullRequests();
   useKeepAddress();
   useRunAlerts();
+  useHealthAlerts();
   return (
     <div className="flex min-h-0 flex-1">
       <Sidebar />
@@ -142,8 +143,8 @@ export function Shell() {
               path="/agents"
               element={
                 <Page
-                  title="Agents & accounts"
-                  sub="Claude Code accounts and defaults for every session"
+                  title="Accounts & Usage"
+                  sub="Claude accounts, what they spent, notifications and defaults for every session"
                   width="narrow"
                 >
                   <PageColumn>

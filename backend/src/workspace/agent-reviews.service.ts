@@ -12,6 +12,7 @@ import {
   type PrComment,
   type PrFile,
   ReviewVerdict,
+  RunPurpose,
   toolUseSchema,
 } from '@ops-console/shared';
 import { and, desc, eq } from 'drizzle-orm';
@@ -380,6 +381,7 @@ export class AgentReviewsService {
         ...(scratch ? { cwd: scratch } : { readOnly: true }),
         deny: HOST_WRITE_DENIALS,
         projectSettings: false,
+        purpose: RunPurpose.AgentReview,
       };
       const failure = await this.steps.run({ job, sessionId, brief, ...reach });
       if (failure) throw new JobFailed(failure, true);
@@ -432,6 +434,7 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
       deny: HOST_WRITE_DENIALS,
       projectSettings: false,
       readOnly: true,
+      purpose: RunPurpose.AgentReview,
     }).finished;
     if (!summary.ok || !summary.text.trim()) return;
     const row = this.actionLog.start({

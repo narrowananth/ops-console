@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post } from '@nestjs/common';
-import { type ClaudeAccount, signInCodeSchema, startLoginSchema } from '@ops-console/shared';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post } from '@nestjs/common';
+import { accountPatchSchema, type ClaudeAccount, signInCodeSchema, startLoginSchema } from '@ops-console/shared';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
 import { AccountsService } from './accounts.service';
@@ -18,6 +18,13 @@ export class AccountsController {
   @Post()
   async add() {
     return { data: await this.accounts.add() };
+  }
+
+  @Patch(':id')
+  @HttpCode(200)
+  setEnabled(@Param() params: unknown, @Body() body: unknown): { data: ClaudeAccount } {
+    const { enabled } = parseInput(accountPatchSchema, body, 'body');
+    return { data: this.accounts.setEnabled(parseInput(idParams, params, 'params').id, enabled) };
   }
 
   @Post(':id/checks')

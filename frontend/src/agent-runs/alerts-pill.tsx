@@ -1,24 +1,28 @@
-import { useAlertsToggle } from './alerts';
+import { Link } from 'react-router-dom';
+import { useAlertsStatus } from './alerts';
 
-/** The pill that turns desktop alerts on or off for runs that need the operator and runs that end. */
+const TEXT = { on: 'Alerts on', off: 'Alerts off', blocked: 'Alerts blocked' } as const;
+
+/** Whether desktop alerts are on, read only: a link to where they are set, Accounts & Usage › Notifications. */
 export function AlertsPill() {
-  const { on, refused, toggle } = useAlertsToggle();
+  const status = useAlertsStatus();
   return (
-    <button
-      type="button"
-      aria-pressed={on}
+    <Link
+      to="/agents#notifications"
       title={
-        refused
-          ? 'The browser did not allow alerts. Allow notifications for this site, then try again.'
-          : 'A desktop alert when a run needs you or ends, while this console is open in a tab you are not looking at'
+        status === 'blocked'
+          ? 'The browser blocks alerts for this site. Allow notifications in the browser, then set them in Accounts & Usage › Notifications.'
+          : 'Set in Accounts & Usage › Notifications'
       }
-      onClick={() => void toggle()}
-      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-xs shadow-sm ${
-        on ? 'border-divider bg-card text-text' : 'border-divider bg-transparent text-neutral-700'
+      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-xs no-underline shadow-sm ${
+        status === 'on' ? 'border-divider bg-card text-text' : 'border-divider bg-transparent text-neutral-700'
       }`}
     >
-      <span aria-hidden className={`size-1.75 rounded-full ${on ? 'bg-ok' : 'bg-neutral-400'}`} />
-      Alerts {on ? 'on' : 'off'}
-    </button>
+      <span
+        aria-hidden
+        className={`size-1.75 rounded-full ${status === 'on' ? 'bg-ok' : status === 'blocked' ? 'bg-accent' : 'bg-neutral-400'}`}
+      />
+      {TEXT[status]}
+    </Link>
   );
 }

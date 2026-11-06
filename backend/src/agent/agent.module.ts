@@ -14,17 +14,19 @@ import { PlaybooksController } from '../playbooks/playbooks.controller';
 import { PlaybooksService } from '../playbooks/playbooks.service';
 import { SkillsController } from '../playbooks/skills.controller';
 import { SkillsService } from '../playbooks/skills.service';
+import { AccountUsage } from './account-usage';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
 import { Attachments } from './attachments';
 import { ConnectionLookup } from './connection-lookup';
 import { MessageInterceptors } from './message-interceptors';
 import { ProdWriteRule } from './prod-write-rule';
+import { Retention } from './retention';
 import { RunInsights } from './run-insights.service';
 import { RunStepsLog } from './run-steps';
 import { RunRegistry } from './runs';
 import { AgentRuntime } from './runtime';
 import { SessionKinds } from './session-kinds';
-import { AgentRunsController, SessionsController } from './sessions.controller';
+import { AccountUsageController, AgentRunsController, SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
 import { Transcripts } from './transcripts';
 
@@ -44,6 +46,7 @@ export class AgentModule {
         ActionLogController,
         ApprovalsController,
         AccountsController,
+        AccountUsageController,
         CliProxyController,
         PlaybooksController,
         SkillsController,
@@ -65,7 +68,9 @@ export class AgentModule {
         CliProxyService,
         SessionsService,
         RunStepsLog,
+        Retention,
         RunInsights,
+        AccountUsage,
         NetworkAllowlistService,
         AgentRuntime,
         PlaybooksService,

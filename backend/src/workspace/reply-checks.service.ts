@@ -6,6 +6,7 @@ import {
   PrState,
   type ReplyCheck,
   ReplyVerdict,
+  RunPurpose,
 } from '@ops-console/shared';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -178,7 +179,14 @@ export class ReplyChecksService {
         projectSettings: false,
       });
       if (failure) throw new JobFailed(failure, true);
-      const closing = { rules, skills, cwd, deny: HOST_WRITE_DENIALS, projectSettings: false };
+      const closing = {
+        rules,
+        skills,
+        cwd,
+        deny: HOST_WRITE_DENIALS,
+        projectSettings: false,
+        purpose: RunPurpose.ReplyCheck,
+      };
       const summary = await this.runtime.runFor(session, REPLY_CHECK_PROMPT, null, closing).finished;
       if (summary.stopped) throw new JobFailed(`The verdict was not given: ${STOPPED}`, true);
       if (summary.failure) throw new JobFailed(summary.failure, true);

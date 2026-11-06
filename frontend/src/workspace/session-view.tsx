@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
 import { ApprovalPrompts } from '../agents/approval-prompts';
+import { PlayRun } from '../agents/play-run';
 import { QuestionPanel, trailingQuestions } from '../agents/question-panel';
 import { SessionChips } from '../agents/session-chips';
 import { StopRun } from '../agents/stop-run';
@@ -377,7 +378,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                   )}
                 </div>
                 <span className="flex flex-none items-center gap-1.5">
-                  {busy && <StopRun sessionId={id} className="px-4 py-1.5" />}
+                  {busy ? <StopRun sessionId={id} className="px-4 py-1.5" /> : <PlayRun sessionId={id} />}
                   <Button
                     variant="primary"
                     title={
