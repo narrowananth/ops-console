@@ -9,6 +9,8 @@ export type SandboxRun = {
   dataDir: string;
   /** Folders outside the working folder the run may read, such as the Session's attached files. */
   readable?: string[];
+  /** Folders outside the working folder the run may write and read: the Session's output folder. */
+  writable?: string[];
   /** The run's Network allowlist (ADR 0006): the only hosts its commands reach. */
   networkDomains: string[];
   /** The run may not change its working folder: a review of pull request text, or an answer in a thread. */
@@ -74,6 +76,7 @@ export function runSandbox(run: SandboxRun): SandboxSettings {
       allowWrite: [
         ...(run.readOnly ? [] : [run.workingDir]),
         ...TEMP,
+        ...(run.writable ?? []),
         ...TOOL_CACHES.map((folder) => path.join(home, folder)),
       ],
       denyWrite: gitControl(run.workingDir, run.gitFile === true),
@@ -84,7 +87,7 @@ export function runSandbox(run: SandboxRun): SandboxSettings {
         path.join(home, 'Library', 'Keychains'),
         path.join(home, '.ssh'),
       ],
-      allowRead: [run.workingDir, ...(run.readable ?? [])],
+      allowRead: [run.workingDir, ...(run.writable ?? []), ...(run.readable ?? [])],
     },
   };
 }

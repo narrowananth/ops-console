@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { InlineText } from '../../agents/inline-text';
+import { CodeBlock } from './code-block';
 
 type Block =
   | { kind: 'heading'; level: number; text: string }
@@ -134,12 +135,11 @@ export function Markdown({ source, className = '' }: { source: string; className
         }
         if (block.kind === 'code') {
           return (
-            <pre
+            <CodeBlock
               key={key}
+              text={block.text}
               className="m-0 overflow-auto rounded-lg bg-neutral-900 p-3 font-mono text-xs text-neutral-100"
-            >
-              {block.text}
-            </pre>
+            />
           );
         }
         if (block.kind === 'rule') return <hr key={key} className="m-0 border-0 border-t border-line" />;

@@ -1,9 +1,9 @@
 # Agent runs are sandboxed by the OS
 
 Every agent run's shell commands run in the Run sandbox: the Claude Agent SDK's own `sandbox` option, which on macOS
-is Seatbelt. A run writes only in its working folder, the temp folders and the package-tool caches under the home
+is Seatbelt. A run writes only in its working folder, its Session's output folder under the data folder, the temp folders and the package-tool caches under the home
 folder (`~/.npm`, `~/.cache`, `~/.cargo/registry`, `~/go/pkg`, `~/.m2/repository`, `~/.gradle`, `~/Library/Caches` and
-a few like them), never in a folder on PATH such as `~/.cargo/bin` or `~/go/bin`. It reads neither the data folder nor
+a few like them), never in a folder on PATH such as `~/.cargo/bin` or `~/go/bin`. It reads neither the data folder (the working folder and the output folder aside) nor
 `~/.aws`, `~/.config/gcloud`, `~/.ssh` or the login Keychain folder. The data folder holds
 `runtime.json`, whose session token lets a command call the console's own API as the operator, Approvals included. The
 console sets the rules and leaves the profile to the SDK. It fails a run when the sandbox is unavailable, never runs a

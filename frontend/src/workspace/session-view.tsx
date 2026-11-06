@@ -15,7 +15,7 @@ import { PlayRun } from '../agents/play-run';
 import { QuestionPanel, trailingQuestions } from '../agents/question-panel';
 import { SessionChips } from '../agents/session-chips';
 import { StopRun } from '../agents/stop-run';
-import { MessageView } from '../agents/transcript';
+import { MessageView, outputsByMessage } from '../agents/transcript';
 import { AttachmentViewer, type Viewed } from '../components/ui/attachment-viewer';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
@@ -24,6 +24,7 @@ import {
   useDeleteSession,
   useEditMessage,
   useMessages,
+  useOutputFiles,
   useRepoPullRequests,
   useRepoSessions,
   useRepos,
@@ -47,6 +48,8 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const sessions = useRepoSessions();
   const repos = useRepos();
   const messages = useMessages(id);
+  const outputFiles = useOutputFiles(id);
+  const outputs = outputsByMessage(messages.data ?? [], outputFiles.data ?? []);
   const send = useSendMessage(id);
   const remove = useDeleteSession();
   const editMessage = useEditMessage(id);
@@ -272,6 +275,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                       <MessageView
                         key={message.id}
                         message={message}
+                        outputs={{ sessionId: id, files: outputs.get(message.id) ?? [] }}
                         onEdit={
                           message.id === lastAsked && !busy
                             ? (edited) =>

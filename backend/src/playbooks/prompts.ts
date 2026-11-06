@@ -1,6 +1,6 @@
 import { PLAYBOOK_LIMITS, PlaybookStepStatus, PR_DESCRIPTION_RULE } from '@ops-console/shared';
 import { z } from 'zod';
-import { OPEN_PULL_REQUEST_TOOL } from '../agent/pull-request-tool';
+import { OPEN_PULL_REQUEST_TOOL, SAVE_FILE_TOOL } from '../agent/pull-request-tool';
 
 /**
  * The console's safety lines. They close the system prompt of every run, after the kind's instructions and the
@@ -26,11 +26,23 @@ export const COMMIT_HOOKS_RULE = `Commit hooks. The repo's own checks run on eve
 export const OPEN_PR_RULE = `Pull requests. Never push a branch and never open a pull request with a Git host CLI: your commands run in a sandbox that has neither the operator's git keys nor the Git host sign-ins. Commit the work on its branch. When the operator asks for a pull request, call the ${OPEN_PULL_REQUEST_TOOL} tool with a title and a description. The operator approves it first, then the console pushes the branch and opens the pull request, and the tool answers with its link. A Fix opens its own pull request. If that tool is not in your tool list, say so: the operator opens the pull request, or pushes by hand.`;
 
 /**
+ * Where the agent puts a file for the operator. The sandbox blocks `open` and any write outside its folders, so the
+ * agent writes into the Session's output folder, where the console shows it, and asks to save a copy elsewhere.
+ */
+export const outputFilesRule = (folder: string) =>
+  `Files for the operator. Write every file meant for the operator (a PDF, a spreadsheet, a chart, an archive) in ${folder}. The console lists each file there in the conversation, and the operator opens or downloads it from the console. Never run open, xdg-open or start: your commands run in a sandbox that blocks them. When the operator asks you to put a file in another folder, such as ~/Downloads, call the ${SAVE_FILE_TOOL} tool with the file's name and the folder's absolute path. The operator approves it first, then the console copies the file. Never move a file with a command, never ask the operator to run mv, and do not retry if the operator says no. If that tool is not in your tool list, say so.`;
+
+/**
  * The system prompt a run appends to Claude Code's own: the kind's instructions, the console's pull request and commit
  * hook rules, the Playbook's rules, then the safety lines.
  */
-export function systemAppend(instructions: string | undefined, rules: string | null): string {
+export function systemAppend(
+  instructions: string | undefined,
+  rules: string | null,
+  outputFolder: string | null = null,
+): string {
   const parts = [instructions ?? '', PR_DESCRIPTION_RULE, OPEN_PR_RULE, COMMIT_HOOKS_RULE];
+  if (outputFolder !== null) parts.push(outputFilesRule(outputFolder));
   if (rules?.trim()) parts.push(`The operator's rules for this work:\n${rules.trim()}`);
   parts.push(SAFETY_LINES);
   return parts.filter(Boolean).join('\n\n');

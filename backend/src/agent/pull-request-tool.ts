@@ -1,11 +1,13 @@
 import { createSdkMcpServer, type McpSdkServerConfigWithInstance, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
+import { type FileSaver, runSaveFile, saveFileInputSchema } from './output-files';
 
 /** The console's own MCP server, in the daemon: it holds the tools the console runs for the agent. */
 export const CONSOLE_TOOLS_SERVER = 'ops-console';
 export const OPEN_PULL_REQUEST_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__open_pull_request`;
 export const JOIN_REPO_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__join_repo`;
+export const SAVE_FILE_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__save_file`;
 
 export const joinRepoInputSchema = z.object({
   /** The Repo the operator means: its name, its path on this machine, or its Git URL or `owner/name`. */
@@ -84,10 +86,10 @@ export async function runJoinRepo(
 
 /** The console's tools for one run. The operator approves each call before it runs (see the runtime's PreToolUse hook). */
 export function consoleToolsServer(
-  tools: { opener: PullRequestOpener | null; joiner: RepoJoiner | null },
+  tools: { opener: PullRequestOpener | null; joiner: RepoJoiner | null; saver: FileSaver | null },
   sessionId: string,
 ): McpSdkServerConfigWithInstance {
-  const { opener, joiner } = tools;
+  const { opener, joiner, saver } = tools;
   return createSdkMcpServer({
     name: CONSOLE_TOOLS_SERVER,
     tools: [
@@ -108,6 +110,16 @@ export function consoleToolsServer(
               "Moves this Session into a Repo the operator imported, after the operator approves, so you work in the real checkout on a branch and can commit and open a pull request. Use it when the operator names a repository or says where the issue is. Give the Repo's name, its path on this machine, or its Git URL.",
               joinRepoInputSchema.shape,
               (args) => runJoinRepo(joiner, sessionId, args),
+            ),
+          ]
+        : []),
+      ...(saver
+        ? [
+            tool(
+              'save_file',
+              "Copies a file from your output folder into a folder the operator names, such as ~/Downloads, after the operator approves. Your commands cannot write there. Give the file's name and the folder's absolute path.",
+              saveFileInputSchema.shape,
+              (args) => runSaveFile(saver, sessionId, args),
             ),
           ]
         : []),

@@ -1,6 +1,7 @@
 import { ReportKind } from '@ops-console/shared';
 import { useState } from 'react';
 import { Button } from '../components/ui/button';
+import { CodeBlock } from '../components/ui/code-block';
 import { FoldTitle, useFold } from '../components/ui/fold';
 import { Markdown } from '../components/ui/markdown';
 import { COPY_FAILED, copyLabel, useCopy } from '../lib/clipboard';
@@ -98,7 +99,11 @@ export function ReportDocument({ report }: { report: AgentReport }) {
         </span>
       </header>
       {folded ? null : raw ? (
-        <pre className="m-0 max-h-[60vh] overflow-auto p-4 font-mono text-xs whitespace-pre-wrap">{report.raw}</pre>
+        <CodeBlock
+          text={report.raw}
+          tone="light"
+          className="m-0 max-h-[60vh] overflow-auto py-4 pl-4 font-mono text-xs whitespace-pre-wrap"
+        />
       ) : (
         <Markdown source={report.markdown} className="max-w-[80ch] px-6 py-5" />
       )}

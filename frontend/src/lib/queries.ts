@@ -49,6 +49,7 @@ import {
   networkAllowlistSchema,
   type OpenPullRequest,
   openedPullRequestSchema,
+  outputFileSchema,
   type PlaybookPatch,
   type PlaybookTrigger,
   type PrReviewEvent,
@@ -120,6 +121,7 @@ export const queryKeys = {
   alert: (id: string) => ['monitor', 'alert', id] as const,
   session: (id: string) => ['sessions', id] as const,
   messages: (id: string) => ['messages', id] as const,
+  outputs: (id: string) => ['outputs', id] as const,
   sessionDiff: (id: string) => ['session-diff', id] as const,
   sessionPullRequest: (id: string) => ['session-pull-request', id] as const,
   diskAccess: ['disk-access'] as const,
@@ -961,6 +963,16 @@ export function useStopSession(id: string) {
   return useMutation({
     mutationFn: () => apiSend('POST', `/sessions/${id}/stop`, undefined, z.undefined()),
     onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.sessions }),
+  });
+}
+
+/** Files the agent wrote for the operator in this Session's output folder. */
+export function useOutputFiles(sessionId: string) {
+  return useQuery({
+    queryKey: queryKeys.outputs(sessionId),
+    queryFn: () =>
+      apiGet(`/sessions/${sessionId}/outputs`, z.object({ data: z.array(outputFileSchema) })).then((b) => b.data),
+    enabled: sessionId !== '',
   });
 }
 

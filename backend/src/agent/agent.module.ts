@@ -19,6 +19,7 @@ import { AGENT_CONFIG, type AgentConfig } from './agent-config';
 import { Attachments } from './attachments';
 import { ConnectionLookup } from './connection-lookup';
 import { MessageInterceptors } from './message-interceptors';
+import { OutputFiles } from './output-files';
 import { ProdWriteRule } from './prod-write-rule';
 import { Retention } from './retention';
 import { RunInsights } from './run-insights.service';
@@ -62,6 +63,7 @@ export class AgentModule {
         ProdWriteRule,
         Transcripts,
         Attachments,
+        OutputFiles,
         ActionLogService,
         ApprovalsService,
         AccountsService,

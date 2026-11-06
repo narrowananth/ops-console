@@ -214,6 +214,19 @@ describe('Run sandbox: what a run cannot change or read (ADR 0006)', () => {
     ).toEqual(['/work/repo/.git']);
   });
 
+  it('lets a run write and read its output folder, and no other folder under the data folder', () => {
+    const fs = runSandbox({
+      workingDir: '/work/repo',
+      dataDir: '/data',
+      networkDomains: [],
+      writable: ['/data/outputs/s1'],
+    }).filesystem;
+    expect(fs?.allowWrite).toContain('/data/outputs/s1');
+    expect(fs?.allowRead).toContain('/data/outputs/s1');
+    expect(fs?.allowWrite).not.toContain('/data');
+    expect(fs?.denyRead).toContain('/data');
+  });
+
   it('leaves the working folder out of the writable folders of a read-only run', () => {
     const open = runSandbox({ workingDir: '/work/repo', dataDir: '/data', networkDomains: [] });
     const readOnly = runSandbox({ workingDir: '/work/repo', dataDir: '/data', networkDomains: [], readOnly: true });

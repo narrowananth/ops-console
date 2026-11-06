@@ -1,5 +1,6 @@
 import { type Approval, ApprovalKind, ApprovalStatus } from '@ops-console/shared';
 import { Button } from '../components/ui/button';
+import { CodeBlock } from '../components/ui/code-block';
 import { Empty } from '../components/ui/empty';
 import { useDecideApproval, usePendingApprovals } from '../lib/queries';
 
@@ -70,9 +71,11 @@ function ApprovalCard({
           </div>
           <p className="m-0 text-sm leading-relaxed font-medium break-words text-text">{approval.summary}</p>
           {approval.command && (
-            <pre className="m-0 max-h-40 overflow-auto rounded-lg border border-line bg-neutral-200 px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all text-neutral-900">
-              {approval.command}
-            </pre>
+            <CodeBlock
+              text={approval.command}
+              tone="light"
+              className="m-0 max-h-40 overflow-auto rounded-lg border border-line bg-neutral-200 py-2 pl-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all text-neutral-900"
+            />
           )}
         </div>
       </div>

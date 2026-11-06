@@ -1,7 +1,7 @@
 import { type AgentRun, RunPhase, type RunStep } from '@ops-console/shared';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { CodeBlock } from '../components/ui/code-block';
 import { duration } from '../components/ui/elapsed';
-import { copyLabel, useCopy } from '../lib/clipboard';
 import { clock as clockOf } from './run-look';
 import type { RunClock } from './run-model';
 import { baseName, Heading, plural, shown } from './run-parts';
@@ -162,7 +162,6 @@ function StepRow({
   lit: boolean;
   who: string | null;
 }) {
-  const [copied, copy] = useCopy();
   const tone = row.tone === 'bad' ? 'bad' : hot || row.running ? 'warm' : 'plain';
   return (
     <li
@@ -201,18 +200,10 @@ function StepRow({
       {open && (
         <div className="px-3 pb-2 pl-[5.75rem]">
           {row.error && <p className="m-0 mb-1 text-[11.5px] break-words text-accent-700">{row.error}</p>}
-          <div className="relative">
-            <pre className="m-0 max-h-60 overflow-auto rounded-md bg-neutral-900 py-2 pr-16 pl-3 font-mono text-[11px] break-all whitespace-pre-wrap text-neutral-100">
-              {row.raw}
-            </pre>
-            <button
-              type="button"
-              onClick={() => copy(row.raw)}
-              className="absolute top-1.5 right-1.5 cursor-pointer rounded border border-white/20 bg-white/10 px-2 py-0.5 text-[10.5px] text-neutral-100 hover:bg-white/20"
-            >
-              {copyLabel(copied, 'Copy')}
-            </button>
-          </div>
+          <CodeBlock
+            text={row.raw}
+            className="m-0 max-h-60 overflow-auto rounded-md bg-neutral-900 py-2 pl-3 font-mono text-[11px] break-all whitespace-pre-wrap text-neutral-100"
+          />
         </div>
       )}
     </li>
