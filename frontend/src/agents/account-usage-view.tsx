@@ -147,19 +147,6 @@ function Figures({ report }: { report: AccountUsageReport }) {
 
 type Series = { key: string; label: string; paint: Paint };
 
-function Legend({ series }: { series: Series[] }) {
-  return (
-    <ul className="m-0 mt-3 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs text-neutral-700">
-      {series.map((one) => (
-        <li key={one.key} className="flex items-center gap-1.5">
-          <Swatch paint={one.paint} />
-          {one.label}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 /** One column per local day, its cost split by account (all accounts) or by kind of work (one account). */
 function DayChart({
   report,

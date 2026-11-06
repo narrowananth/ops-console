@@ -3,7 +3,7 @@ import { SubagentStatus, UsageRange } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { accountUsageOf, agentsOf, localDay, rangeDays } from '../src/agent/account-usage';
 import type { UsageLine } from '../src/agent/pricing';
-import { costOf, sumTokens } from '../src/agent/pricing';
+import { sumTokens } from '../src/agent/pricing';
 import type { UsageRow } from '../src/agent/run-steps';
 import { type AgentDaemon, api, converse, signIn, startAgentDaemon } from './agent-fixtures';
 
@@ -75,9 +75,6 @@ describe('what the rows add up to', () => {
 
   it('adds days, accounts and kinds up to the same totals', () => {
     const all = report();
-    const costs = rows
-      .slice(0, 4)
-      .map((one) => (one.lines ?? []).reduce((sum, one2) => sum + costOf(one2, one2.model), 0));
     expect(all.totals.runs).toBe(4);
     expect(all.totals.subagents).toBe(1);
     const sum = (values: number[]) => values.reduce((total, one) => total + one, 0);
