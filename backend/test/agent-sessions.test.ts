@@ -133,6 +133,7 @@ describe('runs', () => {
         status: 'done',
         parts: [{ kind: 'text', text: 'Fix the webhook' }],
         created_at: expect.any(String),
+        skill: null,
       },
       {
         id: expect.any(String),

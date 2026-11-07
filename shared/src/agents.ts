@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { pageQuerySchema } from './api';
 import { sessionPlaybookSchema } from './playbooks';
+import { skillRefSchema } from './skills';
 
 export enum SessionKind {
   Repo = 'repo',
@@ -204,6 +205,8 @@ export const messageSchema = z.object({
   status: z.enum(['streaming', 'done', 'failed']),
   parts: z.array(partSchema),
   created_at: z.string(),
+  /** The skill a user message was sent with, or null: it ran the Playbook. */
+  skill: skillRefSchema.nullable().optional(),
 });
 
 export type Message = z.infer<typeof messageSchema>;
@@ -420,7 +423,7 @@ export const sessionPatchSchema = z
 
 export type SessionPatch = z.infer<typeof sessionPatchSchema>;
 
-export const sendMessageSchema = z.object({ text: z.string().trim().min(1) });
+export const sendMessageSchema = z.object({ text: z.string().trim().min(1), skill: skillRefSchema.optional() });
 
 /** A file the operator attached to a message: saved in the daemon's data folder, read by the agent from `path`. */
 export const attachmentSchema = z.object({ name: z.string(), path: z.string(), size: z.number().int() });

@@ -85,7 +85,7 @@ describe('Skills', () => {
     const patched = await http.patch(`/skills/${made.id}`, { name: 'new-name', instructions: 'Changed.' });
     expect(patched.body.data).toMatchObject({ name: 'new-name', instructions: 'Changed.' });
     const held = (await http.get('/playbooks')).body.data.items.find((item: { id: string }) => item.id === playbook.id);
-    expect(held.skills).toEqual([{ id: made.id, name: 'new-name', description: expect.any(String) }]);
+    expect(held.skills).toEqual([{ id: made.id, kind: 'custom', name: 'new-name', description: expect.any(String) }]);
     expect((await http.patch('/skills/nope', { name: 'x' })).status).toBe(404);
   });
 

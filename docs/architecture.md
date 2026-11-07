@@ -106,8 +106,8 @@ agent Session.
 | `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks; secrets via Keychain |
 | `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash and checkout |
 | `network` | The Network allowlist an agent run starts with: built-in hosts, the host of each Repo's `origin`, and the operator's own domains in `network_domains`; read, add and remove (`/network-allowlist`), registered by `agent` |
-| `agent` | Sessions and their kinds, Claude Agent SDK runs, the Run sandbox rules, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors; stop a run, edit the last message (file edits rewound), attachments, output files and the `save_file` tool; every tool call of a run kept with its time (`run_steps`) and each run's cost (`run_usage`); run health, slow and failure reasons, stages and time split read from them; the message queued behind a run |
-| `playbooks` | Playbooks and the Trigger each one holds, the built-ins (each Trigger's method, steps and shared rules on evidence, data, Connections and git) and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each; Skills, their `/skills` routes and the Skills each Playbook holds (registered by `agent`) |
+| `agent` | Sessions and their kinds, Claude Agent SDK runs, the Run sandbox rules, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors; stop a run, edit the last message (file edits rewound), attachments, output files and the `save_file` tool; every tool call of a run kept with its time (`run_steps`) and each run's cost (`run_usage`); run health, slow and failure reasons, stages and time split read from them; the message queued behind a run; a skill message, which hands the run its skill in place of the Playbook |
+| `playbooks` | Playbooks and the Trigger each one holds, the built-ins (each Trigger's method, steps and shared rules on evidence, data, Connections and git) and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each; Custom Skills, the Built-in skills in their Skill packs (a catalog in code, the installed packs in `state.db`), the `/skills`, `/skill-packs` and `/skill-menu` routes, the Project skills read from a Repo's folder for the menu, and the Skills each Playbook holds (registered by `agent`) |
 | `accounts` | Claude accounts, their usage, Auto-switch and Smart usage; the Claude account hub: with CLIProxy on, runs go to its loopback address with the API key from the Keychain and switching pauses |
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
 | `workspace` | `repo`, `pr_review` and `anonymous` Sessions; a Session's diff, and a `repo` Session following the agent's branch; branch checkout with stash; pull requests, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews, Reply checks and Comment passes, one job per pull request at a time, each in a scratch copy at the pull request's head commit (an Agent Review makes one only when a Playbook step writes; the built-in's test step does); an Agent Review also fetches the target branch to compare with, may run the tests and build, and the console posts its findings and one summary comment; for the others the console commits, pushes, replies and resolves; Pull request opening: the console pushes a `repo` Session's branch and opens its pull request on the Git host, for a click in the Session header (the agent drafts the text) and for a Fix's PR stage |
@@ -124,13 +124,13 @@ agent Session.
 | `lib` | API client, TanStack queries, `/ws` live events, session token, Remembered view storage, sorting, the finish chime, clipboard copy |
 | `monitor` | Monitor page: scan range and status codes, ticked Services, Alerts, Samples, Reports, Review and Fix |
 | `agent-runs` | Agent runs page: run health, why a run is slow or ended, time split, timeline, steps, queued messages, desktop alerts |
-| `workspace` | Workspace page: Repos and Anonymous Sessions, branch switcher, pull request list, files with Expand all and Collapse all, threads, the Agent Review, Reply check and Comment pass cards, the Session's Changes panel, the Open pull request form, queued messages, attachments, output file chips on the turn that wrote them |
+| `workspace` | Workspace page: Repos and Anonymous Sessions, branch switcher, pull request list, files with Expand all and Collapse all, threads, the Agent Review, Reply check and Comment pass cards, the Session's Changes panel, the Open pull request form, queued messages, attachments, output file chips on the turn that wrote them, the `/` skill menu above a Session's composer and the skill chip on a skill message |
 | `devtools` | Dev tools page (terminal-style `devtools` Sessions scoped to Connections, Results, Comparison) and the Connections page and form |
 | `integrations` | Integrations page: Connectors and MCP Servers |
 | `repos` | Repos page |
 | `setup` | Setup agent page with its xterm terminal, and the Permissions page: Full Disk Access, Start at login, Keychain, Run sandbox, Network allowlist |
 | `playbooks` | Playbooks page: Triggers, Playbooks, the editor with drag and drop, Step blocks, the Skills a Playbook holds; unsaved edits kept as a Remembered view; a job's Playbook steps and the Skills it was offered |
-| `skills` | Skills page: the list, the editor, the Playbooks holding each Skill; unsaved edits kept as a Remembered view |
+| `skills` | Skills page: Discover first (Skill packs, Install and Uninstall, each pack's skills read-only, the Playbooks holding each) and Yours (Custom Skills and their editor, with New Skill); unsaved edits kept as a Remembered view |
 | `agents` | Accounts & Usage page (accounts, sign-in by link, the CLIProxy hub, the chime), Session transcript, model, effort and Access mode chips, Approval prompts, the question panel, stop run, Report rendering |
 | `mcp`, `components/ui` | MCP status labels; shared controls, the folding card title, the side panel that folds to a rail, the job pathway and live timers, and the Tip layer that shows every element's `title` as a styled Tip on hover and keyboard focus, the code block with its copy icon, and the file viewer |
 
@@ -151,7 +151,7 @@ query refetches, batched over 40 ms. Events (`shared/src/ws.ts`):
 - Integrations: `connection.checked` for MCP Servers, Connectors and Connections.
 - Keychain: `keychain.wait_changed` when a call has waited past 10 seconds, and when the wait ends; `keychain.handover_refused` when the handover was refused.
 - Workspace: `pull_request.refreshed`, `pull_request.commented`, `pull_request.reviewed`, `pull_request.job_changed` (a Reply check or Comment pass).
-- Playbooks: `playbook_step.updated`, for each step of any job; `skills.changed`, when a Skill is created, edited or deleted.
+- Playbooks: `playbook_step.updated`, for each step of any job; `skills.changed`, when a Skill is created, edited or deleted, or a Skill pack is installed or uninstalled.
 - Monitor: `scan.started`, `scan.finished`, `alert.detected`, `alert.updated`, `alert.regressed`,
   `verification.stepped`, `alert.verified`, `alert.reviewed`, `fix.advanced`, `alert.resolved`.
 
@@ -201,6 +201,16 @@ Run sandbox's readable folders, and passes it to the SDK with the `skills` optio
 their names and descriptions and loads the text through the `Skill` tool when a step needs it, which the Action Log records
 as kind `skill`. The folder is removed when the run ends. A run whose folder cannot be written fails with the reason.
 
+Skills come in three kinds: Built-in (a Skill pack's text in the console, installed by the operator), Custom (the operator's) and Project (a
+`SKILL.md` folder in the Session's Repo). A Session's `/` menu lists them, read when it opens: a Repo Session shows all three, an Anonymous
+Session Built-in and Custom, a dev-tools or pull request reply Session none. A message that starts with a skill (picked from the menu, or
+a typed `/name` that matches; Project first, then Custom or Built-in) runs that skill and not the Playbook, for that
+message only: no Playbook rules, no Playbook Skills. A Custom skill goes to the run as the same local plugin, holding that one skill; a Built-in skill goes with the rest of its installed pack, so the skills of a pack can call one another. The other skills the agent can find stay available. A
+Project skill loads from the Repo through Claude Code with the Session's settings. A skill gone at send is refused with
+`skill_not_found` and starts no run. A message with no skill, and every job, runs its Playbook. The message's skill is
+stored beside it, so a reload shows the chip. See `docs/diagrams/skill-message-routing.html` and
+`docs/diagrams/skill-menu-sources.html`.
+
 **Workspace pull requests.** Lists span every repository of every owner the operator can read on
 each connected Git host, plus imported Repos under other owners. The daemon keeps lists in memory and
 serves them stale-while-revalidate: a list older than 30 minutes (a detail older than 15 seconds) is served
@@ -224,7 +234,7 @@ Settings the operator changed, Claude accounts, Sessions and the Connections a `
 names, the Action Log and Approvals, MCP Servers the operator removed or disabled, Connectors (config
 and last check), Connections (no secrets), Repos, Agent Reviews, Reply checks, Comment passes, the ids of comments the agent
 posted, Services, Routes, Scans and their Route results, Alerts and their events, Reports, Reviews
-and Fixes, Playbooks, the Trigger each one holds, and each job's copy of its Playbook steps. Pull requests stay on the Git host. Session messages stay in the Claude Code transcript, in
+and Fixes, Playbooks, the Trigger each one holds, each job's copy of its Playbook steps, Custom Skills, the installed Skill packs, the Built-in skills each Playbook holds, and the skill each message was sent with. Pull requests stay on the Git host. Session messages stay in the Claude Code transcript, in
 the config dir of the Session's Claude account.
 
 ## Agent runs
@@ -285,6 +295,7 @@ Where the build departs from `design/ops-console.html` on purpose:
 - **Updates**: a version line and panel, an update card and an "Updated to" notice, with Check now and auto-update.
 - **Claude account hub**: CLIProxy as the sign-in for agent runs, and adding an account by link.
 - **Finish chime**: a soft sound when the operator's run ends, switchable per browser, under Notifications.
+- **Skills page** under Claude, after Playbooks, with Discover and Yours tabs; the Playbook editor's **Skills** section with a badge naming each skill's pack, or Custom; the **`/` skill menu** above the Session composer and the **skill chip** with its "Playbook not used" line on a skill message.
 - **Question panel**, **queued messages**, **attachments**, **output files** and the Session's **Changes** panel in Workspace.
 - **Copy icon** on every code block: fenced blocks in the agent's text, commands in Approvals, raw errors and step output, replay requests and text files.
 - **Check reply** and **Address comments** Triggers, with their cards on a pull request.

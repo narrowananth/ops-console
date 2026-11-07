@@ -12,7 +12,7 @@ import { NetworkAllowlistService } from '../network/network-allowlist.service';
 import { JobSteps } from '../playbooks/job-steps';
 import { PlaybooksController } from '../playbooks/playbooks.controller';
 import { PlaybooksService } from '../playbooks/playbooks.service';
-import { SkillsController } from '../playbooks/skills.controller';
+import { SkillPacksController, SkillsController } from '../playbooks/skills.controller';
 import { SkillsService } from '../playbooks/skills.service';
 import { AccountUsage } from './account-usage';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
@@ -29,6 +29,8 @@ import { AgentRuntime } from './runtime';
 import { SessionKinds } from './session-kinds';
 import { AccountUsageController, AgentRunsController, SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
+import { SkillMenuController } from './skill-menu.controller';
+import { SkillMenuService } from './skill-menu.service';
 import { Transcripts } from './transcripts';
 
 /**
@@ -51,6 +53,8 @@ export class AgentModule {
         CliProxyController,
         PlaybooksController,
         SkillsController,
+        SkillPacksController,
+        SkillMenuController,
         NetworkAllowlistController,
       ],
       providers: [
@@ -77,6 +81,7 @@ export class AgentModule {
         AgentRuntime,
         PlaybooksService,
         SkillsService,
+        SkillMenuService,
         JobSteps,
       ],
       exports: [

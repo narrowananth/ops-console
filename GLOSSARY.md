@@ -98,11 +98,29 @@ A Trigger's run that goes through its Playbook steps and then the console's clos
 Review, Reply check or Comment pass. Reply in thread and Session message are chats, not jobs.
 
 **Skill**:
-A named instruction document the operator keeps in the console and attaches to Playbooks: a name, a description of when to
-use it, and Markdown instructions. The agent sees the name and description of each Skill its Playbook holds and loads the
+A named instruction document the console keeps and the operator attaches to Playbooks: a name, a description of when to
+use it, and Markdown instructions. It is a Built-in skill or a Custom Skill. The agent sees the name and description of each Skill its Playbook holds and loads the
 instructions when a step needs them. Text only, no scripts or files. Not the skills in `.agents/skills/`, which are for
-this repo's developers.
+this repo's developers, and not a Project skill.
 _Avoid_: plugin, add-on, prompt
+
+**Built-in skill**:
+A Skill the console ships in a Skill pack. The operator installs the pack; the skill is read-only and the console updates
+its text. Its badge in the console names its pack.
+
+**Skill pack**:
+A set of Built-in skills installed and uninstalled together. The Skills page lists packs under Discover, where an installed pack's skills are read; Yours holds only Custom Skills. Two ship today: Ops Console, the console's own skills for specifying, shipping, reviewing and refactoring a change, and Caveman, coding methods in a terse voice. A run asked for one skill of a pack also gets the rest of that pack, so its skills can call one another.
+
+**Custom Skill**:
+A Skill the operator wrote. It is available to every Session.
+
+**Project skill**:
+A skill in a Repo's own folder, with a `SKILL.md` that names and describes it. A Session in that Repo may call it from the `/` menu. The console
+reads it and never keeps it, and it cannot be attached to a Playbook.
+
+**Skill message**:
+A Session message that starts with `/` and a skill's name, followed by a free note that is the task. It runs that skill and
+not the Playbook, for that message only. Any other message runs the Playbook.
 
 **Playbook step**:
 One titled instruction in a Playbook, run as its own agent turn, ending done, skipped or failed.

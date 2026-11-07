@@ -17,6 +17,7 @@ import { Hint } from '../components/ui/tip';
 import { Toggle } from '../components/ui/toggle';
 import { useCreatePlaybook, useDeletePlaybook, useSavePlaybook, useSkills } from '../lib/queries';
 import { ascending } from '../lib/sort';
+import { KindBadge, useBadgeLabel } from '../skills/kind-badge';
 import type { Draft, DraftStep } from './drafts';
 import { type Drag, Grip, leftFor, startDrag } from './drag';
 import { SCRATCH_TIP, ScratchTag } from './job-steps';
@@ -398,6 +399,7 @@ function SkillsSection(props: {
 }) {
   const { ids, readOnly } = props;
   const skills = useSkills();
+  const labelOf = useBadgeLabel();
   const known = [...(skills.data?.items ?? []), ...props.playbook.skills];
   const held = ascending(
     ids.map((id) => ({ id, ...known.find((skill) => skill.id === id) })),
@@ -439,13 +441,16 @@ function SkillsSection(props: {
                 {skill.name === undefined ? (
                   <span className="text-[13px] font-semibold text-neutral-700">A deleted Skill</span>
                 ) : (
-                  <Link
-                    to={`/skills?skill=${encodeURIComponent(skill.id)}`}
-                    title="Open this Skill on the Skills page"
-                    className="font-mono text-[13px] font-semibold"
-                  >
-                    {skill.name}
-                  </Link>
+                  <span className="flex items-center gap-1.5">
+                    <Link
+                      to={`/skills?skill=${encodeURIComponent(skill.id)}`}
+                      title="Open this Skill on the Skills page"
+                      className="font-mono text-[13px] font-semibold"
+                    >
+                      {skill.name}
+                    </Link>
+                    {skill.kind && <KindBadge kind={skill.kind} name={skill.name} />}
+                  </span>
                 )}
                 <span className="text-xs text-neutral-700">{skill.description}</span>
               </div>
@@ -483,7 +488,7 @@ function SkillsSection(props: {
             <option value="">Add a Skill…</option>
             {free.map((skill) => (
               <option key={skill.id} value={skill.id}>
-                {skill.name}
+                {skill.name} ({labelOf(skill.kind, skill.name)})
               </option>
             ))}
           </select>

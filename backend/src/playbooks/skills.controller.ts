@@ -1,5 +1,12 @@
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post } from '@nestjs/common';
-import { createSkillSchema, type Skill, type SkillList, skillPatchSchema } from '@ops-console/shared';
+import {
+  createSkillSchema,
+  type Skill,
+  type SkillList,
+  type SkillPack,
+  type SkillPackList,
+  skillPatchSchema,
+} from '@ops-console/shared';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
 import { SkillsService } from './skills.service';
@@ -30,5 +37,27 @@ export class SkillsController {
   @HttpCode(204)
   remove(@Param() params: unknown): void {
     this.skills.remove(parseInput(idParams, params, 'params').id);
+  }
+}
+
+@Controller('skill-packs')
+export class SkillPacksController {
+  constructor(@Inject(SkillsService) private readonly skills: SkillsService) {}
+
+  @Get()
+  list(): { data: SkillPackList } {
+    return { data: this.skills.packs() };
+  }
+
+  @Post(':id/install')
+  @HttpCode(200)
+  install(@Param() params: unknown): { data: SkillPack } {
+    return { data: this.skills.installPack(parseInput(idParams, params, 'params').id) };
+  }
+
+  @Delete(':id/install')
+  @HttpCode(204)
+  uninstall(@Param() params: unknown): void {
+    this.skills.uninstallPack(parseInput(idParams, params, 'params').id);
   }
 }

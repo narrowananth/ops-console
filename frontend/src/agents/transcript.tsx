@@ -16,6 +16,7 @@ import { Markdown } from '../components/ui/markdown';
 import type { PathwayState } from '../components/ui/pathway';
 import { ComparisonView, ResultView } from '../devtools/result-tables';
 import { COPY_FAILED, copyLabel, useCopy } from '../lib/clipboard';
+import { KindBadge } from '../skills/kind-badge';
 import { InlineText } from './inline-text';
 import { asReport, ReportDocument } from './report-document';
 import { StepRun } from './step-run';
@@ -56,6 +57,17 @@ function PartView({ part }: { part: Part }) {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/** A message sent with a skill: its name and kind, and that the Playbook did not run for it. */
+function SkillChip({ skill }: { skill: NonNullable<Message['skill']> }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-700">
+      <span className="font-mono font-semibold text-text">/{skill.name}</span>
+      <KindBadge kind={skill.kind} name={skill.name} />
+      <span>Playbook not used for this message</span>
     </div>
   );
 }
@@ -135,7 +147,10 @@ export function MessageView({
             {outputs && message.status !== 'streaming' && <OutputChips {...outputs} />}
           </>
         ) : (
-          <SentText text={text} />
+          <>
+            {message.skill && <SkillChip skill={message.skill} />}
+            <SentText text={text} />
+          </>
         )
       ) : (
         <div className="flex flex-col gap-2">

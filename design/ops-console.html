@@ -489,6 +489,10 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h11l3 3v13H5z"/><path d="M9 10h6M9 14h6M9 18h3"/></svg>
         <span class="lbl">Playbooks</span>
       </button>
+      <button class="item" data-page="skills" title="Skills">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l2.4 5.6L20 9l-4.2 3.8L17 19l-5-3-5 3 1.2-6.2L4 9l5.6-.4z"/></svg>
+        <span class="lbl">Skills</span><span class="badge count">2</span>
+      </button>
     </nav>
     <div class="foot">
       <a class="acct" href="#agents" data-page="agents" aria-label="Active Claude account">
@@ -877,8 +881,31 @@ pnpm build</pre><button class="cp" aria-label="Copy" title="Copy"><svg width="14
                 </ul>
                 <div>Say so and I will push the branch and open a pull request.</div>
               </li>
+              <li class="msg you"><span class="who">You</span>
+                <div class="row" style="gap:8px;flex-wrap:wrap"><span class="mono s b">/caveman-commit</span><span class="pill acc" title="Caveman skill">Caveman</span><span>only the tax fix, not the test file</span></div>
+                <div class="xs muted">Playbook not used for this message</div>
+              </li>
+              <li class="msg"><span class="who">Agent</span>
+                <div class="mono s muted">Skill caveman-commit</div>
+                <div class="cb"><pre class="logline">fix(tax): guard null shipping in applyTax</pre></div>
+              </li>
             </ul>
             <div style="display:flex;flex-direction:column;gap:8px;padding:0 24px 18px">
+              <div style="position:relative">
+                <div class="menu" id="slashmenu" hidden data-flow style="bottom:calc(100% + 6px);left:0;right:0;max-height:300px;overflow-y:auto" role="listbox" aria-label="Skills">
+                  <div class="menu-h">Skills for checkout-api</div>
+                  <ul style="display:flex;flex-direction:column;gap:2px" id="slashlist">
+                    <li><button class="it" data-skill="caveman-commit" style="align-items:center;gap:10px;padding:8px 10px"><span class="mono s b">/caveman-commit</span><span class="grow trunc s muted">Conventional Commits message compressed to intent only</span><span class="pill acc">Caveman</span></button></li>
+                    <li><button class="it" data-skill="caveman-review" style="align-items:center;gap:10px;padding:8px 10px"><span class="mono s b">/caveman-review</span><span class="grow trunc s muted">Compressed code review, one line per finding</span><span class="pill acc">Caveman</span></button></li>
+                    <li><button class="it" data-skill="code-review" style="align-items:center;gap:10px;padding:8px 10px"><span class="mono s b">/code-review</span><span class="grow trunc s muted">Review the changes since a fixed point along two axes</span><span class="pill ok">Project</span></button></li>
+                    <li><button class="it" data-skill="codebase-design" style="align-items:center;gap:10px;padding:8px 10px"><span class="mono s b">/codebase-design</span><span class="grow trunc s muted">Shared vocabulary for designing deep modules</span><span class="pill ok">Project</span></button></li>
+                    <li><button class="it" data-skill="pr" style="align-items:center;gap:10px;padding:8px 10px"><span class="mono s b">/pr</span><span class="grow trunc s muted">Use when writing a PR body</span><span class="pill ok">Project</span></button></li>
+                    <li><button class="it" data-skill="pr-body-style" style="align-items:center;gap:10px;padding:8px 10px"><span class="mono s b">/pr-body-style</span><span class="grow trunc s muted">Use when writing a pull request description</span><span class="pill">Custom</span></button></li>
+                    <li><button class="it" data-skill="safe-refactor" style="align-items:center;gap:10px;padding:8px 10px"><span class="mono s b">/safe-refactor</span><span class="grow trunc s muted">Restructure code while preserving behavior</span><span class="pill acc">Caveman</span></button></li>
+                  </ul>
+                  <p class="xs muted" id="slashnone" hidden style="padding:8px 10px;margin:0">No skills match</p>
+                  <p class="xs muted" style="padding:6px 10px 2px;margin:0;border-top:1px solid var(--line)">Anonymous Sessions show Ops Console and Custom only. Enter picks, Esc closes. <a href="#skills" data-page="skills">Discover more</a></p>
+                </div>
               <div class="composer">
                 <textarea aria-label="Message">Push the branch and open a pull request.</textarea>
                 <div class="bar">
@@ -900,6 +927,7 @@ pnpm build</pre><button class="cp" aria-label="Copy" title="Copy"><svg width="14
                   </div>
                   <button class="btn primary ml" title="Enter sends. Shift+Enter adds a new line." style="padding:6px 16px">Send</button>
                 </div>
+              </div>
               </div>
             </div>
           </div>
@@ -1332,6 +1360,14 @@ pnpm build</pre><button class="cp" aria-label="Copy" title="Copy"><svg width="14
               <textarea class="field" aria-label="Rules" style="width:100%;min-height:72px;resize:vertical;font-size:13px;background:var(--card)">Run pnpm test:unit, never the whole suite. Treat orders-db-dev as the source of truth for order shapes. Say which file:line each claim comes from.</textarea>
             </section>
             <section>
+              <div class="row" style="margin-bottom:6px"><h2 style="font-size:14px">Skills</h2><span class="xs muted">Method the agent may load when a step needs it</span><span class="ml mono xs muted" style="white-space:nowrap">2 / 8</span></div>
+              <ul style="display:flex;flex-direction:column;gap:6px">
+                <li class="row card s" style="gap:10px;padding:8px 12px"><a class="mono b" href="#skills" data-page="skills">caveman-commit</a><span class="pill acc">Caveman</span><span class="muted trunc grow">Conventional Commits, intent only</span><button class="btn xs" title="Remove from this Playbook">Remove</button></li>
+                <li class="row card s" style="gap:10px;padding:8px 12px"><a class="mono b" href="#skills" data-page="skills">pr-body-style</a><span class="pill">Custom</span><span class="muted trunc grow">Use when writing a pull request description</span><button class="btn xs" title="Remove from this Playbook">Remove</button></li>
+              </ul>
+              <div class="row" style="gap:8px;margin-top:8px"><select class="field s" aria-label="Add a Skill" style="background:var(--card);max-width:280px"><option>Add a Skill…</option><option>caveman (Caveman)</option><option>caveman-review (Caveman)</option><option>repo-debug-notes (Custom)</option></select><span class="xs muted">A message that starts with a skill runs without this Playbook.</span></div>
+            </section>
+            <section>
               <div class="row" style="margin-bottom:8px"><h2 style="font-size:14px">Steps</h2><span class="xs muted">Each step is its own agent turn, in order</span><span class="ml mono xs muted" id="step-count">6 / 12</span></div>
               <ol class="steps-list" id="steps"><li class="pstep" draggable="true" data-writes="0"><span class="grip" title="Drag to reorder">⋮⋮</span><span class="num" style="width:22px;height:22px;font-size:11px">1</span><div class="body"><div class="row" style="gap:6px"><span class="b m trunc">Find the Repo that owns it</span></div><p>Work out which Repo really owns the failure. A log can come from a shared library or a client of the Service; say which, with file:line.</p></div><div class="acts"><button data-up title="Move up" aria-label="Move up">↑</button><button data-down title="Move down" aria-label="Move down">↓</button><button data-rm title="Remove" aria-label="Remove">×</button></div></li><li class="pstep" draggable="true" data-writes="0"><span class="grip" title="Drag to reorder">⋮⋮</span><span class="num" style="width:22px;height:22px;font-size:11px">2</span><div class="body"><div class="row" style="gap:6px"><span class="b m trunc">Trace the log through the code</span></div><p>Map the log line to the code that wrote it, then follow the call path end to end: entry point, the failing call, the data it read.</p></div><div class="acts"><button data-up title="Move up" aria-label="Move up">↑</button><button data-down title="Move down" aria-label="Move down">↓</button><button data-rm title="Remove" aria-label="Remove">×</button></div></li><li class="pstep" draggable="true" data-writes="0"><span class="grip" title="Drag to reorder">⋮⋮</span><span class="num" style="width:22px;height:22px;font-size:11px">3</span><div class="body"><input class="field b" value="Find who else uses it" aria-label="Step title" style="background:var(--card);font-size:13px"><textarea aria-label="Step instructions">List the services, routes and jobs that call the code you would change, so a fix breaks none of them. Check web and orders-worker: both call checkout.</textarea></div><div class="acts"><button data-up title="Move up" aria-label="Move up">↑</button><button data-down title="Move down" aria-label="Move down">↓</button><button data-rm title="Remove" aria-label="Remove">×</button></div></li><li class="pstep" draggable="true" data-writes="0"><span class="grip" title="Drag to reorder">⋮⋮</span><span class="num" style="width:22px;height:22px;font-size:11px">4</span><div class="body"><div class="row" style="gap:6px"><span class="b m trunc">Read real data from Connections</span></div><p>Find the queries this code runs, then run them read-only on the Connections you have to see the real shape of the data. Prefer dev; read PROD only where the Connection allows it.</p></div><div class="acts"><button data-up title="Move up" aria-label="Move up">↑</button><button data-down title="Move down" aria-label="Move down">↓</button><button data-rm title="Remove" aria-label="Remove">×</button></div></li><li class="pstep" draggable="true" data-writes="1"><span class="grip" title="Drag to reorder">⋮⋮</span><span class="num" style="width:22px;height:22px;font-size:11px">5</span><div class="body"><div class="row" style="gap:6px"><span class="b m trunc">Make mock data</span><span class="wtag">scratch copy</span></div><p>Make up rows shaped like the real data, including the case that fails. Never copy a value read from PROD.</p></div><div class="acts"><button data-up title="Move up" aria-label="Move up">↑</button><button data-down title="Move down" aria-label="Move down">↓</button><button data-rm title="Remove" aria-label="Remove">×</button></div></li><li class="pstep" draggable="true" data-writes="1"><span class="grip" title="Drag to reorder">⋮⋮</span><span class="num" style="width:22px;height:22px;font-size:11px">6</span><div class="body"><div class="row" style="gap:6px"><span class="b m trunc">Test a lasting fix</span><span class="wtag">scratch copy</span></div><p>Write a test that fails on the mock data, then the smallest change that makes it pass without breaking the callers you found. No quick patch.</p></div><div class="acts"><button data-up title="Move up" aria-label="Move up">↑</button><button data-down title="Move down" aria-label="Move down">↓</button><button data-rm title="Remove" aria-label="Remove">×</button></div></li></ol>
               <div class="row s muted" style="gap:8px;margin-top:10px;padding:8px 12px;border:1px dashed var(--divider);border-radius:var(--r-lg)"><span class="num" style="width:22px;height:22px;font-size:11px">✓</span>Then the console's own turn: write the Report.</div>
@@ -1346,6 +1382,78 @@ pnpm build</pre><button class="cp" aria-label="Copy" title="Copy"><svg width="14
           </ul>
           <p class="xs muted" style="margin:6px 4px 0">Drag a block into Steps, or press +. The dropped copy is yours to edit. <span class="wtag">scratch copy</span> steps write files or run commands, so Review PR refuses them.</p>
         </aside>
+      </div>
+    </section>
+
+    <!-- ============ Skills (skills/skills-view.tsx): Yours and Discover ============ -->
+    <section class="page" id="p-skills">
+      <header class="ph"><div class="ph-in"><h1>Skills</h1><span class="sub">Instructions the agent can use. Ops Console skills come from the console; Custom Skills are yours. Both attach to Playbooks and show in a Session's <span class="mono">/</span> menu.</span><span class="sp"></span><button class="btn" id="new-skill">+ New Skill</button></div></header>
+      <div class="pb" style="overflow:hidden">
+        <aside class="pbk-left" aria-label="Skills">
+          <div class="seg" style="margin-bottom:8px">
+            <button class="on" data-go="skt:discover" id="skt-discover">Discover</button>
+            <button data-go="skt:yours" id="skt-yours">Yours</button>
+          </div>
+          <div data-pane="skt:yours" hidden>
+            <ul style="display:flex;flex-direction:column;gap:2px">
+              <li><button class="it" data-go="skl:custom" style="align-items:center;gap:8px;padding:8px 10px"><span class="grow" style="display:flex;flex-direction:column;min-width:0"><span class="trunc mono s b">pr-body-style</span><span class="xs muted trunc">2 Playbooks</span></span><span class="pill">Custom</span></button></li>
+              <li><button class="it" data-go="skl:custom" style="align-items:center;gap:8px;padding:8px 10px"><span class="grow" style="display:flex;flex-direction:column;min-width:0"><span class="trunc mono s b">repo-debug-notes</span><span class="xs muted trunc">No Playbooks</span></span><span class="pill">Custom</span></button></li>
+            </ul>
+            <p class="xs muted" style="margin:10px 8px 0">A to Z. Only Skills you wrote: a pack's skills are read in Discover. With none, this tab says so and offers New Skill and Browse Discover.</p>
+          </div>
+          <div data-pane="skt:discover">
+            <div class="pbk-cap">Packs</div>
+            <ul style="display:flex;flex-direction:column;gap:2px">
+              <li><button class="it sel" data-go="skl:pack-caveman" style="align-items:center;gap:8px;padding:8px 10px"><span class="grow" style="display:flex;flex-direction:column;min-width:0"><span class="trunc b">Caveman</span><span class="xs muted trunc">9 skills</span></span><span class="pill ok">Installed</span></button></li>
+              <li><button class="it" data-go="skl:pack-ops" style="align-items:center;gap:8px;padding:8px 10px"><span class="grow" style="display:flex;flex-direction:column;min-width:0"><span class="trunc b">Ops Console</span><span class="xs muted trunc">9 skills</span></span><span class="pill">Install</span></button></li>
+            </ul>
+          </div>
+        </aside>
+        <section class="pbk-mid" aria-label="Open skill">
+          <!-- Custom Skill: editable, as in the Playbooks editor -->
+          <div data-pane="skl:custom" class="col" style="max-width:720px;display:flex;flex-direction:column;gap:20px;padding:24px 28px" hidden>
+            <div class="row" style="gap:10px"><input class="field mono grow" value="pr-body-style" aria-label="Name" style="font:700 16px var(--mono);background:transparent;border-color:transparent;padding:4px 6px"><span class="pill">Custom</span><button class="btn xs danger">Delete</button></div>
+            <section><div class="row" style="margin-bottom:6px"><h2 style="font-size:14px">Description</h2><span class="xs muted">When the agent should use it</span><span class="ml mono xs muted">74 / 1024</span></div><textarea class="field" aria-label="Description" style="width:100%;min-height:48px;resize:vertical;font-size:13px;background:var(--card)">Use when writing a pull request description: what changed, why, how it was tested.</textarea></section>
+            <section><div class="row" style="margin-bottom:6px"><h2 style="font-size:14px">Instructions</h2><span class="xs muted">Markdown</span><span class="ml mono xs muted">412 / 20000</span></div><textarea class="field mono" aria-label="Instructions" style="width:100%;min-height:140px;resize:vertical;font-size:12px;background:var(--card)"># PR body&#10;1. One sentence: what the change does for the operator.&#10;2. Why now.&#10;3. How it was tested, with the command.</textarea></section>
+            <p class="xs muted">Do not put secrets, connection strings or customer data here: the agent can read the text. A Custom Skill cannot take the name of an Ops Console skill.</p>
+            <section><div class="row" style="margin-bottom:6px"><h2 style="font-size:14px">Held by</h2></div><ul class="s" style="display:flex;flex-direction:column;gap:4px"><li><a href="#playbooks" data-page="playbooks">Safe DB fix</a></li><li><a href="#playbooks" data-page="playbooks">PROD readiness</a></li></ul></section>
+          </div>
+          <!-- Discover: an installed pack -->
+          <div data-pane="skl:pack-caveman" class="col" style="max-width:720px;display:flex;flex-direction:column;gap:20px;padding:24px 28px">
+            <div class="row" style="gap:10px"><h2 class="grow" style="font-size:18px">Caveman</h2><span class="pill ok">Installed</span><button class="btn xs danger" data-toggle="#unins2">Uninstall</button></div>
+            <div class="row card s" id="unins2" hidden data-flow style="gap:10px;padding:10px 14px;border-color:var(--accent-200)"><span class="grow">Uninstalling Caveman removes its 9 skills from the / menu and from <a href="#playbooks" data-page="playbooks">Safe DB fix</a>, <a href="#playbooks" data-page="playbooks">PROD readiness</a> and <a href="#playbooks" data-page="playbooks">Checkout deep check</a>.</span><button class="btn xs" data-toggle="#unins2">Cancel</button><button class="btn primary xs">Uninstall</button></div>
+            <p class="s muted" style="margin:-10px 0 0">Terse answers and tight coding methods: commit messages, reviews, refactors, patches. Text only, from the Caveman plugin (Apache-2.0).</p>
+            <ul class="card" style="display:flex;flex-direction:column">
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">caveman</span><span class="muted trunc">Terse voice, every fact kept</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">caveman-commit</span><span class="muted trunc">Conventional Commits, intent only</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">caveman-review</span><span class="muted trunc">One line per finding</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">investigate-first</span><span class="muted trunc">Diagnose before editing</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">lean-build</span><span class="muted trunc">Feature work, strict scope</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">migration</span><span class="muted trunc">Reversible transitions</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">safe-refactor</span><span class="muted trunc">Restructure, keep behavior</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">surgical-patch</span><span class="muted trunc">Narrowest responsible fix</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px"><span class="mono b">verify-and-stop</span><span class="muted trunc">Prove it works, add nothing</span></li>
+            </ul>
+            <p class="xs muted">Click a skill to read its text. Install makes all nine available to Playbooks and the / menu; Uninstall removes all nine.</p>
+          </div>
+          <!-- Discover: the Ops Console pack, not installed -->
+          <div data-pane="skl:pack-ops" class="col" style="max-width:720px;display:flex;flex-direction:column;gap:20px;padding:24px 28px" hidden>
+            <div class="row" style="gap:10px"><h2 class="grow" style="font-size:18px">Ops Console</h2><span class="pill">Install</span><button class="btn primary xs">Install</button></div>
+            <p class="s muted" style="margin:-10px 0 0">The console's own skills for the whole path of a change: spec it, ship it, review it, commit it, write its pull request, refactor, and look back on the session. Written for any Repo. Text only.</p>
+            <ul class="card" style="display:flex;flex-direction:column">
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">code-review</span><span class="muted trunc">Review a change on two axes, standards and spec</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">commit-message</span><span class="muted trunc">Commit message in the repo's convention</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">grilling</span><span class="muted trunc">Interview until the design is shared</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">humanizer</span><span class="muted trunc">Rewrite AI-sounding text</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">pr</span><span class="muted trunc">Pull request body with evidence and merge danger</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">refactor</span><span class="muted trunc">Restructure without changing behavior</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">retro</span><span class="muted trunc">Retrospective on a session</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)"><span class="mono b">ship</span><span class="muted trunc">Spec to committed branch and PR body</span></li>
+              <li class="row s" style="gap:10px;padding:8px 14px;"><span class="mono b">spec</span><span class="muted trunc">Settle one change into a written spec</span></li>
+            </ul>
+            <p class="xs muted">Click a skill to read its text. Install makes all nine available to Playbooks and the / menu; Uninstall removes all nine.</p>
+          </div>
+        </section>
       </div>
     </section>
 
@@ -1423,6 +1531,38 @@ pnpm build</pre><button class="cp" aria-label="Copy" title="Copy"><svg width="14
       ? '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'
       : '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>';
   });
+  /* Skills: Discover is the first tab and opens the Caveman pack; Yours opens a Custom Skill and alone shows New Skill. */
+  $('#skt-discover').addEventListener('click', () => { go('skl:pack-caveman'); $('#new-skill').hidden = true; });
+  $('#skt-yours').addEventListener('click', () => { go('skl:custom'); $('#new-skill').hidden = false; });
+  $('#new-skill').hidden = true;
+
+  /* Session composer: "/" as the first character opens the skill menu; the text after it narrows it, names first. */
+  const msg = $('textarea[aria-label="Message"]');
+  const slash = $('#slashmenu');
+  function slashFilter() {
+    const v = msg.value;
+    if (!v.startsWith('/')) { slash.hidden = true; return; }
+    const q = v.slice(1).split(/\s/)[0].toLowerCase();
+    const rows = $$('#slashlist li');
+    rows.forEach((li) => {
+      const b = li.firstElementChild;
+      const name = b.dataset.skill;
+      const desc = b.querySelector('.grow').textContent.toLowerCase();
+      li.hidden = !(name.includes(q) || desc.includes(q));
+    });
+    rows.sort((a, b) => Number(b.firstElementChild.dataset.skill.includes(q)) - Number(a.firstElementChild.dataset.skill.includes(q)));
+    rows.forEach((li) => li.parentNode.appendChild(li));
+    $('#slashnone').hidden = rows.some((li) => !li.hidden);
+    slash.hidden = v.includes(' ');
+  }
+  msg.addEventListener('input', slashFilter);
+  $$('#slashlist .it').forEach((b) => b.addEventListener('click', () => {
+    const rest = msg.value.replace(/^\/\S*\s?/, '');
+    msg.value = '/' + b.dataset.skill + ' ' + rest;
+    slash.hidden = true;
+    msg.focus();
+  }));
+
   $('#collapse').addEventListener('click', (e) => {
     const on = app.classList.toggle('collapsed');
     e.currentTarget.title = on ? 'Expand sidebar' : 'Collapse sidebar';

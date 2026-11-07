@@ -14,6 +14,8 @@ async function reset(request: APIRequestContext) {
   for (const playbook of held.data.items.filter((item) => !item.builtin)) {
     await request.delete(api(`/playbooks/${playbook.id}`), { headers: auth });
   }
+  await request.delete(api('/skill-packs/caveman/install'), { headers: auth });
+  await request.delete(api('/skill-packs/ops-console/install'), { headers: auth });
   const skills = await request.get(api('/skills'), { headers: auth });
   const list = (await skills.json()) as { data: { items: { id: string }[] } };
   for (const skill of list.data.items) await request.delete(api(`/skills/${skill.id}`), { headers: auth });
@@ -33,7 +35,7 @@ async function makePlaybook(request: APIRequestContext, name: string, skillIds: 
 }
 
 const openSkills = (page: Page, id?: string) =>
-  page.goto(`${daemon.url}/skills${id ? `?skill=${id}` : ''}#token=${daemon.token}`);
+  page.goto(`${daemon.url}/skills?${id ? `skill=${id}` : 'tab=yours'}#token=${daemon.token}`);
 
 const regions = (page: Page) => ({
   list: page.getByRole('complementary', { name: 'Skills', exact: true }),
@@ -44,13 +46,15 @@ test.beforeEach(async ({ request }) => {
   await reset(request);
 });
 
-test('with no Skills the page offers New Skill; New Skill opens a Skill to fill in', async ({ page }) => {
+test('with no Skills Yours keeps its tabs; New Skill opens a Skill to fill in', async ({ page }) => {
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
   await page.getByRole('navigation').getByRole('link', { name: 'Skills' }).click();
+  await page.getByRole('tab', { name: 'Yours' }).click();
   await expect(page.getByRole('heading', { name: 'Skills', exact: true })).toBeVisible();
   await expect(page.getByText('No Skills yet.')).toBeVisible();
 
-  await page.getByRole('button', { name: 'New Skill', exact: true }).click();
+  // The header's New Skill is the way in; the page has no empty-state card.
+  await page.getByRole('button', { name: '+ New Skill' }).click();
   const { list, editor } = regions(page);
   await expect(editor.getByRole('textbox', { name: 'Name' })).toHaveValue('new-skill');
   await expect(list.getByRole('button', { name: /new-skill/ })).toContainText('0 Playbooks');
@@ -171,7 +175,7 @@ test('a Playbook attaches a Skill in its editor, shows it with a link and keeps 
 
   await expect(skills).toContainText('0 / 8');
   await expect(skills).toContainText('No Skills. The agent follows the rules and steps only.');
-  await skills.getByRole('combobox', { name: 'Add a Skill' }).selectOption({ label: 'alpha-method' });
+  await skills.getByRole('combobox', { name: 'Add a Skill' }).selectOption({ label: 'alpha-method (Custom)' });
   await expect(skills).toContainText('1 / 8');
   const held = skills.getByRole('listitem', { name: 'alpha-method' });
   await expect(held).toContainText('Use it to read a log.');
@@ -212,7 +216,7 @@ test('a Playbook holds eight Skills and refuses a ninth; Duplicate copies them; 
   await expect(skills.getByRole('combobox', { name: 'Add a Skill' })).toBeDisabled();
   await skills.getByRole('button', { name: 'Remove skill-8' }).click();
   await expect(skills.getByRole('combobox', { name: 'Add a Skill' })).toBeEnabled();
-  await skills.getByRole('combobox', { name: 'Add a Skill' }).selectOption({ label: 'skill-9' });
+  await skills.getByRole('combobox', { name: 'Add a Skill' }).selectOption({ label: 'skill-9 (Custom)' });
   await expect(skills).toContainText('8 / 8');
   await expect(skills.getByRole('combobox', { name: 'Add a Skill' })).toBeDisabled();
   await editor.getByRole('button', { name: 'Discard' }).click();
