@@ -11,6 +11,8 @@ export type Run = {
   rules: string | null;
   /** The Skills the run's Playbook holds. */
   skills: SkillCopy[];
+  /** True: the agent may use only the held skills. False: the others it can find stay available, as with no Playbook. */
+  onlyHeldSkills: boolean;
   /** Tools denied on top of merging. */
   deny: string[];
   /** The run loads the folder's own `.claude` settings, `.mcp.json` and CLAUDE.md; false for a folder that holds pull request code. */

@@ -113,6 +113,7 @@ export function useLiveEvents(): void {
       if (event.event === 'skills.changed') {
         refetch(queryKeys.skills);
         refetch(queryKeys.playbooks);
+        refetch(queryKeys.skillPacks);
       }
       if (event.event === 'playbook_step.updated') {
         const { agent_review_id, reply_check_id, comment_pass_id } = event.data;

@@ -5,6 +5,7 @@ import {
   namesInText,
   SessionKind,
   SessionState,
+  type SkillRef,
   withAttachments,
 } from '@ops-console/shared';
 import { useEffect, useRef, useState } from 'react';
@@ -43,6 +44,7 @@ import { MessageEditor, type MessageEditorHandle } from './message-editor';
 import { OpenPullRequestForm } from './open-pull-request';
 import { DiffPanel, DiffToggle, ResizeHandle, useDiffWidth } from './session-diff';
 import { SESSION_STATE_TIP } from './sessions-pane';
+import { useSkillMenuFor } from './skill-menu';
 
 export function SessionView({ id, onGone }: { id: string; onGone: () => void }) {
   const sessions = useRepoSessions();
@@ -56,6 +58,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   // What the last edit did to the files, until the operator closes it or sends again.
   const [reverted, setReverted] = useState<EditedMessage | null>(null);
   const [text, setText] = useStored(sessionDraftKey(id), z.string(), '');
+  const [picked, setPicked] = useState<SkillRef | null>(null);
   const attachments = useAttachments(id);
   const editor = useRef<MessageEditorHandle>(null);
   // An attached file open over the page.
@@ -70,6 +73,18 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const panel = useDiffWidth(body);
   const hasDiff = session?.kind === SessionKind.Repo;
   const gone = sessions.isSuccess && session === undefined;
+  // A skill picked from the `/` menu; a typed `/name` is read by the daemon alone.
+  const skillMenu = useSkillMenuFor(
+    id,
+    text,
+    session?.kind === SessionKind.Repo || session?.kind === SessionKind.Anonymous,
+    (chosen) => {
+      setText(`/${chosen.name} ${text.replace(/^\/\S*\s?/, '')}`);
+      setPicked({ kind: chosen.kind, name: chosen.name });
+      // The editor keeps its focus while a row is clicked and moves the cursor after the new text itself.
+      editor.current?.focusEnd();
+    },
+  );
   const pulls = useRepoPullRequests(session?.kind === SessionKind.Repo ? session.repo_id : null);
   // What the operator typed while the agent was working: the daemon keeps it and sends it when the run ends, unless the
   // operator stops the run, which holds it for Send now.
@@ -130,12 +145,18 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
       });
       return;
     }
-    send.mutate(withAttachments(text, files), {
-      onSuccess: () => {
-        setText('');
-        attachments.remove(placed);
+    // The pick holds only while the text still opens with exactly that name: `/pre` is not the picked `pr`.
+    const skill = picked && text.split(/\s/, 1)[0] === `/${picked.name}` ? picked : undefined;
+    send.mutate(
+      { text: withAttachments(text, files), ...(skill ? { skill } : {}) },
+      {
+        onSuccess: () => {
+          setText('');
+          setPicked(null);
+          attachments.remove(placed);
+        },
       },
-    });
+    );
   };
 
   return (
@@ -342,8 +363,9 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 event.preventDefault();
                 addFiles(files);
               }}
-              className={`rounded-lg border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)] ${dropping ? 'border-dashed border-accent-400 bg-accent-100' : 'border-divider'}`}
+              className={`relative rounded-lg border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)] ${dropping ? 'border-dashed border-accent-400 bg-accent-100' : 'border-divider'}`}
             >
+              {skillMenu.menu}
               <MessageEditor
                 ref={editor}
                 label="Message"
@@ -369,6 +391,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 }}
                 onPasteFiles={addFiles}
                 onSubmit={submit}
+                onKey={skillMenu.onKey}
               />
               <div className="flex items-end gap-1.5 px-2.5 pt-1.5 pb-2.5">
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">

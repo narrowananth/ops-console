@@ -12,12 +12,14 @@ import {
   playbookStepSchema,
   SessionKind,
   type SkillCopy,
+  SkillKind,
 } from '@ops-console/shared';
 import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import {
   fixes,
+  playbookBuiltinSkills,
   playbookSkills,
   playbooks,
   playbookTriggers,
@@ -29,7 +31,7 @@ import {
 import { STORE, type Store, type Tx } from '../db/store';
 import { builtinId, builtinName, STEP_BLOCKS, WRITING_BLOCKS } from './blocks';
 import { BUILTIN_RULES, BUILTIN_STEPS } from './builtins';
-import { parseSkillCopies, SkillsService } from './skills.service';
+import { builtinSkillId, parseBuiltinId, parseSkillCopies, SkillsService } from './skills.service';
 
 type PlaybookRow = typeof playbooks.$inferSelect;
 type SessionRow = typeof sessions.$inferSelect;
@@ -269,7 +271,7 @@ export class PlaybooksService {
     };
   }
 
-  /** Playbook id to the Skills it holds, A to Z. */
+  /** Playbook id to the Skills it holds, Custom and Built-in, A to Z. */
   private heldSkills(): Map<string, HeldSkill[]> {
     const map = new Map<string, HeldSkill[]>();
     const rows = this.store.db
@@ -282,19 +284,42 @@ export class PlaybooksService {
       .from(playbookSkills)
       .innerJoin(skills, eq(skills.id, playbookSkills.skillId))
       .all();
-    for (const { playbookId, ...skill } of rows) map.set(playbookId, [...(map.get(playbookId) ?? []), skill]);
+    for (const { playbookId, ...skill } of rows) {
+      map.set(playbookId, [...(map.get(playbookId) ?? []), { ...skill, kind: SkillKind.Custom }]);
+    }
+    const installed = new Map(this.skills.list().items.map((item) => [item.id, item]));
+    for (const row of this.store.db.select().from(playbookBuiltinSkills).all()) {
+      const found = installed.get(builtinSkillId(row.packId, row.skillName));
+      if (!found) continue;
+      map.set(row.playbookId, [
+        ...(map.get(row.playbookId) ?? []),
+        { id: found.id, kind: SkillKind.Builtin, name: found.name, description: found.description },
+      ]);
+    }
     for (const list of map.values()) list.sort(byName);
     return map;
   }
 
-  /** Replaces the Skills the Playbook holds. */
+  /** Replaces the Skills the Playbook holds; a Built-in skill must be one of an installed pack. */
   private holdSkills(tx: Tx, playbookId: string, skillIds: string[]): void {
-    if (skillIds.length > 0) {
-      const found = tx.select({ id: skills.id }).from(skills).where(inArray(skills.id, skillIds)).all();
-      if (found.length !== skillIds.length) throw new ApiError(404, ErrorCode.NotFound, 'no such Skill');
+    const custom = skillIds.filter((id) => parseBuiltinId(id) === null);
+    const builtin = skillIds.flatMap((id) => {
+      const parsed = parseBuiltinId(id);
+      return parsed === null ? [] : [parsed];
+    });
+    if (custom.length > 0) {
+      const found = tx.select({ id: skills.id }).from(skills).where(inArray(skills.id, custom)).all();
+      if (found.length !== custom.length) throw new ApiError(404, ErrorCode.NotFound, 'no such Skill');
+    }
+    if (builtin.some(({ packId, name }) => !this.skills.isInstalledBuiltin(builtinSkillId(packId, name)))) {
+      throw new ApiError(404, ErrorCode.NotFound, 'no such Skill');
     }
     tx.delete(playbookSkills).where(eq(playbookSkills.playbookId, playbookId)).run();
-    for (const skillId of skillIds) tx.insert(playbookSkills).values({ playbookId, skillId }).run();
+    tx.delete(playbookBuiltinSkills).where(eq(playbookBuiltinSkills.playbookId, playbookId)).run();
+    for (const skillId of custom) tx.insert(playbookSkills).values({ playbookId, skillId }).run();
+    for (const { packId, name } of builtin) {
+      tx.insert(playbookBuiltinSkills).values({ playbookId, packId, skillName: name }).run();
+    }
   }
 
   /** Playbook id to the Triggers holding it, in page order. */

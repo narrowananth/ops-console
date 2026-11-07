@@ -33,10 +33,11 @@ import {
   RunPurpose,
   SessionState,
   type SkillCopy,
+  type SkillRef,
   type Subagent,
   SubagentStatus,
 } from '@ops-console/shared';
-import { eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { type AccountRow, AccountsService, rateLimitInfoSchema } from '../accounts/accounts.service';
 import { CliProxyService } from '../accounts/cliproxy.service';
 import { ActionLogService } from '../action-log/action-log.service';
@@ -47,7 +48,7 @@ import { claudeEnv } from '../claude-cli/claude-cli';
 import { DATA_DIR } from '../common/data-dir';
 import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
-import { connections as connectionRows, disabledMcpServers, nowIso, sessions } from '../db/schema';
+import { connections as connectionRows, disabledMcpServers, messageSkills, nowIso, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { KEYCHAIN, type Keychain, KeychainTimeout } from '../keychain/keychain';
 import { storedEnvVar } from '../mcp/launcher';
@@ -81,6 +82,7 @@ import { type Run, RunRegistry, type RunSummary } from './runs';
 import { SessionKinds } from './session-kinds';
 import { sessionTitle, shortTitle } from './session-title';
 import { emitSessionUpdated, NEW_SESSION_TITLE, type SessionRow, SessionsService } from './sessions.service';
+import { type ResolvedSkill, SkillMenuService } from './skill-menu.service';
 import { removeSkillPlugin, skillNames, skillRunsDir, writeSkillPlugin } from './skill-plugin';
 import { Transcripts } from './transcripts';
 
@@ -235,6 +237,8 @@ export type RunOptions = {
   rules?: string | null;
   /** The Skills the job copied. */
   skills?: SkillCopy[];
+  /** False for a skill message: its skill is added and the other skills stay available. Default true. */
+  onlyHeldSkills?: boolean;
   /** Starts a new agent conversation instead of resuming the Session's. */
   fresh?: boolean;
   /** Resumes the conversation from this transcript entry, dropping what came after it. */
@@ -247,6 +251,8 @@ export type RunOptions = {
   readOnly?: boolean;
   /** What the run is for; a chat message when absent. */
   purpose?: RunPurpose;
+  /** What the agent gets in place of the message text, for a message that names a skill. */
+  prompt?: string;
 };
 
 type RunResult =
@@ -308,6 +314,7 @@ export class AgentRuntime {
     @Inject(MessageInterceptors) private readonly interceptors: MessageInterceptors,
     @Inject(ConnectionLookup) private readonly connections: ConnectionLookup,
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
+    @Inject(SkillMenuService) private readonly skillMenu: SkillMenuService,
     @Inject(NetworkAllowlistService) private readonly network: NetworkAllowlistService,
     @Inject(RunStepsLog) private readonly steps: RunStepsLog,
     @Inject(StartupRecovery) recovery: StartupRecovery,
@@ -352,7 +359,7 @@ export class AgentRuntime {
    * Starts a run, or answers the agent's open question. The reply streams as `session.output` under the returned
    * message id.
    */
-  send(sessionId: string, text: string): { message_id: string } {
+  send(sessionId: string, text: string, picked?: SkillRef): { message_id: string } {
     const session = this.sessions.get(sessionId);
     const kind = this.kinds.get(session.kind);
     if (!kind?.acceptsMessages) {
@@ -364,9 +371,45 @@ export class AgentRuntime {
       return { message_id: current.messageId };
     }
     if (this.interceptors.handle(session, text)) return { message_id: crypto.randomUUID() };
-    // A chat reads its Playbook at each turn, so an edit applies from the next message (Behavior 20).
-    const { rules, skills } = this.playbooks.forSession(session);
-    return { message_id: this.begin(sessionId, text, null, null, { rules, skills }).messageId };
+    return { message_id: this.beginMessage(session, text, picked).messageId };
+  }
+
+  /**
+   * Starts the run for an operator message. A message that names a skill runs that skill and not the Playbook; any
+   * other message runs its Playbook, read at each turn so an edit applies from the next message.
+   */
+  private beginMessage(session: SessionRow, text: string, picked?: SkillRef, extra: RunOptions = {}): Run {
+    const named = this.skillMenu.resolve(session, text, picked);
+    if (!named) {
+      const { rules, skills } = this.playbooks.forSession(session);
+      return this.begin(session.id, text, null, null, { rules, skills, ...extra });
+    }
+    const run = this.begin(session.id, text, null, null, {
+      rules: null,
+      skills: named.copies,
+      onlyHeldSkills: false,
+      prompt: named.prompt,
+      ...extra,
+    });
+    this.rememberSkill(session.id, text, named, run.createdAt);
+    return run;
+  }
+
+  /** Keeps which skill a message was sent with: the transcript holds only the prompt the agent got. */
+  private rememberSkill(sessionId: string, typed: string, named: ResolvedSkill, createdAt: string): void {
+    this.store.write((tx) => {
+      tx.insert(messageSkills)
+        .values({
+          id: crypto.randomUUID(),
+          sessionId,
+          prompt: named.prompt,
+          typed,
+          kind: named.ref.kind,
+          name: named.ref.name,
+          createdAt,
+        })
+        .run();
+    });
   }
 
   /**
@@ -414,14 +457,13 @@ export class AgentRuntime {
           }
         : null;
 
-    const { rules, skills } = this.playbooks.forSession(session);
-    // The first message has nothing before it: the conversation starts over.
-    const run = this.begin(
-      sessionId,
+    // The first message has nothing before it: the conversation starts over. An edited message names its skill again
+    // by its leading `/name` (Behavior 21).
+    const run = this.beginMessage(
+      session,
       text,
-      null,
-      null,
-      typeof before === 'string' ? { rules, skills, resumeAt: before } : { rules, skills, fresh: true },
+      undefined,
+      typeof before === 'string' ? { resumeAt: before } : { fresh: true },
     );
     return {
       message_id: run.messageId,
@@ -466,6 +508,7 @@ export class AgentRuntime {
       workingDir: options.cwd ?? kind.workingDir(session),
       rules: options.rules ?? null,
       skills: options.skills ?? [],
+      onlyHeldSkills: options.onlyHeldSkills ?? true,
       parts: [],
       growing: null,
       sdkUuids: new Set(),
@@ -513,7 +556,7 @@ export class AgentRuntime {
       runLimitSince: null,
       runLimitResetsAt: null,
     });
-    void this.execute(run, text);
+    void this.execute(run, options.prompt ?? text);
     return run;
   }
 
@@ -597,7 +640,21 @@ export class AgentRuntime {
       return { message_id: crypto.randomUUID() };
     }
     const retry = session.runOutcome !== RunOutcome.Paused && session.runOutcome !== RunOutcome.Stopped;
-    return this.send(sessionId, retry ? RETRY_TEXT : PLAY_TEXT);
+    const text = retry ? RETRY_TEXT : PLAY_TEXT;
+    // A run that began with a skill goes on with it (Behavior 21).
+    const had = this.skillOfRun(session);
+    return this.send(sessionId, text, had ?? undefined);
+  }
+
+  /** The skill the Session's last run was sent with, if any. */
+  private skillOfRun(session: SessionRow): SkillRef | null {
+    if (session.runStartedAt === null) return null;
+    const row = this.store.db
+      .select({ kind: messageSkills.kind, name: messageSkills.name })
+      .from(messageSkills)
+      .where(and(eq(messageSkills.sessionId, session.id), eq(messageSkills.createdAt, session.runStartedAt)))
+      .get();
+    return row ? { kind: row.kind as SkillRef['kind'], name: row.name } : null;
   }
 
   /** True while the Session's run is going. */
@@ -614,7 +671,7 @@ export class AgentRuntime {
     if (session.sdkSessionId !== null && session.accountId !== null && kind) {
       const configDir = this.accounts.configDir(this.accounts.get(session.accountId));
       const entries = await this.transcripts.read(session.sdkSessionId, kind.workingDir(session), configDir);
-      messages = toMessages(entries, run?.sdkUuids, kind.serverLabel);
+      messages = this.withSkills(sessionId, toMessages(entries, run?.sdkUuids, kind.serverLabel));
     }
     const last = messages.at(-1);
     if (!run && session.state === SessionState.Failed && last?.role === 'agent') last.status = 'failed';
@@ -626,6 +683,27 @@ export class AgentRuntime {
         parts: [...run.parts],
         created_at: run.createdAt,
       });
+    }
+    return messages;
+  }
+
+  /** Shows a skill message as the operator typed it, with its skill, in place of the prompt the agent got. */
+  private withSkills(sessionId: string, messages: Message[]): Message[] {
+    const pool = this.store.db
+      .select()
+      .from(messageSkills)
+      .where(eq(messageSkills.sessionId, sessionId))
+      .orderBy(asc(messageSkills.createdAt))
+      .all();
+    for (const message of messages) {
+      if (message.role === 'user') message.skill = null;
+      const first = message.role === 'user' ? message.parts[0] : undefined;
+      if (first?.kind !== 'text') continue;
+      const at = pool.findIndex((row) => row.prompt === first.text);
+      const row = at < 0 ? undefined : pool.splice(at, 1)[0];
+      if (!row) continue;
+      message.parts = [{ kind: 'text', text: row.typed }];
+      message.skill = { kind: row.kind as SkillRef['kind'], name: row.name };
     }
     return messages;
   }
@@ -725,7 +803,7 @@ export class AgentRuntime {
         ? {}
         : {
             plugins: [{ type: 'local' as const, path: skillFolder, skipMcpDiscovery: true }],
-            skills: skillNames(run.skills),
+            ...(run.onlyHeldSkills ? { skills: skillNames(run.skills) } : {}),
           }),
       model: session.model,
       effort: SDK_EFFORT[session.effort],

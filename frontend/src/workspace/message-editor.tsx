@@ -6,6 +6,8 @@ import { type FileItem, filesIn } from './attachments';
 export type MessageEditorHandle = {
   /** Puts a chip per file at the cursor, or at the end when the cursor is not in the message. */
   insertFiles: (names: string[]) => void;
+  /** Focuses the message with the cursor after its last character. */
+  focusEnd: () => void;
 };
 
 type Props = {
@@ -18,6 +20,8 @@ type Props = {
   onOpen: (name: string) => void;
   onPasteFiles: (files: File[]) => void;
   onSubmit: () => void;
+  /** Sees each key first; true means it was handled (the skill menu's arrows and Enter) and the editor leaves it. */
+  onKey?: (event: KeyboardEvent) => boolean;
 };
 
 const CHIP = 'data-file';
@@ -27,7 +31,7 @@ const CHIP = 'data-file';
  * plain text, each chip written as `[📎 <name>]`. Enter sends, Shift+Enter adds a line, pasted text comes in plain.
  */
 export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function MessageEditor(
-  { label, value, placeholder, onChange, find, onOpen, onPasteFiles, onSubmit },
+  { label, value, placeholder, onChange, find, onOpen, onPasteFiles, onSubmit, onKey },
   handle,
 ) {
   const root = useRef<HTMLDivElement>(null);
@@ -51,6 +55,13 @@ export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function Mes
     if (!node || value === emitted.current || value === serialize(node)) return;
     draw(node, value, findRef.current);
     emitted.current = value;
+    // Text put in from outside while the operator is typing here (a skill picked from the menu): carry on after it.
+    if (document.activeElement === node) {
+      const end = endOf(node);
+      caret.current = end;
+      document.getSelection()?.removeAllRanges();
+      document.getSelection()?.addRange(end);
+    }
   }, [value]);
 
   // Chips follow their files: uploading, saved, failed, a thumbnail once read.
@@ -77,6 +88,15 @@ export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function Mes
   useImperativeHandle(
     handle,
     () => ({
+      focusEnd: () => {
+        const node = root.current;
+        if (!node) return;
+        node.focus();
+        const end = endOf(node);
+        caret.current = end;
+        document.getSelection()?.removeAllRanges();
+        document.getSelection()?.addRange(end);
+      },
       insertFiles: (names) => {
         const node = root.current;
         if (!node || names.length === 0) return;
@@ -134,6 +154,10 @@ export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function Mes
           else document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
         }}
         onKeyDown={(event) => {
+          if (onKey?.(event.nativeEvent)) {
+            event.preventDefault();
+            return;
+          }
           if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
           event.preventDefault();
           if (event.shiftKey) document.execCommand('insertLineBreak');

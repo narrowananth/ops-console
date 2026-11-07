@@ -837,6 +837,51 @@ export const playbookSkills = sqliteTable(
   ],
 );
 
+/** The Skill packs the operator installed. The catalog of packs lives in code. */
+export const installedSkillPacks = sqliteTable('installed_skill_packs', {
+  packId: text('pack_id').primaryKey().notNull(),
+  installedAt: text('installed_at').notNull().default(nowIso),
+});
+
+/** The Built-in skills each Playbook holds; the skill's text is in the catalog. */
+export const playbookBuiltinSkills = sqliteTable(
+  'playbook_builtin_skills',
+  {
+    playbookId: text('playbook_id')
+      .notNull()
+      .references(() => playbooks.id, { onDelete: 'cascade' }),
+    packId: text('pack_id').notNull(),
+    skillName: text('skill_name').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.playbookId, table.packId, table.skillName] }),
+    index('playbook_builtin_skills_pack_idx').on(table.packId),
+  ],
+);
+
+/**
+ * The skill a Session message was sent with. The transcript keeps only the prompt the agent got, so a row holds that
+ * prompt to find its message again, and the text the operator typed to show in its place.
+ */
+export const messageSkills = sqliteTable(
+  'message_skills',
+  {
+    id: text().primaryKey().notNull(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    prompt: text().notNull(),
+    typed: text().notNull(),
+    kind: text().$type<'builtin' | 'custom' | 'project'>().notNull(),
+    name: text().notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    index('message_skills_session_idx').on(table.sessionId, table.createdAt),
+    check('message_skills_kind', sql`${table.kind} IN ('builtin', 'custom', 'project')`),
+  ],
+);
+
 /** Which Playbook each Trigger holds. No row: the built-in. */
 export const playbookTriggers = sqliteTable(
   'playbook_triggers',

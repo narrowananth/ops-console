@@ -1,0 +1,29 @@
+Ops Console
+Third-party text shipped in the console
+
+Caveman skills
+Copyright 2026 Julius Brussee
+Licensed under the Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
+
+The text of the Built-in skills in the Caveman pack (caveman, caveman-commit, caveman-review, investigate-first,
+lean-build, migration, safe-refactor, surgical-patch, verify-and-stop) is copied from the Caveman plugin, version 3.1.0.
+It is unchanged apart from its YAML header, which the console keeps as a name and a description.
+
+Ops Console skills
+The text of the Built-in skills in the Ops Console pack is adapted from the sources below. Each skill is rewritten for use
+in any Repo and under the console's safety rules.
+
+- code-review, grilling, ship, spec, retro, commit-message and pr are adapted from mattpocock/skills
+  (https://github.com/mattpocock/skills), MIT License, Copyright (c) 2026 Matt Pocock. The Summary menu in pr comes from
+  Dex Horthy's show-me skill in humanlayer/humanlayer, Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
+- humanizer is condensed from blader/humanizer (https://github.com/blader/humanizer), MIT License, Copyright (c) 2025
+  Siqi Chen. Its patterns come from Wikipedia's "Signs of AI writing".
+- refactor is original to this repository.
+
+MIT License terms for the two MIT sources:
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

@@ -78,6 +78,7 @@ import {
   type SessionPatch,
   SignInVia,
   type SkillPatch,
+  type SkillRef,
   savedNetworkDomainSchema,
   scanSchema,
   serviceSchema,
@@ -86,6 +87,9 @@ import {
   sessionPullRequestSchema,
   sessionSchema,
   skillListSchema,
+  skillMenuSchema,
+  skillPackListSchema,
+  skillPackSchema,
   skillSchema,
   startAtLoginSchema,
   statusCodeCountSchema,
@@ -133,6 +137,8 @@ export const queryKeys = {
   terminals: ['terminals'] as const,
   playbooks: ['playbooks'] as const,
   skills: ['skills'] as const,
+  skillPacks: ['skill-packs'] as const,
+  skillMenu: ['skill-menu'] as const,
   updates: ['updates'] as const,
 };
 
@@ -989,11 +995,11 @@ export function useMessages(sessionId: string) {
 export function useSendMessage(sessionId: string) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (text: string) =>
+    mutationFn: (message: string | { text: string; skill?: SkillRef }) =>
       apiSend(
         'POST',
         `/sessions/${sessionId}/messages`,
-        { text },
+        typeof message === 'string' ? { text: message } : message,
         z.object({ data: z.object({ message_id: z.string() }) }),
       ),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) }),
@@ -1609,4 +1615,55 @@ export function useSaveSkill() {
 
 export function useDeleteSkill() {
   return useSkillMutation((id: string) => apiSend('DELETE', `/skills/${id}`, undefined, z.undefined()));
+}
+
+/** Every Skill pack in the catalog, with whether it is installed. */
+export function useSkillPacks() {
+  return useQuery({
+    queryKey: queryKeys.skillPacks,
+    queryFn: () => apiGet('/skill-packs', z.object({ data: skillPackListSchema })).then((b) => b.data),
+  });
+}
+
+/** Installing or uninstalling a pack changes Yours and the Playbooks holding its skills; a menu reads when it opens. */
+function usePackMutation<V>(send: (variables: V) => Promise<unknown>) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: send,
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.skillPacks });
+      void client.invalidateQueries({ queryKey: queryKeys.skills });
+      void client.invalidateQueries({ queryKey: queryKeys.playbooks });
+    },
+  });
+}
+
+export function useInstallPack() {
+  return usePackMutation((id: string) =>
+    apiSend('POST', `/skill-packs/${id}/install`, undefined, z.object({ data: skillPackSchema })),
+  );
+}
+
+export function useUninstallPack() {
+  return usePackMutation((id: string) => apiSend('DELETE', `/skill-packs/${id}/install`, undefined, z.undefined()));
+}
+
+/**
+ * The skills a Session's composer may call, read each time the menu opens so one installed or added to the Repo shows
+ * at once. `q` is what follows the `/`.
+ */
+export function useSkillMenu(sessionId: string, q: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [...queryKeys.skillMenu, sessionId, q],
+    enabled,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: 'always',
+    placeholderData: (previous) => previous,
+    queryFn: () =>
+      apiGet(
+        `/skill-menu?session_id=${encodeURIComponent(sessionId)}&q=${encodeURIComponent(q)}`,
+        z.object({ data: skillMenuSchema }),
+      ).then((b) => b.data),
+  });
 }

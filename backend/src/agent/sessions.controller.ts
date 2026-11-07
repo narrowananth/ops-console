@@ -259,6 +259,7 @@ export class SessionsController {
   @HttpCode(202)
   send(@Param() params: unknown, @Body() body: unknown): { data: { message_id: string } } {
     const { id } = parseInput(idParams, params, 'params');
-    return { data: this.runtime.send(id, parseInput(sendMessageSchema, body, 'body').text) };
+    const { text, skill } = parseInput(sendMessageSchema, body, 'body');
+    return { data: this.runtime.send(id, text, skill) };
   }
 }

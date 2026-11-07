@@ -17,6 +17,8 @@ export enum ErrorCode {
   ConnectionNoAccess = 'connection_no_access',
   KeychainTimeout = 'keychain_timeout',
   BranchMoved = 'branch_moved',
+  SkillNotFound = 'skill_not_found',
+  ReadOnly = 'read_only',
 }
 
 export const errorBodySchema = z.object({
