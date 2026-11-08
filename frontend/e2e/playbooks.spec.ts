@@ -879,6 +879,25 @@ test("the palette lists the ten Step blocks, and + appends a copy that is the op
   await expect(editor.getByText('Unsaved edits')).toBeVisible();
 });
 
+test('Save waits, in plain words, until every step has its instructions', async ({ page, request }) => {
+  await open(page, await make(request, 'Checkout deep check'));
+  const { palette, editor, panel, steps } = view(page);
+  const save = editor.getByRole('button', { name: 'Save' });
+  await palette.getByRole('button', { name: 'Add Custom step to steps' }).click();
+  await palette.getByRole('button', { name: 'Add Custom step to steps' }).click();
+  await expect(editor).toContainText('Step 1 and Step 2 need instructions.');
+  await expect(editor).not.toContainText('invalid body');
+  await expect(save).toBeDisabled();
+
+  await panel('Step').getByRole('textbox', { name: 'Step instructions' }).fill('Look at the checkout page.');
+  // The step added last is the one open, so Step 1 is left.
+  await expect(editor).toContainText('Step 1 needs instructions.');
+  await steps.first().click();
+  await panel('Step').getByRole('textbox', { name: 'Step instructions' }).fill('Look at the cart.');
+  await expect(editor).not.toContainText('needs instructions');
+  await expect(save).toBeEnabled();
+});
+
 test('with no step the Add the first step node opens the Step blocks menu and inserts there', async ({
   page,
   request,

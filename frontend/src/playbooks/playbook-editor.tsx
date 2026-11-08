@@ -5,7 +5,7 @@ import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { ResizeHandle, usePanelWidth } from '../components/ui/resize-handle';
 import { useDeletePlaybook, useSavePlaybook, useSkills } from '../lib/queries';
 import { ascending } from '../lib/sort';
-import type { Draft, DraftStep } from './drafts';
+import { type Draft, type DraftStep, unfinished } from './drafts';
 import type { Drag } from './drag';
 import { FlowCanvas, type Sel } from './flow-canvas';
 import { Inspector } from './inspector';
@@ -53,6 +53,7 @@ export function PlaybookEditor(props: {
     (name) => name,
   );
   const triggerLabels = playbook.triggers.map((trigger) => TRIGGER_LABELS[trigger].label);
+  const lacking = unfinished(working);
   const full = working.steps.length >= PLAYBOOK_LIMITS.steps;
   const appendStep = (step: DraftStep) => {
     if (readOnly || full) return;
@@ -103,7 +104,8 @@ export function PlaybookEditor(props: {
             </Button>
             <Button
               variant="primary"
-              disabled={save.isPending}
+              disabled={save.isPending || lacking !== null}
+              title={lacking ?? undefined}
               onClick={() => save.mutate({ id: playbook.id, patch: working }, { onSuccess: props.onSaved })}
             >
               {save.isPending && <Spinner />}
@@ -121,6 +123,11 @@ export function PlaybookEditor(props: {
           </Button>
         )}
       </div>
+      {props.dirty && lacking && (
+        <p className="m-0 border-b border-line px-5 py-1.5 text-right text-xs text-neutral-700">
+          Save when it is finished. {lacking}
+        </p>
+      )}
       {save.error && (
         <p role="alert" className="m-0 border-b border-line px-5 py-1.5 text-right text-xs text-accent-700">
           {save.error.message}

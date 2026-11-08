@@ -75,9 +75,11 @@ Behavior this spec does not list is as in `agent-playbooks` and `playbook-skills
     and Delete removes it. A hint under the palette says so. The panel keeps no Earlier and Later buttons.
 19. Attaching Triggers to a Playbook works from the Trigger node's chips. A Trigger held by another Playbook asks
     Replace first. No Trigger refuses a Playbook for holding a scratch copy step.
-20. Save, Discard and the unsaved-edits label show while the browser holds edits for the open Playbook. A failed Save
-    shows the error beside Save and keeps the edits. Unsaved edits stay in the browser through reloads and reopening the
-    console until Save or Discard. Delete sits in the same bar on the operator's own Playbook.
+20. Save, Discard and the unsaved-edits label show while the browser holds edits for the open Playbook. While a step
+    lacks a title or instructions, or the name is blank, Save is off and a line says which, as "Step 1 and Step 2 need
+    instructions." A failed Save shows the error beside Save and keeps the edits. Unsaved edits stay in the browser
+    through reloads and reopening the console until Save or Discard. Delete sits in the same bar on the operator's own
+    Playbook.
 21. The address `?playbook=<id>` opens that Playbook's flow, and `?trigger=<id>&view=flow` opens the flow of a Trigger's
     built-in. The Playbook link in a Session header still lands on the Playbook.
 

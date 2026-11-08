@@ -1,6 +1,7 @@
 import { type Playbook, StepBlock } from '@ops-console/shared';
 import { z } from 'zod';
 import { useStored } from '../lib/remember';
+import { inWords } from './labels';
 
 /** A Playbook as the operator is editing it: a step may be half written, so nothing here is checked yet. */
 const draftSchema = z.object({
@@ -31,6 +32,23 @@ export const draftOf = (playbook: Playbook): Draft => ({
   skill_ids: playbook.skills.map((skill) => skill.id),
   steps: playbook.steps,
 });
+
+/** What a Playbook still lacks before the daemon takes it, in the operator's words; null when nothing. */
+export function unfinished(draft: Draft): string | null {
+  const lacks = (blank: (step: DraftStep) => boolean) =>
+    draft.steps.flatMap((step, at) => (blank(step) ? [`Step ${at + 1}`] : []));
+  const parts = [
+    draft.name.trim() ? null : 'The Playbook needs a name',
+    ...[
+      [lacks((step) => !step.title.trim()), 'a title'],
+      [lacks((step) => !step.instructions.trim()), 'instructions'],
+    ].map(([steps, what]) => {
+      const names = steps as string[];
+      return names.length > 0 ? `${inWords(names)} ${names.length === 1 ? 'needs' : 'need'} ${what}` : null;
+    }),
+  ].filter((part) => part !== null);
+  return parts.length > 0 ? `${parts.join('. ')}.` : null;
+}
 
 const same = (a: Draft, b: Draft) =>
   a.name === b.name &&
