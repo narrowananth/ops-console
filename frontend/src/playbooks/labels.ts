@@ -1,4 +1,11 @@
-import { JOB_TRIGGERS, PLAYBOOK_LIMITS, type Playbook, PlaybookTrigger, TRIGGER_LABELS } from '@ops-console/shared';
+import {
+  JOB_TRIGGERS,
+  PLAYBOOK_LIMITS,
+  PLAYBOOK_TRIGGERS,
+  type Playbook,
+  PlaybookTrigger,
+  TRIGGER_LABELS,
+} from '@ops-console/shared';
 
 /** What each Trigger starts, shown on hover wherever the Trigger is named. */
 export const TRIGGER_TIPS: Record<PlaybookTrigger, string> = {
@@ -62,3 +69,23 @@ export const CLOSING_TURN: Partial<Record<PlaybookTrigger, string>> = {
 /** Held only by chats, which use the rules and never run steps. */
 export const chatOnly = (triggers: PlaybookTrigger[]) =>
   triggers.length > 0 && triggers.every((trigger) => !JOB_TRIGGERS.includes(trigger));
+
+/** The tabs that hold Triggers, in page order, each with its Triggers. */
+export const TRIGGER_GROUPS: { tab: string; triggers: PlaybookTrigger[] }[] = [
+  ...new Set(PLAYBOOK_TRIGGERS.map((trigger) => TRIGGER_LABELS[trigger].tab)),
+].map((tab) => ({ tab, triggers: PLAYBOOK_TRIGGERS.filter((trigger) => TRIGGER_LABELS[trigger].tab === tab) }));
+
+/** Rough token cost of some text: four characters make about one token (Behavior 22). */
+export const tokens = (characters: number) => Math.ceil(characters / 4);
+
+/** Rules past this many characters get the meter's warning (Behavior 23). */
+export const RULES_LONG = 1500;
+
+/** "3 steps", "1 step", "rules only". */
+export function stepCount(playbook: Playbook): string {
+  const count = playbook.steps.length;
+  return count === 0 ? 'rules only' : `${count} ${count === 1 ? 'step' : 'steps'}`;
+}
+
+/** The Trigger a built-in Playbook is for: its id is `builtin:<trigger>`. */
+export const triggerOfBuiltin = (playbook: Playbook) => playbook.id.replace('builtin:', '') as PlaybookTrigger;
