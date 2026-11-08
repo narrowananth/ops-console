@@ -1,5 +1,5 @@
 /** Where each node of a Playbook's flow sits: one line of nodes that wraps to a new row at the canvas width. */
-export const NODE = { w: 180, h: 120, gapX: 44, gapY: 56, pad: 28 };
+export const NODE = { w: 216, h: 140, gapX: 52, gapY: 64, pad: 32 };
 
 export type FlowNode =
   | { kind: 'trigger' }

@@ -32,7 +32,7 @@ export type Sel =
 const same = (a: Sel | null, b: Sel) =>
   a?.kind === b.kind && (a.kind !== 'step' || (b.kind === 'step' && a.index === b.index));
 
-const CARD = 'absolute flex flex-col gap-1 overflow-hidden rounded-lg border bg-card p-3 text-left shadow-sm';
+const CARD = 'absolute flex flex-col gap-1.5 overflow-hidden rounded-lg border bg-card p-4 text-left shadow-sm';
 const idle = 'border-line hover:border-accent-300';
 const picked = 'border-accent shadow-[0_0_0_3px_var(--color-accent-100)]';
 
@@ -264,7 +264,9 @@ export function FlowCanvas(props: {
           className={`${CARD} border-dashed border-divider bg-transparent shadow-none`}
         >
           <span className="flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.08em] text-neutral-700 uppercase">
-            <span className="flex size-4.5 items-center justify-center rounded-full bg-neutral-200 text-[10px]">✓</span>
+            <span className="flex size-4.5 flex-none items-center justify-center rounded-full bg-neutral-200 text-[10px]">
+              ✓
+            </span>
             {node.kind === 'closing' ? "Console's own turn" : 'End'}
           </span>
           <span className="text-xs text-neutral-700">
@@ -305,7 +307,7 @@ export function FlowCanvas(props: {
         }`}
       >
         <span className="flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.08em] text-neutral-700 uppercase">
-          <span className="flex size-4.5 items-center justify-center rounded-full bg-neutral-200 text-[10px]">
+          <span className="flex size-4.5 flex-none items-center justify-center rounded-full bg-neutral-200 text-[10px]">
             {index + 1}
           </span>
           Step
