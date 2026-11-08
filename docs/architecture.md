@@ -121,7 +121,7 @@ agent Session.
 | Folder | Holds |
 |---|---|
 | `app` | Sign-in gate with the restart panel while an update installs, sidebar with the running tasks tray, the update card, version panel and "Updated to" notice, page shell and routes, theme store, the remembered page address |
-| `lib` | API client, TanStack queries, `/ws` live events, session token, Remembered view storage, sorting, the finish chime, clipboard copy |
+| `lib` | API client, TanStack queries, `/ws` live events, session token, Remembered view storage, the page a link came from (`return-to.ts`), sorting, the finish chime, clipboard copy |
 | `monitor` | Monitor page: scan range and status codes, ticked Services, Alerts, Samples, Reports, Review and Fix |
 | `agent-runs` | Agent runs page: run health, why a run is slow or ended, time split, timeline, steps, queued messages, desktop alerts |
 | `workspace` | Workspace page: Repos and Anonymous Sessions, branch switcher, pull request list, files with Expand all and Collapse all, threads, the Agent Review, Reply check and Comment pass cards, the Session's Changes panel, the Open pull request form, queued messages, attachments, output file chips on the turn that wrote them, the `/` skill menu above a Session's composer and the skill chip on a skill message |
@@ -129,7 +129,7 @@ agent Session.
 | `integrations` | Integrations page: Connectors and MCP Servers |
 | `repos` | Repos page |
 | `setup` | Setup agent page with its xterm terminal, and the Permissions page: Full Disk Access, Start at login, Keychain, Run sandbox, Network allowlist |
-| `playbooks` | Playbooks page: the overview of Triggers, the Playbook as a flow with drag and drop, Step blocks, the Skills a Playbook holds; unsaved edits kept as a Remembered view; a job's Playbook steps and the Skills it was offered |
+| `playbooks` | Playbooks page: the overview of Triggers (each on its built-in or the operator's Playbook, chosen from a dropdown), New Playbook (Blank or Copy of a built-in), the Playbook as a flow on a canvas with a panel the operator resizes, Step blocks by drag, + or Alt and arrow keys, the Rules and Skills token meters, the Skills a Playbook holds; unsaved edits kept as a Remembered view; a job's Playbook steps and the Skills it was offered |
 | `skills` | Skills page: Discover first (Skill packs, Install and Uninstall, each pack's skills read-only, the Playbooks holding each) and Yours (Custom Skills and their editor, with New Skill); unsaved edits kept as a Remembered view |
 | `agents` | Accounts & Usage page (accounts, sign-in by link, the CLIProxy hub, the chime), Session transcript, model, effort and Access mode chips, Approval prompts, the question panel, stop run, Report rendering |
 | `mcp`, `components/ui` | MCP status labels; shared controls, the folding card title, the side panel that folds to a rail, the job pathway and live timers, and the Tip layer that shows every element's `title` as a styled Tip on hover and keyboard focus, the code block with its copy icon, and the file viewer |
@@ -195,6 +195,11 @@ turn writes the Report or the review, and a Fix goes on to its PR. A step tagged
 run commands, only in the job's scratch copy. Chats (Session message, Reply in thread) read their
 Playbook's rules at each turn. An Alert's Session uses the rules its latest job copied.
 
+A built-in is read only and the console updates its text; the operator gets an editable Playbook through New Playbook,
+Blank or Copy of a built-in, and attaches it from a Trigger's dropdown on the overview. The Playbooks page counts the
+Rules and the held Skills' names and descriptions as an estimated token cost in the browser (characters divided by
+four); the daemon counts nothing.
+
 A Playbook also holds Skills. A job copies them with the Playbook, as a snapshot; a chat reads them at each turn. For each run the
 daemon writes the Skills to a folder in the temp folder as a local Claude Code plugin, lists it in the
 Run sandbox's readable folders, and passes it to the SDK with the `skills` option naming only those Skills. The agent sees
@@ -225,7 +230,7 @@ number, title and the operator's login (the email on Bitbucket); All matches num
 (`lib/remember.ts`) in local storage under `ops-console:` (a few older keys, such as the theme, the token and Monitor's range, use
 `ops-console-` or `ops-console.`), so page switches, reloads and reopening the console land where the operator left
 off. Per Session it keeps the draft message and the attachments; per browser, the chime switch, folded cards and the
-Changes panel's width and view. A stored value that no longer parses falls back to the
+Changes panel's width and view, and the Playbook panel's width. The page a link came from rides in the router state, so a Skills page opened from a Playbook offers the way back until the operator leaves it by another route. A stored value that no longer parses falls back to the
 default.
 
 ## `state.db` holds
@@ -295,7 +300,7 @@ Where the build departs from `design/ops-console.html` on purpose:
 - **Updates**: a version line and panel, an update card and an "Updated to" notice, with Check now and auto-update.
 - **Claude account hub**: CLIProxy as the sign-in for agent runs, and adding an account by link.
 - **Finish chime**: a soft sound when the operator's run ends, switchable per browser, under Notifications.
-- **Skills page** under Claude, after Playbooks, with Discover and Yours tabs; the Playbook editor's **Skills** section with a badge naming each skill's pack, or Custom; the **`/` skill menu** above the Session composer and the **skill chip** with its "Playbook not used" line on a skill message.
+- **Skills page** under Claude, after Playbooks, with Discover and Yours tabs; the Playbook's **Skills** panel with a badge naming each skill's pack, or Custom, and a "Back to <Playbook>" button on the Skills page when a link from that panel opened it; the **`/` skill menu** above the Session composer and the **skill chip** with its "Playbook not used" line on a skill message.
 - **Question panel**, **queued messages**, **attachments**, **output files** and the Session's **Changes** panel in Workspace.
 - **Copy icon** on every code block: fenced blocks in the agent's text, commands in Approvals, raw errors and step output, replay requests and text files.
 - **Check reply** and **Address comments** Triggers, with their cards on a pull request.

@@ -131,7 +131,7 @@ not the Playbook, for that message only. Any other message runs the Playbook.
 One titled instruction in a Playbook, run as its own agent turn, ending done, skipped or failed.
 
 **Step block**:
-A ready-made Playbook step the operator drags into a Playbook and then edits.
+A ready-made Playbook step the operator drags or adds into a Playbook and then edits.
 
 **Scratch copy**:
 A throwaway copy of a Repo's code, at the newest commit of the Playbook's branch for a Verification, fetched from

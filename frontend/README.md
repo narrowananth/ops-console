@@ -9,7 +9,7 @@ in [../design/ops-console.html](../design/ops-console.html).
 src/
 ├── app/              # app gate, sidebar shell, routes, updates, running tasks, UI store
 ├── monitor/ workspace/ devtools/ integrations/ repos/ setup/ playbooks/ agents/   # one folder per page
-├── components/ui/    # shared controls: Tip, fold, side panel, pathway, attachment viewer
+├── components/ui/    # shared controls: Tip, fold, side panel, resize handle, pathway, attachment viewer
 ├── lib/              # api client, session token, queries, live events, Remembered view, chime
 └── styles/           # theme tokens ported from the design
 e2e/                  # Playwright against the built daemon

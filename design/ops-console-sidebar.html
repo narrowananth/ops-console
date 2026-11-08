@@ -417,7 +417,9 @@
   .pf-legend i { display: inline-block; width: 26px; border-top: 2px solid var(--n500); margin-right: 8px; vertical-align: middle; }
   .pf-legend i.d { border-top: 2px dashed var(--n400); }
   .pf-note { position: sticky; top: 12px; z-index: 5; display: block; width: max-content; max-width: 70%; margin: 12px auto 0; border-radius: 999px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow-sm); padding: 4px 14px; font-size: 12px; color: var(--n700); }
-  .pf-insp { width: 304px; flex: none; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; border-left: 1px solid var(--line); background: var(--card); padding: 16px; }
+  .pf-split { width: 6px; flex: none; cursor: col-resize; touch-action: none; border-left: 1px solid var(--line); }
+  .pf-split:hover, .pf-split:focus-visible { background: var(--accent-200); outline: 0; }
+  .pf-insp { width: 336px; flex: none; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; border-left: 1px solid var(--line); background: var(--card); padding: 16px; }
   .pf-insp h3 { font-size: 14px; }
   .pf-insp .field { width: 100%; background: var(--bg); font-size: 13px; }
   .pf-insp textarea { resize: vertical; line-height: 1.5; }
@@ -1236,6 +1238,7 @@
         <div class="pf-body" id="pf-bodyw" hidden>
           <aside class="pf-pal" id="pf-pal" aria-label="Step blocks"></aside>
           <div class="pf-canvas" id="pf-canvas" aria-label="Playbook flow"></div>
+          <div class="pf-split" id="pf-split" role="separator" aria-orientation="vertical" aria-label="Resize the panel" tabindex="0" title="Drag to resize. Double-click to reset." hidden></div>
           <aside class="pf-insp" id="pf-insp" aria-label="Inspector" hidden></aside>
         </div>
       </div>
@@ -1470,6 +1473,7 @@
       ['Check PROD readiness', 0, 'Check migrations, config, flags and rollbacks before this reaches PROD.'],
       ['Custom step', 0, ''],
     ];
+    const BY_ORDER = [[BLOCKS[BLOCKS.length - 1], BLOCKS.length - 1], ...BLOCKS.slice(0, -1).map((b, i) => [b, i])]; // Custom step leads
     const st = (i) => ({ title: BLOCKS[i][0], writes: !!BLOCKS[i][1], text: BLOCKS[i][2] });
     const BUILTINS = () => [
       { id: 'b1', builtin: 'Verify', name: 'Verify (built-in)', rules: 'Verify the failing route locally. Base every conclusion on real logs, source code and executed results. Mark each result verified, mocked or unverified.', branches: '', jira: false, skills: [], steps: [0, 1, 2, 3].map(st) },
@@ -1539,11 +1543,14 @@
     /* ======== EDITOR: toolbar, banner, palette ======== */
     function renderBar() {
       const p = cur(); const w = view(); const ro = isRO(); const d = !!drafts[openId];
+      const lack = (blank) => w.steps.flatMap((x, k) => (blank(x) ? ['Step ' + (k + 1)] : []));
+      const say = (names, what) => names.length ? `${names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names.at(-1) : names[0]} ${names.length > 1 ? 'need' : 'needs'} ${what}` : '';
+      const lacking = [w.name.trim() ? '' : 'The Playbook needs a name', say(lack((x) => !x.title.trim()), 'a title'), say(lack((x) => !x.text.trim()), 'instructions')].filter(Boolean).join('. ');
       $id('pf-bar').innerHTML = `<button class="btn" id="pf-back">← All Playbooks</button>
         <input class="pf-name" id="pf-name" value="${esc(w.name)}" aria-label="Name" ${ro ? 'readonly' : ''}>
         ${ro ? `<span class="pill">${lock}&nbsp;READ ONLY</span>` : ''}
         <span class="grow"></span>
-        ${d ? '<span class="s muted">Unsaved edits</span><button class="btn" id="pf-discard">Discard</button><button class="btn primary" id="pf-save">Save</button>' : ''}
+        ${d ? `<span class="s muted">${lacking ? 'Save when it is finished. ' + esc(lacking) + '.' : 'Unsaved edits'}</span><button class="btn" id="pf-discard">Discard</button><button class="btn primary" id="pf-save"${lacking ? ' disabled' : ''}>Save</button>` : ''}
         ${ro ? '' : '<button class="btn danger" id="pf-del">Delete</button>'}`;
       const ban = $id('pf-ban');
       ban.hidden = !ro;
@@ -1554,7 +1561,7 @@
       $id('pf-pal').hidden = ro;
       if (ro) return;
       $id('pf-pal').innerHTML = `<div class="pf-cap">Step blocks</div><p class="xs muted" style="margin:0 4px 2px">Ready-made steps. Drag one onto a line in the flow, or press +. The copy is yours to edit.</p>
-        ${BLOCKS.map((b, i) => `<div class="blk" draggable="true" data-blk="${i}" title="${esc(b[2] || 'An empty step to write yourself.')}"><span class="grip">⋮⋮</span><span class="trunc">${b[0]}</span>${b[1] ? '<span class="wtag">scratch</span>' : ''}<button class="add" data-add="${i}" ${full ? 'disabled' : ''} aria-label="Add ${esc(b[0])} to the end">+</button></div>`).join('')}
+        ${BY_ORDER.map(([b, i]) => `<div class="blk" draggable="true" data-blk="${i}" title="${esc(b[2] || 'An empty step to write yourself.')}"><span class="grip">⋮⋮</span><span class="trunc">${b[0]}</span>${b[1] ? '<span class="wtag">scratch</span>' : ''}<button class="add" data-add="${i}" ${full ? 'disabled' : ''} aria-label="Add ${esc(b[0])} to the end">+</button></div>`).join('')}
         <p class="xs muted" style="margin:4px 4px 0"><span class="wtag">scratch</span> steps write files or run commands in a scratch copy, never in your own checkout.</p>`;
     }
 
@@ -1613,7 +1620,7 @@
         <div class="pf-legend"><span><i></i>Run order</span><span><i class="d"></i>Applies to every turn</span><span>A failed step stops the run: Retry or Skip it from the run.</span></div>`;
     }
     function menuHtml() {
-      return `<div class="pf-menu" id="pf-menu" style="left:${Math.max(8, Math.min(menu.x - 170, $id('pf-canvas').clientWidth - 356))}px;top:${menu.y + 16}px">${BLOCKS.map((b, i) => `<button data-pick="${i}"><span class="h">${b[0]}${b[1] ? '<span class="wtag">scratch copy</span>' : ''}</span><span class="d">${esc(b[2] || 'An empty step to write yourself.')}</span></button>`).join('')}</div>`;
+      return `<div class="pf-menu" id="pf-menu" style="left:${Math.max(8, Math.min(menu.x - 170, $id('pf-canvas').clientWidth - 356))}px;top:${menu.y + 16}px">${BY_ORDER.map(([b, i]) => `<button data-pick="${i}"><span class="h">${b[0]}${b[1] ? '<span class="wtag">scratch copy</span>' : ''}</span><span class="d">${esc(b[2] || 'An empty step to write yourself.')}</span></button>`).join('')}</div>`;
     }
 
     /* ======== EDITOR: inspector ======== */
@@ -1624,8 +1631,8 @@
 
     function renderInsp() {
       const el = $id('pf-insp'); const w = view(); const ro = isRO(); const p = cur();
-      if (!sel) { el.hidden = true; return; }
-      el.hidden = false; let h = '';
+      if (!sel) { el.hidden = true; $id('pf-split').hidden = true; return; }
+      el.hidden = false; $id('pf-split').hidden = false; let h = '';
       const close = '<button class="btn icon ml" data-close title="Close" aria-label="Close">×</button>';
       if (sel.kind === 'trigger') {
         const chip = (t) => {
@@ -1673,7 +1680,7 @@
     /* ======== shell ======== */
     function render() {
       const over = openId === null;
-      $id('pf-over').hidden = !over; $id('pf-bar').hidden = over; $id('pf-bodyw').hidden = over; if (over) $id('pf-ban').hidden = true;
+      $id('pf-over').hidden = !over; $id('pf-new').hidden = !over; $id('pf-bar').hidden = over; $id('pf-bodyw').hidden = over; if (over) $id('pf-ban').hidden = true;
       if (over) return renderOver();
       renderBar(); renderPal(); renderStage(); renderInsp();
     }
@@ -1748,6 +1755,16 @@
     });
     page.addEventListener('change', (e) => { if (e.target.dataset.f === 'writes') { renderStage(); renderInsp(); } });
     $id('pf-new').addEventListener('click', newDialog);
+    // The panel's left edge: drag or arrow keys resize it, a double click resets it.
+    (() => {
+      const bar = $id('pf-split'); const insp = $id('pf-insp'); let from = null;
+      const set = (w) => { insp.style.width = Math.round(Math.min(Math.max(280, w), $id('pf-bodyw').clientWidth - 520)) + 'px'; };
+      bar.addEventListener('pointerdown', (e) => { e.preventDefault(); bar.setPointerCapture(e.pointerId); from = { x: e.clientX, w: insp.offsetWidth }; });
+      bar.addEventListener('pointermove', (e) => { if (from) set(from.w + from.x - e.clientX); });
+      bar.addEventListener('pointerup', () => { from = null; });
+      bar.addEventListener('dblclick', () => set(336));
+      bar.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft') set(insp.offsetWidth + 32); else if (e.key === 'ArrowRight') set(insp.offsetWidth - 32); else return; e.preventDefault(); });
+    })();
 
     /* Drag a block onto a line, or a step to another place. Let go outside the canvas to remove a step. */
     let drag = null;

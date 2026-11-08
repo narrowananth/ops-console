@@ -434,7 +434,7 @@ Server to client, each time a job's step changes status.
   _Avoid_: action (the Action Log means each command the agent runs)
 - **Playbook step**: one titled instruction in a Playbook, run as its own agent turn, ending done, skipped or
   failed.
-- **Step block**: a ready-made Playbook step the operator drags into a Playbook and then edits.
+- **Step block**: a ready-made Playbook step the operator drags or adds into a Playbook and then edits.
 - **Verification** (changed): the agent's attempt to explain an Alert from the code, in a scratch copy of it: follow
   the log through the code end to end, replay the request and test with mock data locally when it can, cross-check
   Connections, and write a Report on the issue and its fix.
