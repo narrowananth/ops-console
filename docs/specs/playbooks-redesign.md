@@ -67,8 +67,9 @@ Behavior this spec does not list is as in `agent-playbooks` and `playbook-skills
 16. Selecting a node opens its fields in the panel on the right; the close button or Escape closes it. The panel shows
     the Trigger node's Trigger chips, a step's title, instructions and scratch copy tag, the Rules text, the Skills the
     Playbook holds with a picker of those it does not, or the Settings: Branch and the Jira ticket switch.
-17. The palette on the left lists the ten Step blocks. Dragging a block onto a line of the flow inserts a copy at that
-    point, and pressing its + appends one. A step dragged to another place moves, and a step dropped outside the canvas
+17. The palette on the left lists the ten Step blocks, Custom step first, and the + menu on the line lists them in the
+    same order. Dragging a block onto a line of the flow inserts a copy at that point, and pressing its + appends one;
+    the step added opens in the panel. A step dragged to another place moves, and a step dropped outside the canvas
     is removed. A step can also be removed with the Remove button in its panel.
 18. Reordering and removing have a keyboard path: a focused step moves one place with Alt and the left or right arrow,
     and Delete removes it. A hint under the palette says so. The panel keeps no Earlier and Later buttons.

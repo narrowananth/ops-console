@@ -114,6 +114,7 @@ export function FlowCanvas(props: {
     if (full) return;
     props.onChange({ ...working, steps: [...steps.slice(0, at), { ...step }, ...steps.slice(at)] });
     setAdding(null);
+    props.onSelect({ kind: 'step', index: at });
   };
   const move = (from: number, to: number) => {
     if (to < 0 || to >= steps.length || from === to) return;

@@ -847,6 +847,7 @@ test("the palette lists the ten Step blocks, and + appends a copy that is the op
   const { palette, editor, steps, panel } = view(page);
 
   const titles = [
+    'Custom step',
     'Trace the log through the code',
     'Find the Repo that owns it',
     'Find who else uses it',
@@ -856,7 +857,6 @@ test("the palette lists the ten Step blocks, and + appends a copy that is the op
     'Run the tests',
     'Test a lasting fix',
     'Check PROD readiness',
-    'Custom step',
   ];
   const items = palette.getByRole('listitem');
   await expect(items).toHaveCount(10);
@@ -868,6 +868,8 @@ test("the palette lists the ten Step blocks, and + appends a copy that is the op
   await palette.getByRole('button', { name: 'Add Make mock data to steps' }).click();
   await expectTitles(page, ['Find the Repo that owns it', 'Make mock data']);
   await expect(steps.nth(1)).toContainText('scratch copy');
+  // The step just added opens in the panel.
+  await expect(panel('Step').getByRole('textbox', { name: 'Step title' })).toHaveValue('Make mock data');
 
   await steps.first().click();
   await panel('Step').getByRole('textbox', { name: 'Step title' }).fill('Find the real owner');
@@ -886,6 +888,7 @@ test('with no step the Add the first step node opens the Step blocks menu and in
 
   await addFirst.click();
   await expect(menu.getByRole('menuitem')).toHaveCount(10);
+  await expect(menu.getByRole('menuitem').first()).toContainText('Custom step');
   await menu.getByRole('menuitem', { name: /^Find who else uses it/ }).click();
   await expect(menu).toHaveCount(0);
   await expectTitles(page, ['Find who else uses it']);
@@ -902,6 +905,10 @@ test('a + slot on the line opens the Step blocks menu and inserts at that point;
   // The slot right after the Trigger puts the step first; the one after the last step puts it last.
   await slots.first().click();
   await menu.getByRole('menuitem', { name: /^Trace the log through the code/ }).click();
+  // The step just added opens in the panel, at its place.
+  await expect(view(page).panel('Step').getByRole('textbox', { name: 'Step title' })).toHaveValue(
+    'Trace the log through the code',
+  );
   await slots.last().click();
   await menu.getByRole('menuitem', { name: /^Run the tests/ }).click();
   await expectTitles(page, ['Trace the log through the code', 'Find who else uses it', 'Run the tests']);

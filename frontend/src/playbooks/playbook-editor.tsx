@@ -1,4 +1,4 @@
-import { PLAYBOOK_LIMITS, type Playbook, type PlaybookTrigger, TRIGGER_LABELS } from '@ops-console/shared';
+import { PLAYBOOK_LIMITS, type Playbook, type PlaybookTrigger, StepBlock, TRIGGER_LABELS } from '@ops-console/shared';
 import { useState } from 'react';
 import { Button, Spinner } from '../components/ui/button';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
@@ -57,7 +57,12 @@ export function PlaybookEditor(props: {
   const appendStep = (step: DraftStep) => {
     if (readOnly || full) return;
     onChange({ ...working, steps: [...working.steps, { ...step }] });
+    setSel({ kind: 'step', index: working.steps.length });
   };
+  // The empty Custom step leads the list: it is the one the operator writes themselves.
+  const blocks = [...props.blocks].sort(
+    (a, b) => Number(b.block === StepBlock.Custom) - Number(a.block === StepBlock.Custom),
+  );
 
   const builtinTrigger = triggerOfBuiltin(playbook);
   const replacedBy = readOnly ? holderOf(props.items, builtinTrigger) : undefined;
@@ -162,7 +167,7 @@ export function PlaybookEditor(props: {
         </p>
       )}
       <div ref={setBody} className="flex min-h-0 flex-1">
-        {!readOnly && <Palette blocks={props.blocks} full={full} drag={drag} setDrag={setDrag} onAdd={appendStep} />}
+        {!readOnly && <Palette blocks={blocks} full={full} drag={drag} setDrag={setDrag} onAdd={appendStep} />}
         <FlowCanvas
           playbook={playbook}
           working={working}
@@ -170,7 +175,7 @@ export function PlaybookEditor(props: {
           readOnly={readOnly}
           sel={shown}
           onSelect={setSel}
-          blocks={props.blocks}
+          blocks={blocks}
           drag={drag}
           setDrag={setDrag}
           onChange={onChange}
