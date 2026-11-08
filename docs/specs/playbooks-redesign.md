@@ -66,7 +66,8 @@ Behavior this spec does not list is as in `agent-playbooks` and `playbook-skills
     card reads "A built-in holds none."
 16. Selecting a node opens its fields in the panel on the right; the close button or Escape closes it. The panel shows
     the Trigger node's Trigger chips, a step's title, instructions and scratch copy tag, the Rules text, the Skills the
-    Playbook holds with a picker of those it does not, or the Settings: Branch and the Jira ticket switch.
+    Playbook holds with a picker of those it does not, or the Settings: Branch and the Jira ticket switch. A link from the Skills panel to the Skills page opens it with
+    "← Back to <Playbook name>" in its header; that returns to the same Playbook, its unsaved edits kept.
 17. The palette on the left lists the ten Step blocks, Custom step first, and the + menu on the line lists them in the
     same order. Dragging a block onto a line of the flow inserts a copy at that point, and pressing its + appends one;
     the step added opens in the panel. A step dragged to another place moves, and a step dropped outside the canvas

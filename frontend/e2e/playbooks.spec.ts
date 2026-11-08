@@ -777,6 +777,28 @@ test('the Rules and Step instructions boxes fill the height of the panel', async
   }
 });
 
+test('the Skills page opened from a Playbook offers the way back, with the unsaved edits kept', async ({
+  page,
+  request,
+}) => {
+  const id = await make(request, 'Checkout deep check', [FIND_OWNER]);
+  await open(page, id);
+  const { editor, node, panel } = view(page);
+  await editor.getByRole('textbox', { name: 'Name' }).fill('Checkout deeper check');
+  await node('Skills').click();
+  await panel('Skills').getByRole('link', { name: 'Open the Skills page' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Skills', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '← Back to Checkout deep check' }).click();
+  await expect(page).toHaveURL(new RegExp(`/playbooks\\?playbook=${id}`));
+  await expect(editor.getByRole('textbox', { name: 'Name' })).toHaveValue('Checkout deeper check');
+  await expect(editor.getByText('Unsaved edits')).toBeVisible();
+
+  // The Skills page opened from the sidebar has no way back to offer.
+  await page.getByRole('navigation').getByRole('link', { name: 'Skills' }).click();
+  await expect(page.getByRole('button', { name: /^← Back to/ })).toHaveCount(0);
+});
+
 test('Escape with the focus in the Rules textarea closes the panel', async ({ page, request }) => {
   await open(page, await make(request, 'Checkout deep check', [FIND_OWNER], 'Read only.'));
   const { panel, node } = view(page);

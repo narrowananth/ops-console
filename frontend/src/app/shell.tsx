@@ -19,6 +19,7 @@ import { WorkspaceView } from '../workspace/workspace-view';
 import { KeychainWaitBanner } from './keychain-wait';
 import { lastPage, useKeepAddress } from './last-address';
 import { Page, PageColumn } from './page';
+import { ReturnButton } from './return-button';
 import { Sidebar } from './sidebar';
 import { UpdateNotice } from './updates';
 
@@ -171,7 +172,12 @@ export function Shell() {
                 <Page
                   title="Skills"
                   sub="Methods the agent can load while a Playbook runs. Attach them to Playbooks."
-                  actions={<NewSkillButton />}
+                  actions={
+                    <>
+                      <ReturnButton />
+                      <NewSkillButton />
+                    </>
+                  }
                 >
                   <SkillsView />
                 </Page>

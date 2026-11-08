@@ -8,10 +8,11 @@ import {
   TRIGGER_LABELS,
 } from '@ops-console/shared';
 import { type ReactNode, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Toggle } from '../components/ui/toggle';
 import { useSkills } from '../lib/queries';
+import { returnState } from '../lib/return-to';
 import { ascending } from '../lib/sort';
 import { KindBadge } from '../skills/kind-badge';
 import type { Draft, DraftStep } from './drafts';
@@ -348,6 +349,7 @@ function SkillsPanel({
   onClose: () => void;
 }) {
   const skills = useSkills();
+  const here = useLocation();
   const [listing, setListing] = useState(false);
   const ids = working.skill_ids;
   const known = [...(skills.data?.items ?? []), ...playbook.skills];
@@ -378,7 +380,11 @@ function SkillsPanel({
           <b>What is a Skill?</b> A method you write once, such as "how to debug a failing route". The agent sees only
           its name and description, and loads the full text when a step needs it.
         </span>
-        <Link to="/skills" className="text-[13px] font-semibold">
+        <Link
+          to="/skills"
+          state={returnState(`${here.pathname}${here.search}`, playbook.name)}
+          className="text-[13px] font-semibold"
+        >
           Open the Skills page →
         </Link>
       </div>
@@ -400,6 +406,7 @@ function SkillsPanel({
                   <span className="flex items-center gap-1.5">
                     <Link
                       to={`/skills?skill=${encodeURIComponent(skill.id)}`}
+                      state={returnState(`${here.pathname}${here.search}`, playbook.name)}
                       title="Open this Skill on the Skills page"
                       className="font-mono text-[13px] font-semibold"
                     >
