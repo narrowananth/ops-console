@@ -11,6 +11,9 @@ import { builtinFor, freeName, stepCount } from './labels';
 export function NewPlaybookButton() {
   const list = usePlaybooks();
   const [open, setOpen] = useState(false);
+  const [address] = useAddress('playbook', 'view');
+  // A Playbook open on the page has its own header; the button belongs to the overview.
+  if (address.playbook || address.view === 'flow') return null;
   return (
     <>
       <Button disabled={!list.data} onClick={() => setOpen(true)}>

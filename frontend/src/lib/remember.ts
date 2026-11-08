@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import type { z } from 'zod';
 
 const PREFIX = 'ops-console:';
@@ -58,18 +58,23 @@ export function useAddress<K extends string>(
   ...names: K[]
 ): [Record<K, string | null>, (next: Partial<Record<K, string | null>>, options?: { replace?: boolean }) => void] {
   const [params, setParams] = useSearchParams();
+  // Router state, such as the page a link came from, belongs to the page and outlives a change of its item.
+  const { state } = useLocation();
   const values = Object.fromEntries(names.map((name) => [name, params.get(name)])) as Record<K, string | null>;
   const set = useCallback(
     (next: Partial<Record<K, string | null>>, options?: { replace?: boolean }) =>
-      setParams((now) => {
-        const out = new URLSearchParams(now);
-        for (const [name, value] of Object.entries(next) as [K, string | null | undefined][]) {
-          if (value === null || value === undefined) out.delete(name);
-          else out.set(name, value);
-        }
-        return out;
-      }, options),
-    [setParams],
+      setParams(
+        (now) => {
+          const out = new URLSearchParams(now);
+          for (const [name, value] of Object.entries(next) as [K, string | null | undefined][]) {
+            if (value === null || value === undefined) out.delete(name);
+            else out.set(name, value);
+          }
+          return out;
+        },
+        { ...options, state },
+      ),
+    [setParams, state],
   );
   return [values, set];
 }

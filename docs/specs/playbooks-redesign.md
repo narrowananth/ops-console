@@ -44,8 +44,9 @@ Behavior this spec does not list is as in `agent-playbooks` and `playbook-skills
 
 ### New Playbook
 
-10. New Playbook sits in the page header. Its dialog asks for a name and a start: Blank, or Copy of a built-in, with a
-    dropdown of the seven built-ins. The name is up to 60 characters and unique without regard to case.
+10. New Playbook sits in the page header on the overview, and is absent while a Playbook is open. Its dialog asks for
+    a name and a start: Blank, or Copy of a built-in, with a dropdown of the seven built-ins. The name is up to 60
+    characters and unique without regard to case.
 11. A new Playbook runs on no Trigger. It opens on its flow with the Trigger node asking the operator to attach
     Triggers. A copy of a built-in starts with that built-in's rules and steps and holds no Skills.
 12. A built-in has no Customize or Duplicate action. New Playbook, Copy of a built-in, is the only way to get an
@@ -67,7 +68,8 @@ Behavior this spec does not list is as in `agent-playbooks` and `playbook-skills
 16. Selecting a node opens its fields in the panel on the right; the close button or Escape closes it. The panel shows
     the Trigger node's Trigger chips, a step's title, instructions and scratch copy tag, the Rules text, the Skills the
     Playbook holds with a picker of those it does not, or the Settings: Branch and the Jira ticket switch. A link from the Skills panel to the Skills page opens it with
-    "← Back to <Playbook name>" in its header; that returns to the same Playbook, its unsaved edits kept.
+    "← Back to <Playbook name>" in its header; that returns to the same Playbook, its unsaved edits kept. Picking a
+    pack or Skill on the Skills page keeps the button.
 17. The palette on the left lists the ten Step blocks, Custom step first, and the + menu on the line lists them in the
     same order. Dragging a block onto a line of the flow inserts a copy at that point, and pressing its + appends one;
     the step added opens in the panel. A step dragged to another place moves, and a step dropped outside the canvas

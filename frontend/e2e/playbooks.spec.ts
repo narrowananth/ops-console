@@ -789,6 +789,10 @@ test('the Skills page opened from a Playbook offers the way back, with the unsav
   await panel('Skills').getByRole('link', { name: 'Open the Skills page' }).click();
 
   await expect(page.getByRole('heading', { name: 'Skills', exact: true })).toBeVisible();
+  // Picking another pack or Skill on the Skills page keeps the way back.
+  await page.getByRole('tab', { name: 'Discover' }).click();
+  await page.getByRole('button', { name: /^Ops Console \d+ skills/ }).click();
+  await expect(page).toHaveURL(/pack=ops-console/);
   await page.getByRole('button', { name: '← Back to Checkout deep check' }).click();
   await expect(page).toHaveURL(new RegExp(`/playbooks\\?playbook=${id}`));
   await expect(editor.getByRole('textbox', { name: 'Name' })).toHaveValue('Checkout deeper check');
@@ -797,6 +801,18 @@ test('the Skills page opened from a Playbook offers the way back, with the unsav
   // The Skills page opened from the sidebar has no way back to offer.
   await page.getByRole('navigation').getByRole('link', { name: 'Skills' }).click();
   await expect(page.getByRole('button', { name: /^← Back to/ })).toHaveCount(0);
+});
+
+test('New Playbook shows on the overview and not while a Playbook is open', async ({ page, request }) => {
+  const id = await make(request, 'Checkout deep check');
+  await overview(page);
+  const button = page.getByRole('button', { name: '+ New Playbook' });
+  await expect(button).toBeVisible();
+  await open(page, id);
+  await expect(view(page).editor).toBeVisible();
+  await expect(button).toHaveCount(0);
+  await overview(page, '?trigger=verify&view=flow');
+  await expect(button).toHaveCount(0);
 });
 
 test('Escape with the focus in the Rules textarea closes the panel', async ({ page, request }) => {
@@ -1294,7 +1310,6 @@ test('standard buttons share one height, icon buttons are 30 pixels, and the dro
   await panel('Rules').getByRole('textbox', { name: 'Rules' }).fill('Never write to PROD.');
 
   const standard = [
-    page.getByRole('button', { name: '+ New Playbook' }),
     editor.getByRole('button', { name: '← All Playbooks' }),
     editor.getByRole('button', { name: 'Discard' }),
     editor.getByRole('button', { name: 'Save' }),
@@ -1306,6 +1321,7 @@ test('standard buttons share one height, icon buttons are 30 pixels, and the dro
 
   await editor.getByRole('button', { name: '← All Playbooks' }).click();
   const field = await sizeOf(page.getByRole('button', { name: 'Playbook for Verify' }));
+  expect((await sizeOf(page.getByRole('button', { name: '+ New Playbook' }))).height).toBe(sizes[0]?.height);
   await page.getByRole('button', { name: '+ New Playbook' }).click();
   const dialog = page.getByRole('alertdialog', { name: 'New Playbook' });
   const copy = await sizeOf(dialog.getByRole('button', { name: 'Built-in to copy' }));
