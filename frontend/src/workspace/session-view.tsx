@@ -21,6 +21,7 @@ import { AttachmentViewer, type Viewed } from '../components/ui/attachment-viewe
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
 import { type PathwayState, StatusPill } from '../components/ui/pathway';
+import { ResizeHandle, usePanelWidth } from '../components/ui/resize-handle';
 import {
   useDeleteSession,
   useEditMessage,
@@ -42,7 +43,7 @@ import { ConversationMap, ScrollToEnd, useFollowLatest } from './conversation';
 import { alertPath, pullRequestNamedIn, pullRequestPath, sessionDraftKey } from './links';
 import { MessageEditor, type MessageEditorHandle } from './message-editor';
 import { OpenPullRequestForm } from './open-pull-request';
-import { DiffPanel, DiffToggle, ResizeHandle, useDiffWidth } from './session-diff';
+import { DIFF_PANEL, DiffPanel, DiffToggle } from './session-diff';
 import { SESSION_STATE_TIP } from './sessions-pane';
 import { useSkillMenuFor } from './skill-menu';
 
@@ -70,7 +71,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const [diffOpen, setDiffOpen] = useStored('workspace.session-diff-open', z.boolean(), false);
   // The row beside the header; held in state so the panel measures it once it renders.
   const [body, setBody] = useState<HTMLDivElement | null>(null);
-  const panel = useDiffWidth(body);
+  const panel = usePanelWidth(DIFF_PANEL, body);
   const hasDiff = session?.kind === SessionKind.Repo;
   const gone = sessions.isSuccess && session === undefined;
   // A skill picked from the `/` menu; a typed `/name` is read by the daemon alone.
@@ -429,7 +430,14 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
         {viewed && <AttachmentViewer viewed={viewed} onClose={() => setViewed(null)} />}
         {hasDiff && diffOpen && (
           <>
-            <ResizeHandle width={panel.width} widest={panel.widest} onWidth={panel.setWidth} />
+            <ResizeHandle
+              label="Resize the diff panel"
+              width={panel.width}
+              initial={DIFF_PANEL.initial}
+              narrowest={DIFF_PANEL.narrowest}
+              widest={panel.widest}
+              onWidth={panel.setWidth}
+            />
             <div style={{ width: panel.width }} className="flex min-h-0 flex-none">
               <DiffPanel
                 diff={diff.data}

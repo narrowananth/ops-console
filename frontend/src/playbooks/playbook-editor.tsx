@@ -2,6 +2,7 @@ import { PLAYBOOK_LIMITS, type Playbook, type PlaybookTrigger, TRIGGER_LABELS } 
 import { useState } from 'react';
 import { Button, Spinner } from '../components/ui/button';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
+import { ResizeHandle, usePanelWidth } from '../components/ui/resize-handle';
 import { useDeletePlaybook, useSavePlaybook, useSkills } from '../lib/queries';
 import { ascending } from '../lib/sort';
 import type { Draft, DraftStep } from './drafts';
@@ -11,6 +12,9 @@ import { Inspector } from './inspector';
 import { holderOf, inWords, triggerOfBuiltin } from './labels';
 import { Lock } from './lock';
 import { Palette } from './palette';
+
+/** The panel's size: its width until the operator drags it, its narrowest, and the room the palette and canvas keep. */
+const PANEL = { key: 'playbooks.panel-width', initial: 336, narrowest: 280, keep: 520 };
 
 /** One Playbook as a flow: toolbar, the Step blocks, the canvas and the panel of the picked node. */
 export function PlaybookEditor(props: {
@@ -37,6 +41,9 @@ export function PlaybookEditor(props: {
     !readOnly && playbook.triggers.length === 0 && playbook.steps.length === 0 ? { kind: 'trigger' } : null,
   );
   const [drag, setDrag] = useState<Drag | null>(null);
+  // The row of palette, canvas and panel; held in state so the panel measures it once it renders.
+  const [body, setBody] = useState<HTMLDivElement | null>(null);
+  const panel = usePanelWidth(PANEL, body);
   // A step removed or moved away leaves its panel with nothing to show.
   const shown = sel?.kind === 'step' && !working.steps[sel.index] ? null : sel;
 
@@ -154,7 +161,7 @@ export function PlaybookEditor(props: {
           </span>
         </p>
       )}
-      <div className="flex min-h-0 flex-1">
+      <div ref={setBody} className="flex min-h-0 flex-1">
         {!readOnly && <Palette blocks={props.blocks} full={full} drag={drag} setDrag={setDrag} onAdd={appendStep} />}
         <FlowCanvas
           playbook={playbook}
@@ -169,7 +176,18 @@ export function PlaybookEditor(props: {
           onChange={onChange}
         />
         {shown && (
+          <ResizeHandle
+            label="Resize the panel"
+            width={panel.width}
+            initial={PANEL.initial}
+            narrowest={PANEL.narrowest}
+            widest={panel.widest}
+            onWidth={panel.setWidth}
+          />
+        )}
+        {shown && (
           <Inspector
+            width={panel.width}
             sel={shown}
             playbook={playbook}
             items={props.items}

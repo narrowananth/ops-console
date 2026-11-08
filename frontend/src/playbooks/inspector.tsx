@@ -65,6 +65,7 @@ const Note = ({ children }: { children: ReactNode }) => <p className="m-0 text-x
 
 /** The panel for the node picked on the canvas. Everything reads only on a built-in. */
 export function Inspector(props: {
+  width: number;
   sel: Sel;
   playbook: Playbook;
   items: Playbook[];
@@ -79,7 +80,8 @@ export function Inspector(props: {
     <aside
       aria-label={PANEL_LABEL[sel.kind]}
       onKeyDown={(event) => event.key === 'Escape' && onClose()}
-      className="flex w-84 flex-none flex-col gap-3 overflow-y-auto border-l border-line bg-card px-4 py-4"
+      style={{ width: props.width }}
+      className="flex flex-none flex-col gap-3 overflow-y-auto bg-card px-4 py-4"
     >
       {sel.kind === 'trigger' && <TriggerPanel {...props} />}
       {sel.kind === 'step' && working.steps[sel.index] && (
@@ -120,10 +122,9 @@ export function Inspector(props: {
               aria-label="Rules"
               value={working.rules}
               maxLength={PLAYBOOK_LIMITS.rules}
-              rows={14}
               placeholder="Example: Run pnpm test:unit, never the whole suite. Say which file:line each claim comes from."
               onChange={(event) => onChange({ ...working, rules: event.target.value })}
-              className={`${field} field-sizing-content max-h-[50vh] min-h-40 resize-y overflow-y-auto text-[13px] leading-relaxed`}
+              className={`${field} min-h-40 flex-1 resize-none overflow-y-auto text-[13px] leading-relaxed`}
             />
           )}
           <details className="text-xs text-neutral-700">
@@ -302,11 +303,10 @@ function StepPanel(props: {
         aria-label="Step instructions"
         value={step.instructions}
         readOnly={readOnly}
-        rows={11}
         maxLength={PLAYBOOK_LIMITS.instructions}
         placeholder="Write what the agent does in this step."
         onChange={(event) => props.onChange({ instructions: event.target.value })}
-        className={`${field} field-sizing-content max-h-[50vh] min-h-40 resize-y overflow-y-auto text-xs leading-relaxed`}
+        className={`${field} min-h-40 flex-1 resize-none overflow-y-auto text-xs leading-relaxed`}
       />
       {!readOnly && step.block === StepBlock.Custom && (
         <label title={SCRATCH_TIP} className="flex items-center gap-2 text-xs text-neutral-700">

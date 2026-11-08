@@ -1,92 +1,14 @@
 import { type SessionDiff, type SessionDiffFile, SessionDiffStatus } from '@ops-console/shared';
-import { type PointerEvent, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { z } from 'zod';
 import { Button } from '../components/ui/button';
 import { DiffLines, DiffStat, SplitDiff } from '../components/ui/diff';
 import { useStored } from '../lib/remember';
 
-/** The panel's width when the operator has not dragged it, and the narrowest it gets. */
-const WIDTH = 560;
-const NARROWEST = 320;
-/** The conversation keeps at least this much beside the panel. */
-const CONVERSATION = 360;
+/** The diff panel's size: its width when the operator has not dragged it, its narrowest, and the room the conversation keeps. */
+export const DIFF_PANEL = { key: 'workspace.session-diff-width', initial: 560, narrowest: 320, keep: 360 };
 /** Files open at first while the diff has this many or fewer. */
 const OPEN_UP_TO = 8;
-
-/**
- * The diff panel's width, kept through reloads, and the widest it may be in `container` now: the conversation keeps
- * its room as the window narrows, and the stored width comes back as it widens.
- */
-export function useDiffWidth(container: HTMLElement | null) {
-  const [stored, setStored] = useStored('workspace.session-diff-width', z.number(), WIDTH);
-  const [room, setRoom] = useState<number | null>(null);
-  useEffect(() => {
-    const node = container;
-    if (!node) return;
-    const observer = new ResizeObserver(() => setRoom(node.clientWidth));
-    observer.observe(node);
-    setRoom(node.clientWidth);
-    return () => observer.disconnect();
-  }, [container]);
-  const widest = Math.max(NARROWEST, (room ?? WIDTH + CONVERSATION) - CONVERSATION);
-  const clamp = (next: number) => Math.round(Math.min(widest, Math.max(NARROWEST, next)));
-  return { width: clamp(stored), widest, setWidth: (next: number) => setStored(clamp(next)) };
-}
-
-/**
- * The bar between the conversation and the diff panel. Dragging it, or the arrow keys on it, makes the panel wider or
- * narrower; a double click puts it back.
- */
-export function ResizeHandle({
-  width,
-  widest,
-  onWidth,
-}: {
-  width: number;
-  widest: number;
-  onWidth: (width: number) => void;
-}) {
-  const start = useRef<{ x: number; width: number } | null>(null);
-  const move = (event: PointerEvent<HTMLDivElement>) => {
-    if (start.current) onWidth(start.current.width + start.current.x - event.clientX);
-  };
-  return (
-    // biome-ignore lint/a11y/useSemanticElements: a vertical bar that resizes is a separator; <hr> cannot take focus or drags
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize the diff panel"
-      aria-valuenow={width}
-      aria-valuemin={NARROWEST}
-      aria-valuemax={widest}
-      tabIndex={0}
-      title="Drag to resize. Double-click to reset."
-      onPointerDown={(event) => {
-        event.preventDefault();
-        event.currentTarget.setPointerCapture(event.pointerId);
-        start.current = { x: event.clientX, width };
-      }}
-      onPointerMove={move}
-      onPointerUp={(event) => {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-        start.current = null;
-      }}
-      onDoubleClick={() => onWidth(WIDTH)}
-      onKeyDown={(event) => {
-        if (event.key === 'ArrowLeft') onWidth(width + 32);
-        else if (event.key === 'ArrowRight') onWidth(width - 32);
-        else return;
-        event.preventDefault();
-      }}
-      className="group relative w-1.5 flex-none cursor-col-resize touch-none border-l border-line outline-none hover:bg-accent-200 focus-visible:bg-accent-300"
-    >
-      <span
-        aria-hidden
-        className="absolute top-1/2 left-1/2 h-8 w-0.5 -translate-1/2 rounded-full bg-neutral-400 group-hover:bg-accent-500"
-      />
-    </div>
-  );
-}
 
 const STATUS: Record<SessionDiffStatus, { letter: string; tone: string; word: string }> = {
   [SessionDiffStatus.Added]: { letter: 'A', tone: 'text-diff-add-text', word: 'added' },

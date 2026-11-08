@@ -95,6 +95,9 @@ Behavior this spec does not list is as in `agent-playbooks` and `playbook-skills
 
 25. Buttons, dropdowns and switches use the console's shared sizes: the page's standard button, the compact button in
     toolbars and panels, the 30 pixel icon button, the shared dropdown field and the shared switch.
+26. The panel's left edge is a bar the operator drags, or moves with the arrow keys, to make the panel wider or
+    narrower. The width stays through another node and a reload, a double click puts it back, and the canvas keeps room
+    beside it. The Rules and instructions boxes fill the height the panel leaves.
 
 ## Settled
 
@@ -150,7 +153,7 @@ screen has three columns.
 
 ## Seams
 
-- **Browser** (Playwright, against the dev daemon, `frontend/e2e/playbooks.spec.ts`): 1 to 25. The token figure,
+- **Browser** (Playwright, against the dev daemon, `frontend/e2e/playbooks.spec.ts`): 1 to 26. The token figure,
   the 1500 character tint and the Skills meter (22 to 24) assert on typed text. The first install (3) runs against a
   daemon with no Playbooks.
 

@@ -726,6 +726,57 @@ test('picking another node swaps the panel, and Escape on the node closes it', a
   await expect(panel('Skills')).toHaveCount(0);
 });
 
+test('the panel drags wider and narrower from its edge, keeps its width on another node and through a reload, and double click resets it', async ({
+  page,
+  request,
+}) => {
+  await open(page, await make(request, 'Checkout deep check', [FIND_OWNER], 'Read only.'));
+  const { panel, node } = view(page);
+  await node('Rules').click();
+  const handle = page.getByRole('separator', { name: 'Resize the panel' });
+  const width = async (kind: 'Rules' | 'Skills' = 'Rules') => Math.round((await panel(kind).boundingBox())?.width ?? 0);
+  const start = Number(await handle.getAttribute('aria-valuenow'));
+  expect(await width()).toBe(start);
+
+  await handle.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(handle).toHaveAttribute('aria-valuenow', String(start + 32));
+  expect(await width()).toBe(start + 32);
+
+  const box = await handle.boundingBox();
+  if (!box) throw new Error('the handle has no box');
+  await page.mouse.move(box.x + box.width / 2, box.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 40, box.y + 100, { steps: 4 });
+  await page.mouse.up();
+  await expect(handle).toHaveAttribute('aria-valuenow', String(start + 32 - 40));
+
+  await node('Skills').click();
+  expect(await width('Skills')).toBe(start + 32 - 40);
+  await page.reload();
+  await node('Skills').click();
+  await expect(handle).toHaveAttribute('aria-valuenow', String(start + 32 - 40));
+
+  await handle.dblclick();
+  await expect(handle).toHaveAttribute('aria-valuenow', String(start));
+});
+
+test('the Rules and Step instructions boxes fill the height of the panel', async ({ page, request }) => {
+  await open(page, await make(request, 'Checkout deep check', [FIND_OWNER], 'Read only.'));
+  const { panel, node } = view(page);
+  for (const [name, kind, box] of [
+    ['Rules', 'Rules', 'Rules'],
+    ['Step 1', 'Step', 'Step instructions'],
+  ] as const) {
+    await node(name).click();
+    const aside = await panel(kind).boundingBox();
+    const area = await panel(kind).getByRole('textbox', { name: box }).boundingBox();
+    if (!aside || !area) throw new Error('missing box');
+    // Only the Note, the Remove row and the panel's padding sit below the box.
+    expect(aside.y + aside.height - (area.y + area.height)).toBeLessThan(120);
+  }
+});
+
 test('Escape with the focus in the Rules textarea closes the panel', async ({ page, request }) => {
   await open(page, await make(request, 'Checkout deep check', [FIND_OWNER], 'Read only.'));
   const { panel, node } = view(page);
