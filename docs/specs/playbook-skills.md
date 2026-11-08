@@ -1,9 +1,8 @@
 # Playbook Skills
 
 **Status:** shipped
-**Design:** Playbooks in `design/ops-console.html` (sidebar item under Claude, after Playbooks; the open Playbook in the
-middle column). The Skills page, the Skills section of a Playbook and the Skills line on a job card are new to the
-design.
+**Design:** Playbooks in `design/ops-console-sidebar.html` (sidebar item under Claude, after Playbooks; the Skills card
+and panel of an open Playbook). The Skills page and the Skills line on a job card are in `design/ops-console.html`.
 
 ## Problem
 
@@ -39,7 +38,7 @@ methods once, attach them to the Playbooks that need them, and let the agent pic
 8. A Playbook may hold Skills whichever Triggers it is on, including Review PR: a Skill is read-only text and writes
    nothing. Built-in Playbooks hold none and cannot be edited, so a Trigger that runs its built-in offers no Skills.
    Dev tools Sessions have no Playbook and no Skills.
-9. Duplicating a Playbook copies its Skills.
+9. A copy of a built-in holds no Skills, as the built-in holds none.
 
 ### At run time
 
@@ -165,11 +164,11 @@ Server to client, `{}`. Fires after a Skill is created, edited or deleted. The U
 
 ## UI
 
-- **Skills page**: sidebar item under Claude after Playbooks, route `/skills`. Two columns like Playbooks: list on the
-  left, editor in the middle. States: loading, empty (New Skill), error with retry, unsaved edits (save bar). Departs
+- **Skills page**: sidebar item under Claude after Playbooks, route `/skills`. Two columns: list on the left, editor in
+  the middle. States: loading, empty (New Skill), error with retry, unsaved edits (save bar). Departs
   from the design: new page.
-- **Playbook editor**: Skills section under Rules with the picker and the count. With no Skills, the section reads
-  "No Skills. The agent follows the rules and steps only."
+- **Playbook editor**: a Skills card beside Rules and Settings, whose panel holds the picker and the count. With no
+  Skills, the panel reads "None held. The agent follows the rules and steps only."
 - **Job cards** (Report panel, Fix, Agent Review, Reply check, Comment pass): one line, "Skills offered: a, b", linking to each
   Skill. Hidden when none. A Skill since deleted shows its name as plain text.
 - No PROD state: a Skill reaches no Connection.

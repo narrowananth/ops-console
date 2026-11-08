@@ -88,6 +88,11 @@ the branches Verify and Fix read the code from, and whether a Fix makes a Ticket
 may be held by several. Each Trigger without one runs its built-in.
 _Avoid_: rule, pipeline, workflow
 
+**Built-in Playbook**:
+The console's own Playbook for a Trigger. Read only, and the console updates its text. A Trigger runs its built-in until
+the operator attaches a Playbook of their own. The operator gets an editable copy through New Playbook.
+_Avoid_: default Playbook
+
 **Trigger**:
 A place in a tab that starts the agent: Verify and Fix in Monitor, Review PR, Check reply, Address comments, Reply in
 thread and Session message in Workspace.

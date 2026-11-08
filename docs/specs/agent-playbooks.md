@@ -1,9 +1,9 @@
 # Agent Playbooks
 
 **Status:** shipped
-**Design:** Playbooks in `design/ops-console.html` (sidebar, under Claude after Agents & accounts), in three columns:
-Triggers and Playbooks on the left, the open Playbook in the middle, Step blocks on the right. The same file shows
-the Playbook on the Monitor Verify button and Report panel, the Session header and the Agent Review card.
+**Design:** Playbooks in `design/ops-console-sidebar.html` (sidebar, under Claude after Agents & accounts): the overview
+of Triggers and the Playbook as a flow, as `playbooks-redesign` describes. `design/ops-console.html` shows the Playbook
+on the Monitor Verify button and Report panel, the Session header and the Agent Review card.
 
 ## Problem
 
@@ -30,8 +30,8 @@ patch. They have no place to write that down, so they retype it in every Session
    eight (description, production baseline and diff, codebase trace, consumers and dependencies, database, correctness
    and risk, tests and build, findings and verdict), Check reply four and Address comments six. Reply in thread and
    Session message have rules only.
-3. Built-in Playbooks are read-only. Duplicate makes an editable copy named "Copy of Verify (built-in)".
-4. The operator creates a Playbook from nothing or by Duplicate. A Playbook has a name, rules and ordered steps.
+3. Built-in Playbooks are read-only. New Playbook starts an editable copy of one, under the name the operator gives.
+4. The operator creates a Playbook from nothing or as a copy of a built-in. A Playbook has a name, rules and ordered steps.
    Limits: name 60 characters and unique without regard to case, rules 8000, at most 12 steps, step title 80, step
    instructions 4000. A Playbook may have no steps.
 5. One Playbook may hold several Triggers; editing it changes what each of them runs from their next job or turn.
@@ -42,14 +42,14 @@ patch. They have no place to write that down, so they retype it in every Session
 
 ### Building a Playbook
 
-7. The Step blocks column holds ten blocks, each with written instructions: Trace the log through the code, Find
+7. The Step blocks palette holds ten blocks, each with written instructions: Trace the log through the code, Find
    the Repo that owns it, Find who else uses it, Read real data from Connections, Replay the request locally, Make
    mock data, Run the tests, Test a lasting fix, Check PROD readiness, and Custom step (empty).
-8. Dragging a block into Steps inserts a copy at the drop point; the copy's title and instructions are then the
-   Playbook's own to edit. Dragging a step reorders it. Dragging a step out of Steps removes it. Dragging a Playbook
-   onto a Trigger attaches it (Behavior 5), and dragging a Trigger that holds one off it detaches it.
-9. Every drag move has a keyboard and button path: Add to steps on a block, Move up and Move down and Remove on a
-   step, Attach to and Detach on a Playbook, and each Trigger's dropdown of Built-in and the operator's Playbooks.
+8. Dragging a block onto a line of the flow inserts a copy at that point; the copy's title and instructions are then the
+   Playbook's own to edit. Dragging a step reorders it. Dragging a step off the canvas removes it. A Playbook goes on
+   a Trigger from the Trigger's dropdown, and comes off by choosing Built-in there.
+9. Every drag move has a keyboard and button path: + on a block, Alt and the arrow keys and Delete on a focused step,
+   Remove in a step's panel, and each Trigger's dropdown of Built-in and the operator's Playbooks.
 10. A step that writes files or runs commands carries the tag "scratch copy". The blocks Replay the request locally,
     Make mock data, Run the tests and Test a lasting fix carry it, whatever the step's text says; Custom step has a checkbox for it. Editing a step's text keeps its tag.
 11. Review PR may hold tagged steps; the built-in's "Run the tests and build" is one. With any, the Agent Review makes
@@ -179,7 +179,7 @@ patch. They have no place to write that down, so they retype it in every Session
 
 - **Resume after a daemon restart**: a step running at restart fails as interrupted. Resuming from the step joins
   the resume work in `persist-selections-and-runs` Behaviors 12 to 23.
-- **Saving your own Step blocks**: a step lives in its Playbook; Duplicate copies a whole Playbook.
+- **Saving your own Step blocks**: a step lives in its Playbook; New Playbook copies a built-in.
 - **Two pages editing one Playbook**: the last Save wins.
 - **Enforcing the mock data rule**: it is an instruction, not a check. The operator sees a PR's diff before merging,
   and real values that slip into a file show there.
@@ -327,7 +327,7 @@ blocks in the order of Behavior 7.
 
 ### `POST /playbooks`
 
-Body: `name`, `rules`, `branches`, `jira_ticket`, `steps`. 201 `Playbook`. Duplicate is this call with a copy's fields.
+Body: `name`, `rules`, `branches`, `jira_ticket`, `steps`. 201 `Playbook`. A copy of a built-in is this call with its fields.
 
 ### `PATCH /playbooks/:id`
 
@@ -387,24 +387,10 @@ Server to client, each time a job's step changes status.
 ## UI
 
 - **Sidebar**: Playbooks under Claude, after Agents & accounts, at `/playbooks`.
-- **Left column, Triggers**: grouped under Monitor and Workspace. Each is a drop target with a dropdown showing
-  its Playbook or "Built-in". The dropdown lists Built-in and the operator's Playbooks A to Z with their step counts.
-  A drag over a Trigger outlines it.
+- **Page**: the overview of Triggers and one Playbook's flow, as `playbooks-redesign` describes. The open Playbook is in
+  the address as `?playbook=<id>`.
 - **Confirms**: Delete and Replace (Behaviors 5 and 6) ask in a modal over a dimmed page, with Cancel focused first.
   Escape, Cancel or a click on the dimmed page closes it.
-- **Left column, Playbooks**: the operator's Playbooks A to Z with the Triggers each holds, then the built-ins
-  marked "built-in". New Playbook sits in the page header. The open one is in the address as `?playbook=<id>`. Empty: "No Playbooks
-  yet. Duplicate a built-in or start a new one." Loading: "Reading Playbooks…". Error: "Could not read Playbooks:"
-  and the reason.
-- **Middle column**: the name; "On: Monitor · Verify, Workspace · Session message" or "On no Trigger"; Rules as a text
-  box with a count to 8000; Steps as numbered cards with a grip, title, instructions, the "scratch copy" tag, and
-  Move up, Move down and Remove; a drop line where a dragged block or step would land; under the last step, "Then
-  the console's own turn:" and what it is for each job Trigger. On a Playbook held only by chat Triggers the steps
-  are greyed (Behavior 19). Save and Discard show while there are unsaved edits; Duplicate and Delete always. A
-  built-in shows its text read-only with only Duplicate. A failed Save shows the error under Save and keeps the
-  edits.
-- **Right column, Step blocks**: the ten blocks, each with a grip, its title, the tag where it has one, and Add to
-  steps. The instructions show on hover and on focus.
 - **Monitor**: the Verify and Fix buttons name a Playbook that is not built-in (Behavior 18). The Report panel shows
   the Playbook's name, then its steps with status and summary above today's live tool steps, then "Writing the
   Report" during the closing turn. A failed one shows "Retry from step N" next to Verify again. Fix progress shows
@@ -431,7 +417,7 @@ Server to client, each time a job's step changes status.
   Connection, compare them and keep PROD read-only, so a Playbook there would only repeat them.
 - **Steps on chat Triggers**: the operator drives a chat message by message, so ordered steps have no start or end
   to run between.
-- **Drag only**: a drag cannot be done from the keyboard; every move has a button too.
+- **Drag only**: a drag cannot be done from the keyboard; every move has a key or a button too.
 - **Verification writing in the operator's checkout**: mock files and test runs would mix with the operator's own
   uncommitted work.
 - **Verification stays read-only, mocks only in the Fix**: the mock test is how a Verification proves the cause

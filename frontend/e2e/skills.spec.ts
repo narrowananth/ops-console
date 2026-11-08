@@ -157,12 +157,23 @@ test('Used by links each Playbook; Delete names them, takes the Skill off and ke
   await expect(list.getByRole('button', { name: /zz-other/ })).toContainText('1 Playbook');
 
   await page.goto(`${daemon.url}/playbooks?playbook=${two}#token=${daemon.token}`);
-  const held = page.getByRole('region', { name: 'Playbook', exact: true }).getByRole('region', { name: 'Skills' });
+  const playbook = page.getByRole('region', { name: 'Playbook', exact: true });
+  await playbook.getByRole('button', { name: 'Skills', exact: true }).click();
+  const held = playbook.getByRole('complementary', { name: 'Skills panel' });
   await expect(held.getByRole('listitem')).toHaveCount(1);
   await expect(held).toContainText('zz-other');
 });
 
-test('a Playbook attaches a Skill in its editor, shows it with a link and keeps it after Save and reload', async ({
+const skillsPanel = (page: Page) => {
+  const editor = page.getByRole('region', { name: 'Playbook', exact: true });
+  return {
+    editor,
+    card: editor.getByRole('button', { name: 'Skills', exact: true }),
+    skills: editor.getByRole('complementary', { name: 'Skills panel' }),
+  };
+};
+
+test('a Skill added in the Skills panel shows with a link and leaves the list of Skills to add', async ({
   page,
   request,
 }) => {
@@ -170,66 +181,85 @@ test('a Playbook attaches a Skill in its editor, shows it with a link and keeps 
   await makeSkill(request, 'beta-method');
   const id = await makePlaybook(request, 'Checkout deep check');
   await page.goto(`${daemon.url}/playbooks?playbook=${id}#token=${daemon.token}`);
-  const editor = page.getByRole('region', { name: 'Playbook', exact: true });
-  const skills = editor.getByRole('region', { name: 'Skills' });
+  const { editor, card, skills } = skillsPanel(page);
+  const add = skills.getByRole('button', { name: '+ Add a Skill' });
 
+  await card.click();
   await expect(skills).toContainText('0 / 8');
-  await expect(skills).toContainText('No Skills. The agent follows the rules and steps only.');
-  await skills.getByRole('combobox', { name: 'Add a Skill' }).selectOption({ label: 'alpha-method (Custom)' });
+  await expect(skills).toContainText('None held. The agent follows the rules and steps only.');
+  await add.click();
+  await skills.getByRole('button', { name: /^alpha-method/ }).click();
   await expect(skills).toContainText('1 / 8');
+  await expect(card).toContainText('alpha-method');
   const held = skills.getByRole('listitem', { name: 'alpha-method' });
   await expect(held).toContainText('Use it to read a log.');
   await expect(held.getByRole('link', { name: 'alpha-method' })).toHaveAttribute('href', `/skills?skill=${alpha}`);
-  await expect(skills.getByRole('option', { name: 'alpha-method' })).toHaveCount(0);
+  await add.click();
+  await expect(skills.getByRole('button', { name: /^alpha-method/ })).toHaveCount(0);
+  await expect(skills.getByRole('button', { name: /^beta-method/ })).toBeVisible();
   await expect(editor.getByText('Unsaved edits')).toBeVisible();
+});
 
+test('a Skill added to a Playbook stays after Save and reload', async ({ page, request }) => {
+  await makeSkill(request, 'alpha-method', 'Use it to read a log.');
+  const id = await makePlaybook(request, 'Checkout deep check');
+  await page.goto(`${daemon.url}/playbooks?playbook=${id}#token=${daemon.token}`);
+  const { editor, card, skills } = skillsPanel(page);
+
+  await card.click();
+  await skills.getByRole('button', { name: '+ Add a Skill' }).click();
+  await skills.getByRole('button', { name: /^alpha-method/ }).click();
   await editor.getByRole('button', { name: 'Save' }).click();
   await expect(editor.getByRole('button', { name: 'Save' })).toHaveCount(0);
   await page.reload();
+  await card.click();
   await expect(skills.getByRole('listitem', { name: 'alpha-method' })).toBeVisible();
+});
 
+test('Remove takes a Skill off a Playbook once saved, and the Skill itself stays', async ({ page, request }) => {
+  const alpha = await makeSkill(request, 'alpha-method');
+  const id = await makePlaybook(request, 'Checkout deep check', [alpha]);
+  await page.goto(`${daemon.url}/playbooks?playbook=${id}#token=${daemon.token}`);
+  const { editor, card, skills } = skillsPanel(page);
+
+  await card.click();
   await skills.getByRole('button', { name: 'Remove alpha-method' }).click();
-  await expect(skills).toContainText('No Skills.');
+  await expect(skills).toContainText('None held.');
   await editor.getByRole('button', { name: 'Save' }).click();
   await page.reload();
+  await card.click();
   await expect(skills).toContainText('0 / 8');
   await openSkills(page, alpha);
   await expect(regions(page).editor.getByRole('textbox', { name: 'Name' })).toHaveValue('alpha-method');
-
-  await page.goto(`${daemon.url}/playbooks?playbook=${id}#token=${daemon.token}`);
-  await editor.getByRole('button', { name: 'Duplicate' }).click();
-  await expect(editor.getByRole('textbox', { name: 'Name' })).toHaveValue('Copy of Checkout deep check');
 });
 
-test('a Playbook holds eight Skills and refuses a ninth; Duplicate copies them; a built-in holds none', async ({
-  page,
-  request,
-}) => {
+test('a Playbook holds eight Skills and refuses a ninth', async ({ page, request }) => {
   const ids: string[] = [];
   for (let n = 1; n <= 9; n += 1) ids.push(await makeSkill(request, `skill-${n}`));
   const id = await makePlaybook(request, 'Full', ids.slice(0, 8));
   await page.goto(`${daemon.url}/playbooks?playbook=${id}#token=${daemon.token}`);
-  const editor = page.getByRole('region', { name: 'Playbook', exact: true });
-  const skills = editor.getByRole('region', { name: 'Skills' });
+  const { editor, card, skills } = skillsPanel(page);
+  const add = skills.getByRole('button', { name: /Add a Skill|Hide list/ });
 
+  await card.click();
   await expect(skills).toContainText('8 / 8');
-  await expect(skills.getByRole('combobox', { name: 'Add a Skill' })).toBeDisabled();
+  await expect(add).toBeDisabled();
   await skills.getByRole('button', { name: 'Remove skill-8' }).click();
-  await expect(skills.getByRole('combobox', { name: 'Add a Skill' })).toBeEnabled();
-  await skills.getByRole('combobox', { name: 'Add a Skill' }).selectOption({ label: 'skill-9 (Custom)' });
+  await expect(add).toBeEnabled();
+  await add.click();
+  await skills.getByRole('button', { name: /^skill-9/ }).click();
   await expect(skills).toContainText('8 / 8');
-  await expect(skills.getByRole('combobox', { name: 'Add a Skill' })).toBeDisabled();
+  await expect(add).toBeDisabled();
   await editor.getByRole('button', { name: 'Discard' }).click();
+});
 
-  await editor.getByRole('button', { name: 'Duplicate' }).click();
-  await expect(editor.getByRole('textbox', { name: 'Name' })).toHaveValue('Copy of Full');
-  await expect(skills.getByRole('listitem')).toHaveCount(8);
-
-  await page.getByRole('button', { name: /^Verify \(built-in\)/ }).click();
-  await expect(editor.getByRole('textbox', { name: 'Name' })).toHaveValue(/Verify/);
-  await expect(skills).toContainText('0 / 8');
-  await expect(skills).toContainText('No Skills.');
-  await expect(skills.getByRole('combobox', { name: 'Add a Skill' })).toHaveCount(0);
+test('a built-in Playbook holds no Skills', async ({ page, request }) => {
+  await makeSkill(request, 'alpha-method');
+  await page.goto(`${daemon.url}/playbooks?trigger=verify&view=flow#token=${daemon.token}`);
+  const { card, skills } = skillsPanel(page);
+  await card.click();
+  await expect(skills).toContainText('A built-in Playbook holds no Skills.');
+  await expect(skills.getByRole('button', { name: /Add a Skill/ })).toHaveCount(0);
 });
 
 test('an Agent Review card lists the Skills it was offered; a deleted one is plain text', async ({ page }) => {

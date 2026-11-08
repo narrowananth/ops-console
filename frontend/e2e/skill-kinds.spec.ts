@@ -117,11 +117,16 @@ test('a Playbook picker offers pack and Custom skills with their badges', async 
   const made = await request.post(api('/playbooks'), { headers: auth, data: { name: 'Picks' } });
   const id = ((await made.json()) as { data: { id: string } }).data.id;
   await page.goto(`${daemon.url}/playbooks?playbook=${id}#token=${daemon.token}`);
-  const skills = page.getByRole('region', { name: 'Skills' });
-  await skills.getByRole('combobox', { name: 'Add a Skill' }).selectOption({ label: 'caveman-commit (Caveman)' });
-  await skills.getByRole('combobox', { name: 'Add a Skill' }).selectOption({ label: 'my-method (Custom)' });
-  await expect(skills.getByRole('listitem', { name: 'caveman-commit' })).toContainText('Caveman');
-  await expect(skills.getByRole('listitem', { name: 'my-method' })).toContainText('Custom');
+  const editor = page.getByRole('region', { name: 'Playbook', exact: true });
+  await editor.getByRole('button', { name: 'Skills', exact: true }).click();
+  const skills = editor.getByRole('complementary', { name: 'Skills panel' });
+  await skills.getByRole('button', { name: '+ Add a Skill' }).click();
+  await expect(skills.getByRole('button', { name: /^caveman-commit/ })).toContainText('Caveman');
+  await expect(skills.getByRole('button', { name: /^my-method/ })).toContainText('Custom');
+  await skills.getByRole('button', { name: /^caveman-commit/ }).click();
+  await skills.getByRole('button', { name: '+ Add a Skill' }).click();
+  await skills.getByRole('button', { name: /^my-method/ }).click();
+  await expect(skills.getByRole('listitem')).toHaveCount(2);
 });
 
 const REPO = {

@@ -1,620 +1,216 @@
-import {
-  JOB_TRIGGERS,
-  PLAYBOOK_LIMITS,
-  PLAYBOOK_TRIGGERS,
-  type Playbook,
-  type PlaybookTrigger,
-  PR_DESCRIPTION_RULE,
-  SKILL_LIMITS,
-  StepBlock,
-  TRIGGER_LABELS,
-} from '@ops-console/shared';
-import { type DragEvent, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { PLAYBOOK_LIMITS, type Playbook, type PlaybookTrigger, StepBlock, TRIGGER_LABELS } from '@ops-console/shared';
+import { useState } from 'react';
 import { Button, Spinner } from '../components/ui/button';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
-import { Hint } from '../components/ui/tip';
-import { Toggle } from '../components/ui/toggle';
-import { useCreatePlaybook, useDeletePlaybook, useSavePlaybook, useSkills } from '../lib/queries';
+import { ResizeHandle, usePanelWidth } from '../components/ui/resize-handle';
+import { useDeletePlaybook, useSavePlaybook, useSkills } from '../lib/queries';
 import { ascending } from '../lib/sort';
-import { KindBadge, useBadgeLabel } from '../skills/kind-badge';
-import type { Draft, DraftStep } from './drafts';
-import { type Drag, Grip, leftFor, startDrag } from './drag';
-import { SCRATCH_TIP, ScratchTag } from './job-steps';
-import { CLOSING_TURN, chatOnly, freeName, inWords, TRIGGER_TIPS, triggerName } from './labels';
+import { type Draft, type DraftStep, unfinished } from './drafts';
+import type { Drag } from './drag';
+import { FlowCanvas, type Sel } from './flow-canvas';
+import { Inspector } from './inspector';
+import { holderOf, inWords, triggerOfBuiltin } from './labels';
+import { Lock } from './lock';
+import { Palette } from './palette';
 
-const small = 'px-2.5 py-1 text-xs';
-const field =
-  'w-full rounded-md border border-divider bg-card px-2.5 py-1.5 text-text outline-none focus:border-accent-400 read-only:bg-transparent';
+/** The panel's size: its width until the operator drags it, its narrowest, and the room the palette and canvas keep. */
+const PANEL = { key: 'playbooks.panel-width', initial: 336, narrowest: 280, keep: 520 };
 
-/** The open Playbook: its name, the Triggers holding it, Rules, Steps, and Save while there are edits. */
+/** One Playbook as a flow: toolbar, the Step blocks, the canvas and the panel of the picked node. */
 export function PlaybookEditor(props: {
   playbook: Playbook;
   items: Playbook[];
+  blocks: DraftStep[];
   working: Draft;
   dirty: boolean;
   onChange: (next: Draft) => void;
   onDiscard: () => void;
   onSaved: () => void;
-  onOpen: (id: string) => void;
+  onBack: () => void;
   onDeleted: () => void;
-  onAttach: (trigger: PlaybookTrigger) => void;
-  onDetach: (trigger: PlaybookTrigger) => void;
-  drag: Drag | null;
-  setDrag: (drag: Drag | null) => void;
-  onDropBlock: (step: DraftStep, at: number) => void;
+  onToggleTrigger: (trigger: PlaybookTrigger) => void;
 }) {
-  const { playbook, working, onChange, drag, setDrag } = props;
-  const save = useSavePlaybook();
-  const duplicate = useCreatePlaybook();
-  const remove = useDeletePlaybook();
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [menu, setMenu] = useState<'attach' | 'detach' | null>(null);
-  const [lineAt, setLineAt] = useState<number | null>(null);
-  const cards = useRef<(HTMLLIElement | null)[]>([]);
+  const { playbook, working, onChange } = props;
   const readOnly = playbook.builtin;
-  const steps = working.steps;
+  const save = useSavePlaybook();
+  const remove = useDeletePlaybook();
+  const skills = useSkills();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // A Playbook made just now has no Trigger and no step: open on the Trigger node, where the operator attaches it.
+  const [sel, setSel] = useState<Sel | null>(
+    !readOnly && playbook.triggers.length === 0 && playbook.steps.length === 0 ? { kind: 'trigger' } : null,
+  );
+  const [drag, setDrag] = useState<Drag | null>(null);
+  // The row of palette, canvas and panel; held in state so the panel measures it once it renders.
+  const [body, setBody] = useState<HTMLDivElement | null>(null);
+  const panel = usePanelWidth(PANEL, body);
+  // A step removed or moved away leaves its panel with nothing to show.
+  const shown = sel?.kind === 'step' && !working.steps[sel.index] ? null : sel;
+
+  const known = [...(skills.data?.items ?? []), ...playbook.skills];
+  const skillNames = ascending(
+    working.skill_ids.map((id) => known.find((skill) => skill.id === id)?.name ?? 'A deleted Skill'),
+    (name) => name,
+  );
   const triggerLabels = playbook.triggers.map((trigger) => TRIGGER_LABELS[trigger].label);
-  const closing = JOB_TRIGGERS.filter((trigger) => playbook.triggers.includes(trigger));
-  const greyed = chatOnly(playbook.triggers);
-
-  const setStep = (index: number, patch: Partial<DraftStep>) =>
-    onChange({ ...working, steps: steps.map((step, at) => (at === index ? { ...step, ...patch } : step)) });
-  const move = (from: number, to: number) => {
-    const next = [...steps];
-    const [moved] = next.splice(from, 1);
-    if (!moved) return;
-    next.splice(to, 0, moved);
-    onChange({ ...working, steps: next });
+  const lacking = unfinished(working);
+  const full = working.steps.length >= PLAYBOOK_LIMITS.steps;
+  const appendStep = (step: DraftStep) => {
+    if (readOnly || full) return;
+    onChange({ ...working, steps: [...working.steps, { ...step }] });
+    setSel({ kind: 'step', index: working.steps.length });
   };
-  const removeStep = (index: number) => onChange({ ...working, steps: steps.filter((_, at) => at !== index) });
+  // The empty Custom step leads the list: it is the one the operator writes themselves.
+  const blocks = [...props.blocks].sort(
+    (a, b) => Number(b.block === StepBlock.Custom) - Number(a.block === StepBlock.Custom),
+  );
 
-  /** Where a dragged block or step would land: before the first card whose middle is below the pointer. */
-  const dropIndex = (event: DragEvent) => {
-    const at = cards.current
-      .slice(0, steps.length)
-      .findIndex((card) => card !== null && event.clientY < card.getBoundingClientRect().top + card.offsetHeight / 2);
-    return at === -1 ? steps.length : at;
-  };
-  const takesDrop =
-    !readOnly && (drag?.kind === 'step' || (drag?.kind === 'block' && steps.length < PLAYBOOK_LIMITS.steps));
+  const builtinTrigger = triggerOfBuiltin(playbook);
+  const replacedBy = readOnly ? holderOf(props.items, builtinTrigger) : undefined;
 
   return (
-    <section aria-label="Playbook" className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <div className="flex w-full max-w-180 flex-col gap-5 px-7 py-6">
-        <div className="flex flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              aria-label="Name"
-              value={working.name}
-              readOnly={readOnly}
-              maxLength={PLAYBOOK_LIMITS.name}
-              onChange={(event) => onChange({ ...working, name: event.target.value })}
-              className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 py-1 font-heading text-lg font-semibold text-text outline-none hover:border-divider focus:border-accent-400 read-only:hover:border-transparent"
-            />
-            {!readOnly && (
-              <>
-                <Button
-                  className={small}
-                  title="Make a Trigger run this Playbook. Each Trigger runs one Playbook."
-                  aria-expanded={menu === 'attach'}
-                  onClick={() => setMenu(menu === 'attach' ? null : 'attach')}
-                >
-                  Attach to
-                </Button>
-                {playbook.triggers.length > 0 && (
-                  <Button
-                    className={small}
-                    title="Take this Playbook off a Trigger. That Trigger runs its built-in again."
-                    aria-expanded={menu === 'detach'}
-                    onClick={() => setMenu(menu === 'detach' ? null : 'detach')}
-                  >
-                    Detach
-                  </Button>
-                )}
-              </>
-            )}
-            <Button
-              className={small}
-              title="Make an editable copy of this Playbook. The copy runs on no Trigger until you attach it."
-              disabled={duplicate.isPending}
-              onClick={() =>
-                duplicate.mutate(
-                  {
-                    name: freeName(`Copy of ${playbook.name}`, props.items),
-                    rules: playbook.rules,
-                    branches: playbook.branches,
-                    jira_ticket: playbook.jira_ticket,
-                    steps: playbook.steps,
-                    skill_ids: playbook.skills.map((skill) => skill.id),
-                  },
-                  { onSuccess: (made) => props.onOpen(made.id) },
-                )
-              }
-            >
-              Duplicate
-            </Button>
-            {!readOnly && (
-              <Button
-                className={`${small} text-accent-700`}
-                title="Delete this Playbook. Its Triggers go back to their built-ins. Asks first."
-                onClick={() => setConfirmDelete(true)}
-              >
-                Delete
-              </Button>
-            )}
-          </div>
-          {menu && (
-            <fieldset
-              aria-label={menu === 'attach' ? 'Attach to' : 'Detach'}
-              className="m-0 flex flex-wrap gap-1.5 border-0 px-1.5 py-0"
-            >
-              {(menu === 'attach'
-                ? PLAYBOOK_TRIGGERS.filter((trigger) => !playbook.triggers.includes(trigger))
-                : playbook.triggers
-              ).map((trigger) => (
-                <Button
-                  key={trigger}
-                  className={small}
-                  title={TRIGGER_TIPS[trigger]}
-                  onClick={() => {
-                    setMenu(null);
-                    if (menu === 'attach') props.onAttach(trigger);
-                    else props.onDetach(trigger);
-                  }}
-                >
-                  {triggerName(trigger)}
-                </Button>
-              ))}
-            </fieldset>
-          )}
-          {confirmDelete && (
-            <ConfirmDialog
-              title={`Delete ${playbook.name}?`}
-              action="Delete"
-              pending={remove.isPending}
-              error={remove.error?.message}
-              onConfirm={() => remove.mutate(playbook.id, { onSuccess: props.onDeleted })}
-              onCancel={() => {
-                remove.reset();
-                setConfirmDelete(false);
-              }}
-            >
-              {triggerLabels.length > 0 &&
-                `${inWords(triggerLabels)} ${triggerLabels.length === 1 ? 'goes' : 'go'} back to built-in. `}
-              This can't be undone.
-            </ConfirmDialog>
-          )}
-          {duplicate.error && (
-            <p role="alert" className="m-0 px-1.5 text-xs text-accent-700">
-              {duplicate.error.message}
-            </p>
-          )}
-          <div className="px-1.5 text-[13px] text-neutral-700">
-            {playbook.triggers.length > 0 ? `On: ${playbook.triggers.map(triggerName).join(', ')}` : 'On no Trigger'}
-          </div>
-        </div>
-
-        <section aria-label="Rules">
-          <div className="mb-1.5 flex items-baseline gap-2">
-            <h2 className="m-0 text-sm">Rules</h2>
-            <Hint
-              text={`What the agent must always do or never do. Sent with every agent turn this Playbook runs, steps and chats alike. Up to ${PLAYBOOK_LIMITS.rules} characters.`}
-            />
-            <span className="text-xs text-neutral-700">Every turn, after the console's own instructions</span>
-            <span
-              title="Characters used, out of the most Rules can hold"
-              className="ml-auto font-mono text-xs text-neutral-700"
-            >
-              {working.rules.length} / {PLAYBOOK_LIMITS.rules}
-            </span>
-          </div>
-          <textarea
-            aria-label="Rules"
-            value={working.rules}
-            readOnly={readOnly}
-            maxLength={PLAYBOOK_LIMITS.rules}
-            placeholder={readOnly ? 'No rules.' : 'What the agent should always do or never do on this Trigger'}
-            onChange={(event) => onChange({ ...working, rules: event.target.value })}
-            className={`${field} field-sizing-content max-h-[50vh] min-h-28 resize-y overflow-y-auto text-[13px] leading-relaxed`}
-          />
-          <details className="mt-1.5 text-xs text-neutral-700">
-            <summary className="cursor-pointer">
-              Every run also gets the console's pull request description rule, before these rules
-            </summary>
-            <p className="m-0 mt-1 whitespace-pre-wrap rounded-lg border border-line bg-surface/40 px-3 py-2">
-              {PR_DESCRIPTION_RULE}
-            </p>
-          </details>
-        </section>
-
-        <SkillsSection
-          playbook={playbook}
-          ids={working.skill_ids}
+    <section aria-label="Playbook" className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex flex-none flex-wrap items-center gap-3 border-b border-line px-5 py-3">
+        <Button title="Back to the Triggers" onClick={props.onBack}>
+          ← All Playbooks
+        </Button>
+        <input
+          aria-label="Name"
+          value={working.name}
           readOnly={readOnly}
-          onChange={(skill_ids) => onChange({ ...working, skill_ids })}
+          maxLength={PLAYBOOK_LIMITS.name}
+          onChange={(event) => onChange({ ...working, name: event.target.value })}
+          className="min-w-0 max-w-80 flex-1 rounded-md border border-transparent bg-transparent px-1.5 py-1 font-heading text-lg font-semibold text-text outline-none hover:border-divider focus:border-accent-400 read-only:hover:border-transparent"
         />
-
-        <section aria-label="Branch">
-          <div className="mb-1.5 flex items-baseline gap-2">
-            <h2 className="m-0 text-sm">Branch</h2>
-            <Hint text="Branch names split by commas, tried in order. Verify and Fix read the newest commit of the first one origin has, so they see what is deployed, not your checkout. Blank: the Repo's default branch." />
-            <span className="text-xs text-neutral-700">
-              Where Verify and Fix read the code: the first of these origin has, fetched first
-            </span>
-          </div>
-          <input
-            aria-label="Branch"
-            value={working.branches}
-            readOnly={readOnly}
-            maxLength={PLAYBOOK_LIMITS.branches}
-            placeholder={
-              readOnly ? "The Repo's default branch" : "production, master, main  ·  blank: the Repo's default branch"
-            }
-            onChange={(event) => onChange({ ...working, branches: event.target.value })}
-            className={`${field} font-mono text-[13px]`}
-          />
-        </section>
-
-        <section aria-label="Jira ticket" className="flex items-center gap-3">
-          <Toggle
-            label="Jira ticket"
-            title={readOnly ? 'A built-in reads only. Duplicate it to turn the Jira ticket on.' : undefined}
-            checked={working.jira_ticket}
-            disabled={readOnly}
-            onChange={(checked) => onChange({ ...working, jira_ticket: checked })}
-          />
-          <div className="flex flex-col">
-            <h2 className="m-0 text-sm">Jira ticket</h2>
-            <span className="text-xs text-neutral-700">
-              Fix makes a Jira ticket first, when Jira is connected, and names the branch after it. Off: the branch is
-              fix/&lt;name&gt;.
-            </span>
-          </div>
-        </section>
-
-        <section aria-label="Steps">
-          <div className="mb-2 flex items-baseline gap-2">
-            <h2 className="m-0 text-sm">Steps</h2>
-            <Hint text="Each step runs as its own agent turn, top to bottom, and ends done, skipped or failed. A failed step stops the run; Retry or Skip it from where the run shows." />
-            <span className="text-xs text-neutral-700">Each step is its own agent turn, in order</span>
-            <span
-              title="Steps used, out of the most a Playbook can hold"
-              className="ml-auto font-mono text-xs text-neutral-700"
-            >
-              {steps.length} / {PLAYBOOK_LIMITS.steps}
-            </span>
-          </div>
-          {greyed && <p className="m-0 mb-2 text-xs text-neutral-700">Steps don't run on chat Triggers.</p>}
-          <ol
-            aria-label="Steps"
-            onDragOver={(event) => {
-              if (!takesDrop) return;
-              event.preventDefault();
-              event.dataTransfer.dropEffect = 'move';
-              setLineAt(dropIndex(event));
-            }}
-            onDragLeave={(event) => {
-              if (leftFor(event)) setLineAt(null);
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              const at = dropIndex(event);
-              setLineAt(null);
-              if (drag?.kind === 'block') props.onDropBlock(drag.step, at);
-              if (drag?.kind === 'step') move(drag.index, at > drag.index ? at - 1 : at);
-            }}
-            className={`m-0 flex min-h-12 list-none flex-col gap-2 p-0 ${greyed ? 'opacity-50' : ''}`}
-          >
-            {steps.length === 0 && lineAt === null && (
-              <li className="rounded-lg border border-dashed border-divider px-3 py-3 text-xs text-neutral-700">
-                {readOnly
-                  ? 'No steps: the agent answers with the rules alone.'
-                  : 'No steps. Drag a block here, or press + on one.'}
-              </li>
-            )}
-            {steps.map((step, index) => (
-              <StepCard
-                // Inputs are controlled, so a card moved to another index shows its own text.
-                // biome-ignore lint/suspicious/noArrayIndexKey: steps have no id until saved
-                key={index}
-                cardRef={(card) => {
-                  cards.current[index] = card;
-                }}
-                step={step}
-                index={index}
-                count={steps.length}
-                readOnly={readOnly}
-                lineBefore={lineAt === index}
-                dragging={drag?.kind === 'step' && drag.index === index}
-                onDragStart={(event) => startDrag(event, { kind: 'step', index }, setDrag)}
-                onDragEnd={(event) => {
-                  // Let go outside Steps: the step is removed (Behavior 8).
-                  if (event.dataTransfer.dropEffect === 'none') removeStep(index);
-                  setLineAt(null);
-                  setDrag(null);
-                }}
-                onChange={(patch) => setStep(index, patch)}
-                onMove={(to) => move(index, to)}
-                onRemove={() => removeStep(index)}
-              />
-            ))}
-            {lineAt === steps.length && <DropLine />}
-          </ol>
-          {closing.length > 0 && (
-            <div className="mt-2.5 flex flex-col gap-0.5 rounded-lg border border-dashed border-divider px-3 py-2 text-xs text-neutral-700">
-              <span className="flex items-center gap-1.5">
-                Then the console's own turn:
-                <Hint text="After your steps the console runs one more turn itself, with its own instructions. It is not a step, so you cannot move or remove it." />
-              </span>
-              {closing.map((trigger) => (
-                <span key={trigger}>
-                  {TRIGGER_LABELS[trigger].label}: {CLOSING_TURN[trigger]}.
-                </span>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
-      {props.dirty && (
-        <div className="sticky bottom-0 mt-auto flex flex-col gap-1 border-t border-line bg-card px-7 py-2.5">
-          <div className="flex items-center gap-2">
+        {readOnly && (
+          <span className="flex items-center gap-1 rounded-full bg-neutral-200 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.04em] text-neutral-700 uppercase">
+            <Lock />
+            Read only
+          </span>
+        )}
+        <span className="flex-1" />
+        {props.dirty && (
+          <>
             <span className="text-xs text-neutral-700">Unsaved edits</span>
-            <span className="flex-1" />
             <Button
-              className={small}
               title="Throw the edits away and go back to the saved Playbook"
               disabled={save.isPending}
-              onClick={props.onDiscard}
+              onClick={() => {
+                setSel(null);
+                props.onDiscard();
+              }}
             >
               Discard
             </Button>
             <Button
               variant="primary"
-              className={small}
-              disabled={save.isPending}
+              disabled={save.isPending || lacking !== null}
+              title={lacking ?? undefined}
               onClick={() => save.mutate({ id: playbook.id, patch: working }, { onSuccess: props.onSaved })}
             >
               {save.isPending && <Spinner />}
               Save
             </Button>
-          </div>
-          {save.error && (
-            <p role="alert" className="m-0 text-right text-xs text-accent-700">
-              {save.error.message}
-            </p>
-          )}
-        </div>
-      )}
-    </section>
-  );
-}
-
-/** The Skills the Playbook holds, with a picker for the ones it does not. They save with the Playbook. */
-function SkillsSection(props: {
-  playbook: Playbook;
-  ids: string[];
-  readOnly: boolean;
-  onChange: (ids: string[]) => void;
-}) {
-  const { ids, readOnly } = props;
-  const skills = useSkills();
-  const labelOf = useBadgeLabel();
-  const known = [...(skills.data?.items ?? []), ...props.playbook.skills];
-  const held = ascending(
-    ids.map((id) => ({ id, ...known.find((skill) => skill.id === id) })),
-    (skill) => skill.name ?? '',
-  );
-  const free = ascending(
-    (skills.data?.items ?? []).filter((skill) => !ids.includes(skill.id)),
-    (skill) => skill.name,
-  );
-  const full = ids.length >= SKILL_LIMITS.perPlaybook;
-  const noneToAdd = skills.data !== undefined && free.length === 0;
-
-  return (
-    <section aria-label="Skills">
-      <div className="mb-1.5 flex items-baseline gap-2">
-        <h2 className="m-0 text-sm">Skills</h2>
-        <Hint
-          text={`Methods the agent can load while this Playbook runs, when a step needs one. Up to ${SKILL_LIMITS.perPlaybook}. Write them on the Skills page.`}
-        />
-        <span className="text-xs text-neutral-700">The agent sees their names and loads one when it needs it</span>
-        <span
-          title="Skills held, out of the most a Playbook can hold"
-          className="ml-auto font-mono text-xs text-neutral-700"
-        >
-          {ids.length} / {SKILL_LIMITS.perPlaybook}
-        </span>
+          </>
+        )}
+        {!readOnly && (
+          <Button
+            className="text-accent-700"
+            title="Delete this Playbook. Its Triggers go back to their built-ins. Asks first."
+            onClick={() => setConfirmDelete(true)}
+          >
+            Delete
+          </Button>
+        )}
       </div>
-      {held.length === 0 ? (
-        <p className="m-0 mb-2 text-xs text-neutral-700">No Skills. The agent follows the rules and steps only.</p>
-      ) : (
-        <ul className="m-0 mb-2 flex list-none flex-col gap-2 p-0">
-          {held.map((skill) => (
-            <li
-              key={skill.id}
-              aria-label={skill.name ?? 'A deleted Skill'}
-              className="flex items-start gap-2.5 rounded-lg border border-line bg-card px-3 py-2 shadow-sm"
-            >
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                {skill.name === undefined ? (
-                  <span className="text-[13px] font-semibold text-neutral-700">A deleted Skill</span>
-                ) : (
-                  <span className="flex items-center gap-1.5">
-                    <Link
-                      to={`/skills?skill=${encodeURIComponent(skill.id)}`}
-                      title="Open this Skill on the Skills page"
-                      className="font-mono text-[13px] font-semibold"
-                    >
-                      {skill.name}
-                    </Link>
-                    {skill.kind && <KindBadge kind={skill.kind} name={skill.name} />}
-                  </span>
-                )}
-                <span className="text-xs text-neutral-700">{skill.description}</span>
-              </div>
-              {!readOnly && (
-                <button
-                  type="button"
-                  aria-label={`Remove ${skill.name ?? 'the deleted Skill'}`}
-                  title="Take this Skill off the Playbook. Save to keep the change. The Skill is not deleted."
-                  onClick={() => props.onChange(ids.filter((id) => id !== skill.id))}
-                  className={actionButton}
-                >
-                  ×
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
+      {props.dirty && lacking && (
+        <p className="m-0 border-b border-line px-5 py-1.5 text-right text-xs text-neutral-700">
+          Save when it is finished. {lacking}
+        </p>
       )}
-      {!readOnly && (
-        <>
-          <select
-            aria-label="Add a Skill"
-            value=""
-            disabled={full || noneToAdd}
-            title={
-              full
-                ? `A Playbook holds ${SKILL_LIMITS.perPlaybook} Skills at most. Remove one first.`
-                : noneToAdd
-                  ? 'Every Skill is held already, or none is written yet.'
-                  : undefined
-            }
-            onChange={(event) => event.target.value && props.onChange([...ids, event.target.value])}
-            className={`${field} w-auto min-w-56 cursor-pointer text-[13px] disabled:cursor-not-allowed disabled:opacity-50`}
-          >
-            <option value="">Add a Skill…</option>
-            {free.map((skill) => (
-              <option key={skill.id} value={skill.id}>
-                {skill.name} ({labelOf(skill.kind, skill.name)})
-              </option>
-            ))}
-          </select>
-          {skills.isError && (
-            <p role="alert" className="m-0 mt-1 text-xs text-accent-700">
-              Could not read Skills: {skills.error.message}
-            </p>
-          )}
-        </>
+      {save.error && (
+        <p role="alert" className="m-0 border-b border-line px-5 py-1.5 text-right text-xs text-accent-700">
+          {save.error.message}
+        </p>
       )}
-    </section>
-  );
-}
-
-function DropLine() {
-  return <li role="presentation" className="h-0 rounded-xs border-t-2 border-accent" />;
-}
-
-const actionButton =
-  'size-6 cursor-pointer rounded-sm border-0 bg-transparent p-0 text-neutral-600 hover:bg-neutral-200 hover:text-text disabled:cursor-not-allowed disabled:opacity-40';
-
-function StepCard(props: {
-  cardRef: (card: HTMLLIElement | null) => void;
-  step: DraftStep;
-  index: number;
-  count: number;
-  readOnly: boolean;
-  lineBefore: boolean;
-  dragging: boolean;
-  onDragStart: (event: DragEvent) => void;
-  onDragEnd: (event: DragEvent) => void;
-  onChange: (patch: Partial<DraftStep>) => void;
-  onMove: (to: number) => void;
-  onRemove: () => void;
-}) {
-  const { step, index, readOnly } = props;
-  return (
-    <>
-      {props.lineBefore && <DropLine />}
-      <li
-        ref={props.cardRef}
-        aria-label={`Step ${index + 1}`}
-        className={`flex items-start gap-2.5 rounded-lg border border-line bg-card px-3 py-2.5 shadow-sm ${props.dragging ? 'opacity-40' : ''}`}
-      >
-        {!readOnly && (
-          // biome-ignore lint/a11y/noStaticElementInteractions: a drag handle; Move up, Move down and Remove are its keyboard path
-          <span
-            draggable
-            onDragStart={props.onDragStart}
-            onDragEnd={props.onDragEnd}
-            className="pt-1.5"
-            title="Drag to reorder"
-          >
-            <Grip />
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Delete ${playbook.name}?`}
+          action="Delete"
+          pending={remove.isPending}
+          error={remove.error?.message}
+          onConfirm={() => remove.mutate(playbook.id, { onSuccess: props.onDeleted })}
+          onCancel={() => {
+            remove.reset();
+            setConfirmDelete(false);
+          }}
+        >
+          {triggerLabels.length > 0 &&
+            `${inWords(triggerLabels)} ${triggerLabels.length === 1 ? 'goes' : 'go'} back to built-in. `}
+          This can't be undone.
+        </ConfirmDialog>
+      )}
+      {readOnly && (
+        <p className="m-0 flex flex-none items-center gap-2.5 border-b border-line bg-accent-100/50 px-5 py-2 text-[13px]">
+          <span className="flex size-5.5 flex-none items-center justify-center rounded-full bg-neutral-200 text-[11px] font-semibold">
+            i
           </span>
-        )}
-        <span className="mt-1 flex size-5.5 flex-none items-center justify-center rounded-full bg-neutral-200 text-xs font-semibold">
-          {index + 1}
-        </span>
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <div className="flex items-center gap-2">
-            <input
-              aria-label="Step title"
-              value={step.title}
-              readOnly={readOnly}
-              maxLength={PLAYBOOK_LIMITS.title}
-              onChange={(event) => props.onChange({ title: event.target.value })}
-              className={`${field} text-[13px] font-semibold`}
-            />
-            {step.block === StepBlock.Custom && !readOnly ? (
-              <label title={SCRATCH_TIP} className="flex flex-none items-center gap-1 text-xs text-neutral-700">
-                <input
-                  type="checkbox"
-                  checked={step.writes}
-                  onChange={(event) => props.onChange({ writes: event.target.checked })}
-                />
-                scratch copy
-              </label>
+          <span>
+            <b>Built-in, read only.</b>{' '}
+            {replacedBy ? (
+              <>
+                Replaced on <b>{TRIGGER_LABELS[builtinTrigger].label}</b> by <b>{replacedBy.name}</b>.
+              </>
             ) : (
-              step.writes && <ScratchTag />
-            )}
-          </div>
-          <textarea
-            aria-label="Step instructions"
-            value={step.instructions}
-            readOnly={readOnly}
-            maxLength={PLAYBOOK_LIMITS.instructions}
-            placeholder="Write what the agent does in this step."
-            onChange={(event) => props.onChange({ instructions: event.target.value })}
-            className={`${field} field-sizing-content max-h-[50vh] min-h-24 resize-y overflow-y-auto text-xs leading-relaxed`}
+              <>
+                The console runs this on <b>{TRIGGER_LABELS[builtinTrigger].label}</b> until you attach a Playbook of
+                yours.
+              </>
+            )}{' '}
+            <span className="text-neutral-700">
+              The console updates its text; to change it, make a copy from <b>+ New Playbook</b>.
+            </span>
+          </span>
+        </p>
+      )}
+      <div ref={setBody} className="flex min-h-0 flex-1">
+        {!readOnly && <Palette blocks={blocks} full={full} drag={drag} setDrag={setDrag} onAdd={appendStep} />}
+        <FlowCanvas
+          playbook={playbook}
+          working={working}
+          skillNames={skillNames}
+          readOnly={readOnly}
+          sel={shown}
+          onSelect={setSel}
+          blocks={blocks}
+          drag={drag}
+          setDrag={setDrag}
+          onChange={onChange}
+        />
+        {shown && (
+          <ResizeHandle
+            label="Resize the panel"
+            width={panel.width}
+            initial={PANEL.initial}
+            narrowest={PANEL.narrowest}
+            widest={panel.widest}
+            onWidth={panel.setWidth}
           />
-        </div>
-        {!readOnly && (
-          <div className="flex flex-none gap-0.5">
-            <button
-              type="button"
-              aria-label="Move up"
-              title="Move this step up one place"
-              disabled={index === 0}
-              onClick={() => props.onMove(index - 1)}
-              className={actionButton}
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              aria-label="Move down"
-              title="Move this step down one place"
-              disabled={index === props.count - 1}
-              onClick={() => props.onMove(index + 1)}
-              className={actionButton}
-            >
-              ↓
-            </button>
-            <button
-              type="button"
-              aria-label="Remove"
-              title="Remove this step from the Playbook. Save to keep the change."
-              onClick={props.onRemove}
-              className={actionButton}
-            >
-              ×
-            </button>
-          </div>
         )}
-      </li>
-    </>
+        {shown && (
+          <Inspector
+            width={panel.width}
+            sel={shown}
+            playbook={playbook}
+            items={props.items}
+            working={working}
+            readOnly={readOnly}
+            onChange={onChange}
+            onClose={() => setSel(null)}
+            onToggleTrigger={props.onToggleTrigger}
+          />
+        )}
+      </div>
+    </section>
   );
 }

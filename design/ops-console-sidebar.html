@@ -361,39 +361,169 @@
   .xchip { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 4px 12px; font-size: 12px; }
   .xchip:hover { border-color: var(--accent-300); background: var(--accent-100); }
   .perm { display: flex; flex-direction: column; gap: 8px; border-radius: var(--r-lg); background: var(--bg); padding: 10px 12px; }
-  /* Playbooks */
-  .pbk-left { width: 288px; flex: none; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; border-right: 1px solid var(--line); padding: 16px 12px; }
-  .pbk-mid { flex: 1; min-width: 0; overflow-y: auto; }
-  .pbk-right { width: 268px; flex: none; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; border-left: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 40%, transparent); padding: 16px 12px; }
-  .pbk-cap { margin: 12px 0 4px; padding: 0 8px; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--n600); }
-  .pbk-cap:first-child { margin-top: 0; }
-  .tab-h { padding: 6px 8px 2px; font-size: 11px; font-weight: 700; color: var(--n700); }
-  .slot { display: flex; align-items: center; gap: 8px; border: 1px dashed var(--divider); border-radius: var(--r-lg); padding: 8px 10px; font-size: 13px; transition: border-color .15s, background .15s; }
-  .slot b { font-weight: 700; }
-  .slot.over { border-style: solid; border-color: var(--accent-400); background: var(--accent-100); }
-  .slot.refuse { border-style: solid; border-color: var(--n400); background: var(--n200); cursor: no-drop; }
-  .pchip { margin-left: auto; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 999px; background: var(--accent-100); color: var(--accent-700); padding: 2px 10px; font-size: 11px; font-weight: 700; cursor: grab; }
-  .pchip.builtin { background: var(--n200); color: var(--n700); font-weight: 400; cursor: default; }
-  .grip { flex: none; color: var(--n500); cursor: grab; font-size: 12px; letter-spacing: -2px; line-height: 1.4; user-select: none; }
-  .pbrow { align-items: center; gap: 8px; padding: 8px 10px; font-size: 13px; }
-  .pbrow .dirty { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--accent); }
-  .pstep { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--line); background: var(--card); border-radius: var(--r-lg); padding: 10px 12px; box-shadow: var(--shadow-sm); }
-  .pstep .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-  .pstep .body p { margin: 0; font-size: 12px; color: var(--n700); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .pstep textarea { width: 100%; min-height: 76px; resize: vertical; border: 1px solid var(--divider); background: var(--bg); padding: 8px 10px; font-size: 12px; outline: none; }
-  .pstep .acts { display: flex; flex: none; gap: 2px; }
-  .pstep .acts button { width: 24px; height: 24px; border: 0; background: transparent; border-radius: var(--r-sm); color: var(--n600); padding: 0; }
-  .pstep .acts button:hover { background: var(--n200); color: var(--text); }
-  .pstep.dragging, .blk.dragging, .pbrow.dragging { opacity: .4; }
-  .steps-list { display: flex; flex-direction: column; gap: 8px; min-height: 48px; }
-  .steps-list.chat .pstep { opacity: .5; }
-  .dropline { height: 0; border-top: 2px solid var(--accent); border-radius: 2px; }
-  .blk { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--card); border-radius: var(--r-lg); padding: 8px 10px; font-size: 12px; cursor: grab; box-shadow: var(--shadow-sm); }
+  /* Playbooks: a flow canvas. Trigger node → step nodes → the console's own turn. Rules, Skills and Settings are context cards above it. */
+  .pf { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .pf-bar { flex: none; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); padding: 12px 20px; }
+  .pf-pick { position: relative; }
+  .pf-pick > button { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--divider); background: var(--card); box-shadow: var(--shadow-sm); padding: 6px 12px; font-size: 13px; font-weight: 700; }
+  .pf-pick .menu { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: 320px; max-height: 420px; overflow-y: auto; border: 1px solid var(--divider); background: var(--card); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); padding: 6px; }
+  .pf-pick .menu .cap { padding: 8px 10px 3px; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--n600); }
+  .pf-pick .menu button { display: flex; width: 100%; align-items: center; gap: 8px; border: 0; background: transparent; border-radius: var(--r); padding: 7px 10px; text-align: left; font-size: 13px; }
+  .pf-pick .menu button:hover { background: var(--n200); }
+  .pf-pick .menu button.on { background: var(--accent-100); }
+  .pf-name { width: 260px; border: 1px solid transparent; background: transparent; padding: 5px 8px; font: 800 16px var(--sans); letter-spacing: -.01em; }
+  .pf-name:hover { border-color: var(--divider); }
+  .pf-name:focus { border-color: var(--accent-400); outline: 0; background: var(--card); }
+  .pf-body { flex: 1; min-height: 0; display: flex; }
+  .pf-pal { width: 212px; flex: none; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; border-right: 1px solid var(--line); padding: 14px 12px; }
+  .pf-cap { padding: 0 4px; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--n600); }
+  .blk { display: flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--card); border-radius: var(--r-lg); padding: 7px 8px; font-size: 12px; cursor: grab; box-shadow: var(--shadow-sm); }
   .blk:hover { border-color: var(--accent-300); }
+  .blk.ro { cursor: default; opacity: .6; }
   .blk .add { margin-left: auto; width: 22px; height: 22px; flex: none; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--accent); font-weight: 800; padding: 0; }
   .blk .add:hover { background: var(--accent-100); }
+  .blk .add:disabled { opacity: .4; cursor: not-allowed; }
+  .pf-canvas { flex: 1; min-width: 0; position: relative; overflow: auto; background-color: var(--bg); background-image: radial-gradient(circle, color-mix(in srgb, var(--text) 16%, transparent) 1px, transparent 1.2px); background-size: 20px 20px; }
+  .pf-stage { position: relative; min-height: 100%; }
+  .pf-stage svg { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+  .pf-edge { fill: none; stroke: var(--n500); stroke-width: 1.6; }
+  .pf-edge.ctx { stroke: var(--n400); stroke-dasharray: 5 5; }
+  .pf-stage.dim .pf-edge:not(.ctx) { opacity: .45; }
+  .pf-node { position: absolute; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); background: var(--card); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); padding: 10px 12px; text-align: left; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+  .pf-node:hover { border-color: var(--accent-300); }
+  .pf-node.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-100), var(--shadow-md); }
+  .pf-node.dragging { opacity: .35; }
+  .pf-node .k { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--n600); }
+  .pf-node .t { font-size: 13px; font-weight: 800; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pf-node .d { font-size: 11.5px; color: var(--n700); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pf-node.trig { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: var(--accent-100); }
+  .pf-node.trig .k { color: var(--accent-700); }
+  .pf-node.term { border-style: dashed; background: transparent; box-shadow: none; }
+  .pf-node.ctx { gap: 3px; padding: 9px 12px; }
+  .pf-node.ctx .k { color: var(--accent-700); }
+  .pf-node .num { width: 20px; height: 20px; font-size: 10.5px; flex: none; }
+  .pf-node .tags { display: flex; flex-wrap: wrap; gap: 4px; }
+  .pf-node .tg { border-radius: 999px; background: var(--accent); color: #fff; padding: 0 8px; font-size: 10.5px; font-weight: 700; }
+  .pf-node .tg.more { background: transparent; color: var(--accent-700); box-shadow: inset 0 0 0 1px var(--accent-300); }
+  .pf-plus { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--divider); background: var(--card); border-radius: 50%; padding: 0; font-size: 14px; line-height: 1; color: var(--n700); box-shadow: var(--shadow-sm); opacity: .0; transition: opacity .12s; }
+  .pf-stage:hover .pf-plus, .pf-plus.hot, .pf-plus:focus-visible { opacity: 1; }
+  .pf-plus:hover, .pf-plus.hot { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pf-menu { position: absolute; z-index: 20; width: 340px; max-height: 340px; overflow-y: auto; border: 1px solid var(--divider); background: var(--card); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); padding: 6px; }
+  .pf-menu button { display: flex; width: 100%; flex-direction: column; gap: 1px; border: 0; background: transparent; border-radius: var(--r); padding: 6px 10px; text-align: left; }
+  .pf-menu button:hover { background: var(--accent-100); }
+  .pf-menu .h { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; }
+  .pf-menu .d { font-size: 11.5px; color: var(--n700); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pf-legend { position: sticky; left: 14px; bottom: 14px; float: left; margin: 0 0 14px 14px; display: flex; flex-direction: column; gap: 5px; border: 1px solid var(--line); background: var(--card); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); padding: 9px 12px; font-size: 11px; color: var(--n700); }
+  .pf-legend i { display: inline-block; width: 26px; border-top: 2px solid var(--n500); margin-right: 8px; vertical-align: middle; }
+  .pf-legend i.d { border-top: 2px dashed var(--n400); }
+  .pf-note { position: sticky; top: 12px; z-index: 5; display: block; width: max-content; max-width: 70%; margin: 12px auto 0; border-radius: 999px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow-sm); padding: 4px 14px; font-size: 12px; color: var(--n700); }
+  .pf-insp { width: 304px; flex: none; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; border-left: 1px solid var(--line); background: var(--card); padding: 16px; }
+  .pf-insp h3 { font-size: 14px; }
+  .pf-insp .field { width: 100%; background: var(--bg); font-size: 13px; }
+  .pf-insp textarea { resize: vertical; line-height: 1.5; }
+  .pf-insp .g { margin-top: 2px; font-size: 11px; font-weight: 600; color: var(--n700); }
+  .pf-insp .tc { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--divider); background: var(--bg); border-radius: 999px; padding: 4px 12px; font-size: 12px; color: var(--n800); }
+  .tchip:hover { border-color: var(--accent-300); background: var(--accent-100); }
+  .tchip.on { border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 700; }
+  .tchip.on:hover { background: var(--accent-600); }
+  .tchip.taken { border-style: dashed; color: var(--n700); }
+  .tchip:disabled { opacity: .5; cursor: default; background: var(--bg); border-color: var(--divider); }
+  .tchip small { font-size: 10.5px; color: var(--n600); }
+  .tchip.on small { color: #fff; }
+  .pf-sw { display: flex; align-items: flex-start; gap: 12px; }
+  .pf-ro { border-radius: var(--r-lg); background: var(--n200); padding: 8px 12px; font-size: 12px; color: var(--n800); }
+  .pf-skill { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--bg); border-radius: var(--r); padding: 6px 8px 6px 10px; }
+  .pf-confirm { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, #000 35%, transparent); }
+  .pf-confirm > div { width: 380px; border-radius: var(--r-xl); background: var(--card); box-shadow: var(--shadow-lg); padding: 20px; display: flex; flex-direction: column; gap: 14px; }
   .wtag { flex: none; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); color: var(--warn); padding: 0 7px; font-size: 10px; white-space: nowrap; }
-  .savebar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); background: var(--card); padding: 10px 28px; }
+  .grip { flex: none; color: var(--n500); cursor: grab; font-size: 12px; letter-spacing: -2px; line-height: 1.4; user-select: none; }
+  .pf-over { flex: 1; min-height: 0; display: flex; }
+  .pf-over[hidden] { display: none; }
+  .ov { width: 100%; max-width: 980px; margin: 0 auto; padding: 24px 32px 40px; display: flex; flex-direction: column; gap: 26px; }
+  /* Playbooks opening screen: Trigger list left, the selected Trigger's flow right. */
+  .ov2 { flex: 1; min-height: 0; display: flex; }
+  .ov2-list { width: 316px; flex: none; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; border-right: 1px solid var(--line); padding: 16px 12px 24px; }
+  .ov2-cap { margin: 14px 0 4px; padding: 0 10px; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--n600); }
+  .ov2-cap:first-child { margin-top: 0; }
+  .ov2-it { display: flex; width: 100%; align-items: center; gap: 10px; border: 0; background: transparent; border-radius: var(--r); padding: 9px 10px; text-align: left; color: var(--text); }
+  .ov2-it:hover { background: var(--n200); }
+  .ov2-it.on { background: var(--card); box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--line); }
+  .ov2-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--n400); }
+  .ov2-dot.mine { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-100); }
+  .ov2-it .nm { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 700; }
+  .ov2-it .rt { max-width: 124px; font-size: 11.5px; color: var(--n600); }
+  .ov2-it .rt.mine { color: var(--accent-700); font-weight: 600; }
+  .ov2-mine { display: flex; width: 100%; flex-direction: column; gap: 4px; border: 0; background: transparent; border-radius: var(--r); padding: 8px 10px; text-align: left; color: var(--text); }
+  .ov2-mine:hover { background: var(--n200); }
+  .ov2-main { flex: 1; min-width: 0; overflow-y: auto; }
+  .ov2-in { width: 100%; max-width: 860px; margin: 0 auto; padding: 24px 32px 40px; display: flex; flex-direction: column; gap: 20px; }
+  .ov2-h { display: flex; align-items: flex-start; gap: 14px; }
+  .ov2-h h2 { font-size: 22px; }
+  .ov2-h p { margin: 4px 0 0; font-size: 13px; color: var(--n700); }
+  .ov2-run { position: relative; display: flex; align-items: center; gap: 14px; border: 1px solid var(--line); background: var(--card); border-radius: var(--r-xl); box-shadow: var(--shadow-sm); padding: 14px 16px; }
+  .ov2-run.mine { border-color: var(--accent-200); background: color-mix(in srgb, var(--accent-100) 55%, var(--card)); }
+  .ov2-run .ic { display: flex; width: 38px; height: 38px; flex: none; align-items: center; justify-content: center; border-radius: var(--r-lg); background: var(--n200); color: var(--n800); }
+  .ov2-run.mine .ic { background: var(--accent-100); color: var(--accent-700); }
+  .ov2-flow { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 0; border: 1px solid var(--line); border-radius: var(--r-xl); background-color: var(--bg); background-image: radial-gradient(circle, color-mix(in srgb, var(--text) 16%, transparent) 1px, transparent 1.2px); background-size: 20px 20px; padding: 22px 20px; cursor: pointer; }
+  .ov2-flow:hover { border-color: var(--accent-300); }
+  .ov2-flow .nd { display: flex; flex-direction: column; gap: 4px; width: 158px; flex: none; border: 1px solid var(--line); background: var(--card); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); padding: 9px 11px; min-height: 66px; }
+  .ov2-flow .nd .k { display: flex; align-items: center; gap: 6px; font-size: 9.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--n600); }
+  .ov2-flow .nd .t { font-size: 12.5px; font-weight: 800; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .ov2-flow .nd.trig { background: var(--accent-100); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+  .ov2-flow .nd.trig .k { color: var(--accent-700); }
+  .ov2-flow .nd.term { border-style: dashed; background: transparent; box-shadow: none; }
+  .ov2-flow .nd .num { width: 18px; height: 18px; font-size: 10px; }
+  .ov2-flow .ar { width: 26px; flex: none; border-top: 1.6px solid var(--n500); position: relative; }
+  .ov2-flow .ar::after { content: ""; position: absolute; right: -1px; top: -5px; border: 4.5px solid transparent; border-left: 7px solid var(--n500); border-right: 0; }
+  .ov2-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .ov2-fact { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--line); background: var(--card); border-radius: var(--r-lg); padding: 11px 13px; }
+  .ov2-fact .k { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--n600); }
+  .ov2-fact .v { font-size: 12.5px; color: var(--n800); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .ov2-note { display: flex; gap: 10px; align-items: flex-start; border-radius: var(--r-lg); background: var(--n200); padding: 11px 14px; font-size: 12.5px; color: var(--n800); line-height: 1.5; }
+  /* Controls here follow the rest of the console: .btn (page and section actions), .btn.xs (toolbars and panels), .drop + .menu + .it.sel (dropdowns), .toggle (switches). */
+  .ov2-dd { position: relative; width: 232px; flex: none; }
+  .ov2-dd .menu { top: calc(100% + 6px); right: 0; width: 320px; }
+  .ov2-opt { flex-direction: column; gap: 1px; padding: 8px 12px; font-size: 13px; }
+  .ov2-opt .t { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+  .ov2-opt .t .ck { margin-left: auto; color: var(--accent-700); }
+  .ov2-opt .d { font-size: 11.5px; color: var(--n700); }
+  .ov2-opt:disabled { opacity: .5; cursor: not-allowed; }
+  .pf-dd { position: relative; display: block; margin-top: 10px; }
+  .pf-dd .menu { top: calc(100% + 6px); left: 0; right: 0; max-height: 260px; overflow-y: auto; }
+  .pf-sw { display: flex; align-items: flex-start; gap: 12px; }
+  .pf-sw .toggle { margin-top: 1px; }
+  /* Built-in banner, empty canvas, skills */
+  .pf-ban { flex: none; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--warn) 7%, var(--card)); padding: 9px 20px; font-size: 12.5px; }
+  .pf-ban.mine { background: color-mix(in srgb, var(--warn) 9%, var(--card)); }
+  .pf-canvas { display: flex; flex-direction: column; }
+  .pf-stage { flex: none; min-height: 0 !important; }
+  .pf-legend { margin: 0; flex-direction: row; flex-wrap: wrap; gap: 6px 18px; align-items: center; border: 0; border-top: 1px solid var(--line); border-radius: 0; box-shadow: none; background: color-mix(in srgb, var(--card) 70%, transparent); padding: 8px 18px; margin-top: auto; }
+  .pf-node.ro { background: var(--card); }
+  .pf-node.empty { align-items: center; justify-content: center; gap: 4px; border: 1.6px dashed var(--accent-400); background: color-mix(in srgb, var(--accent-100) 55%, transparent); box-shadow: none; text-align: center; color: var(--accent-700); }
+  .pf-node.empty:hover { background: var(--accent-100); }
+  .pf-node.empty .plus { display: flex; width: 30px; height: 30px; align-items: center; justify-content: center; border-radius: 50%; background: var(--accent); color: #fff; font-size: 20px; line-height: 1; }
+  .pf-node.trig.warn { border: 1.6px dashed var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--card)); }
+  .pf-node.trig.warn .k { color: var(--warn); }
+  .pf-insp .rotitle { font-size: 15px; font-weight: 800; }
+  .pf-insp .kv { display: grid; grid-template-columns: 88px 1fr; gap: 6px 10px; font-size: 12.5px; }
+  .pf-insp .kv dt { color: var(--n700); } .pf-insp .kv dd { margin: 0; font-weight: 600; word-break: break-word; }
+  .pf-insp .pf-ro { white-space: pre-wrap; line-height: 1.55; }
+  .pf-sk { display: flex; flex-direction: column; gap: 3px; border: 1px solid var(--line); background: var(--bg); border-radius: var(--r-lg); padding: 9px 10px 9px 12px; }
+  .pf-sk .h { display: flex; align-items: center; gap: 8px; }
+  .pf-sk .d { font-size: 12px; color: var(--n700); line-height: 1.4; }
+  .pf-sk.pick { cursor: pointer; text-align: left; }
+  .pf-sk.pick:hover { border-color: var(--accent-300); background: var(--accent-100); }
+  .pf-meter { border-radius: var(--r-lg); background: var(--n200); padding: 8px 12px; font-size: 12px; line-height: 1.45; color: var(--n800); }
+  .pf-meter b { font-weight: 600; }
+  .pf-meter.warn { background: var(--accent-100); }
+  .pf-explain { border-radius: var(--r-lg); background: var(--n200); padding: 12px; font-size: 12.5px; line-height: 1.5; color: var(--n800); display: flex; flex-direction: column; gap: 8px; }
+  .kind { border-radius: 999px; padding: 0 8px; font-size: 10px; font-weight: 700; background: var(--n200); color: var(--n700); white-space: nowrap; }
+  .kind.pack { background: var(--hunk); color: var(--hunk-text); }
+  .pf-confirm label.h { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 700; }
+  .pf-opt { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--divider); border-radius: var(--r-lg); padding: 10px 12px; cursor: pointer; }
+  .pf-opt:has(input:checked) { border-color: var(--accent); background: var(--accent-100); }
+  .pf-opt input { margin-top: 3px; accent-color: var(--accent); }
   .jsteps { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
   .jsteps li { display: grid; grid-template-columns: 18px minmax(0,1fr); gap: 2px 8px; }
   .jsteps .st { font-family: var(--mono); text-align: center; }
@@ -1098,59 +1228,16 @@
 
     <!-- ============ Playbooks (playbooks/*.tsx) ============ -->
     <section class="page" id="p-playbooks">
-      <header class="ph"><div class="ph-in"><h1>Playbooks</h1><span class="sub">What the agent follows when each Trigger starts it. One Playbook per Trigger.</span><span class="sp"></span><button class="btn">+ New Playbook</button></div></header>
-      <div class="pb" style="overflow:hidden">
-        <aside class="pbk-left" aria-label="Triggers and Playbooks">
-          <div class="pbk-cap">Triggers</div>
-          <ul style="display:flex;flex-direction:column;gap:6px" id="slots">
-            <li class="tab-h">Monitor</li>
-            <li class="slot" data-trigger="Verify"><b>Verify</b><span class="pchip" draggable="true" data-writes="1" title="Drag off to put the built-in back">Checkout deep check</span></li>
-            <li class="slot" data-trigger="Fix"><b>Fix</b><span class="pchip builtin">Built-in</span></li>
-            <li class="tab-h">Workspace</li>
-            <li class="slot" data-trigger="Review PR" data-readonly="1"><b>Review PR</b><span class="pchip" draggable="true" data-writes="0" title="Drag off to put the built-in back">PROD readiness</span></li>
-            <li class="slot" data-trigger="Reply in thread"><b>Reply in thread</b><span class="pchip builtin">Built-in</span></li>
-            <li class="slot" data-trigger="Session message"><b>Session message</b><span class="pchip" draggable="true" data-writes="1" title="Drag off to put the built-in back">Safe DB fix</span></li>
-          </ul>
-          <p class="xs acc" id="refused" hidden style="margin:6px 8px 0"></p>
-          <p class="xs muted" style="margin:6px 8px 0">Drag a Playbook onto a Trigger. Drag its chip off to put the built-in back.</p>
-          <div class="pbk-cap">Playbooks</div>
-          <ul style="display:flex;flex-direction:column;gap:2px">
-            <li><button class="it pbrow sel" draggable="true" data-pb="Checkout deep check" data-writes="1"><span class="grip">⋮⋮</span><span class="grow" style="display:flex;flex-direction:column;min-width:0"><span class="trunc b">Checkout deep check</span><span class="xs muted trunc">Verify</span></span><span class="dirty" title="Unsaved edits"></span></button></li>
-            <li><button class="it pbrow" draggable="true" data-pb="PROD readiness" data-writes="0"><span class="grip">⋮⋮</span><span class="grow" style="display:flex;flex-direction:column;min-width:0"><span class="trunc b">PROD readiness</span><span class="xs muted trunc">Review PR</span></span></button></li>
-            <li><button class="it pbrow" draggable="true" data-pb="Safe DB fix" data-writes="1"><span class="grip">⋮⋮</span><span class="grow" style="display:flex;flex-direction:column;min-width:0"><span class="trunc b">Safe DB fix</span><span class="xs muted trunc">Session message</span></span></button></li>
-          </ul>
-          <div class="pbk-cap">Built-in</div>
-          <ul class="s faint" style="display:flex;flex-direction:column;gap:2px;padding:0 10px">
-            <li>Verify (built-in) · 4 steps</li><li>Fix (built-in) · 2 steps</li><li>Review PR (built-in) · 1 step</li>
-            <li>Reply in thread (built-in) · rules</li><li>Session message (built-in) · rules</li>
-          </ul>
-        </aside>
-        <section class="pbk-mid" aria-label="Checkout deep check">
-          <div class="col" style="max-width:720px;display:flex;flex-direction:column;gap:20px;padding:24px 28px">
-            <div class="row" style="gap:10px">
-              <input class="field grow" value="Checkout deep check" aria-label="Name" style="font:800 18px var(--sans);background:transparent;border-color:transparent;padding:4px 6px">
-              <button class="btn xs">Duplicate</button><button class="btn xs danger">Delete</button>
-            </div>
-            <div class="s muted" style="margin-top:-14px;padding:0 6px">On: <a href="#monitor" data-page="monitor">Monitor · Verify</a></div>
-            <section>
-              <div class="row" style="margin-bottom:6px"><h2 style="font-size:14px">Rules</h2><span class="xs muted">Every turn, after the console's own instructions</span><span class="ml mono xs muted">142 / 8000</span></div>
-              <textarea class="field" aria-label="Rules" style="width:100%;min-height:72px;resize:vertical;font-size:13px;background:var(--card)">Run pnpm test:unit, never the whole suite. Treat orders-db-dev as the source of truth for order shapes. Say which file:line each claim comes from.</textarea>
-            </section>
-            <section>
-              <div class="row" style="margin-bottom:8px"><h2 style="font-size:14px">Steps</h2><span class="xs muted">Each step is its own agent turn, in order</span><span class="ml mono xs muted" id="step-count">6 / 12</span></div>
-              <ol class="steps-list" id="steps"><li class="pstep" draggable="true" data-writes="0"><span class="grip" title="Drag to reorder">⋮⋮</span><span class="num" style="width:22px;height:22px;font-size:11px">1</span><div class="body"><div class="row" style="gap:6px"><span class="b m trunc">Find the Repo that owns it</span></div><p>Work out which Repo really owns the failure. A log can come from a shared library or a client of the Service; say which, with file:line.</p></div><div class="acts"><button data-up title="Move up" aria-label="Move up">↑</button><button data-down title="Move down" aria-label="Move down">↓</button><button data-rm title="Remove" aria-label="Remove">×</button></div></li><li class="pstep" draggable="true" data-writes="0"><span class="grip" title="Drag to reorder">⋮⋮</span><span class="num" style="width:22px;height:22px;font-size:11px">2</span><div class="body"><div class="row" style="gap:6px"><span class="b m trunc">Trace the log through the code</span></div><p>Map the log line to the code that wrote it, then follow the call path end to end: entry point, the failing call, the data it read.</p></div><div class="acts"><button data-up title="Move up" aria-label="Move up">↑</button><button data-down title="Move down" aria-label="Move down">↓</button><button data-rm title="Remove" aria-label="Remove">×</button></div></li><li class="pstep" draggable="true" data-writes="0"><span class="grip" title="Drag to reorder">⋮⋮</span><span class="num" style="width:22px;height:22px;font-size:11px">3</span><div class="body"><input class="field b" value="Find who else uses it" aria-label="Step title" style="background:var(--card);font-size:13px"><textarea aria-label="Step instructions">List the services, routes and jobs that call the code you would change, so a fix breaks none of them. Check web and orders-worker: both call checkout.</textarea></div><div class="acts"><button data-up title="Move up" aria-label="Move up">↑</button><button data-down title="Move down" aria-label="Move down">↓</button><button data-rm title="Remove" aria-label="Remove">×</button></div></li><li class="pstep" draggable="true" data-writes="0"><span class="grip" title="Drag to reorder">⋮⋮</span><span class="num" style="width:22px;height:22px;font-size:11px">4</span><div class="body"><div class="row" style="gap:6px"><span class="b m trunc">Read real data from Connections</span></div><p>Find the queries this code runs, then run them read-only on the Connections you have to see the real shape of the data. Prefer dev; read PROD only where the Connection allows it.</p></div><div class="acts"><button data-up title="Move up" aria-label="Move up">↑</button><button data-down title="Move down" aria-label="Move down">↓</button><button data-rm title="Remove" aria-label="Remove">×</button></div></li><li class="pstep" draggable="true" data-writes="1"><span class="grip" title="Drag to reorder">⋮⋮</span><span class="num" style="width:22px;height:22px;font-size:11px">5</span><div class="body"><div class="row" style="gap:6px"><span class="b m trunc">Make mock data</span><span class="wtag">scratch copy</span></div><p>Make up rows shaped like the real data, including the case that fails. Never copy a value read from PROD.</p></div><div class="acts"><button data-up title="Move up" aria-label="Move up">↑</button><button data-down title="Move down" aria-label="Move down">↓</button><button data-rm title="Remove" aria-label="Remove">×</button></div></li><li class="pstep" draggable="true" data-writes="1"><span class="grip" title="Drag to reorder">⋮⋮</span><span class="num" style="width:22px;height:22px;font-size:11px">6</span><div class="body"><div class="row" style="gap:6px"><span class="b m trunc">Test a lasting fix</span><span class="wtag">scratch copy</span></div><p>Write a test that fails on the mock data, then the smallest change that makes it pass without breaking the callers you found. No quick patch.</p></div><div class="acts"><button data-up title="Move up" aria-label="Move up">↑</button><button data-down title="Move down" aria-label="Move down">↓</button><button data-rm title="Remove" aria-label="Remove">×</button></div></li></ol>
-              <div class="row s muted" style="gap:8px;margin-top:10px;padding:8px 12px;border:1px dashed var(--divider);border-radius:var(--r-lg)"><span class="num" style="width:22px;height:22px;font-size:11px">✓</span>Then the console's own turn: write the Report.</div>
-            </section>
-          </div>
-          <div class="savebar" id="savebar"><span class="s muted">Unsaved edits</span><span class="grow"></span><button class="btn xs" id="discard">Discard</button><button class="btn primary xs" id="save">Save</button></div>
-        </section>
-        <aside class="pbk-right" aria-label="Step blocks">
-          <div class="pbk-cap">Step blocks</div>
-          <ul style="display:flex;flex-direction:column;gap:6px" id="blocks">
-            <li class="blk" draggable="true" data-instr="Map the log line to the code that wrote it, then follow the call path end to end: entry point, the failing call, the data it read." data-writes="0" title="Map the log line to the code that wrote it, then follow the call path end to end: entry point, the failing call, the data it read."><span class="grip">⋮⋮</span><span class="trunc">Trace the log through the code</span><button class="add" title="Add to steps" aria-label="Add Trace the log through the code to steps">+</button></li><li class="blk" draggable="true" data-instr="Work out which Repo really owns the failure. A log can come from a shared library or a client of the Service; say which, with file:line." data-writes="0" title="Work out which Repo really owns the failure. A log can come from a shared library or a client of the Service; say which, with file:line."><span class="grip">⋮⋮</span><span class="trunc">Find the Repo that owns it</span><button class="add" title="Add to steps" aria-label="Add Find the Repo that owns it to steps">+</button></li><li class="blk" draggable="true" data-instr="List the services, routes and jobs that call the code you would change, so a fix breaks none of them. Search the Repos you can read." data-writes="0" title="List the services, routes and jobs that call the code you would change, so a fix breaks none of them. Search the Repos you can read."><span class="grip">⋮⋮</span><span class="trunc">Find who else uses it</span><button class="add" title="Add to steps" aria-label="Add Find who else uses it to steps">+</button></li><li class="blk" draggable="true" data-instr="Find the queries this code runs, then run them read-only on the Connections you have to see the real shape of the data. Prefer dev; read PROD only where the Connection allows it." data-writes="0" title="Find the queries this code runs, then run them read-only on the Connections you have to see the real shape of the data. Prefer dev; read PROD only where the Connection allows it."><span class="grip">⋮⋮</span><span class="trunc">Read real data from Connections</span><button class="add" title="Add to steps" aria-label="Add Read real data from Connections to steps">+</button></li><li class="blk" draggable="true" data-instr="Run the Service locally and replay the failing request with curl. Note the status and body, secrets removed." data-writes="0" title="Run the Service locally and replay the failing request with curl. Note the status and body, secrets removed."><span class="grip">⋮⋮</span><span class="trunc">Replay the request locally</span><button class="add" title="Add to steps" aria-label="Add Replay the request locally to steps">+</button></li><li class="blk" draggable="true" data-instr="Make up rows shaped like the real data, including the case that fails. Never copy a value read from PROD." data-writes="1" title="Make up rows shaped like the real data, including the case that fails. Never copy a value read from PROD."><span class="grip">⋮⋮</span><span class="trunc">Make mock data</span><span class="wtag">scratch copy</span><button class="add" title="Add to steps" aria-label="Add Make mock data to steps">+</button></li><li class="blk" draggable="true" data-instr="Run the tests that cover this code and report what ran and how it ended." data-writes="1" title="Run the tests that cover this code and report what ran and how it ended."><span class="grip">⋮⋮</span><span class="trunc">Run the tests</span><span class="wtag">scratch copy</span><button class="add" title="Add to steps" aria-label="Add Run the tests to steps">+</button></li><li class="blk" draggable="true" data-instr="Write a test that fails on the mock data, then the smallest change that makes it pass without breaking the callers you found. No quick patch." data-writes="1" title="Write a test that fails on the mock data, then the smallest change that makes it pass without breaking the callers you found. No quick patch."><span class="grip">⋮⋮</span><span class="trunc">Test a lasting fix</span><span class="wtag">scratch copy</span><button class="add" title="Add to steps" aria-label="Add Test a lasting fix to steps">+</button></li><li class="blk" draggable="true" data-instr="Check migrations, config and secrets, backwards compatibility, rollback and tests for the change." data-writes="0" title="Check migrations, config and secrets, backwards compatibility, rollback and tests for the change."><span class="grip">⋮⋮</span><span class="trunc">Check PROD readiness</span><button class="add" title="Add to steps" aria-label="Add Check PROD readiness to steps">+</button></li><li class="blk" draggable="true" data-instr="" data-writes="0" title="An empty step to write yourself"><span class="grip">⋮⋮</span><span class="trunc">Custom step</span><button class="add" title="Add to steps" aria-label="Add Custom step to steps">+</button></li>
-          </ul>
-          <p class="xs muted" style="margin:6px 4px 0">Drag a block into Steps, or press +. The dropped copy is yours to edit. <span class="wtag">scratch copy</span> steps write files or run commands, so Review PR refuses them.</p>
-        </aside>
+      <header class="ph"><div class="ph-in"><h1>Playbooks</h1><span class="sub">What the agent follows when each Trigger starts it. One Playbook per Trigger.</span><span class="sp"></span><button class="btn" id="pf-new">+ New Playbook</button></div></header>
+      <div class="pf">
+        <div class="pf-over" id="pf-over"></div>
+        <div class="pf-bar" id="pf-bar" hidden></div>
+        <div class="pf-ban" id="pf-ban" hidden></div>
+        <div class="pf-body" id="pf-bodyw" hidden>
+          <aside class="pf-pal" id="pf-pal" aria-label="Step blocks"></aside>
+          <div class="pf-canvas" id="pf-canvas" aria-label="Playbook flow"></div>
+          <aside class="pf-insp" id="pf-insp" aria-label="Inspector" hidden></aside>
+        </div>
       </div>
     </section>
 
@@ -1362,82 +1449,332 @@
   }));
   const all = $('[data-scope]');
   if (all) all.addEventListener('click', () => { $$('[data-tool]').forEach((b) => { b.classList.remove('sel'); $('.box', b).textContent = ''; }); scope(); });
-  /* Playbooks: drag a block into Steps, drag a step to reorder or out to remove, drag a Playbook onto a Trigger. */
+  /* Playbooks. Overview first: every Trigger and the Playbook it runs (a built-in until you attach one). Open one to see its flow.
+     Editing a Playbook of yours is where Triggers, steps, rules and Skills appear. */
   (() => {
-    const list = $('#steps');
-    if (!list) return;
-    const dirty = () => { $('#savebar').hidden = false; const d = $('.pbrow.sel .dirty'); if (!d) $('.pbrow.sel').insertAdjacentHTML('beforeend', '<span class="dirty" title="Unsaved edits"></span>'); };
-    const renumber = () => {
-      $$('.pstep', list).forEach((li, i) => ($('.num', li).textContent = i + 1));
-      $('#step-count').textContent = `${$$('.pstep', list).length} / 12`;
-    };
-    const stepFrom = (title, instr, writes) => {
-      const li = document.createElement('li');
-      li.className = 'pstep'; li.draggable = true; li.dataset.writes = writes;
-      li.innerHTML = `<span class="grip" title="Drag to reorder">⋮⋮</span><span class="num" style="width:22px;height:22px;font-size:11px"></span><div class="body"><div class="row" style="gap:6px"><span class="b m trunc">${title}</span>${writes === '1' ? '<span class="wtag">scratch copy</span>' : ''}</div><p>${instr || 'Write what the agent does in this step.'}</p></div><div class="acts"><button data-up title="Move up">↑</button><button data-down title="Move down">↓</button><button data-rm title="Remove">×</button></div>`;
-      return li;
-    };
-    let dragged = null; let kind = null;
-    const line = document.createElement('li'); line.className = 'dropline';
-    const after = (y) => $$('.pstep:not(.dragging)', list).find((li) => y < li.getBoundingClientRect().top + li.offsetHeight / 2) || null;
-    document.addEventListener('dragstart', (e) => {
-      const el = e.target.closest?.('.pstep, .blk, .pbrow, .pchip:not(.builtin)');
-      if (!el) return;
-      dragged = el; kind = el.classList.contains('pstep') ? 'step' : el.classList.contains('blk') ? 'block' : el.classList.contains('pbrow') ? 'playbook' : 'chip';
-      el.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', kind);
-    });
-    document.addEventListener('dragend', (e) => {
-      if (!dragged) return;
-      dragged.classList.remove('dragging'); line.remove();
-      $$('.slot').forEach((s) => s.classList.remove('over', 'refuse'));
-      // A step dropped outside Steps is removed; a chip dropped off its Trigger puts the built-in back.
-      if (e.dataTransfer.dropEffect === 'none' && kind === 'step') { dragged.remove(); renumber(); dirty(); }
-      if (e.dataTransfer.dropEffect === 'none' && kind === 'chip') { dragged.outerHTML = '<span class="pchip builtin">Built-in</span>'; }
-      dragged = null;
-    });
-    list.addEventListener('dragover', (e) => {
-      if (kind !== 'step' && kind !== 'block') return;
-      e.preventDefault(); list.insertBefore(line, after(e.clientY));
-    });
-    list.addEventListener('drop', (e) => {
-      e.preventDefault();
-      if (kind === 'block') { if ($$('.pstep', list).length >= 12) return; line.replaceWith(stepFrom($('.trunc', dragged).textContent, dragged.dataset.instr, dragged.dataset.writes)); }
-      else if (kind === 'step') line.replaceWith(dragged);
-      renumber(); dirty();
-    });
-    $$('.slot').forEach((slot) => {
-      slot.addEventListener('dragover', (e) => {
-        if (kind !== 'playbook') return;
-        const refused = slot.dataset.readonly && dragged.dataset.writes === '1';
-        slot.classList.toggle('refuse', !!refused); slot.classList.toggle('over', !refused);
-        if (!refused) e.preventDefault();
-        $('#refused').hidden = !refused;
-        if (refused) $('#refused').textContent = `${slot.dataset.trigger} reads only: remove Make mock data first.`;
+    const TRIGGERS = [['Monitor', ['Verify', 'Fix']], ['Workspace', ['Review PR', 'Check reply', 'Address comments', 'Reply in thread', 'Session message']]];
+    const ALL = TRIGGERS.flatMap(([, t]) => t);
+    const READ_ONLY = []; // no Trigger refuses a scratch copy step: Agent Playbooks 11, Pr thread actions
+    const CHAT = ['Reply in thread', 'Session message'];
+    const WHAT = { Verify: 'Reproduces a failing route locally and writes a Report', Fix: 'Fixes a confirmed Review and opens the pull request', 'Review PR': 'Reviews a pull request for production readiness', 'Check reply': 'Checks a reply against the code before it is posted', 'Address comments': 'Works through the review comments on a pull request', 'Reply in thread': 'Chat: answers in a pull request thread', 'Session message': 'Chat: answers a message in a Session' };
+    const CLOSING = { Verify: 'write the Report', Fix: 'push the branch and open the pull request', 'Review PR': 'post the findings on their lines and the summary', 'Check reply': 'show the verdict', 'Address comments': 'push the commits' };
+    const BLOCKS = [
+      ['Trace the log through the code', 0, 'Map the log line to the code that wrote it, then follow the call path end to end: entry point, the failing call, the data it read.'],
+      ['Find the Repo that owns it', 0, 'Work out which Repo really owns the failure. A log can come from a shared library.'],
+      ['Find who else uses it', 0, 'List the other callers and consumers of the changed code and say what each would see.'],
+      ['Read real data from Connection', 0, 'Query the Connection read-only for real rows that match the failing request.'],
+      ['Replay the request', 1, 'Replay the failing request against the scratch copy and record the response.'],
+      ['Make mock data', 1, 'Write the smallest mock data that reproduces the failure.'],
+      ['Run the tests', 1, 'Run the tests that cover the change and report each failure with file:line.'],
+      ['Test a lasting fix', 1, 'Check that the fix holds after a restart and on a second run.'],
+      ['Check PROD readiness', 0, 'Check migrations, config, flags and rollbacks before this reaches PROD.'],
+      ['Custom step', 0, ''],
+    ];
+    const st = (i) => ({ title: BLOCKS[i][0], writes: !!BLOCKS[i][1], text: BLOCKS[i][2] });
+    const BUILTINS = () => [
+      { id: 'b1', builtin: 'Verify', name: 'Verify (built-in)', rules: 'Verify the failing route locally. Base every conclusion on real logs, source code and executed results. Mark each result verified, mocked or unverified.', branches: '', jira: false, skills: [], steps: [0, 1, 2, 3].map(st) },
+      { id: 'b2', builtin: 'Fix', name: 'Fix (built-in)', rules: 'Fix only what the confirmed Review names. Never claim a fix works without running it.', branches: '', jira: false, skills: [], steps: [st(6), st(2)] },
+      { id: 'b3', builtin: 'Review PR', name: 'Review PR (built-in)', rules: 'Review the pull request for production readiness: correctness, regressions, architecture and risk. Never approve or merge on the host.', branches: '', jira: false, skills: [], steps: [st(0)] },
+      { id: 'b4', builtin: 'Check reply', name: 'Check reply (built-in)', rules: 'Check the reply against the code before it is posted.', branches: '', jira: false, skills: [], steps: [] },
+      { id: 'b5', builtin: 'Address comments', name: 'Address comments (built-in)', rules: 'Make the change each review comment asks for.', branches: '', jira: false, skills: [], steps: [st(6)] },
+      { id: 'b6', builtin: 'Reply in thread', name: 'Reply in thread (built-in)', rules: 'Answer the thread from the code and logs.', branches: '', jira: false, skills: [], steps: [] },
+      { id: 'b7', builtin: 'Session message', name: 'Session message (built-in)', rules: 'Answer the operator from the code and logs.', branches: '', jira: false, skills: [], steps: [] },
+    ];
+    /* Skills come from the Skills page: Custom ones the operator wrote, Built-in ones from an installed Skill pack. */
+    const SKILLS_FULL = [
+      { name: 'debug-failing-route', desc: 'How to find why a route fails: read the log, follow the call path, then check the data.', kind: 'Custom' },
+      { name: 'sql-safety', desc: 'Rules for writing queries against a Connection: read-only first, LIMIT, never on PROD without Approval.', kind: 'Custom' },
+      { name: 'grilling', desc: 'Stress-test a plan or an assumption by asking one hard question at a time.', kind: 'Ops Console' },
+    ];
+    /* A fresh install: only built-ins, every Trigger on its built-in. Skills shown are examples of what the Skills page would hold. */
+    const P = BUILTINS();
+    const holder = Object.fromEntries(ALL.map((t) => [t, null]));
+    const SKILLS = SKILLS_FULL;
+    const $id = (id) => document.getElementById(id);
+    const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    const drafts = {}; let openId = null; let sel = null; let menu = null; let hot = null; let chg = null; let addSkill = false;
+    const by = (id) => P.find((p) => String(p.id) === String(id));
+    const builtinOf = (t) => P.find((p) => p.builtin === t);
+    const runner = (t) => (holder[t] ? by(holder[t]) : builtinOf(t));
+    const triggersOf = (p) => (p.builtin ? (holder[p.builtin] ? [] : [p.builtin]) : ALL.filter((t) => holder[t] === p.id));
+    const cur = () => by(openId);
+    const view = () => drafts[openId] ?? cur();
+    const work = () => (drafts[openId] ??= JSON.parse(JSON.stringify(cur())));
+    const isRO = () => !!cur()?.builtin;
+    const stepsText = (p) => (p.steps.length ? `${p.steps.length} ${p.steps.length === 1 ? 'step' : 'steps'}` : 'rules only');
+    const skillOf = (n) => SKILLS.find((k) => k.name === n);
+    const kindTag = (k) => (k ? `<span class="kind${k.kind === 'Custom' ? '' : ' pack'}">${k.kind === 'Custom' ? 'Custom' : 'Built-in · ' + esc(k.kind)}</span>` : '');
+    const lock = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>';
+
+    /* ======== OVERVIEW: Trigger list + the selected Trigger's flow ======== */
+    let ovSel = 'Verify';
+    function renderOver() {
+      const mine = P.filter((p) => !p.builtin);
+      const item = (t) => { const p = runner(t); const own = !p.builtin; return `<button class="ov2-it${t === ovSel ? ' on' : ''}" data-ovsel="${t}"><span class="ov2-dot${own ? ' mine' : ''}"></span><span class="nm">${t}</span><span class="rt trunc${own ? ' mine' : ''}">${own ? esc(p.name) : 'Built-in'}</span></button>`; };
+      const t = ovSel; const p = runner(t); const own = !p.builtin; const chat = CHAT.includes(t);
+      const nodes = `<div class="nd trig"><span class="k">Trigger</span><span class="t">${t}</span></div>${chat ? '' : p.steps.map((s, i) => `<span class="ar"></span><div class="nd"><span class="k"><span class="num">${i + 1}</span>Step${s.writes ? '<span class="wtag" style="margin-left:auto">scratch</span>' : ''}</span><span class="t">${esc(s.title)}</span></div>`).join('')}<span class="ar"></span><div class="nd term"><span class="k">${CLOSING[t] ? "Console's own turn" : 'Reply'}</span><span class="t" style="font-weight:600;font-size:11.5px;color:var(--n700)">${CLOSING[t] ? CLOSING[t] : 'The agent answers using the rules'}</span></div>`;
+      const caret = '<svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+      const opt = (val, name, desc, sel, off) => `<button class="it ov2-opt${sel ? ' sel' : ''}" role="option" aria-selected="${sel}" data-set="${t}:${val}" ${off ? 'disabled title="' + t + ' reads only: remove the scratch copy steps first"' : ''}><span class="t">${name}${sel ? '<span class="ck">✓</span>' : ''}</span><span class="d">${desc}</span></button>`;
+      const menuHtml2 = chg === t ? `<div class="menu" role="listbox"><div class="menu-h">${t} runs</div>${opt('', 'Built-in', esc(builtinOf(t).name) + ' · ' + stepsText(builtinOf(t)), !holder[t])}${mine.map((m) => opt(m.id, esc(m.name), stepsText(m), holder[t] === m.id, READ_ONLY.includes(t) && m.steps.some((x) => x.writes))).join('') || '<div class="xs muted" style="padding:6px 12px 8px">No Playbooks of your own yet. Press + New Playbook.</div>'}</div>` : '';
+      const skills = p.skills.length ? p.skills.map(esc).join(', ') : 'None';
+      $id('pf-over').innerHTML = `<div class="ov2">
+        <aside class="ov2-list" aria-label="Triggers">
+          ${TRIGGERS.map(([g, ts]) => `<div class="ov2-cap">${g}</div>${ts.map(item).join('')}`).join('')}
+          ${mine.length ? `<div class="ov2-cap" style="margin-top:22px">Your Playbooks</div>${mine.map((m) => `<button class="ov2-mine" data-view="${m.id}"><span class="row"><b class="m grow trunc">${esc(m.name)}</b>${drafts[m.id] ? '<span class="pill acc">unsaved</span>' : ''}</span><span style="display:flex;flex-wrap:wrap;gap:4px">${triggersOf(m).map((x) => `<span class="pill acc">${x}</span>`).join('') || '<span class="pill">on no Trigger</span>'}</span></button>`).join('')}` : ''}
+        </aside>
+        <section class="ov2-main" aria-label="${t}"><div class="ov2-in">
+          <div class="ov2-h"><div class="grow"><h2>${t}</h2><p>${WHAT[t]}</p></div><span class="pill x">${chat ? 'CHAT' : 'JOB'}</span></div>
+          <div class="ov2-run${own ? ' mine' : ''}">
+            <span class="ic">${own ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>' : lock}</span>
+            <div class="grow"><div class="xs muted">${t} runs</div><div class="row" style="gap:8px"><b style="font-size:15px">${esc(p.name)}</b>${own ? '<span class="pill acc x">YOURS</span>' : '<span class="pill x">BUILT-IN · READ ONLY</span>'}</div><div class="s muted">${stepsText(p)}</div></div>
+            ${own ? `<button class="btn" data-view="${p.id}">Edit</button>` : ''}<div class="ov2-dd"><button class="drop" data-change="${t}" aria-haspopup="listbox" aria-expanded="${chg === t}" aria-label="Playbook for ${t}"><span class="v">${own ? esc(p.name) : 'Built-in'}</span>${caret}</button>${menuHtml2}</div>
+          </div>
+          <div><div class="row" style="margin-bottom:8px"><div class="pf-cap" style="margin:0;padding:0">What the agent does</div><span class="grow"></span><button class="btn" data-view="${p.id}">${own ? 'Edit flow' : 'View full flow'} →</button></div>
+            <div class="ov2-flow" data-view="${p.id}" title="${own ? 'Open to edit' : 'Open the read-only flow'}">${nodes}</div></div>
+          <div class="ov2-facts"><div class="ov2-fact"><span class="k">Rules</span><span class="v">${esc(p.rules) || 'None'}</span></div><div class="ov2-fact"><span class="k">Skills</span><span class="v">${skills}</span></div><div class="ov2-fact"><span class="k">Branch · Jira</span><span class="v">${p.branches ? esc(p.branches) : "The Repo's default branch"} · Jira ticket ${p.jira ? 'on' : 'off'}</span></div></div>
+          ${own ? '' : `<div class="ov2-note"><span class="num" style="width:22px;height:22px;font-size:11px">i</span><span>The built-in is read only and the console keeps it up to date. To use your own rules and steps, press <b>+ New Playbook</b> (blank, or a copy of this built-in), then pick it in the dropdown above.</span></div>`}
+        </div></section></div>`;
+    }
+
+    /* ======== EDITOR: toolbar, banner, palette ======== */
+    function renderBar() {
+      const p = cur(); const w = view(); const ro = isRO(); const d = !!drafts[openId];
+      $id('pf-bar').innerHTML = `<button class="btn" id="pf-back">← All Playbooks</button>
+        <input class="pf-name" id="pf-name" value="${esc(w.name)}" aria-label="Name" ${ro ? 'readonly' : ''}>
+        ${ro ? `<span class="pill">${lock}&nbsp;READ ONLY</span>` : ''}
+        <span class="grow"></span>
+        ${d ? '<span class="s muted">Unsaved edits</span><button class="btn" id="pf-discard">Discard</button><button class="btn primary" id="pf-save">Save</button>' : ''}
+        ${ro ? '' : '<button class="btn danger" id="pf-del">Delete</button>'}`;
+      const ban = $id('pf-ban');
+      ban.hidden = !ro;
+      if (ro) ban.innerHTML = `<span class="num" style="width:22px;height:22px;font-size:11px">i</span><span><b>Built-in, read only.</b> ${triggersOf(p).length ? `The console runs this on <b>${p.builtin}</b> until you attach a Playbook of yours.` : `Replaced on <b>${p.builtin}</b> by <b>${esc(runner(p.builtin).name)}</b>.`} <span class="muted">The console updates its text; to change it, make a copy from <b>+ New Playbook</b>.</span></span>`;
+    }
+    function renderPal() {
+      const ro = isRO(); const full = view().steps.length >= 12;
+      $id('pf-pal').hidden = ro;
+      if (ro) return;
+      $id('pf-pal').innerHTML = `<div class="pf-cap">Step blocks</div><p class="xs muted" style="margin:0 4px 2px">Ready-made steps. Drag one onto a line in the flow, or press +. The copy is yours to edit.</p>
+        ${BLOCKS.map((b, i) => `<div class="blk" draggable="true" data-blk="${i}" title="${esc(b[2] || 'An empty step to write yourself.')}"><span class="grip">⋮⋮</span><span class="trunc">${b[0]}</span>${b[1] ? '<span class="wtag">scratch</span>' : ''}<button class="add" data-add="${i}" ${full ? 'disabled' : ''} aria-label="Add ${esc(b[0])} to the end">+</button></div>`).join('')}
+        <p class="xs muted" style="margin:4px 4px 0"><span class="wtag">scratch</span> steps write files or run commands in a scratch copy, never in your own checkout.</p>`;
+    }
+
+    /* ======== EDITOR: canvas ======== */
+    const W = 180; const H = 120; const GX = 44; const GY = 56; const PAD = 28;
+    let slots = [];
+    function renderStage() {
+      const canvas = $id('pf-canvas'); const w = view(); const ro = isRO(); const p = cur();
+      if (!p || !canvas.clientWidth) return;
+      const mine = triggersOf(p); const grey = mine.length > 0 && mine.every((t) => CHAT.includes(t));
+      const closing = mine.filter((t) => CLOSING[t]);
+      const width = Math.max(canvas.clientWidth, 320);
+      const cols = Math.max(2, Math.floor((width - PAD * 2 + GX) / (W + GX)));
+      const empty = w.steps.length === 0 && !ro;
+      const nodes = [{ kind: 'trigger' }, ...(empty ? [{ kind: 'empty' }] : w.steps.map((s, i) => ({ kind: 'step', i, s }))), { kind: closing.length ? 'closing' : 'end' }];
+      const top = 138;
+      const pos = nodes.map((n, k) => { const row = Math.floor(k / cols); const c = k % cols; const col = row % 2 ? cols - 1 - c : c; return { x: PAD + col * (W + GX), y: top + row * (H + GY), row, rev: row % 2 === 1 }; });
+      const rows = Math.floor((nodes.length - 1) / cols) + 1;
+      const height = top + rows * (H + GY) - GY + 40;
+      let svg = ''; slots = []; let plus = '';
+      for (let k = 0; k < nodes.length - 1; k++) {
+        const a = pos[k]; const b = pos[k + 1]; let d; let mx; let my;
+        if (a.row === b.row) { const y = a.y + H / 2; const x1 = a.rev ? a.x : a.x + W; const x2 = a.rev ? b.x + W : b.x; d = `M${x1},${y} L${x2},${y}`; mx = (x1 + x2) / 2; my = y; }
+        else { const x = a.x + W / 2; const y1 = a.y + H; const y2 = b.y; d = `M${x},${y1} L${x},${y2}`; mx = x; my = (y1 + y2) / 2; }
+        svg += `<path class="pf-edge" d="${d}" marker-end="url(#pf-arr)"/>`;
+        if (empty) continue;
+        slots.push({ j: k, x: mx, y: my });
+        if (!ro && w.steps.length < 12) plus += `<button class="pf-plus${hot === k ? ' hot' : ''}" data-slot="${k}" style="left:${mx}px;top:${my}px" title="Add a step here" aria-label="Add a step here">+</button>`;
+      }
+      if (empty) slots.push({ j: 0, x: pos[1].x + W / 2, y: pos[1].y + H / 2 });
+      const ctx = [['rules', 'Rules', w.rules ? esc(w.rules) : (ro ? 'No rules.' : 'None yet. Click to write what the agent must always or never do.'), `${w.rules.length} / 8000`], ['skills', 'Skills', w.skills.length ? w.skills.map(esc).join(', ') : (ro ? 'A built-in holds none.' : 'None. Click to add a method the agent can load.'), ro ? '' : `${w.skills.length} / 8`], ['settings', 'Settings', `Branch: ${w.branches ? esc(w.branches) : "the Repo's default"} · Jira ticket ${w.jira ? 'on' : 'off'}`, '']];
+      const cw = Math.min(236, Math.floor((width - PAD * 2 - 24) / 3)); const busY = 106; let cards = '';
+      ctx.forEach(([k, label, text, meta], i) => {
+        const x = PAD + i * (cw + 12); const cx = x + cw / 2;
+        svg += `<path class="pf-edge ctx" d="M${cx},84 L${cx},${busY}"/>`;
+        cards += `<button class="pf-node ctx${ro ? ' ro' : ''}${sel?.kind === k ? ' sel' : ''}" data-node="${k}" style="left:${x}px;top:16px;width:${cw}px;height:68px"><span class="k">${label}${ro ? lock : ''}<span class="ml mono" style="letter-spacing:0">${meta}</span></span><span class="d">${text}</span></button>`;
       });
-      slot.addEventListener('dragleave', () => slot.classList.remove('over', 'refuse'));
-      slot.addEventListener('drop', (e) => {
-        e.preventDefault();
-        const name = dragged.dataset.pb; const chip = $('.pchip', slot);
-        if (!chip.classList.contains('builtin') && chip.textContent !== name && !confirm(`${slot.dataset.trigger} runs ${chip.textContent}. Replace it with ${name}?`)) return;
-        chip.outerHTML = `<span class="pchip" draggable="true" data-writes="${dragged.dataset.writes}" title="Drag off to put the built-in back">${name}</span>`;
+      const bx1 = PAD + cw / 2; const bx2 = PAD + 2 * (cw + 12) + cw / 2;
+      svg += `<path class="pf-edge ctx" d="M${bx1},${busY} L${bx2},${busY}"/>`;
+      const label = `<span class="xs muted" style="position:absolute;left:${bx2 + 10}px;top:${busY - 9}px;white-space:nowrap">applies to every turn</span>`;
+      const html = nodes.map((n, k) => {
+        const q = pos[k]; const base = `left:${q.x}px;top:${q.y}px;width:${W}px;height:${H}px`;
+        if (n.kind === 'trigger') {
+          const shown = mine.slice(0, 3); const more = mine.length - shown.length; const none = mine.length === 0;
+          return `<button class="pf-node trig${none && !ro ? ' warn' : ''}${sel?.kind === 'trigger' ? ' sel' : ''}" data-node="trigger" style="${base}"><span class="k">Trigger${ro ? ' · built-in' : ''}</span><span class="tags">${shown.map((t) => `<span class="tg">${t}</span>`).join('')}${more > 0 ? `<span class="tg more">+${more}</span>` : ''}</span><span class="d">${none ? (ro ? 'Replaced by a Playbook of yours.' : 'Runs on no Trigger yet. Click to choose one, or the agent never uses it.') : ro ? 'Runs until you attach one of yours.' : 'Click to change the Triggers that start this Playbook.'}</span></button>`;
+        }
+        if (n.kind === 'empty') return `<button class="pf-node empty" data-empty style="${base}"><span class="plus">+</span><b class="m">Add the first step</b><span class="xs">Drag a block here, or click</span></button>`;
+        if (n.kind === 'closing') return `<div class="pf-node term" style="${base};cursor:default" title="After your steps the console runs one more turn itself. It is not a step: you cannot move or remove it."><span class="k"><span class="num">✓</span>Console's own turn</span><span class="d">${closing.map((t) => t + ': ' + CLOSING[t]).join(' · ')}</span></div>`;
+        if (n.kind === 'end') return `<div class="pf-node term" style="${base};cursor:default"><span class="k"><span class="num">✓</span>End</span><span class="d">${grey ? "Steps don't run on chat Triggers: the agent replies using the rules." : mine.length ? 'The run ends here.' : 'Where the run ends.'}</span></div>`;
+        const s = n.s;
+        return `<button class="pf-node${ro ? ' ro' : ''}${sel?.kind === 'step' && sel.i === n.i ? ' sel' : ''}" data-node="step" data-i="${n.i}" ${ro ? '' : 'draggable="true"'} style="${base}"><span class="k"><span class="num">${n.i + 1}</span>Step${ro ? lock : ''}${s.writes ? '<span class="wtag" style="margin-left:auto">scratch copy</span>' : ''}</span><span class="t">${esc(s.title) || 'Untitled step'}</span><span class="d">${esc(s.text) || 'Empty: write what the agent does.'}</span></button>`;
+      }).join('');
+      canvas.innerHTML = `<div class="pf-stage${grey ? ' dim' : ''}" id="pf-stage" style="width:${width}px;height:${height}px">
+        <svg width="${width}" height="${height}"><defs><marker id="pf-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--n500)"/></marker></defs>${svg}</svg>
+        ${cards}${label}${html}${plus}${menu ? menuHtml() : ''}</div>
+        <div class="pf-legend"><span><i></i>Run order</span><span><i class="d"></i>Applies to every turn</span><span>A failed step stops the run: Retry or Skip it from the run.</span></div>`;
+    }
+    function menuHtml() {
+      return `<div class="pf-menu" id="pf-menu" style="left:${Math.max(8, Math.min(menu.x - 170, $id('pf-canvas').clientWidth - 356))}px;top:${menu.y + 16}px">${BLOCKS.map((b, i) => `<button data-pick="${i}"><span class="h">${b[0]}${b[1] ? '<span class="wtag">scratch copy</span>' : ''}</span><span class="d">${esc(b[2] || 'An empty step to write yourself.')}</span></button>`).join('')}</div>`;
+    }
+
+    /* ======== EDITOR: inspector ======== */
+    /* Rough token cost: 4 characters is about one token. */
+    const tok = (n) => Math.ceil(n / 4);
+    const rulesMeter = (n) => `<div class="pf-meter${n > 1500 ? ' warn' : ''}" id="pf-tk"><b>≈ ${tok(n).toLocaleString()} tokens</b> <span>sent on every turn of every run.${n > 1500 ? ' Long. Move how-to text into a Skill.' : ' Keep only what is always true; put methods in a Skill.'}</span></div>`;
+    const skillsMeter = (list) => { const n = list.reduce((a, k) => a + k.n.length + (k.k ? k.k.desc.length : 0), 0); return `<div class="pf-meter"><b>≈ ${tok(n).toLocaleString()} tokens</b> <span>per turn: names and descriptions only. A Skill's full text costs tokens only when a step loads it.</span></div>`; };
+
+    function renderInsp() {
+      const el = $id('pf-insp'); const w = view(); const ro = isRO(); const p = cur();
+      if (!sel) { el.hidden = true; return; }
+      el.hidden = false; let h = '';
+      const close = '<button class="btn icon ml" data-close title="Close" aria-label="Close">×</button>';
+      if (sel.kind === 'trigger') {
+        const chip = (t) => {
+          const mine = ro ? p.builtin === t && !holder[t] : holder[t] === p.id; const other = runner(t);
+          if (ro) return mine ? `<span class="tchip on">${t}</span>` : `<span class="tchip taken" title="Replaced by ${esc(other.name)}">${t}<small>replaced</small></span>`;
+          const refused = READ_ONLY.includes(t) && w.steps.some((s) => s.writes); const taken = !mine && holder[t];
+          return `<button class="tchip${mine ? ' on' : taken ? ' taken' : ''}" data-trig="${t}" ${refused && !mine ? 'disabled' : ''} title="${refused && !mine ? t + ' reads only: remove the scratch copy steps first' : mine ? 'Click to detach. ' + t + ' runs its built-in again' : taken ? 'Runs ' + esc(other.name) + '. Click to replace' : 'Run this Playbook on ' + t}">${mine ? '✓ ' : ''}${t}${taken ? '<small>' + esc(other.name) + '</small>' : ''}</button>`;
+        };
+        h = `<div class="row"><h3>Triggers</h3>${close}</div><p class="s muted" style="margin:0">${ro ? 'This built-in runs on its Trigger until you attach a Playbook of yours there.' : 'Pick the Triggers that start this Playbook. A Trigger runs one Playbook; one you leave off keeps its built-in.'}</p>
+          ${TRIGGERS.map(([g, ts]) => `<div class="g">${g}</div><div class="tc">${(ro ? ts.filter((t) => t === p.builtin) : ts).map(chip).join('')}</div>`).join('')}`;
+      } else if (sel.kind === 'step') {
+        const s = w.steps[sel.i];
+        if (ro) h = `<div class="row"><span class="num">${sel.i + 1}</span><h3>Step</h3>${s.writes ? '<span class="wtag">scratch copy</span>' : ''}${close}</div><div class="rotitle">${esc(s.title)}</div><div class="g">Instructions</div><div class="pf-ro">${esc(s.text) || 'No instructions.'}</div><p class="xs muted" style="margin:0">Runs as its own agent turn.</p>`;
+        else h = `<div class="row"><span class="num">${sel.i + 1}</span><h3>Step</h3>${s.writes ? '<span class="wtag">scratch copy</span>' : ''}${close}</div>
+          <label class="g" for="pf-t">Title</label><input class="field" id="pf-t" data-f="title" value="${esc(s.title)}" maxlength="80">
+          <label class="g" for="pf-x">Instructions</label><textarea class="field" id="pf-x" data-f="text" rows="11" placeholder="Write what the agent does in this step.">${esc(s.text)}</textarea>
+          ${s.title === 'Custom step' ? `<label class="row s muted"><input type="checkbox" data-f="writes" ${s.writes ? 'checked' : ''}>scratch copy: writes files or runs commands</label>` : ''}
+          <p class="xs muted" style="margin:0">Runs as its own agent turn. Ends done, skipped or failed.</p>
+          <div class="row"><span class="grow"></span><button class="btn xs danger" data-rm>Remove</button></div>`;
+      } else if (sel.kind === 'rules') {
+        h = ro ? `<div class="row"><h3>Rules</h3>${close}</div><div class="pf-ro">${esc(w.rules) || 'No rules.'}</div>${rulesMeter(w.rules.length)}`
+          : `<div class="row"><h3>Rules</h3><span class="ml mono xs muted" id="pf-rc">${w.rules.length} / 8000</span>${close}</div><p class="s muted" style="margin:0">What the agent must always or never do. Sent every turn, after the console's own instructions.</p>
+          ${rulesMeter(w.rules.length)}
+          <textarea class="field" id="pf-rules" rows="14" placeholder="Example: Run pnpm test:unit, never the whole suite. Say which file:line each claim comes from.">${esc(w.rules)}</textarea>
+          <details><summary>Every run also gets the console's pull request description rule</summary><p class="pf-ro" style="margin:6px 0 0">Open the PR description with what changed and why, then how it was checked.</p></details>`;
+      } else if (sel.kind === 'skills') {
+        const held = w.skills.map((n) => ({ n, k: skillOf(n) })); const free = SKILLS.filter((k) => !w.skills.includes(k.name));
+        h = `<div class="row"><h3>Skills</h3>${ro ? '' : `<span class="ml mono xs muted">${w.skills.length} / 8</span>`}${close}</div>
+          ${ro ? '<p class="s muted" style="margin:0">A built-in Playbook holds no Skills.</p>'
+            : `<div class="pf-explain"><span><b>What is a Skill?</b> A method you write once, such as "how to debug a failing route". The agent sees only its name and description, and loads the full text when a step needs it.</span><a class="s b" href="#skills" data-page="skills">Open the Skills page →</a></div>${held.length ? skillsMeter(held) : ''}`}
+          ${ro ? '' : held.length ? held.map(({ n, k }) => `<div class="pf-sk"><div class="h"><a class="mono s b grow" href="#skills" data-page="skills">${esc(n)}</a>${kindTag(k)}<button class="btn icon" data-rmskill="${esc(n)}" title="Take off this Playbook. The Skill is not deleted." aria-label="Remove ${esc(n)}" style="width:28px;height:28px">×</button></div><span class="d">${k ? esc(k.desc) : 'This Skill was deleted.'}</span></div>`).join('') : '<p class="s muted" style="margin:0">None held. The agent follows the rules and steps only.</p>'}
+          ${ro ? '' : SKILLS.length === 0 ? '<div class="pf-ro">No Skills exist yet. Write one on the Skills page, or install a Skill pack under Discover. They appear here.</div>'
+            : free.length === 0 ? '<p class="xs muted" style="margin:0">Every Skill is held already.</p>'
+            : `<button class="btn xs" data-addskill style="align-self:flex-start" ${w.skills.length >= 8 ? 'disabled' : ''}>${addSkill ? 'Hide list' : '+ Add a Skill'}</button>${addSkill ? free.map((k) => `<button class="pf-sk pick" data-pickskill="${esc(k.name)}"><span class="h"><b class="mono s grow">${esc(k.name)}</b>${kindTag(k)}</span><span class="d">${esc(k.desc)}</span></button>`).join('') : ''}`}`;
+      } else if (sel.kind === 'settings') {
+        h = ro ? `<div class="row"><h3>Settings</h3>${close}</div><dl class="kv"><dt>Branch</dt><dd>The Repo's default branch</dd><dt>Jira ticket</dt><dd>Off</dd></dl>`
+          : `<div class="row"><h3>Settings</h3>${close}</div>
+          <label class="g" for="pf-branch">Branch</label><input class="field mono" id="pf-branch" value="${esc(w.branches)}" placeholder="production, master, main">
+          <p class="xs muted" style="margin:0">Where Verify and Fix read the code: the first of these origin has, fetched first. Blank: the Repo's default branch.</p>
+          <div class="pf-sw"><button class="toggle${w.jira ? ' on' : ''}" role="switch" id="pf-jira" aria-checked="${w.jira}" aria-label="Jira ticket"></button><div><b class="m">Jira ticket</b><p class="xs muted" style="margin:2px 0 0">Fix makes a Jira ticket first, when Jira is connected, and names the branch after it. Off: the branch is fix/&lt;name&gt;.</p></div></div>`;
+      }
+      el.innerHTML = h;
+    }
+
+    /* ======== shell ======== */
+    function render() {
+      const over = openId === null;
+      $id('pf-over').hidden = !over; $id('pf-bar').hidden = over; $id('pf-bodyw').hidden = over; if (over) $id('pf-ban').hidden = true;
+      if (over) return renderOver();
+      renderBar(); renderPal(); renderStage(); renderInsp();
+    }
+    const open = (id, select) => { openId = id; sel = select ?? null; menu = null; chg = null; addSkill = false; render(); };
+    const attach = (t, id) => { holder[t] = id; render(); };
+    const dialog = (html, onClick) => { const d = document.createElement('div'); d.className = 'pf-confirm'; d.innerHTML = `<div role="dialog">${html}</div>`; d.addEventListener('click', (e) => { if (e.target === d) return d.remove(); if (e.target.closest('[data-c]')) { const r = onClick(e.target.closest('[data-c]').dataset.c, d); if (r !== false) d.remove(); } }); document.body.append(d); return d; };
+    const ask = (t, from, to) => dialog(`<h3 style="font-size:16px">Replace ${esc(from.name)}?</h3><p class="m muted" style="margin:0">${t} runs ${esc(from.name)}. Replace it with ${esc(to.name)}?</p><div class="row" style="justify-content:flex-end"><button class="btn" data-c="no">Cancel</button><button class="btn primary" data-c="yes">Replace</button></div>`, (c) => { if (c === 'yes') attach(t, to.id); });
+    const copyOf = (src, name) => { const id = Date.now() + Math.floor(Math.random() * 1000); P.splice(P.filter((x) => !x.builtin).length, 0, { ...JSON.parse(JSON.stringify(src)), id, builtin: undefined, name }); return id; };
+    const insertAt = (j, b) => { const s = work().steps; if (s.length >= 12) return; s.splice(j, 0, { title: b[0], writes: !!b[1], text: b[2] }); sel = { kind: 'step', i: j }; menu = null; render(); };
+    const newDialog = () => {
+      let pick = 'Verify'; let isOpen = false;
+      const caret = '<svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+      const d = dialog(`<h3 style="font-size:16px">New Playbook</h3>
+      <div><label class="h" for="pf-nn">Name</label><input class="field" id="pf-nn" style="width:100%" value="New Playbook"></div>
+      <div style="display:flex;flex-direction:column;gap:8px"><label class="pf-opt"><input type="radio" name="from" value="blank" checked><span><b class="m">Blank</b><br><span class="s muted">An empty flow. Add steps from the blocks.</span></span></label>
+        <label class="pf-opt"><input type="radio" name="from" value="copy"><span style="flex:1;min-width:0"><b class="m">Copy of a built-in</b><br><span class="s muted">Starts with its rules and steps. It runs on no Trigger until you attach it.</span><span class="pf-dd" id="pf-nbdd"></span></span></label></div>
+      <div class="row" style="justify-content:flex-end"><button class="btn" data-c="no">Cancel</button><button class="btn primary" data-c="yes">Create</button></div>`, (c, dlg) => {
+        if (c !== 'yes') return;
+        const name = dlg.querySelector('#pf-nn').value.trim() || 'New Playbook';
+        const kind = dlg.querySelector('input[name=from]:checked').value;
+        const id = kind === 'copy' ? copyOf(builtinOf(pick), name) : copyOf({ rules: '', branches: '', jira: false, skills: [], steps: [] }, name);
+        open(id, kind === 'blank' ? { kind: 'trigger' } : null);
       });
+      const box = d.querySelector('#pf-nbdd');
+      const draw = () => {
+        box.innerHTML = `<button type="button" class="drop" data-nbtoggle aria-haspopup="listbox" aria-expanded="${isOpen}" aria-label="Built-in to copy"><span class="v">${pick} (built-in) · ${stepsText(builtinOf(pick))}</span>${caret}</button>${isOpen ? `<div class="menu" role="listbox"><div class="menu-h">Copy which built-in?</div>${ALL.map((t) => `<button type="button" class="it ov2-opt${t === pick ? ' sel' : ''}" role="option" aria-selected="${t === pick}" data-nbopt="${t}"><span class="t">${t}${t === pick ? '<span class="ck">✓</span>' : ''}</span><span class="d">${esc(builtinOf(t).name)} · ${stepsText(builtinOf(t))}</span></button>`).join('')}</div>` : ''}`;
+      };
+      draw();
+      d.addEventListener('click', (e) => {
+        if (e.target.closest('[data-nbtoggle]')) { e.stopPropagation(); isOpen = !isOpen; d.querySelector('input[value=copy]').checked = true; return draw(); }
+        const o = e.target.closest('[data-nbopt]');
+        if (o) { e.stopPropagation(); pick = o.dataset.nbopt; isOpen = false; return draw(); }
+        if (isOpen && !e.target.closest('.menu')) { isOpen = false; draw(); }
+      });
+    };
+
+    const page = $id('p-playbooks');
+    page.addEventListener('click', (e) => {
+      const t = e.target; const q = (s) => t.closest(s);
+      if (q('[data-view]')) return open(by(q('[data-view]').dataset.view).id);
+      if (q('[data-ovsel]')) { ovSel = q('[data-ovsel]').dataset.ovsel; chg = null; return renderOver(); }
+      if (q('[data-change]')) { e.stopPropagation(); const tr = q('[data-change]').dataset.change; chg = chg === tr ? null : tr; return renderOver(); }
+      if (q('[data-set]')) { const [tr, id] = q('[data-set]').dataset.set.split(':'); chg = null; if (!id) return attach(tr, null); const to = by(id); if (holder[tr] && holder[tr] !== to.id) return (render(), ask(tr, by(holder[tr]), to)); return attach(tr, to.id); }
+      if (chg && !q('.menu')) { chg = null; renderOver(); }
+      if (q('#pf-back')) { openId = null; sel = null; menu = null; return render(); }
+      if (q('[data-pick]')) return insertAt(menu.j, BLOCKS[+q('[data-pick]').dataset.pick]);
+      if (q('[data-slot]')) { const b = q('[data-slot]'); menu = menu && menu.j === +b.dataset.slot ? null : { j: +b.dataset.slot, x: parseFloat(b.style.left), y: parseFloat(b.style.top) }; return renderStage(); }
+      if (q('[data-empty]')) { const b = q('[data-empty]'); menu = menu ? null : { j: 0, x: parseFloat(b.style.left) + W / 2, y: parseFloat(b.style.top) + H / 2 }; return renderStage(); }
+      if (q('[data-add]')) return insertAt(work().steps.length, BLOCKS[+q('[data-add]').dataset.add]);
+      if (q('[data-close]')) { sel = null; return render(); }
+      if (q('[data-node]')) { const n = q('[data-node]'); sel = n.dataset.node === 'step' ? { kind: 'step', i: +n.dataset.i } : { kind: n.dataset.node }; menu = null; addSkill = false; renderStage(); return renderInsp(); }
+      if (q('#pf-canvas') && !q('.pf-menu') && !q('.pf-legend')) { sel = null; menu = null; renderStage(); renderInsp(); return; }
+      if (q('[data-trig]')) { const trig = q('[data-trig]').dataset.trig; const p = cur(); if (holder[trig] === p.id) return attach(trig, null); if (holder[trig]) return ask(trig, by(holder[trig]), p); return attach(trig, p.id); }
+      if (q('[data-rm]')) { work().steps.splice(sel.i, 1); sel = null; return render(); }
+      if (q('[data-addskill]')) { addSkill = !addSkill; return renderInsp(); }
+      if (q('[data-pickskill]')) { work().skills.push(q('[data-pickskill]').dataset.pickskill); addSkill = false; return render(); }
+      if (q('[data-rmskill]')) { const w = work(); w.skills = w.skills.filter((n) => n !== q('[data-rmskill]').dataset.rmskill); return render(); }
+      if (q('#pf-jira')) { work().jira = !work().jira; return render(); }
+      if (q('#pf-del')) return dialog(`<h3 style="font-size:16px">Delete ${esc(cur().name)}?</h3><p class="m muted" style="margin:0">${triggersOf(cur()).length ? triggersOf(cur()).join(', ') + ' go back to their built-in. ' : ''}This can't be undone.</p><div class="row" style="justify-content:flex-end"><button class="btn" data-c="no">Cancel</button><button class="btn danger" data-c="yes">Delete</button></div>`, (c) => { if (c !== 'yes') return; ALL.forEach((tr) => { if (holder[tr] === openId) holder[tr] = null; }); delete drafts[openId]; P.splice(P.indexOf(cur()), 1); openId = null; sel = null; render(); });
+      if (q('#pf-save')) { Object.assign(cur(), drafts[openId]); delete drafts[openId]; return render(); }
+      if (q('#pf-discard')) { delete drafts[openId]; sel = null; return render(); }
     });
-    list.addEventListener('click', (e) => {
-      const li = e.target.closest('.pstep');
-      if (e.target.matches('[data-up]') && li.previousElementSibling) li.after(li.previousElementSibling);
-      else if (e.target.matches('[data-down]') && li.nextElementSibling) li.nextElementSibling.after(li);
-      else if (e.target.matches('[data-rm]')) li.remove();
+    page.addEventListener('keydown', (e) => { if (e.key === 'Escape' && chg) { chg = null; renderOver(); } });
+    page.addEventListener('input', (e) => {
+      const t = e.target; if (openId === null) return; const w = work();
+      if (t.id === 'pf-name') w.name = t.value;
+      else if (t.id === 'pf-rules') { w.rules = t.value; const c = $id('pf-rc'); if (c) c.textContent = `${t.value.length} / 8000`; const m = $id('pf-tk'); if (m) m.outerHTML = rulesMeter(t.value.length); }
+      else if (t.id === 'pf-branch') w.branches = t.value;
+      else if (t.dataset.f && sel?.kind === 'step') w.steps[sel.i][t.dataset.f] = t.type === 'checkbox' ? t.checked : t.value;
       else return;
-      renumber(); dirty();
+      const had = $id('pf-save'); renderStage(); if (!had) renderBar();
     });
-    $$('#blocks .add').forEach((b) => b.addEventListener('click', () => {
-      const el = b.closest('.blk');
-      if ($$('.pstep', list).length < 12) list.append(stepFrom($('.trunc', el).textContent, el.dataset.instr, el.dataset.writes));
-      renumber(); dirty();
-    }));
-    $('#save').addEventListener('click', () => { $('#savebar').hidden = true; $('.pbrow.sel .dirty')?.remove(); });
-    $('#discard').addEventListener('click', () => location.reload());
-    list.addEventListener('input', dirty);
+    page.addEventListener('change', (e) => { if (e.target.dataset.f === 'writes') { renderStage(); renderInsp(); } });
+    $id('pf-new').addEventListener('click', newDialog);
+
+    /* Drag a block onto a line, or a step to another place. Let go outside the canvas to remove a step. */
+    let drag = null;
+    const nearest = (e) => { const r = $id('pf-stage').getBoundingClientRect(); const x = e.clientX - r.left; const y = e.clientY - r.top; return slots.reduce((m, s) => { const d = Math.hypot(s.x - x, s.y - y); return !m || d < m.d ? { ...s, d } : m; }, null); };
+    page.addEventListener('dragstart', (e) => {
+      const b = e.target.closest?.('[data-blk]'); const n = e.target.closest?.('[data-node="step"]');
+      if (b) drag = { kind: 'block', i: +b.dataset.blk }; else if (n && !isRO()) { drag = { kind: 'step', i: +n.dataset.i }; n.classList.add('dragging'); } else return;
+      e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', drag.kind);
+    });
+    page.addEventListener('dragover', (e) => {
+      if (!drag || !e.target.closest?.('#pf-canvas')) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+      const s = nearest(e); if (s && s.j !== hot) { hot = s.j; document.querySelectorAll('.pf-plus').forEach((p) => p.classList.toggle('hot', +p.dataset.slot === hot)); }
+    });
+    page.addEventListener('drop', (e) => {
+      if (!drag || !e.target.closest?.('#pf-canvas')) return; e.preventDefault();
+      const s = nearest(e); const w = work();
+      if (drag.kind === 'block') insertAt(s.j, BLOCKS[drag.i]);
+      else { const [m] = w.steps.splice(drag.i, 1); const at = s.j > drag.i ? s.j - 1 : s.j; w.steps.splice(at, 0, m); sel = { kind: 'step', i: at }; render(); }
+      drag = null; hot = null;
+    });
+    page.addEventListener('dragend', (e) => {
+      if (drag?.kind === 'step' && e.dataTransfer.dropEffect === 'none') { work().steps.splice(drag.i, 1); sel = null; }
+      drag = null; hot = null; render();
+    });
+    new ResizeObserver(() => { if (openId !== null && $id('pf-canvas').clientWidth) renderStage(); }).observe($id('pf-canvas'));
+    render();
   })();
 </script>
 </body>
