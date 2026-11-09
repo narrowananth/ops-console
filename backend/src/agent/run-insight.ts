@@ -119,6 +119,8 @@ export type HealthInput = {
   now: number;
   /** The failure the page would show for an ended run, for its one-line reason. */
   failure: Failure | null;
+  /** Hosts the Run sandbox refused this run that the Network allowlist still lacks. */
+  blocked?: string[];
 };
 
 /** Whether to look at a run, and in one line why. */
@@ -129,6 +131,14 @@ export function healthOf(input: HealthInput): { health: RunHealth; reason: strin
       return {
         health: RunHealth.NeedsYou,
         reason: `Waiting on you for ${fmtMs(now - waiting.since)}${waiting.on ? `: ${waiting.on}` : ''}`,
+      };
+    }
+    // A command that calls a refused host can wait on it for a long time, so the operator is told at once.
+    const blocked = input.blocked ?? [];
+    if (blocked.length > 0) {
+      return {
+        health: RunHealth.NeedsYou,
+        reason: `The Run sandbox refused ${blocked.join(', ')}. Allow ${blocked.length === 1 ? 'it' : 'them'} in the Network allowlist, or the run may wait on ${blocked.length === 1 ? 'it' : 'them'}.`,
       };
     }
     const long = slowest(input.steps, now);

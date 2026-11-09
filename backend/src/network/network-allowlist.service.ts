@@ -13,6 +13,7 @@ import { ApiError } from '../common/errors';
 import { networkDomains, repos } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { remoteHostname } from '../repos/git';
+import { coveredBy } from './blocked-hosts';
 
 /**
  * The first `url` of the `origin` remote in a Repo's `.git/config`, or null. A small file read in place, not a `git`
@@ -75,6 +76,11 @@ export class NetworkAllowlistService {
   /** The list a run starts with. A run keeps it; later edits reach the next run. */
   forRun(): string[] {
     return allNetworkDomains(this.read());
+  }
+
+  /** True when a run started now could reach `host`. */
+  covers(host: string): boolean {
+    return coveredBy(allNetworkDomains(this.read()), host);
   }
 
   /** Saves `domain` unless some group already has it. */

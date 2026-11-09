@@ -14,6 +14,7 @@ import { AppModule } from './app.module';
 import { DaemonAddress } from './common/daemon-address';
 import { lockDataDir, writeRuntimeFile } from './common/data-dir';
 import { DaemonLogger, type WriteLog } from './common/logger';
+import { watchLoopLag } from './common/loop-lag';
 import { StartupRecovery } from './common/recovery';
 import { Session } from './common/session';
 import { WsHub } from './common/ws-hub';
@@ -108,6 +109,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     const scheduler = app.get(Scheduler);
     await scheduler.start();
     cleanups.push(() => scheduler.stop());
+    cleanups.push(watchLoopLag((message) => log.warn(message)));
 
     cleanups.push(
       await writeRuntimeFile(options.dataDir, {

@@ -42,6 +42,13 @@ An agent run can read the checkout, the files the operator attached and the `GH_
 20. The Run sandbox's file rules, the `GH_TOKEN` sign-in, the Keychain timeouts and the Approvals behave as before. A blocked command does not fail its job by itself.
 21. A failed run whose result text mentions the sandbox shows that text as the Session's `last_error`, as before.
 
+### Refused hosts on the run
+
+22. A command's output that carries `deny network-outbound <host>:<port> (host is not on the allow list)` names a refused host. The console keeps each such host once, in the order met, with the Session's run, and a new run starts with none. An IP address is not kept: the allowlist takes names only.
+23. While the run goes, a refused host that no group covers turns the run to Needs you, with the hosts in its reason. The Running tray and Agent runs page show it, and the desktop alert for runs that need the operator fires. The run's page shows the hosts with an Allow button each and, for a run that can be played again, Allow all and restart the run.
+24. Allow adds the host to Added by you, as in Behavior 13, and the host leaves the run's list at once. A run keeps the allowlist it started with (Behavior 11), so Allow and restart pauses the run, waits for it to end and plays it again on the new list. The run carries on from its conversation.
+25. The agent cannot add a host: it cannot read the data folder or call the console's API (Behavior 18). No refusal fails a job by itself (Behavior 20).
+
 ## Settled
 
 - **Mechanism**: the SDK's `network.allowedDomains` with `network.strictAllowlist: true`, set in the Run sandbox rules. The console sets the list; the SDK runs the filtering proxy and keeps the profile. No hand-written Seatbelt rule, no DNS interception, no proxy in the daemon. Checked on this Mac with the real SDK sandbox: a host off the list fails, raw IPs and DNS outside the filter fail, `curl`, `gh`, `git` over https and `pnpm` pass through it.
@@ -49,7 +56,7 @@ An agent run can read the checkout, the files the operator attached and the `GH_
 - **Repo remotes**: read from each Repo's `.git/config` when a run starts, with no `git` process, so a run's start waits on nothing. A Repo whose `.git` is a file (a worktree) adds nothing.
 - **Wildcards**: the SDK's `*.host` matches subdomains and not the apex.
 - **No off switch**: no Setting, no flag and no unfiltered retry, the same rule as the Run sandbox.
-- **Blocked host in the UI**: the transcript only. No parser, event or table.
+- **Blocked host in the UI**: the transcript, and the run itself (Behavior 22 to 25). The console reads the refused host from the command's output and keeps it on the Session's row; the operator allows it, never the agent.
 - **`WebFetch` and `WebSearch`**: denied next to the merge denials. The SDK does not filter in-process tools. `WebSearch` is the same kind of tool; it was read, not run.
 - **Datadog**: no domain. `pup` does not run in a run's shell, and the Datadog MCP Server runs outside the sandbox.
 - **Validation**: one Zod schema in `shared/`, used by the API and by the page.
@@ -63,7 +70,6 @@ An agent run can read the checkout, the files the operator attached and the `GH_
 - **`git push` over ssh**: ssh ignores the proxy and fails in the Run sandbox today, with or without this change. A Fix that pushes over https works through `GH_TOKEN`.
 - **Node `fetch` and other clients that ignore proxy settings**: they fail before and after. The run env does not set `NODE_USE_ENV_PROXY`.
 - **Local servers**: binding a port fails in the sandbox today and still does.
-- **A list or alert of blocked hosts**: the operator reads the transcript and adds the host.
 - **Live sync**: other open browsers show an edited list after a reload.
 - **MCP Servers, the daemon and the Setup agent's terminal**: not sandboxed, so not filtered.
 

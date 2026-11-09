@@ -171,16 +171,19 @@ describe('runs', () => {
     const messageId = sent.body.data.message_id;
     const outputs = () => events.flatMap((event) => (event.event === 'session.output' ? [event.data] : []));
     await until(
-      () => outputs().length,
-      (count) => count >= 3,
+      () => outputs().at(-1)?.part,
+      (part) => part?.kind === 'text' && part.text === 'Looking at the logs.',
     );
 
-    // Two stream deltas grow part 0; the finished block resends it whole.
-    expect(outputs().map((output) => [output.message_id, output.part_index, output.part])).toEqual([
-      [messageId, 0, { kind: 'text', text: 'Looking at' }],
-      [messageId, 0, { kind: 'text', text: 'Looking at the logs.' }],
-      [messageId, 0, { kind: 'text', text: 'Looking at the logs.' }],
-    ]);
+    // Deltas grow part 0 and the finished block resends it whole. Changes close together go out as one event, so how
+    // many events there are is not fixed; each carries the part whole, every one is a start of the final text, and
+    // the last is the finished block.
+    const part0 = outputs().filter((output) => output.part_index === 0);
+    expect(part0.every((output) => output.message_id === messageId)).toBe(true);
+    for (const output of part0) {
+      expect(output.part.kind === 'text' && 'Looking at the logs.'.startsWith(output.part.text)).toBe(true);
+    }
+    expect(part0.at(-1)?.part).toEqual({ kind: 'text', text: 'Looking at the logs.' });
 
     // A reload mid-run: the list holds the in-flight message, and output continues from the next index.
     const midRun = await api(daemon).get(`/sessions/${id}/messages`);

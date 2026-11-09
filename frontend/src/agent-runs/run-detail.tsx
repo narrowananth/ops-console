@@ -4,7 +4,7 @@ import { useAgentAccounts, useRunDetail, useRunQueue } from '../lib/queries';
 import { alertPath, pullRequestPath, sessionPath } from '../workspace/links';
 import { Split, SubagentTable } from './run-breakdown';
 import { Pill, PillLink } from './run-controls';
-import { SlowBox } from './run-diagnostics';
+import { BlockedBox, SlowBox } from './run-diagnostics';
 import { FailureBox } from './run-ended';
 import { ACCESS_NAME, clock, KIND_NAME, MODEL_NAME, usageText, usageTip } from './run-look';
 import { useRunClock } from './run-model';
@@ -47,6 +47,7 @@ export function RunAnalytics({ run, detail }: { run: AgentRun; detail: RunDetail
   return (
     <>
       {detail.stages.length > 0 && <Stepper stages={detail.stages} />}
+      <BlockedBox run={live} />
       <SlowBox detail={detail} run={run} />
       {detail.failure && <FailureBox failure={detail.failure} run={run} />}
       {clockOfRun && (

@@ -26,6 +26,14 @@ export class Store {
   }
 
   /**
+   * Sends an event that has no state change behind it. `write` would open and commit an empty transaction on the
+   * daemon's one thread; a streaming run sends one of these per token.
+   */
+  emit: Emit = (event, data) => {
+    this.hub.publish({ event, at: new Date().toISOString(), data } as WsEvent);
+  };
+
+  /**
    * Runs a state change in one transaction. Events passed to `emit` go out only after the commit;
    * a change that throws rolls back and sends none.
    */

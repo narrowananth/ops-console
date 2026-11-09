@@ -135,6 +135,8 @@ export const sessions = sqliteTable(
     runOutcome: text('run_outcome').$type<RunOutcome>(),
     /** JSON array of the last run's `Subagent`s. */
     runSubagents: text('run_subagents'),
+    /** JSON array of the hosts the Run sandbox refused the last run, in the order it first met them. */
+    runBlockedHosts: text('run_blocked_hosts'),
     /** When the last run began to wait on the account's usage limit, and when the window resets (ISO). */
     runLimitSince: text('run_limit_since'),
     runLimitResetsAt: text('run_limit_resets_at'),

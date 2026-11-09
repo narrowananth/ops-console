@@ -121,6 +121,9 @@ export const queryKeys = {
   branches: (repoId: string) => ['branches', repoId] as const,
   pulls: ['pull-requests'] as const,
   pullRequest: (repoId: string, number: number) => ['pull-requests', 'detail', repoId, number] as const,
+  pullRequestDetails: ['pull-requests', 'detail'] as const,
+  pullRequestLists: ['pull-requests', 'list'] as const,
+  pullRequestRepoLists: ['pull-requests', 'repo'] as const,
   monitor: ['monitor'] as const,
   alert: (id: string) => ['monitor', 'alert', id] as const,
   session: (id: string) => ['sessions', id] as const,
@@ -692,7 +695,48 @@ export function useAddNetworkDomain() {
   return useMutation({
     mutationFn: (domain: string) =>
       apiSend('POST', '/network-allowlist/domains', { domain }, z.object({ data: savedNetworkDomainSchema })),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.networkAllowlist }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.networkAllowlist });
+      // A run lists the hosts still refused; one just allowed leaves the list.
+      return client.invalidateQueries({ queryKey: queryKeys.sessions });
+    },
+  });
+}
+
+/** How long Allow and restart waits for a paused run to end before it gives up. */
+const PAUSE_WAIT_MS = 15_000;
+
+/**
+ * Adds the hosts to the Network allowlist, pauses the run and plays it again once it has ended. A run keeps the
+ * allowlist it started with, so the restart is what lets it reach them. The run carries on from its conversation.
+ */
+export function useAllowAndRestart(sessionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (hosts: string[]) => {
+      for (const domain of hosts) {
+        await apiSend('POST', '/network-allowlist/domains', { domain }, z.object({ data: savedNetworkDomainSchema }));
+      }
+      await apiSend('POST', `/sessions/${sessionId}/pause`, undefined, z.undefined());
+      const give = Date.now() + PAUSE_WAIT_MS;
+      for (;;) {
+        const { data } = await apiGet(`/agent-runs/${sessionId}`, z.object({ data: runDetailSchema }));
+        if (!data.run.running) break;
+        if (Date.now() > give) throw new Error('The run did not stop in time. Allow is saved; play it again by hand.');
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      await apiSend(
+        'POST',
+        `/sessions/${sessionId}/resume`,
+        undefined,
+        z.object({ data: z.object({ message_id: z.string() }) }),
+      );
+    },
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.networkAllowlist });
+      void client.invalidateQueries({ queryKey: queryKeys.sessions });
+      void client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) });
+    },
   });
 }
 

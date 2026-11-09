@@ -7,4 +7,6 @@ export type AgentConfig = {
   sdk: AgentSdk;
   /** Where an account's current usage comes from, besides its runs. */
   usage: UsageSource;
+  /** How many job runs go at once; the rest wait their turn. */
+  jobRunLimit?: number;
 };

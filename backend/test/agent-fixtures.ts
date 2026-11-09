@@ -87,6 +87,7 @@ export async function startAgentDaemon(
     keychain?: Keychain;
     keychainWait?: KeychainWaitTracker;
     keychainHandover?: KeychainHandoverTracker;
+    jobRunLimit?: number;
   } = {},
 ): Promise<AgentDaemon> {
   const dataDir = options.dataDir ?? (await tempDir());
@@ -99,7 +100,11 @@ export async function startAgentDaemon(
     ...(options.keychainWait ? { keychainWait: options.keychainWait } : {}),
     ...(options.keychainHandover ? { keychainHandover: options.keychainHandover } : {}),
     modules: [
-      AgentModule.forRoot({ sdk, usage }),
+      AgentModule.forRoot({
+        sdk,
+        usage,
+        ...(options.jobRunLimit === undefined ? {} : { jobRunLimit: options.jobRunLimit }),
+      }),
       ...(options.fixtureKinds === false ? [] : [{ module: KindsFixtureModule }]),
       ...(options.modules ?? []),
     ],
