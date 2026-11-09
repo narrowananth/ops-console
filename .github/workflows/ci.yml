@@ -12,10 +12,8 @@ permissions:
 
 jobs:
   check:
-    # A pull request from a fork would run its own scripts on the operator's Mac: only branches of this repo do.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    # The operator's own Mac, through a self-hosted runner: GitHub's macOS runners queue for 15 minutes or more.
-    runs-on: self-hosted
+    # macOS, as the app is: the sandbox, Keychain and launchd tests need it.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
         with:

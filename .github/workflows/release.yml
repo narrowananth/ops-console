@@ -10,16 +10,14 @@ permissions:
 jobs:
   build:
     strategy:
-      # One Mac builds both: the install test below starts the daemon on its port, so the builds run in turn.
-      max-parallel: 1
       matrix:
         include:
-          - label: ARM64
-            arch: arm64
-          - label: X64
-            arch: x64
-    # A self-hosted runner of the build's own architecture; each runner carries its label.
-    runs-on: [self-hosted, "${{ matrix.label }}"]
+          - arch: arm64
+            runner: macos-latest
+          - arch: x64
+            runner: macos-15-intel
+    # GitHub's macOS runner of the build's own architecture.
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -32,12 +30,6 @@ jobs:
       - name: Install the built tarball and run it under launchd
         run: |
           set -eu
-          # install.sh installs the arm64 build in a shell under Rosetta, so an Intel runner on an Apple silicon Mac
-          # cannot install the x64 tarball. The build above still ran.
-          if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = 1 ]; then
-            echo "Under Rosetta: install.sh picks arm64 here, so the install test is skipped."
-            exit 0
-          fi
           mkdir release
           cp "out/ops-console-darwin-${{ matrix.arch }}.tar.gz" release/
           (cd release && shasum -a 256 ops-console-darwin-*.tar.gz > checksums.txt)
