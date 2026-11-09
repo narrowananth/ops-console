@@ -327,6 +327,8 @@ export const agentRunSchema = z.object({
   usage: runUsageSchema.nullable(),
   /** The usage limit the run waits on or ended on; null otherwise. */
   limit: runLimitSchema.nullable(),
+  /** Hosts the Run sandbox refused the run's commands that are still not on the Network allowlist, first met first. */
+  blocked_hosts: z.array(z.string()),
   /** Milliseconds per phase over the run, in `RunPhase` order. */
   split: z.array(z.object({ phase: z.enum(RunPhase), ms: z.number().int() })),
 });

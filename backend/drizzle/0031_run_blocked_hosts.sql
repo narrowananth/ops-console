@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `run_blocked_hosts` text;

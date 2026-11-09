@@ -67,6 +67,7 @@ const run = (id: string, extra: Record<string, unknown> = {}, sessionExtra: Reco
   tokens: null,
   usage: null,
   limit: null,
+  blocked_hosts: [] as string[],
   split: split(60_000),
   ...extra,
 });
@@ -692,3 +693,61 @@ for (const size of [
     await page.screenshot({ path: `/tmp/ops-console-shots/limit-${size.width}.png` });
   });
 }
+
+const refusedRun = (extra: Record<string, unknown> = {}) =>
+  run('refused', {
+    health: 'needs_you',
+    health_reason: 'The Run sandbox refused stamped.io, loox.io. Allow them in the Network allowlist.',
+    blocked_hosts: ['stamped.io', 'loox.io'],
+    ...extra,
+  });
+
+test('a run the sandbox refused hosts for names them, and Allow adds one to the allowlist', async ({ page }) => {
+  const calls = await routeRuns(page, [...RUNS, refusedRun()]);
+  await page.route('**/api/agent-runs/refused', (route) =>
+    route.fulfill({ json: { data: { ...detailOf('refused'), run: refusedRun() } } }),
+  );
+  await page.goto(`${daemon.url}/agent-runs?run=refused#token=${daemon.token}`);
+
+  const box = page.getByRole('region', { name: 'Refused hosts' });
+  await expect(box).toContainText('The Run sandbox refused these hosts');
+  await expect(box.getByText('stamped.io', { exact: true })).toBeVisible();
+  await expect(box.getByText('loox.io', { exact: true })).toBeVisible();
+
+  await box.getByRole('listitem').filter({ hasText: 'loox.io' }).getByRole('button', { name: 'Allow' }).click();
+  await expect
+    .poll(() => calls.find((call) => call.path === '/api/network-allowlist/domains')?.body)
+    .toEqual({ domain: 'loox.io' });
+});
+
+test('Allow all and restart adds every host, pauses the run, waits for it to end and plays it again', async ({
+  page,
+}) => {
+  const calls = await routeRuns(page, [...RUNS, refusedRun()]);
+  // The run goes until it is paused, then it has ended.
+  await page.route('**/api/agent-runs/refused', (route) =>
+    route.fulfill({
+      json: {
+        data: {
+          ...detailOf('refused'),
+          run: refusedRun({ running: !calls.some((call) => call.path.endsWith('/pause')) }),
+        },
+      },
+    }),
+  );
+  await page.goto(`${daemon.url}/agent-runs?run=refused#token=${daemon.token}`);
+
+  await page.getByRole('button', { name: 'Allow all and restart the run' }).click();
+  await expect
+    .poll(() => calls.filter((call) => call.method === 'POST').map((call) => call.path))
+    .toEqual([
+      '/api/network-allowlist/domains',
+      '/api/network-allowlist/domains',
+      '/api/sessions/refused/pause',
+      '/api/sessions/refused/resume',
+    ]);
+  expect(calls.filter((call) => call.path === '/api/network-allowlist/domains').map((call) => call.body)).toEqual([
+    { domain: 'stamped.io' },
+    { domain: 'loox.io' },
+  ]);
+});

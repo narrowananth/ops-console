@@ -25,6 +25,8 @@ export type Step =
       tool: string;
       input: Record<string, unknown>;
       fails?: string;
+      /** What the call prints, as its `PostToolUse` `tool_response`; `ok` when not given. */
+      output?: string;
       classifierAsks?: boolean;
       /** Holds the call open, between its `PreToolUse` and its result, until the promise settles. */
       hold?: Promise<unknown>;
@@ -375,7 +377,7 @@ export class FakeAgentSdk implements AgentSdk {
         } else {
           await hooks(
             'PostToolUse',
-            { tool_name: step.tool, tool_input: input, tool_use_id: id, tool_response: 'ok' },
+            { tool_name: step.tool, tool_input: input, tool_use_id: id, tool_response: step.output ?? 'ok' },
             id,
           );
           await result('ok', false);

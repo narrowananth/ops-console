@@ -142,6 +142,7 @@ const run = (id: string, extra: Record<string, unknown> = {}, sessionExtra: Reco
   tokens: null,
   usage: null,
   limit: null,
+  blocked_hosts: [] as string[],
   split: [],
   ...extra,
 });

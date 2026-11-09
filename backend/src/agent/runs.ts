@@ -24,6 +24,12 @@ export type Run = {
   parts: Part[];
   /** The text part growing from stream deltas, until its block arrives whole. */
   growing: number | null;
+  /** Hosts the Run sandbox refused this run, as its commands reported them. */
+  blockedHosts: Set<string>;
+  /** Part indexes changed since their last `session.output`; sent together once per `OUTPUT_EVERY_MS`. */
+  outputDirty: Set<number>;
+  /** Fires the next send of `outputDirty`; null when nothing waits. */
+  outputTimer: ReturnType<typeof setTimeout> | null;
   /** Transcript entries this run wrote; listing serves them from `parts` instead. */
   sdkUuids: Set<string>;
   /** Action Log row per tool call. */
@@ -102,6 +108,10 @@ export class RunRegistry {
 
   remove(sessionId: string): void {
     this.runs.delete(sessionId);
+  }
+
+  all(): Run[] {
+    return [...this.runs.values()];
   }
 
   /** The Sessions with a run going. */

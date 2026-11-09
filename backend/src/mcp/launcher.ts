@@ -107,7 +107,10 @@ export async function runMcpExec(argv: string[], keychain: Keychain, base: strin
   if (!name || dash !== 1 || !command) return 2;
   const stored = await keychain.get(secretsKey(name));
   const ready = await materialize(stored === null ? {} : parseEnv(stored), argv.slice(dash + 2), base);
-  const child = spawn(command, ready.args, { stdio: 'inherit', env: { ...process.env, ...ready.env } });
+  // Every run starts every Connection's server through `npx …@latest`; asking the npm registry each time costs CPU and
+  // a round trip per server. Cached packages are used as they are, and a missing one is still fetched.
+  const quiet = { npm_config_prefer_offline: 'true', npm_config_update_notifier: 'false', npm_config_fund: 'false' };
+  const child = spawn(command, ready.args, { stdio: 'inherit', env: { ...quiet, ...process.env, ...ready.env } });
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => child.kill(signal));
   const code = await new Promise<number>((resolve) => {
     child.once('error', () => resolve(127));

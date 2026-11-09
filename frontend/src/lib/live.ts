@@ -22,6 +22,17 @@ export function useLiveEvent(listener: Listener): void {
 /** Events that land this close together refetch each query once. */
 const BATCH_MS = 40;
 
+/**
+ * A running agent's events come many times a second, and each refetch behind them is heavy for the daemon: the whole
+ * transcript, or the whole pull request list. These refetch at most this often per query.
+ */
+const STREAM_MS = 400;
+const LIST_MS = 5000;
+
+/** Wait before the socket reopens after it drops, doubling to the cap. */
+const RECONNECT_MIN_MS = 1000;
+const RECONNECT_MAX_MS = 10_000;
+
 /** Keeps queries fresh from `/ws` events. A burst, such as a Probe reporting ten servers, refetches each query once. */
 export function useLiveEvents(): void {
   const client = useQueryClient();
@@ -30,6 +41,23 @@ export function useLiveEvents(): void {
     if (token === null) return;
     const due = new Map<string, QueryKey>();
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let closed = false;
+    const ran = new Map<string, number>();
+    const waiting = new Map<string, ReturnType<typeof setTimeout>>();
+    /** Like `refetch`, but a query already refetched within `every` ms waits out the rest; events meanwhile make one. */
+    const refetchEvery = (queryKey: QueryKey, every: number) => {
+      const id = JSON.stringify(queryKey);
+      if (waiting.has(id)) return;
+      const wait = Math.max(0, (ran.get(id) ?? 0) + every - Date.now());
+      waiting.set(
+        id,
+        setTimeout(() => {
+          waiting.delete(id);
+          ran.set(id, Date.now());
+          void client.invalidateQueries({ queryKey });
+        }, wait),
+      );
+    };
     const refetch = (queryKey: QueryKey) => {
       due.set(JSON.stringify(queryKey), queryKey);
       timer ??= setTimeout(() => {
@@ -43,8 +71,11 @@ export function useLiveEvents(): void {
     document.addEventListener('pointerdown', unlockChime);
     document.addEventListener('keydown', unlockChime);
     const url = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}${WS_PATH}`;
-    const socket = new WebSocket(url, [WS_PROTOCOL, token]);
-    socket.addEventListener('message', (message) => {
+    let socket: WebSocket | null = null;
+    let reopen: ReturnType<typeof setTimeout> | null = null;
+    let wait = RECONNECT_MIN_MS;
+    let dropped = false;
+    const onMessage = (message: MessageEvent) => {
       const parsed = wsEventSchema.safeParse(JSON.parse(String(message.data)));
       if (!parsed.success) return;
       const event = parsed.data;
@@ -77,9 +108,8 @@ export function useLiveEvents(): void {
         refetch(queryKeys.session(event.data.session_id));
         refetch(queryKeys.sessions);
       }
-      if (event.event === 'session.output' || event.event === 'session.finished') {
-        refetch(queryKeys.messages(event.data.session_id));
-      }
+      if (event.event === 'session.output') refetchEvery(queryKeys.messages(event.data.session_id), STREAM_MS);
+      if (event.event === 'session.finished') refetch(queryKeys.messages(event.data.session_id));
       if (event.event === 'session.finished') {
         refetch(queryKeys.outputs(event.data.session_id));
         refetch(queryKeys.sessionDiff(event.data.session_id));
@@ -117,13 +147,40 @@ export function useLiveEvents(): void {
       }
       if (event.event === 'playbook_step.updated') {
         const { agent_review_id, reply_check_id, comment_pass_id } = event.data;
-        if (agent_review_id !== null || reply_check_id !== null || comment_pass_id !== null) refetch(queryKeys.pulls);
-        else refetch(queryKeys.monitor);
+        if (agent_review_id !== null || reply_check_id !== null || comment_pass_id !== null) {
+          // The open pull request shows its steps; the list, 750 KB across every Repo, only follows.
+          refetch(queryKeys.pullRequestDetails);
+          refetchEvery(queryKeys.pullRequestLists, LIST_MS);
+          refetchEvery(queryKeys.pullRequestRepoLists, LIST_MS);
+        } else refetch(queryKeys.monitor);
       }
-    });
+    };
+    const connect = () => {
+      const current = sessionToken();
+      if (closed || current === null) return;
+      const next = new WebSocket(url, [WS_PROTOCOL, current]);
+      socket = next;
+      next.addEventListener('open', () => {
+        wait = RECONNECT_MIN_MS;
+        // Events sent while the socket was down are gone: read everything the pages show again.
+        if (dropped) void client.invalidateQueries();
+        dropped = false;
+      });
+      next.addEventListener('message', onMessage);
+      next.addEventListener('close', () => {
+        if (closed || socket !== next) return;
+        dropped = true;
+        reopen = setTimeout(connect, wait);
+        wait = Math.min(wait * 2, RECONNECT_MAX_MS);
+      });
+    };
+    connect();
     return () => {
+      closed = true;
       if (timer) clearTimeout(timer);
-      socket.close();
+      if (reopen) clearTimeout(reopen);
+      for (const wake of waiting.values()) clearTimeout(wake);
+      socket?.close();
       document.removeEventListener('pointerdown', unlockChime);
       document.removeEventListener('keydown', unlockChime);
     };

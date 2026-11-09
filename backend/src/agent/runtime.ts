@@ -14,7 +14,7 @@ import type {
   SDKTaskNotificationMessage,
   SDKTaskStartedMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import {
   AccessLevel,
   AccessMode,
@@ -52,6 +52,7 @@ import { connections as connectionRows, disabledMcpServers, messageSkills, nowIs
 import { STORE, type Store } from '../db/store';
 import { KEYCHAIN, type Keychain, KeychainTimeout } from '../keychain/keychain';
 import { storedEnvVar } from '../mcp/launcher';
+import { blockedHostsIn } from '../network/blocked-hosts';
 import { NetworkAllowlistService } from '../network/network-allowlist.service';
 import { PlaybooksService } from '../playbooks/playbooks.service';
 import { systemAppend } from '../playbooks/prompts';
@@ -77,6 +78,7 @@ import {
   SAVE_FILE_TOOL,
 } from './pull-request-tool';
 import { gitControl, runSandbox } from './run-sandbox';
+import { DEFAULT_JOB_RUN_LIMIT, RunSlots } from './run-slots';
 import { RunStepsLog } from './run-steps';
 import { type Run, RunRegistry, type RunSummary } from './runs';
 import { SessionKinds } from './session-kinds';
@@ -95,6 +97,12 @@ const MCP_STARTUP_WAIT_MS = '30000';
 
 /** When to look for Claude Code's name for a new Session after its first run ends. */
 const TITLE_WAITS_MS = [0, 2000, 5000];
+
+/** Changes to a run's parts reach the pages at most this often. */
+const OUTPUT_EVERY_MS = 100;
+
+/** A shutdown waits this long for aborted runs to end. */
+const SHUTDOWN_WAIT_MS = 10_000;
 
 const PERMISSION_MODES: Record<AccessMode, PermissionMode> = {
   [AccessMode.Supervised]: 'default',
@@ -292,7 +300,7 @@ const firstLine = (text: string, max: number) => (text.trim().split('\n')[0] ?? 
 
 /** Runs Sessions on the Claude Agent SDK: one run per Session at a time, Sessions side by side. */
 @Injectable()
-export class AgentRuntime {
+export class AgentRuntime implements OnModuleDestroy {
   private readonly logger = new Logger('agent');
 
   constructor(
@@ -320,6 +328,29 @@ export class AgentRuntime {
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
     recovery.register('agent sessions and approvals', () => this.recover());
+    this.slots = new RunSlots(config.jobRunLimit ?? DEFAULT_JOB_RUN_LIMIT);
+  }
+
+  /** Places for the runs a job starts; an operator's own message never waits for one. */
+  private readonly slots: RunSlots;
+  /** Every run's `execute`, until it ends, so a shutdown can wait for them. */
+  private readonly executing = new Set<Promise<void>>();
+  private closing = false;
+
+  /**
+   * The daemon is stopping: every run aborts and is waited for, so none writes to the database after it closes. A run
+   * cut off this way is left as it is, `working`, and start-up recovery fails it, as for a daemon that was killed.
+   */
+  async onModuleDestroy(): Promise<void> {
+    this.closing = true;
+    for (const run of this.runs.all()) {
+      run.abort.abort();
+      run.answer?.('');
+    }
+    await Promise.race([
+      Promise.allSettled([...this.executing]),
+      new Promise((resolve) => setTimeout(resolve, SHUTDOWN_WAIT_MS).unref()),
+    ]);
   }
 
   /** Who opens a pull request when the agent asks. Set once by the Workspace, which this module does not import. */
@@ -511,6 +542,9 @@ export class AgentRuntime {
       onlyHeldSkills: options.onlyHeldSkills ?? true,
       parts: [],
       growing: null,
+      blockedHosts: new Set(),
+      outputDirty: new Set(),
+      outputTimer: null,
       sdkUuids: new Set(),
       toolRows: new Map(),
       said: [],
@@ -553,10 +587,12 @@ export class AgentRuntime {
       runFinishedAt: null,
       runOutcome: null,
       runSubagents: null,
+      runBlockedHosts: null,
       runLimitSince: null,
       runLimitResetsAt: null,
     });
-    void this.execute(run, options.prompt ?? text);
+    const executing = this.execute(run, options.prompt ?? text).finally(() => this.executing.delete(executing));
+    this.executing.add(executing);
     return run;
   }
 
@@ -708,7 +744,31 @@ export class AgentRuntime {
     return messages;
   }
 
+  /** Runs a job's run once a place is free; any other run starts at once. */
   private async execute(run: Run, text: string): Promise<void> {
+    if (run.onFinish === null) return this.executeNow(run, text);
+    let release: () => void;
+    try {
+      release = await this.slots.acquire(run.abort.signal, (ahead) => this.noteWaiting(run, ahead));
+    } catch {
+      // Stopped, or the daemon is stopping, while it waited.
+      return this.finish(run, 'stopped');
+    }
+    try {
+      await this.executeNow(run, text);
+    } finally {
+      release();
+    }
+  }
+
+  /** Says in the run's steps that it waits for a place, so the page shows why nothing happens yet. */
+  private noteWaiting(run: Run, ahead: number): void {
+    const text = `Waiting for a free place: ${ahead} job run${ahead === 1 ? '' : 's'} ahead`;
+    run.parts.push({ kind: 'step', text });
+    this.output(run, run.parts.length - 1);
+  }
+
+  private async executeNow(run: Run, text: string): Promise<void> {
     let result: RunResult;
     try {
       let account = this.accounts.get(run.accountId);
@@ -729,7 +789,7 @@ export class AgentRuntime {
         result = await this.runOnce(run, text, account);
       }
     } catch (error) {
-      if (run.stopped) return this.finish(run, 'stopped');
+      if (run.stopped || this.closing) return this.finish(run, 'stopped');
       this.logger.error(
         `run of session ${run.sessionId} failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -1082,16 +1142,39 @@ export class AgentRuntime {
     for (let index = from; index < run.parts.length; index++) this.output(run, index);
   }
 
+  /**
+   * Tells the pages part `index` changed. A token arrives every few milliseconds and each event carries the whole
+   * part, so sending every one would cost the daemon's one thread more with each agent running. Changes within
+   * `OUTPUT_EVERY_MS` go out together, each part as it stands then; nothing is lost.
+   */
   private output(run: Run, index: number): void {
-    const part = run.parts[index];
-    if (!part) return;
-    this.store.write((_tx, emit) =>
-      emit('session.output', { session_id: run.sessionId, message_id: run.messageId, part_index: index, part }),
-    );
+    run.outputDirty.add(index);
+    run.outputTimer ??= setTimeout(() => this.flushOutput(run), OUTPUT_EVERY_MS);
+  }
+
+  /** Sends the parts changed since the last send, in order. Called when the run ends, so nothing is left behind. */
+  private flushOutput(run: Run): void {
+    if (run.outputTimer) clearTimeout(run.outputTimer);
+    run.outputTimer = null;
+    const indexes = [...run.outputDirty].sort((a, b) => a - b);
+    run.outputDirty.clear();
+    for (const index of indexes) {
+      const part = run.parts[index];
+      if (part) {
+        this.store.emit('session.output', {
+          session_id: run.sessionId,
+          message_id: run.messageId,
+          part_index: index,
+          part,
+        });
+      }
+    }
   }
 
   private finish(run: Run, result: RunResult): void {
+    this.flushOutput(run);
     this.runs.remove(run.sessionId);
+    if (this.closing) return;
     this.sessions.setFailure(run.sessionId, run.failure);
     // A run the operator stopped ends `idle`, like one that finished; the job that started it still sees it fail.
     const failed = result !== 'done' && result !== 'stopped';
@@ -1270,12 +1353,25 @@ export class AgentRuntime {
       if (input.hook_event_name !== 'PostToolUse' && input.hook_event_name !== 'PostToolUseFailure') return {};
       if (input.hook_event_name === 'PostToolUse') this.steps.finish(input.tool_use_id, { ok: true });
       else this.steps.finish(input.tool_use_id, { ok: false, error: input.error });
+      this.noteBlockedHosts(run, input.hook_event_name === 'PostToolUse' ? input.tool_response : input.error);
       const row = run.toolRows.get(input.tool_use_id);
       if (!row) return {};
       if (input.hook_event_name === 'PostToolUse') this.actionLog.finish(row, ActionOutcome.Ok);
       else this.actionLog.finish(row, ActionOutcome.Failed, redact(input.error).slice(0, 500));
       return {};
     };
+  }
+
+  /**
+   * Keeps the hosts the Run sandbox refused, from what a command printed, so the operator is told while the run goes:
+   * a test that calls a refused host can wait on it for a long time. The console adds nothing to the allowlist itself;
+   * the operator does, and a run that has begun keeps the list it began with (ADR 0006).
+   */
+  private noteBlockedHosts(run: Run, output: unknown): void {
+    const found = blockedHostsIn(output).filter((host) => !run.blockedHosts.has(host));
+    if (found.length === 0) return;
+    for (const host of found) run.blockedHosts.add(host);
+    this.sessions.write(run.sessionId, { runBlockedHosts: JSON.stringify([...run.blockedHosts]) });
   }
 
   /** Permission prompts: the agent's questions, and edits and commands the access mode asks about. */

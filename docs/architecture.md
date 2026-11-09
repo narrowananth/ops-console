@@ -142,8 +142,8 @@ local storage and drops it on `unauthorized`. Any number of browsers on the Mac 
 on the one daemon (`ops-console open <app>` signs another browser in): each keeps its own Remembered view, and `/ws` events reach all of them.
 
 **WebSocket.** `/ws` sends server-to-client events only, with the token as the second subprotocol.
-`Store.write` runs one transaction and sends its events after the commit. The UI turns each event into
-query refetches, batched over 40 ms. Events (`shared/src/ws.ts`):
+`Store.write` runs one transaction and sends its events after the commit; `Store.emit` sends an event with no state change behind it. A run's `session.output` goes out at most every 100 ms, each changed part whole. The UI turns each event into
+query refetches, batched over 40 ms. A running agent's events refetch its transcript at most every 400 ms and the pull request lists every 5 seconds. The socket reopens after a drop and the UI reads every query again. Events (`shared/src/ws.ts`):
 
 - Settings and agents: `settings.updated`, `update.changed`, `session.output`, `session.finished`, `session.updated`,
   `approval.requested`, `approval.decided`, `action.logged`, `account.updated`, `account.removed`,
@@ -243,6 +243,14 @@ and Fixes, Playbooks, the Trigger each one holds, each job's copy of its Playboo
 the config dir of the Session's Claude account.
 
 ## Agent runs
+
+A command refused by the Run sandbox's filter prints the host (`deny network-outbound host:443`); the post-tool hook keeps it on the Session's row (`run_blocked_hosts`), and the run turns Needs you until the operator allows the host. The agent never adds one.
+
+Runs a job starts (Verification, Fix, Agent Review, Reply check, Comment pass, each Playbook step) go three at a time;
+the rest wait first come first served and say so in their steps. A Stop on a waiting run ends it before it starts. A message
+the operator sends never waits. The daemon logs a warning when its thread stalls for over a second. On shutdown the daemon
+aborts every run and waits up to 10 seconds for them to end, leaving them `working` for start-up recovery to fail. Each
+run starts every Connection's MCP server through `mcp-exec`, which tells `npx` to use its cache before the registry.
 
 A Session's run is a Claude Agent SDK `query()` in the working directory its kind supplies,
 resuming the stored SDK session. Each Claude account has its own `CLAUDE_CONFIG_DIR` under the data
