@@ -791,5 +791,3 @@ export type AccountUsageReport = z.infer<typeof accountUsageSchema>;
 export const EDITOR_PASTE_LIMIT = 5000;
 /** The most characters a terminal prompt holds; a longer paste is cut to it. */
 export const TERMINAL_TEXT_LIMIT = 10000;
-/** The most characters a pull request description holds; a longer paste is cut to it, with an error. */
-export const PR_DESCRIPTION_LIMIT = 3000;

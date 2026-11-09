@@ -152,7 +152,7 @@ test('a branch that cannot open a pull request shows no button', async ({ page }
   await expect(page.getByRole('button', { name: 'Open pull request' })).toHaveCount(0);
 });
 
-test('a paste into the description keeps its first 3,000 characters, drops the rest and says so', async ({ page }) => {
+test('a long description keeps every character, with no error', async ({ page }) => {
   await route(page, { can_open: true });
   await page.route('**/api/sessions/s1/pull-request-draft', (route) =>
     route.fulfill({ json: { data: { title: 'Guard empty carts', description: '' } } }),
@@ -163,12 +163,7 @@ test('a paste into the description keeps its first 3,000 characters, drops the r
   const form = page.getByRole('form', { name: 'Open pull request' });
   const description = form.getByLabel('Description');
   await expect(description).toBeEditable();
-  await description.evaluate((element) => {
-    element.focus();
-    const data = new DataTransfer();
-    data.setData('text/plain', 'x'.repeat(5000));
-    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
-  });
-  await expect(description).toHaveValue('x'.repeat(3000));
-  await expect(form.getByRole('alert')).toContainText('3,000 characters at most');
+  await description.fill('x'.repeat(5000));
+  await expect(description).toHaveValue('x'.repeat(5000));
+  await expect(form.getByRole('alert')).toHaveCount(0);
 });
