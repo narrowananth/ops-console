@@ -15,3 +15,9 @@ supportedArchitectures:
   cpu:
     - arm64
     - x64
+
+# The runners share one home link; pnpm's default of many parallel downloads stalls each of them and the install
+# times out on the native packages (biome, esbuild, better-sqlite3). Four at a time finishes.
+networkConcurrency: 4
+fetchTimeout: 120000
+fetchRetries: 4
