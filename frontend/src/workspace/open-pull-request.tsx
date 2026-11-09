@@ -1,8 +1,9 @@
-import { ErrorCode } from '@ops-console/shared';
+import { ErrorCode, PR_DESCRIPTION_LIMIT } from '@ops-console/shared';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button, Spinner } from '../components/ui/button';
 import { ApiError } from '../lib/api';
+import { usePasteLimit } from '../lib/paste-limit';
 import { useDraftPullRequest, useOpenPullRequest } from '../lib/queries';
 
 const FIELD =
@@ -27,6 +28,7 @@ export function OpenPullRequestForm({
   const open = useOpenPullRequest(sessionId);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const paste = usePasteLimit(PR_DESCRIPTION_LIMIT, 'fit');
   const [base, setBase] = useState(baseBranch);
   const asked = useRef(false);
   const { mutate: ask } = draft;
@@ -72,9 +74,20 @@ export function OpenPullRequestForm({
           className={`${FIELD} min-h-32 resize-y font-mono`}
           value={description}
           readOnly={drafting}
+          maxLength={PR_DESCRIPTION_LIMIT}
           placeholder={drafting ? 'The agent is writing the description…' : 'Description'}
-          onChange={(event) => setDescription(event.target.value)}
+          onPaste={paste.onPaste}
+          onChange={(event) => {
+            paste.clear();
+            setDescription(event.target.value);
+          }}
         />
+        {paste.over && (
+          <span role="alert" className="text-accent-700">
+            The description holds {PR_DESCRIPTION_LIMIT.toLocaleString()} characters at most. The rest of the paste was
+            left out.
+          </span>
+        )}
       </label>
       <label className="flex flex-col gap-1 text-xs text-neutral-700">
         Base branch

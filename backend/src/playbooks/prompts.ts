@@ -1,6 +1,6 @@
 import { PLAYBOOK_LIMITS, PlaybookStepStatus, PR_DESCRIPTION_RULE } from '@ops-console/shared';
 import { z } from 'zod';
-import { OPEN_PULL_REQUEST_TOOL, SAVE_FILE_TOOL } from '../agent/pull-request-tool';
+import { OPEN_PULL_REQUEST_TOOL, RUN_INTEGRATION_TOOL, SAVE_FILE_TOOL } from '../agent/pull-request-tool';
 
 /**
  * The console's safety lines. They close the system prompt of every run, after the kind's instructions and the
@@ -21,9 +21,16 @@ export const COMMIT_HOOKS_RULE = `Commit hooks. The repo's own checks run on eve
 /**
  * What the agent does about pull requests. Pushing and opening run in the daemon, outside the Run sandbox, where the
  * operator's git keys and Git host sign-ins work; a run cannot reach them (ADR 0006). The agent asks through the
- * console's tool and the operator approves.
+ * console's tool and the console pushes it.
  */
-export const OPEN_PR_RULE = `Pull requests. Never push a branch and never open a pull request with a Git host CLI: your commands run in a sandbox that has neither the operator's git keys nor the Git host sign-ins. Commit the work on its branch. When the operator asks for a pull request, call the ${OPEN_PULL_REQUEST_TOOL} tool with a title and a description. The operator approves it first, then the console pushes the branch and opens the pull request, and the tool answers with its link. A Fix opens its own pull request. If that tool is not in your tool list, say so: the operator opens the pull request, or pushes by hand.`;
+export const OPEN_PR_RULE = `Pull requests. Never push a branch and never open a pull request with a Git host CLI: your commands run in a sandbox that has neither the operator's git keys nor the Git host sign-ins. Commit the work on its branch. When the operator asks for a pull request, call the ${OPEN_PULL_REQUEST_TOOL} tool with a title and a description. The console pushes the branch with the operator's git access, rebasing it onto origin first if the branch moved there, and opens the pull request at once with no Approval. The tool answers with its link. For a branch that already has a pull request, it pushes the new commits and answers with that pull request's link. A Fix opens its own pull request. If that tool is not in your tool list, say so: the operator opens the pull request, or pushes by hand.`;
+
+/**
+ * The integration CLIs in a run. `pup`, `gh`, `glab`, `bkt` and `slashdocs` keep their sign-in in the macOS Keychain or
+ * the operator's config, which the Run sandbox hides (ADR 0006). The console's `run_integration` tool runs them in the
+ * daemon, outside the sandbox: reads at once, writes after the operator's Approval, and never sign-in or a merge.
+ */
+export const INTEGRATIONS_RULE = `Integrations. The pup, gh, glab, bkt and slashdocs CLIs cannot sign in inside your sandbox: it has no Keychain and you hold no keys. Never run pup auth login, never look for tokens, never ask the operator for keys. Run these CLIs with the ${RUN_INTEGRATION_TOOL} tool: cli, then args with the command words first and one argument per entry (cli pup, args logs, search, --query, status:error). A read runs at once. A write (a comment, a create, an update, a mute) asks the operator first. Sign-in, tokens, extensions, aliases and merges are refused, and the tool will not read a file outside your folders. Datadog also has the tools of the datadog-pup MCP Server (mcp__datadog-pup__*). When neither is in your tool list, say so and stop.`;
 
 /**
  * Where the agent puts a file for the operator. The sandbox blocks `open` and any write outside its folders, so the
@@ -41,7 +48,7 @@ export function systemAppend(
   rules: string | null,
   outputFolder: string | null = null,
 ): string {
-  const parts = [instructions ?? '', PR_DESCRIPTION_RULE, OPEN_PR_RULE, COMMIT_HOOKS_RULE];
+  const parts = [instructions ?? '', PR_DESCRIPTION_RULE, OPEN_PR_RULE, INTEGRATIONS_RULE, COMMIT_HOOKS_RULE];
   if (outputFolder !== null) parts.push(outputFilesRule(outputFolder));
   if (rules?.trim()) parts.push(`The operator's rules for this work:\n${rules.trim()}`);
   parts.push(SAFETY_LINES);

@@ -61,6 +61,7 @@ import { Attachments } from './attachments';
 import { ConnectionLookup } from './connection-lookup';
 import { editRoots, outsideEditRoots } from './edit-scope';
 import { HOOK_BYPASS_REASON, skipsCommitHooks } from './hook-bypass';
+import { classifyCli, type IntegrationInput, integrationInputSchema, outsideFile, runCli } from './integration-cli';
 import { MessageInterceptors } from './message-interceptors';
 import { OutputFiles, saveFileInputSchema } from './output-files';
 import { blockParts, contentSchema, EDIT_TOOLS, questionInputSchema, stepText, toMessages } from './parts';
@@ -75,6 +76,7 @@ import {
   openPullRequestInputSchema,
   type PullRequestOpener,
   type RepoJoiner,
+  RUN_INTEGRATION_TOOL,
   SAVE_FILE_TOOL,
 } from './pull-request-tool';
 import { gitControl, runSandbox } from './run-sandbox';
@@ -274,7 +276,7 @@ type RunResult =
 /** What Play and Retry say to the agent. */
 const PLAY_TEXT = 'Carry on from where you stopped.';
 const JOINED_TEXT =
-  "You are now in the Repo, in its own folder. Carry on with what the operator asked. Do the work on a new branch, not on the default branch: make one with git switch -c, commit the change (the repo's commit hooks run and must pass), and when the work is done call the open_pull_request tool. The operator approves it, then the console pushes the branch and opens the pull request. If that tool is not in your tool list, the Repo has no Git host the console can open on: say so, and leave the commit on its branch.";
+  "You are now in the Repo, in its own folder. Carry on with what the operator asked. Do the work on a new branch, not on the default branch: make one with git switch -c, commit the change (the repo's commit hooks run and must pass), and when the work is done call the open_pull_request tool. The console pushes the branch and opens the pull request at once, with no Approval. If that tool is not in your tool list, the Repo has no Git host the console can open on: say so, and leave the commit on its branch.";
 const RETRY_TEXT = 'Your last run ended before it finished. Try again and carry on from where it stopped.';
 
 /** How a run that ended with `result` reads in the tray. */
@@ -880,14 +882,23 @@ export class AgentRuntime implements OnModuleDestroy {
       },
       includePartialMessages: true,
       abortController: run.abort,
-      // The console's own tools: the agent asks, the operator approves, the daemon pushes and opens the pull request.
+      // The console's own tools: the agent asks, the daemon pushes and opens the pull request as the operator.
       ...(() => {
         const opener = this.opener?.offers(run.sessionId, run.workingDir) ? this.opener : null;
         // Only a run the operator started: a Playbook step or a Verification in an Anonymous Session stays where it is.
         const joiner = run.onFinish === null && this.joiner?.offers(run.sessionId) ? this.joiner : null;
         const saver = outputFolder === null ? null : this.outputs;
-        return opener || joiner || saver
-          ? { mcpServers: { [CONSOLE_TOOLS_SERVER]: consoleToolsServer({ opener, joiner, saver }, run.sessionId) } }
+        // The integration CLIs run in the daemon, outside the sandbox, in the Session's output folder.
+        const integrations =
+          outputFolder === null
+            ? null
+            : { run: (input: IntegrationInput) => runCli(input.cli, input.args, outputFolder) };
+        return opener || joiner || saver || integrations
+          ? {
+              mcpServers: {
+                [CONSOLE_TOOLS_SERVER]: consoleToolsServer({ opener, joiner, saver, integrations }, run.sessionId),
+              },
+            }
           : {};
       })(),
       disallowedTools: [
@@ -1290,9 +1301,10 @@ export class AgentRuntime implements OnModuleDestroy {
           },
         };
       }
-      if (input.tool_name === OPEN_PULL_REQUEST_TOOL) return this.approvePullRequest(run, toolInput, input.tool_use_id);
+      if (input.tool_name === OPEN_PULL_REQUEST_TOOL) return this.checkPullRequest(run, toolInput, input.tool_use_id);
       if (input.tool_name === JOIN_REPO_TOOL) return this.approveJoinRepo(run, toolInput, input.tool_use_id);
       if (input.tool_name === SAVE_FILE_TOOL) return this.approveSaveFile(run, toolInput, input.tool_use_id);
+      if (input.tool_name === RUN_INTEGRATION_TOOL) return this.approveIntegration(run, toolInput, input.tool_use_id);
       if (input.tool_name === 'Bash' && typeof toolInput.command === 'string' && skipsCommitHooks(toolInput.command)) {
         this.steps.finish(input.tool_use_id, { ok: false, error: HOOK_BYPASS_REASON });
         return {
@@ -1412,10 +1424,10 @@ export class AgentRuntime implements OnModuleDestroy {
   }
 
   /**
-   * Opening a pull request asks in every Access mode, `full` included: the operator reads what will be pushed and where,
-   * and the daemon pushes and opens only after a yes. A call that cannot open anything is refused before it asks.
+   * Opening a pull request needs no Approval in any Access mode: the daemon pushes and opens at once. A call that
+   * cannot open anything is refused, and the agent is told why.
    */
-  private async approvePullRequest(
+  private async checkPullRequest(
     run: Run,
     toolInput: Record<string, unknown>,
     stepId: string,
@@ -1432,26 +1444,16 @@ export class AgentRuntime implements OnModuleDestroy {
     };
     const parsed = openPullRequestInputSchema.safeParse(toolInput);
     if (!this.opener || !parsed.success) return refuse('Give the pull request a title and a description.');
-    let summary: string;
     try {
-      summary = await this.opener.describe(run.sessionId, parsed.data);
+      await this.opener.describe(run.sessionId, parsed.data);
     } catch (error) {
       return refuse(error instanceof ApiError ? error.message : 'No pull request can open here.');
     }
-    const decision = await this.ask(
-      run,
-      { actionLogId: null, sessionId: run.sessionId, kind: ApprovalKind.Command, summary, isProd: false },
-      stepId,
-    );
-    const approved = decision === ApprovalStatus.Approved;
-    if (!approved) this.steps.finish(stepId, { ok: false, error: 'denied by the operator' });
     return {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
-        permissionDecision: approved ? 'allow' : 'deny',
-        permissionDecisionReason: approved
-          ? 'The operator approved this pull request.'
-          : 'The operator denied this pull request. Do not retry it.',
+        permissionDecision: 'allow',
+        permissionDecisionReason: 'The console pushes the branch and opens the pull request without asking.',
       },
     };
   }
@@ -1502,6 +1504,81 @@ export class AgentRuntime implements OnModuleDestroy {
    * Saving an output file outside the run's folders asks in every Access mode: the daemon, outside the sandbox, writes
    * where the operator says. A call with no such file or no such folder is refused before it asks.
    */
+  /**
+   * `run_integration`: the daemon runs an integration CLI outside the Run sandbox (ADR 0006). The command is classified
+   * by its words first. A read runs at once. A write asks in every Access mode, `full` included, and only a chat run
+   * may write: a Verification or a review reads. Sign-in, tokens, merges and anything not on the lists are refused.
+   */
+  private async approveIntegration(
+    run: Run,
+    toolInput: Record<string, unknown>,
+    stepId: string,
+  ): Promise<HookJSONOutput> {
+    const refuse = (reason: string): HookJSONOutput => {
+      this.steps.finish(stepId, { ok: false, error: reason });
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: reason,
+        },
+      };
+    };
+    const parsed = integrationInputSchema.safeParse(toolInput);
+    if (!parsed.success)
+      return refuse('Give cli (pup, gh, glab, bkt or slashdocs) and args: command words first, one per entry.');
+    const { cli, args } = parsed.data;
+    const verdict = classifyCli(cli, args);
+    if (verdict.kind === 'deny') return refuse(verdict.reason);
+    const outputFolder = this.outputs.ensure(run.sessionId);
+    const file = outsideFile(args, [...run.editRoots, run.workingDir, outputFolder], outputFolder);
+    if (file)
+      return refuse(`${file} is a file outside your folders: the CLI runs outside the sandbox and may not read it.`);
+    if (verdict.kind === 'write' && run.purpose !== RunPurpose.Chat) {
+      return refuse(`This run reads only: ${cli} ${args.slice(0, 2).join(' ')} changes something.`);
+    }
+    const command = redact(`${cli} ${args.map((arg) => (/[\s"']/.test(arg) ? JSON.stringify(arg) : arg)).join(' ')}`);
+    const row = this.actionLog.start({
+      sessionId: run.sessionId,
+      kind: ActionKind.Shell,
+      target: cli,
+      command: `outside the sandbox: ${command}`,
+      isProd: false,
+    });
+    run.toolRows.set(stepId, row);
+    if (verdict.kind === 'read') {
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'allow',
+          permissionDecisionReason: 'A read: the console runs it outside the sandbox.',
+        },
+      };
+    }
+    const decision = await this.ask(
+      run,
+      {
+        actionLogId: row,
+        sessionId: run.sessionId,
+        kind: ApprovalKind.Command,
+        summary: `Run outside the sandbox, as you: ${command}`,
+        isProd: false,
+      },
+      stepId,
+    );
+    const approved = decision === ApprovalStatus.Approved;
+    if (!approved) this.steps.finish(stepId, { ok: false, error: 'denied by the operator' });
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: approved ? 'allow' : 'deny',
+        permissionDecisionReason: approved
+          ? 'The operator approved this command.'
+          : 'The operator denied this command. Do not retry it, by this tool or by a shell command.',
+      },
+    };
+  }
+
   private async approveSaveFile(run: Run, toolInput: Record<string, unknown>, stepId: string): Promise<HookJSONOutput> {
     const refuse = (reason: string): HookJSONOutput => {
       this.steps.finish(stepId, { ok: false, error: reason });

@@ -289,7 +289,7 @@ The patterns come from Wikipedia's "Signs of AI writing", maintained by WikiProj
 
 Write the description for a reviewer who has not seen this work. Skip preambles and keep prose brief. Use the repo's own pull request template when it has one (\`.github/pull_request_template.md\` or similar) and fill each of its sections to the same depth; this template then fills the gaps. Use the vocabulary of the repo's glossary or docs when it has one.
 
-The description is text. Writing it never pushes or opens anything: the operator approves the pull request and the console opens it. When the operator asks for one, give the finished title and description to the \`open_pull_request\` tool.
+The description is text. Writing it never pushes or opens anything: the console pushes the branch and opens the pull request when the \`open_pull_request\` tool runs, with no Approval. When the operator asks for one, give the finished title and description to the \`open_pull_request\` tool.
 
 \`\`\`markdown
 ## Summary
@@ -512,7 +512,7 @@ One change per run, built from its spec to a committed branch and a pull request
 ## Limits that hold for the whole run
 
 - Commit on a branch, never on the default branch.
-- Never push, never open a pull request with a Git host CLI, never merge. The operator approves, then the console pushes and opens it. When the operator asks for the pull request, call the \`open_pull_request\` tool with a title and a description.
+- Never push, never open a pull request with a Git host CLI, never merge. The console pushes and opens it for you through the tool, with no Approval. When the operator asks for the pull request, call the \`open_pull_request\` tool with a title and a description.
 - Never skip the repo's commit hooks: no \`--no-verify\`, no \`-n\`, no \`HUSKY=0\`, \`SKIP=\` or \`LEFTHOOK=0\`, and never edit or move a hook to get past it. When a hook fails, read its output, fix the cause and commit again.
 - Name any step you skipped and why. Report from \`git diff --stat\`, not from memory of what you meant to do.
 
@@ -527,7 +527,7 @@ When another skill in your list does a step (\`tdd\`, \`humanizer\`, \`code-revi
 5. **Prose.** Every changed or new Markdown file, and every title, goes through the \`humanizer\` skill, or through a read-aloud pass for AI tells if it is not in your list. Done when each file has had the pass.
 6. **Review.** Run the \`code-review\` skill against the default branch with the spec as the spec, or do the two passes yourself: standards, then spec. Fix what the user accepts in one pass. Done when both axes are clean or the user waived what is left.
 7. **Commit.** Set the spec's status to \`shipped\` when it has one. Write the message with the \`commit-message\` skill, or by the repo's log convention, and commit. Done when \`git status --short\` lists none of this change's files.
-8. **Pull request.** Write the body with the \`pr\` skill, or with this skeleton: Summary, Evidence (before and after, from steps 3 and 4), Merge Danger (below). When the risk is **high**, show the user the gaps and wait for a go. Then call \`open_pull_request\` with the title and description: the operator approves it before anything is pushed. If that tool is not in your tool list, say so and leave the commit on its branch. Stop there: the user reviews and merges. Never merge.
+8. **Pull request.** Write the body with the \`pr\` skill, or with this skeleton: Summary, Evidence (before and after, from steps 3 and 4), Merge Danger (below). When the risk is **high**, show the user the gaps and wait for a go. Then call \`open_pull_request\` with the title and description: the console pushes and opens it at once. If that tool is not in your tool list, say so and leave the commit on its branch. Stop there: the user reviews and merges. Never merge.
 9. **Retro.** Offer the \`retro\` skill on this session. Done when each friction has a fix landed or proposed.
 
 ## Merge Danger

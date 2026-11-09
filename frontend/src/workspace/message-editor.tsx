@@ -1,4 +1,4 @@
-import { FILE_TOKEN, fileToken } from '@ops-console/shared';
+import { FILE_TOKEN, fileToken, PASTE_AS_FILE_LIMIT, PASTED_TEXT_NAME } from '@ops-console/shared';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react';
 import { size } from '../components/ui/attachment-viewer';
 import { type FileItem, filesIn } from './attachments';
@@ -18,6 +18,8 @@ type Props = {
   /** The file under each chip's name; a token with no file shows as the text it is. */
   find: (name: string) => FileItem | undefined;
   onOpen: (name: string) => void;
+  /** The pencil on a pasted text card. */
+  onEdit?: (name: string) => void;
   onPasteFiles: (files: File[]) => void;
   onSubmit: () => void;
   /** Sees each key first; true means it was handled (the skill menu's arrows and Enter) and the editor leaves it. */
@@ -31,7 +33,7 @@ const CHIP = 'data-file';
  * plain text, each chip written as `[📎 <name>]`. Enter sends, Shift+Enter adds a line, pasted text comes in plain.
  */
 export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function MessageEditor(
-  { label, value, placeholder, onChange, find, onOpen, onPasteFiles, onSubmit, onKey },
+  { label, value, placeholder, onChange, find, onOpen, onEdit, onPasteFiles, onSubmit, onKey },
   handle,
 ) {
   const root = useRef<HTMLDivElement>(null);
@@ -150,8 +152,18 @@ export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function Mes
           event.preventDefault();
           const files = filesIn(event.clipboardData);
           // A pasted screenshot or copied file attaches; pasted text comes in as plain text.
-          if (files.length > 0) onPasteFiles(files);
-          else document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
+          if (files.length > 0) {
+            onPasteFiles(files);
+            return;
+          }
+          const text = event.clipboardData.getData('text/plain');
+          // Text too long to draw in the box attaches as a file the operator can still open and read.
+          if (text.length > PASTE_AS_FILE_LIMIT) {
+            onPasteFiles([new File([text], 'pasted-text.txt', { type: 'text/plain' })]);
+            return;
+          }
+          document.execCommand('insertText', false, text);
+          revealCaret(event.currentTarget);
         }}
         onKeyDown={(event) => {
           if (onKey?.(event.nativeEvent)) {
@@ -172,6 +184,10 @@ export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function Mes
             if (space?.nodeType === Node.TEXT_NODE && space.textContent === ' ') space.remove();
             at.remove();
             emit();
+            return;
+          }
+          if (target.closest('[data-edit]')) {
+            onEdit?.(at.getAttribute(CHIP) ?? '');
             return;
           }
           onOpen(at.getAttribute(CHIP) ?? '');
@@ -228,8 +244,9 @@ function chip(name: string, item: FileItem | undefined): HTMLElement {
   const element = document.createElement('span');
   element.setAttribute(CHIP, name);
   element.contentEditable = 'false';
-  element.className =
-    'mx-0.5 inline-flex max-w-72 cursor-pointer items-center gap-1.5 rounded-md border py-0.5 pr-0.5 pl-1 align-middle font-mono text-xs leading-5 select-none hover:border-accent-300';
+  element.className = PASTED_TEXT_NAME.test(name)
+    ? 'group relative mr-2 mb-1 inline-flex h-32 w-44 cursor-pointer flex-col justify-between rounded-xl border p-2.5 align-top font-sans text-xs select-none hover:border-accent-300'
+    : 'mx-0.5 inline-flex max-w-72 cursor-pointer items-center gap-1.5 rounded-md border py-0.5 pr-0.5 pl-1 align-middle font-mono text-xs leading-5 select-none hover:border-accent-300';
   paint(element, item);
   return element;
 }
@@ -238,7 +255,7 @@ function chip(name: string, item: FileItem | undefined): HTMLElement {
 function paint(element: HTMLElement, item: FileItem | undefined) {
   const name = element.getAttribute(CHIP) ?? '';
   const state = !item ? 'gone' : item.error ? 'failed' : item.saved ? size(item.saved.size) : 'uploading…';
-  const key = `${state}|${item?.preview ?? ''}`;
+  const key = `${state}|${item?.preview ?? ''}|${item?.snippet ?? ''}`;
   if (element.dataset.painted === key) return;
   element.dataset.painted = key;
   element.title = item?.error ?? (item ? `Open ${name}` : `${name} is no longer attached`);
@@ -247,6 +264,50 @@ function paint(element: HTMLElement, item: FileItem | undefined) {
   element.classList.toggle('text-accent-700', state === 'failed');
   element.classList.toggle('border-line', state !== 'failed');
   element.classList.toggle('bg-bg', true);
+  const card = PASTED_TEXT_NAME.test(name);
+  const remove = Object.assign(document.createElement('span'), {
+    className: card
+      ? 'absolute -top-2 -right-2 flex size-6 items-center justify-center rounded-full border border-line bg-card text-sm leading-none text-neutral-700 shadow-sm hover:bg-neutral-200 hover:text-text'
+      : 'flex size-4.5 flex-none items-center justify-center rounded-sm text-neutral-700 hover:bg-neutral-200 hover:text-text',
+    textContent: '×',
+    title: card ? `Clear ${name}` : `Remove ${name}`,
+  });
+  remove.setAttribute('data-remove', '');
+  remove.setAttribute('role', 'button');
+  remove.setAttribute('aria-label', `Remove ${name}`);
+  const note = Object.assign(document.createElement('span'), {
+    className: 'flex-none text-[11px] text-neutral-700',
+    textContent: state,
+  });
+  if (card) {
+    // Pasted text shows as a card: its first lines, a PASTED badge and the size.
+    const lines = Object.assign(document.createElement('span'), {
+      className: 'line-clamp-5 font-mono text-[11px] leading-4 break-all text-neutral-700',
+      textContent: item?.snippet || name,
+    });
+    const badge = Object.assign(document.createElement('span'), {
+      className:
+        'rounded-md border border-line px-1.5 py-0.5 font-sans text-[10px] font-medium tracking-wide text-neutral-700 uppercase',
+      textContent: 'Pasted',
+    });
+    const foot = Object.assign(document.createElement('span'), {
+      className: 'flex items-center justify-between gap-2',
+    });
+    const edit = Object.assign(document.createElement('span'), {
+      className:
+        'flex size-7 flex-none items-center justify-center rounded-md border border-line bg-card text-neutral-700 hover:border-accent-300 hover:text-text',
+      title: `Edit ${name}`,
+    });
+    edit.setAttribute('data-edit', '');
+    edit.setAttribute('role', 'button');
+    edit.setAttribute('aria-label', `Edit ${name}`);
+    edit.append(pencil());
+    const tools = Object.assign(document.createElement('span'), { className: 'flex items-center gap-1.5' });
+    tools.append(note, edit);
+    foot.append(badge, tools);
+    element.replaceChildren(lines, foot, remove);
+    return;
+  }
   const thumb = item?.preview
     ? Object.assign(document.createElement('img'), {
         src: item.preview,
@@ -255,20 +316,23 @@ function paint(element: HTMLElement, item: FileItem | undefined) {
       })
     : clip();
   const label = Object.assign(document.createElement('span'), { className: 'min-w-0 truncate', textContent: name });
-  const note = Object.assign(document.createElement('span'), {
-    className: 'flex-none text-[11px] text-neutral-700',
-    textContent: state,
-  });
-  const remove = Object.assign(document.createElement('span'), {
-    className:
-      'flex size-4.5 flex-none items-center justify-center rounded-sm text-neutral-700 hover:bg-neutral-200 hover:text-text',
-    textContent: '×',
-    title: `Remove ${name}`,
-  });
-  remove.setAttribute('data-remove', '');
-  remove.setAttribute('role', 'button');
-  remove.setAttribute('aria-label', `Remove ${name}`);
   element.replaceChildren(thumb, label, note, remove);
+}
+
+function pencil(): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', '13');
+  svg.setAttribute('height', '13');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M11 2.5 13.5 5 5.5 13 2.5 13.5 3 10.5 11 2.5Z');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', '1.4');
+  path.setAttribute('stroke-linejoin', 'round');
+  svg.append(path);
+  return svg;
 }
 
 function clip(): SVGSVGElement {
@@ -289,6 +353,24 @@ function clip(): SVGSVGElement {
   path.setAttribute('stroke-linecap', 'round');
   svg.append(path);
   return svg;
+}
+
+/** Scrolls the box so the cursor, which a paste leaves after the pasted text, is in view. */
+function revealCaret(node: HTMLElement) {
+  const selection = document.getSelection();
+  if (!selection || selection.rangeCount === 0) return;
+  const caret = selection.getRangeAt(0).cloneRange();
+  caret.collapse(false);
+  // The cursor at the very end: the last line, whatever the browser's own scroll did.
+  if (caret.compareBoundaryPoints(Range.END_TO_END, endOf(node)) >= 0) {
+    node.scrollTop = node.scrollHeight;
+  } else {
+    const at = caret.getClientRects()[0];
+    const box = node.getBoundingClientRect();
+    if (at && at.bottom > box.bottom) node.scrollTop += at.bottom - box.bottom + 8;
+    else if (at && at.top < box.top) node.scrollTop -= box.top - at.top + 8;
+  }
+  node.scrollIntoView({ block: 'nearest' });
 }
 
 function endOf(node: HTMLElement): Range {

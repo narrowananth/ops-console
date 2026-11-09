@@ -279,3 +279,23 @@ test("changing the scope of a terminal that has a Session works while the tray h
   await expect.poll(() => patched).toEqual({ connection_ids: ['c1'] });
   await expect(page.getByText('is not a function')).toBeHidden();
 });
+
+test('a paste into the terminal prompt keeps its first 10,000 characters and warns under the terminal', async ({
+  page,
+}) => {
+  await mock(page, []);
+  await page.goto(`${daemon.url}/devtools#token=${daemon.token}`);
+  const prompt = page.getByRole('textbox', { name: 'Ask the agent' });
+  await expect(prompt).toBeEnabled();
+  await expect(page.getByRole('status')).toHaveCount(0);
+
+  await prompt.evaluate((element) => {
+    element.focus();
+    const data = new DataTransfer();
+    data.setData('text/plain', 'y'.repeat(12000));
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  await expect(prompt).toHaveValue('y'.repeat(10000));
+  await expect(page.getByRole('status')).toContainText('Only 10,000 characters are allowed at once');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});

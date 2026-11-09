@@ -25,7 +25,7 @@ import { ApiError, validationFailed } from '../common/errors';
 import { ConnectorsService } from '../connectors/connectors.service';
 import { repos } from '../db/schema';
 import { STORE, type Store } from '../db/store';
-import { BranchMoved, GIT, Git, GitFailed } from '../repos/git';
+import { BranchMoved, GIT, Git, GitFailed, RebaseConflict } from '../repos/git';
 import { GIT_HOSTS, type GitHosts } from './git-host';
 import { PullRequestsService } from './pull-requests.service';
 
@@ -137,7 +137,7 @@ Change nothing: no commit, no push, no pull request. The console pushes and open
     return `Push ${branch} and open a pull request into ${base} on ${repo.host}: "${input.title}"`;
   }
 
-  /** The agent's request, after the operator approved it. */
+  /** The agent's request. It runs with no Approval: the daemon pushes with the operator's own git access, never forced. */
   async open(sessionId: string, input: OpenPullRequestInput): Promise<Published> {
     const { branch, base } = await this.resolve(sessionId, input);
     return this.openBranch(sessionId, branch, {
@@ -219,8 +219,20 @@ Change nothing: no commit, no push, no pull request. The console pushes and open
       `git push origin ${input.branch}`,
       async () => {
         try {
-          await this.git.pushHead(input.dir, input.branch, `refs/heads/${input.branch}`);
+          // A branch checked out in `dir` that moved on origin is rebased onto the new tip and pushed again, never forced.
+          if ((await this.git.currentBranch(input.dir)) === input.branch) {
+            await this.git.pushHeadRebasing(input.dir, input.branch);
+          } else {
+            await this.git.pushHead(input.dir, input.branch, `refs/heads/${input.branch}`);
+          }
         } catch (error) {
+          if (error instanceof RebaseConflict) {
+            throw new ApiError(
+              409,
+              ErrorCode.BranchMoved,
+              `Conflict: ${input.branch} moved on origin and rebasing onto it conflicts. The rebase was aborted and nothing was pushed. Resolve the conflict by hand, then open the pull request again.`,
+            );
+          }
           if (error instanceof BranchMoved) {
             throw new ApiError(409, ErrorCode.BranchMoved, 'Branch moved on origin: nothing was pushed');
           }

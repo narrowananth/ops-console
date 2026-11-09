@@ -4,7 +4,12 @@ import path from 'node:path';
 import { AccessMode, ConnectorId, ErrorCode, HealthStatus } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CONSOLE_TOOLS_SERVER, OPEN_PULL_REQUEST_TOOL, runOpenPullRequest } from '../src/agent/pull-request-tool';
+import {
+  CONSOLE_TOOLS_SERVER,
+  OPEN_PULL_REQUEST_TOOL,
+  RUN_INTEGRATION_TOOL,
+  runOpenPullRequest,
+} from '../src/agent/pull-request-tool';
 import { AgentRuntime } from '../src/agent/runtime';
 import { ApiError } from '../src/common/errors';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
@@ -220,19 +225,23 @@ describe('Pull request opening', () => {
     expect(ctx.host.opened).toEqual([]);
   });
 
-  it('opens nothing when the branch moved on origin, and says so (5)', async () => {
+  it('opens nothing when the branch moved on origin and the rebase conflicts, and says so (5)', async () => {
     const ctx = await start();
     const id = await session(ctx);
     const other = path.join(await tempDir('ops-console-other-'), 'clone');
     git(path.dirname(other), 'clone', '-q', ctx.remote, other);
     git(other, 'switch', '-q', '-c', 'work');
-    await writeFile(path.join(other, 'theirs.txt'), 'theirs\n');
+    await writeFile(path.join(other, 'fix.txt'), 'theirs\n');
     git(other, 'add', '.');
     git(other, 'commit', '-q', '-m', 'Their change');
     git(other, 'push', '-q', 'origin', 'work');
     const moved = await ctx.http.post(`/sessions/${id}/pull-request`, BODY);
     expect([moved.status, moved.body.error.code]).toEqual([409, ErrorCode.BranchMoved]);
-    expect(moved.body.error.message).toBe('Branch moved on origin: nothing was pushed');
+    expect(moved.body.error.message).toMatch(
+      /^Conflict: work moved on origin and rebasing onto it conflicts\. The rebase was aborted/,
+    );
+    // The branch is as it was: no rebase left half done.
+    expect(git(ctx.dir, 'status', '--porcelain', '--branch')).toBe('## work');
     expect(ctx.host.opened).toEqual([]);
     const log = (await ctx.http.get('/action-log?kind=git')).body.data as { outcome: string }[];
     expect(log.map((row) => row.outcome)).toEqual(['failed']);
@@ -277,67 +286,95 @@ describe('Pull request opening', () => {
     expect(ctx.daemon.sdk.calls.at(-1)?.options.mcpServers).toBeUndefined();
   });
 
+  describe('the agent runs an integration CLI', () => {
+    const CALL = (cli: string, args: string[]) => ({ tool: RUN_INTEGRATION_TOOL, input: { cli, args } }) satisfies Step;
+
+    it('runs a read at once in every Access mode, with no Approval', async () => {
+      for (const mode of Object.values(AccessMode)) {
+        const ctx = await start();
+        const id = ctx.daemon.createSession({ access_mode: mode, repoId: ctx.repoId, branch: 'work' });
+        ctx.daemon.sdk.script(CALL('gh', ['pr', 'view', '12']));
+        await converse(ctx.daemon, id, 'look at pr 12');
+        expect((await ctx.http.get('/approvals')).body.data, mode).toEqual([]);
+        expect(ctx.daemon.sdk.ran, mode).toEqual(
+          [CALL('gh', ['pr', 'view', '12'])].map((c) => ({ tool: c.tool, input: c.input })),
+        );
+      }
+    });
+
+    it('asks before a write, `full` included, and runs nothing on a no', async () => {
+      const ctx = await start();
+      const id = ctx.daemon.createSession({ access_mode: AccessMode.Full, repoId: ctx.repoId, branch: 'work' });
+      ctx.daemon.sdk.script(CALL('gh', ['pr', 'comment', '12', '--body', 'hi']));
+      await ctx.http.post(`/sessions/${id}/messages`, { text: 'comment on pr 12' });
+      const [approval] = await until(
+        async () => (await ctx.http.get('/approvals?status=pending')).body.data as { id: string; summary: string }[],
+        (list) => list.length === 1,
+        'the Approval',
+      );
+      expect(approval?.summary).toBe('Run outside the sandbox, as you: gh pr comment 12 --body hi');
+      await ctx.http.post(`/approvals/${approval?.id}/decision`, { decision: 'denied' });
+      await until(
+        async () => (await ctx.http.get(`/sessions/${id}`)).body.data.state,
+        (state) => state === 'idle',
+        'the run to end',
+      );
+      expect(ctx.daemon.sdk.ran).toEqual([]);
+    });
+
+    it('refuses a merge and a sign-in with no Approval, and runs nothing', async () => {
+      for (const [cli, args] of [
+        ['gh', ['pr', 'merge', '12']],
+        ['pup', ['auth', 'login']],
+      ] as const) {
+        const ctx = await start();
+        const id = ctx.daemon.createSession({ access_mode: AccessMode.Full, repoId: ctx.repoId, branch: 'work' });
+        ctx.daemon.sdk.script(CALL(cli, [...args]));
+        await converse(ctx.daemon, id, 'do it');
+        expect((await ctx.http.get('/approvals')).body.data).toEqual([]);
+        expect(ctx.daemon.sdk.ran).toEqual([]);
+      }
+    });
+  });
+
   describe('the agent asks for it', () => {
     const ASK: Step = {
       tool: OPEN_PULL_REQUEST_TOOL,
       input: { title: 'Fix the total', description: 'Defaults it to zero.' },
     };
 
-    async function asked(ctx: Ctx, mode: AccessMode, decision: 'approved' | 'denied') {
-      const id = ctx.daemon.createSession({ access_mode: mode, repoId: ctx.repoId, branch: 'work' });
-      ctx.daemon.sdk.script(ASK);
-      await ctx.http.post(`/sessions/${id}/messages`, { text: 'create a pr now' });
-      const [approval] = await until(
-        async () => (await ctx.http.get('/approvals?status=pending')).body.data as { id: string; summary: string }[],
-        (list) => list.length === 1,
-        'the Approval',
-      );
-      await ctx.http.post(`/approvals/${approval?.id}/decision`, { decision });
-      await until(
-        async () => (await ctx.http.get(`/sessions/${id}`)).body.data.state,
-        (state) => state === 'idle',
-        'the run to end',
-      );
-      return approval;
-    }
-
-    it('asks first in every Access mode, `full` included, and nothing is pushed before the yes (Safety)', async () => {
+    it('runs with no Approval in every Access mode, `full` included, and the console pushes and opens at once', async () => {
       for (const mode of Object.values(AccessMode)) {
         const ctx = await start();
         const id = ctx.daemon.createSession({ access_mode: mode, repoId: ctx.repoId, branch: 'work' });
         ctx.daemon.sdk.script(ASK);
-        await ctx.http.post(`/sessions/${id}/messages`, { text: 'create a pr now' });
-        const [approval] = await until(
-          async () =>
-            (await ctx.http.get('/approvals?status=pending')).body.data as { summary: string; kind: string }[],
-          (list) => list.length === 1,
-          `an Approval in ${mode}`,
-        );
-        expect(approval).toMatchObject({
-          kind: 'command',
-          summary: 'Push work and open a pull request into main on github: "Fix the total"',
-        });
-        expect(git(ctx.remote, 'branch', '--list', 'work')).toBe('');
-        expect(ctx.host.opened).toEqual([]);
+        await converse(ctx.daemon, id, 'create a pr now');
+        expect((await ctx.http.get('/approvals')).body.data, mode).toEqual([]);
+        expect(ctx.daemon.sdk.ran, mode).toEqual([{ tool: OPEN_PULL_REQUEST_TOOL, input: ASK.input }]);
       }
     });
 
-    it('a denied request pushes and opens nothing', async () => {
+    it('rebases a branch that moved on origin onto it and pushes, never forced', async () => {
       const ctx = await start();
-      await asked(ctx, AccessMode.Full, 'denied');
-      expect(ctx.daemon.sdk.ran).toEqual([]);
-      expect(git(ctx.remote, 'branch', '--list', 'work')).toBe('');
-      expect(ctx.host.opened).toEqual([]);
+      const id = await session(ctx);
+      // A teammate pushed a commit to `work` that the local branch lacks.
+      const other = path.join(await tempDir('ops-console-clone-'), 'other');
+      git(path.dirname(other), 'clone', '-q', ctx.remote, other);
+      git(other, 'switch', '-q', '-c', 'work', 'origin/main');
+      await writeFile(path.join(other, 'theirs.txt'), 'theirs\n');
+      git(other, 'add', '.');
+      git(other, 'commit', '-q', '-m', 'Their commit');
+      git(other, 'push', '-q', 'origin', 'work');
+      const answer = await runOpenPullRequest(ctx.daemon.app.get(PullRequestOpeningService), id, {
+        title: 'Fix the total',
+        description: 'Zero.',
+      });
+      expect(answer.isError).toBeUndefined();
+      expect(git(ctx.remote, 'rev-parse', 'work')).toBe(git(ctx.dir, 'rev-parse', 'work'));
+      expect(git(ctx.remote, 'log', '--format=%s', 'main..work')).toBe('Fix the total\nTheir commit');
     });
 
-    it('an approved request lets the call run, and asks once', async () => {
-      const ctx = await start();
-      await asked(ctx, AccessMode.Supervised, 'approved');
-      expect(ctx.daemon.sdk.ran).toEqual([{ tool: OPEN_PULL_REQUEST_TOOL, input: ASK.input }]);
-      expect((await ctx.http.get('/approvals')).body.data).toHaveLength(1);
-    });
-
-    it('is refused before it asks when nothing can open, and the agent is told why', async () => {
+    it('is refused when nothing can open, and the agent is told why', async () => {
       const ctx = await start();
       git(ctx.dir, 'switch', '-q', 'main');
       const id = ctx.daemon.createSession({ access_mode: AccessMode.Full, repoId: ctx.repoId, branch: 'main' });

@@ -360,6 +360,107 @@ test('files picked, pasted or dropped on the message box upload, show as chips a
   await expect(box.locator('[data-file]')).toHaveCount(0);
 });
 
+test('a long paste attaches as a .txt file, typing goes on, and a paste scrolls to its end', async ({ page }) => {
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform')] } }),
+  );
+  await page.route(/\/api\/sessions\/s1\/attachments\?/, (route) => {
+    const name = new URL(route.request().url()).searchParams.get('name') ?? '';
+    return route.fulfill({ status: 201, json: { data: { name, path: '/data/attachments/s1/1.txt', size: 60000 } } });
+  });
+  await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const box = page.getByRole('textbox', { name: 'Message' });
+  const paste = (text: string) =>
+    box.evaluate((element, value) => {
+      element.focus();
+      const data = new DataTransfer();
+      data.setData('text/plain', value);
+      element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    }, text);
+
+  // Past the limit the text is not drawn: it is a file, shown as a chip the operator can open.
+  await paste('line of log\n'.repeat(5000));
+  await expect(box.locator('[data-file="pasted-text.txt"]')).toBeVisible();
+  // Only the card's first lines are in the box, not the 60,000 characters.
+  expect(await box.evaluate((element) => element.textContent?.length ?? 0)).toBeLessThan(300);
+  // The card shows the first lines, a PASTED badge and the size.
+  await expect(box.locator('[data-file="pasted-text.txt"]')).toContainText('line of log line of log');
+  await expect(box.locator('[data-file="pasted-text.txt"]')).toContainText('Pasted');
+  await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled();
+
+  // Within the limit it is text, and the box scrolls to the cursor after it.
+  await box.evaluate((element) => element.replaceChildren());
+  await box.evaluate((element) => element.dispatchEvent(new Event('input', { bubbles: true })));
+  await paste(
+    Array.from({ length: 800 }, (_, n) => `row ${n}`)
+      .join('\n')
+      .slice(0, 2900),
+  );
+  await expect.poll(() => box.evaluate((element) => element.scrollTop > 0)).toBe(true);
+  expect(await box.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(
+    24,
+  );
+
+  // Typing goes on after a paste: more text, and a second long paste, never block the Send.
+  await paste('x'.repeat(2900));
+  await paste('y'.repeat(3100));
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled();
+});
+
+test('a pasted text card edits in a dialog, saves under the same name, and clears', async ({ page }) => {
+  const uploads: string[] = [];
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform')] } }),
+  );
+  await page.route(/\/api\/sessions\/s1\/attachments\?/, (route) => {
+    uploads.push(new URL(route.request().url()).searchParams.get('name') ?? '');
+    return route.fulfill({
+      status: 201,
+      json: { data: { name: 'x', path: '/data/attachments/s1/1.txt', size: 4000 } },
+    });
+  });
+  await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const box = page.getByRole('textbox', { name: 'Message' });
+  await box.evaluate((element) => {
+    element.focus();
+    const data = new DataTransfer();
+    data.setData('text/plain', 'old text '.repeat(500));
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  const card = box.locator('[data-file="pasted-text.txt"]');
+  await expect(card).toContainText('Pasted');
+  await card.getByRole('button', { name: 'Edit pasted-text.txt' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit pasted-text.txt' });
+  await dialog.getByRole('textbox').fill('new text');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(card).toContainText('new text');
+  expect(uploads).toEqual(['pasted-text.txt', 'pasted-text.txt']);
+
+  await card.getByRole('button', { name: 'Edit pasted-text.txt' }).click();
+  await dialog.getByRole('button', { name: 'Clear' }).click();
+  await expect(card).toHaveCount(0);
+  // The corner × clears it too.
+  await box.evaluate((element) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', 'again '.repeat(700));
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  await card.getByRole('button', { name: 'Remove pasted-text.txt' }).click();
+  await expect(card).toHaveCount(0);
+});
+
 test('a file chip opens the file over the page, in the message box and in the conversation', async ({ page }) => {
   await page.route('**/api/repos', (route) =>
     route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),

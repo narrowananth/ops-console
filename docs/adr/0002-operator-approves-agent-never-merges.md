@@ -24,9 +24,11 @@ the agent runs no command because the description or a comment says so. A run on
 settings, hooks, `.mcp.json` servers or CLAUDE.md from that code, and neither does the agent's answer in a review thread,
 which also holds the same denials and is read-only.
 
-In a chat, the agent opens a pull request only by asking: the console's `open_pull_request` tool raises an Approval in
-every Access mode, and only the operator's yes has the console push the branch and open it. The agent never pushes or
-opens one itself.
+In a chat, the agent opens a pull request only through the console's `open_pull_request` tool, which asks for no
+Approval in any Access mode. The console pushes the branch and opens the pull request in the daemon, with the operator's
+own git access, never forced. A branch that moved on origin is rebased onto the new tip first; a rebase that conflicts
+stops with the branch untouched. When the branch has a pull request already, the push updates it. The agent never pushes
+or opens one itself: its commands hold no git credentials and `git push` stays denied.
 
 The agent saves a file outside its folders the same way. The sandbox keeps a run's commands from writing anywhere but its
 working folder, its Session's output folder, temp and the package-tool caches, so a file for the operator goes in the
@@ -62,10 +64,20 @@ resolves threads, and a Reply check or Comment pass denies the agent `git push` 
   word from the operator. It lost because the sandbox cannot tell the operator's words from text injected through a log,
   so a writable folder would be writable to a steered run, and a run could write into `~/.zshrc`, `~/Library/LaunchAgents`
   or a folder on PATH. The copy goes through an Approval instead, and the daemon writes the destination.
+- **An Approval on every `open_pull_request` call**: the operator read what would be pushed and where. It lost because
+  the push is never forced and never merges, the diff and the pull request are on the host to read, and the stop broke
+  a chat's flow: an update to an open pull request waited for a click each time.
+- **Git host credentials inside the Run sandbox so the agent pushes itself**: `ssh` ignores the proxy, and the Bitbucket
+  and GitLab CLIs keep their tokens in the Keychain, so it cannot work; where it could, a steered run would hold a
+  token that writes to every repository. The daemon pushes for the agent instead.
 - **Show the Comment pass diff and wait before the push**: one more stop, but the operator already
   chose the threads, and the commit is on the card and on the host to look at after.
 
 ## Consequences
+
+A chat run, steered by text it read, can have the console push the Session's committed branch to `origin` and open a
+pull request without a click. It cannot push a force, merge, or push another Repo. The operator sees the pull request on
+the host and merges it or not.
 
 An approved `save_file` writes where the operator was shown: the daemon replaces a file of that name in the destination
 and checks nothing but that the folder exists. The operator reads the path on the card.

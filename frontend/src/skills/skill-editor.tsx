@@ -1,9 +1,10 @@
-import { SKILL_LIMITS, type Skill } from '@ops-console/shared';
+import { EDITOR_PASTE_LIMIT, SKILL_LIMITS, type Skill } from '@ops-console/shared';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button, Spinner } from '../components/ui/button';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { Hint } from '../components/ui/tip';
+import { usePasteLimit } from '../lib/paste-limit';
 import { useDeleteSkill, useSaveSkill } from '../lib/queries';
 import { ascending } from '../lib/sort';
 import { inWords } from '../playbooks/labels';
@@ -38,6 +39,8 @@ export function SkillEditor(props: {
   const save = useSaveSkill();
   const remove = useDeleteSkill();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const descriptionPaste = usePasteLimit(EDITOR_PASTE_LIMIT, 'reject');
+  const instructionsPaste = usePasteLimit(EDITOR_PASTE_LIMIT, 'reject');
   const holders = ascending(skill.playbooks, (playbook) => playbook.name).map((playbook) => playbook.name);
 
   return (
@@ -95,9 +98,18 @@ export function SkillEditor(props: {
             aria-label="Description"
             value={working.description}
             maxLength={SKILL_LIMITS.description}
-            onChange={(event) => onChange({ ...working, description: event.target.value })}
+            onPaste={descriptionPaste.onPaste}
+            onChange={(event) => {
+              descriptionPaste.clear();
+              onChange({ ...working, description: event.target.value });
+            }}
             className={`${field} field-sizing-content max-h-[30vh] min-h-16 resize-y overflow-y-auto text-[13px] leading-relaxed`}
           />
+          {descriptionPaste.over && (
+            <p role="alert" className="m-0 mt-1 text-xs text-accent-700">
+              The limit is {EDITOR_PASTE_LIMIT.toLocaleString()} characters at once. The paste was not added.
+            </p>
+          )}
         </section>
 
         <section aria-label="Instructions">
@@ -111,9 +123,18 @@ export function SkillEditor(props: {
             aria-label="Instructions"
             value={working.instructions}
             maxLength={SKILL_LIMITS.instructions}
-            onChange={(event) => onChange({ ...working, instructions: event.target.value })}
+            onPaste={instructionsPaste.onPaste}
+            onChange={(event) => {
+              instructionsPaste.clear();
+              onChange({ ...working, instructions: event.target.value });
+            }}
             className={`${field} field-sizing-content max-h-[50vh] min-h-48 resize-y overflow-y-auto font-mono text-xs leading-relaxed`}
           />
+          {instructionsPaste.over && (
+            <p role="alert" className="m-0 mt-1 text-xs text-accent-700">
+              The limit is {EDITOR_PASTE_LIMIT.toLocaleString()} characters at once. The paste was not added.
+            </p>
+          )}
         </section>
 
         <section aria-label="Used by">
