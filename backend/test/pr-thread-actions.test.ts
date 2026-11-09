@@ -665,6 +665,50 @@ describe('Address comments', () => {
     expect(thread(ctx, 'c3')?.resolved).toBe(false);
   });
 
+  it('sends an unreadable closing answer back to the agent, and finishes with the repaired one', async () => {
+    const ctx = await start();
+    script(
+      ctx,
+      stepTurns(PlaybookTrigger.AddressComments, {
+        [IMPLEMENT]: [stepAnswer('nothing', 'skipped')],
+        [TESTS]: [stepAnswer('-', 'skipped')],
+      }),
+    );
+    // The first answer uses a word the console does not know; the second names the right one.
+    ctx.daemon.sdk.script({
+      text: outcomes([{ comment_id: 'c3', outcome: 'pending clarification', reply: 'Needs the author.' }]),
+    });
+    ctx.daemon.sdk.script({
+      text: outcomes([{ comment_id: 'c3', outcome: 'declined', reply: 'Which rate do you mean?' }]),
+    });
+    const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/comment-passes`, { comment_ids: ['c3'] });
+    await jobEnded(ctx, 'comment_pass', started.body.data.id);
+    const [pass] = (await detail(ctx)).comment_passes;
+    expect(pass).toMatchObject({ status: 'ready' });
+    expect(ctx.host.posted.map((post) => post.body)).toEqual(['Which rate do you mean?']);
+    const repair = ctx.daemon.sdk.calls.at(-1)?.prompt as string;
+    expect(repair).toContain('Your last answer could not be used');
+    expect(repair).toContain('c3');
+  });
+
+  it('fails, and offers Retry, when the agent still leaves a thread out after two repairs', async () => {
+    const ctx = await start();
+    script(
+      ctx,
+      stepTurns(PlaybookTrigger.AddressComments, {
+        [IMPLEMENT]: [stepAnswer('nothing', 'skipped')],
+        [TESTS]: [stepAnswer('-', 'skipped')],
+      }),
+    );
+    for (let turn = 0; turn < 3; turn++) ctx.daemon.sdk.script({ text: 'No JSON here.' });
+    const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/comment-passes`, { comment_ids: ['c3'] });
+    await jobEnded(ctx, 'comment_pass', started.body.data.id);
+    const [pass] = (await detail(ctx)).comment_passes;
+    expect(pass).toMatchObject({ status: 'failed', can_retry: true });
+    expect(pass.error).toBe('The agent did not report every thread in a way the console could read');
+    expect(ctx.host.posted).toEqual([]);
+  });
+
   it('fails with nothing pushed when the run rewrote the scratch copy’s .git, and offers no retry', async () => {
     const ctx = await start();
     const before = git(ctx.remote, 'rev-parse', 'feature-1');
