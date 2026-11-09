@@ -58,6 +58,18 @@ const verdictsSchema = z.object({
 
 const MOVED = 'The branch moved; run Address comments again.';
 
+/** How many times the console asks the agent to fix an answer it could not read, before the job fails. */
+export const REPORT_REPAIRS = 2;
+
+/** The follow-up turn when the closing answer was unreadable or left threads out: what was wrong, and the shape again. */
+export function repairPrompt(check: boolean, missing: string[], unreadable: boolean): string {
+  const words = check ? '"verdict": fixed, partly_fixed or not_fixed' : '"outcome": done or declined';
+  const why = unreadable
+    ? 'It had no JSON block the console could read, or a word outside the allowed ones.'
+    : `It left out ${missing.length === 1 ? 'a thread' : 'threads'}.`;
+  return `Your last answer could not be used. ${why} Answer again with one JSON block and nothing after it, in the same shape: { "threads": [{ "comment_id": "id", ${check ? '"verdict"' : '"outcome"'}: "...", "reply": "..." }] }. Use only these words for ${words}.${check ? '' : ' A thread that needs the author\'s answer, or more work than this pass can do, is "declined": put the question in "reply".'} Include these threads, each once, each with a reply: ${missing.join(', ')}.`;
+}
+
 /** What the agent is told before Check replies' first step: every replied thread, to check against the head commit. */
 export function checkRepliesBrief(slug: string, pr: HostPullRequest, threads: HostComment[][]): string {
   const listed = threads.map((thread) => {
@@ -80,7 +92,7 @@ export const CHECK_REPLIES_PROMPT = `Give your verdict on each thread. Answer wi
 { "threads": [{ "comment_id": "id", "verdict": "fixed | partly_fixed | not_fixed", "reply": "a few sentences for the thread: what you checked, and what is left if anything" }] }
 \`\`\`
 
-List every thread once.`;
+List every thread once. Use only those three words for "verdict".`;
 
 /** What the agent is told about the pull request and the ticked threads before its first step. */
 export function commentPassBrief(slug: string, pr: HostPullRequest, threads: HostComment[][]): string {
@@ -104,7 +116,7 @@ export const COMMENT_PASS_PROMPT = `Report each thread the operator ticked. Answ
 { "threads": [{ "comment_id": "id", "outcome": "done | declined", "reply": "done: what you changed. declined: why not" }] }
 \`\`\`
 
-List every ticked thread once.`;
+List every ticked thread once. Use only "done" or "declined" for "outcome". A thread that needs the author's answer, or more work than this pass can do, is "declined": put the question or the reason in "reply".`;
 
 /** The commit's message: the pull request, then a line per done thread (Behavior 16). */
 export function commitMessage(number: number, threads: StoredThread[]): string {
@@ -309,15 +321,24 @@ export class CommentPassesService {
       purpose: RunPurpose.CommentPass,
     };
     const check = row.kind === CommentPassKind.Check;
-    const prompt = check ? CHECK_REPLIES_PROMPT : COMMENT_PASS_PROMPT;
-    const summary = await this.runtime.runFor(session, prompt, null, closing).finished;
-    if (summary.stopped) throw new JobFailed(`The threads were not reported: ${STOPPED}`, true);
-    if (summary.failure) throw new JobFailed(summary.failure, true);
-    const answered = summary.ok ? readOutcomes(summary.text, check) : null;
     const threads = storedThreads(row);
-    const byId = new Map(answered?.map((thread) => [thread.comment_id, thread]));
-    if (!answered || threads.some((thread) => !byId.has(thread.comment_id))) {
-      throw new JobFailed('The agent did not report every thread in a way the console could read', true);
+    const byId = new Map<string, { comment_id: string; outcome: ThreadOutcome; reply: string }>();
+    // The ids go in the prompt itself: a thread the agent thinks needs no answer, such as a general comment, still gets one.
+    const ids = threads.map((thread) => thread.comment_id).join(', ');
+    let prompt = `${check ? CHECK_REPLIES_PROMPT : COMMENT_PASS_PROMPT}\n\nThe threads, all of them, each with a reply: ${ids}.`;
+    // An answer the console cannot read, or one that leaves a thread out, is sent back to the agent to fix.
+    for (let repairs = 0; ; repairs++) {
+      const summary = await this.runtime.runFor(session, prompt, null, closing).finished;
+      if (summary.stopped) throw new JobFailed(`The threads were not reported: ${STOPPED}`, true);
+      if (summary.failure) throw new JobFailed(summary.failure, true);
+      const answered = summary.ok ? readOutcomes(summary.text, check) : null;
+      for (const thread of answered ?? []) byId.set(thread.comment_id, thread);
+      const missing = threads.filter((thread) => !byId.has(thread.comment_id)).map((thread) => thread.comment_id);
+      if (missing.length === 0) break;
+      if (repairs === REPORT_REPAIRS) {
+        throw new JobFailed('The agent did not report every thread in a way the console could read', true);
+      }
+      prompt = repairPrompt(check, missing, answered === null);
     }
     const reported = threads.map((thread) => {
       const answer = byId.get(thread.comment_id) as { outcome: ThreadOutcome; reply: string };

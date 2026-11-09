@@ -152,7 +152,8 @@ export class ConnectorsService implements OnModuleDestroy {
     const server = CONNECTOR_SERVERS[id];
     if (server && !this.sharedServer(id, server.name)) {
       const found = await this.mcp.find(server.name);
-      if (found?.registered) await this.mcp.remove(server.name);
+      // A read of the list that no longer holds the server means it is already gone: Disconnect goes on.
+      if (found?.registered) await this.mcp.remove(server.name).catch(ignoreMissing);
     }
     this.store.write((tx) => {
       tx.update(connectors)
@@ -460,4 +461,8 @@ function serverReading(found: McpServer, config: Record<string, string | null>):
     accountLabel: config.workspace || config.org || config.site || null,
     login: null,
   };
+}
+
+function ignoreMissing(error: unknown): void {
+  if (!(error instanceof ApiError && error.status === 404)) throw error;
 }

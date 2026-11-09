@@ -1,9 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { CONNECTOR_ORDER, ConnectorId, type WsEvent } from '@ops-console/shared';
+import { CONNECTOR_ORDER, ConnectorId, ErrorCode, type WsEvent } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ApiError } from '../src/common/errors';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
 import { ConnectorsService } from '../src/connectors/connectors.service';
 import { connectors } from '../src/db/schema';
@@ -562,6 +563,23 @@ describe('disconnecting', () => {
     const gone = await api(ctx.daemon).delete('/connectors/gitlab/credentials');
     expect(gone.body.data).toMatchObject({ status: 'off', login: null });
     expect(ctx.tools.gitlab).toBe('gl-operator');
+  });
+
+  it('still disconnects when the MCP server is gone from the list by the time it is removed', async () => {
+    const ctx = await start();
+    ctx.tools.datadog = { signedIn: true, org: 'example-org' };
+    await api(ctx.daemon).post('/connectors/datadog/connect', {});
+    await until(
+      () => mcpServer(ctx, 'datadog-pup'),
+      (found) => found?.registered === true,
+      'the registration',
+    );
+    const mcp = ctx.daemon.app.get(McpServersService);
+    mcp.remove = async (name: string) => {
+      throw new ApiError(404, ErrorCode.NotFound, `no MCP server named ${name}`);
+    };
+    const off = await api(ctx.daemon).delete('/connectors/datadog/credentials');
+    expect(off.body, `HTTP ${off.status}`).toMatchObject({ data: { status: 'off', login: null } });
   });
 
   it('opens the sign-in of a server it just registered at once, and Disconnect stops it', async () => {
