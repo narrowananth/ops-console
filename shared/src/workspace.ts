@@ -105,10 +105,7 @@ export const prAgentReviewSchema = z.object({
   note: z.string().nullable(),
 });
 
-/** Most characters in a Review note. */
-export const REVIEW_NOTE_MAX = 4000;
-
-export const startAgentReviewSchema = z.object({ note: z.string().trim().max(REVIEW_NOTE_MAX).optional() }).strict();
+export const startAgentReviewSchema = z.object({ note: z.string().trim().optional() }).strict();
 
 export type StartAgentReview = z.infer<typeof startAgentReviewSchema>;
 

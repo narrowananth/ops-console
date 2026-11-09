@@ -1,6 +1,7 @@
 import { createSdkMcpServer, type McpSdkServerConfigWithInstance, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
+import { type IntegrationRunner, integrationInputSchema } from './integration-cli';
 import { type FileSaver, runSaveFile, saveFileInputSchema } from './output-files';
 
 /** The console's own MCP server, in the daemon: it holds the tools the console runs for the agent. */
@@ -8,6 +9,7 @@ export const CONSOLE_TOOLS_SERVER = 'ops-console';
 export const OPEN_PULL_REQUEST_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__open_pull_request`;
 export const JOIN_REPO_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__join_repo`;
 export const SAVE_FILE_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__save_file`;
+export const RUN_INTEGRATION_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__run_integration`;
 
 export const joinRepoInputSchema = z.object({
   /** The Repo the operator means: its name, its path on this machine, or its Git URL or `owner/name`. */
@@ -41,7 +43,7 @@ export type OpenPullRequestInput = z.infer<typeof openPullRequestInputSchema>;
 export interface PullRequestOpener {
   /** Whether a run working in `dir` for this Session may open a pull request: a Session in a Repo, on a supported Git host. */
   offers(sessionId: string, dir: string): boolean;
-  /** The words the operator's Approval shows. Throws an `ApiError` when no pull request can open. */
+  /** Throws an `ApiError` when no pull request can open. Returns a one-line description. */
   describe(sessionId: string, input: OpenPullRequestInput): Promise<string>;
   /** Pushes the branch and opens the pull request; an open one for the branch is returned. */
   open(sessionId: string, input: OpenPullRequestInput): Promise<{ number: number; url: string }>;
@@ -84,12 +86,17 @@ export async function runJoinRepo(
   }
 }
 
-/** The console's tools for one run. The operator approves each call before it runs (see the runtime's PreToolUse hook). */
+/** The console's tools for one run. The runtime's PreToolUse hook gates each call: joining a Repo and saving a file ask the operator, an integration write asks, a read and a pull request do not. */
 export function consoleToolsServer(
-  tools: { opener: PullRequestOpener | null; joiner: RepoJoiner | null; saver: FileSaver | null },
+  tools: {
+    opener: PullRequestOpener | null;
+    joiner: RepoJoiner | null;
+    saver: FileSaver | null;
+    integrations?: IntegrationRunner | null;
+  },
   sessionId: string,
 ): McpSdkServerConfigWithInstance {
-  const { opener, joiner, saver } = tools;
+  const { opener, joiner, saver, integrations = null } = tools;
   return createSdkMcpServer({
     name: CONSOLE_TOOLS_SERVER,
     tools: [
@@ -97,7 +104,7 @@ export function consoleToolsServer(
         ? [
             tool(
               'open_pull_request',
-              "Pushes a branch and opens a pull request on the Repo's Git host, after the operator approves. Commit the work first. Never push or open one any other way.",
+              "Pushes a branch and opens a pull request on the Repo's Git host, with no Approval. When the branch has a pull request already, it pushes the new commits and returns that pull request's link. A branch that moved on origin is rebased onto it first, never forced. Commit the work first. Never push or open one any other way.",
               openPullRequestInputSchema.shape,
               (args) => runOpenPullRequest(opener, sessionId, args),
             ),
@@ -110,6 +117,19 @@ export function consoleToolsServer(
               "Moves this Session into a Repo the operator imported, after the operator approves, so you work in the real checkout on a branch and can commit and open a pull request. Use it when the operator names a repository or says where the issue is. Give the Repo's name, its path on this machine, or its Git URL.",
               joinRepoInputSchema.shape,
               (args) => runJoinRepo(joiner, sessionId, args),
+            ),
+          ]
+        : []),
+      ...(integrations
+        ? [
+            tool(
+              'run_integration',
+              "Runs an integration CLI (pup for Datadog, gh, glab, bkt, slashdocs) outside your sandbox, as the operator, where their sign-in works. Give cli and args: the command words first, then the flags, one argument per entry, no shell (for example gh with args pr, view, 12, --repo, owner/name). A read runs at once. A write (comment, create, update, mute) waits for the operator's Approval. Sign-in, tokens, extensions, aliases, config and merges are refused. Your commands cannot run these CLIs themselves.",
+              integrationInputSchema.shape,
+              async (args) => {
+                const done = await integrations.run(args);
+                return { content: [{ type: 'text' as const, text: done.text }], ...(done.ok ? {} : { isError: true }) };
+              },
             ),
           ]
         : []),

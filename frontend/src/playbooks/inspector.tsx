@@ -1,4 +1,5 @@
 import {
+  EDITOR_PASTE_LIMIT,
   PLAYBOOK_LIMITS,
   type Playbook,
   type PlaybookTrigger,
@@ -11,6 +12,7 @@ import { type ReactNode, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Toggle } from '../components/ui/toggle';
+import { usePasteLimit } from '../lib/paste-limit';
 import { useSkills } from '../lib/queries';
 import { returnState } from '../lib/return-to';
 import { ascending } from '../lib/sort';
@@ -54,6 +56,14 @@ function Head({
   );
 }
 
+function PasteLimitError() {
+  return (
+    <p role="alert" className="m-0 text-xs text-accent-700">
+      The limit is {EDITOR_PASTE_LIMIT.toLocaleString()} characters at once. The paste was not added.
+    </p>
+  );
+}
+
 const PANEL_LABEL: Record<Sel['kind'], string> = {
   trigger: 'Trigger panel',
   step: 'Step panel',
@@ -77,6 +87,7 @@ export function Inspector(props: {
   onToggleTrigger: (trigger: PlaybookTrigger) => void;
 }) {
   const { sel, working, readOnly, onChange, onClose } = props;
+  const rulesPaste = usePasteLimit(EDITOR_PASTE_LIMIT, 'reject');
   return (
     <aside
       aria-label={PANEL_LABEL[sel.kind]}
@@ -124,10 +135,15 @@ export function Inspector(props: {
               value={working.rules}
               maxLength={PLAYBOOK_LIMITS.rules}
               placeholder="Example: Run pnpm test:unit, never the whole suite. Say which file:line each claim comes from."
-              onChange={(event) => onChange({ ...working, rules: event.target.value })}
+              onPaste={rulesPaste.onPaste}
+              onChange={(event) => {
+                rulesPaste.clear();
+                onChange({ ...working, rules: event.target.value });
+              }}
               className={`${field} min-h-40 flex-1 resize-none overflow-y-auto text-[13px] leading-relaxed`}
             />
           )}
+          {rulesPaste.over && <PasteLimitError />}
           <details className="text-xs text-neutral-700">
             <summary className="cursor-pointer">
               Every run also gets the console's pull request description rule
@@ -272,6 +288,7 @@ function StepPanel(props: {
   onRemove: () => void;
 }) {
   const { step, readOnly } = props;
+  const paste = usePasteLimit(EDITOR_PASTE_LIMIT, 'reject');
   return (
     <>
       <div className="flex items-center gap-2">
@@ -306,9 +323,14 @@ function StepPanel(props: {
         readOnly={readOnly}
         maxLength={PLAYBOOK_LIMITS.instructions}
         placeholder="Write what the agent does in this step."
-        onChange={(event) => props.onChange({ instructions: event.target.value })}
+        onPaste={paste.onPaste}
+        onChange={(event) => {
+          paste.clear();
+          props.onChange({ instructions: event.target.value });
+        }}
         className={`${field} min-h-40 flex-1 resize-none overflow-y-auto text-xs leading-relaxed`}
       />
+      {paste.over && <PasteLimitError />}
       {!readOnly && step.block === StepBlock.Custom && (
         <label title={SCRATCH_TIP} className="flex items-center gap-2 text-xs text-neutral-700">
           <input

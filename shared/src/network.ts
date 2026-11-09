@@ -24,6 +24,28 @@ export const BUILT_IN_NETWORK_DOMAINS = [
   'files.pythonhosted.org',
   'rubygems.org',
   'index.rubygems.org',
+  // The Connectors' own APIs (Git hosts, Atlassian, Datadog, Slack, Sentry, Shopify), by API host: never an ingest or
+  // webhook host, which takes data from anyone.
+  'bitbucket.org',
+  'api.bitbucket.org',
+  'gitlab.com',
+  'api.atlassian.com',
+  'mcp.atlassian.com',
+  '*.atlassian.net',
+  'api.datadoghq.com',
+  'app.datadoghq.com',
+  'mcp.datadoghq.com',
+  'api.datadoghq.eu',
+  'api.us3.datadoghq.com',
+  'api.us5.datadoghq.com',
+  'api.ap1.datadoghq.com',
+  'api.ddog-gov.com',
+  'slack.com',
+  'mcp.slack.com',
+  'sentry.io',
+  'mcp.sentry.dev',
+  'shopify.dev',
+  '*.myshopify.com',
 ] as const;
 
 const LABEL = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?';

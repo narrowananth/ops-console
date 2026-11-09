@@ -1019,18 +1019,13 @@ describe('Agent Review', () => {
     close();
   });
 
-  it("puts the operator's note in the agent's brief and keeps it on the review; a note over the limit is refused", async () => {
+  it("puts the operator's note in the agent's brief and keeps it on the review, however long it is", async () => {
     const ctx = await start();
     await withOrigin(ctx);
     const { events, close } = await listen(ctx.daemon);
     scriptReview(ctx);
 
-    const tooLong = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`, {
-      note: 'x'.repeat(4001),
-    });
-    expect(tooLong.status).toBe(400);
-
-    const note = 'Continues #12: read it first, then check the retry path.';
+    const note = `Continues #12: read it first, then check the retry path. ${'More detail. '.repeat(1000)}`.trim();
     const started = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`, { note: `  ${note}  ` });
     expect(started.status).toBe(202);
     expect(started.body.data.note).toBe(note);

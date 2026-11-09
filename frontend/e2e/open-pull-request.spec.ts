@@ -151,3 +151,19 @@ test('a branch that cannot open a pull request shows no button', async ({ page }
   await expect(page.getByRole('heading', { name: 'Fix the empty cart' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open pull request' })).toHaveCount(0);
 });
+
+test('a long description keeps every character, with no error', async ({ page }) => {
+  await route(page, { can_open: true });
+  await page.route('**/api/sessions/s1/pull-request-draft', (route) =>
+    route.fulfill({ json: { data: { title: 'Guard empty carts', description: '' } } }),
+  );
+  await open(page);
+
+  await page.getByRole('button', { name: 'Open pull request' }).click();
+  const form = page.getByRole('form', { name: 'Open pull request' });
+  const description = form.getByLabel('Description');
+  await expect(description).toBeEditable();
+  await description.fill('x'.repeat(5000));
+  await expect(description).toHaveValue('x'.repeat(5000));
+  await expect(form.getByRole('alert')).toHaveCount(0);
+});

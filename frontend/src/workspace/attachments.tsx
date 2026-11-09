@@ -1,4 +1,4 @@
-import { type Attachment, attachmentSchema, tokenName } from '@ops-console/shared';
+import { type Attachment, attachmentSchema, PASTED_TEXT_NAME, tokenName } from '@ops-console/shared';
 import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { attachmentAddress, PaperClip } from '../components/ui/attachment-viewer';
@@ -12,11 +12,15 @@ export type FileItem = {
   file: File | null;
   /** A thumbnail for images. */
   preview: string | null;
+  /** The first characters of a pasted text file, for its card; null until read. */
+  snippet: string | null;
   saved: Attachment | null;
   error: string | null;
 };
 
 const savedBody = z.object({ data: attachmentSchema });
+/** How many characters of a pasted text a card shows. */
+const SNIPPET_CHARS = 180;
 const IMAGE = /\.(gif|jpe?g|png|webp)$/i;
 
 /** `name`, or `name (2)` and on, so two files in one message never share a name. */
@@ -37,6 +41,7 @@ export function useAttachments(sessionId: string) {
   const [kept, setKept] = useStored(`workspace.attachments.${sessionId}`, z.array(attachmentSchema), []);
   const [live, setLive] = useState<FileItem[]>([]);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const [snippets, setSnippets] = useState<Record<string, string>>({});
   const urls = useRef(new Set<string>());
   useEffect(() => {
     const made = urls.current;
@@ -48,9 +53,16 @@ export function useAttachments(sessionId: string) {
   const items: FileItem[] = [
     ...kept
       .filter((saved) => !live.some((item) => item.name === saved.name))
-      .map((saved) => ({ name: saved.name, file: null, preview: thumbs[saved.name] || null, saved, error: null })),
+      .map((saved) => ({
+        name: saved.name,
+        file: null,
+        preview: thumbs[saved.name] || null,
+        snippet: null,
+        saved,
+        error: null,
+      })),
     ...live,
-  ];
+  ].map((item) => ({ ...item, snippet: snippets[item.name] ?? null }));
 
   // Thumbnails for images kept from before a reload, read back from the daemon.
   const missing = kept.filter(
@@ -72,8 +84,46 @@ export function useAttachments(sessionId: string) {
     }
   }, [missingKey]);
 
+  // The first lines of each pasted text file, for its card: read from the file on this page, or back from the daemon.
+  const unread = items.filter((item) => PASTED_TEXT_NAME.test(item.name) && !(item.name in snippets));
+  const unreadKey = unread.map((item) => item.name).join('\n');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the key lists the files to read
+  useEffect(() => {
+    for (const item of unread) {
+      setSnippets((now) => ({ ...now, [item.name]: '' }));
+      const source = item.file
+        ? Promise.resolve<Blob>(item.file)
+        : item.saved
+          ? apiBlob(attachmentAddress(item.saved.path))
+          : null;
+      source
+        ?.then((blob) => blob.slice(0, SNIPPET_CHARS * 2).text())
+        .then(
+          (text) =>
+            setSnippets((now) => ({ ...now, [item.name]: text.replace(/\s+/g, ' ').trim().slice(0, SNIPPET_CHARS) })),
+          () => {},
+        );
+    }
+  }, [unreadKey]);
+
   const update = (name: string, change: Partial<FileItem>) =>
     setLive((now) => now.map((item) => (item.name === name ? { ...item, ...change } : item)));
+
+  /** Starts the upload of `file` under `name`; the item in `live` follows it. */
+  const upload = (name: string, file: File, preview: string | null) => {
+    setLive((now) => [
+      ...now.filter((item) => item.name !== name),
+      { name, file, preview, snippet: null, saved: null, error: null },
+    ]);
+    apiUpload(`/sessions/${sessionId}/attachments?name=${encodeURIComponent(name)}`, file, savedBody).then(
+      (body) => {
+        const saved = { ...body.data, name };
+        update(name, { saved });
+        setKept((now) => [...now.filter((item) => item.name !== name), saved]);
+      },
+      (failure: unknown) => update(name, { error: failure instanceof Error ? failure.message : String(failure) }),
+    );
+  };
 
   /** Uploads the files and gives back the name each goes under in the message. */
   const add = (files: File[]): string[] => {
@@ -83,21 +133,20 @@ export function useAttachments(sessionId: string) {
       taken.add(name);
       const preview = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
       if (preview) urls.current.add(preview);
-      setLive((now) => [...now, { name, file, preview, saved: null, error: null }]);
-      apiUpload(`/sessions/${sessionId}/attachments?name=${encodeURIComponent(name)}`, file, savedBody).then(
-        (body) => {
-          const saved = { ...body.data, name };
-          update(name, { saved });
-          setKept((now) => [...now.filter((item) => item.name !== name), saved]);
-        },
-        (failure: unknown) => update(name, { error: failure instanceof Error ? failure.message : String(failure) }),
-      );
+      upload(name, file, preview);
       return name;
     });
   };
 
+  /** Puts `text` in the pasted text file `name`: the same name in the message, the new text uploaded. */
+  const rewrite = (name: string, text: string) => {
+    setSnippets((now) => Object.fromEntries(Object.entries(now).filter(([key]) => key !== name)));
+    upload(name, new File([text], name, { type: 'text/plain' }), null);
+  };
+
   const remove = (names: string[]) => {
     setLive((now) => now.filter((item) => !names.includes(item.name)));
+    setSnippets((now) => Object.fromEntries(Object.entries(now).filter(([name]) => !names.includes(name))));
     setKept((now) => now.filter((item) => !names.includes(item.name)));
   };
 
@@ -113,6 +162,7 @@ export function useAttachments(sessionId: string) {
     uploading: (names: string[]) =>
       items.some((item) => names.includes(item.name) && item.saved === null && item.error === null),
     add,
+    rewrite,
     remove,
   };
 }

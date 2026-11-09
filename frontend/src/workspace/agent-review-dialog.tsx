@@ -1,4 +1,3 @@
-import { REVIEW_NOTE_MAX } from '@ops-console/shared';
 import { useRef, useState } from 'react';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
 
@@ -23,7 +22,6 @@ export function AgentReviewDialog({ onStart, onCancel }: { onStart: (note: strin
         aria-label="Note for the agent"
         value={note}
         rows={4}
-        maxLength={REVIEW_NOTE_MAX}
         placeholder="Example: continues #123; check the retry path and the migration"
         onChange={(event) => setNote(event.target.value)}
         onKeyDown={(event) => {

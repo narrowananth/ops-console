@@ -6,6 +6,7 @@ import {
   type Session,
   SessionState,
   sessionDefaultsSchema,
+  TERMINAL_TEXT_LIMIT,
 } from '@ops-console/shared';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -17,6 +18,7 @@ import { StopIcon } from '../agents/stop-run';
 import { BrandIcon, CONNECTION_BRAND } from '../components/ui/brand-icon';
 import { Empty } from '../components/ui/empty';
 import { item } from '../components/ui/item';
+import { usePasteLimit } from '../lib/paste-limit';
 import {
   useAgentSettings,
   useAskNewDevtoolsSession,
@@ -222,6 +224,7 @@ function Terminal({
   const send = useSendMessage(session?.id ?? '');
   const scroller = useRef<HTMLDivElement>(null);
   const prompt = useRef<HTMLTextAreaElement>(null);
+  const paste = usePasteLimit(TERMINAL_TEXT_LIMIT, 'fit');
   const list = session ? (messages.data ?? []) : [];
   const running = isRunning(session) || asking || send.isPending;
   // Scrolls the terminal only; scrollIntoView would scroll the page under it too.
@@ -291,6 +294,8 @@ function Terminal({
                 ? 'The agent is working…'
                 : 'Ask the agent — e.g. find shop acme · show 5 pending reservations. Shift+Enter adds a line.'
             }
+            maxLength={TERMINAL_TEXT_LIMIT}
+            onPaste={paste.onPaste}
             onChange={(event) => onText(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -302,6 +307,11 @@ function Terminal({
           />
         </div>
       </div>
+      {text.length >= TERMINAL_TEXT_LIMIT && (
+        <div role="status" className="border-t border-neutral-700 px-4 py-1.5 font-mono text-xs text-warn">
+          Only {TERMINAL_TEXT_LIMIT.toLocaleString()} characters are allowed at once. The rest was left out.
+        </div>
+      )}
     </section>
   );
 }

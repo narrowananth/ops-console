@@ -338,3 +338,26 @@ test('an Agent Review card lists the Skills it was offered; a deleted one is pla
   await expect(card.getByText('old-method', { exact: true })).toBeVisible();
   await expect(card.getByRole('link', { name: 'old-method' })).toHaveCount(0);
 });
+
+test('a paste over 5,000 characters is refused with an error, and a shorter one goes in', async ({ page, request }) => {
+  const id = await makeSkill(request, 'gamma');
+  await openSkills(page, id);
+  const { editor } = regions(page);
+  const box = editor.getByRole('textbox', { name: 'Instructions' });
+  const paste = (text: string) =>
+    box.evaluate((element, value) => {
+      element.focus();
+      const data = new DataTransfer();
+      data.setData('text/plain', value);
+      element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    }, text);
+  const before = await box.inputValue();
+
+  await paste('x'.repeat(6000));
+  await expect(editor.getByRole('alert')).toContainText('The limit is 5,000 characters');
+  await expect(box).toHaveValue(before);
+
+  // Typing again clears the error.
+  await box.fill('Read the log first.');
+  await expect(editor.getByRole('alert')).toHaveCount(0);
+});

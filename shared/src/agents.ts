@@ -462,6 +462,11 @@ export function splitAttachments(message: string): { text: string; attachments: 
 export const fileToken = (name: string) => `[📎 ${name}]`;
 export const FILE_TOKEN = /\[📎 ([^\]\n]+)\]/g;
 
+/** Text pasted past this many characters attaches as a `pasted-text.txt` file, shown as a card with its first lines. */
+export const PASTE_AS_FILE_LIMIT = 3000;
+/** The name a pasted text file goes under; a second one in a message is `pasted-text (2).txt`. */
+export const PASTED_TEXT_NAME = /^pasted-text(?: \(\d+\))?\.txt$/;
+
 /** A file name a token can hold: `]` and line breaks become spaces. */
 export const tokenName = (name: string) => name.replace(/[\]\r\n]+/g, ' ').trim() || 'pasted';
 
@@ -781,3 +786,8 @@ export const accountUsageSchema = z.object({
 });
 
 export type AccountUsageReport = z.infer<typeof accountUsageSchema>;
+
+/** The most characters one paste into a Skill or Playbook field may hold; a longer paste is refused with an error. */
+export const EDITOR_PASTE_LIMIT = 5000;
+/** The most characters a terminal prompt holds; a longer paste is cut to it. */
+export const TERMINAL_TEXT_LIMIT = 10000;

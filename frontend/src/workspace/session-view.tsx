@@ -43,6 +43,7 @@ import { ConversationMap, ScrollToEnd, useFollowLatest } from './conversation';
 import { alertPath, pullRequestNamedIn, pullRequestPath, sessionDraftKey } from './links';
 import { MessageEditor, type MessageEditorHandle } from './message-editor';
 import { OpenPullRequestForm } from './open-pull-request';
+import { type PastedText, PastedTextEditor } from './pasted-text-editor';
 import { DIFF_PANEL, DiffPanel, DiffToggle } from './session-diff';
 import { SESSION_STATE_TIP } from './sessions-pane';
 import { useSkillMenuFor } from './skill-menu';
@@ -64,6 +65,8 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const editor = useRef<MessageEditorHandle>(null);
   // An attached file open over the page.
   const [viewed, setViewed] = useState<Viewed | null>(null);
+  // A pasted text file open to edit.
+  const [editing, setEditing] = useState<PastedText | null>(null);
   // A drag carrying files is over the message box.
   const [dropping, setDropping] = useState(false);
   const latest = useFollowLatest();
@@ -127,7 +130,13 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const placed = namesInText(text);
   const files = attachments.saved(placed);
   const uploading = attachments.uploading(placed);
-  const empty = text.replace(FILE_TOKEN, '').trim() === '' && files.length === 0;
+  const typed = text.replace(FILE_TOKEN, '');
+  const empty = typed.trim() === '' && files.length === 0;
+  // Takes a file out of the message: its file, and its card in the text.
+  const clearPasted = (name: string) => {
+    attachments.remove([name]);
+    setText((now) => now.split(fileToken(name)).join('').replace(/ {2,}/g, ' '));
+  };
   const addFiles = (picked: File[]) => editor.current?.insertFiles(attachments.add(picked));
   const lastMessage = messages.data?.at(-1);
   const questions =
@@ -390,6 +399,11 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                   if (item?.file) setViewed({ name, file: item.file });
                   else if (item?.saved) setViewed({ name, path: item.saved.path });
                 }}
+                onEdit={(name) => {
+                  const item = attachments.find(name);
+                  if (item?.file) setEditing({ name, file: item.file });
+                  else if (item?.saved) setEditing({ name, path: item.saved.path });
+                }}
                 onPasteFiles={addFiles}
                 onSubmit={submit}
                 onKey={skillMenu.onKey}
@@ -428,6 +442,22 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
           </div>
         </div>
         {viewed && <AttachmentViewer viewed={viewed} onClose={() => setViewed(null)} />}
+        {editing && (
+          <PastedTextEditor
+            pasted={editing}
+            onClose={() => setEditing(null)}
+            onSave={(next) => {
+              // Nothing left to send: the file goes, and its card with it.
+              if (next.trim() === '') clearPasted(editing.name);
+              else attachments.rewrite(editing.name, next);
+              setEditing(null);
+            }}
+            onClear={() => {
+              clearPasted(editing.name);
+              setEditing(null);
+            }}
+          />
+        )}
         {hasDiff && diffOpen && (
           <>
             <ResizeHandle

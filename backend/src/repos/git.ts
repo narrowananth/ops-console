@@ -31,6 +31,9 @@ export class BranchMoved extends GitFailed {
   }
 }
 
+/** The branch moved on the remote and rebasing onto it conflicts. The rebase was aborted and the branch is as it was. */
+export class RebaseConflict extends BranchMoved {}
+
 /**
  * Where a job reads the code: a branch at a commit. `fetched` is false when origin could not be reached and the
  * Repo's local branch stands in; `error` is then why, and the code may be behind origin.
@@ -337,7 +340,7 @@ export class Git {
   /**
    * `pushHead`, and when the branch moved on the remote, rebases the commits `dir` is at onto the new tip and pushes
    * again, never with force; up to `tries` times, since the branch can move again. A rebase that conflicts is undone
-   * and throws `BranchMoved`: only a person can settle that.
+   * and throws `RebaseConflict`: only a person can settle that.
    */
   async pushHeadRebasing(dir: string, branch: string, tries = 3): Promise<void> {
     for (let attempt = 0; ; attempt++) {
@@ -355,7 +358,7 @@ export class Git {
           await this.must(dir, ['rebase', '--quiet', `refs/remotes/origin/${branch}`]);
         } catch {
           await this.try(dir, ['rebase', '--abort']);
-          throw new BranchMoved(branch);
+          throw new RebaseConflict(branch);
         }
       }
     }

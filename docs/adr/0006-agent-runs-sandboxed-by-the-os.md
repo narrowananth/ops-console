@@ -7,7 +7,7 @@ a few like them), never in a folder on PATH such as `~/.cargo/bin` or `~/go/bin`
 `~/.aws`, `~/.config/gcloud`, `~/.ssh` or the login Keychain folder. The data folder holds
 `runtime.json`, whose session token lets a command call the console's own API as the operator, Approvals included. The
 console sets the rules and leaves the profile to the SDK. It fails a run when the sandbox is unavailable, never runs a
-command outside it, and has no Setting to turn it off. The Setup agent's terminal is no agent run and is not sandboxed.
+command the agent wrote outside it, and has no Setting to turn it off. One door leads out: the console's `run_integration` tool (below). The Setup agent's terminal is no agent run and is not sandboxed.
 
 The sandbox filters a run's commands, not the agent's file tools, which run in Claude Code's own process. The console
 holds those to the same limits with permission rules in `disallowedTools`: no reading the data folder's secrets
@@ -21,10 +21,21 @@ needs a key as a file gets it in a folder under the data folder, which the sandb
 folder.
 
 A run's commands reach only its Network allowlist, which the SDK's filtering proxy enforces (`network.allowedDomains`
-with `strictAllowlist`). The console builds the list when the run starts: the built-in hosts (GitHub, and the package
+with `strictAllowlist`). The console builds the list when the run starts: the built-in hosts (GitHub, the API hosts of the
+Connectors' services (Bitbucket, GitLab, Atlassian, Datadog, Slack, Sentry, Shopify), and the package
 registries of npm and Yarn, Cargo, Go, Maven, Gradle, PyPI and RubyGems), the host of each Repo's `origin`, and the
 domains the operator added. A raw IP address, a DNS lookup outside the filter and a client that ignores the proxy settings are
 refused. `WebFetch` and `WebSearch` run outside the filter, so every run denies them.
+
+The integration CLIs (`pup`, `gh`, `glab`, `bkt`, `slashdocs`) keep their sign-in where the sandbox hides it, so a run
+cannot use them itself. Its `run_integration` tool has the daemon run one outside the sandbox, as the operator, in the
+Session's output folder. The agent gives the CLI and an argument list; no shell runs. The console classifies the command
+by its words, default deny: a read runs at once, a write (a comment, a create, an update, a mute) raises an Approval in
+every Access mode, and a run that is not the operator's own chat writes nothing. Sign-in, tokens, config, extensions,
+aliases, a flag that passes a secret or another server, a merge by any spelling, and every command no list names are
+refused. An argument that names a file outside the run's own folders is refused too, so the tool cannot read what the
+sandbox hides. The CLI gets its home folder and PATH and nothing of the daemon's environment; its output is redacted and
+cut at 100,000 characters; each call is an Action Log row. The tool exists only in a run that has an output folder.
 
 The daemon bounds every Keychain call at 60 seconds and the wait for the version handover at 90, and shows a call
 pending past 10 seconds on every page. The native call cannot be cancelled, so an answer that comes late is dropped.
@@ -50,7 +61,12 @@ The agent is told never to skip a hook, and its `PreToolUse` hook refuses `--no-
   the operator a list to extend when a run needs a private registry.
 - **DNS interception or a proxy in the daemon**: the SDK already filters, and a second filter is code to keep for the
   same result.
-- **A Setting or an unsandboxed retry**: the escape hatch is what the sandbox removes.
+- **A Setting or an unsandboxed retry**: the escape hatch is what the sandbox removes. `run_integration` is no retry:
+  the agent cannot choose a command's sandbox, only ask the console to run a command from a fixed list.
+- **A free-form command outside the sandbox with an Approval**: any command could ask, and the operator would read shell
+  to judge it. It lost to a list the console classifies, where a read never asks and a write names what it changes.
+- **The Keychain token handed to the run, as `GH_TOKEN` is**: `pup` has no token export, and its token writes monitors,
+  dashboards and incidents.
 - **Reading `~/.ssh` in a Fix so its PR stage can push**: the first design. `ssh` writes `known_hosts` and ignores the
   proxy, and the GitLab and Bitbucket CLIs keep short-lived tokens in the Keychain, so a run could not open a pull
   request there anyway. The console pushes and opens it in the daemon instead (Pull request opening).
@@ -58,16 +74,21 @@ The agent is told never to skip a hook, and its `PreToolUse` hook refuses `--no-
 
 ## Consequences
 
+A chat run steered by text it read can run any listed read through `run_integration`, as the operator, and see the output:
+logs, pull requests, documents. It can ask for a write, and the operator reads the exact command. A listed read that a
+CLI later turns into a write, or a new CLI verb that does one, is a gap the lists must catch: unknown `pup` and `slashdocs`
+verbs ask, and a `gh`, `glab` or `bkt` command off the list is refused.
+
 A run steered by log text can still send out what it can read, but only to a host on its Network allowlist. A run can
 write into the package caches, so it could poison a cached package for a later build; the console does not guard that. `GH_TOKEN`
 reaches `api.github.com`, so a steered run can still use it there (`gh gist create`, a push to a repo it controls); no
-domain rule stops that. A command to any other host fails with the host named in its result, and the run goes on. The
+domain rule stops that. The Connectors' API hosts are on every run's list, so a steered run can send out what it reads to Datadog, Slack, Sentry or Atlassian too, but only to their API hosts, never their ingest or webhook hosts. A command to any other host fails with the host named in its result, and the run goes on. The
 operator adds the host in Permissions and the next run has it.
 
 The sandbox blocks the login Keychain, so `gh` signs in through that token in place of its Keychain item, and
 `enableWeakerNetworkIsolation` lets Go programs check certificates through macOS's trust service. `pup` keeps its
-Datadog sign-in in the Keychain and does not work inside a run's shell; the Datadog MCP Server, outside the sandbox, is
-how the Playbooks read Datadog. `ssh` and Node's built-in `fetch` ignore the proxy settings and fail in a run, so a run
+Datadog sign-in in the Keychain and does not work inside a run's shell; the Datadog MCP Server and `run_integration`, both
+outside the sandbox, are how the Playbooks and chats reach Datadog, and the run's system prompt says so. `ssh` and Node's built-in `fetch` ignore the proxy settings and fail in a run, so a run
 cannot push. The console pushes and opens every pull request in the daemon, outside the sandbox, as the operator. A late
 `set` may still reach the Keychain after its timeout. The Keychain reads of
 `mcp-exec` and the Setup agent have their own waits and are not shown.

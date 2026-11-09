@@ -1,5 +1,6 @@
 import {
   refuseSetupLine,
+  TERMINAL_TEXT_LIMIT,
   type TerminalServerMessage,
   terminalServerMessageSchema,
   WS_PROTOCOL,
@@ -9,6 +10,7 @@ import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '../components/ui/button';
+import { usePasteLimit } from '../lib/paste-limit';
 import { useAnswerSecret } from '../lib/queries';
 import { sessionToken } from '../lib/session';
 
@@ -48,6 +50,7 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
   const host = useRef<HTMLDivElement>(null);
   const socket = useRef<WebSocket | null>(null);
   const [line, setLineState] = useState(() => drafts.get(terminalId) ?? takeQueued());
+  const paste = usePasteLimit(TERMINAL_TEXT_LIMIT, 'fit');
   const setLine = (text: string) => {
     if (text) drafts.set(terminalId, text);
     else drafts.delete(terminalId);
@@ -186,6 +189,8 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
               ? 'The terminal ended. Close it and open it again.'
               : 'Ask Claude to set something up, e.g. import my local databases. Shift+Enter adds a line; Enter alone confirms a prompt.'
           }
+          maxLength={TERMINAL_TEXT_LIMIT}
+          onPaste={paste.onPaste}
           aria-invalid={refused !== null}
           aria-describedby={refused === null ? undefined : 'setup-line-refused'}
           onChange={(event) => {
@@ -225,6 +230,11 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
           </Button>
         </div>
       </div>
+      {line.length >= TERMINAL_TEXT_LIMIT && (
+        <div role="status" className="text-xs text-warn">
+          Only {TERMINAL_TEXT_LIMIT.toLocaleString()} characters are allowed at once. The rest was left out.
+        </div>
+      )}
       {refused && (
         <div id="setup-line-refused" role="alert" className="text-xs text-accent-700">
           {refused}
