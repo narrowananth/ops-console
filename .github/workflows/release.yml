@@ -26,7 +26,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Package
         run: node scripts/package.mjs "${GITHUB_REF_NAME#v}"
