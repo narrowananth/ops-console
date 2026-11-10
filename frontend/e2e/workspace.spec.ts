@@ -32,6 +32,7 @@ const session = (id: string, repoId: string, title: string, state = 'idle', bran
   pr_number: null,
   connection_ids: null,
   extra_repo_ids: [],
+  pull_request: null,
   alert_id: null,
   state,
   last_message_preview: null,
@@ -789,37 +790,87 @@ test("the Diff panel shows the Session's branch and its files, folds them and re
   await expect(page.getByRole('complementary', { name: 'Diff' })).toHaveCount(0);
 });
 
-test('a pull request the agent names in the conversation links at the top of the Session', async ({ page }) => {
+test("a Session links the pull request it opened, and shows none that another Session's conversation names", async ({
+  page,
+}) => {
   await page.route('**/api/repos', (route) =>
     route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
   );
+  const opened = {
+    ...session('s1', 'r1', 'engage platform', 'idle', 'fix/engage'),
+    pull_request: { number: 42, url: 'https://github.com/example/apis/pull/42' },
+  };
   await page.route(/\/api\/sessions\?kind=repo/, (route) =>
-    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform')] } }),
+    route.fulfill({ json: { data: [opened, session('s2', 'r1', 'fresh start', 'idle', 'main')] } }),
   );
+  const naming = (text: string) => ({
+    json: {
+      data: [{ id: 'm1', role: 'agent', status: 'done', parts: [{ kind: 'text', text }], created_at: NOW }],
+    },
+  });
   await page.route('**/api/sessions/s1/messages', (route) =>
-    route.fulfill({
-      json: {
-        data: [
-          {
-            id: 'm1',
-            role: 'agent',
-            status: 'done',
-            parts: [{ kind: 'text', text: 'Opened https://github.com/example/apis/pull/42 for review.' }],
-            created_at: NOW,
-          },
-        ],
-      },
-    }),
+    route.fulfill(naming('Also see https://github.com/example/apis/pull/99 for the earlier attempt.')),
+  );
+  await page.route('**/api/sessions/s2/messages', (route) =>
+    route.fulfill(naming('Opened https://github.com/example/apis/pull/42 for review.')),
   );
   await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
 
   const header = page.locator('header');
-  // One link opens the pull request in the Workspace, the other on the Git host.
+  // One link opens the pull request in the Workspace, the other on the Git host: the Session's own, not #99.
   await expect(header.getByRole('link', { name: /^PR #42/ })).toHaveAttribute('href', /tab=pulls&pr=r1%2F42/);
   await expect(header.getByRole('link', { name: /#42 on host/ })).toHaveAttribute(
     'href',
     'https://github.com/example/apis/pull/42',
   );
+  await expect(header.getByRole('link', { name: /#99/ })).toHaveCount(0);
+
+  // A new Session on the default branch shows no pull request, whatever its conversation names.
+  await page.goto(`${daemon.url}/workspace?session=s2#token=${daemon.token}`);
+  await expect(page.locator('header').getByRole('heading', { name: 'fresh start' })).toBeVisible();
+  await expect(page.locator('header').getByRole('link', { name: /^PR #/ })).toHaveCount(0);
+});
+
+test('a Session that has edited nothing shows no Diff button or panel, even while the panel is open for another', async ({
+  page,
+}) => {
+  await page.addInitScript(() => localStorage.setItem('ops-console:workspace.session-diff-open', 'true'));
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'fresh start', 'idle', 'main')] } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
+  await page.route('**/api/sessions/s1/diff', (route) =>
+    route.fulfill({ json: { data: { branch: 'main', base: null, additions: 0, deletions: 0, files: [] } } }),
+  );
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  await expect(page.locator('header').getByRole('heading', { name: 'fresh start' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Diff/ })).toHaveCount(0);
+  await expect(page.getByRole('complementary', { name: 'Diff' })).toHaveCount(0);
+});
+
+test('a repo row keeps its counts and New Session button apart, even for a long Repo name', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({
+      json: { data: [repo('r1', 'shopify-fraud-orders-lambda-with-a-very-long-name', 1)], meta: { next_cursor: null } },
+    }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform', 'working')] } }),
+  );
+  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+
+  const row = page.getByRole('region', { name: /shopify-fraud/ });
+  const plus = row.getByRole('button', { name: /^New Session in/ });
+  const counts = row.getByText('1 running');
+  await expect(plus).toBeVisible();
+  await expect(counts).toBeVisible();
+  const [a, b] = [await counts.boundingBox(), await plus.boundingBox()];
+  expect((a?.x ?? 0) + (a?.width ?? 0)).toBeLessThanOrEqual(b?.x ?? 0);
 });
 
 test("the agent's tool steps fold to a count and the latest, and open as short lines", async ({ page }) => {

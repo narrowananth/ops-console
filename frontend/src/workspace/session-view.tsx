@@ -41,7 +41,7 @@ import { AttachButton, filesIn, useAttachments } from './attachments';
 import { BranchSwitcher } from './branch-switcher';
 import { ConversationMap, ScrollToEnd, useFollowLatest } from './conversation';
 import { ExtraRepos } from './extra-repos';
-import { alertPath, pullRequestNamedIn, pullRequestPath, sessionDraftKey } from './links';
+import { alertPath, pullRequestPath, sessionDraftKey } from './links';
 import { MessageEditor, type MessageEditorHandle } from './message-editor';
 import { OpenPullRequestForm } from './open-pull-request';
 import { type PastedText, PastedTextEditor } from './pasted-text-editor';
@@ -96,24 +96,28 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const queue = useRunQueue(id);
   const sessionState = session?.state;
   const working = sessionState === SessionState.Working || sessionState === SessionState.WaitingApproval;
-  const diff = useSessionDiff(id, hasDiff, diffOpen && working);
+  // Polled while the agent works, so the Diff button shows once it has edited a file.
+  const diff = useSessionDiff(id, hasDiff, working);
   const openable = useSessionPullRequest(id, hasDiff);
   // The form that opens the pull request, while the operator has it open.
   const [formOpen, setFormOpen] = useState(false);
-  // While the agent works, the branch it has checked out: it may make one for its fix. After the run the Session follows it.
+  // The branch in the Session's own worktree. While the agent works it may make one for its fix; after the run the
+  // Session follows it.
   const branch = (working ? diff.data?.branch : null) ?? session?.branch ?? null;
-  // A pull request the agent opened or named here wins over the one on the Session's branch.
-  const named = pullRequestNamedIn(messages.data ?? []);
-  const listed =
-    pulls.data?.data.find((candidate) => candidate.number === named?.number) ??
-    pulls.data?.data.find((candidate) => candidate.branch === branch);
-  const pullNumber = listed?.number ?? named?.number;
+  // The pull request the Session opened for the branch it is on wins; otherwise the open one on the Git host for this
+  // branch. Never one that only appears in the conversation, which may be another Session's.
+  const listed = pulls.data?.data.find((candidate) => candidate.branch === branch);
+  const pull =
+    (branch === session?.branch ? session?.pull_request : null) ??
+    (listed ? { number: listed.number, url: listed.url } : null);
   // Both ways in: the console's Pull requests tab for the Session's Repo, and the Git host's page.
   const internalPull =
-    session?.kind === SessionKind.Repo && session.repo_id !== null && pullNumber !== undefined
-      ? { repo_id: session.repo_id, number: pullNumber }
+    session?.kind === SessionKind.Repo && session.repo_id !== null && pull !== null
+      ? { repo_id: session.repo_id, number: pull.number }
       : null;
-  const externalPull = listed ? { url: listed.url, number: listed.number } : named;
+  const externalPull = pull;
+  // A Session whose worktree changes nothing yet has nothing to show.
+  const showDiff = hasDiff && (diff.data?.files.length ?? 0) > 0;
   useEffect(() => {
     if (gone) onGone();
   }, [gone, onGone]);
@@ -182,10 +186,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             <StatusPill state={SESSION_STATE[session.state]}>{session.state.replace('_', ' ')}</StatusPill>
           </span>
           <span className="ml-auto flex flex-none items-center gap-2">
-            {/* A Session whose branch changes nothing yet has nothing to show. */}
-            {hasDiff && (diffOpen || (diff.data?.files.length ?? 0) > 0) && (
-              <DiffToggle open={diffOpen} diff={diff.data} onToggle={() => setDiffOpen((now) => !now)} />
-            )}
+            {showDiff && <DiffToggle open={diffOpen} diff={diff.data} onToggle={() => setDiffOpen((now) => !now)} />}
             <Button
               className="px-2.5 py-1 text-xs"
               title={
@@ -460,7 +461,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             }}
           />
         )}
-        {hasDiff && diffOpen && (
+        {showDiff && diffOpen && (
           <>
             <ResizeHandle
               label="Resize the diff panel"

@@ -145,7 +145,7 @@ describe('an Anonymous Session joins a Repo', () => {
         `an Approval in ${mode}`,
       );
       expect(approval?.summary).toBe(
-        `Move this Session into the Repo orders-api (${ctx.dir}): the agent then works in your checkout on its current branch`,
+        `Move this Session into the Repo orders-api (${ctx.dir}): the agent then works in a worktree of its own, started from the newest work`,
       );
       expect((await ctx.http.get(`/sessions/${id}`)).body.data.kind).toBe('anonymous');
 
@@ -160,7 +160,7 @@ describe('an Anonymous Session joins a Repo', () => {
         (count) => count === 2,
         'the next turn',
       );
-      expect(ctx.daemon.sdk.calls[1]?.options.cwd).toBe(ctx.dir);
+      expect(ctx.daemon.sdk.calls[1]?.options.cwd).toBe(path.join(ctx.daemon.dataDir, 'session-worktrees', id));
       expect(ctx.daemon.sdk.calls[1]?.prompt).toContain('You are now in the Repo');
       // The handover turn can branch, commit and ask for the pull request: the console tool is there, and it is told how.
       expect(ctx.daemon.sdk.calls[1]?.prompt).toContain('git switch -c');

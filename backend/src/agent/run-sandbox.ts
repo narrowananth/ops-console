@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { SandboxSettings } from '@anthropic-ai/claude-agent-sdk';
@@ -19,8 +20,39 @@ export type SandboxRun = {
   readOnly?: boolean;
   /** The working folder's `.git` is a file, as in a worktree: the run may not rewrite it. */
   gitFile?: boolean;
+  /** The working folder is a Session's own worktree: the Repo's git folder and this worktree's folder in it, where its commits go. */
+  gitDirs?: WorktreeGitDirs | null;
   home?: string;
 };
+
+export type WorktreeGitDirs = { common: string; admin: string };
+
+/**
+ * The git folders of a worktree: the `.git` file names its own folder `<common>/worktrees/<name>`, and the Repo's git
+ * folder `<common>` is two levels up. Null when `.git` is not that file.
+ */
+export function worktreeGitDirs(workingDir: string): WorktreeGitDirs | null {
+  try {
+    const named = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(path.join(workingDir, '.git'), 'utf8'))?.[1];
+    if (!named) return null;
+    const admin = path.resolve(workingDir, named);
+    const common = path.dirname(path.dirname(admin));
+    return path.basename(path.dirname(admin)) === 'worktrees' ? { common, admin } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What a worktree's commits write, which its run may not: the Repo's hooks and config, and the files that say where
+ * this worktree and its Repo are. The daemon's own `git` reads them outside the sandbox.
+ */
+function worktreeControl({ common, admin }: WorktreeGitDirs): string[] {
+  return [
+    ...['hooks', 'config', 'config.worktree', 'commondir', 'gitdir'].map((name) => path.join(common, name)),
+    ...['config.worktree', 'commondir', 'gitdir'].map((name) => path.join(admin, name)),
+  ];
+}
 
 export const TEMP = ['/tmp', '/private/tmp'];
 
@@ -78,12 +110,14 @@ export function runSandbox(run: SandboxRun): SandboxSettings {
       allowWrite: [
         ...(run.readOnly ? [] : [run.workingDir]),
         ...TEMP,
+        ...(run.readOnly || !run.gitDirs ? [] : [run.gitDirs.common]),
         ...(run.writable ?? []),
         ...(run.readOnly ? [] : (run.repos ?? []).map((repo) => repo.path)),
         ...TOOL_CACHES.map((folder) => path.join(home, folder)),
       ],
       denyWrite: [
         ...gitControl(run.workingDir, run.gitFile === true),
+        ...(run.gitDirs ? worktreeControl(run.gitDirs) : []),
         ...(run.repos ?? []).flatMap((repo) => gitControl(repo.path, repo.gitFile)),
       ],
       denyRead: [

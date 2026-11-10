@@ -16,7 +16,6 @@ import {
   PrState,
   RunPurpose,
   SessionKind,
-  SessionState,
   Severity,
 } from '@ops-console/shared';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -201,7 +200,7 @@ export class FixesService {
     }
     if (this.cancelling.has(id)) throw new ApiError(409, ErrorCode.InvalidState, 'The Fix is already being cancelled');
     const found = this.found(id);
-    const place = this.placeOf(fix, found.service);
+    const place = await this.placeOf(fix, found.service);
     this.cancelling.add(id);
     try {
       await this.halt(fix);
@@ -250,43 +249,34 @@ export class FixesService {
   }
 
   /**
-   * Where the Fix's branch lives: the Session's clone, or the Service's Repo. Refused while another Session in that
-   * Repo is running, since the checkout would move under it.
+   * Where the Fix's branch lives: the Session's clone, or the Session's own worktree of the Service's Repo. A worktree
+   * has no branch checked out for the Repo's default branch, so going back to it is a detached HEAD.
    */
-  private placeOf(
+  private async placeOf(
     fix: FixRow,
     service: ServiceRow,
-  ): { dir: string; fallback: string; sessionId: string | null } | null {
+  ): Promise<{ dir: string; fallback: string; sessionId: string | null; detached: boolean } | null> {
     const session = fix.sessionId
       ? this.store.db.select().from(sessions).where(eq(sessions.id, fix.sessionId)).get()
       : undefined;
     if (session?.kind === SessionKind.Anonymous) {
-      return { dir: this.anonymous.folder(session.id), fallback: 'main', sessionId: session.id };
+      return { dir: this.anonymous.folder(session.id), fallback: 'main', sessionId: session.id, detached: false };
     }
     const source = this.sessions.sourceOf(service);
     if (source.kind !== 'repo') return null;
-    const busy = this.store.db
-      .select({ id: sessions.id, state: sessions.state })
-      .from(sessions)
-      .where(eq(sessions.repoId, source.repo.id))
-      .all()
-      .some(
-        (row) =>
-          row.id !== fix.sessionId &&
-          (row.state === SessionState.Working || row.state === SessionState.WaitingApproval),
-      );
-    if (busy) {
-      throw new ApiError(
-        409,
-        ErrorCode.InvalidState,
-        'A Session in this Repo is running; stop it, then cancel the Fix',
-      );
-    }
-    return { dir: source.repo.path, fallback: source.repo.defaultBranch, sessionId: session?.id ?? null };
+    return {
+      dir: session ? await this.workspace.ensure(session) : source.repo.path,
+      fallback: source.repo.defaultBranch,
+      sessionId: session?.id ?? null,
+      detached: session !== undefined,
+    };
   }
 
   /** Back to the source branch with the Fix's work on the stash; the branch the checkout is on after. */
-  private async restore(fix: FixRow, place: { dir: string; fallback: string }): Promise<string | null> {
+  private async restore(
+    fix: FixRow,
+    place: { dir: string; fallback: string; detached: boolean },
+  ): Promise<string | null> {
     if (!fix.branch) return null;
     const listed = branchList(fix.playbookBranches ?? '');
     try {
@@ -297,7 +287,8 @@ export class FixesService {
         }
         const fallback = (await this.git.defaultBranch(place.dir)) ?? place.fallback;
         const base = await this.git.codeBase(place.dir, listed.length > 0 ? listed : [place.fallback, fallback]);
-        await this.git.checkout(place.dir, base.branch, false);
+        if (place.detached) await this.git.checkoutDetached(place.dir, base.ref);
+        else await this.git.checkout(place.dir, base.branch, false);
         current = base.branch;
       }
       if ((await this.git.branches(place.dir)).some((candidate) => candidate.name === fix.branch)) {
@@ -578,7 +569,7 @@ Change nothing else. ${JSON_ONLY}
     } else {
       const source = this.sessions.sourceOf(context.service);
       if (source.kind !== 'repo') throw new StageFailed('the Fix Session lost its Repo');
-      dir = source.repo.path;
+      dir = session ? await this.workspace.ensure(session) : source.repo.path;
       repoId = source.repo.id;
       remote = { host: source.repo.host, slug: source.repo.remoteSlug };
       fallback = source.repo.defaultBranch;

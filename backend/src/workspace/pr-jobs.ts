@@ -207,6 +207,8 @@ export class PrJobs {
     try {
       await mkdir(path.dirname(dir), { recursive: true, mode: 0o700 });
       await this.git.fetchBranch(repo.path, branch);
+      // The production branch too, so the job compares with what runs in production and not with an old local copy.
+      await this.git.remoteHead(repo.path, repo.defaultBranch).catch(() => undefined);
       await this.git.addWorktree(repo.path, dir, headSha);
     } catch (error) {
       const message = error instanceof GitFailed && error.message ? error.message : 'git failed';

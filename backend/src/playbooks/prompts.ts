@@ -12,6 +12,13 @@ export const SAFETY_LINES = `Console safety rules. They come last and win over a
 - Mock data is made up and shaped like the real data. No value read from a PROD Connection goes into a file, a commit, a pull request or its comments, a ticket or a Report.`;
 
 /**
+ * Fresh code. Commits reach the production branch without reaching the operator's folders, so anything read from an old
+ * copy gives a wrong review, fix or reply. Every run gets this line, whichever Playbook it follows, the operator's own
+ * included.
+ */
+export const LATEST_CODE_RULE = `Latest code first. Commits reach the production branch (main or master, whichever the repository uses) that this machine has not fetched, so code read from an old copy gives a wrong review, fix or reply. Before you read, review or change code, get the newest production branch: in your own working folder run git fetch origin, then read, compare with and branch from origin/<production branch>, never from the local branch of that name. A scratch copy was made by the console from code it just fetched: record its commit instead. Name the production commit you worked from. When the fetch fails, say so, and mark every conclusion that depends on it unverified.`;
+
+/**
  * Commit hooks. Whatever the repo runs on `git commit` (husky, lefthook, pre-commit, a `core.hooksPath` folder,
  * `.git/hooks`) runs in every language, and the agent finishes it instead of bypassing it. The `PreToolUse` hook
  * refuses the usual bypasses (`hook-bypass.ts`).
@@ -45,7 +52,7 @@ export function repoFoldersRule(folders: string[]): string {
 }
 
 /**
- * The system prompt a run appends to Claude Code's own: the kind's instructions, the console's pull request and commit
+ * The system prompt a run appends to Claude Code's own: the kind's instructions, the console's latest-code, pull request and commit
  * hook rules, the Playbook's rules, then the safety lines.
  */
 export function systemAppend(
@@ -54,7 +61,14 @@ export function systemAppend(
   outputFolder: string | null = null,
   repoFolders: string[] = [],
 ): string {
-  const parts = [instructions ?? '', PR_DESCRIPTION_RULE, OPEN_PR_RULE, INTEGRATIONS_RULE, COMMIT_HOOKS_RULE];
+  const parts = [
+    instructions ?? '',
+    LATEST_CODE_RULE,
+    PR_DESCRIPTION_RULE,
+    OPEN_PR_RULE,
+    INTEGRATIONS_RULE,
+    COMMIT_HOOKS_RULE,
+  ];
   if (outputFolder !== null) parts.push(outputFilesRule(outputFolder));
   if (repoFolders.length > 0) parts.push(repoFoldersRule(repoFolders));
   if (rules?.trim()) parts.push(`The operator's rules for this work:\n${rules.trim()}`);

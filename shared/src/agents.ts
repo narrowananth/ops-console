@@ -225,6 +225,8 @@ export const sessionSchema = z.object({
   branch: z.string().nullable(),
   /** `pr_review` Sessions: the pull request in `repo_id`. */
   pr_number: z.number().int().nullable(),
+  /** `repo` Sessions: the pull request the Session opened from the branch it is on now; null on any other branch. */
+  pull_request: z.object({ number: z.number().int(), url: z.string() }).nullable(),
   /** `devtools` Sessions: the Connections the agent may reach; empty means every Connection with access. Null for other kinds. */
   connection_ids: z.array(z.string()).nullable(),
   /** The Monitor Alert whose Verification or Fix runs in it; null for any other Session. */

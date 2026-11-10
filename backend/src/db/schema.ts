@@ -125,6 +125,10 @@ export const sessions = sqliteTable(
     repoId: text('repo_id').references((): AnySQLiteColumn => repos.id, { onDelete: 'restrict' }),
     branch: text(),
     prNumber: integer('pr_number'),
+    /** The pull request this Session opened, and the branch it came from; shown only while the Session is on that branch. */
+    openedPrNumber: integer('opened_pr_number'),
+    openedPrUrl: text('opened_pr_url'),
+    openedPrBranch: text('opened_pr_branch'),
     /** JSON array of the other Repos' ids the operator opened to this Session's agent; null for none. */
     extraRepoIds: text('extra_repo_ids'),
     /** The Alert a Verification or Fix runs for. */

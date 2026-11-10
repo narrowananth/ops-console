@@ -99,6 +99,9 @@ type Ctx = {
   codeHosts: FakeCodeHosts;
 };
 
+/** Where a Session's agent works: its own worktree of the Repo. */
+const worktreeOf = (ctx: Ctx, sessionId: string) => path.join(ctx.daemon.dataDir, 'session-worktrees', sessionId);
+
 function setConnector(store: Store, id: ConnectorId, patch: Partial<typeof connectors.$inferInsert>) {
   store.write((tx) => tx.update(connectors).set(patch).where(eq(connectors.id, id)).run());
 }
@@ -1013,7 +1016,9 @@ describe('Fix', () => {
       pr_url: 'https://github.com/acme/orders-api/pull/41',
       stage: 'pr',
     });
-    expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe('ORD-7-null-order-total');
+    expect(git(worktreeOf(ctx, fix.session_id), 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe(
+      'ORD-7-null-order-total',
+    );
     const advanced = listener.events.filter((e: WsEvent) => e.event === 'fix.advanced');
     expect(advanced.length).toBeGreaterThanOrEqual(5);
     listener.close();
@@ -1063,7 +1068,11 @@ describe('Fix', () => {
     expect(fix.playbook.steps.map((step: { status: string }) => step.status)).toEqual(
       stepTurns(PlaybookTrigger.Fix).map(() => 'done'),
     );
-    expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe('fix/null-order-total');
+    expect(git(worktreeOf(ctx, fix.session_id), 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe(
+      'fix/null-order-total',
+    );
+    // The operator's own folder is never checked out onto the Fix's branch.
+    expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe('main');
     const prompts = ctx.daemon.sdk.calls.slice(before).map((call) => call.prompt);
     expect(prompts).toHaveLength(fix.playbook.steps.length + 1);
     expect(prompts.some((prompt) => prompt.includes('Atlassian'))).toBe(false);
@@ -1113,7 +1122,9 @@ describe('Fix', () => {
       ticket_skipped: null,
     });
     expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.status).toBe('pr_open');
-    expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe('fix/null-order-total');
+    expect(git(worktreeOf(ctx, fix.session_id), 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe(
+      'fix/null-order-total',
+    );
     const prompts = ctx.daemon.sdk.calls.slice(callsBefore).map((call) => call.prompt);
     expect(prompts).toHaveLength(3);
     expect(prompts.some((prompt) => prompt.includes('Atlassian'))).toBe(false);
@@ -1140,7 +1151,9 @@ describe('Fix', () => {
       pr_number: 41,
       ticket_skipped: 'the agent did not answer as asked',
     });
-    expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe('fix/null-order-total');
+    expect(git(worktreeOf(ctx, fix.session_id), 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe(
+      'fix/null-order-total',
+    );
     const prompts = ctx.daemon.sdk.calls.slice(callsBefore).map((call) => call.prompt);
     expect(prompts).toHaveLength(4);
     expect(prompts.slice(1).some((prompt) => prompt.includes('Atlassian'))).toBe(false);
@@ -1161,14 +1174,18 @@ describe('Fix', () => {
       (status) => status === 'failed',
       'the Fix to fail',
     );
-    expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe('fix/null-order-total');
-    await writeFile(path.join(ctx.dir, 'total.ts'), 'export const total = 0;\n');
+    const sessionId = (await ctx.http.get(`/fixes/${fixId}`)).body.data.session_id as string;
+    const here = worktreeOf(ctx, sessionId);
+    expect(git(here, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe('fix/null-order-total');
+    await writeFile(path.join(here, 'total.ts'), 'export const total = 0;\n');
 
     const cancelled = await ctx.http.post(`/fixes/${fixId}/cancel`);
     expect(cancelled.status).toBe(200);
     expect(cancelled.body.data).toMatchObject({ status: 'abandoned' });
-    expect(git(ctx.dir, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()).toBe('main');
-    expect(git(ctx.dir, 'status', '--porcelain').toString()).toBe('');
+    // The Session's worktree goes back to the production code, detached since the Repo's own folder holds main.
+    expect(git(here, 'branch', '--show-current').toString().trim()).toBe('');
+    expect(git(here, 'status', '--porcelain').toString()).toBe('');
+    expect((await ctx.http.get(`/sessions/${sessionId}`)).body.data.branch).toBe('main');
     expect(git(ctx.dir, 'branch', '--list', 'fix/null-order-total').toString()).toBe('');
     expect(git(ctx.dir, 'stash', 'list').toString()).toContain('ops-console: cancelled Fix fix/null-order-total');
     expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.status).toBe('verified');
@@ -1734,7 +1751,7 @@ describe('Playbooks in Monitor jobs', () => {
   it("runs the Fix's steps in the checkout, in a new conversation, with the rules Fix copied", async () => {
     const ctx = await start();
     const alert = await failing(ctx);
-    const repoId = await linkRepo(ctx, alert.service.id);
+    await linkRepo(ctx, alert.service.id);
     await verify(ctx, alert.id);
     setConnector(ctx.store, ConnectorId.Jira, { status: HealthStatus.Off });
     await attach(ctx, 'fix', {
@@ -1757,8 +1774,9 @@ describe('Playbooks in Monitor jobs', () => {
       { title: 'Test a lasting fix', writes: true, status: 'done', summary: 'test added and passing' },
     ]);
     const calls = ctx.daemon.sdk.calls.slice(before);
-    const repoPath = ctx.store.db.select().from(repos).where(eq(repos.id, repoId)).get()?.path;
-    expect(calls.map((call) => call.options.cwd)).toEqual([repoPath, repoPath]);
+    // The Fix works in its Session's own worktree of the Repo, not in the operator's folder.
+    const here = worktreeOf(ctx, fix.session_id);
+    expect(calls.map((call) => call.options.cwd)).toEqual([here, here]);
     expect(calls[0]?.options.resume).toBeUndefined();
     expect(calls[1]?.options.resume).toBeTruthy();
     expect(calls[0]?.prompt).toContain('Root cause: OrderService reads a missing total');

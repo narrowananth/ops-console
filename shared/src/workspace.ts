@@ -363,7 +363,7 @@ export type SessionDiffFile = z.infer<typeof sessionDiffFileSchema>;
  * Repo's default branch.
  */
 export const sessionDiffSchema = z.object({
-  /** The branch checked out in the Repo now; null on a detached HEAD. */
+  /** The branch checked out in the Session's own worktree; the Session's branch while that is detached. */
   branch: z.string().nullable(),
   /** What the changes are compared with, such as `origin/main`; null when the Repo has no commit to compare with. */
   base: z.string().nullable(),

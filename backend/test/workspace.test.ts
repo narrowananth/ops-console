@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ConnectorId, GitHost, HealthStatus, PlaybookTrigger, PrReviewState, type WsEvent } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
@@ -77,6 +77,9 @@ async function start(): Promise<Ctx> {
   return { daemon, host, repoId: imported.body.data.id, dir, store, http };
 }
 
+/** Where a Session's agent works: its own worktree of the Repo. */
+const worktree = (ctx: Ctx, sessionId: string) => path.join(ctx.daemon.dataDir, 'session-worktrees', sessionId);
+
 const newSession = (ctx: Ctx, branch = 'main') =>
   ctx.http.post('/sessions', { repo_id: ctx.repoId, branch }).then((res) => res.body.data.id as string);
 
@@ -98,7 +101,7 @@ describe('Sessions in a Repo', () => {
   it("starts on a branch only origin has, as a pull request's, made a local branch tracking it", async () => {
     const ctx = await start();
     const origin = path.join(await tempDir('ops-console-origin-'), 'orders-api.git');
-    execFileSync('git', ['init', '-q', '--bare', origin]);
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin]);
     git(ctx.dir, 'remote', 'set-url', 'origin', origin);
     git(ctx.dir, 'push', '-q', 'origin', 'main', 'feature-1:pr-branch');
 
@@ -115,14 +118,16 @@ describe('Sessions in a Repo', () => {
     const gone = await ctx.http.post('/sessions', { repo_id: ctx.repoId, branch: 'no-such', from_origin: true });
     expect(gone.status).toBe(502);
     expect(gone.body.error.code).toBe('upstream_failed');
-    const log = (await ctx.http.get('/action-log?kind=git')).body.data as { command: string; outcome: string }[];
+    const log = (
+      (await ctx.http.get('/action-log?kind=git')).body.data as { command: string; outcome: string }[]
+    ).filter((row) => row.command.includes('git branch --track'));
     expect(log.map((row) => [row.command, row.outcome]).sort()).toEqual([
       ['git fetch origin no-such && git branch --track no-such origin/no-such', 'failed'],
       ['git fetch origin pr-branch && git branch --track pr-branch origin/pr-branch', 'ok'],
     ]);
   });
 
-  it('runs the agent in the Repo folder, in two Repos side by side, and refuses a second message mid-run', async () => {
+  it("runs the agent in the Session's own worktree, in two Repos side by side, and refuses a second message mid-run", async () => {
     const ctx = await start();
     const other = await makeRepo('billing', 'git@github.com:acme/billing.git');
     const otherId = (await ctx.http.post('/repos', { path: other })).body.data.id;
@@ -146,10 +151,77 @@ describe('Sessions in a Repo', () => {
       () => ctx.http.get(`/sessions/${first}`).then((res) => res.body.data.state),
       (state) => state === 'idle',
     );
-    expect(ctx.daemon.sdk.calls.map((call) => path.basename(call.options.cwd ?? '')).sort()).toEqual([
-      'billing',
-      'orders-api',
-    ]);
+    expect(ctx.daemon.sdk.calls.map((call) => call.options.cwd).sort()).toEqual(
+      [worktree(ctx, first), path.join(ctx.daemon.dataDir, 'session-worktrees', second)].sort(),
+    );
+    // Each worktree belongs to its own Repo, and the Repo folders keep their branch.
+    expect(git(worktree(ctx, first), 'rev-parse', '--git-common-dir').toString().trim()).toBe(
+      path.join(await realpath(ctx.dir), '.git'),
+    );
+    expect(git(ctx.dir, 'branch', '--show-current').toString().trim()).toBe('main');
+  });
+
+  it('gives each Session a worktree of its own, so Sessions on different branches work at once and the Repo folder stays put', async () => {
+    const ctx = await start();
+    git(ctx.dir, 'branch', 'feature-2');
+    const onMain = await newSession(ctx);
+    const onFeature = await newSession(ctx, 'feature-1');
+    expect(git(worktree(ctx, onFeature), 'branch', '--show-current').toString().trim()).toBe('feature-1');
+    // A Session on the default branch starts detached: the Repo folder may hold the branch itself.
+    expect(git(worktree(ctx, onMain), 'branch', '--show-current').toString().trim()).toBe('');
+    expect(git(ctx.dir, 'branch', '--show-current').toString().trim()).toBe('main');
+
+    // A branch another Session holds is shared; one the operator's own folder holds stays there.
+    expect((await ctx.http.post('/sessions', { repo_id: ctx.repoId, branch: 'feature-1' })).status).toBe(201);
+    git(ctx.dir, 'switch', '-q', 'feature-2');
+    const held = await ctx.http.post('/sessions', { repo_id: ctx.repoId, branch: 'feature-2' });
+    expect(held.status).toBe(502);
+    expect(held.body.error.code).toBe('upstream_failed');
+    expect(held.body.error.message).toContain("checked out in the Repo's own folder");
+    expect((await ctx.http.get('/sessions?kind=repo')).body.data).toHaveLength(3);
+
+    // Deleting a Session takes its worktree away and keeps its branch.
+    expect((await ctx.http.delete(`/sessions/${onFeature}`)).status).toBe(204);
+    await until(
+      async () => existsSync(worktree(ctx, onFeature)),
+      (there) => !there,
+      'the worktree gone',
+    );
+    expect(git(ctx.dir, 'branch', '--list', 'feature-1').toString()).toContain('feature-1');
+  });
+
+  it('starts a Session from the newest default branch on origin, not from the Repo folder as it was', async () => {
+    const ctx = await start();
+    const origin = path.join(await tempDir('ops-console-origin-'), 'orders-api.git');
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin]);
+    git(ctx.dir, 'remote', 'set-url', 'origin', origin);
+    git(ctx.dir, 'push', '-q', 'origin', 'main');
+    // A teammate's commit reaches origin; the Repo folder has not fetched it.
+    const teammate = path.join(await tempDir('ops-console-teammate-'), 'orders-api');
+    execFileSync('git', ['clone', '-q', origin, teammate]);
+    await writeFile(path.join(teammate, 'merged.ts'), 'from production\n');
+    git(teammate, 'add', '.');
+    git(teammate, 'commit', '-q', '-m', 'merged to production');
+    git(teammate, 'push', '-q', 'origin', 'main');
+    const newest = git(teammate, 'rev-parse', 'HEAD').toString().trim();
+
+    const id = await newSession(ctx);
+    expect(git(worktree(ctx, id), 'rev-parse', 'HEAD').toString().trim()).toBe(newest);
+    expect(existsSync(path.join(worktree(ctx, id), 'merged.ts'))).toBe(true);
+    expect(existsSync(path.join(ctx.dir, 'merged.ts'))).toBe(false);
+
+    // A later run starts at the newest commit again while the Session has changed nothing.
+    await writeFile(path.join(teammate, 'later.ts'), 'later\n');
+    git(teammate, 'add', '.');
+    git(teammate, 'commit', '-q', '-m', 'later');
+    git(teammate, 'push', '-q', 'origin', 'main');
+    ctx.daemon.sdk.script({ text: 'read' });
+    await ctx.http.post(`/sessions/${id}/messages`, { text: 'look' });
+    await until(
+      () => ctx.http.get(`/sessions/${id}`).then((res) => res.body.data.state),
+      (state) => state === 'idle',
+    );
+    expect(existsSync(path.join(worktree(ctx, id), 'later.ts'))).toBe(true);
   });
 
   it('asks what to do with the Sessions before removing a Repo, and deleting a Session keeps reviews and agent comments', async () => {
@@ -244,21 +316,25 @@ describe('branches', () => {
     const ctx = await start();
     const id = await newSession(ctx);
     const { events, close } = await listen(ctx.daemon);
-    await writeFile(path.join(ctx.dir, 'README.md'), 'changed\n');
-    await writeFile(path.join(ctx.dir, 'new.txt'), 'untracked\n');
+    await writeFile(path.join(worktree(ctx, id), 'README.md'), 'changed\n');
+    await writeFile(path.join(worktree(ctx, id), 'new.txt'), 'untracked\n');
 
     const moved = await ctx.http.post(`/sessions/${id}/checkout`, { branch: 'feature-1' });
     expect(moved.status).toBe(200);
     expect(moved.body.data.stashed).toBe(true);
     expect(moved.body.data.session.branch).toBe('feature-1');
-    expect(git(ctx.dir, 'branch', '--show-current').toString().trim()).toBe('feature-1');
+    // The Session's worktree moved; the Repo's own folder did not.
+    expect(git(worktree(ctx, id), 'branch', '--show-current').toString().trim()).toBe('feature-1');
+    expect(git(ctx.dir, 'branch', '--show-current').toString().trim()).toBe('main');
     expect(git(ctx.dir, 'stash', 'list').toString()).toContain('before switching to feature-1');
 
     const log = (await ctx.http.get(`/action-log?session_id=${id}&kind=git`)).body.data;
-    expect(log.map((row: { command: string }) => row.command).sort()).toEqual([
-      'git checkout feature-1',
-      'git stash push --include-untracked',
-    ]);
+    expect(
+      log
+        .map((row: { command: string }) => row.command)
+        .filter((command: string) => !command.includes('worktree add'))
+        .sort(),
+    ).toEqual(['git checkout feature-1', 'git stash push --include-untracked']);
     expect(
       log.every((row: { outcome: string; actor: string }) => row.outcome === 'ok' && row.actor === 'operator'),
     ).toBe(true);
@@ -283,34 +359,36 @@ describe('branches', () => {
     expect(failed).toHaveLength(1);
   });
 
-  it('refuses while the Session or any Session in the Repo is running', async () => {
+  it('refuses while the Session is running, and lets another Session in the Repo switch meanwhile', async () => {
     const ctx = await start();
     const one = await newSession(ctx);
     const two = await newSession(ctx);
     const hold = gate();
     ctx.daemon.sdk.script({ wait: hold.promise });
     await ctx.http.post(`/sessions/${one}/messages`, { text: 'go' });
-    for (const id of [one, two]) {
-      const refused = await ctx.http.post(`/sessions/${id}/checkout`, { branch: 'feature-1' });
-      expect(refused.status).toBe(409);
-      expect(refused.body.error.code).toBe('invalid_state');
-    }
+    const refused = await ctx.http.post(`/sessions/${one}/checkout`, { branch: 'feature-1' });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.code).toBe('invalid_state');
+    expect((await ctx.http.post(`/sessions/${two}/checkout`, { branch: 'feature-1' })).status).toBe(200);
     hold.open();
     await until(
       () => ctx.http.get(`/sessions/${one}`).then((res) => res.body.data.state),
       (state) => state === 'idle',
     );
-    expect((await ctx.http.post(`/sessions/${two}/checkout`, { branch: 'feature-1' })).status).toBe(200);
-    expect((await ctx.http.get(`/action-log?kind=git`)).body.data).toHaveLength(1);
+    const checkouts = (await ctx.http.get(`/action-log?kind=git`)).body.data.filter((row: { command: string }) =>
+      row.command.startsWith('git checkout'),
+    );
+    expect(checkouts).toHaveLength(1);
   });
+
   it('follows a branch the agent checked out in its run, and leaves a detached HEAD alone', async () => {
     const ctx = await start();
     const id = await newSession(ctx);
     const hold = gate();
     ctx.daemon.sdk.script({ wait: hold.promise }, { text: 'pushed the fix' });
     await ctx.http.post(`/sessions/${id}/messages`, { text: 'fix it on a branch' });
-    // What the agent does from its shell in the run.
-    git(ctx.dir, 'checkout', '-q', '-b', 'fix/login');
+    // What the agent does from its shell in the run: in its own worktree.
+    git(worktree(ctx, id), 'checkout', '-q', '-b', 'fix/login');
     hold.open();
     await until(
       () => ctx.http.get(`/sessions/${id}`).then((res) => res.body.data.branch),
@@ -318,7 +396,7 @@ describe('branches', () => {
       'the Session on fix/login',
     );
 
-    git(ctx.dir, 'checkout', '-q', '--detach');
+    git(worktree(ctx, id), 'checkout', '-q', '--detach');
     ctx.daemon.sdk.script({ text: 'looked' });
     await ctx.http.post(`/sessions/${id}/messages`, { text: 'look' });
     await until(
@@ -326,22 +404,6 @@ describe('branches', () => {
       (state) => state === 'idle',
     );
     expect((await ctx.http.get(`/sessions/${id}`)).body.data.branch).toBe('fix/login');
-  });
-
-  it('keeps the branch the agent made for its fix when the run ends back on the default branch', async () => {
-    const ctx = await start();
-    const id = await newSession(ctx);
-    const hold = gate();
-    ctx.daemon.sdk.script({ wait: hold.promise }, { text: 'pushed the fix' });
-    await ctx.http.post(`/sessions/${id}/messages`, { text: 'fix it on a branch' });
-    git(ctx.dir, 'checkout', '-q', '-b', 'fix/login');
-    git(ctx.dir, 'checkout', '-q', 'main');
-    hold.open();
-    await until(
-      () => ctx.http.get(`/sessions/${id}`).then((res) => res.body.data.branch),
-      (branch) => branch === 'fix/login',
-      'the Session on fix/login',
-    );
   });
 
   it('stays on its branch after a run that checked out nothing, whatever another Session left checked out', async () => {
@@ -364,13 +426,15 @@ describe('Session diff', () => {
   it("shows the branch's commits and its staged, unstaged and untracked files against where it forked", async () => {
     const ctx = await start();
     const id = await newSession(ctx);
+    const here = worktree(ctx, id);
+    expect((await ctx.http.get(`/sessions/${id}/diff`)).body.data.files).toEqual([]);
     expect((await ctx.http.post(`/sessions/${id}/checkout`, { branch: 'fix/login', create: true })).status).toBe(200);
-    await writeFile(path.join(ctx.dir, 'src.ts'), 'one\ntwo\n');
-    git(ctx.dir, 'add', '.');
-    git(ctx.dir, 'commit', '-q', '-m', 'add src');
-    await writeFile(path.join(ctx.dir, 'README.md'), 'hello\nworld\n');
-    git(ctx.dir, 'mv', 'src.ts', 'app.ts');
-    await writeFile(path.join(ctx.dir, 'notes.md'), 'new\n');
+    await writeFile(path.join(here, 'src.ts'), 'one\ntwo\n');
+    git(here, 'add', '.');
+    git(here, 'commit', '-q', '-m', 'add src');
+    await writeFile(path.join(here, 'README.md'), 'hello\nworld\n');
+    git(here, 'mv', 'src.ts', 'app.ts');
+    await writeFile(path.join(here, 'notes.md'), 'new\n');
 
     const res = await ctx.http.get(`/sessions/${id}/diff`);
     expect(res.status).toBe(200);
@@ -397,7 +461,7 @@ describe('Session diff', () => {
     expect([diff.additions, diff.deletions]).toEqual([4, 0]);
   });
 
-  it("shows only a Session's own branch while the folder has another Session's checked out", async () => {
+  it("shows only a Session's own changes, whatever other Sessions and the Repo folder hold", async () => {
     const ctx = await start();
     const idle = await newSession(ctx);
     git(ctx.dir, 'checkout', '-q', '-b', 'feature/old');
@@ -406,7 +470,9 @@ describe('Session diff', () => {
     git(ctx.dir, 'commit', '-q', '-m', 'add old');
     git(ctx.dir, 'checkout', '-q', 'main');
     const other = await newSession(ctx, 'feature/old');
-    // Another Session's agent moved the folder to its branch and left work in it.
+    // Another Session edits in its worktree, and the operator's own folder holds work on a branch of its own.
+    const third = await newSession(ctx, 'feature-1');
+    await writeFile(path.join(worktree(ctx, third), 'third.ts'), 'third\n');
     git(ctx.dir, 'checkout', '-q', '-b', 'fix/other');
     await writeFile(path.join(ctx.dir, 'other.ts'), 'other\n');
 
@@ -415,18 +481,18 @@ describe('Session diff', () => {
     const onOld = (await ctx.http.get(`/sessions/${other}/diff`)).body.data;
     expect(onOld.branch).toBe('feature/old');
     expect(onOld.files.map((file: { name: string }) => file.name)).toEqual(['old.ts']);
-    // Neither Session moved to the branch checked out.
+    const onThird = (await ctx.http.get(`/sessions/${third}/diff`)).body.data;
+    expect(onThird.files.map((file: { name: string }) => file.name)).toEqual(['third.ts']);
     expect((await ctx.http.get(`/sessions/${idle}`)).body.data.branch).toBe('main');
     expect((await ctx.http.get(`/sessions/${other}`)).body.data.branch).toBe('feature/old');
   });
 
-  it('keeps a running Session on its own branch until its run checks one out, whatever another Session left checked out', async () => {
+  it("shows a running Session's own edits and the branch its run made, and nothing from the Repo folder", async () => {
     const ctx = await start();
     const id = await newSession(ctx);
-    // Another Session's agent left the shared folder on its branch, with work in it.
+    // The operator's folder holds work of its own.
     git(ctx.dir, 'checkout', '-q', '-b', 'fix/other');
     await writeFile(path.join(ctx.dir, 'other.ts'), 'other\n');
-    await new Promise((resolve) => setTimeout(resolve, 1100));
     const hold = gate();
     ctx.daemon.sdk.script({ wait: hold.promise }, { text: 'done' });
     await ctx.http.post(`/sessions/${id}/messages`, { text: 'work on main' });
@@ -434,11 +500,9 @@ describe('Session diff', () => {
     const before = (await ctx.http.get(`/sessions/${id}/diff`)).body.data;
     expect([before.branch, before.files]).toEqual(['main', []]);
 
-    // The run's own checkout is the Session's branch from then on.
-    await rm(path.join(ctx.dir, 'other.ts'));
-    git(ctx.dir, 'checkout', '-q', 'main');
-    git(ctx.dir, 'checkout', '-q', '-b', 'fix/mine');
-    await writeFile(path.join(ctx.dir, 'mine.ts'), 'mine\n');
+    // The agent makes a branch in its worktree and edits there.
+    git(worktree(ctx, id), 'checkout', '-q', '-b', 'fix/mine');
+    await writeFile(path.join(worktree(ctx, id), 'mine.ts'), 'mine\n');
     const during = (await ctx.http.get(`/sessions/${id}/diff`)).body.data;
     expect(during.branch).toBe('fix/mine');
     expect(during.files.map((file: { name: string }) => file.name)).toEqual(['mine.ts']);
@@ -448,6 +512,20 @@ describe('Session diff', () => {
       () => ctx.http.get(`/sessions/${id}`).then((res) => res.body.data.state),
       (state) => state === 'idle',
     );
+    await until(
+      () => ctx.http.get(`/sessions/${id}`).then((res) => res.body.data.branch),
+      (branch) => branch === 'fix/mine',
+      'the Session on fix/mine',
+    );
+  });
+
+  it('shows the edits of a detached Session on the default branch, named for the branch it is on', async () => {
+    const ctx = await start();
+    const id = await newSession(ctx);
+    await writeFile(path.join(worktree(ctx, id), 'edit.ts'), 'edit\n');
+    const diff = (await ctx.http.get(`/sessions/${id}/diff`)).body.data;
+    expect(diff.branch).toBe('main');
+    expect(diff.files.map((file: { name: string }) => file.name)).toEqual(['edit.ts']);
   });
 
   it('has no diff for a Session without a Repo', async () => {

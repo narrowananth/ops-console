@@ -4,6 +4,12 @@ import type { SessionRow } from './sessions.service';
 export type SessionKindHandler = {
   /** Where the agent runs for this Session. */
   workingDir: (session: SessionRow) => string;
+  /** The Session's working folder is a git worktree of its own: its runs may write the Repo's git folder (not its hooks or config). */
+  ownWorktree?: boolean;
+  /** Makes ready what the Session's own runs need, such as its worktree, before each run; a throw fails the run. */
+  prepare?: (session: SessionRow) => Promise<void>;
+  /** Runs after the Session is deleted, to take away what it kept. Its errors are ignored. */
+  removed?: (session: SessionRow) => Promise<void>;
   /** `pr_review` Sessions take no messages from the operator. */
   acceptsMessages: boolean;
   /** `POST /sessions` for this kind. A kind without it is made by the backend only. */

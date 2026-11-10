@@ -90,8 +90,13 @@ async function start(origin = 'git@github.com:acme/orders-api.git'): Promise<Ctx
   await writeFile(path.join(dir, 'fix.txt'), 'fixed\n');
   git(dir, 'add', '.');
   git(dir, 'commit', '-q', '-m', 'Fix the total');
+  // The Repo's own folder stays on main: Sessions work in worktrees of their own.
+  git(dir, 'switch', '-q', 'main');
   return { daemon, host, store, http, repoId, dir, remote };
 }
+
+/** Where a Session's agent works. */
+const worktree = (ctx: Ctx, sessionId: string) => path.join(ctx.daemon.dataDir, 'session-worktrees', sessionId);
 
 const session = (ctx: Ctx, branch = 'work') =>
   ctx.http.post('/sessions', { repo_id: ctx.repoId, branch }).then((res) => res.body.data.id as string);
@@ -111,7 +116,7 @@ describe('Pull request opening', () => {
       uncommitted_files: 0,
     });
     // Changes not committed are left out, and counted so the form can say so.
-    await writeFile(path.join(ctx.dir, 'draft.txt'), 'wip\n');
+    await writeFile(path.join(worktree(ctx, id), 'draft.txt'), 'wip\n');
     expect((await ctx.http.get(`/sessions/${id}/pull-request`)).body.data.uncommitted_files).toBe(1);
   });
 
@@ -158,7 +163,9 @@ describe('Pull request opening', () => {
       { title: 'Fix the total', body: 'Defaults it to zero.', head: 'work', base: 'main' },
     ]);
     expect(git(ctx.remote, 'rev-parse', 'work')).toBe(git(ctx.dir, 'rev-parse', 'work'));
-    const log = (await ctx.http.get('/action-log')).body.data as { kind: string; outcome: string; command: string }[];
+    const log = (
+      (await ctx.http.get('/action-log')).body.data as { kind: string; outcome: string; command: string }[]
+    ).filter((row) => !row.command.includes('worktree add'));
     expect(log.map((row) => [row.kind, row.command, row.outcome]).sort()).toEqual([
       ['git', 'git push origin work', 'ok'],
       ['pr', 'open pull request work -> main', 'ok'],
@@ -169,6 +176,16 @@ describe('Pull request opening', () => {
       can_open: false,
       pull_request: { number: 41, url: 'https://github.com/acme/orders-api/pull/41' },
     });
+    // The Session keeps the pull request it opened while it stays on that branch; another Session on the branch, or this
+    // one on another branch, does not show it.
+    const link = { number: 41, url: 'https://github.com/acme/orders-api/pull/41' };
+    expect((await ctx.http.get(`/sessions/${id}`)).body.data.pull_request).toEqual(link);
+    const beside = await session(ctx);
+    expect((await ctx.http.get(`/sessions/${beside}`)).body.data.pull_request).toBeNull();
+    await ctx.http.post(`/sessions/${id}/checkout`, { branch: 'next', create: true });
+    expect((await ctx.http.get(`/sessions/${id}`)).body.data.pull_request).toBeNull();
+    await ctx.http.post(`/sessions/${id}/checkout`, { branch: 'work' });
+    expect((await ctx.http.get(`/sessions/${id}`)).body.data.pull_request).toEqual(link);
   });
 
   it('opens one pull request for two clicks at once, and shows the open one on a later click (14)', async () => {
@@ -241,9 +258,11 @@ describe('Pull request opening', () => {
       /^Conflict: work moved on origin and rebasing onto it conflicts\. The rebase was aborted/,
     );
     // The branch is as it was: no rebase left half done.
-    expect(git(ctx.dir, 'status', '--porcelain', '--branch')).toBe('## work');
+    expect(git(worktree(ctx, id), 'status', '--porcelain', '--branch')).toBe('## work');
     expect(ctx.host.opened).toEqual([]);
-    const log = (await ctx.http.get('/action-log?kind=git')).body.data as { outcome: string }[];
+    const log = (
+      (await ctx.http.get('/action-log?kind=git')).body.data as { outcome: string; command: string }[]
+    ).filter((row) => !row.command.includes('worktree add'));
     expect(log.map((row) => row.outcome)).toEqual(['failed']);
   });
 
@@ -268,6 +287,9 @@ describe('Pull request opening', () => {
     const append = JSON.stringify(ctx.daemon.sdk.calls.at(-1)?.options.systemPrompt ?? '');
     expect(append).toContain('Never push a branch');
     expect(append).toContain(OPEN_PULL_REQUEST_TOOL);
+    // Every run is told to work from the newest production branch, whichever Playbook it follows.
+    expect(append).toContain('Latest code first');
+    expect(append).toContain('git fetch origin');
   });
 
   it('gives the console tool to a Session in its Repo folder and to no other run (1)', async () => {

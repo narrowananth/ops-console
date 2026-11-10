@@ -90,7 +90,8 @@ Repos' remotes and the operator's own domains. Any other host is refused.
 
 **Playbook**:
 The rules and ordered steps the agent follows when a Trigger starts it, written by the operator, the Skills it holds,
-the branches Verify and Fix read the code from, and whether a Fix makes a Ticket. Each Trigger holds one; one Playbook
+the branches Verify and Fix read the code from, and whether a Fix makes a Ticket. Whatever the Playbook, every run is told
+to fetch origin and work from the newest production branch. Each Trigger holds one; one Playbook
 may be held by several. Each Trigger without one runs its built-in.
 _Avoid_: rule, pipeline, workflow
 
@@ -230,10 +231,11 @@ A local git repository imported into the console, identified by its top folder, 
 The service holding a Repo's remote: GitHub, GitLab or Bitbucket.
 
 **Pull request opening**:
-The console's push of a Session's branch to `origin` and its call to the Git host to open the pull request, run in the daemon as the operator. The agent writes the title and description; it never pushes or opens. The operator's click starts it in a Session, as does the agent's `open_pull_request` call, which needs no Approval, and a confirmed Fix starts it by itself. A branch that moved on `origin` is rebased onto it first, never forced.
+The console's push of a Session's branch from its Session worktree to `origin` and its call to the Git host to open the pull request, run in the daemon as the operator. The Session keeps the pull request it opened for as long as it is on that branch. The agent writes the title and description; it never pushes or opens. The operator's click starts it in a Session, as does the agent's `open_pull_request` call, which needs no Approval, and a confirmed Fix starts it by itself. A branch that moved on `origin` is rebased onto it first, never forced.
 
 **Session**:
-One conversation between the operator and the agent, named for its first task. It runs in one Repo on one branch, except a
+One conversation between the operator and the agent, named for its first task. It runs in one Repo on one branch, in a
+Session worktree, except a
 dev-tools Session and an anonymous Session, which have no Repo. A pull request has its own Session for the agent's
 replies, with no composer, and an Alert has one for its Verification and Fix.
 _Avoid_: chat, thread
@@ -258,9 +260,15 @@ run's steps, its Approvals and its outcome.
 The Session an Alert's first Verification makes, linked to the Alert. Every later Verification and Fix stage runs in
 it: a Session in the Service's Repo, on the Repo's default branch, or an Anonymous Session holding a clone.
 
+**Session worktree**:
+The git worktree a Session in a Repo works in, under the data folder, made from the newest commit of the Repo's default
+branch fetched from origin. Sessions on different branches work at once, and the operator's own folder is never checked
+out. A Session on the default branch starts on a detached HEAD.
+_Avoid_: checkout, working copy
+
 **Session diff**:
-What a Session's own branch changes against the commit it forked from, shown beside the conversation and followed as
-the agent moves to another branch.
+What a Session worktree changes against the commit its branch forked from, committed or not, shown beside the
+conversation and followed as the agent moves to another branch. It shows only once the worktree has changes.
 
 **Anonymous Session**:
 A Session with no imported Repo. It works in a folder of its own in the data directory, and the agent may clone a

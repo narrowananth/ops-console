@@ -63,6 +63,10 @@ export function toSession(row: SessionRow): Session {
     repo_id: row.repoId,
     branch: row.branch,
     pr_number: row.prNumber,
+    pull_request:
+      row.openedPrNumber !== null && row.openedPrUrl !== null && row.openedPrBranch === row.branch
+        ? { number: row.openedPrNumber, url: row.openedPrUrl }
+        : null,
     connection_ids: null,
     alert_id: row.alertId,
     extra_repo_ids: extraRepoIds(row),
@@ -281,9 +285,13 @@ export class SessionsService {
 
   /** The transcript stays where Claude Code keeps it; Action Log rows and Approvals lose their `session_id`. */
   remove(id: string): void {
-    this.get(id);
+    const row = this.get(id);
     if (this.runs.get(id)) throw new ApiError(409, ErrorCode.SessionBusy, "the session's run is still going");
     this.store.write((tx) => tx.delete(sessions).where(eq(sessions.id, id)).run());
+    void this.kinds
+      .get(row.kind)
+      ?.removed?.(row)
+      .catch(() => {});
   }
 }
 

@@ -104,13 +104,13 @@ agent Session.
 | `mcp` | Servers registered in every Claude account (`.claude.json`) and a Repo's `.mcp.json`; Probe, add, edit, reconnect, disable, remove; the `mcp-exec` launcher |
 | `connectors` | The nine Connectors: browser sign-in through `pup`, `gh`, `glab`, `bkt`, `slashdocs` or an MCP Server; cancel a sign-in; the MCP Server each registers; Homebrew install of a missing CLI; checks; config |
 | `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks; secrets via Keychain |
-| `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash and checkout |
+| `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash, worktrees and checkout |
 | `network` | The Network allowlist an agent run starts with: built-in hosts, the host of each Repo's `origin`, and the operator's own domains in `network_domains`; read, add and remove (`/network-allowlist`), registered by `agent` |
 | `agent` | Sessions and their kinds, Claude Agent SDK runs, the Run sandbox rules, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors; stop a run, edit the last message (file edits rewound), attachments, output files, the `save_file` tool and the `run_integration` tool (integration CLIs run in the daemon outside the sandbox); every tool call of a run kept with its time (`run_steps`) and each run's cost (`run_usage`); run health, slow and failure reasons, stages and time split read from them; the message queued behind a run; a skill message, which hands the run its skill in place of the Playbook |
 | `playbooks` | Playbooks and the Trigger each one holds, the built-ins (each Trigger's method, steps and shared rules on evidence, data, Connections and git) and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each; Custom Skills, the Built-in skills in their Skill packs (a catalog in code, the installed packs in `state.db`), the `/skills`, `/skill-packs` and `/skill-menu` routes, the Project skills read from a Repo's folder for the menu, and the Skills each Playbook holds (registered by `agent`) |
 | `accounts` | Claude accounts, their usage, Auto-switch and Smart usage; the Claude account hub: with CLIProxy on, runs go to its loopback address with the API key from the Keychain and switching pauses |
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
-| `workspace` | `repo`, `pr_review` and `anonymous` Sessions; a Session's diff, and a `repo` Session following the agent's branch; branch checkout with stash; pull requests, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews, Reply checks and Comment passes, one job per pull request at a time, each in a scratch copy at the pull request's head commit (an Agent Review makes one only when a Playbook step writes; the built-in's test step does); an Agent Review also fetches the target branch to compare with, may run the tests and build, and the console posts its findings and one summary comment; for the others the console commits, pushes, replies and resolves; Pull request opening: the console pushes a `repo` Session's branch and opens its pull request on the Git host, for a click in the Session header (the agent drafts the text) and for a Fix's PR stage |
+| `workspace` | `repo`, `pr_review` and `anonymous` Sessions; each `repo` Session in a git worktree of its own under `session-worktrees/` in the data directory, made from the fetched default branch; a Session's diff read from its worktree, and a `repo` Session following the branch its worktree is on; branch checkout with stash, in the worktree; pull requests, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews, Reply checks and Comment passes, one job per pull request at a time, each in a scratch copy at the pull request's head commit (an Agent Review makes one only when a Playbook step writes; the built-in's test step does); an Agent Review also fetches the target branch to compare with, may run the tests and build, and the console posts its findings and one summary comment; for the others the console commits, pushes, replies and resolves; Pull request opening: the console pushes a `repo` Session's branch and opens its pull request on the Git host, for a click in the Session header (the agent drafts the text) and for a Fix's PR stage |
 | `monitor` | Services, Routes, Scans and Alerts through `pup`; finding a Service's code; the Alert's Session; Verification and Reports; the operator's Review; the Fix from ticket to merged PR |
 | `devtools` | `devtools` Sessions scoped to Connections; ties MCP calls to their Connection; the PROD-write rule; the instructions that make the agent hand over Results and a Comparison |
 | `updates` | The newest GitHub release, the version record (`update.json`), install through `install.sh`, auto-update, the wait for running agent runs |
@@ -177,7 +177,7 @@ clone of its Git URL. Its runs work in a scratch copy: a git worktree of that co
 commit of the Verify Playbook's branch (the default branch when blank), fetched from origin first,
 under `scratch/` in the data directory, removed once the Report is ready. The Report also
 goes to a Markdown file in the Datadog Connector's reports folder. Confirming the Report starts the
-Fix in the same Session, in the checkout and in a new conversation, stage by stage (ticket, branch,
+Fix in the same Session, in its worktree and in a new conversation, stage by stage (ticket, branch,
 steps, PR), each agent run ending with JSON. The ticket stage runs only when the Fix Playbook's Jira ticket switch is
 on and Jira is connected; otherwise the branch is `fix/<name>`.
 
@@ -273,7 +273,7 @@ edits. Attached files sit in the Session's `attachments/` folder and output file
 run sends CLIProxy's API key and address in place of an account's sign-in, usage is not read from it and account
 switching is off; the address must be loopback (ADR 0003). A
 conversation begun in one folder moves its transcript to the next run's folder, so a chat after a
-Verification resumes it in the checkout. Runs live in the daemon's memory; a restart
+Verification resumes it in the Session's worktree. Runs live in the daemon's memory; a restart
 fails them and expires their Approvals.
 
 Smart usage moves work to the best-ranked signed-in Claude account on its own, and Auto-switch does

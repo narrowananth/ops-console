@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { BUILT_IN_NETWORK_DOMAINS } from '@ops-console/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { runSandbox } from '../src/agent/run-sandbox';
+import { runSandbox, worktreeGitDirs } from '../src/agent/run-sandbox';
 import { SeatbeltRunSandbox } from '../src/terminals/run-sandbox-gate';
 
 /**
@@ -273,6 +273,43 @@ describe.skipIf(process.platform !== 'darwin' || CLAUDE === null)('Run sandbox, 
         rules(checkout),
       ),
     ).toContain('ENOTFOUND');
+  }, 240_000);
+
+  it("commits in a Session's own worktree, and still cannot write the Repo's hooks or config", async () => {
+    const repo = path.join(path.dirname(data), 'session-repo');
+    const worktree = path.join(data, 'session-worktrees', 's1');
+    mkdirSync(repo, { recursive: true });
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@example.com', ...args], {
+        cwd: repo,
+        stdio: 'pipe',
+      });
+    git('init', '-q', '-b', 'main');
+    git('commit', '-q', '--allow-empty', '-m', 'first');
+    git('worktree', 'add', '-q', '--detach', worktree);
+    const sandbox = runSandbox({
+      workingDir: worktree,
+      dataDir: data,
+      home,
+      networkDomains: BUILT_IN,
+      gitFile: true,
+      gitDirs: worktreeGitDirs(worktree),
+    });
+    const commit = await run(
+      'git checkout -q -b fix && echo x > f && git add f && git -c user.name=T -c user.email=t@example.com commit -q -m c && git log --oneline | head -1; echo exit=$?',
+      worktree,
+      sandbox,
+    );
+    expect(commit).toContain('exit=0');
+    expect(git('rev-parse', '--verify', 'fix').toString().trim()).toHaveLength(40);
+    const closed = await run(
+      `echo x > ${repo}/.git/config; echo a=$?; echo x > ${repo}/.git/hooks/pre-commit; echo b=$?`,
+      worktree,
+      sandbox,
+    );
+    expect(closed).toMatch(/not permitted/);
+    expect(closed).not.toContain('a=0');
+    expect(closed).not.toContain('b=0');
   }, 240_000);
 
   it('reports the sandbox on when Seatbelt works (Behavior 10)', async () => {
