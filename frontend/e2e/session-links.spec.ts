@@ -31,6 +31,7 @@ const session = (id: string, extra: Record<string, unknown> = {}) => ({
   branch: 'fix/empty-cart',
   pr_number: null,
   connection_ids: null,
+  extra_repo_ids: [],
   alert_id: null,
   state: 'idle',
   last_message_preview: null,

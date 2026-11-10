@@ -31,6 +31,7 @@ const SESSION = {
   branch: 'main',
   pr_number: null,
   connection_ids: null,
+  extra_repo_ids: [],
   alert_id: null,
   state: 'waiting_input',
   last_message_preview: null,

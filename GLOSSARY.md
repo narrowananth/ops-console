@@ -64,8 +64,11 @@ a mode that asks.
 **Integration command**:
 A `pup`, `gh`, `glab`, `bkt` or `slashdocs` command the agent asks the console to run through its `run_integration` tool. The daemon runs it outside the Run sandbox, as the operator. A read runs at once; a write needs an Approval; sign-in, tokens and merges are refused.
 
+**Opened Repo**:
+An imported Repo, other than the Session's own, that the operator ticked in the composer's Repos chip. The operator's own runs in that Session write and read its checkout and run `git` there, inside the Run sandbox. The agent never pushes from it.
+
 **Run sandbox**:
-The operating-system limit on an agent run's commands: writes only in the run's working folder, the Session's output folder, temp and package-tool caches, no reads of
+The operating-system limit on an agent run's commands: writes only in the run's working folder, the Session's output folder, its Opened Repos, temp and package-tool caches, no reads of
 the console's data folder or the operator's cloud and login credentials, and no writes to git hooks or config. Package-tool caches under the home folder stay writable so a repo's commit hooks and builds run. It applies in every Access mode, and a run
 fails when the sandbox is unavailable. The agent's file tools write only in the same folders; the console checks their paths.
 

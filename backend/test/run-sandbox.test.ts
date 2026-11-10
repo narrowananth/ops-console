@@ -38,6 +38,7 @@ const BUILT_IN = [...BUILT_IN_NETWORK_DOMAINS];
 
 /** A git folder the console knows as a Repo, with `origin` at `origin` or none. */
 async function addRepo(daemon: AgentDaemon, name: string, origin: string | null, removedAt: string | null = null) {
+  const id = crypto.randomUUID();
   const dir = path.join(await tempDir('ops-console-remote-'), name);
   await mkdir(dir, { recursive: true });
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
@@ -45,11 +46,9 @@ async function addRepo(daemon: AgentDaemon, name: string, origin: string | null,
   daemon.app
     .get<Store>(STORE)
     .write((tx) =>
-      tx
-        .insert(repos)
-        .values({ id: crypto.randomUUID(), name, path: dir, host: GitHost.Local, defaultBranch: 'main', removedAt })
-        .run(),
+      tx.insert(repos).values({ id, name, path: dir, host: GitHost.Local, defaultBranch: 'main', removedAt }).run(),
     );
+  return { id, dir };
 }
 
 const sandboxOf = (daemon: AgentDaemon, call = -1) => {
@@ -175,6 +174,57 @@ describe('Run sandbox on agent runs', () => {
     );
   });
 
+  it('opens the Repos the operator picked to the Session: writable, readable, git control closed, and the agent told', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    const billing = await addRepo(daemon, 'billing', null);
+    const orders = await addRepo(daemon, 'orders', null);
+    expect((await api(daemon).patch(`/sessions/${id}`, { extra_repo_ids: [billing.id] })).body.data).toMatchObject({
+      extra_repo_ids: [billing.id],
+    });
+    await converse(daemon, id, 'go');
+    const { filesystem } = sandboxOf(daemon);
+    expect(filesystem?.allowWrite).toContain(billing.dir);
+    expect(filesystem?.allowWrite).not.toContain(orders.dir);
+    expect(filesystem?.allowRead).toContain(billing.dir);
+    expect(filesystem?.denyWrite).toEqual(
+      expect.arrayContaining([path.join(billing.dir, '.git', 'hooks'), path.join(billing.dir, '.git', 'config')]),
+    );
+    const options = daemon.sdk.calls.at(-1)?.options;
+    expect(options?.additionalDirectories).toContain(billing.dir);
+    expect(options?.disallowedTools).toContain(`Edit(/${path.join(billing.dir, '.git', 'hooks')})`);
+    expect(JSON.stringify(options?.systemPrompt)).toContain(billing.dir);
+    // Repos picked later reach the next run only.
+    await api(daemon).patch(`/sessions/${id}`, { extra_repo_ids: [billing.id, orders.id] });
+    await converse(daemon, id, 'again');
+    expect(sandboxOf(daemon).filesystem?.allowWrite).toEqual(expect.arrayContaining([billing.dir, orders.dir]));
+  });
+
+  it('opens an extra Repo to the operator’s own runs only, never to a read-only run', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    const billing = await addRepo(daemon, 'billing', null);
+    await api(daemon).patch(`/sessions/${id}`, { extra_repo_ids: [billing.id] });
+    await daemon.app.get(AgentRuntime).runFor(id, 'read', null, { readOnly: true }).finished;
+    expect(sandboxOf(daemon).filesystem?.allowWrite).not.toContain(billing.dir);
+  });
+
+  it('refuses a Repo the console does not know or has removed, and keeps a repeated one once, and never lists the Session’s own Repo', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    const billing = await addRepo(daemon, 'billing', null);
+    const gone = await addRepo(daemon, 'gone', null, '2026-01-01T00:00:00.000Z');
+    expect((await api(daemon).patch(`/sessions/${id}`, { extra_repo_ids: ['nope'] })).status).toBe(404);
+    expect((await api(daemon).patch(`/sessions/${id}`, { extra_repo_ids: [gone.id] })).status).toBe(404);
+    const kept = await api(daemon).patch(`/sessions/${id}`, { extra_repo_ids: [billing.id, billing.id] });
+    expect(kept.body.data.extra_repo_ids).toEqual([billing.id]);
+    const own = (await api(daemon).get(`/sessions/${id}`)).body.data.repo_id;
+    const alone = await api(daemon).patch(`/sessions/${id}`, { extra_repo_ids: [own] });
+    expect(alone.body.data.extra_repo_ids).toEqual([]);
+    const cleared = await api(daemon).patch(`/sessions/${id}`, { extra_repo_ids: [] });
+    expect(cleared.body.data.extra_repo_ids).toEqual([]);
+  });
+
   it('lets the run go on when a command is blocked (Behavior 8)', async () => {
     const daemon = await start();
     const id = daemon.createSession({ access_mode: AccessMode.Full });
@@ -236,6 +286,23 @@ describe('Run sandbox: what a run cannot change or read (ADR 0006)', () => {
       home: '/home/op',
     }).filesystem;
     expect(fs?.denyRead).toContain('/home/op/.ops-console');
+  });
+
+  it('writes and reads an extra Repo like the working folder, and closes its git control files', () => {
+    const fs = runSandbox({
+      workingDir: '/work/repo',
+      dataDir: '/data',
+      networkDomains: [],
+      repos: [
+        { path: '/work/billing', gitFile: false },
+        { path: '/work/wt', gitFile: true },
+      ],
+    }).filesystem;
+    expect(fs?.allowWrite).toEqual(expect.arrayContaining(['/work/billing', '/work/wt']));
+    expect(fs?.allowRead).toEqual(expect.arrayContaining(['/work/billing', '/work/wt']));
+    expect(fs?.denyWrite).toEqual(
+      expect.arrayContaining(['/work/billing/.git/hooks', '/work/billing/.git/config', '/work/wt/.git']),
+    );
   });
 
   it('leaves the working folder out of the writable folders of a read-only run', () => {

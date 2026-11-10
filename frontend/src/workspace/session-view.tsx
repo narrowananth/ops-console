@@ -40,6 +40,7 @@ import { PlaybookLink } from '../playbooks/job-steps';
 import { AttachButton, filesIn, useAttachments } from './attachments';
 import { BranchSwitcher } from './branch-switcher';
 import { ConversationMap, ScrollToEnd, useFollowLatest } from './conversation';
+import { ExtraRepos } from './extra-repos';
 import { alertPath, pullRequestNamedIn, pullRequestPath, sessionDraftKey } from './links';
 import { MessageEditor, type MessageEditorHandle } from './message-editor';
 import { OpenPullRequestForm } from './open-pull-request';
@@ -412,6 +413,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
                   <AttachButton onFiles={addFiles} />
                   <SessionChips session={session} variant="chip" />
+                  <ExtraRepos session={session} repos={repos.data?.data ?? []} />
                   {repo && <BranchSwitcher session={session} all={sessions.data ?? []} repo={repo} />}
                   {send.isError && (
                     <span role="alert" className="text-xs text-accent-700">

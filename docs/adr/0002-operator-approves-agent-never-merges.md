@@ -60,10 +60,12 @@ resolves threads, and a Reply check or Comment pass denies the agent `git push` 
   a commit the teammate did not write, but the operator would fix review comments on a teammate's
   pull request by hand. It lost because the operator wants the agent on those too; the push never
   forces, so a teammate's newer commit stops the Comment pass and nothing of theirs is dropped.
-- **Widen the sandbox's write list to `~/Downloads` or any path the operator names**: the agent could move a file at one
+- **Widen the sandbox's write list to `~/Downloads` or any path the operator names in a message**: the agent could move a file at one
   word from the operator. It lost because the sandbox cannot tell the operator's words from text injected through a log,
   so a writable folder would be writable to a steered run, and a run could write into `~/.zshrc`, `~/Library/LaunchAgents`
-  or a folder on PATH. The copy goes through an Approval instead, and the daemon writes the destination.
+  or a folder on PATH. The copy goes through an Approval instead, and the daemon writes the destination. A Repo the operator
+  ticks in the composer's Repos chip is not this option: it is an imported checkout picked by a click, not a path from
+  words ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md)).
 - **An Approval on every `open_pull_request` call**: the operator read what would be pushed and where. It lost because
   the push is never forced and never merges, the diff and the pull request are on the host to read, and the stop broke
   a chat's flow: an update to an open pull request waited for a click each time.

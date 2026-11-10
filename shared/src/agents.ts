@@ -229,6 +229,8 @@ export const sessionSchema = z.object({
   connection_ids: z.array(z.string()).nullable(),
   /** The Monitor Alert whose Verification or Fix runs in it; null for any other Session. */
   alert_id: z.string().nullable(),
+  /** Other Repos the operator opened to the agent in this Session: it reads and writes their checkouts. */
+  extra_repo_ids: z.array(z.string()),
   state: z.enum(SessionState),
   last_message_preview: z.string().nullable(),
   /** Why the last run failed, when the console can say: the Run sandbox is unavailable, or the Keychain did not answer. */
@@ -420,6 +422,8 @@ export const sessionPatchSchema = z
     access_mode: z.enum(AccessMode).optional(),
     /** `devtools` Sessions only. */
     connection_ids: z.array(z.string().min(1)).optional(),
+    /** The other Repos this Session's agent may write in; replaces the list. */
+    extra_repo_ids: z.array(z.string().min(1)).max(50).optional(),
   })
   .strict();
 

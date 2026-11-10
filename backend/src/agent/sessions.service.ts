@@ -14,7 +14,7 @@ import {
   sessionDefaultsSchema,
   type sessionListQuerySchema,
 } from '@ops-console/shared';
-import { and, desc, eq, inArray, lt, or, type SQL, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, or, type SQL, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { ApiError, validationFailed } from '../common/errors';
 import { afterCursor, toPage } from '../common/pagination';
@@ -65,6 +65,7 @@ export function toSession(row: SessionRow): Session {
     pr_number: row.prNumber,
     connection_ids: null,
     alert_id: row.alertId,
+    extra_repo_ids: extraRepoIds(row),
     state: row.state,
     last_message_preview: row.lastMessagePreview,
     last_error: null,
@@ -73,6 +74,17 @@ export function toSession(row: SessionRow): Session {
     playbook: null,
     queued_message: row.queuedText,
   };
+}
+
+/** The other Repos the operator opened to the Session's agent. */
+export function extraRepoIds(row: SessionRow): string[] {
+  if (row.extraRepoIds === null) return [];
+  try {
+    const ids: unknown = JSON.parse(row.extraRepoIds);
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 export function emitSessionUpdated(emit: Emit, row: SessionRow): void {
@@ -223,6 +235,9 @@ export class SessionsService {
     if (patch.connection_ids !== undefined && !own) throw validationFailed('invalid body: connection_ids');
     own?.(row, patch);
     const values = {
+      ...(patch.extra_repo_ids === undefined
+        ? {}
+        : { extraRepoIds: this.checkedExtraRepos(row, patch.extra_repo_ids) }),
       ...(patch.title === undefined ? {} : { title: patch.title }),
       ...(patch.model === undefined ? {} : { model: patch.model }),
       ...(patch.effort === undefined ? {} : { effort: patch.effort }),
@@ -232,6 +247,22 @@ export class SessionsService {
     // A change only the kind stores, such as a devtools scope, still tells every open page.
     if (own) this.store.write((_tx, emit) => emitSessionUpdated(emit, row));
     return row;
+  }
+
+  /** The ids as the column stores them: each an imported Repo other than the Session's own, once, in the order given. */
+  private checkedExtraRepos(row: SessionRow, ids: string[]): string | null {
+    const known = new Set(
+      this.store.db
+        .select({ id: repos.id })
+        .from(repos)
+        .where(isNull(repos.removedAt))
+        .all()
+        .map((repo) => repo.id),
+    );
+    const missing = ids.find((id) => !known.has(id));
+    if (missing !== undefined) throw new ApiError(404, ErrorCode.NotFound, 'no such repo');
+    const kept = [...new Set(ids)].filter((id) => id !== row.repoId);
+    return kept.length === 0 ? null : JSON.stringify(kept);
   }
 
   setState(id: string, state: SessionState): SessionRow {

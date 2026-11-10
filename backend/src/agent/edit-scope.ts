@@ -8,6 +8,8 @@ export type EditScope = {
   workingDir: string;
   /** The Session's output folder, when the run has one. */
   outputFolder: string | null;
+  /** The checkouts of the other Repos the operator opened to the Session. */
+  repoFolders?: string[];
   /** The account's Claude Code config folder, where Claude Code keeps its own plans and memory. */
   configDir: string;
   home?: string;
@@ -22,6 +24,7 @@ export function editRoots(scope: EditScope): string[] {
   const home = scope.home ?? os.homedir();
   return [
     scope.workingDir,
+    ...(scope.repoFolders ?? []),
     ...(scope.outputFolder === null ? [] : [scope.outputFolder]),
     scope.configDir,
     ...TEMP,
