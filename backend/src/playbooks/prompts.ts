@@ -39,6 +39,11 @@ export const INTEGRATIONS_RULE = `Integrations. The pup, gh, glab, bkt and slash
 export const outputFilesRule = (folder: string) =>
   `Files for the operator. Write every file meant for the operator (a PDF, a spreadsheet, a chart, an archive) in ${folder}. The console lists each file there in the conversation, and the operator opens or downloads it from the console. Never run open, xdg-open or start: your commands run in a sandbox that blocks them. When the operator asks you to put a file in another folder, such as ~/Downloads, call the ${SAVE_FILE_TOOL} tool with the file's name and the folder's absolute path. The operator approves it first, then the console copies the file. Never move a file with a command, never ask the operator to run mv, and do not retry if the operator says no. If that tool is not in your tool list, say so.`;
 
+/** The other Repos the operator opened to the Session: the sandbox and the file tools let the run write in them. */
+export function repoFoldersRule(folders: string[]): string {
+  return `Other Repos. The operator opened these Repos' checkouts to this Session: ${folders.join(', ')}. You may read and edit files and run git commands (checkout, branch, add, commit) in them, as in your working folder. Change nothing outside the work the operator asked for. You still never push: ${OPEN_PULL_REQUEST_TOOL} opens a pull request for the working folder's branch only, so commit work in another Repo on its own branch and tell the operator the Repo and the branch.`;
+}
+
 /**
  * The system prompt a run appends to Claude Code's own: the kind's instructions, the console's pull request and commit
  * hook rules, the Playbook's rules, then the safety lines.
@@ -47,9 +52,11 @@ export function systemAppend(
   instructions: string | undefined,
   rules: string | null,
   outputFolder: string | null = null,
+  repoFolders: string[] = [],
 ): string {
   const parts = [instructions ?? '', PR_DESCRIPTION_RULE, OPEN_PR_RULE, INTEGRATIONS_RULE, COMMIT_HOOKS_RULE];
   if (outputFolder !== null) parts.push(outputFilesRule(outputFolder));
+  if (repoFolders.length > 0) parts.push(repoFoldersRule(repoFolders));
   if (rules?.trim()) parts.push(`The operator's rules for this work:\n${rules.trim()}`);
   parts.push(SAFETY_LINES);
   return parts.filter(Boolean).join('\n\n');

@@ -187,6 +187,7 @@ test('a pull request row shows when it was opened, and a Session row when it sta
           branch: 'main',
           pr_number: null,
           connection_ids: null,
+          extra_repo_ids: [],
           alert_id: null,
           state: 'idle',
           last_message_preview: null,

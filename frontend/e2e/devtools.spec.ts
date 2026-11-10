@@ -39,6 +39,7 @@ const SESSION = {
   branch: null,
   pr_number: null,
   connection_ids: [],
+  extra_repo_ids: [],
   alert_id: null,
   state: 'idle',
   last_message_preview: null,

@@ -225,6 +225,13 @@
       "when": 1794207003853,
       "tag": "0031_run_blocked_hosts",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1794288918161,
+      "tag": "0032_session_extra_repos",
+      "breakpoints": true
     }
   ]
 }

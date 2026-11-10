@@ -1,13 +1,19 @@
 # Agent runs are sandboxed by the OS
 
 Every agent run's shell commands run in the Run sandbox: the Claude Agent SDK's own `sandbox` option, which on macOS
-is Seatbelt. A run writes only in its working folder, its Session's output folder under the data folder, the temp folders and the package-tool caches under the home
+is Seatbelt. A run writes only in its working folder, its Session's output folder under the data folder, the checkouts of the Repos the operator opened to the Session (below), the temp folders and the package-tool caches under the home
 folder (`~/.npm`, `~/.cache`, `~/.cargo/registry`, `~/go/pkg`, `~/.m2/repository`, `~/.gradle`, `~/Library/Caches` and
 a few like them), never in a folder on PATH such as `~/.cargo/bin` or `~/go/bin`. It reads neither the data folder (the working folder and the output folder aside) nor
 `~/.aws`, `~/.config/gcloud`, `~/.ssh` or the login Keychain folder. The data folder holds
 `runtime.json`, whose session token lets a command call the console's own API as the operator, Approvals included. The
 console sets the rules and leaves the profile to the SDK. It fails a run when the sandbox is unavailable, never runs a
 command the agent wrote outside it, and has no Setting to turn it off. One door leads out: the console's `run_integration` tool (below). The Setup agent's terminal is no agent run and is not sandboxed.
+
+The operator opens other imported Repos to a Session from the composer's Repos chip. A run the operator started (a chat turn) then
+writes and reads those checkouts as it does its working folder, commands and file tools alike, and may run `git` there
+(checkout, branch, add, commit). The choice is the operator's click on a Repo the console imported, never a path or the
+agent's request, so text injected through a log cannot widen it. The git control files of each opened Repo stay closed as in the
+working folder, and the agent still never pushes. Playbook steps, Verifications, Fixes and read-only runs get none.
 
 The sandbox filters a run's commands, not the agent's file tools, which run in Claude Code's own process. The console
 holds those to the same limits with permission rules in `disallowedTools`: no reading the data folder's secrets
@@ -46,6 +52,10 @@ The agent is told never to skip a hook, and its `PreToolUse` hook refuses `--no-
 `SKIP=`, `LEFTHOOK=0` and a `core.hooksPath` pointed at nothing.
 
 ## Considered Options
+
+- **A run writes only in its own Repo's folder**: the first design. A chat that found a fix in another Repo could only
+  print a patch and the commands for the operator to run by hand (a branch could not even be created there). It lost to
+  the operator opening the other Repo to that Session by a click.
 
 - **Writes only in the working folder and temp**: the first design. A hook that fetches a crate, a Go module or a Maven
   artifact, or starts a pre-commit environment, writes to a cache under the home folder, so it failed, and the agent

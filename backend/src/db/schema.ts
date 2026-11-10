@@ -125,6 +125,8 @@ export const sessions = sqliteTable(
     repoId: text('repo_id').references((): AnySQLiteColumn => repos.id, { onDelete: 'restrict' }),
     branch: text(),
     prNumber: integer('pr_number'),
+    /** JSON array of the other Repos' ids the operator opened to this Session's agent; null for none. */
+    extraRepoIds: text('extra_repo_ids'),
     /** The Alert a Verification or Fix runs for. */
     alertId: text('alert_id').references((): AnySQLiteColumn => alerts.id, { onDelete: 'set null' }),
     state: text().$type<SessionState>().notNull().default(SessionState.Idle),

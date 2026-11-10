@@ -37,7 +37,7 @@ import {
   type Subagent,
   SubagentStatus,
 } from '@ops-console/shared';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { type AccountRow, AccountsService, rateLimitInfoSchema } from '../accounts/accounts.service';
 import { CliProxyService } from '../accounts/cliproxy.service';
 import { ActionLogService } from '../action-log/action-log.service';
@@ -48,7 +48,14 @@ import { claudeEnv } from '../claude-cli/claude-cli';
 import { DATA_DIR } from '../common/data-dir';
 import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
-import { connections as connectionRows, disabledMcpServers, messageSkills, nowIso, sessions } from '../db/schema';
+import {
+  connections as connectionRows,
+  disabledMcpServers,
+  messageSkills,
+  nowIso,
+  repos as repoRows,
+  sessions,
+} from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { KEYCHAIN, type Keychain, KeychainTimeout } from '../keychain/keychain';
 import { storedEnvVar } from '../mcp/launcher';
@@ -85,7 +92,13 @@ import { RunStepsLog } from './run-steps';
 import { type Run, RunRegistry, type RunSummary } from './runs';
 import { SessionKinds } from './session-kinds';
 import { sessionTitle, shortTitle } from './session-title';
-import { emitSessionUpdated, NEW_SESSION_TITLE, type SessionRow, SessionsService } from './sessions.service';
+import {
+  emitSessionUpdated,
+  extraRepoIds,
+  NEW_SESSION_TITLE,
+  type SessionRow,
+  SessionsService,
+} from './sessions.service';
 import { type ResolvedSkill, SkillMenuService } from './skill-menu.service';
 import { removeSkillPlugin, skillNames, skillRunsDir, writeSkillPlugin } from './skill-plugin';
 import { Transcripts } from './transcripts';
@@ -210,7 +223,12 @@ const absolute = (file: string) => `/${file}`;
  * permission rules, which `disallowedTools` holds in every mode: no reading the data folder's secrets or the operator's
  * credential folders, and no editing the git control files the daemon's `git` later reads.
  */
-export function fileToolDenials(dataDir: string, workingDir: string, home: string = os.homedir()): string[] {
+export function fileToolDenials(
+  dataDir: string,
+  workingDir: string,
+  home: string = os.homedir(),
+  repoFolders: string[] = [],
+): string[] {
   const secrets = [
     path.join(dataDir, 'runtime.json'),
     path.join(dataDir, 'state.db'),
@@ -226,7 +244,9 @@ export function fileToolDenials(dataDir: string, workingDir: string, home: strin
   ];
   return [
     ...secrets.flatMap((file) => [`Read(${absolute(file)})`, `Edit(${absolute(file)})`]),
-    ...gitControl(workingDir, gitFileOf(workingDir)).map((file) => `Edit(${absolute(file)})`),
+    ...[workingDir, ...repoFolders]
+      .flatMap((folder) => gitControl(folder, gitFileOf(folder)))
+      .map((file) => `Edit(${absolute(file)})`),
   ];
 }
 
@@ -811,6 +831,21 @@ export class AgentRuntime implements OnModuleDestroy {
     return token ? { GH_TOKEN: token } : {};
   }
 
+  /** The checkouts of the Repos the operator opened to the Session, apart from the folder the run works in. */
+  private openedRepoFolders(session: SessionRow, workingDir: string): string[] {
+    const ids = extraRepoIds(session);
+    if (ids.length === 0) return [];
+    const folders = new Map(
+      this.store.db
+        .select({ id: repoRows.id, path: repoRows.path })
+        .from(repoRows)
+        .where(and(inArray(repoRows.id, ids), isNull(repoRows.removedAt)))
+        .all()
+        .map((repo) => [repo.id, repo.path]),
+    );
+    return ids.flatMap((id) => folders.get(id) ?? []).filter((folder) => folder !== workingDir);
+  }
+
   /** The MCP servers of Connections whose Access Level lets them write. */
   private writableConnections(): string[] {
     return this.store.db
@@ -844,8 +879,10 @@ export class AgentRuntime implements OnModuleDestroy {
     const outputFolder = run.onFinish === null && !run.readOnly ? this.outputs.ensure(run.sessionId) : null;
     // The run's Skills sit in a folder of their own that the Run sandbox lets it read.
     const skillFolder = run.skills.length > 0 ? path.join(skillRunsDir(), crypto.randomUUID()) : null;
-    const extraDirs = [attached, outputFolder].filter((folder) => folder !== null);
-    run.editRoots = editRoots({ workingDir: run.workingDir, outputFolder, configDir });
+    // The other Repos the operator opened to this Session, for a run of their own only (the output folder's rule).
+    const repoFolders = outputFolder === null ? [] : this.openedRepoFolders(session, run.workingDir);
+    const extraDirs = [attached, outputFolder, ...repoFolders].filter((folder) => folder !== null);
+    run.editRoots = editRoots({ workingDir: run.workingDir, outputFolder, repoFolders, configDir });
     const options: Options = {
       cwd: run.workingDir,
       sandbox: runSandbox({
@@ -853,6 +890,7 @@ export class AgentRuntime implements OnModuleDestroy {
         dataDir: this.dataDir,
         readable: [...(attached === null ? [] : [attached]), ...(skillFolder === null ? [] : [skillFolder])],
         writable: outputFolder === null ? [] : [outputFolder],
+        repos: repoFolders.map((folder) => ({ path: folder, gitFile: gitFileOf(folder) })),
         networkDomains: run.networkDomains,
         readOnly: run.readOnly,
         gitFile: gitFileOf(run.workingDir),
@@ -904,7 +942,7 @@ export class AgentRuntime implements OnModuleDestroy {
       disallowedTools: [
         ...MERGE_DENIALS,
         ...WEB_DENIALS,
-        ...fileToolDenials(this.dataDir, run.workingDir),
+        ...fileToolDenials(this.dataDir, run.workingDir, undefined, repoFolders),
         ...(run.readOnly ? READ_ONLY_DENIALS : []),
         // Log text steers a Verification: it writes to no Git host and to no Connection (ADR 0002).
         ...(run.purpose === RunPurpose.Verify ? HOST_WRITE_DENIALS : []),
@@ -913,7 +951,7 @@ export class AgentRuntime implements OnModuleDestroy {
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
-        append: systemAppend(instructions, run.rules, outputFolder),
+        append: systemAppend(instructions, run.rules, outputFolder, repoFolders),
       },
       // Servers the operator disabled stay out of the run.
       settings: {

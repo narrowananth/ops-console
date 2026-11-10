@@ -11,6 +11,8 @@ export type SandboxRun = {
   readable?: string[];
   /** Folders outside the working folder the run may write and read: the Session's output folder. */
   writable?: string[];
+  /** Other Repos' checkouts the operator opened to this Session: the run writes and reads them like its working folder. */
+  repos?: { path: string; gitFile: boolean }[];
   /** The run's Network allowlist (ADR 0006): the only hosts its commands reach. */
   networkDomains: string[];
   /** The run may not change its working folder: a review of pull request text, or an answer in a thread. */
@@ -77,9 +79,13 @@ export function runSandbox(run: SandboxRun): SandboxSettings {
         ...(run.readOnly ? [] : [run.workingDir]),
         ...TEMP,
         ...(run.writable ?? []),
+        ...(run.readOnly ? [] : (run.repos ?? []).map((repo) => repo.path)),
         ...TOOL_CACHES.map((folder) => path.join(home, folder)),
       ],
-      denyWrite: gitControl(run.workingDir, run.gitFile === true),
+      denyWrite: [
+        ...gitControl(run.workingDir, run.gitFile === true),
+        ...(run.repos ?? []).flatMap((repo) => gitControl(repo.path, repo.gitFile)),
+      ],
       denyRead: [
         run.dataDir,
         // The installed app and its bundled `node`: macOS may trust that binary's Keychain items without a prompt.
@@ -89,7 +95,12 @@ export function runSandbox(run: SandboxRun): SandboxSettings {
         path.join(home, 'Library', 'Keychains'),
         path.join(home, '.ssh'),
       ],
-      allowRead: [run.workingDir, ...(run.writable ?? []), ...(run.readable ?? [])],
+      allowRead: [
+        run.workingDir,
+        ...(run.writable ?? []),
+        ...(run.readable ?? []),
+        ...(run.repos ?? []).map((repo) => repo.path),
+      ],
     },
   };
 }

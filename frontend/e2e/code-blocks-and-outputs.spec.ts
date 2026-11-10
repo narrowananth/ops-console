@@ -49,6 +49,7 @@ async function openSession(page: Page, outputs: object[]) {
             branch: 'main',
             pr_number: null,
             connection_ids: null,
+            extra_repo_ids: [],
             alert_id: null,
             state: 'idle',
             last_message_preview: null,

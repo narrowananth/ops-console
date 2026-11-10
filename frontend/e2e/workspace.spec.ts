@@ -31,6 +31,7 @@ const session = (id: string, repoId: string, title: string, state = 'idle', bran
   branch,
   pr_number: null,
   connection_ids: null,
+  extra_repo_ids: [],
   alert_id: null,
   state,
   last_message_preview: null,
@@ -514,6 +515,42 @@ test('a file chip opens the file over the page, in the message box and in the co
   });
   await box.locator('[data-file="note.txt"]').click();
   await expect(page.getByRole('dialog', { name: 'note.txt' })).toContainText('hello there');
+});
+
+test('the Repos chip opens other Repos to the Session, A to Z, without its own Repo', async ({ page }) => {
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({
+      json: {
+        data: [repo('r1', 'apis', 1), repo('r2', 'admin-panel'), repo('r3', 'artemis')],
+        meta: { next_cursor: null },
+      },
+    }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform')] } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
+  const patches: unknown[] = [];
+  await page.route('**/api/sessions/s1', (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback();
+    const body = route.request().postDataJSON();
+    patches.push(body);
+    return route.fulfill({ json: { data: { ...session('s1', 'r1', 'engage platform'), ...body } } });
+  });
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const chip = page.getByRole('button', { name: 'Other Repos' });
+  await expect(chip).toContainText('this one');
+  await chip.click();
+  const picker = page.locator('[data-extra-repos]');
+  const names = picker.getByRole('button', { pressed: false }).filter({ hasText: /^(admin-panel|artemis|apis)/ });
+  await expect(names).toHaveText([/^admin-panel/, /^artemis/]);
+  await picker.getByRole('button', { name: /^admin-panel/ }).click();
+  await expect.poll(() => patches).toEqual([{ extra_repo_ids: ['r2'] }]);
+  await expect(chip).toContainText('+1');
+  await picker.getByRole('button', { name: /^admin-panel/ }).click();
+  await expect.poll(() => patches.at(-1)).toEqual({ extra_repo_ids: [] });
+  await expect(chip).toContainText('this one');
 });
 
 test('a Session opens at its newest message', async ({ page }) => {
