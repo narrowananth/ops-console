@@ -16,6 +16,7 @@ import { Markdown } from '../components/ui/markdown';
 import type { PathwayState } from '../components/ui/pathway';
 import { ComparisonView, ResultView } from '../devtools/result-tables';
 import { COPY_FAILED, copyLabel, useCopy } from '../lib/clipboard';
+import { when } from '../monitor/scan-scope';
 import { KindBadge } from '../skills/kind-badge';
 import { InlineText } from './inline-text';
 import { asReport, ReportDocument } from './report-document';
@@ -117,6 +118,17 @@ export function MessageView({
         </span>
         {/* The run's in-flight message starts with the run, so its age is how long the agent has worked. */}
         {message.status === 'streaming' && <Elapsed from={message.created_at} to={null} running className="ml-1" />}
+        {/* When the prompt ran, or the agent's turn began. */}
+        {/* An entry with no timestamp reads as the epoch: it shows none. */}
+        {Date.parse(message.created_at) > 0 && (
+          <time
+            dateTime={message.created_at}
+            title={new Date(message.created_at).toLocaleString()}
+            className="ml-2 text-xs text-neutral-600 normal-case tracking-normal"
+          >
+            {when(message.created_at)}
+          </time>
+        )}
         {!agent && draft === null && (
           <span className="ml-auto flex gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
             <button

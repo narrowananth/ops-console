@@ -28,6 +28,7 @@ import { STORE, type Store } from '../db/store';
 import { BranchMoved, GIT, Git, GitFailed, RebaseConflict } from '../repos/git';
 import { GIT_HOSTS, type GitHosts } from './git-host';
 import { PullRequestsService } from './pull-requests.service';
+import { WorkspaceSessionsService } from './workspace-sessions.service';
 
 const CONNECTORS: Partial<Record<GitHost, ConnectorId>> = {
   [GitHost.Github]: ConnectorId.Github,
@@ -72,6 +73,7 @@ export class PullRequestOpeningService implements PullRequestOpener {
     @Inject(ConnectorsService) private readonly connectors: ConnectorsService,
     @Inject(PullRequestsService) private readonly pulls: PullRequestsService,
     @Inject(AgentRuntime) private readonly runtime: AgentRuntime,
+    @Inject(WorkspaceSessionsService) private readonly workspace: WorkspaceSessionsService,
   ) {
     runtime.setPullRequestOpener(this);
   }
@@ -85,13 +87,14 @@ export class PullRequestOpeningService implements PullRequestOpener {
     if (repo.host === GitHost.Local || repo.remoteSlug === null || !this.hosts.supports(repo.host)) return none;
     const base = repo.defaultBranch;
     const open = await this.openFor(repo.id, branch);
-    const checkedOut = (await this.git.currentBranch(repo.path)) === branch;
+    const dir = await this.workspace.existingWorktree(sessionId);
+    const checkedOut = dir !== null && (await this.git.branchName(dir)) === branch;
     const ahead = branch === base ? 0 : await this.git.commitsAhead(repo.path, base, branch);
     return {
       can_open: open === null && ahead > 0,
       pull_request: open,
       base_branch: base,
-      uncommitted_files: checkedOut ? await this.git.uncommittedFiles(repo.path) : 0,
+      uncommitted_files: checkedOut ? await this.git.uncommittedFiles(dir) : 0,
     };
   }
 
@@ -119,12 +122,12 @@ Change nothing: no commit, no push, no pull request. The console pushes and open
     }
   }
 
-  /** The agent may ask in a Session's own Repo folder, on a Git host the console can open on. */
+  /** The agent may ask in a Session's own worktree, on a Git host the console can open on. */
   offers(sessionId: string, dir: string): boolean {
     const found = this.target(sessionId);
     return (
       found !== null &&
-      found.repo.path === dir &&
+      this.workspace.worktreeDir(sessionId) === dir &&
       found.repo.host !== GitHost.Local &&
       found.repo.remoteSlug !== null &&
       this.hosts.supports(found.repo.host)
@@ -147,11 +150,12 @@ Change nothing: no commit, no push, no pull request. The console pushes and open
     });
   }
 
-  /** The branch the agent means (the one checked out in the Repo's folder unless it names another) and its base. */
+  /** The branch the agent means (the one checked out in the Session's worktree unless it names another) and its base. */
   private async resolve(sessionId: string, input: OpenPullRequestInput) {
     const found = this.target(sessionId);
     if (!found) throw new ApiError(409, ErrorCode.InvalidState, 'Only a Session in a Repo opens a pull request');
-    const branch = input.branch ?? (await this.git.currentBranch(found.repo.path)) ?? found.branch;
+    const dir = await this.workspace.ensure(this.sessions.get(sessionId));
+    const branch = input.branch ?? (await this.git.branchName(dir)) ?? found.branch;
     const base = input.base_branch ?? found.repo.defaultBranch;
     await this.openable(sessionId, base, branch);
     return { repo: found.repo, branch, base };
@@ -168,9 +172,10 @@ Change nothing: no commit, no push, no pull request. The console pushes and open
     input: OpenPullRequest,
   ): Promise<Published> {
     const { repo, branch } = await this.openable(sessionId, input.base_branch, onBranch);
+    const dir = await this.workspace.ensure(this.sessions.get(sessionId));
     return this.publish({
       sessionId,
-      dir: repo.path,
+      dir,
       repoId: repo.id,
       remote: { host: repo.host, slug: repo.remoteSlug },
       branch,
@@ -248,7 +253,10 @@ Change nothing: no commit, no push, no pull request. The console pushes and open
     const open = (await adapter.list(slug, PrState.Open)).find((pr) => pr.branch === input.branch);
     // The header reads the kept list: forget it, so it shows the link at once.
     if (input.repoId) this.pulls.drop(input.repoId);
-    if (open) return { number: open.number, url: open.url, created: false };
+    if (open) {
+      this.remember(input.sessionId, input.branch, open);
+      return { number: open.number, url: open.url, created: false };
+    }
     const made = await this.logged(
       input.sessionId,
       ActionKind.Pr,
@@ -274,7 +282,14 @@ Change nothing: no commit, no push, no pull request. The console pushes and open
       },
     );
     if (input.repoId) this.pulls.drop(input.repoId);
+    this.remember(input.sessionId, input.branch, made);
     return { ...made, created: true };
+  }
+
+  /** The Session keeps the pull request it opened, with its branch, so its header shows this one and no other. */
+  private remember(sessionId: string, branch: string, pull: { number: number; url: string }): void {
+    if (this.sessions.get(sessionId).kind !== SessionKind.Repo) return;
+    this.sessions.write(sessionId, { openedPrNumber: pull.number, openedPrUrl: pull.url, openedPrBranch: branch });
   }
 
   /** The Action Log row exists before the work; a failure finishes it with the reason. */

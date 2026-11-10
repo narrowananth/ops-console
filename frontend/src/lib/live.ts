@@ -107,6 +107,7 @@ export function useLiveEvents(): void {
       if (event.event === 'session.updated') {
         refetch(queryKeys.session(event.data.session_id));
         refetch(queryKeys.sessions);
+        refetch(queryKeys.sessionDiff(event.data.session_id));
       }
       if (event.event === 'session.output') refetchEvery(queryKeys.messages(event.data.session_id), STREAM_MS);
       if (event.event === 'session.finished') refetch(queryKeys.messages(event.data.session_id));

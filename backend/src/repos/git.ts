@@ -66,35 +66,17 @@ export class Git {
     return sha?.trim() || null;
   }
 
-  /**
-   * The branches `HEAD` moved to by a checkout since `since`, newest first, read from the reflog. A detached checkout
-   * and a branch deleted since are left out.
-   */
-  async checkoutsSince(dir: string, since: Date): Promise<string[]> {
-    const log = await this.try(dir, ['log', '-g', '--date=unix', '--format=%gd%x09%gs', 'HEAD']);
-    const after = Math.floor(since.getTime() / 1000);
-    const moves: string[] = [];
-    for (const line of (log ?? '').split('\n')) {
-      const entry = /^HEAD@\{(\d+)\}\tcheckout: moving from \S+ to (\S+)$/.exec(line);
-      if (!entry) continue;
-      if (Number(entry[1]) < after) break;
-      const branch = entry[2] as string;
-      if (!moves.includes(branch) && (await this.commitOf(dir, `refs/heads/${branch}`))) moves.push(branch);
-    }
-    return moves;
-  }
-
   /** The branch checked out; null on a detached HEAD or outside a repository. */
   async branchName(dir: string): Promise<string | null> {
     return (await this.try(dir, ['symbolic-ref', '--short', '-q', 'HEAD']))?.trim() || null;
   }
 
   /**
-   * Everything `branch` changes against where it forked from the default branch, on origin when origin has it: its
-   * commits, and while it is the branch checked out, the staged, unstaged and untracked files too. On the default
-   * branch itself, the commits not pushed yet. `fallback` is the default branch when origin names none.
+   * Everything the worktree `dir` changes against where it forked from the default branch, on origin when origin has
+   * it: its commits, and its staged, unstaged and untracked files. `branch` names the changes while `dir` is on a
+   * detached HEAD. `fallback` is the default branch when origin names none.
    */
-  async changes(dir: string, fallback: string, branch: string): Promise<SessionDiff> {
+  async changes(dir: string, fallback: string, branch: string | null): Promise<SessionDiff> {
     const named = (await this.try(dir, ['symbolic-ref', '--short', '-q', 'refs/remotes/origin/HEAD']))?.trim();
     const main = named ? named.replace(/^origin\//, '') : fallback;
     const base = (await this.commitOf(dir, `refs/remotes/origin/${main}`))
@@ -102,34 +84,22 @@ export class Git {
       : (await this.commitOf(dir, `refs/heads/${main}`))
         ? main
         : null;
-    // Repo Sessions share the folder: the working tree is this branch's only while it is the one checked out.
-    const checkedOut = (await this.branchName(dir)) === branch;
-    const head = await this.commitOf(dir, `refs/heads/${branch}`);
+    const head = await this.commitOf(dir, 'HEAD');
     const fork = base && head ? ((await this.try(dir, ['merge-base', base, head]))?.trim() ?? head) : head;
     const files: SessionDiffFile[] = fork
       ? parseDiff(
-          (await this.try(dir, [
-            '-c',
-            'core.quotePath=false',
-            'diff',
-            '--no-color',
-            '--no-ext-diff',
-            '-M',
-            fork,
-            ...(checkedOut || !head ? [] : [head]),
-          ])) ?? '',
+          (await this.try(dir, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '-M', fork])) ??
+            '',
         )
       : [];
-    const untracked = checkedOut
-      ? ((await this.try(dir, ['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '-z'])) ??
-        '')
-      : '';
+    const untracked =
+      (await this.try(dir, ['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '-z'])) ?? '';
     for (const name of untracked.split('\0').filter(Boolean).slice(0, UNTRACKED_FILES)) {
       files.push(await untrackedFile(path.join(dir, name), name));
     }
     files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     return {
-      branch,
+      branch: (await this.branchName(dir)) ?? branch,
       base: fork ? (base ?? branch) : null,
       files,
       additions: files.reduce((sum, file) => sum + file.additions, 0),
@@ -196,11 +166,16 @@ export class Git {
   }
 
   /**
-   * Checks out an existing branch, or makes `branch` first: from `from` when given, else from the current one. Throws
-   * when git refuses.
+   * Checks out an existing branch, or makes `branch` first: from `from` when given, else from the current one. `shared`
+   * takes a branch another worktree has checked out. Throws when git refuses.
    */
-  async checkout(dir: string, branch: string, create: boolean, from?: string): Promise<void> {
-    await this.must(dir, create ? ['checkout', '-b', branch, ...(from ? [from] : [])] : ['checkout', branch]);
+  async checkout(dir: string, branch: string, create: boolean, from?: string, shared = false): Promise<void> {
+    await this.must(
+      dir,
+      create
+        ? ['checkout', '-b', branch, ...(from ? [from] : [])]
+        : ['checkout', ...(shared ? ['--ignore-other-worktrees'] : []), branch],
+    );
   }
 
   /**
@@ -234,6 +209,59 @@ export class Git {
   /** A detached worktree of `repo` at `ref`, in `dir`. Throws with git's first line when it refuses. */
   async addWorktree(repo: string, dir: string, ref: string): Promise<void> {
     await this.must(repo, ['worktree', 'add', '--detach', '--quiet', dir, ref]);
+  }
+
+  /**
+   * A worktree of `repo` in `dir` for a Session: `branch` checked out, or, with `branch` null, a detached HEAD at `ref`.
+   * `shared` lets it take a branch another worktree has checked out. Throws with git's first line when git refuses.
+   */
+  async addSessionWorktree(
+    repo: string,
+    dir: string,
+    branch: string | null,
+    ref: string,
+    shared = false,
+  ): Promise<void> {
+    await this.must(repo, [
+      'worktree',
+      'add',
+      '--quiet',
+      ...(shared ? ['--force'] : []),
+      ...(branch === null ? ['--detach', dir, ref] : [dir, branch]),
+    ]);
+  }
+
+  /** The folder of the worktree that has `branch` checked out, the repository's own folder included; null when none has. */
+  async worktreeOf(repo: string, branch: string): Promise<string | null> {
+    const list = (await this.try(repo, ['worktree', 'list', '--porcelain'])) ?? '';
+    for (const block of list.split('\n\n')) {
+      const folder = /^worktree (.+)$/m.exec(block)?.[1];
+      if (
+        folder &&
+        new RegExp(`^branch refs/heads/${branch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm').test(block)
+      ) {
+        return realpath(folder).catch(() => folder);
+      }
+    }
+    return null;
+  }
+
+  /** Moves `dir` to `ref` with a detached HEAD, leaving every branch as it is. Throws with git's first line. */
+  async checkoutDetached(dir: string, ref: string): Promise<void> {
+    await this.must(dir, ['checkout', '--quiet', '--detach', ref]);
+  }
+
+  /** Fetches `branch` from `origin`, and moves a clean `dir` forward to it when that is a fast-forward. Never throws. */
+  async pull(dir: string, branch: string): Promise<void> {
+    try {
+      await this.remoteHead(dir, branch);
+    } catch {
+      return;
+    }
+    const checkedOut = await this.branchName(dir);
+    if (checkedOut === null || checkedOut === branch) {
+      await this.try(dir, ['merge', '--ff-only', '--quiet', `refs/remotes/origin/${branch}`]);
+    }
   }
 
   /**

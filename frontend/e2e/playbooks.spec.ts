@@ -1872,6 +1872,7 @@ const session = (id: string, kind: string, playbook: { id: string; name: string 
   pr_number: null,
   connection_ids: null,
   extra_repo_ids: [],
+  pull_request: null,
   alert_id: null,
   state: 'idle',
   last_message_preview: null,

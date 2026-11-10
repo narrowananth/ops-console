@@ -27,7 +27,7 @@ This skill reads and reports. It edits no file, posts no comment on a Git host a
 
 ## 1. Pin the fixed point
 
-The fixed point is what the user named: a commit, branch, tag, \`main\`, \`HEAD~5\`. With none given, use the merge-base of \`HEAD\` and the repo's default branch (\`git symbolic-ref refs/remotes/origin/HEAD\`, else \`main\`, else \`master\`) and say which you chose.
+Run \`git fetch origin\` first and compare with \`origin/<default branch>\`, not a local copy that may be behind. The fixed point is what the user named: a commit, branch, tag, \`main\`, \`HEAD~5\`. With none given, use the merge-base of \`HEAD\` and the repo's default branch (\`git symbolic-ref refs/remotes/origin/HEAD\`, else \`main\`, else \`master\`) and say which you chose.
 
 Before going further:
 
@@ -418,7 +418,7 @@ A refactor changes the shape of code and nothing that anyone can observe. Same i
 2. **Fix the boundary.** List what must stay the same: public functions and types, file formats, API shapes, event names, log and error text others parse. A refactor that must touch one of them needs the user's yes first.
 3. **Get a green baseline.** Run the repo's build, lint and tests the way the repo does. Failing before you start is a finding to report, not something to fix inside this change. Note which tests cover the code you will touch.
 4. **Cover it, or stop.** If the code to change has no test that fails when its behaviour changes, write a characterisation test first: call the code at the highest seam that reaches it and pin what it does today, bugs included. If the code cannot be tested without changing it, make the smallest change that makes it testable (extract a seam), run the baseline again, and say so. If you still cannot cover it, stop and tell the user what is unprotected.
-5. **Work on a branch**, not on the default branch. Check \`git status\` first, so earlier work is not mixed in.
+5. **Work on a branch**, not on the default branch, started after \`git fetch origin\` from the newest default branch, so the moves are made on current code. Check \`git status\` first, so earlier work is not mixed in.
 
 ## The loop
 
@@ -521,7 +521,7 @@ When another skill in your list does a step (\`tdd\`, \`humanizer\`, \`code-revi
 ## Steps
 
 1. **Spec.** Read the spec the user named: \`docs/specs/<slug>.md\`, an issue, or text pasted into the conversation. With none, list \`docs/specs/\` if it exists and ask which, or tell the user to write one first (the \`spec\` skill does). A spec marked \`draft\` is not ready: ask the user to confirm it. Done when you can state the spec's behaviours and its test seams in your own words.
-2. **Branch.** On the default branch, make a new one named for the change (\`git switch -c <slug>\`). On any other branch, stay on it: it is this change's branch. Done when \`git branch --show-current\` prints it and it is not the default.
+2. **Branch.** Fetch first (\`git fetch origin\`): commits reach the default branch that this folder has not seen, and a change built on old code is wrong. On the default branch, make a new one named for the change from the newest default branch (\`git switch -c <slug> origin/<default branch>\`). On any other branch, stay on it: it is this change's branch. Done when \`git branch --show-current\` prints it and it is not the default.
 3. **Build.** Update the docs the spec says to update (glossary, decision records) first, then build test-first at the seams the spec names: write the test, watch it fail for the right reason, write the smallest code that passes, repeat. Send wide exploration to a sub-agent when you can, pointing it at the spec. Find the repo's build, format, lint and test commands in its own files and run them the way the repo does. Done when the docs hold every entry the spec asked for and the repo's full check passes. A failing check is fixed at its cause; never loosened, skipped or mocked away.
 4. **Verify.** Run the change the way its user would and look at it: start the app and drive the changed screen, call the changed endpoint, run the changed command. A visual change gets a screenshot; an API change gets the request and response. Done when the evidence shows each behaviour of the spec on the running thing. A change with no runtime surface (docs, config) skips this step: say so.
 5. **Prose.** Every changed or new Markdown file, and every title, goes through the \`humanizer\` skill, or through a read-aloud pass for AI tells if it is not in your list. Done when each file has had the pass.

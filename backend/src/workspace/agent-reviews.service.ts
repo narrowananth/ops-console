@@ -75,8 +75,8 @@ export type ReviewPlace = {
   scratch: string | null;
   /** The target branch and the commit it was at when the review started; null when it could not be fetched. */
   base: { branch: string; sha: string } | null;
-  /** The Repo's default branch, named when it is not the target branch. */
-  production: string | null;
+  /** The Repo's default branch and the commit it was at when the review started, when it is not the target branch. */
+  production: { branch: string; sha: string } | null;
 };
 
 const where = (comment: HostComment) =>
@@ -134,8 +134,8 @@ export function reviewBrief(
     ? `The target branch ${place.base.branch} is at ${place.base.sha}: compare the change with it.`
     : `The target branch ${pr.base_branch} could not be fetched: say so in the report, and compare with the diff below.`;
   const production =
-    place.production && place.production !== pr.base_branch
-      ? ` The production branch is ${place.production}, not the target branch: where they differ, review against both.`
+    place.production && place.production.branch !== pr.base_branch
+      ? ` The production branch ${place.production.branch} is at ${place.production.sha}, fetched now and not the target branch: where they differ, review against both.`
       : '';
   const folder = place.scratch
     ? `This folder is a scratch copy at commit ${pr.head_sha}. Steps tagged "scratch copy" may build, run tests and write mocks here; nothing here is pushed.`
@@ -360,7 +360,7 @@ export class AgentReviewsService {
       const place: ReviewPlace = {
         scratch,
         base: await this.base(repo.path, read.pr.base_branch),
-        production: await this.git.defaultBranch(repo.path).catch(() => null),
+        production: await this.production(repo.path, read.pr.base_branch),
       };
       this.store.write((tx) =>
         tx
@@ -401,6 +401,12 @@ export class AgentReviewsService {
       this.logger.warn(`base ${branch} not read: ${error instanceof GitFailed ? error.message : String(error)}`);
       return null;
     }
+  }
+
+  /** The Repo's default branch at its newest commit, fetched from `origin`; null when it is the target branch or cannot be read. */
+  private async production(dir: string, target: string): Promise<ReviewPlace['production']> {
+    const branch = await this.git.defaultBranch(dir).catch(() => null);
+    return branch && branch !== target ? this.base(dir, branch) : null;
   }
 
   /** After the operator posts a reply: a thread the agent started wakes the agent. */

@@ -32,6 +32,7 @@ const SESSION = {
   pr_number: null,
   connection_ids: null,
   extra_repo_ids: [],
+  pull_request: null,
   alert_id: null,
   state: 'waiting_input',
   last_message_preview: null,

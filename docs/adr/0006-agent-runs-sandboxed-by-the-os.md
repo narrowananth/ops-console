@@ -15,6 +15,12 @@ writes and reads those checkouts as it does its working folder, commands and fil
 agent's request, so text injected through a log cannot widen it. The git control files of each opened Repo stay closed as in the
 working folder, and the agent still never pushes. Playbook steps, Verifications, Fixes and read-only runs get none.
 
+A Session in a Repo works in its own git worktree under the data folder, so Sessions on different branches never share a
+checkout and the operator's folder is never checked out. Its commits, branches and index live in the Repo's git folder,
+outside the worktree, so the Session's own runs may write that folder too. The folder's `hooks`, `config`,
+`config.worktree`, `commondir` and `gitdir`, and the `gitdir`, `commondir` and `config.worktree` of the worktree's own folder
+in it, stay closed, as they were in the shared checkout. A scratch copy gets no git folder: the daemon commits there.
+
 The sandbox filters a run's commands, not the agent's file tools, which run in Claude Code's own process. The console
 holds those to the same limits with permission rules in `disallowedTools`: no reading the data folder's secrets
 (`runtime.json`, `state.db`, the account folders, the key files of MCP Servers) or the credential folders, and no editing
@@ -52,6 +58,12 @@ The agent is told never to skip a hook, and its `PreToolUse` hook refuses `--no-
 `SKIP=`, `LEFTHOOK=0` and a `core.hooksPath` pointed at nothing.
 
 ## Considered Options
+
+- **One checkout per Repo, shared by its Sessions**: the first design, where the run's working folder was the Repo's own
+  folder. Sessions on different branches fought over the one checkout: a Session showed another's branch, pull request
+  and changed lines, a branch switch refused while any Session in the Repo ran, and code fetched by nobody went stale.
+  It lost to a worktree per Session, which costs a fresh checkout with no `node_modules` or `.env` and lets a run write
+  the Repo's git folder (hooks and config stay closed).
 
 - **A run writes only in its own Repo's folder**: the first design. A chat that found a fix in another Repo could only
   print a patch and the commands for the operator to run by hand (a branch could not even be created there). It lost to

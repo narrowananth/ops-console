@@ -86,7 +86,7 @@ import {
   RUN_INTEGRATION_TOOL,
   SAVE_FILE_TOOL,
 } from './pull-request-tool';
-import { gitControl, runSandbox } from './run-sandbox';
+import { gitControl, runSandbox, worktreeGitDirs } from './run-sandbox';
 import { DEFAULT_JOB_RUN_LIMIT, RunSlots } from './run-slots';
 import { RunStepsLog } from './run-steps';
 import { type Run, RunRegistry, type RunSummary } from './runs';
@@ -858,6 +858,14 @@ export class AgentRuntime implements OnModuleDestroy {
 
   private async runOnce(run: Run, text: string, account: AccountRow): Promise<RunResult> {
     const session = this.sessions.get(run.sessionId);
+    const kind = this.kinds.get(session.kind);
+    // The Session's own folder first: for a Repo Session, its worktree at the newest code. Other folders are ready.
+    if (kind?.prepare && run.workingDir === kind.workingDir(session)) {
+      await kind.prepare(session).catch((error: unknown) => {
+        run.failure = error instanceof Error && error.message ? error.message : 'the Session folder is not ready';
+        throw error;
+      });
+    }
     const configDir = this.accounts.configDir(account);
     let resume = session.sdkSessionId;
     if (resume !== null) {
@@ -872,7 +880,7 @@ export class AgentRuntime implements OnModuleDestroy {
       else await this.transcripts.place(resume, configDir, run.workingDir);
     }
     if (session.accountId !== account.id) this.sessions.write(run.sessionId, { accountId: account.id });
-    const instructions = this.kinds.get(session.kind)?.instructions;
+    const instructions = kind?.instructions;
 
     const attached = this.attachments.existingFolder(run.sessionId);
     // A run the operator started writes its files for them in the Session's output folder (a read-only run has none).
@@ -894,6 +902,10 @@ export class AgentRuntime implements OnModuleDestroy {
         networkDomains: run.networkDomains,
         readOnly: run.readOnly,
         gitFile: gitFileOf(run.workingDir),
+        // A Session's own worktree commits into the Repo's git folder, which sits outside it.
+        ...(kind?.ownWorktree && run.workingDir === kind.workingDir(session)
+          ? { gitDirs: worktreeGitDirs(run.workingDir) }
+          : {}),
       }),
       // A folder that holds pull request code never adds its own settings, hooks, servers or memory to the run.
       ...(run.projectSettings ? {} : { settingSources: ['user' as const] }),

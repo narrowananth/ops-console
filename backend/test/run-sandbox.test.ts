@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -13,7 +13,7 @@ import {
 } from '@ops-console/shared';
 import { sql } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
-import { runSandbox } from '../src/agent/run-sandbox';
+import { runSandbox, worktreeGitDirs } from '../src/agent/run-sandbox';
 import { AgentRuntime, HOST_WRITE_DENIALS } from '../src/agent/runtime';
 import { repos } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
@@ -263,6 +263,46 @@ describe('Run sandbox: what a run cannot change or read (ADR 0006)', () => {
     expect(
       runSandbox({ workingDir: wd, dataDir: '/data', networkDomains: [], gitFile: true }).filesystem?.denyWrite,
     ).toEqual(['/work/repo/.git']);
+  });
+
+  it("lets a Session's own worktree commit into the Repo's git folder, and closes its hooks, config and pointers", async () => {
+    const repo = await tempDir('ops-console-wt-');
+    execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+    execFileSync(
+      'git',
+      ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-q', '--allow-empty', '-m', 'first'],
+      {
+        cwd: repo,
+      },
+    );
+    const wd = path.join(await tempDir('ops-console-wt-data-'), 'wt');
+    execFileSync('git', ['worktree', 'add', '-q', '--detach', wd], { cwd: repo });
+    const dirs = worktreeGitDirs(wd);
+    const common = await realpath(path.join(repo, '.git'));
+    expect(dirs && (await realpath(dirs.common))).toBe(common);
+
+    const fs = runSandbox({
+      workingDir: wd,
+      dataDir: '/data',
+      networkDomains: [],
+      gitFile: true,
+      gitDirs: dirs,
+    }).filesystem;
+    expect(fs?.allowWrite).toContain(dirs?.common);
+    expect(fs?.denyWrite).toEqual(
+      expect.arrayContaining([
+        path.join(wd, '.git'),
+        path.join(dirs?.common ?? '', 'hooks'),
+        path.join(dirs?.common ?? '', 'config'),
+        path.join(dirs?.admin ?? '', 'gitdir'),
+        path.join(dirs?.admin ?? '', 'commondir'),
+      ]),
+    );
+    // A scratch copy has no git folder to write, and nothing else gives one.
+    expect(
+      runSandbox({ workingDir: wd, dataDir: '/data', networkDomains: [], gitFile: true }).filesystem?.allowWrite,
+    ).not.toContain(dirs?.common);
+    expect(worktreeGitDirs(repo)).toBeNull();
   });
 
   it('lets a run write and read its output folder, and no other folder under the data folder', () => {

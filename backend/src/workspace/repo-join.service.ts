@@ -8,7 +8,6 @@ import { SessionsService } from '../agent/sessions.service';
 import { ApiError } from '../common/errors';
 import { repos } from '../db/schema';
 import { STORE, type Store } from '../db/store';
-import { GIT, Git } from '../repos/git';
 
 type RepoFacts = { id: string; name: string; path: string; remoteSlug: string | null; defaultBranch: string };
 
@@ -44,13 +43,12 @@ export function matchRepos(query: string, rows: RepoFacts[]): RepoFacts[] {
 
 /**
  * Moves an Anonymous Session into an imported Repo when the agent asks and the operator approves. The Session then
- * runs in the Repo's checkout like any `repo` Session: a branch, the Changes panel, commit hooks, the pull request.
+ * runs in a worktree of the Repo like any `repo` Session: a branch, the Changes panel, commit hooks, the pull request.
  */
 @Injectable()
 export class RepoJoinService implements RepoJoiner {
   constructor(
     @Inject(STORE) private readonly store: Store,
-    @Inject(GIT) private readonly git: Git,
     @Inject(SessionsService) private readonly sessions: SessionsService,
     @Inject(AgentRuntime) runtime: AgentRuntime,
   ) {
@@ -65,12 +63,12 @@ export class RepoJoinService implements RepoJoiner {
 
   describe(sessionId: string, input: JoinRepoInput): string {
     const repo = this.find(sessionId, input);
-    return `Move this Session into the Repo ${repo.name} (${repo.path}): the agent then works in your checkout on its current branch`;
+    return `Move this Session into the Repo ${repo.name} (${repo.path}): the agent then works in a worktree of its own, started from the newest ${repo.defaultBranch}`;
   }
 
   async join(sessionId: string, input: JoinRepoInput): Promise<{ repo: string; branch: string | null }> {
     const repo = this.find(sessionId, input);
-    const branch = (await this.git.currentBranch(repo.path)) ?? repo.defaultBranch;
+    const branch = repo.defaultBranch;
     this.sessions.write(sessionId, { kind: SessionKind.Repo, repoId: repo.id, branch });
     return { repo: repo.name, branch };
   }

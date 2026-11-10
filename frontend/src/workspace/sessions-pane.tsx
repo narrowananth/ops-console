@@ -187,22 +187,29 @@ function RepoGroup({
           type="button"
           aria-expanded={!folded}
           onClick={onFold}
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-0 bg-transparent py-2 pl-2 text-left text-text"
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 overflow-hidden border-0 bg-transparent py-2 pl-2 text-left text-text"
         >
           <span aria-hidden className="w-3 flex-none text-xs text-neutral-700">
             {folded ? '▸' : '▾'}
           </span>
           <RepoIcon host={repo.host} size="xs" />
-          <strong className="flex-none font-mono text-[13px]">{repo.name}</strong>
+          {/* A long name gives way before the counts do, so nothing paints over the New Session button. */}
+          <strong title={repo.name} className="min-w-0 truncate font-mono text-[13px]">
+            {repo.name}
+          </strong>
           <span
             title="The branch checked out in this Repo's folder now"
-            className="min-w-0 flex-1 truncate font-mono text-xs text-neutral-700"
+            className="min-w-0 shrink-[3] truncate font-mono text-xs text-neutral-700"
           >
             {repo.branch}
           </span>
-          {running > 0 && <span className="flex-none font-mono text-xs text-accent-700">{running} running</span>}
-          <span title="Sessions in this Repo" className="flex-none font-mono text-xs text-neutral-700">
-            {sessions.length}
+          <span className="ml-auto flex flex-none items-center gap-2 pl-1">
+            {running > 0 && (
+              <span className="font-mono text-xs whitespace-nowrap text-accent-700">{running} running</span>
+            )}
+            <span title="Sessions in this Repo" className="font-mono text-xs text-neutral-700">
+              {sessions.length}
+            </span>
           </span>
         </button>
         {!repo.missing && (
