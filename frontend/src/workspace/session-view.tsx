@@ -41,7 +41,7 @@ import { AttachButton, filesIn, useAttachments } from './attachments';
 import { BranchSwitcher } from './branch-switcher';
 import { ConversationMap, ScrollToEnd, useFollowLatest } from './conversation';
 import { ExtraRepos } from './extra-repos';
-import { alertPath, pullRequestPath, sessionDraftKey } from './links';
+import { alertPath, pullRequestPath, sessionDraftKey, sessionPath } from './links';
 import { MessageEditor, type MessageEditorHandle } from './message-editor';
 import { OpenPullRequestForm } from './open-pull-request';
 import { type PastedText, PastedTextEditor } from './pasted-text-editor';
@@ -206,8 +206,18 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
           externalPull ||
           session.alert_id ||
           session.playbook ||
+          session.spawned_by ||
           openable.data?.can_open) && (
           <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {session.spawned_by && (
+              <Link
+                to={sessionPath(session.spawned_by.id)}
+                title="The Session whose agent started this one with a task for this Repo"
+                className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
+              >
+                Started from {session.spawned_by.title} →
+              </Link>
+            )}
             {branch && (
               <span
                 title="The branch this Session works on"

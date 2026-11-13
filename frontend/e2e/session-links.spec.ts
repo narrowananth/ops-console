@@ -41,6 +41,8 @@ const session = (id: string, extra: Record<string, unknown> = {}) => ({
   last_active_at: NOW,
   playbook: null,
   queued_message: null,
+  spawned_by: null,
+  spawned: [],
   ...extra,
 });
 

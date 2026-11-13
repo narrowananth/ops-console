@@ -49,6 +49,8 @@ export type NewSession = {
   repoId?: string;
   branch?: string;
   prNumber?: number;
+  /** The Session whose agent started this one, and the `spawn_sessions` call that did. */
+  spawnedBy?: { sessionId: string; callId: string };
 };
 
 export function toSession(row: SessionRow): Session {
@@ -77,6 +79,8 @@ export function toSession(row: SessionRow): Session {
     last_active_at: row.lastActiveAt,
     playbook: null,
     queued_message: row.queuedText,
+    spawned_by: null,
+    spawned: [],
   };
 }
 
@@ -134,6 +138,8 @@ export class SessionsService {
           repoId: input.repoId ?? null,
           branch: input.branch ?? null,
           prNumber: input.prNumber ?? null,
+          spawnedBySessionId: input.spawnedBy?.sessionId ?? null,
+          spawnCallId: input.spawnedBy?.callId ?? null,
         })
         .returning()
         .get(),
@@ -228,7 +234,36 @@ export class SessionsService {
       ...toSession(row),
       last_error: this.failures.get(row.id) ?? null,
       playbook: this.playbooks.forSession(row).playbook,
+      ...this.spawnLinks(row),
       ...this.kinds.get(row.kind)?.view?.(row),
+    };
+  }
+
+  /** The Session that started this one and the Sessions this one started, with where each stands. */
+  private spawnLinks(row: SessionRow): Pick<Session, 'spawned_by' | 'spawned'> {
+    const parent =
+      row.spawnedBySessionId === null
+        ? null
+        : this.store.db.select().from(sessions).where(eq(sessions.id, row.spawnedBySessionId)).get();
+    const children = this.store.db
+      .select({ row: sessions, repoName: repos.name })
+      .from(sessions)
+      .leftJoin(repos, eq(repos.id, sessions.repoId))
+      .where(eq(sessions.spawnedBySessionId, row.id))
+      .orderBy(sessions.createdAt)
+      .all();
+    return {
+      spawned_by: parent ? { id: parent.id, title: parent.title } : null,
+      spawned: children.map(({ row: child, repoName }) => ({
+        id: child.id,
+        title: child.title,
+        call_id: child.spawnCallId,
+        repo_name: repoName,
+        branch: child.branch,
+        state: child.state,
+        run_outcome: child.runOutcome,
+        pull_request: toSession(child).pull_request,
+      })),
     };
   }
 

@@ -1881,6 +1881,8 @@ const session = (id: string, kind: string, playbook: { id: string; name: string 
   last_active_at: NOW,
   playbook,
   queued_message: null,
+  spawned_by: null,
+  spawned: [],
 });
 
 test('a Session names the Playbook its rules come from and links to its flow', async ({ page, request }) => {

@@ -69,6 +69,12 @@ resolves threads, and a Reply check or Comment pass denies the agent `git push` 
 - **An Approval on every `open_pull_request` call**: the operator read what would be pushed and where. It lost because
   the push is never forced and never merges, the diff and the pull request are on the host to read, and the stop broke
   a chat's flow: an update to an open pull request waited for a click each time.
+- **A cap and a queue on the Sessions one `spawn_sessions` call starts**: past the limit, a Session waits for a place. It
+  lost because the Approval already shows the count and the operator decides. Every Spawned Session runs at once, and each
+  boots its own Claude Code process with every Connection's MCP server, so a large batch slows the console. That cost
+  is accepted.
+- **An Approval per Spawned Session**: one click per Repo, each reading one task. It lost because the operator reads the
+  whole list once, and a yes per Repo gave back most of the time the batch saves.
 - **Git host credentials inside the Run sandbox so the agent pushes itself**: `ssh` ignores the proxy, and the Bitbucket
   and GitLab CLIs keep their tokens in the Keychain, so it cannot work; where it could, a steered run would hold a
   token that writes to every repository. The daemon pushes for the agent instead.
@@ -80,6 +86,11 @@ resolves threads, and a Reply check or Comment pass denies the agent `git push` 
 A chat run, steered by text it read, can have the console push the Session's committed branch to `origin` and open a
 pull request without a click. It cannot push a force, merge, or push another Repo. The operator sees the pull request on
 the host and merges it or not.
+
+One yes on a `spawn_sessions` list starts a chat run per Repo, and each can push its committed branch and open a pull
+request without a click, as any chat run can. The count is new. No run can force a push, merge or push
+another Repo, a Spawned Session cannot start others, and the tool is offered only in a chat the operator started, never
+in a job that read log or pull request text.
 
 An approved `save_file` writes where the operator was shown: the daemon replaces a file of that name in the destination
 and checks nothing but that the folder exists. The operator reads the path on the card.

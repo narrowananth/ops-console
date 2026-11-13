@@ -2,6 +2,7 @@ import type { Cell, Message, Part } from '@ops-console/shared';
 import { z } from 'zod';
 import { mcpTool } from '../action-log/classify';
 import { redact } from '../action-log/redact';
+import { SPAWN_SESSIONS_TOOL, spawnSessionsInputSchema } from './pull-request-tool';
 import { skillNameOf } from './skill-plugin';
 
 const blockSchema = z.union([
@@ -140,7 +141,7 @@ export function stepText(name: string, input: Record<string, unknown>, label?: S
   return typeof subject === 'string' ? `${name} ${subject}` : name;
 }
 
-function toolParts(name: string, input: Record<string, unknown>, label?: ServerLabel | null): Part[] {
+function toolParts(name: string, input: Record<string, unknown>, label?: ServerLabel | null, id = ''): Part[] {
   if (name === 'AskUserQuestion') {
     const parsed = questionInputSchema.safeParse(input);
     if (parsed.success) {
@@ -152,6 +153,10 @@ function toolParts(name: string, input: Record<string, unknown>, label?: ServerL
         options: question.options.map((option) => ({ label: option.label, description: option.description ?? '' })),
       }));
     }
+  }
+  if (name === SPAWN_SESSIONS_TOOL) {
+    const parsed = spawnSessionsInputSchema.safeParse(input);
+    if (parsed.success) return [{ kind: 'spawn', call_id: id, entries: parsed.data.sessions }];
   }
   const file = typeof input.file_path === 'string' ? input.file_path : null;
   if (file && (name === 'Edit' || name === 'MultiEdit' || name === 'Write')) {
@@ -168,7 +173,7 @@ function toolParts(name: string, input: Record<string, unknown>, label?: ServerL
 /** Parts for one assistant content block: text, tool calls, file edits, code blocks and questions. */
 export function blockParts(block: ContentBlock, label?: ServerLabel | null): Part[] {
   if (block.type === 'text' && 'text' in block) return textParts(block.text);
-  if (block.type === 'tool_use' && 'name' in block) return toolParts(block.name, block.input, label);
+  if (block.type === 'tool_use' && 'name' in block) return toolParts(block.name, block.input, label, block.id);
   return [];
 }
 

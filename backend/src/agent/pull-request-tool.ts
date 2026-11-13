@@ -8,6 +8,7 @@ import { type FileSaver, runSaveFile, saveFileInputSchema } from './output-files
 export const CONSOLE_TOOLS_SERVER = 'ops-console';
 export const OPEN_PULL_REQUEST_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__open_pull_request`;
 export const JOIN_REPO_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__join_repo`;
+export const SPAWN_SESSIONS_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__spawn_sessions`;
 export const SAVE_FILE_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__save_file`;
 export const RUN_INTEGRATION_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__run_integration`;
 
@@ -26,6 +27,26 @@ export interface RepoJoiner {
   describe(sessionId: string, input: JoinRepoInput): string;
   /** Moves the Session into the Repo; returns where it works now. */
   join(sessionId: string, input: JoinRepoInput): Promise<{ repo: string; branch: string | null }>;
+}
+
+export const spawnSessionsInputSchema = z.object({
+  /** One entry per Repo: the Repo's name, path or Git URL, and the task its Session starts with. */
+  sessions: z.array(z.object({ repo: z.string().trim().min(1), task: z.string().trim().min(1) })).min(1),
+});
+
+export type SpawnSessionsInput = z.infer<typeof spawnSessionsInputSchema>;
+
+/** What became of one entry of a `spawn_sessions` call. */
+export type SpawnedEntry = { repo: string; sessionId: string | null; error: string | null };
+
+/** What the agent's `spawn_sessions` tool calls. The Workspace provides it. */
+export interface SessionSpawner {
+  /** Whether this run may spawn: a chat run the operator started, in a Session no other Session spawned. */
+  offers(sessionId: string): boolean;
+  /** Checks every entry and returns the words the operator's Approval shows. Throws an `ApiError` when the batch is refused. */
+  describe(sessionId: string, input: SpawnSessionsInput): string;
+  /** Makes a Session per entry and starts its run. A Session that cannot start is reported, and the others go on. */
+  spawn(sessionId: string, input: SpawnSessionsInput, callId: string): Promise<SpawnedEntry[]>;
 }
 
 export const openPullRequestInputSchema = z.object({
@@ -86,17 +107,48 @@ export async function runJoinRepo(
   }
 }
 
+/** The tool's answer to the agent: one line per entry, or why nothing started. */
+export async function runSpawnSessions(
+  spawner: SessionSpawner,
+  sessionId: string,
+  input: SpawnSessionsInput,
+  callId: string,
+): Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }> {
+  try {
+    const entries = await spawner.spawn(sessionId, input, callId);
+    const lines = entries.map((entry) =>
+      entry.sessionId === null
+        ? `failed ${entry.repo}: ${entry.error ?? 'did not start'}`
+        : `started ${entry.repo} as Session ${entry.sessionId}`,
+    );
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `${lines.join('\n')}\nEach Session works alone and opens its own pull request. Reply with one short line: the console shows their progress under this turn. Do not wait for them.`,
+        },
+      ],
+    };
+  } catch (error) {
+    const why = error instanceof ApiError ? error.message : 'the Sessions did not start';
+    return { content: [{ type: 'text', text: `No Sessions were started: ${why}` }], isError: true };
+  }
+}
+
 /** The console's tools for one run. The runtime's PreToolUse hook gates each call: joining a Repo and saving a file ask the operator, an integration write asks, a read and a pull request do not. */
 export function consoleToolsServer(
   tools: {
     opener: PullRequestOpener | null;
     joiner: RepoJoiner | null;
+    spawner?: SessionSpawner | null;
+    /** The tool-use id of the `spawn_sessions` call being run, set by the approval hook. */
+    spawnCallId?: () => string;
     saver: FileSaver | null;
     integrations?: IntegrationRunner | null;
   },
   sessionId: string,
 ): McpSdkServerConfigWithInstance {
-  const { opener, joiner, saver, integrations = null } = tools;
+  const { opener, joiner, spawner = null, spawnCallId = () => '', saver, integrations = null } = tools;
   return createSdkMcpServer({
     name: CONSOLE_TOOLS_SERVER,
     tools: [
@@ -117,6 +169,16 @@ export function consoleToolsServer(
               "Moves this Session into a Repo the operator imported, after the operator approves, so you work in the real checkout on a branch and can commit and open a pull request. Use it when the operator names a repository or says where the issue is. Give the Repo's name, its path on this machine, or its Git URL.",
               joinRepoInputSchema.shape,
               (args) => runJoinRepo(joiner, sessionId, args),
+            ),
+          ]
+        : []),
+      ...(spawner
+        ? [
+            tool(
+              'spawn_sessions',
+              "Starts a Session in each of several imported Repos at once, after the operator approves the whole list, so the Repos' tasks run in parallel. Give one entry per Repo: the Repo's name, path or Git URL, and the task for its Session, written so the agent there needs nothing else (it does not see this conversation). Each Session works on its own branch and opens its own pull request. Not for the Repo this Session works in: do that work here.",
+              spawnSessionsInputSchema.shape,
+              (args) => runSpawnSessions(spawner, sessionId, args, spawnCallId()),
             ),
           ]
         : []),

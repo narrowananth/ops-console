@@ -11,6 +11,7 @@ import { PullRequestOpeningService } from './pull-request-opening.service';
 import { PullRequestsService } from './pull-requests.service';
 import { ReplyChecksService } from './reply-checks.service';
 import { RepoJoinService } from './repo-join.service';
+import { SessionSpawnService } from './session-spawn.service';
 import { PullRequestsController, WorkspaceSessionsController } from './workspace.controller';
 import { WorkspaceSessionsService } from './workspace-sessions.service';
 
@@ -33,6 +34,7 @@ export class WorkspaceModule {
         PullRequestOpeningService,
         AnonymousSessionsService,
         RepoJoinService,
+        SessionSpawnService,
         PrRunRetry,
         { provide: OPEN_PR_BRANCHES, useExisting: PullRequestsService },
       ],

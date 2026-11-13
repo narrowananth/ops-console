@@ -49,6 +49,8 @@ const SESSION = {
   last_active_at: NOW,
   playbook: null,
   queued_message: null,
+  spawned_by: null,
+  spawned: [],
 };
 
 const MESSAGES = [

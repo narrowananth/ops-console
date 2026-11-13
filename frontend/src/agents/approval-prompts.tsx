@@ -69,7 +69,9 @@ function ApprovalCard({
               </span>
             )}
           </div>
-          <p className="m-0 text-sm leading-relaxed font-medium break-words text-text">{approval.summary}</p>
+          <p className="m-0 text-sm leading-relaxed font-medium max-h-48 overflow-y-auto break-words whitespace-pre-line text-text">
+            {approval.summary}
+          </p>
           {approval.command && (
             <CodeBlock
               text={approval.command}

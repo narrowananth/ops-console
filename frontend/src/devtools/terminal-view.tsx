@@ -168,6 +168,8 @@ function PartLine({ part, connections }: { part: Part; connections: Connection[]
     );
   if (part.kind === 'code') return <pre className="m-0 overflow-x-auto pl-4 text-neutral-400">{part.text}</pre>;
   if (part.kind === 'diff') return <div className="text-neutral-300">● edited {part.file}</div>;
+  if (part.kind === 'spawn')
+    return <div className="text-neutral-300">● started Sessions in {part.entries.length} Repos</div>;
   return (
     <div className="font-semibold text-accent-300">
       ? {part.text}

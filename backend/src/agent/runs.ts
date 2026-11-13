@@ -60,6 +60,8 @@ export type Run = {
   waitingSince: number | null;
   /** Set when the agent moved the Session into a Repo: the next turn starts there once this run ends. */
   joinedRepo: boolean;
+  /** The tool-use ids of the `spawn_sessions` calls the operator approved and the tool has not run yet, oldest first. */
+  spawnCallIds: string[];
   /** Set when Send now stopped the run: its queued message goes out as the run ends. */
   sendQueuedAfter: boolean;
   /** The subagents the run started, by task id. */
