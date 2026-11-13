@@ -90,8 +90,8 @@ Repos' remotes and the operator's own domains. Any other host is refused.
 
 **Playbook**:
 The rules and ordered steps the agent follows when a Trigger starts it, written by the operator, the Skills it holds,
-the branches Verify and Fix read the code from, and whether a Fix makes a Ticket. Whatever the Playbook, every run is told
-to fetch origin and work from the newest production branch. Each Trigger holds one; one Playbook
+the branches Verify and Fix read the code from, and whether a Fix makes a Ticket. Whatever the Playbook, the console fetches
+origin before every run, and the agent is told to work from the newest production branch. Each Trigger holds one; one Playbook
 may be held by several. Each Trigger without one runs its built-in.
 _Avoid_: rule, pipeline, workflow
 
@@ -263,7 +263,8 @@ it: a Session in the Service's Repo, on the Repo's default branch, or an Anonymo
 **Session worktree**:
 The git worktree a Session in a Repo works in, under the data folder, made from the newest commit of the Repo's default
 branch fetched from origin. Sessions on different branches work at once, and the operator's own folder is never checked
-out. A Session on the default branch starts on a detached HEAD.
+out. A Session on the default branch starts on a detached HEAD. The console fetches the default branch before each run;
+the agent never fetches, since its sandbox has no git keys.
 _Avoid_: checkout, working copy
 
 **Session diff**:
