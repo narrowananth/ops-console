@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { ErrorCode, StepBlock, type WsEvent } from '@ops-console/shared';
 import { sql } from 'drizzle-orm';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentRuntime } from '../src/agent/runtime';
 import { ConnectionsModule } from '../src/connections/connections.module';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
@@ -85,6 +85,23 @@ describe('Keychain wait', () => {
   it('is quiet while no call is pending (Behavior 14)', async () => {
     const { daemon } = await start();
     expect(await waitOf(daemon)).toEqual({ waiting: false, since: null, pending: 0 });
+  });
+
+  it('starts the wait when its timer fires, even if the clock reads a millisecond short of the threshold', () => {
+    vi.useFakeTimers();
+    try {
+      const wait = new KeychainWaitTracker(100);
+      const heard: boolean[] = [];
+      wait.onChange((state) => heard.push(state.waiting));
+      const end = wait.begin();
+      vi.setSystemTime(Date.now() - 1);
+      vi.advanceTimersByTime(100);
+      expect(heard).toEqual([true]);
+      end();
+      expect(heard).toEqual([true, false]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('starts a wait after the threshold, tells every browser, and clears when the call times out (Behavior 13, 14, 15)', async () => {

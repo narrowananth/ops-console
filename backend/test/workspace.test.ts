@@ -275,6 +275,11 @@ describe('Sessions in a Repo', () => {
     const hold = gate();
     ctx.daemon.sdk.script({ wait: hold.promise }, { text: 'done' });
     await ctx.http.post(`/sessions/${id}/messages`, { text: 'go' });
+    // The run is in the SDK once its worktree is ready; removing the Repo before that fails the run.
+    await until(
+      () => ctx.daemon.sdk.calls.length,
+      (count) => count > 0,
+    );
 
     expect((await ctx.http.delete(`/repos/${ctx.repoId}?sessions=keep`)).status).toBe(204);
     expect((await ctx.http.get('/repos')).body.data).toEqual([]);
