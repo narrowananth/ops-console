@@ -20,10 +20,12 @@ import { when } from '../monitor/scan-scope';
 import { KindBadge } from '../skills/kind-badge';
 import { InlineText } from './inline-text';
 import { asReport, ReportDocument } from './report-document';
+import { SpawnCard } from './spawn-card';
 import { StepRun } from './step-run';
 
 /** One part of a Session's transcript: text, a tool step, a diff, a code block, a question or a Dev tools table. */
-function PartView({ part }: { part: Part }) {
+function PartView({ part, sessionId }: { part: Part; sessionId: string | null }) {
+  if (part.kind === 'spawn') return sessionId === null ? null : <SpawnCard part={part} sessionId={sessionId} />;
   if (part.kind === 'result') return <ResultView part={part} connections={[]} />;
   if (part.kind === 'comparison') return <ComparisonView part={part} />;
   if (part.kind === 'text') {
@@ -155,7 +157,7 @@ export function MessageView({
       {draft === null ? (
         agent ? (
           <>
-            <MessageParts message={message} />
+            <MessageParts message={message} sessionId={outputs?.sessionId ?? null} />
             {outputs && message.status !== 'streaming' && <OutputChips {...outputs} />}
           </>
         ) : (
@@ -314,7 +316,7 @@ function FileChip({ name, onOpen }: { name: string; onOpen: () => void }) {
  * The parts in order, each run of tool steps drawn as one compact path. While the message streams, its last step
  * turns; on a failed message, it is crossed.
  */
-function MessageParts({ message }: { message: Message }) {
+function MessageParts({ message, sessionId }: { message: Message; sessionId: string | null }) {
   const groups: { at: number; parts: Part[] }[] = [];
   message.parts.forEach((part, at) => {
     const open = groups.at(-1);
@@ -325,7 +327,7 @@ function MessageParts({ message }: { message: Message }) {
     const [first] = group.parts;
     if (first?.kind !== 'step') {
       // Parts stream in order and never reorder: a group's first index is its identity.
-      return first ? <PartView key={group.at} part={first} /> : null;
+      return first ? <PartView key={group.at} part={first} sessionId={sessionId} /> : null;
     }
     const tail = index === groups.length - 1;
     const end: PathwayState =

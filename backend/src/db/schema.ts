@@ -148,10 +148,16 @@ export const sessions = sqliteTable(
     runLimitResetsAt: text('run_limit_resets_at'),
     /** The message the operator queued behind the run; the daemon sends it when the run ends, unless the operator stopped it. */
     queuedText: text('queued_text'),
+    /** The Session whose agent started this one through `spawn_sessions`, and that call's tool-use id; null for any other Session. */
+    spawnedBySessionId: text('spawned_by_session_id').references((): AnySQLiteColumn => sessions.id, {
+      onDelete: 'set null',
+    }),
+    spawnCallId: text('spawn_call_id'),
     createdAt: text('created_at').notNull().default(nowIso),
     lastActiveAt: text('last_active_at').notNull().default(nowIso),
   },
   (table) => [
+    index('sessions_spawned_by_idx').on(table.spawnedBySessionId),
     index('sessions_active_idx').on(sql`${table.lastActiveAt} DESC`),
     index('sessions_repo_idx').on(table.repoId, sql`${table.lastActiveAt} DESC`),
     uniqueIndex('sessions_one_pr_review_idx').on(table.repoId, table.prNumber).where(sql`${table.kind} = 'pr_review'`),

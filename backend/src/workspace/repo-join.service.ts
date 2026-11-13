@@ -9,7 +9,7 @@ import { ApiError } from '../common/errors';
 import { repos } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 
-type RepoFacts = { id: string; name: string; path: string; remoteSlug: string | null; defaultBranch: string };
+export type RepoFacts = { id: string; name: string; path: string; remoteSlug: string | null; defaultBranch: string };
 
 const clean = (text: string) =>
   text

@@ -237,8 +237,18 @@ The console's push of a Session's branch from its Session worktree to `origin` a
 One conversation between the operator and the agent, named for its first task. It runs in one Repo on one branch, in a
 Session worktree, except a
 dev-tools Session and an anonymous Session, which have no Repo. A pull request has its own Session for the agent's
-replies, with no composer, and an Alert has one for its Verification and Fix.
+replies, with no composer, and an Alert has one for its Verification and Fix. The agent may start Spawned Sessions from one.
 _Avoid_: chat, thread
+
+**Spawned Session**:
+A Session the agent started in an imported Repo through `spawn_sessions`, with a task the agent wrote, after the operator
+approved the whole list at once. It is a `repo` Session in every other way: its own worktree, branch and pull request, in
+the starting Session's model, effort and Access mode. It cannot start others. Its header names the Session that started it.
+_Avoid_: child chat, subtask
+
+**Batch card**:
+What the starting Session's transcript shows for a `spawn_sessions` call: each Spawned Session with its state, branch and
+pull request, and a button that opens it.
 
 **Running tray**:
 The sidebar popup of agent runs, filtered and grouped: the ones that need the operator, the ones going with the

@@ -59,6 +59,8 @@ async function openSession(page: Page, outputs: object[]) {
             last_active_at: T0,
             playbook: null,
             queued_message: null,
+            spawned_by: null,
+            spawned: [],
           },
         ],
       },

@@ -197,6 +197,8 @@ test('a pull request row shows when it was opened, and a Session row when it sta
           last_active_at: started,
           playbook: null,
           queued_message: null,
+          spawned_by: null,
+          spawned: [],
         },
       ]),
     ),

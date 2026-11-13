@@ -169,6 +169,12 @@ export const partSchema = z.discriminatedUnion('kind', [
     multi_select: z.boolean().default(false),
     options: z.array(z.object({ label: z.string(), description: z.string().default('') })),
   }),
+  /** The agent's `spawn_sessions` call: the Repos and tasks it asked to start, and the call's id the children carry. */
+  z.object({
+    kind: z.literal('spawn'),
+    call_id: z.string(),
+    entries: z.array(z.object({ repo: z.string(), task: z.string() })),
+  }),
   /** The rows one Connection gave for one question (`10-dev-tools-compare`). */
   z.object({
     kind: z.literal('result'),
@@ -211,6 +217,21 @@ export const messageSchema = z.object({
 
 export type Message = z.infer<typeof messageSchema>;
 
+/** A Session the agent started from another through `spawn_sessions`. */
+export const spawnedSessionSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  /** The `spawn_sessions` call that started it; the transcript's batch card matches on this. */
+  call_id: z.string().nullable(),
+  repo_name: z.string().nullable(),
+  branch: z.string().nullable(),
+  state: z.enum(SessionState),
+  run_outcome: z.enum(RunOutcome).nullable(),
+  pull_request: z.object({ number: z.number().int(), url: z.string() }).nullable(),
+});
+
+export type SpawnedSession = z.infer<typeof spawnedSessionSchema>;
+
 export const sessionSchema = z.object({
   id: z.string(),
   kind: z.enum(SessionKind),
@@ -243,6 +264,10 @@ export const sessionSchema = z.object({
   playbook: sessionPlaybookSchema.nullable(),
   /** The message queued behind the run: sent when the run ends, or held when the operator stopped it. */
   queued_message: z.string().nullable(),
+  /** The Session whose agent started this one; null for any other Session, and for one whose parent was deleted. */
+  spawned_by: z.object({ id: z.string(), title: z.string() }).nullable(),
+  /** The Sessions this one's agent started, oldest first. */
+  spawned: z.array(spawnedSessionSchema),
 });
 
 export type Session = z.infer<typeof sessionSchema>;

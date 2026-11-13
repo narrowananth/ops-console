@@ -85,6 +85,9 @@ import {
   type RepoJoiner,
   RUN_INTEGRATION_TOOL,
   SAVE_FILE_TOOL,
+  type SessionSpawner,
+  SPAWN_SESSIONS_TOOL,
+  spawnSessionsInputSchema,
 } from './pull-request-tool';
 import { gitControl, runSandbox, worktreeGitDirs } from './run-sandbox';
 import { DEFAULT_JOB_RUN_LIMIT, RunSlots } from './run-slots';
@@ -389,6 +392,13 @@ export class AgentRuntime implements OnModuleDestroy {
     this.joiner = joiner;
   }
 
+  /** Who starts Sessions in several Repos when the agent asks. Set once by the Workspace. */
+  private spawner: SessionSpawner | null = null;
+
+  setSessionSpawner(spawner: SessionSpawner): void {
+    this.spawner = spawner;
+  }
+
   /** A run does not survive a restart: its Session fails and its Approvals expire (Behavior 18). */
   private recover(): void {
     this.store.write((tx, emit) => {
@@ -582,6 +592,7 @@ export class AgentRuntime implements OnModuleDestroy {
       waitingSince: null,
       sendQueuedAfter: false,
       joinedRepo: false,
+      spawnCallIds: [],
       subagents: new Map(),
       taskOfToolUse: new Map(),
       messageUsage: new Map(),
@@ -937,16 +948,24 @@ export class AgentRuntime implements OnModuleDestroy {
         const opener = this.opener?.offers(run.sessionId, run.workingDir) ? this.opener : null;
         // Only a run the operator started: a Playbook step or a Verification in an Anonymous Session stays where it is.
         const joiner = run.onFinish === null && this.joiner?.offers(run.sessionId) ? this.joiner : null;
+        // A chat the operator started, in a Session no other Session spawned.
+        const spawner =
+          run.onFinish === null && run.purpose === RunPurpose.Chat && this.spawner?.offers(run.sessionId)
+            ? this.spawner
+            : null;
         const saver = outputFolder === null ? null : this.outputs;
         // The integration CLIs run in the daemon, outside the sandbox, in the Session's output folder.
         const integrations =
           outputFolder === null
             ? null
             : { run: (input: IntegrationInput) => runCli(input.cli, input.args, outputFolder) };
-        return opener || joiner || saver || integrations
+        return opener || joiner || spawner || saver || integrations
           ? {
               mcpServers: {
-                [CONSOLE_TOOLS_SERVER]: consoleToolsServer({ opener, joiner, saver, integrations }, run.sessionId),
+                [CONSOLE_TOOLS_SERVER]: consoleToolsServer(
+                  { opener, joiner, spawner, spawnCallId: () => run.spawnCallIds.shift() ?? '', saver, integrations },
+                  run.sessionId,
+                ),
               },
             }
           : {};
@@ -1353,6 +1372,7 @@ export class AgentRuntime implements OnModuleDestroy {
       }
       if (input.tool_name === OPEN_PULL_REQUEST_TOOL) return this.checkPullRequest(run, toolInput, input.tool_use_id);
       if (input.tool_name === JOIN_REPO_TOOL) return this.approveJoinRepo(run, toolInput, input.tool_use_id);
+      if (input.tool_name === SPAWN_SESSIONS_TOOL) return this.approveSpawnSessions(run, toolInput, input.tool_use_id);
       if (input.tool_name === SAVE_FILE_TOOL) return this.approveSaveFile(run, toolInput, input.tool_use_id);
       if (input.tool_name === RUN_INTEGRATION_TOOL) return this.approveIntegration(run, toolInput, input.tool_use_id);
       if (input.tool_name === 'Bash' && typeof toolInput.command === 'string' && skipsCommitHooks(toolInput.command)) {
@@ -1546,6 +1566,54 @@ export class AgentRuntime implements OnModuleDestroy {
         permissionDecisionReason: approved
           ? 'The operator approved joining the Repo.'
           : 'The operator denied joining the Repo. Do not ask again: work in this folder or ask the operator.',
+      },
+    };
+  }
+
+  /**
+   * Starting Sessions in several Repos asks once for the whole list, in every Access mode: each Session then works in a
+   * Repo and may open a pull request. A list with an unknown or repeated Repo, or a blank task, is refused before it asks.
+   */
+  private async approveSpawnSessions(
+    run: Run,
+    toolInput: Record<string, unknown>,
+    stepId: string,
+  ): Promise<HookJSONOutput> {
+    const refuse = (reason: string): HookJSONOutput => {
+      this.steps.finish(stepId, { ok: false, error: reason });
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: reason,
+        },
+      };
+    };
+    const parsed = spawnSessionsInputSchema.safeParse(toolInput);
+    if (!this.spawner || !parsed.success) {
+      return refuse('No Sessions were started: give at least one entry, each with a Repo and a task.');
+    }
+    let summary: string;
+    try {
+      summary = this.spawner.describe(run.sessionId, parsed.data);
+    } catch (error) {
+      return refuse(`No Sessions were started: ${error instanceof ApiError ? error.message : 'none can start here'}`);
+    }
+    const decision = await this.ask(
+      run,
+      { actionLogId: null, sessionId: run.sessionId, kind: ApprovalKind.Command, summary, isProd: false },
+      stepId,
+    );
+    const approved = decision === ApprovalStatus.Approved;
+    if (approved) run.spawnCallIds.push(stepId);
+    else this.steps.finish(stepId, { ok: false, error: 'denied by the operator' });
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: approved ? 'allow' : 'deny',
+        permissionDecisionReason: approved
+          ? 'The operator approved starting the Sessions.'
+          : 'The operator denied starting the Sessions. Do not ask again: the tasks stay with the operator. Say so in one line.',
       },
     };
   }
