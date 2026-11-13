@@ -23,7 +23,11 @@ export class KeychainWaitTracker {
   begin(): () => void {
     const id = Symbol('keychain call');
     this.started.set(id, Date.now());
-    const timer = setTimeout(() => this.publish(), this.thresholdMs);
+    // The timer firing is the threshold: it can run a millisecond before `Date.now()` agrees, and no later check follows.
+    const timer = setTimeout(() => {
+      this.latched = true;
+      this.publish();
+    }, this.thresholdMs);
     timer.unref();
     this.timers.set(id, timer);
     this.publish();
