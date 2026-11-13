@@ -289,7 +289,7 @@ describe('Pull request opening', () => {
     expect(append).toContain(OPEN_PULL_REQUEST_TOOL);
     // Every run is told to work from the newest production branch, whichever Playbook it follows.
     expect(append).toContain('Latest code first');
-    expect(append).toContain('git fetch origin');
+    expect(append).toContain('Never run git fetch');
   });
 
   it('gives the console tool to a Session in its Repo folder and to no other run (1)', async () => {

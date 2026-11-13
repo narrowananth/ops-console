@@ -27,7 +27,7 @@ Data and connections:
 - When a dependent repository or service cannot be reached, do not assume how it behaves: mock the integration and name the gap.
 
 Code and git:
-- Pull first: commits reach production that this machine has not fetched, so a review, a fix or a reply on old code is wrong. Before reading or changing code, fetch origin and work from the newest production branch (main or master, whichever the repository uses): read it, compare with it and branch from origin/<production branch>, never from the local branch of that name. Name the production commit you used; when the fetch fails, say so and mark what depends on it unverified.
+- Pull first: commits reach production that this machine has not fetched, so a review, a fix or a reply on old code is wrong. The console fetches origin before each run; your sandbox cannot (no git keys), so never run git fetch, pull or push. Work from the newest production branch (main or master, whichever the repository uses): read it, compare with it and branch from origin/<production branch>, never from the local branch of that name. Name the production commit you used; when it looks old or the console could not fetch, say so and mark what depends on it unverified.
 - Read the production branch before judging a change against it.
 - Never modify production data or configuration, never push to the production branch, never force-push, never overwrite or discard someone else's work, and never merge a pull request.`;
 
@@ -98,7 +98,7 @@ export const BUILTIN_STEPS: Record<PlaybookTrigger, PlaybookStep[]> = {
   ],
   [PlaybookTrigger.Fix]: [
     step('Confirm the root cause and look for an existing fix', false, [
-      'Fetch origin first and make sure this branch sits on the newest production branch (origin/main or origin/master); record the production commit. Then read the Report and check it against the code on this branch before changing anything.',
+      'The console fetched origin just now: make sure this branch sits on the newest production branch (origin/main or origin/master); record the production commit. Then read the Report and check it against the code on this branch before changing anything.',
       '- Confirm the root cause still holds at this commit: the failing path, the condition and the place it starts.',
       '- Search open and recently merged pull requests for the same fix. When one already fixes the whole issue, answer failed with its link, so no duplicate fix is made.',
     ]),
@@ -151,7 +151,7 @@ export const BUILTIN_STEPS: Record<PlaybookTrigger, PlaybookStep[]> = {
       'A sufficient description is context to verify, never proof: check every important claim against the code. Note what is missing or wrong for the report, and work it out from the code.',
     ]),
     step('Compare with the production baseline', false, [
-      'Review against the right baseline: the target branch commit in the brief, and the newest production branch commit (main or master, fetched just now) where it differs from the target. Record both commits; a commit the brief does not give you is one to fetch before you judge.',
+      'Review against the right baseline: the target branch commit in the brief, and the newest production branch commit (main or master, fetched just now) where it differs from the target. Record both commits; a commit the brief does not give you is unverified: say so.',
       "Do not touch the pull request branch or anyone's working tree. Use `git diff` against the baseline in this folder.",
       'Read the whole diff, not a sample. For every changed file: why it changed, the code before and after, its callers, dependencies and downstream paths, duplicated logic or needless abstraction, removed behaviour a consumer may rely on, configuration, exception handling, validation, logging and security, and whether the tests cover the changed behaviour.',
     ]),
@@ -327,7 +327,7 @@ Investigate when the request needs it:
 
 Implement only when asked:
 - Follow the existing code standards; reuse services, utilities and patterns; keep changes minimal, stable and maintainable; mind backward compatibility and downstream impact; follow the repository's formatting, test and commit conventions.
-- Do not create Jira tickets unless asked. Start with git fetch origin and branch the issue from origin/<production branch>, so the work sits on the newest production code; never push to the production branch. Ask before opening a pull request, and never merge one.
+- Do not create Jira tickets unless asked. The console fetched origin before this run: branch the issue from origin/<production branch>, so the work sits on the newest production code; never push to the production branch. Ask before opening a pull request, and never merge one.
 - Test it: the relevant unit and integration tests, the affected paths, edge cases, failures and backward compatibility, the build and static analysis. Report failures and unverified scenarios plainly.
 
 Answer:

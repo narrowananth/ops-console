@@ -150,13 +150,20 @@ export class WorkspaceSessionsService {
     return dir;
   }
 
-  /** A Session left on the default branch's detached HEAD starts each run at the newest commit of it. */
+  /**
+   * The agent's sandbox has no git keys, so its own `git fetch` fails: the console fetches the Repo's default branch
+   * before each run, and `origin/<default branch>` is the newest commit when the agent reads it. A Session left clean
+   * on the default branch's detached HEAD also moves forward to it. A failed fetch leaves the last fetched commit.
+   */
   private async refreshDefault(session: SessionRow): Promise<void> {
     const repo = this.repo(session.repoId);
     const dir = this.worktreeDir(session.id);
-    if (session.branch !== repo.defaultBranch || (await this.git.branchName(dir)) !== null) return;
-    if (await this.git.isDirty(dir)) return;
-    await this.git.pull(dir, repo.defaultBranch);
+    const follows =
+      session.branch === repo.defaultBranch &&
+      (await this.git.branchName(dir)) === null &&
+      !(await this.git.isDirty(dir));
+    if (follows) await this.git.pull(dir, repo.defaultBranch);
+    else await this.git.remoteHead(repo.path, repo.defaultBranch).catch(() => undefined);
   }
 
   /** Takes the Session's worktree away with the Session; its branch and commits stay in the Repo. */

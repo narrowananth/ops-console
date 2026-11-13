@@ -224,6 +224,31 @@ describe('Sessions in a Repo', () => {
     expect(existsSync(path.join(worktree(ctx, id), 'later.ts'))).toBe(true);
   });
 
+  it('fetches the default branch before each run of a Session on another branch, since the agent cannot fetch', async () => {
+    const ctx = await start();
+    const origin = path.join(await tempDir('ops-console-origin-'), 'orders-api.git');
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin]);
+    git(ctx.dir, 'remote', 'set-url', 'origin', origin);
+    git(ctx.dir, 'push', '-q', 'origin', 'main');
+    const id = await newSession(ctx, 'feature-1');
+    const teammate = path.join(await tempDir('ops-console-teammate-'), 'orders-api');
+    execFileSync('git', ['clone', '-q', origin, teammate]);
+    await writeFile(path.join(teammate, 'merged.ts'), 'from production\n');
+    git(teammate, 'add', '.');
+    git(teammate, 'commit', '-q', '-m', 'merged to production');
+    git(teammate, 'push', '-q', 'origin', 'main');
+    const newest = git(teammate, 'rev-parse', 'HEAD').toString().trim();
+
+    ctx.daemon.sdk.script({ text: 'read' });
+    await ctx.http.post(`/sessions/${id}/messages`, { text: 'look' });
+    await until(
+      () => ctx.http.get(`/sessions/${id}`).then((res) => res.body.data.state),
+      (state) => state === 'idle',
+    );
+    expect(git(worktree(ctx, id), 'rev-parse', 'origin/main').toString().trim()).toBe(newest);
+    expect(git(worktree(ctx, id), 'branch', '--show-current').toString().trim()).toBe('feature-1');
+  });
+
   it('asks what to do with the Sessions before removing a Repo, and deleting a Session keeps reviews and agent comments', async () => {
     const ctx = await start();
     const id = await newSession(ctx);

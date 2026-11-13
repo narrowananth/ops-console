@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
 import {
@@ -37,6 +37,13 @@ export class AnonymousSessionsService {
     kinds.register(SessionKind.Anonymous, {
       workingDir: (session) => this.folder(session.id),
       acceptsMessages: true,
+      // A clone in the folder gets its default branch fetched here: the run's sandbox has no git keys to fetch it.
+      prepare: async (session) => {
+        const dir = this.folder(session.id);
+        if (!existsSync(path.join(dir, '.git'))) return;
+        const branch = await this.git.defaultBranch(dir);
+        if (branch) await this.git.remoteHead(dir, branch).catch(() => undefined);
+      },
       create: (body) => this.create(parseInput(createAnonymousSessionSchema, body, 'body')),
       instructions: ANONYMOUS_INSTRUCTIONS,
     });
