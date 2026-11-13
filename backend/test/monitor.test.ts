@@ -1217,6 +1217,12 @@ describe('Fix', () => {
       () => ctx.http.get(`/sessions/${sessionId}`).then((res) => res.body.data.state),
       (state) => state === 'working',
     );
+    // The console fetches the production branch before the run starts; the run is going once the SDK is called.
+    await until(
+      async () => ctx.daemon.sdk.calls.length,
+      (calls) => calls > callsBefore,
+      'the Fix run started',
+    );
 
     const cancelled = await ctx.http.post(`/fixes/${fixId}/cancel`);
     expect(cancelled.status).toBe(200);
