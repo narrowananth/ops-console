@@ -1,9 +1,10 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { WsEvent } from '@ops-console/shared';
+import { AccessLevel, ConnectionType, FirebaseService, type WsEvent } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConnectionsModule } from '../src/connections/connections.module';
 import { ConnectionsService } from '../src/connections/connections.service';
+import { launchFor } from '../src/connections/launch';
 import { KEYCHAIN } from '../src/keychain/keychain';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { type AgentDaemon, api, listen, signIn, startAgentDaemon, until } from './agent-fixtures';
@@ -236,6 +237,29 @@ describe('Access Level', () => {
         })
       ).status,
     ).toBe(201);
+  });
+});
+
+describe('Firebase test read', () => {
+  const launch = (services: FirebaseService[]) =>
+    launchFor({
+      type: ConnectionType.Firebase,
+      config: { project_id: 'shop-123', services },
+      secret: JSON.stringify({ type: 'service_account', project_id: 'shop-123' }),
+      access: AccessLevel.Read,
+      launchDir: LAUNCH_DIR,
+    });
+
+  it('reads the product the Connection names, so a key with product roles only still passes, and falls back to the project lookup', () => {
+    expect(launch([FirebaseService.RealtimeDatabase, FirebaseService.Firestore])?.ping).toEqual({
+      tool: 'realtimedatabase_get_data',
+      args: { path: '/ops-console-ping' },
+    });
+    expect(launch([FirebaseService.Firestore])?.ping).toEqual({
+      tool: 'firestore_list_collections',
+      args: { parent: 'projects/shop-123/databases/(default)/documents' },
+    });
+    expect(launch([FirebaseService.Auth])?.ping).toBeUndefined();
   });
 });
 

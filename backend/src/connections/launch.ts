@@ -3,7 +3,12 @@ import { AccessLevel, ConnectionType, FirebaseService, READ_ONLY_TYPES, SERVER_T
 import { FILE_PREFIX, FILES_DIR } from '../mcp/launcher';
 
 /** How a Connection's MCP Server starts: a command line, and the env vars the launcher reads from the Keychain. */
-export type Launch = { target: string; env: Record<string, string> };
+export type Launch = {
+  target: string;
+  env: Record<string, string>;
+  /** A read that fits this Connection better than the type's own, when the config says what it reaches. */
+  ping?: { tool: string; args: Record<string, unknown> };
+};
 
 export type LaunchInput = {
   type: ConnectionType;
@@ -79,6 +84,25 @@ const FIREBASE_READ_TOOLS: { core: string[] } & Record<FirebaseService, string[]
   [FirebaseService.Storage]: ['storage_get_object_download_url'],
 };
 
+/**
+ * The read that proves a Firebase Connection reaches what it was made for. The project lookup (`firebase_get_project`)
+ * needs a Google Cloud permission a key with only product roles lacks, so a Connection that names a product is tested
+ * with a read of that product. Auth and Storage have no cheap read of their own and keep the project lookup.
+ */
+function firebasePing(config: Record<string, unknown>, services: FirebaseService[]): Launch['ping'] {
+  const project = str(config, 'project_id');
+  if (services.includes(FirebaseService.RealtimeDatabase)) {
+    return { tool: 'realtimedatabase_get_data', args: { path: '/ops-console-ping' } };
+  }
+  if (services.includes(FirebaseService.Firestore)) {
+    return {
+      tool: 'firestore_list_collections',
+      args: { parent: `projects/${project}/databases/(default)/documents` },
+    };
+  }
+  return undefined;
+}
+
 /** Every read tool of `firebase mcp`; a Dev tools write check lets these through. */
 export const FIREBASE_READS: ReadonlySet<string> = new Set(Object.values(FIREBASE_READ_TOOLS).flat());
 
@@ -131,6 +155,7 @@ const RECIPES: Partial<Record<ConnectionType, Recipe>> = {
           ? `--only core,${services.map((service) => FIREBASE_FEATURES[service]).join(',')}`
           : `--tools ${[...FIREBASE_READ_TOOLS.core, ...services.flatMap((service) => FIREBASE_READ_TOOLS[service])].join(',')}`;
       return {
+        ping: firebasePing(config, services),
         target: `npx -y firebase-tools@latest mcp --dir ${FILES_DIR} ${pick}`,
         env: {
           [`${FILE_PREFIX}key.json`]: (secret && parseServiceAccount(secret)?.json) ?? '',
