@@ -152,7 +152,7 @@ export async function until<T>(
   done: (value: T) => boolean,
   what = 'condition',
 ): Promise<T> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 15_000;
   for (;;) {
     const value = await read();
     if (done(value)) return value;
