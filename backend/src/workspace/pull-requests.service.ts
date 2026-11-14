@@ -215,6 +215,11 @@ export class PullRequestsService implements OpenPrBranches {
               host,
               owner,
               read: await this.readOwner(host, owner, query.state).catch((error) => {
+                // The host answered that the owner is not there (a renamed or deleted organization): nothing to read.
+                if (error instanceof ApiError && error.status === 404) {
+                  this.logger.debug(`${host} ${owner}: ${error.message}`);
+                  return { at: Date.now(), prs: [] as OwnedPullRequest[], stale: false };
+                }
                 this.logger.warn(`${host} ${owner}: ${error instanceof Error ? error.message : String(error)}`);
                 return null;
               }),
