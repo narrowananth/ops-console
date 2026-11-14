@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, type OnApplicationBootstrap } from '@nestjs/common';
 import { ErrorCode, RemovedRepoSessions, type Repo, SessionState } from '@ops-console/shared';
 import { and, count, eq, isNull } from 'drizzle-orm';
 import { ApiError } from '../common/errors';
@@ -14,13 +14,19 @@ type Row = typeof repos.$inferSelect;
 const RUNNING = [SessionState.Working, SessionState.WaitingInput, SessionState.WaitingApproval];
 
 @Injectable()
-export class ReposService {
+export class ReposService implements OnApplicationBootstrap {
   constructor(
     @Inject(STORE) private readonly store: Store,
     @Inject(GIT) private readonly git: Git,
   ) {}
 
+  /** The pull request list reads the stored host and slug, so they are right before anyone opens the Repos page. */
+  async onApplicationBootstrap(): Promise<void> {
+    await this.syncRemotes();
+  }
+
   async list(): Promise<{ data: Repo[]; meta: { next_cursor: null } }> {
+    await this.syncRemotes();
     const rows = this.store.db.select().from(repos).where(isNull(repos.removedAt)).all();
     rows.sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
     return { data: await Promise.all(rows.map((row) => this.view(row))), meta: { next_cursor: null } };
@@ -33,6 +39,24 @@ export class ReposService {
 
   async get(id: string): Promise<Repo> {
     return this.view(this.row(id));
+  }
+
+  /**
+   * Follows each Repo's `origin`: a remote moved to another workspace or SSH host (vajro to superfans-io) changes
+   * the stored host and `owner/name`. A folder that is gone, or an `origin` that names no known host, changes nothing.
+   */
+  async syncRemotes(): Promise<void> {
+    const rows = this.store.db.select().from(repos).where(isNull(repos.removedAt)).all();
+    await Promise.all(
+      rows.map(async (row) => {
+        if ((await this.git.topFolder(row.path)) === null) return;
+        const { host, slug } = parseRemote(await this.git.originUrl(row.path));
+        if (slug === null || (host === row.host && slug === row.remoteSlug)) return;
+        this.store.write((tx) => {
+          tx.update(repos).set({ host, remoteSlug: slug }).where(eq(repos.id, row.id)).run();
+        });
+      }),
+    );
   }
 
   /** Stores the top folder of the repository holding `rawPath`. Git is read, never changed. */
