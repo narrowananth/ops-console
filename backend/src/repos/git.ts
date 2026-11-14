@@ -435,6 +435,9 @@ export function remoteHostname(url: string | null): string | null {
   return splitRemote(url).hostname;
 }
 
+/** Bitbucket Cloud's website host and its two SSH hosts: `git@ssh.bitbucket.org:owner/name.git` is a Bitbucket remote. */
+const BITBUCKET_HOSTNAMES = ['bitbucket.org', 'ssh.bitbucket.org', 'altssh.bitbucket.org'];
+
 /** The host and `owner/name` an `origin` URL points at; any other host is `local`. */
 export function parseRemote(url: string | null): { host: GitHost; slug: string | null } {
   if (url === null) return { host: GitHost.Local, slug: null };
@@ -444,7 +447,7 @@ export function parseRemote(url: string | null): { host: GitHost; slug: string |
       ? GitHost.Github
       : hostname === 'gitlab.com'
         ? GitHost.Gitlab
-        : hostname === 'bitbucket.org'
+        : hostname !== null && BITBUCKET_HOSTNAMES.includes(hostname)
           ? GitHost.Bitbucket
           : null;
   return host === null ? { host: GitHost.Local, slug: null } : { host, slug };

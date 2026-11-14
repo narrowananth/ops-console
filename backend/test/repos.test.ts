@@ -214,6 +214,21 @@ describe('branches', () => {
     expect(branches.body.data.find((branch: { current: boolean }) => branch.current).name).toBe('newer');
   });
 
+  it('follows a moved origin: the stored host and owner/name change, and a missing origin changes nothing', async () => {
+    const { daemon } = await start();
+    const dir = await makeRepo('moved', 'git@bitbucket.org:vajro/apis.git');
+    const { body } = await api(daemon).post('/repos', { path: dir });
+    expect(body.data).toMatchObject({ host: 'bitbucket', remote_slug: 'vajro/apis' });
+
+    git(dir, 'remote', 'set-url', 'origin', 'git@ssh.bitbucket.org:superfans-io/apis.git');
+    const moved = await api(daemon).get('/repos');
+    expect(moved.body.data[0]).toMatchObject({ host: 'bitbucket', remote_slug: 'superfans-io/apis' });
+
+    git(dir, 'remote', 'remove', 'origin');
+    const gone = await api(daemon).get('/repos');
+    expect(gone.body.data[0]).toMatchObject({ host: 'bitbucket', remote_slug: 'superfans-io/apis' });
+  });
+
   it('answers not_found when the folder is gone', async () => {
     const { daemon } = await start();
     const dir = await makeRepo('vanishing');
@@ -229,6 +244,8 @@ describe('origin urls', () => {
     ['https://github.com/acme/api', 'github', 'acme/api'],
     ['ssh://git@github.com/acme/api.git', 'github', 'acme/api'],
     ['https://user@bitbucket.org/acme/api.git', 'bitbucket', 'acme/api'],
+    ['git@ssh.bitbucket.org:acme/api.git', 'bitbucket', 'acme/api'],
+    ['ssh://git@altssh.bitbucket.org:443/acme/api.git', 'bitbucket', 'acme/api'],
     ['git@gitlab.com:group/sub/api.git', 'gitlab', 'group/sub/api'],
     ['https://git.example.com/acme/api.git', 'local', null],
     [null, 'local', null],
