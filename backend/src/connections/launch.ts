@@ -92,7 +92,15 @@ const FIREBASE_READ_TOOLS: { core: string[] } & Record<FirebaseService, string[]
 function firebasePing(config: Record<string, unknown>, services: FirebaseService[]): Launch['ping'] {
   const project = str(config, 'project_id');
   if (services.includes(FirebaseService.RealtimeDatabase)) {
-    return { tool: 'realtimedatabase_get_data', args: { path: '/ops-console-ping' } };
+    // Without `databaseUrl`, `firebase mcp` builds the address with a path import it never resolves and throws
+    // "Cannot read properties of undefined (reading 'join')". This is the default address it would have used.
+    return {
+      tool: 'realtimedatabase_get_data',
+      args: {
+        path: '/ops-console-ping',
+        databaseUrl: `https://${project}-default-rtdb.us-central1.firebasedatabase.app`,
+      },
+    };
   }
   if (services.includes(FirebaseService.Firestore)) {
     return {

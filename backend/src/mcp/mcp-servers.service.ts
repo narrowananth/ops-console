@@ -832,6 +832,11 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
 
   /** Every server as the kept Probes read it; `fresh` waits for new ones. */
   private async servers(fresh = false): Promise<McpServer[]> {
+    // What a Remove has done is read before anything is awaited, as the config below is. A check that began before a
+    // Remove and ends after it sees the server in the config and no longer leaving: read at its end, the Removed row
+    // would pass for a server added again outside the console and be dropped.
+    const leaving = new Set(this.leaving);
+    const removed = this.store.db.select().from(removedMcpServers).all();
     const views = await this.views(fresh);
     const disabled = new Set(
       this.store.db
@@ -840,12 +845,11 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
         .all()
         .map((row) => row.name),
     );
-    const removed = this.store.db.select().from(removedMcpServers).all();
     const userNames = [...new Set(views.flatMap((view) => [...view.entries.keys()]))].filter(
-      (name) => !this.leaving.has(name),
+      (name) => !leaving.has(name),
     );
     const project = (await this.projectItems(fresh)).filter(
-      (item) => !userNames.includes(item.name) && !this.leaving.has(item.name),
+      (item) => !userNames.includes(item.name) && !leaving.has(item.name),
     );
     const names = [...userNames, ...project.map((item) => item.name)];
     const out: McpServer[] = [];

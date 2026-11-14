@@ -253,7 +253,10 @@ describe('Firebase test read', () => {
   it('reads the product the Connection names, so a key with product roles only still passes, and falls back to the project lookup', () => {
     expect(launch([FirebaseService.RealtimeDatabase, FirebaseService.Firestore])?.ping).toEqual({
       tool: 'realtimedatabase_get_data',
-      args: { path: '/ops-console-ping' },
+      args: {
+        path: '/ops-console-ping',
+        databaseUrl: 'https://shop-123-default-rtdb.us-central1.firebasedatabase.app',
+      },
     });
     expect(launch([FirebaseService.Firestore])?.ping).toEqual({
       tool: 'firestore_list_collections',
