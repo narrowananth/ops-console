@@ -945,6 +945,42 @@ describe('pull requests', () => {
     expect(mine.body.data.map((pr: { number: number }) => pr.number)).toEqual([5]);
   });
 
+  it("maps pull requests to the Repo after the host's owner is renamed, and keeps the mapping when git is not told", async () => {
+    const ctx = await start();
+    ctx.host.ownerNames = ['newco'];
+    ctx.host.elsewhere = [{ ...hostPr(1), slug: 'newco/orders-api' }];
+
+    const res = await ctx.http.get('/pull-requests');
+    expect(res.body.data.map((pr: { repo_id: string | null; slug: string }) => [pr.repo_id, pr.slug])).toEqual([
+      [ctx.repoId, 'newco/orders-api'],
+    ]);
+    const repo = (await ctx.http.get('/repos')).body.data[0];
+    expect(repo).toMatchObject({ remote_slug: 'newco/orders-api', origin_slug: 'acme/orders-api' });
+    // Reading the Repos again follows git only when git changed: the remap holds.
+    expect((await ctx.http.get('/repos')).body.data[0].remote_slug).toBe('newco/orders-api');
+
+    // Once the operator repoints git, the hint goes.
+    git(ctx.dir, 'remote', 'set-url', 'origin', 'git@github.com:newco/orders-api.git');
+    expect((await ctx.http.get('/repos')).body.data[0]).toMatchObject({
+      remote_slug: 'newco/orders-api',
+      origin_slug: null,
+    });
+  });
+
+  it('maps nothing when two imported Repos share the moved repository name', async () => {
+    const ctx = await start();
+    const other = await makeRepo('orders-api-two', 'git@github.com:other/orders-api.git');
+    expect((await ctx.http.post('/repos', { path: other })).status).toBe(201);
+    ctx.host.ownerNames = ['newco'];
+    ctx.host.elsewhere = [{ ...hostPr(1), slug: 'newco/orders-api' }];
+
+    const res = await ctx.http.get('/pull-requests');
+    expect(res.body.data.map((pr: { repo_id: string | null }) => pr.repo_id)).toEqual([null]);
+    expect(
+      (await ctx.http.get('/repos')).body.data.map((repo: { remote_slug: string }) => repo.remote_slug).sort(),
+    ).toEqual(['acme/orders-api', 'other/orders-api']);
+  });
+
   it('has no pull requests for a Repo without a Git host', async () => {
     const ctx = await start();
     const local = await makeRepo('scratch', 'ssh://git.example.com/scratch.git');

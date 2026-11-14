@@ -22,6 +22,12 @@ function RepoRow({ repo }: { repo: Repo }) {
         <div className={`text-xs ${repo.missing ? 'text-accent-700' : 'text-neutral-700'}`}>
           {repo.missing ? 'This folder is gone from the machine.' : `branch ${repo.branch ?? '?'}`}
         </div>
+        {repo.origin_slug && (
+          <div className="text-xs text-neutral-700">
+            The Git host now calls this <span className="font-mono">{repo.remote_slug}</span>. The folder's origin still
+            says <span className="font-mono">{repo.origin_slug}</span>.
+          </div>
+        )}
         {remove.error && (
           <div role="alert" className="text-xs text-accent-700">
             {remove.error.message}

@@ -222,6 +222,12 @@ export class PullRequestsService implements OpenPrBranches {
           );
         }),
       );
+      this.followMovedRepos(
+        imported,
+        reads
+          .flat()
+          .flatMap(({ host, read }) => (read === null ? [] : read.prs.map((pr) => ({ host, slug: pr.slug })))),
+      );
       for (const { host, owner, read } of reads.flat()) {
         if (read === null) {
           stale = true;
@@ -635,6 +641,40 @@ export class PullRequestsService implements OpenPrBranches {
 
   private key(repoId: string, state: PrState): string {
     return `${repoId}:${state}`;
+  }
+
+  /**
+   * A repository the host lists under an owner no imported Repo has, while one unmatched imported Repo has the same
+   * name, is that Repo after the host moved it (an organization renamed). The Repo takes the host's `owner/name`;
+   * its folder's `origin` is left as it is. Two candidates on either side map nothing.
+   */
+  private followMovedRepos(imported: RepoRow[], listed: { host: GitHost; slug: string }[]): void {
+    const nameOf = (slug: string) => slug.split('/').at(-1)?.toLowerCase() ?? '';
+    const unmatched = new Map<string, { host: GitHost; slug: string }[]>();
+    for (const one of listed) {
+      if (imported.some((repo) => repo.host === one.host && sameSlug(repo.remoteSlug ?? '', one.slug))) continue;
+      const key = `${one.host}:${nameOf(one.slug)}`;
+      const seen = unmatched.get(key) ?? [];
+      if (!seen.some((other) => other.slug === one.slug)) seen.push(one);
+      unmatched.set(key, seen);
+    }
+    for (const [key, found] of unmatched) {
+      if (found.length !== 1) continue;
+      const [one] = found as [{ host: GitHost; slug: string }];
+      const candidates = imported.filter(
+        (repo) =>
+          repo.host === one.host &&
+          repo.remoteSlug !== null &&
+          nameOf(repo.remoteSlug) === key.slice(one.host.length + 1) &&
+          !listed.some((other) => other.host === repo.host && sameSlug(other.slug, repo.remoteSlug ?? '')),
+      );
+      const [repo] = candidates;
+      if (candidates.length !== 1 || repo === undefined) continue;
+      this.store.write((tx) => {
+        tx.update(repos).set({ remoteSlug: one.slug }).where(eq(repos.id, repo.id)).run();
+      });
+      repo.remoteSlug = one.slug;
+    }
   }
 
   /** Repos a list across Repos reads: a host with no adapter yet would fail the whole list. */
