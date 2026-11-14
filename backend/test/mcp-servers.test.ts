@@ -593,6 +593,19 @@ describe('removing', () => {
     expect(await find(ctx, 'pg')).toMatchObject({ registered: false, status: 'auth' });
   });
 
+  it('keeps a removed server listed as removed when a slow check that began before the Remove ends after it', async () => {
+    const ctx = await start();
+    await list(ctx);
+    ctx.probe.delayMs = 600;
+    // Adding starts a check in the background; it reads the accounts' config now, and the Probe answers later.
+    await api(ctx.daemon).post('/mcp-servers', { name: 'pg', transport: 'stdio', target: 'npx pg', scope: 'user' });
+    await api(ctx.daemon).delete('/mcp-servers/pg/credentials');
+    await settled(ctx);
+    ctx.probe.delayMs = 0;
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(await find(ctx, 'pg')).toMatchObject({ registered: false });
+  });
+
   it('registers an http server again from its row when Authenticate runs, then drops the row', async () => {
     const ctx = await start();
     await api(ctx.daemon).post('/mcp-servers', {
