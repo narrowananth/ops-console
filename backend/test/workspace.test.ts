@@ -967,6 +967,18 @@ describe('pull requests', () => {
     });
   });
 
+  it('a host that says an owner is not there is not a host that did not answer', async () => {
+    const ctx = await start();
+    ctx.host.ownerNames = ['acme', 'renamed-away'];
+    ctx.host.missingOwners.add('renamed-away');
+    ctx.host.prs = [hostPr(1)];
+
+    const res = await ctx.http.get('/pull-requests');
+    expect(res.body.meta.stale).toBe(false);
+    expect(res.body.data.map((pr: { number: number }) => pr.number)).toEqual([1]);
+    expect(ctx.host.ownerReads).toContain('renamed-away');
+  });
+
   it('maps nothing when two imported Repos share the moved repository name', async () => {
     const ctx = await start();
     const other = await makeRepo('orders-api-two', 'git@github.com:other/orders-api.git');

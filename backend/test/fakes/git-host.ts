@@ -51,6 +51,8 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
   /** The owners the host says the operator can read. */
   ownerNames: string[] = [];
   readonly ownerReads: string[] = [];
+  /** Owners the host says are not there: reading one answers 404. */
+  readonly missingOwners = new Set<string>();
   files: PrFile[] = [{ name: 'src/app.ts', additions: 3, deletions: 1, lines: [{ sign: '+', text: 'const a = 1;' }] }];
   comments = new Map<number, HostComment[]>();
   readonly calls = { list: 0, get: 0 };
@@ -123,6 +125,8 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
     this.calls.list++;
     this.ownerReads.push(owner);
     this.check();
+    if (this.missingOwners.has(owner))
+      throw new ApiError(404, ErrorCode.NotFound, `\`GET /repositories/${owner}\` found nothing`);
     const own = owner === 'acme' ? this.prs.map((pr) => ({ ...this.counted(pr), slug: 'acme/orders-api' })) : [];
     return [...own, ...this.elsewhere.filter((pr) => pr.slug.startsWith(`${owner}/`))].filter(
       (pr) => pr.state === state,
