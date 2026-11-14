@@ -225,7 +225,9 @@ its Playbook (code change, mocked tests, the full suite and a diff review by def
 ### Workspace
 
 **Repo**:
-A local git repository imported into the console, identified by its top folder, where Sessions run.
+A local git repository imported into the console, identified by its top folder, where Sessions run. Its Git host and
+`owner/name` follow the folder's `origin` when that changes, and follow the Git host when the host reports the
+repository under a new owner and the folder's `origin` has not changed. The console never edits `origin`.
 
 **Git host**:
 The service holding a Repo's remote: GitHub, GitLab or Bitbucket.

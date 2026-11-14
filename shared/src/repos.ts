@@ -15,6 +15,8 @@ export const repoSchema = z.object({
   host: z.enum(GitHost),
   /** `owner/name` on the host; null for a local Repo. */
   remote_slug: z.string().nullable(),
+  /** The `owner/name` the folder's `origin` names, when it differs from `remote_slug`: the host moved the Repo and git was not told. */
+  origin_slug: z.string().nullable(),
   default_branch: z.string(),
   created_at: z.string(),
   /** Read from git on every read; null when the folder is gone. */

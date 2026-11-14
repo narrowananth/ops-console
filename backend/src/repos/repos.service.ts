@@ -42,8 +42,9 @@ export class ReposService implements OnApplicationBootstrap {
   }
 
   /**
-   * Follows each Repo's `origin`: a remote moved to another workspace or SSH host (vajro to superfans-io) changes
-   * the stored host and `owner/name`. A folder that is gone, or an `origin` that names no known host, changes nothing.
+   * Follows each Repo's `origin` when it changes: a remote moved to another workspace or SSH host takes the stored host
+   * and `owner/name` with it. An `origin` that has not changed leaves them alone, so what the Git host said about the
+   * Repo stays. A folder that is gone, or an `origin` that names no known host, changes nothing.
    */
   async syncRemotes(): Promise<void> {
     const rows = this.store.db.select().from(repos).where(isNull(repos.removedAt)).all();
@@ -51,9 +52,9 @@ export class ReposService implements OnApplicationBootstrap {
       rows.map(async (row) => {
         if ((await this.git.topFolder(row.path)) === null) return;
         const { host, slug } = parseRemote(await this.git.originUrl(row.path));
-        if (slug === null || (host === row.host && slug === row.remoteSlug)) return;
+        if (slug === null || slug === row.originSlug) return;
         this.store.write((tx) => {
-          tx.update(repos).set({ host, remoteSlug: slug }).where(eq(repos.id, row.id)).run();
+          tx.update(repos).set({ host, remoteSlug: slug, originSlug: slug }).where(eq(repos.id, row.id)).run();
         });
       }),
     );
@@ -73,10 +74,21 @@ export class ReposService implements OnApplicationBootstrap {
     const id = existing?.id ?? crypto.randomUUID();
     this.store.write((tx) => {
       if (existing) {
-        tx.update(repos).set({ host, remoteSlug: slug, defaultBranch, removedAt: null }).where(eq(repos.id, id)).run();
+        tx.update(repos)
+          .set({ host, remoteSlug: slug, originSlug: slug, defaultBranch, removedAt: null })
+          .where(eq(repos.id, id))
+          .run();
       } else {
         tx.insert(repos)
-          .values({ id, name: path.basename(folder), path: folder, host, remoteSlug: slug, defaultBranch })
+          .values({
+            id,
+            name: path.basename(folder),
+            path: folder,
+            host,
+            remoteSlug: slug,
+            originSlug: slug,
+            defaultBranch,
+          })
           .run();
       }
     });
@@ -145,6 +157,10 @@ export class ReposService implements OnApplicationBootstrap {
       path: row.path,
       host: row.host,
       remote_slug: row.remoteSlug,
+      origin_slug:
+        row.originSlug !== null && row.originSlug.toLowerCase() !== row.remoteSlug?.toLowerCase()
+          ? row.originSlug
+          : null,
       default_branch: row.defaultBranch,
       created_at: row.createdAt,
       branch: missing ? null : await this.git.currentBranch(row.path),

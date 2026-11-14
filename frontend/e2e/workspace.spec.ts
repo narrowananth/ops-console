@@ -11,6 +11,7 @@ const repo = (id: string, name: string, sessionCount = 0) => ({
   path: `/work/${name}`,
   host: 'github',
   remote_slug: `example/${name}`,
+  origin_slug: null,
   default_branch: 'main',
   created_at: NOW,
   branch: 'main',

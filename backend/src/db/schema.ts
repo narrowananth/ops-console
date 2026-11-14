@@ -385,6 +385,8 @@ export const repos = sqliteTable('repos', {
   host: text().$type<GitHost>().notNull(),
   /** `owner/name` on the host; null for local. */
   remoteSlug: text('remote_slug'),
+  /** The `owner/name` the folder's `origin` named when the console last read it; `remote_slug` follows it until the host says otherwise. */
+  originSlug: text('origin_slug'),
   defaultBranch: text('default_branch').notNull(),
   createdAt: text('created_at').notNull().default(nowIso),
   /** Set when the operator removed it and kept its Sessions; importing the folder again clears it. */

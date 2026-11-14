@@ -135,6 +135,7 @@ const REPO = {
   path: '/work/checkout-api',
   host: 'github',
   remote_slug: 'example/checkout-api',
+  origin_slug: null,
   default_branch: 'main',
   created_at: NOW,
   branch: 'main',
