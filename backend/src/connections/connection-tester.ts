@@ -17,7 +17,7 @@ export class McpConnectionTester implements ConnectionTester {
   constructor(private readonly version: string) {}
 
   async run(type: ConnectionType, launch: Launch): Promise<ConnectionTestResult> {
-    const ping = pingFor(type);
+    const ping = launch.ping ?? pingFor(type);
     if (!ping) return { status: HealthStatus.Fail, latency_ms: null, detail: `no MCP server for ${type}` };
     const [command = '', ...args] = launch.target.split(' ');
     const ready = await materialize(launch.env, args);
