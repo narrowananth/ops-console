@@ -12,6 +12,7 @@ const REPO = {
   path: '/work/apis',
   host: 'github',
   remote_slug: 'example/apis',
+  origin_slug: null,
   default_branch: 'main',
   created_at: NOW,
   branch: 'main',

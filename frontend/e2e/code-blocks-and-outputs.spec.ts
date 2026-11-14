@@ -21,6 +21,7 @@ async function openSession(page: Page, outputs: object[]) {
             path: '/work/apis',
             host: 'github',
             remote_slug: 'example/apis',
+            origin_slug: null,
             default_branch: 'main',
             created_at: T0,
             branch: 'main',

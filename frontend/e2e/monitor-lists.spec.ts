@@ -159,6 +159,7 @@ test('a pull request row shows when it was opened, and a Session row when it sta
     path: '/work/apis',
     host: 'github',
     remote_slug: 'example/apis',
+    origin_slug: null,
     default_branch: 'main',
     created_at: ago(500),
     branch: 'main',
