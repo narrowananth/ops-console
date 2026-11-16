@@ -141,12 +141,20 @@ export class ReposService implements OnApplicationBootstrap {
     });
   }
 
-  async branches(id: string): Promise<{ name: string; current: boolean }[]> {
+  /** The Repo's local branches, then the ones only origin has, fetched now. */
+  async branches(id: string): Promise<{ name: string; current: boolean; remote: boolean }[]> {
     const row = this.row(id);
     if ((await this.git.topFolder(row.path)) === null) {
       throw new ApiError(404, ErrorCode.NotFound, `${row.name} is not on this machine any more`);
     }
-    return this.git.branches(row.path);
+    await this.git.refreshRemote(row.path);
+    const local = (await this.git.branches(row.path)).map((branch) => ({ ...branch, remote: false }));
+    const remote = (await this.git.remoteOnlyBranches(row.path)).map((name) => ({
+      name,
+      current: false,
+      remote: true,
+    }));
+    return [...local, ...remote];
   }
 
   private async view(row: Row): Promise<Repo> {

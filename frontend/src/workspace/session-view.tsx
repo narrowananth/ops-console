@@ -34,11 +34,13 @@ import {
   useSendMessage,
   useSessionDiff,
   useSessionPullRequest,
+  useStopSession,
 } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { PlaybookLink } from '../playbooks/job-steps';
 import { AttachButton, filesIn, useAttachments } from './attachments';
 import { BranchSwitcher } from './branch-switcher';
+import { type ComposerCommand, useComposerMenus } from './composer-menus';
 import { ConversationMap, ScrollToEnd, useFollowLatest } from './conversation';
 import { ExtraRepos } from './extra-repos';
 import { alertPath, pullRequestPath, sessionDraftKey, sessionPath } from './links';
@@ -47,7 +49,6 @@ import { OpenPullRequestForm } from './open-pull-request';
 import { type PastedText, PastedTextEditor } from './pasted-text-editor';
 import { DIFF_PANEL, DiffPanel, DiffToggle } from './session-diff';
 import { SESSION_STATE_TIP } from './sessions-pane';
-import { useSkillMenuFor } from './skill-menu';
 
 export function SessionView({ id, onGone }: { id: string; onGone: () => void }) {
   const sessions = useRepoSessions();
@@ -78,18 +79,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const panel = usePanelWidth(DIFF_PANEL, body);
   const hasDiff = session?.kind === SessionKind.Repo;
   const gone = sessions.isSuccess && session === undefined;
-  // A skill picked from the `/` menu; a typed `/name` is read by the daemon alone.
-  const skillMenu = useSkillMenuFor(
-    id,
-    text,
-    session?.kind === SessionKind.Repo || session?.kind === SessionKind.Anonymous,
-    (chosen) => {
-      setText(`/${chosen.name} ${text.replace(/^\/\S*\s?/, '')}`);
-      setPicked({ kind: chosen.kind, name: chosen.name });
-      // The editor keeps its focus while a row is clicked and moves the cursor after the new text itself.
-      editor.current?.focusEnd();
-    },
-  );
+  const stop = useStopSession(id);
   const pulls = useRepoPullRequests(session?.kind === SessionKind.Repo ? session.repo_id : null);
   // What the operator typed while the agent was working: the daemon keeps it and sends it when the run ends, unless the
   // operator stops the run, which holds it for Send now.
@@ -118,6 +108,32 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const externalPull = pull;
   // A Session whose worktree changes nothing yet has nothing to show.
   const showDiff = hasDiff && (diff.data?.files.length ?? 0) > 0;
+  // The `/` menu: what the Session can do now. A skill picked from the `$` menu; a typed `$name` or `/name` is read by
+  // the daemon alone.
+  const commands: ComposerCommand[] = [
+    ...(working ? [{ name: 'stop', description: 'Stop the agent where it is', run: () => stop.mutate() }] : []),
+    ...(showDiff
+      ? [{ name: 'diff', description: 'Show or hide the changed files', run: () => setDiffOpen((now) => !now) }]
+      : []),
+    ...(openable.data?.can_open && !externalPull && !working
+      ? [{ name: 'pr', description: 'Open a pull request for this branch', run: () => setFormOpen(true) }]
+      : []),
+    { name: 'skills', description: 'Pick a skill to run', run: () => setText('$') },
+    { name: 'files', description: 'Search files to mention', run: () => setText('@') },
+  ];
+  const composerMenus = useComposerMenus({
+    sessionId: id,
+    text,
+    enabled: session?.kind === SessionKind.Repo || session?.kind === SessionKind.Anonymous,
+    commands,
+    setText,
+    onSkill: (chosen) => {
+      setText(`$${chosen.name} ${text.replace(/^[$/]\S*\s?/, '')}`);
+      setPicked({ kind: chosen.kind, name: chosen.name });
+      editor.current?.focusEnd();
+    },
+    focusEnd: () => editor.current?.focusEnd(),
+  });
   useEffect(() => {
     if (gone) onGone();
   }, [gone, onGone]);
@@ -160,8 +176,9 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
       });
       return;
     }
-    // The pick holds only while the text still opens with exactly that name: `/pre` is not the picked `pr`.
-    const skill = picked && text.split(/\s/, 1)[0] === `/${picked.name}` ? picked : undefined;
+    // The pick holds only while the text still opens with exactly that name: `$pre` is not the picked `pr`.
+    const first = text.split(/\s/, 1)[0];
+    const skill = picked && (first === `$${picked.name}` || first === `/${picked.name}`) ? picked : undefined;
     send.mutate(
       { text: withAttachments(text, files), ...(skill ? { skill } : {}) },
       {
@@ -387,7 +404,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
               }}
               className={`relative rounded-lg border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)] ${dropping ? 'border-dashed border-accent-400 bg-accent-100' : 'border-divider'}`}
             >
-              {skillMenu.menu}
+              {composerMenus.menu}
               <MessageEditor
                 ref={editor}
                 label="Message"
@@ -395,9 +412,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 placeholder={
                   running
                     ? 'The agent is working. Type the next message: it sends when the run ends.'
-                    : repo
-                      ? `Ask anything in ${repo.name} — e.g. add a retry to the orders webhook and write a test`
-                      : 'Ask anything — e.g. clone github.com/owner/repo and find why the orders job fails'
+                    : 'Ask anything. @ files, $ skills, / commands'
                 }
                 onChange={(next) => {
                   // A chip taken out of the text takes its file with it.
@@ -418,7 +433,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 }}
                 onPasteFiles={addFiles}
                 onSubmit={submit}
-                onKey={skillMenu.onKey}
+                onKey={composerMenus.onKey}
               />
               <div className="flex items-end gap-1.5 px-2.5 pt-1.5 pb-2.5">
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">

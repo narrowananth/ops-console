@@ -16,7 +16,8 @@ fetched. Commits merged to production never reached a review, a fix or a reply.
 2. A Session on the default branch starts at the newest commit of it, on a detached HEAD, since the Repo's own folder may
    hold the branch. A Session on another branch checks it out, moved forward to origin when it is behind.
 3. Sessions on different branches work at the same time. Switching one Session's branch moves its worktree only. A branch
-   another Session holds is shared; a branch the Repo's own folder holds is refused, naming the folder.
+   another Session holds is shared; a branch the Repo's own folder holds starts on a detached HEAD at its commit, as the
+   default branch does, and the Session keeps the branch's name.
 4. A Session left on the default branch's detached HEAD with no changes starts each run at the newest commit again.
 5. The Session's branch is the branch its worktree is on: when the agent makes a branch for its fix, the header shows it,
    and the Session follows it once the run ends. On a detached HEAD the Session keeps the branch it has.
@@ -42,7 +43,8 @@ fetched. Commits merged to production never reached a review, a fix or a reply.
 - **Shared branches**: Sessions on one pull request's branch are a designed flow, so a branch another Session's worktree
   holds is shared (`git worktree add --force`). Two Sessions committing on one branch at once may leave the older worktree
   with stale files; that is the operator's to avoid.
-- **Repo folder untouched**: a branch the operator's folder holds is refused instead of detaching that folder.
+- **Repo folder untouched**: a branch the operator's folder holds is never taken from it. The Session detaches at that
+  branch's commit, moved forward to origin when it is behind.
 - **A Session made by the backend** (an Alert Session, an Anonymous Session that joined a Repo) gets its worktree at its
   first run. A joined Session starts on the default branch.
 
@@ -50,7 +52,6 @@ fetched. Commits merged to production never reached a review, a fix or a reply.
 
 - **Dependencies in a worktree**: it is a fresh checkout, so `node_modules`, `.env` and other untracked files are not
   there. The agent installs what it needs.
-- **Old Sessions on the branch the Repo's folder holds**: they fail their next run with the folder's name until it moves.
 
 ## Safety
 

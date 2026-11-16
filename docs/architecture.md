@@ -207,9 +207,9 @@ their names and descriptions and loads the text through the `Skill` tool when a 
 as kind `skill`. The folder is removed when the run ends. A run whose folder cannot be written fails with the reason.
 
 Skills come in three kinds: Built-in (a Skill pack's text in the console, installed by the operator), Custom (the operator's) and Project (a
-`SKILL.md` folder in the Session's Repo). A Session's `/` menu lists them, read when it opens: a Repo Session shows all three, an Anonymous
+`SKILL.md` folder in the Session's Repo). A Session's `$` menu lists them, read when it opens: a Repo Session shows all three, an Anonymous
 Session Built-in and Custom, a dev-tools or pull request reply Session none. A message that starts with a skill (picked from the menu, or
-a typed `/name` that matches; Project first, then Custom or Built-in) runs that skill and not the Playbook, for that
+a typed `$name` or `/name` that matches; Project first, then Custom or Built-in) runs that skill and not the Playbook, for that
 message only: no Playbook rules, no Playbook Skills. A Custom skill goes to the run as the same local plugin, holding that one skill; a Built-in skill goes with the rest of its installed pack, so the skills of a pack can call one another. The other skills the agent can find stay available. A
 Project skill loads from the Repo through Claude Code with the Session's settings. A skill gone at send is refused with
 `skill_not_found` and starts no run. A message with no skill, and every job, runs its Playbook. The message's skill is

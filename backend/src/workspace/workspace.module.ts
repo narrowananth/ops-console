@@ -4,6 +4,8 @@ import { AgentReviewsService } from './agent-reviews.service';
 import { AnonymousSessionsService } from './anonymous-sessions.service';
 import { CliGitHosts } from './cli-git-hosts';
 import { CommentPassesService } from './comment-passes.service';
+import { FileMenuController } from './file-menu.controller';
+import { FileMenuService } from './file-menu.service';
 import { GIT_HOSTS, type GitHosts } from './git-host';
 import { PrJobs } from './pr-jobs';
 import { PrRunRetry } from './pr-run-retry';
@@ -22,7 +24,7 @@ export class WorkspaceModule {
     return {
       module: WorkspaceModule,
       global: true,
-      controllers: [WorkspaceSessionsController, PullRequestsController],
+      controllers: [WorkspaceSessionsController, PullRequestsController, FileMenuController],
       providers: [
         { provide: GIT_HOSTS, useValue: config.hosts ?? new CliGitHosts() },
         PullRequestsService,
@@ -31,6 +33,7 @@ export class WorkspaceModule {
         ReplyChecksService,
         CommentPassesService,
         WorkspaceSessionsService,
+        FileMenuService,
         PullRequestOpeningService,
         AnonymousSessionsService,
         RepoJoinService,

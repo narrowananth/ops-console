@@ -30,8 +30,8 @@ export type ResolvedSkill = {
   copies: SkillCopy[];
 };
 
-/** A leading `/name` and the free note after it. */
-const TYPED = /^\/([a-z0-9-]+)(?:\s+([\s\S]*))?$/;
+/** A leading `$name`, or `/name` as before, and the free note after it. */
+const TYPED = /^[$/]([a-z0-9-]+)(?:\s+([\s\S]*))?$/;
 
 /** Project first, then Custom, then Built-in, when a typed name matches several (Behavior 16). */
 const PRECEDENCE = [SkillKind.Project, SkillKind.Custom, SkillKind.Builtin] as const;
@@ -40,7 +40,7 @@ const byName = (a: SkillMenuItem, b: SkillMenuItem) =>
   a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) ||
   PRECEDENCE.indexOf(a.kind) - PRECEDENCE.indexOf(b.kind);
 
-/** The `/` menu of a Session, and the skill a message names. */
+/** The `$` menu of a Session, and the skill a message names. */
 @Injectable()
 export class SkillMenuService {
   constructor(
@@ -58,7 +58,7 @@ export class SkillMenuService {
     const { menuAllowed, folder } = this.scope(query.session_id, query.repo_id);
     if (!menuAllowed) return { items: [] };
     const all = this.entries(folder);
-    const q = (query.q ?? '').replace(/^\//, '').trim().toLowerCase();
+    const q = (query.q ?? '').replace(/^[$/]/, '').trim().toLowerCase();
     if (q === '') return { items: all.sort(byName) };
     // A name that starts with the text comes first, then names that hold it, then descriptions that do; each A to Z.
     const starts = all.filter((item) => item.name.toLowerCase().startsWith(q)).sort(byName);

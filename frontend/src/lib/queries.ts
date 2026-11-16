@@ -32,6 +32,7 @@ import {
   datadogServiceSchema,
   diskAccessSchema,
   editedMessageSchema,
+  fileMenuSchema,
   findCodeResultSchema,
   fixSchema,
   HEALTH_CHECKS_DEFAULT,
@@ -1001,7 +1002,7 @@ export function useCreateAnonymousSession() {
 export function useCreateRepoSession() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: { repo_id: string; branch: string; from_origin?: boolean }) =>
+    mutationFn: (input: { repo_id: string; branch: string; from_origin?: boolean; new_branch?: boolean }) =>
       apiSend('POST', '/sessions', input, z.object({ data: sessionSchema })).then((body) => body.data),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.sessions }),
   });
@@ -1705,9 +1706,26 @@ export function useUninstallPack() {
   return usePackMutation((id: string) => apiSend('DELETE', `/skill-packs/${id}/install`, undefined, z.undefined()));
 }
 
+/** The files the `@` menu lists for a Session, narrowed by `q`, the text after the `@`. */
+export function useFileMenu(sessionId: string, q: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['file-menu', sessionId, q],
+    enabled,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: 'always',
+    placeholderData: (previous) => previous,
+    queryFn: () =>
+      apiGet(
+        `/file-menu?session_id=${encodeURIComponent(sessionId)}&q=${encodeURIComponent(q)}`,
+        z.object({ data: fileMenuSchema }),
+      ).then((b) => b.data),
+  });
+}
+
 /**
  * The skills a Session's composer may call, read each time the menu opens so one installed or added to the Repo shows
- * at once. `q` is what follows the `/`.
+ * at once. `q` is what follows the `$`.
  */
 export function useSkillMenu(sessionId: string, q: string, enabled: boolean) {
   return useQuery({

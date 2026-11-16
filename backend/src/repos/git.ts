@@ -141,6 +141,52 @@ export class Git {
       });
   }
 
+  /** Branches only origin has, by most recent commit, as last fetched. A branch the Repo also has locally is not listed. */
+  async remoteOnlyBranches(dir: string): Promise<string[]> {
+    const local = new Set((await this.branches(dir)).map((branch) => branch.name));
+    const out = await this.try(dir, [
+      'for-each-ref',
+      '--sort=-committerdate',
+      '--format=%(refname)',
+      'refs/remotes/origin',
+    ]);
+    return (out ?? '')
+      .split('\n')
+      .map((ref) => ref.replace(/^refs\/remotes\/origin\//, ''))
+      .filter((name) => name !== '' && name !== 'HEAD' && !local.has(name));
+  }
+
+  /** Fetches every branch of origin and drops the ones it deleted. Never throws; a slow or missing remote is skipped. */
+  async refreshRemote(dir: string): Promise<void> {
+    try {
+      await run(this.bin, [...NO_PROGRAMS, '-C', dir, 'fetch', '--quiet', '--prune', 'origin'], {
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        timeout: 8000,
+      });
+    } catch {
+      // The branches as last fetched stand.
+    }
+  }
+
+  /** Makes local branch `branch` at `ref`, which may be a remote ref. Throws with git's first line when git refuses. */
+  async createBranch(dir: string, branch: string, ref: string): Promise<void> {
+    await this.must(dir, ['branch', '--quiet', '--no-track', branch, ref]);
+  }
+
+  /** The files git knows in `dir`: tracked, plus untracked ones no ignore rule hides. Paths are relative to `dir`. */
+  async files(dir: string): Promise<string[]> {
+    const out = await this.try(dir, [
+      '-c',
+      'core.quotePath=false',
+      'ls-files',
+      '--cached',
+      '--others',
+      '--exclude-standard',
+      '-z',
+    ]);
+    return [...new Set((out ?? '').split('\0').filter(Boolean))];
+  }
+
   /** Clones `url` into `dir`, which must be empty or missing. Throws with git's first line when it refuses. */
   async clone(url: string, dir: string): Promise<void> {
     try {
