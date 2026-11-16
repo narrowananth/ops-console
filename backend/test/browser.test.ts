@@ -563,8 +563,8 @@ describe.skipIf(!chromePath)('Session browser in a real Chrome', () => {
       await new Promise((resolve) => execFile('pkill', ['-f', profile(session)], resolve));
       const dead = await until(
         async () => (await state(h, session)).tabs,
-        (tabs) => tabs.length === 1 && tabs[0]?.error !== null,
-        'the tab to show the error',
+        (tabs) => tabs.length === 1 && /Chrome stopped/.test(tabs[0]?.error ?? ''),
+        'the tab to show Chrome stopped',
       );
       expect(dead[0]?.error).toMatch(/Chrome stopped/);
       expect((await h.http.patch(`/browser/tabs/${created.id}`, { action: 'reload' })).status).toBe(409);

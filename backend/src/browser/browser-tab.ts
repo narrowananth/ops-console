@@ -222,7 +222,9 @@ export class BrowserTab {
     page.on('download', (download) =>
       this.send({ type: 'dialog', kind: 'download', message: `Download refused: ${download.suggestedFilename()}` }),
     );
-    page.on('crash', () => this.set({ loading: false, error: 'The page crashed. Reload to try again.' }));
+    page.on('crash', () => {
+      if (!this.dead) this.set({ loading: false, error: 'The page crashed. Reload to try again.' });
+    });
     page.on('popup', (popup) => this.hooks.popup(this, popup));
     page.on('close', () => {
       for (const dir of [...this.chosenDirs, ...(this.staged ? [this.staged.dir] : [])]) {
