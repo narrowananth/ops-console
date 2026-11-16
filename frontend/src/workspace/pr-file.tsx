@@ -223,6 +223,14 @@ export function PrFileView({
           </span>
           <span className={`min-w-0 truncate font-semibold ${viewed ? 'text-neutral-700' : ''}`}>{file.name}</span>
         </button>
+        {pr.conflicts?.files.includes(file.name) && (
+          <span
+            title={`This file conflicts with ${pr.base_branch}: both changed the same lines. Resolve it on the branch before it can merge.`}
+            className="flex-none rounded-full bg-accent-100 px-1.75 py-px font-body text-xs font-semibold text-accent-700"
+          >
+            conflict
+          </span>
+        )}
         {roots.length > 0 && (
           <span
             title={`${roots.length} comment ${roots.length === 1 ? 'thread' : 'threads'} on lines of this file. Open the file to read them.`}

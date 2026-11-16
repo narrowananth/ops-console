@@ -135,6 +135,8 @@ const pullRequest = (extra: Record<string, unknown> = {}) => ({
   comments: COMMENTS,
   reply_checks: [] as unknown[],
   comment_passes: [] as unknown[],
+  commits: [] as unknown[],
+  conflicts: { state: 'clean', files: [] as string[], checked_at: null as string | null },
   ...extra,
 });
 
@@ -297,10 +299,10 @@ test('Address comments shows on any open pull request, the operator’s or someo
   ] as const) {
     await routePullRequest(page, { current: pullRequest(extra) });
     await openPullRequest(page);
-    // Agent Review shows on an open pull request only, so on a closed one wait on the files instead.
+    // Agent Review shows on an open pull request only, so on a closed one wait on the tabs instead.
     const closed = 'state' in extra && extra.state === 'closed';
     await expect(page.getByRole('button', { name: 'Agent Review' })).toHaveCount(closed ? 0 : 1);
-    await expect(page.getByRole('region', { name: 'Files' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Overview' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Address comments' })).toHaveCount(shown ? 1 : 0);
     await page.unrouteAll();
     // The next goto differs only after the #, which would keep this page and its cached pull request.
@@ -658,6 +660,7 @@ test('Collapse all folds every file to its name and Expand all opens them again'
   const detail = { current: pullRequest({ files: [file('src/a.ts'), file('src/b.ts'), file('src/c.ts')] }) };
   await routePullRequest(page, detail);
   await openPullRequest(page);
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
 
   const files = page.getByRole('region', { name: 'Files' });
   await expect(files.getByText('export const srcats = 1;')).toBeVisible();
@@ -665,7 +668,7 @@ test('Collapse all folds every file to its name and Expand all opens them again'
   for (const name of ['srcats', 'srcbts', 'srccts'])
     await expect(files.getByText(`export const ${name} = 1;`)).toBeHidden();
 
-  // A fold kept in the browser holds through a reload, and Expand all opens every file again.
+  // A fold kept in the browser holds through a reload, as does the tab, and Expand all opens every file again.
   await page.reload();
   await expect(files.getByText('export const srcbts = 1;')).toBeHidden();
   await files.getByRole('button', { name: 'Expand all' }).click();
@@ -700,4 +703,96 @@ test('Agent Review opens a note dialog; Start sends the note, and an empty note 
   await dialog.getByRole('button', { name: 'Start' }).click();
   await expect.poll(() => sent.length).toBe(2);
   expect(sent[1]).toBeNull();
+});
+
+test('Request changes sits under More actions; Merge waits for an approval and asks before it merges', async ({
+  page,
+}) => {
+  const detail = { current: pullRequest({ is_mine: false, author: 'someone' }) };
+  await routePullRequest(page, detail);
+  const sent: { path: string; body: unknown }[] = [];
+  await page.route(/\/api\/repos\/r1\/pull-requests\/7\/(reviews|merge)$/, (route) => {
+    sent.push({ path: new URL(route.request().url()).pathname, body: route.request().postDataJSON() });
+    return route.fulfill({ json: { data: {} } });
+  });
+  await openPullRequest(page);
+
+  await expect(page.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('button', { name: 'Merge', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('button', { name: 'Request changes' }).click();
+  await page.getByRole('textbox', { name: 'What needs to change' }).fill('Guard the null cart too');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect
+    .poll(() => sent)
+    .toEqual([
+      {
+        path: '/api/repos/r1/pull-requests/7/reviews',
+        body: { event: 'request_changes', body: 'Guard the null cart too' },
+      },
+    ]);
+
+  detail.current = pullRequest({ is_mine: false, author: 'someone', review_state: 'approved', approved_by: ['lead'] });
+  await page.reload();
+  await expect(page.getByRole('region', { name: 'People' })).toContainText('lead');
+  await page.getByRole('button', { name: 'Merge', exact: true }).click();
+  await expect(page.getByText('Merge #7 on the host?')).toBeVisible();
+  await page.getByRole('button', { name: 'Keep open' }).click();
+  await expect(page.getByText('Merge #7 on the host?')).toHaveCount(0);
+  expect(sent).toHaveLength(1);
+});
+
+test('Commits lists the branch’s commits newest first; conflicts show which files and hold Merge back', async ({
+  page,
+}) => {
+  const detail = {
+    current: pullRequest({
+      is_mine: false,
+      author: 'someone',
+      review_state: 'approved',
+      approved_by: ['lead'],
+      commits: [
+        {
+          sha: 'aaaaaaa1111',
+          message: 'Guard empty carts',
+          author: 'someone',
+          created_at: '2026-11-01T00:00:00Z',
+          url: null,
+        },
+        {
+          sha: 'bbbbbbb2222',
+          message: 'Cover the null cart',
+          author: 'someone',
+          created_at: '2026-11-02T00:00:00Z',
+          url: 'https://github.com/example/checkout-api/commit/bbbbbbb2222',
+        },
+      ],
+      conflicts: { state: 'conflict', files: ['src/cart.ts'], checked_at: '2026-11-03T00:00:00Z' },
+    }),
+  };
+  await routePullRequest(page, detail);
+  await openPullRequest(page);
+
+  const banner = page.getByRole('region', { name: 'Merge conflicts' });
+  await expect(banner).toContainText('This pull request has conflicts');
+  await expect(banner).toContainText('src/cart.ts');
+  await expect(page.getByRole('region', { name: 'Merge readiness' })).toContainText('1 file conflicts');
+  await expect(page.getByRole('button', { name: 'Merge', exact: true })).toBeDisabled();
+
+  await page.getByRole('tab', { name: /^Commits/ }).click();
+  await expect(page.getByRole('region', { name: 'Commits' }).getByRole('listitem')).toHaveText([
+    /Cover the null cart.*bbbbbbb/,
+    /Guard empty carts.*aaaaaaa/,
+  ]);
+  await expect(page.getByRole('link', { name: 'bbbbbbb' })).toHaveAttribute(
+    'href',
+    'https://github.com/example/checkout-api/commit/bbbbbbb2222',
+  );
+
+  detail.current = { ...detail.current, conflicts: { state: 'clean', files: [], checked_at: '2026-11-03T00:00:00Z' } };
+  await page.reload();
+  await expect(page.getByRole('tab', { name: /^Commits/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('button', { name: 'Merge', exact: true })).toBeEnabled();
+  await page.getByRole('tab', { name: 'Overview' }).click();
+  await expect(page.getByRole('region', { name: 'Merge conflicts' })).toHaveCount(0);
 });

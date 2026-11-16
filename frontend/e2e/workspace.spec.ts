@@ -51,7 +51,9 @@ const repoRoutes = async (page: Page, repos: ReturnType<typeof repo>[], sessions
   await page.route(/\/api\/sessions\?kind=repo/, (route) => route.fulfill({ json: { data: sessions } }));
 };
 
-test('Sessions list by what needs you, then running, then idle; a long idle list folds', async ({ page }) => {
+test('Sessions list by what needs you, then running, then idle; a long idle list shortens and a group folds', async ({
+  page,
+}) => {
   const idle = Array.from({ length: 9 }, (_, n) => session(`i${n}`, 'r1', `idle job ${n}`));
   await repoRoutes(
     page,
@@ -76,6 +78,16 @@ test('Sessions list by what needs you, then running, then idle; a long idle list
   await idleGroup.getByRole('button', { name: 'Show 2 more' }).click();
   await expect(idleGroup.getByRole('listitem')).toHaveCount(11);
   await idleGroup.getByRole('button', { name: 'Show fewer' }).click();
+  await expect(idleGroup.getByRole('listitem')).toHaveCount(9);
+
+  // A folded group keeps its header and count, and stays folded through a reload.
+  await page.getByRole('button', { name: 'Fold Idle' }).click();
+  await expect(idleGroup.getByRole('listitem')).toHaveCount(0);
+  await expect(idleGroup).toContainText('10');
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Fold Idle' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(running.getByRole('listitem')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Fold Idle' }).click();
   await expect(idleGroup.getByRole('listitem')).toHaveCount(9);
 });
 
@@ -135,12 +147,13 @@ test('the state chips, the Repo filter and a search narrow the list; a search ma
   await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
   const list = page.locator('aside').filter({ has: page.getByRole('tablist', { name: 'Workspace' }) });
 
-  await expect(list.getByRole('button', { name: 'All 4' })).toHaveAttribute('aria-pressed', 'true');
-  await list.getByRole('button', { name: 'Needs you 1' }).click();
+  const states = list.getByRole('group', { name: 'Session state' });
+  await expect(states.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await states.getByRole('button', { name: 'Needs you 1' }).click();
   await expect(list.getByRole('listitem')).toHaveText([/audit queries/]);
-  await list.getByRole('button', { name: 'Running 1' }).click();
+  await states.getByRole('button', { name: 'Running 1' }).click();
   await expect(list.getByRole('listitem')).toHaveText([/long job/]);
-  await list.getByRole('button', { name: 'All 4' }).click();
+  await states.getByRole('button', { name: 'All', exact: true }).click();
 
   await list.getByRole('button', { name: /Filter by Repo/ }).click();
   await page.getByRole('option', { name: /^apis/ }).click();

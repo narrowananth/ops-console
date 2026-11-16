@@ -395,13 +395,14 @@ test('picks stay through page switches, reloads and reopening the console', asyn
 
 test('a stored choice that no longer reads falls back to the default', async ({ page }) => {
   await page.goto(`${daemon.url}/workspace?tab=pulls#token=${daemon.token}`);
-  await page.getByRole('button', { name: 'All', exact: true }).click();
+  const whose = page.getByRole('group', { name: 'Whose pull requests' });
+  await whose.getByRole('button', { name: 'All', exact: true }).click();
   await page.reload();
-  await expect(page.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(whose.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');
 
   await page.evaluate(() => localStorage.setItem('ops-console:workspace.pr-mine', '"not a boolean"'));
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Mine', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(whose.getByRole('button', { name: 'Mine', exact: true })).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('Shift+Enter adds a line to the Setup agent request; Enter sends the lines as one request', async ({ page }) => {

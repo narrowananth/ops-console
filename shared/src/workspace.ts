@@ -138,6 +138,37 @@ export const prFileSchema = z.object({
 
 export type PrFile = z.infer<typeof prFileSchema>;
 
+/** One commit on a pull request's branch that its base lacks, as the Git host lists it. */
+export const prCommitSchema = z.object({
+  sha: z.string(),
+  /** The first line of the message. */
+  message: z.string(),
+  author: z.string(),
+  created_at: z.string(),
+  /** The commit's page on the host. */
+  url: z.string().nullable(),
+});
+
+export type PrCommit = z.infer<typeof prCommitSchema>;
+
+export enum PrMergeState {
+  /** The console is reading it now; the page reads again when it knows. */
+  Checking = 'checking',
+  Clean = 'clean',
+  Conflict = 'conflict',
+  /** git could not tell: a fetch failed, or the branch's commit is not on origin. */
+  Unknown = 'unknown',
+}
+
+/** Whether the branch merges into its base as they stand on origin now, and the files that conflict when not. */
+export const prConflictsSchema = z.object({
+  state: z.enum(PrMergeState),
+  files: z.array(z.string()),
+  checked_at: z.string().nullable(),
+});
+
+export type PrConflicts = z.infer<typeof prConflictsSchema>;
+
 export const pullRequestSchema = z.object({
   /** The imported Repo it belongs to; null for a repository on the host that is not imported. */
   repo_id: z.string().nullable(),
@@ -267,6 +298,10 @@ export const pullRequestDetailSchema = pullRequestSchema.extend({
   reply_checks: z.array(replyCheckSchema),
   /** Newest first. */
   comment_passes: z.array(commentPassSchema),
+  /** Oldest first. */
+  commits: z.array(prCommitSchema),
+  /** Null for a pull request that is not open. */
+  conflicts: prConflictsSchema.nullable(),
 });
 
 export type PullRequestDetail = z.infer<typeof pullRequestDetailSchema>;

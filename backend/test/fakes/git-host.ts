@@ -2,6 +2,7 @@ import {
   ErrorCode,
   GitHost,
   PrChecks,
+  type PrCommit,
   type PrFile,
   type PrReviewEvent,
   PrReviewState,
@@ -55,6 +56,7 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
   readonly missingOwners = new Set<string>();
   files: PrFile[] = [{ name: 'src/app.ts', additions: 3, deletions: 1, lines: [{ sign: '+', text: 'const a = 1;' }] }];
   comments = new Map<number, HostComment[]>();
+  commits: PrCommit[] = [];
   readonly calls = { list: 0, get: 0 };
   readonly posted: (NewHostComment & { id: string; number: number })[] = [];
   readonly reviews: { number: number; event: PrReviewEvent; body: string }[] = [];
@@ -146,7 +148,16 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
   async get(_slug: string, number: number) {
     this.calls.get++;
     this.check();
-    return { pr: this.counted(this.pr(number)), files: this.files, comments: [...(this.comments.get(number) ?? [])] };
+    return {
+      pr: this.counted(this.pr(number)),
+      files: this.files,
+      comments: [...(this.comments.get(number) ?? [])],
+      commits: this.commits,
+    };
+  }
+
+  headRef(number: number): string {
+    return `refs/pull/${number}/head`;
   }
 
   async postComment(_slug: string, number: number, comment: NewHostComment): Promise<HostComment> {

@@ -1623,6 +1623,8 @@ const pullRequest = (review: unknown) => ({
   comments: [],
   reply_checks: [],
   comment_passes: [],
+  commits: [],
+  conflicts: null,
 });
 
 const agentReview = (extra: Record<string, unknown>) => ({

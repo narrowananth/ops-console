@@ -326,6 +326,8 @@ test('an Agent Review card lists the Skills it was offered; a deleted one is pla
           comments: [],
           reply_checks: [],
           comment_passes: [],
+          commits: [],
+          conflicts: null,
         },
       },
     }),
