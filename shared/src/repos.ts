@@ -48,6 +48,8 @@ export const renameRepoSchema = z.object({ name: z.string().trim().min(1) });
 export const branchSchema = z.object({
   name: z.string(),
   current: z.boolean(),
+  /** Only origin has the branch: a Session on it fetches it and makes a local branch tracking it. */
+  remote: z.boolean(),
   /** Whether the Git host lists an open pull request from this branch. */
   has_open_pr: z.boolean(),
 });

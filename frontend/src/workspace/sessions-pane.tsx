@@ -61,25 +61,51 @@ function RowStop({ session }: { session: Session }) {
   );
 }
 
-/** Branch and Start for a new Session in one Repo. */
+/** Branch and Start for a new Session in one Repo: a local branch, one only origin has, or a new one typed in. */
 function RepoStart({ repo, onCreated }: { repo: Repo; onCreated: (id: string) => void }) {
   const branches = useBranches(repo.id);
   const create = useCreateRepoSession();
   const [branch, setBranch] = useStored(`workspace.new-branch.${repo.id}`, z.string().nullable(), null);
-  const chosen = branch ?? branches.data?.find((b) => b.current)?.name ?? branches.data?.[0]?.name ?? '';
+  // A name typed into the list that no branch has: made at the newest default branch when the Session starts.
+  const [fresh, setFresh] = useState<string | null>(null);
+  const known = branches.data ?? [];
+  const chosen = fresh ?? branch ?? known.find((b) => b.current)?.name ?? known[0]?.name ?? '';
+  const picked = known.find((b) => b.name === chosen);
+  const isNew = fresh !== null && picked === undefined;
+  const label = isNew ? `new branch from ${repo.default_branch}` : picked?.remote ? 'on origin' : '';
+  const choose = (name: string) => {
+    create.reset();
+    setFresh(null);
+    setBranch(name);
+  };
   return (
     <>
       <div className="flex gap-1.5">
         <Dropdown
           label={`Branch for a new Session in ${repo.name}`}
-          title={`The new Session works on ${chosen || 'this branch'} in ${repo.name}`}
+          title={`The new Session works on ${chosen || 'this branch'} in ${repo.name}${label ? ` (${label})` : ''}`}
           value={chosen}
-          options={ascending(branches.data ?? [], (b) => b.name).map((b) => ({
-            value: b.name,
-            label: b.name,
-            description: [b.current && 'checked out', b.has_open_pr && 'open PR'].filter(Boolean).join(' · '),
-          }))}
-          onChange={setBranch}
+          options={[
+            ...(fresh !== null && picked === undefined
+              ? [{ value: fresh, label: fresh, description: 'new branch' }]
+              : []),
+            ...ascending(known, (b) => b.name).map((b) => ({
+              value: b.name,
+              label: b.name,
+              description: [b.current && 'checked out', b.remote && 'on origin', b.has_open_pr && 'open PR']
+                .filter(Boolean)
+                .join(' · '),
+            })),
+          ]}
+          onChange={choose}
+          create={{
+            label: (name) => `Create ${name}`,
+            describe: `A new branch from ${repo.default_branch}`,
+            onCreate: (name) => {
+              create.reset();
+              setFresh(name);
+            },
+          }}
           align="left"
           heading="Start on branch"
           searchable
@@ -91,7 +117,16 @@ function RepoStart({ repo, onCreated }: { repo: Repo; onCreated: (id: string) =>
           className="px-3.5 py-1.5 text-xs"
           disabled={chosen === '' || create.isPending}
           title={chosen === '' ? 'Pick a branch first' : `Start a Session on ${chosen}`}
-          onClick={() => create.mutate({ repo_id: repo.id, branch: chosen }, { onSuccess: (s) => onCreated(s.id) })}
+          onClick={() =>
+            create.mutate(
+              {
+                repo_id: repo.id,
+                branch: chosen,
+                ...(isNew ? { new_branch: true } : picked?.remote ? { from_origin: true } : {}),
+              },
+              { onSuccess: (s) => onCreated(s.id) },
+            )
+          }
         >
           Start
         </Button>

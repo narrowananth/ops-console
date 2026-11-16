@@ -269,6 +269,20 @@ describe('Running a message (Behavior 13 to 16, 18, 20)', () => {
     expect(lastCall(daemon)?.options.skills).toEqual(['ops-console-skills:playbook-skill']);
   });
 
+  it('takes a typed $name as it takes a typed /name', async () => {
+    const { daemon, http } = await start();
+    await installCaveman(http);
+    const session = daemon.createSession();
+
+    await converse(daemon, session, '$caveman-commit only the tax fix');
+    expect(lastCall(daemon)?.prompt).toBe(
+      'Use the "ops-console-skills:caveman-commit" skill for this task.\n\nonly the tax fix',
+    );
+    expect(
+      (await http.get(`/skill-menu?session_id=${session}&q=${encodeURIComponent('$caveman')}`)).body.data.items,
+    ).not.toHaveLength(0);
+  });
+
   it('hands a Custom skill to the run as a plugin holding that one skill, and removes it after (Behavior 20)', async () => {
     const { daemon, http } = await start();
     await custom(http, 'house-style');

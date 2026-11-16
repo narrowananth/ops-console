@@ -135,6 +135,66 @@ describe('Sessions in a Repo', () => {
     ]);
   });
 
+  it('lists the branches only origin has after the local ones, and starts a new branch at the default branch', async () => {
+    const ctx = await start();
+    const origin = path.join(await tempDir('ops-console-origin-'), 'orders-api.git');
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin]);
+    git(ctx.dir, 'remote', 'set-url', 'origin', origin);
+    git(ctx.dir, 'push', '-q', 'origin', 'main', 'feature-1:pr-branch');
+
+    const listed = (await ctx.http.get(`/repos/${ctx.repoId}/branches`)).body.data as {
+      name: string;
+      remote: boolean;
+    }[];
+    expect(listed.find((branch) => branch.name === 'pr-branch')).toMatchObject({ remote: true });
+    expect(listed.find((branch) => branch.name === 'main')).toMatchObject({ remote: false });
+    expect(listed.filter((branch) => branch.name === 'main')).toHaveLength(1);
+
+    const made = await ctx.http.post('/sessions', { repo_id: ctx.repoId, branch: 'brand-new', new_branch: true });
+    expect(made.status).toBe(201);
+    expect(made.body.data.branch).toBe('brand-new');
+    expect(git(ctx.dir, 'rev-parse', 'brand-new').toString().trim()).toBe(
+      git(ctx.dir, 'rev-parse', 'origin/main').toString().trim(),
+    );
+    expect(git(worktree(ctx, made.body.data.id), 'branch', '--show-current').toString().trim()).toBe('brand-new');
+    expect(git(ctx.dir, 'branch', '--show-current').toString().trim()).toBe('main');
+  });
+
+  it("searches a Repo Session's files for the @ menu, and every imported Repo's for an Anonymous Session", async () => {
+    const ctx = await start();
+    await mkdir(path.join(ctx.dir, 'src', 'orders'), { recursive: true });
+    await writeFile(path.join(ctx.dir, 'src', 'orders', 'retry.ts'), 'export {};\n');
+    await writeFile(path.join(ctx.dir, 'src', 'webhook.ts'), 'export {};\n');
+    await writeFile(path.join(ctx.dir, '.gitignore'), 'secret.env\n');
+    await writeFile(path.join(ctx.dir, 'secret.env'), 'x\n');
+    git(ctx.dir, 'add', '.');
+    git(ctx.dir, 'commit', '-q', '-m', 'more');
+    const billing = await makeRepo('billing', 'git@github.com:acme/billing.git');
+    await writeFile(path.join(billing, 'retry-policy.md'), 'x\n');
+    git(billing, 'add', '.');
+    git(billing, 'commit', '-q', '-m', 'policy');
+    await ctx.http.post('/repos', { path: billing });
+    const session = await newSession(ctx);
+    const anonymous = (await ctx.http.post('/sessions', { kind: 'anonymous' })).body.data.id;
+
+    const inRepo = async (q: string) =>
+      (await ctx.http.get(`/file-menu?session_id=${session}&q=${encodeURIComponent(q)}`)).body.data.items;
+    expect((await inRepo('retry')).map((item: { path: string }) => item.path)).toEqual(['src/orders/retry.ts']);
+    expect((await inRepo('retry'))[0]).toMatchObject({ name: 'retry.ts', dir: 'src/orders', repo: null });
+    // A name that starts with the text comes before a path that only holds it.
+    expect((await inRepo('orders')).map((item: { path: string }) => item.path)).toEqual(['src/orders/retry.ts']);
+    expect((await inRepo('secret')).length).toBe(0);
+    expect((await inRepo('')).length).toBeGreaterThan(2);
+
+    const all = (await ctx.http.get(`/file-menu?session_id=${anonymous}&q=retry`)).body.data.items as {
+      path: string;
+      repo: string;
+    }[];
+    expect(all.map((item) => item.repo).sort()).toEqual(['billing', 'orders-api']);
+    expect(all.every((item) => path.isAbsolute(item.path))).toBe(true);
+    expect((await ctx.http.get('/file-menu?session_id=nope')).status).toBe(404);
+  });
+
   it("runs the agent in the Session's own worktree, in two Repos side by side, and refuses a second message mid-run", async () => {
     const ctx = await start();
     const other = await makeRepo('billing', 'git@github.com:acme/billing.git');
@@ -146,6 +206,12 @@ describe('Sessions in a Repo', () => {
     ctx.daemon.sdk.script({ text: 'two' });
 
     expect((await ctx.http.post(`/sessions/${first}/messages`, { text: 'go' })).status).toBe(202);
+    // The scripts go to runs in the order they reach the SDK: the second run starts once the first is held there.
+    await until(
+      async () => ctx.daemon.sdk.calls.length,
+      (calls) => calls === 1,
+      "the first run's call",
+    );
     await ctx.http.post(`/sessions/${second}/messages`, { text: 'go' });
     const busy = await ctx.http.post(`/sessions/${first}/messages`, { text: 'again' });
     expect(busy.status).toBe(409);
@@ -179,14 +245,19 @@ describe('Sessions in a Repo', () => {
     expect(git(worktree(ctx, onMain), 'branch', '--show-current').toString().trim()).toBe('');
     expect(git(ctx.dir, 'branch', '--show-current').toString().trim()).toBe('main');
 
-    // A branch another Session holds is shared; one the operator's own folder holds stays there.
+    // A branch another Session holds is shared; one the operator's own folder holds stays there, and the Session
+    // starts detached at its commit.
     expect((await ctx.http.post('/sessions', { repo_id: ctx.repoId, branch: 'feature-1' })).status).toBe(201);
     git(ctx.dir, 'switch', '-q', 'feature-2');
     const held = await ctx.http.post('/sessions', { repo_id: ctx.repoId, branch: 'feature-2' });
-    expect(held.status).toBe(502);
-    expect(held.body.error.code).toBe('upstream_failed');
-    expect(held.body.error.message).toContain("checked out in the Repo's own folder");
-    expect((await ctx.http.get('/sessions?kind=repo')).body.data).toHaveLength(3);
+    expect(held.status).toBe(201);
+    expect(held.body.data.branch).toBe('feature-2');
+    expect(git(worktree(ctx, held.body.data.id), 'branch', '--show-current').toString().trim()).toBe('');
+    expect(git(worktree(ctx, held.body.data.id), 'rev-parse', 'HEAD').toString().trim()).toBe(
+      git(ctx.dir, 'rev-parse', 'feature-2').toString().trim(),
+    );
+    expect(git(ctx.dir, 'branch', '--show-current').toString().trim()).toBe('feature-2');
+    expect((await ctx.http.get('/sessions?kind=repo')).body.data).toHaveLength(4);
 
     // Deleting a Session takes its worktree away and keeps its branch.
     expect((await ctx.http.delete(`/sessions/${onFeature}`)).status).toBe(204);
@@ -340,8 +411,8 @@ describe('branches', () => {
     const branches = (await ctx.http.get(`/repos/${ctx.repoId}/branches`)).body.data;
     expect(branches).toEqual(
       expect.arrayContaining([
-        { name: 'main', current: true, has_open_pr: false },
-        { name: 'feature-1', current: false, has_open_pr: true },
+        { name: 'main', current: true, remote: false, has_open_pr: false },
+        { name: 'feature-1', current: false, remote: false, has_open_pr: true },
       ]),
     );
     ctx.host.down = 'failed';

@@ -127,11 +127,11 @@ A set of Built-in skills installed and uninstalled together. The Skills page lis
 A Skill the operator wrote. It is available to every Session.
 
 **Project skill**:
-A skill in a Repo's own folder, with a `SKILL.md` that names and describes it. A Session in that Repo may call it from the `/` menu. The console
+A skill in a Repo's own folder, with a `SKILL.md` that names and describes it. A Session in that Repo may call it from the `$` menu. The console
 reads it and never keeps it, and it cannot be attached to a Playbook.
 
 **Skill message**:
-A Session message that starts with `/` and a skill's name, followed by a free note that is the task. It runs that skill and
+A Session message that starts with `$` (or `/`) and a skill's name, followed by a free note that is the task. It runs that skill and
 not the Playbook, for that message only. Any other message runs the Playbook.
 
 **Playbook step**:
@@ -275,7 +275,8 @@ it: a Session in the Service's Repo, on the Repo's default branch, or an Anonymo
 **Session worktree**:
 The git worktree a Session in a Repo works in, under the data folder, made from the newest commit of the Repo's default
 branch fetched from origin. Sessions on different branches work at once, and the operator's own folder is never checked
-out. A Session on the default branch starts on a detached HEAD. The console fetches the default branch before each run;
+out. A Session on the default branch, or on a branch the operator's own folder holds, starts on a detached HEAD and keeps
+the branch's name. The console fetches the default branch before each run;
 the agent never fetches, since its sandbox has no git keys.
 _Avoid_: checkout, working copy
 

@@ -25,6 +25,7 @@ export function Dropdown<T extends string>({
   title,
   disabled = false,
   compact = false,
+  create,
 }: {
   label: string;
   /** The text a chip shows before its value; empty for none. */
@@ -48,6 +49,11 @@ export function Dropdown<T extends string>({
   disabled?: boolean;
   /** A field button as small as a row's own buttons, for a strip of controls. */
   compact?: boolean;
+  /**
+   * With `searchable`: a text no option's label matches exactly offers a row that makes `onCreate` pick it as new.
+   * `describe` is the row's second line.
+   */
+  create?: { label: (name: string) => string; describe?: string; onCreate: (name: string) => void };
 }) {
   const [place, setPlace] = useState<CSSProperties | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -62,6 +68,10 @@ export function Dropdown<T extends string>({
   const shown = needle
     ? options.filter((option) => `${option.label} ${option.description ?? ''}`.toLowerCase().includes(needle))
     : options;
+
+  const typed = query.trim();
+  const offerCreate =
+    create !== undefined && searchable && typed !== '' && !options.some((option) => option.label === typed);
 
   useEffect(() => {
     if (!open) return;
@@ -220,7 +230,25 @@ export function Dropdown<T extends string>({
               className="sticky top-0 z-10 mb-1 block w-full border border-divider bg-bg px-2.5 py-1.5 text-[13px] text-text outline-none focus:border-accent-400"
             />
           )}
-          {shown.length === 0 && <div className="px-2.5 py-2 text-xs text-neutral-700">No match</div>}
+          {offerCreate && (
+            <button
+              type="button"
+              role="option"
+              aria-selected={false}
+              onClick={() => {
+                setPlace(null);
+                trigger.current?.focus();
+                create.onCreate(typed);
+              }}
+              className={`flex w-full items-start gap-2.5 px-2.5 py-2 outline-none focus-visible:bg-neutral-200 ${item(false)}`}
+            >
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="text-[13px] break-words">{create.label(typed)}</span>
+                {create.describe && <span className="text-xs font-normal text-neutral-700">{create.describe}</span>}
+              </span>
+            </button>
+          )}
+          {shown.length === 0 && !offerCreate && <div className="px-2.5 py-2 text-xs text-neutral-700">No match</div>}
           {shown.map((option) => {
             const selected = option.value === value;
             return (

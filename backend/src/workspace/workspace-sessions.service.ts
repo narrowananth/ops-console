@@ -71,13 +71,28 @@ export class WorkspaceSessionsService {
     const folder = this.folder(input.repo_id);
     const branches = await this.git.branches(folder);
     if (!branches.some((branch) => branch.name === input.branch)) {
-      if (!input.from_origin) throw validationFailed(`invalid body: branch ${input.branch} is not in this Repo`);
-      await this.logged(
-        null,
-        folder,
-        `git fetch origin ${input.branch} && git branch --track ${input.branch} origin/${input.branch}`,
-        () => this.git.trackBranch(folder, input.branch),
-      );
+      if (input.new_branch) {
+        // The newest code first: a new branch starts where the default branch is on origin, not where the folder left it.
+        const { defaultBranch } = this.repo(input.repo_id);
+        await this.logged(
+          null,
+          folder,
+          `git fetch origin ${defaultBranch} && git branch ${input.branch} origin/${defaultBranch}`,
+          async () => {
+            const base = await this.git.codeBase(folder, [defaultBranch]);
+            await this.git.createBranch(folder, input.branch, base.ref);
+          },
+        );
+      } else if (input.from_origin) {
+        await this.logged(
+          null,
+          folder,
+          `git fetch origin ${input.branch} && git branch --track ${input.branch} origin/${input.branch}`,
+          () => this.git.trackBranch(folder, input.branch),
+        );
+      } else {
+        throw validationFailed(`invalid body: branch ${input.branch} is not in this Repo`);
+      }
     }
     const row = this.sessions.create({
       kind: SessionKind.Repo,
@@ -113,17 +128,13 @@ export class WorkspaceSessionsService {
   }
 
   /**
-   * Whether another worktree already has `branch` checked out, which a Session may share. The Repo's own folder is the
-   * operator's: a branch it holds stays there, and this throws.
+   * Who has `branch` checked out: the Repo's own folder, which is the operator's and stays on it, another Session's
+   * worktree, which a Session may share, or no one.
    */
-  private async sharesBranch(repoPath: string, branch: string): Promise<boolean> {
+  private async holder(repoPath: string, branch: string): Promise<'folder' | 'worktree' | null> {
     const holder = await this.git.worktreeOf(repoPath, branch);
-    if (holder !== null && holder === (await realpath(repoPath).catch(() => repoPath))) {
-      throw new GitFailed(
-        `${branch} is checked out in the Repo's own folder. Switch that folder to another branch, then try again`,
-      );
-    }
-    return holder !== null;
+    if (holder === null) return null;
+    return holder === (await realpath(repoPath).catch(() => repoPath)) ? 'folder' : 'worktree';
   }
 
   /** The Session's worktree when it has one; null before its first run or when it was taken away. */
@@ -142,9 +153,18 @@ export class WorkspaceSessionsService {
       `git fetch origin ${repo.defaultBranch} && git worktree add ${onDefault ? '--detach ' : ''}${dir}${onDefault ? '' : ` ${branch}`}`,
       async () => {
         const base = await this.git.codeBase(repo.path, [repo.defaultBranch]);
-        const shared = onDefault ? false : await this.sharesBranch(repo.path, branch);
-        await this.git.addSessionWorktree(repo.path, dir, onDefault ? null : branch, base.ref, shared);
-        if (!onDefault) await this.git.pull(dir, branch);
+        const holder = onDefault ? null : await this.holder(repo.path, branch);
+        if (onDefault) {
+          await this.git.addSessionWorktree(repo.path, dir, null, base.ref);
+        } else if (holder === 'folder') {
+          // The operator's folder keeps the branch: the Session starts at its commit on a detached HEAD, moved forward
+          // to origin when it is behind.
+          await this.git.addSessionWorktree(repo.path, dir, null, branch);
+          await this.git.pull(dir, branch);
+        } else {
+          await this.git.addSessionWorktree(repo.path, dir, branch, base.ref, holder === 'worktree');
+          await this.git.pull(dir, branch);
+        }
       },
     );
     return dir;
@@ -195,12 +215,18 @@ export class WorkspaceSessionsService {
       );
       stashed = true;
     }
+    const holder = create ? null : await this.holder(repo.path, branch);
     await this.logged(
       sessionId,
       folder,
-      `git checkout ${create ? '-b ' : ''}${branch}${create && from ? ` ${from}` : ''}`,
-      async () =>
-        this.git.checkout(folder, branch, create, from, !create && (await this.sharesBranch(repo.path, branch))),
+      holder === 'folder'
+        ? `git checkout --detach ${branch}`
+        : `git checkout ${create ? '-b ' : ''}${branch}${create && from ? ` ${from}` : ''}`,
+      async () => {
+        if (holder !== 'folder') return this.git.checkout(folder, branch, create, from, holder === 'worktree');
+        await this.git.checkoutDetached(folder, branch);
+        await this.git.pull(folder, branch);
+      },
     );
     return { session: toSession(this.sessions.write(sessionId, { branch })), stashed };
   }

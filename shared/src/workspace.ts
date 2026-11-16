@@ -318,6 +318,8 @@ export const createRepoSessionSchema = z.strictObject({
   branch: z.string().trim().min(1),
   /** A branch only origin has, as a pull request's, is fetched and made a local branch tracking it. */
   from_origin: z.boolean().optional(),
+  /** A branch no one has: it is made at the newest commit of the Repo's default branch. */
+  new_branch: z.boolean().optional(),
   model: z.enum(Model).optional(),
   effort: z.enum(Effort).optional(),
   access_mode: z.enum(AccessMode).optional(),
@@ -459,3 +461,26 @@ export const prRefreshStatus = z.enum(['ok', 'rate_limited', 'failed']);
 
 /** Hosts that serve pull requests; `local` has none. */
 export const PR_HOSTS: GitHost[] = [GitHost.Github, GitHost.Gitlab, GitHost.Bitbucket];
+
+/** The `@` menu above a Session's composer: files whose path matches the text after the `@`. */
+export const fileMenuQuerySchema = z.object({
+  session_id: z.string().min(1),
+  q: z.string().optional(),
+});
+
+/** A row of the `@` menu. */
+export const fileMenuItemSchema = z.object({
+  /** What `@` inserts: relative to the Session's folder in a Repo Session, absolute in an Anonymous one. */
+  path: z.string(),
+  name: z.string(),
+  /** The folder the file is in, relative to its Repo; empty at the top. */
+  dir: z.string(),
+  /** The imported Repo the file is in; set only for an Anonymous Session, which searches every Repo. */
+  repo: z.string().nullable(),
+});
+
+export type FileMenuItem = z.infer<typeof fileMenuItemSchema>;
+
+export const fileMenuSchema = z.object({ items: z.array(fileMenuItemSchema) });
+
+export type FileMenu = z.infer<typeof fileMenuSchema>;

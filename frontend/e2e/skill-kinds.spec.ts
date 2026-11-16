@@ -216,16 +216,16 @@ async function mockSession(page: Page, sent: unknown[]) {
   await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
 }
 
-test('typing / opens the skill menu; picking keeps the note, and Send names the skill', async ({ page }) => {
+test('typing $ opens the skill menu; picking keeps the note, and Send names the skill', async ({ page }) => {
   const sent: unknown[] = [];
   await mockSession(page, sent);
   const box = page.getByRole('textbox', { name: 'Message' });
   const menu = page.getByRole('listbox', { name: 'Skills' });
 
   await box.click();
-  await page.keyboard.type('/');
+  await page.keyboard.type('$');
   await expect(menu.getByRole('option')).toHaveCount(4);
-  await expect(menu.getByRole('option').nth(0)).toContainText('/caveman-commit');
+  await expect(menu.getByRole('option').nth(0)).toContainText('$caveman-commit');
   await expect(menu.getByRole('option', { name: /code-review/ })).toContainText('Project');
   await expect(menu.getByRole('option', { name: /pr-body-style/ })).toContainText('Custom');
   await expect(menu.getByRole('option', { name: /caveman-commit/ })).toContainText('Caveman');
@@ -233,7 +233,7 @@ test('typing / opens the skill menu; picking keeps the note, and Send names the 
   await expect(menu.getByRole('option', { name: /ship/ })).toContainText('Ops Console');
 
   await page.keyboard.type('code');
-  await expect(menu.getByRole('option').first()).toContainText('/code-review');
+  await expect(menu.getByRole('option').first()).toContainText('$code-review');
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
 
@@ -245,12 +245,12 @@ test('typing / opens the skill menu; picking keeps the note, and Send names the 
   await menu.getByRole('option', { name: /code-review/ }).click();
   await expect(menu).toHaveCount(0);
   await page.keyboard.type('the auth changes only');
-  await expect(box).toHaveText('/code-review the auth changes only');
+  await expect(box).toHaveText('$code-review the auth changes only');
 
   await page.keyboard.press('Enter');
   await expect
     .poll(() => sent)
-    .toEqual([{ text: '/code-review the auth changes only', skill: { kind: 'project', name: 'code-review' } }]);
+    .toEqual([{ text: '$code-review the auth changes only', skill: { kind: 'project', name: 'code-review' } }]);
 });
 
 test('a menu with no match says so, and a plain message sends with no skill', async ({ page }) => {
@@ -258,7 +258,7 @@ test('a menu with no match says so, and a plain message sends with no skill', as
   await mockSession(page, sent);
   const box = page.getByRole('textbox', { name: 'Message' });
   await box.click();
-  await page.keyboard.type('/zzz');
+  await page.keyboard.type('$zzz');
   await expect(page.getByRole('listbox', { name: 'Skills' })).toContainText('No skills match');
   await page.keyboard.press('Escape');
   await box.evaluate((node) => {
@@ -268,6 +268,46 @@ test('a menu with no match says so, and a plain message sends with no skill', as
   await page.keyboard.type('just a plain message');
   await page.keyboard.press('Enter');
   await expect.poll(() => sent).toEqual([{ text: 'just a plain message' }]);
+});
+
+test('typing / lists the Session commands, and picking one runs it', async ({ page }) => {
+  await mockSession(page, []);
+  const box = page.getByRole('textbox', { name: 'Message' });
+  const commands = page.getByRole('listbox', { name: 'Commands' });
+  await box.click();
+  await page.keyboard.type('/');
+  await expect(commands.getByRole('option').first()).toContainText('/skills');
+  await page.keyboard.type('zzz');
+  await expect(commands).toContainText('No commands match');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Backspace');
+  // The skills command hands over to the $ menu.
+  await commands.getByRole('option', { name: /skills/ }).click();
+  await expect(page.getByRole('listbox', { name: 'Skills' }).getByRole('option')).toHaveCount(4);
+});
+
+test('typing @ searches files; picking puts the path in the message', async ({ page }) => {
+  await mockSession(page, []);
+  await page.route(/\/api\/file-menu\?.*/, (route) => {
+    const q = new URL(route.request().url()).searchParams.get('q') ?? '';
+    const all = [
+      { path: 'src/orders/retry.ts', name: 'retry.ts', dir: 'src/orders', repo: null },
+      { path: 'src/webhook.ts', name: 'webhook.ts', dir: 'src', repo: null },
+    ];
+    return route.fulfill({ json: { data: { items: all.filter((item) => item.path.includes(q)) } } });
+  });
+  const box = page.getByRole('textbox', { name: 'Message' });
+  const files = page.getByRole('listbox', { name: 'Files' });
+  await box.click();
+  await page.keyboard.type('look at @re');
+  await expect(files.getByRole('option')).toHaveCount(1);
+  await expect(files.getByRole('option').first()).toContainText('retry.ts');
+  await expect(files.getByRole('option').first()).toContainText('src/orders');
+  await page.keyboard.press('Enter');
+  await expect(files).toHaveCount(0);
+  await expect(box).toHaveText('look at @src/orders/retry.ts');
+  await expect(box).toHaveAttribute('aria-placeholder', 'Ask anything. @ files, $ skills, / commands');
 });
 
 test('a skill message shows its skill chip and that the Playbook was not used, after a reload', async ({ page }) => {

@@ -97,8 +97,8 @@ test('+ New picks a Repo and a branch, or no Repo, and starts a Session there', 
     route.fulfill({
       json: {
         data: [
-          { name: 'main', current: true, has_open_pr: false },
-          { name: 'release', current: false, has_open_pr: true },
+          { name: 'main', current: true, remote: false, has_open_pr: false },
+          { name: 'release', current: false, remote: false, has_open_pr: true },
         ],
       },
     }),
@@ -118,7 +118,9 @@ test('+ New picks a Repo and a branch, or no Repo, and starts a Session there', 
   await expect(page.getByRole('option', { name: /^main/ })).toContainText('checked out');
   // The search narrows the branches as it is typed.
   await page.getByRole('searchbox', { name: /Search Branch for a new Session/ }).fill('rel');
-  await expect(page.getByRole('option')).toHaveCount(1);
+  // The one branch that matches, and the offer to make a branch of that name.
+  await expect(page.getByRole('option')).toHaveCount(2);
+  await expect(page.getByRole('option', { name: /^Create rel/ })).toBeVisible();
   await page.getByRole('option', { name: /^release/ }).click();
   await expect(branch).toContainText('release');
   await page.getByRole('button', { name: 'Start', exact: true }).click();
@@ -129,6 +131,43 @@ test('+ New picks a Repo and a branch, or no Repo, and starts a Session there', 
   await page.getByRole('button', { name: 'Repo for a new Session' }).click();
   await page.getByRole('option', { name: /^No Repo/ }).click();
   await expect(page.getByRole('button', { name: /^Branch for a new Session/ })).toHaveCount(0);
+});
+
+test('+ New starts on a branch only origin has, or on a new branch typed into the list', async ({ page }) => {
+  await repoRoutes(page, [repo('r1', 'analytics')], []);
+  await page.route('**/api/repos/*/branches', (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          { name: 'main', current: true, remote: false, has_open_pr: false },
+          { name: 'teammate-fix', current: false, remote: true, has_open_pr: false },
+        ],
+      },
+    }),
+  );
+  const started: unknown[] = [];
+  await page.route('**/api/sessions', (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    started.push(route.request().postDataJSON());
+    return route.fulfill({ json: { data: session('s9', 'r1', 'new one', 'idle', 'main') } });
+  });
+  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+
+  const branch = page.getByRole('button', { name: 'Branch for a new Session in analytics' });
+  await page.getByRole('button', { name: '+ New' }).click();
+  await branch.click();
+  await expect(page.getByRole('option', { name: /^teammate-fix/ })).toContainText('on origin');
+  await page.getByRole('option', { name: /^teammate-fix/ }).click();
+  await page.getByRole('button', { name: 'Start', exact: true }).click();
+  await expect.poll(() => started).toEqual([{ repo_id: 'r1', branch: 'teammate-fix', from_origin: true }]);
+
+  await page.getByRole('button', { name: '+ New' }).click();
+  await branch.click();
+  await page.getByRole('searchbox', { name: /Search Branch for a new Session/ }).fill('brand-new');
+  await page.getByRole('option', { name: /Create brand-new/ }).click();
+  await expect(branch).toContainText('brand-new');
+  await page.getByRole('button', { name: 'Start', exact: true }).click();
+  await expect.poll(() => started.at(-1)).toEqual({ repo_id: 'r1', branch: 'brand-new', new_branch: true });
 });
 
 test('the state chips, the Repo filter and a search narrow the list; a search matches Repo, branch and title', async ({
