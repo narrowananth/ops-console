@@ -49,7 +49,15 @@ export function AttachmentViewer({ viewed, onClose }: { viewed: Viewed; onClose:
   const kind = blob ? viewKind(blob.type, viewed.name) : null;
   useEffect(() => {
     if (!blob) return;
-    const made = URL.createObjectURL(blob);
+    // The daemon never serves HTML or SVG as a page (its type is bytes); the viewer types them to show them, in a frame
+    // or an `<img>` that runs no script.
+    const made = URL.createObjectURL(
+      kind === 'html'
+        ? new Blob([blob], { type: 'text/html' })
+        : kind === 'image' && SVG_NAME.test(viewed.name)
+          ? new Blob([blob], { type: 'image/svg+xml' })
+          : blob,
+    );
     setUrl(made);
     if (kind === 'text')
       blob
@@ -57,7 +65,7 @@ export function AttachmentViewer({ viewed, onClose }: { viewed: Viewed; onClose:
         .text()
         .then(setText, () => setText(null));
     return () => URL.revokeObjectURL(made);
-  }, [blob, kind]);
+  }, [blob, kind, viewed.name]);
 
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: Escape closes a modal dialog natively; the click is the backdrop
@@ -100,6 +108,23 @@ export function AttachmentViewer({ viewed, onClose }: { viewed: Viewed; onClose:
           <img src={url} alt={viewed.name} className="max-h-[calc(100vh-120px)] max-w-full object-contain" />
         ) : kind === 'pdf' ? (
           <iframe title={viewed.name} src={url} className="h-[calc(100vh-120px)] w-full border-0" />
+        ) : kind === 'html' ? (
+          // No `allow-*` token: no script, no form, no top navigation, and the page gets an opaque origin. The page's
+          // own `csp` also blocks every request it would make, so it cannot call the daemon or any host.
+          <iframe
+            title={viewed.name}
+            src={url}
+            sandbox=""
+            // @ts-expect-error `csp` is not in React's iframe attributes yet
+            csp="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:; media-src data: blob:"
+            className="h-[calc(100vh-120px)] w-full border-0 bg-white"
+          />
+        ) : kind === 'video' ? (
+          // biome-ignore lint/a11y/useMediaCaption: an operator's file has no caption track
+          <video src={url} controls className="max-h-[calc(100vh-120px)] max-w-full" />
+        ) : kind === 'audio' ? (
+          // biome-ignore lint/a11y/useMediaCaption: an operator's file has no caption track
+          <audio src={url} controls className="m-6 w-full max-w-xl" />
         ) : kind === 'text' ? (
           <CodeBlock
             text={text ?? ''}
@@ -117,11 +142,18 @@ export function AttachmentViewer({ viewed, onClose }: { viewed: Viewed; onClose:
 }
 
 const TEXT_SHOWN = 256 * 1024;
-const TEXT_NAME = /\.(csv|json|log|md|sql|txt|xml|ya?ml)$/i;
+const SVG_NAME = /\.svg$/i;
+const HTML_NAME = /\.html?$/i;
+const TEXT_NAME =
+  /\.(csv|tsv|json|jsonl|log|md|sql|txt|xml|ya?ml|toml|ini|env|conf|sh|py|rb|go|rs|java|kt|swift|[cm]?[jt]sx?|css|scss|diff|patch)$/i;
 
-function viewKind(type: string, name: string): 'image' | 'pdf' | 'text' | 'other' {
-  if (type.startsWith('image/') && type !== 'image/svg+xml') return 'image';
+function viewKind(type: string, name: string): 'image' | 'pdf' | 'html' | 'video' | 'audio' | 'text' | 'other' {
+  // SVG goes through `<img>`, which runs no script in it.
+  if (type.startsWith('image/') || SVG_NAME.test(name)) return 'image';
   if (type === 'application/pdf') return 'pdf';
+  if (type === 'text/html' || HTML_NAME.test(name)) return 'html';
+  if (type.startsWith('video/')) return 'video';
+  if (type.startsWith('audio/')) return 'audio';
   if (type.startsWith('text/') || type === 'application/json' || TEXT_NAME.test(name)) return 'text';
   return 'other';
 }

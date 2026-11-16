@@ -62,7 +62,7 @@ The operator's yes or no on one agent action that needs it: a PROD write, or an 
 a mode that asks.
 
 **Integration command**:
-A `pup`, `gh`, `glab`, `bkt` or `slashdocs` command the agent asks the console to run through its `run_integration` tool. The daemon runs it outside the Run sandbox, as the operator. A read runs at once; a write needs an Approval; sign-in, tokens and merges are refused.
+A `pup`, `gh`, `glab`, `bkt` or `slashdocs` command the agent asks the console to run through its `run_integration` tool. The daemon runs it outside the Run sandbox, as the operator. A read runs at once; a write needs an Approval, unless the operator chose "Don't ask again this Session" for that CLI, which holds until the Session is deleted; sign-in, tokens and merges are refused whatever the choice.
 
 **Opened Repo**:
 An imported Repo, other than the Session's own, that the operator ticked in the composer's Repos chip. The operator's own runs in that Session write and read its checkout and run `git` there, inside the Run sandbox. The agent never pushes from it.

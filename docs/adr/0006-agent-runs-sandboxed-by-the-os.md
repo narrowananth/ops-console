@@ -43,7 +43,7 @@ The integration CLIs (`pup`, `gh`, `glab`, `bkt`, `slashdocs`) keep their sign-i
 cannot use them itself. Its `run_integration` tool has the daemon run one outside the sandbox, as the operator, in the
 Session's output folder. The agent gives the CLI and an argument list; no shell runs. The console classifies the command
 by its words, default deny: a read runs at once, a write (a comment, a create, an update, a mute) raises an Approval in
-every Access mode, and a run that is not the operator's own chat writes nothing. Sign-in, tokens, config, extensions,
+every Access mode unless the operator chose "Don't ask again this Session" for that CLI (kept on the Session until it is deleted, one CLI at a time), and a run that is not the operator's own chat writes nothing. Sign-in, tokens, config, extensions,
 aliases, a flag that passes a secret or another server, a merge by any spelling, and every command no list names are
 refused. An argument that names a file outside the run's own folders is refused too, so the tool cannot read what the
 sandbox hides. The CLI gets its home folder and PATH and nothing of the daemon's environment; its output is redacted and

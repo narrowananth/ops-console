@@ -101,6 +101,7 @@ import {
   NEW_SESSION_TITLE,
   type SessionRow,
   SessionsService,
+  trustedClis,
 } from './sessions.service';
 import { type ResolvedSkill, SkillMenuService } from './skill-menu.service';
 import { removeSkillPlugin, skillNames, skillRunsDir, writeSkillPlugin } from './skill-plugin';
@@ -1673,6 +1674,16 @@ export class AgentRuntime implements OnModuleDestroy {
         },
       };
     }
+    // The operator chose "don't ask again this Session" for this CLI: the guards above still held.
+    if (trustedClis(this.sessions.get(run.sessionId)).includes(cli)) {
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'allow',
+          permissionDecisionReason: `The operator stopped asking about ${cli} for this Session.`,
+        },
+      };
+    }
     const decision = await this.ask(
       run,
       {
@@ -1681,6 +1692,7 @@ export class AgentRuntime implements OnModuleDestroy {
         kind: ApprovalKind.Command,
         summary: `Run outside the sandbox, as you: ${command}`,
         isProd: false,
+        trustCli: cli,
       },
       stepId,
     );

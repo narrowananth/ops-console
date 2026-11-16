@@ -11,18 +11,57 @@ import { ApiError } from '../common/errors';
 /** A saved file's name: the id it was saved under and the operator's extension. */
 const SAVED = /^[0-9a-f-]{36}(\.[A-Za-z0-9]{1,16})?$/;
 
-/** How the console shows a file: images and PDFs as themselves, text as text, the rest as bytes to download. */
+/** How the console shows a file: images, PDFs, video and audio as themselves, text as text, the rest as bytes. */
 const TYPES: Record<string, string> = {
   '.gif': 'image/gif',
   '.jpeg': 'image/jpeg',
   '.jpg': 'image/jpeg',
+  '.m4a': 'audio/mp4',
+  '.mov': 'video/quicktime',
+  '.mp3': 'audio/mpeg',
+  '.mp4': 'video/mp4',
+  '.ogg': 'audio/ogg',
   '.pdf': 'application/pdf',
   '.png': 'image/png',
+  '.wav': 'audio/wav',
+  '.webm': 'video/webm',
   '.webp': 'image/webp',
 };
-const TEXT = new Set(['.csv', '.json', '.log', '.md', '.sql', '.txt', '.xml', '.yaml', '.yml']);
+const TEXT = new Set([
+  '.conf',
+  '.css',
+  '.csv',
+  '.diff',
+  '.go',
+  '.ini',
+  '.java',
+  '.js',
+  '.json',
+  '.jsonl',
+  '.jsx',
+  '.kt',
+  '.log',
+  '.md',
+  '.mjs',
+  '.patch',
+  '.py',
+  '.rb',
+  '.rs',
+  '.scss',
+  '.sh',
+  '.sql',
+  '.swift',
+  '.toml',
+  '.ts',
+  '.tsx',
+  '.tsv',
+  '.txt',
+  '.xml',
+  '.yaml',
+  '.yml',
+]);
 
-/** The type a file is served with: never one a browser renders as a page or runs (HTML, SVG), so those download. */
+/** The type a file is served with: never one a browser renders as a page or runs (HTML, SVG). The viewer shows those in a sandbox. */
 export function fileType(name: string): string {
   const ext = path.extname(name).toLowerCase();
   return TYPES[ext] ?? (TEXT.has(ext) ? 'text/plain; charset=utf-8' : 'application/octet-stream');

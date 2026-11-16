@@ -10,9 +10,10 @@ import {
 } from '@ops-console/shared';
 import { and, desc, eq, lt, type SQL, sql } from 'drizzle-orm';
 import type { z } from 'zod';
+import { trustedClis } from '../agent/sessions.service';
 import { ApiError } from '../common/errors';
 import { afterCursor, toPage } from '../common/pagination';
-import { actionLog, approvals, nowIso } from '../db/schema';
+import { actionLog, approvals, nowIso, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { ActionLogService } from './action-log.service';
 import { redact } from './redact';
@@ -28,6 +29,8 @@ export type ApprovalRequest = {
   kind: ApprovalKind;
   summary: string;
   isProd: boolean;
+  /** An integration CLI the operator may stop being asked about for this Session. */
+  trustCli?: string;
 };
 
 @Injectable()
@@ -53,6 +56,7 @@ export class ApprovalsService {
           sessionId: request.sessionId,
           kind: request.kind,
           summary,
+          trustCli: request.trustCli ?? null,
         })
         .run();
       emit('approval.requested', {
@@ -67,7 +71,7 @@ export class ApprovalsService {
   }
 
   /** Approving lets the call run; denying sets its Action Log row `denied` and tells the agent no. */
-  decide(id: string, decision: Decision): Approval {
+  decide(id: string, decision: Decision, trustSession = false): Approval {
     this.store.write((tx, emit) => {
       const row = tx.select().from(approvals).where(eq(approvals.id, id)).get();
       if (!row) throw new ApiError(404, ErrorCode.NotFound, 'no such approval');
@@ -75,6 +79,16 @@ export class ApprovalsService {
         throw new ApiError(409, ErrorCode.InvalidState, `the approval is already ${row.status}`);
       }
       tx.update(approvals).set({ status: decision, decidedAt: nowIso }).where(eq(approvals.id, id)).run();
+      if (trustSession && decision === ApprovalStatus.Approved && row.trustCli !== null && row.sessionId !== null) {
+        const session = tx.select().from(sessions).where(eq(sessions.id, row.sessionId)).get();
+        if (session) {
+          const clis = [...new Set([...trustedClis(session), row.trustCli])];
+          tx.update(sessions)
+            .set({ trustedClis: JSON.stringify(clis) })
+            .where(eq(sessions.id, session.id))
+            .run();
+        }
+      }
       if (decision === ApprovalStatus.Denied && row.actionLogId !== null) {
         this.actionLog.close(tx, emit, row.actionLogId, ActionOutcome.Denied, null);
       }
@@ -155,6 +169,7 @@ export class ApprovalsService {
           target,
           command,
           is_prod: isProd ?? false,
+          trust_cli: approval.trustCli,
         },
       }));
   }
