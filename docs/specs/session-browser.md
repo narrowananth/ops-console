@@ -52,7 +52,9 @@ adds the same to a Session.
     started by one of the Session's processes (Behavior 17) is tagged with that process; one whose folder is in the
     Session's worktree, its Opened Repos or its output folder is tagged with the Session. Those come first. A click opens
     it in the tab. The list refreshes every 5 seconds while a panel is open and when a process starts or ends. The console's
-    own ports (4545, 4555, 4556) are not listed.
+    own ports (4545, 4555, 4556) are not listed. A server that is the Session's but that no Session process owns, such as one
+    started with `nohup` that outlived its terminal, shows a Stop button. Stop ends that process and what it started (by
+    parent links, never by process group) and refuses any server that is not the Session's.
 12. When a process of the Session starts listening and no tab is open, the Browser button shows a dot and the port. The
     panel does not open itself.
 
@@ -79,8 +81,10 @@ adds the same to a Session.
 18. Any number of processes run at once, so the frontend, the backend and the database of one project run side by side.
     There is no cap. Processes of different Sessions never share a folder, since each Session has its own worktree.
 19. The terminal takes input, paste and resize. The daemon keeps the last 256 KB of each process's output, which the dock replays to a browser that opens late.
-20. A daemon exit stops every process of every Session, process group and children included. A daemon start finds none of
-    a previous run's.
+20. A daemon exit stops every process of every Session, process group and children included. A daemon killed with no chance
+    to clean up leaves none behind either: the shell holds the terminal, and the terminal closing hangs up the shell and the
+    processes it started. A process that ignores the hangup (`nohup`) is left running; it shows under Local servers with a Stop
+    (11).
 
 ### The agent
 
@@ -233,6 +237,10 @@ Body `{ ids: string[] }`, the staged files in order; none cancels the picker. 20
 
 Clears the Session's cookies and storage. 204.
 
+### `POST /sessions/:id/local-servers/:port/stop`
+
+Stops the server on `port` when it is this Session's. 204. 404 `not_found` for a port that is not this Session's.
+
 ### `GET /sessions/:id/local-servers`
 
 `{ data: { servers: server[] } }`.
@@ -311,9 +319,9 @@ the dock with no process, a running one, an exited one, an Approval card for the
 - **Backend + SQLite** (`browser.test.ts`, a real Chrome from `OPS_CONSOLE_CHROME_PATH`, a small server in the test):
   1, 2, 4, 6 to 10, 21 to 25 (25 with a fake page and a signal), 28 to 32, 34. The URL checks (4, 13's classification, 22) run with
   no Chrome. `browser-orphans.test.ts`: 29.
-- **Backend + SQLite** (`session-processes.test.ts`, real child processes): 15 to 20, 26, 33; `process-prod-env.test.ts`: 17 and 26's PROD line; with `local-servers.test.ts`
-  (a real listening socket): 11, 12.
-- **Browser** (`frontend/e2e/session-browser.spec.ts`, a real daemon and Chrome): 1 to 3, 5, 6, 8, 15, 16, 21, 26, 27, 28, 32, and the PROD warning of 17.
+- **Backend + SQLite** (`session-processes.test.ts`, real child processes): 15 to 20, 26, 33; `process-prod-env.test.ts`: 17 and 26's PROD line; `process-hangup.test.ts`: 20; with `local-servers.test.ts`
+  (a real listening socket): 11, 12, and the Stop of a leftover server.
+- **Browser** (`frontend/e2e/session-browser.spec.ts`, a real daemon and Chrome): 1 to 3, 5, 6, 8, 11 (Stop), 15 to 17 (Run menu, Restart, Stop, Close), 21, 26, 27, 28, 32, and the PROD warning of 17.
 - **Browser** (`frontend/e2e/skill-kinds.spec.ts` pattern): 13's setting and Cmd-click.
 
 ## Out of scope

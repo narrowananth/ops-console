@@ -12,6 +12,7 @@ import {
   useOpenExternal,
   usePatchTab,
   useProcesses,
+  useStopServer,
   useStoreTab,
 } from '../lib/queries';
 import { LocalServers } from './local-servers';
@@ -41,6 +42,7 @@ export function BrowserPanel({
 }) {
   const state = useBrowserState(sessionId, true);
   const servers = useLocalServers(sessionId, true, true);
+  const stopServer = useStopServer(sessionId);
   const processes = useProcesses(sessionId, true);
   const create = useCreateTab(sessionId);
   const patch = usePatchTab(sessionId);
@@ -93,6 +95,7 @@ export function BrowserPanel({
           processes={processes.data ?? []}
           error={servers.error?.message ?? null}
           onOpen={open}
+          onStop={(port) => stopServer.mutate(port)}
         />
       </div>
     );
@@ -111,6 +114,7 @@ export function BrowserPanel({
               processes={processes.data ?? []}
               error={servers.error?.message ?? null}
               onOpen={open}
+              onStop={(port) => stopServer.mutate(port)}
             />
           ) : undefined
         }

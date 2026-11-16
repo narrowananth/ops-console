@@ -25,7 +25,7 @@ import { connections, repos, sessionProcesses, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { loadPty } from '../terminals/pty';
 import { LOCAL_SERVER_SCANNER, type LocalServerScanner } from './local-servers';
-import { familyOf, isAlive, processTable, signal } from './process-tree';
+import { descendantsOf, familyOf, isAlive, processTable, signal } from './process-tree';
 import { prodConnectionsNamedIn } from './prod-env';
 import { readScripts, shellWord } from './scripts';
 
@@ -63,6 +63,9 @@ function shellEnv(shell: string): Record<string, string> {
   }
   return env;
 }
+
+/** A login shell that reads the operator's rc files, so PATH and version managers are as in their terminal. */
+export const shellArgs = (command: string): string[] => (command ? ['-ilc', command] : ['-il']);
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
 const ANSI = /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b\[[0-?]*[ -/]*[@-~]|\u001b[()][0-9A-Za-z]|\u001b[=>]/g;
@@ -238,6 +241,26 @@ export class ProcessesService implements OnModuleDestroy {
     const session = this.supported(sessionId);
     const dir = this.folderFor(session, await this.workingDir(session), folder);
     return readScripts(dir);
+  }
+
+  /**
+   * Stops the server on `port` when it is this Session's: one a Session process started, or one running in the
+   * Session's folders. This reaches a server that outlived its process, such as one started with `nohup`. Any other
+   * listener is 404, so the console never stops a process that is not the Session's.
+   */
+  async stopServer(sessionId: string, port: number): Promise<void> {
+    const mine = (await this.localServers(sessionId)).find((server) => server.port === port && server.session_id);
+    const listener = mine ? (await this.scanner.scan()).find((server) => server.port === port) : undefined;
+    if (!mine || !listener) throw new ApiError(404, ErrorCode.NotFound, `no server of this Session on port ${port}`);
+    // A server nobody owns may share a process group with things that are not the Session's: follow parents only.
+    const family = descendantsOf(await processTable(), listener.pid);
+    for (const pid of family) signal(pid, 'SIGTERM');
+    const allGone = () => [...family].every((pid) => !isAlive(pid));
+    if (!(await waitUntil(allGone, STOP_GRACE_MS))) {
+      for (const pid of family) signal(pid, 'SIGKILL');
+      await waitUntil(allGone, STOP_GRACE_MS);
+    }
+    this.store.emit('browser.servers_changed', { session_id: sessionId });
   }
 
   /** Servers listening on a loopback port; the Session's own come first. */
@@ -436,7 +459,7 @@ export class ProcessesService implements OnModuleDestroy {
 
   private spawn(row: ProcessRow, nodePty: Awaited<ReturnType<typeof loadPty>>): void {
     const shell = process.env.SHELL || '/bin/zsh';
-    const pty = nodePty.spawn(shell, row.command ? ['-ilc', row.command] : ['-il'], {
+    const pty = nodePty.spawn(shell, shellArgs(row.command), {
       name: 'xterm-256color',
       cols: 120,
       rows: 30,

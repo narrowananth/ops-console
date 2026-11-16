@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -184,4 +185,93 @@ test("the dock warns when a process's folder names a PROD Connection (5)", async
   await expect(
     page.getByRole('region', { name: 'Terminals' }).getByText(/names the PROD Connections orders-prod, billing-prod/),
   ).toBeVisible();
+});
+
+type ProcessView = { id: string; name: string; state: string; folder: string; started_at: string };
+
+const processesOf = async (request: APIRequestContext, id: string): Promise<ProcessView[]> =>
+  ((await (await request.get(api(`/sessions/${id}/processes`), { headers: auth })).json()) as { data: ProcessView[] })
+    .data;
+
+test("Run lists the folder's package.json scripts and starts one; Restart runs it again and Stop ends it (15, 16, 17)", async ({
+  page,
+  request,
+}) => {
+  const id = await newSession(request);
+  // The Session's own folder gets a package.json, written by a process the way the operator would from a shell.
+  const writer = await request.post(api(`/sessions/${id}/processes`), {
+    headers: auth,
+    data: {
+      name: 'setup',
+      command: `printf '{"scripts":{"hello":"echo hello-from-script && sleep 600","quick":"echo q"}}' > package.json`,
+    },
+  });
+  expect(writer.status()).toBe(201);
+  await expect.poll(async () => (await processesOf(request, id))[0]?.state).toBe('exited');
+
+  await openSession(page, id);
+  await page.getByRole('button', { name: 'Terminals' }).click();
+  const dock = page.getByRole('region', { name: 'Terminals' });
+  await dock.getByRole('button', { name: 'Run', exact: true }).click();
+  await expect(page.getByRole('menuitem', { name: /hello/ })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /quick/ })).toBeVisible();
+  await page.getByRole('menuitem', { name: /hello/ }).click();
+  await expect(dock.locator('.xterm-rows')).toContainText('hello-from-script');
+
+  const first = (await processesOf(request, id)).find((p) => p.name === 'hello');
+  expect(first?.state).toBe('running');
+
+  await dock.getByRole('button', { name: 'Restart' }).click();
+  await expect
+    .poll(async () => (await processesOf(request, id)).find((p) => p.name === 'hello')?.started_at)
+    .not.toBe(first?.started_at);
+  await expect(dock.locator('.xterm-rows')).toContainText('hello-from-script');
+  expect((await processesOf(request, id)).find((p) => p.name === 'hello')?.state).toBe('running');
+
+  await dock.getByRole('button', { name: 'Stop' }).click();
+  await expect
+    .poll(async () => (await processesOf(request, id)).find((p) => p.name === 'hello')?.state)
+    .toBe('stopped');
+  await expect(dock.getByRole('button', { name: 'Close', exact: true })).toBeEnabled();
+  await dock.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect.poll(async () => (await processesOf(request, id)).some((p) => p.name === 'hello')).toBe(false);
+});
+
+test("a server left running in the Session's folder shows in Local servers with a Stop that ends it (11)", async ({
+  page,
+  request,
+}) => {
+  needsChrome();
+  const id = await newSession(request);
+  const shell = await request.post(api(`/sessions/${id}/processes`), { headers: auth, data: { name: 'shell' } });
+  const { folder } = ((await shell.json()) as { data: ProcessView }).data;
+  // Not started by a Session process: a stand-in for a server that outlived its terminal.
+  const leftover = spawn(
+    process.execPath,
+    [
+      '-e',
+      "const s = require('node:http').createServer((_q, r) => r.end('up')); s.listen(0, '127.0.0.1', () => console.log('port=' + s.address().port));",
+    ],
+    { cwd: folder },
+  );
+  try {
+    const port = await new Promise<number>((resolve) => {
+      let seen = '';
+      leftover.stdout.on('data', (chunk) => {
+        seen += String(chunk);
+        const found = /port=(\d+)/.exec(seen);
+        if (found) resolve(Number(found[1]));
+      });
+    });
+    await openSession(page, id);
+    await page.getByRole('button', { name: 'Browser', exact: true }).click();
+    const panel = page.getByRole('complementary', { name: 'Browser' });
+    const row = panel.getByRole('listitem').filter({ hasText: `:${port}` });
+    await expect(row).toBeVisible();
+    await row.getByRole('button', { name: 'Stop' }).click();
+    await expect(row).toHaveCount(0, { timeout: 15_000 });
+    await expect.poll(() => leftover.exitCode !== null || leftover.signalCode !== null).toBe(true);
+  } finally {
+    leftover.kill('SIGKILL');
+  }
 });

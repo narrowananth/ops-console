@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
-import { createServer, type Server } from 'node:net';
+import { connect, createServer, type Server } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { GitHost, type LocalServer } from '@ops-console/shared';
@@ -56,6 +56,16 @@ async function listenIn(cwd: string, host = '127.0.0.1'): Promise<number> {
   });
   return port;
 }
+
+const reachable = (port: number): Promise<boolean> =>
+  new Promise((resolve) => {
+    const socket = connect(port, '127.0.0.1');
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('error', () => resolve(false));
+  });
 
 const servers = async (daemon: AgentDaemon, sessionId: string): Promise<LocalServer[]> =>
   (await api(daemon).get(`/sessions/${sessionId}/local-servers`)).body.data.servers;
@@ -137,6 +147,27 @@ describe('local servers', () => {
     const seen = await waitForPort(daemon, sessionId, port);
     expect(seen).toMatchObject({ session_id: null, process_id: null });
     expect(await waitForPort(daemon, other, port)).toMatchObject({ session_id: other, process_id: started.id });
+  });
+
+  it("stops a server that runs in the Session's folder though no Session process owns it, and refuses any other", async () => {
+    const { daemon, sessionId } = await start();
+    const leftover = await listenIn(WORKING_DIR);
+    const outside = await listenIn(await tempDir('ops-console-outside-'));
+    await waitForPort(daemon, sessionId, leftover);
+    await waitForPort(daemon, sessionId, outside);
+    const http = api(daemon);
+
+    expect((await http.post(`/sessions/${sessionId}/local-servers/${outside}/stop`, {})).status).toBe(404);
+    expect(await reachable(outside)).toBe(true);
+
+    expect((await http.post(`/sessions/${sessionId}/local-servers/${leftover}/stop`, {})).status).toBe(204);
+    await until(
+      () => reachable(leftover),
+      (up) => !up,
+      'the leftover server to stop',
+    );
+    expect(await reachable(outside)).toBe(true);
+    expect((await http.post(`/sessions/${sessionId}/local-servers/${leftover}/stop`, {})).status).toBe(404);
   });
 
   it('leaves out a server that is not on loopback', async (ctx) => {

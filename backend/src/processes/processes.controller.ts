@@ -5,6 +5,7 @@ import { parseInput } from '../common/errors';
 import { ProcessesService } from './processes.service';
 
 const idParams = z.object({ id: z.string().min(1) });
+const serverParams = z.object({ id: z.string().min(1), port: z.coerce.number().int().min(1).max(65535) });
 const scriptsQuery = z.object({ folder: z.string().min(1).max(4096).optional() });
 
 @Controller()
@@ -44,6 +45,13 @@ export class ProcessesController {
   async scripts(@Param() params: unknown, @Query() query: unknown): Promise<{ data: Scripts }> {
     const { id } = parseInput(idParams, params, 'params');
     return { data: await this.processes.scripts(id, parseInput(scriptsQuery, query, 'query').folder) };
+  }
+
+  @Post('sessions/:id/local-servers/:port/stop')
+  @HttpCode(204)
+  async stopServer(@Param() params: unknown): Promise<void> {
+    const { id, port } = parseInput(serverParams, params, 'params');
+    await this.processes.stopServer(id, port);
   }
 
   @Get('sessions/:id/local-servers')

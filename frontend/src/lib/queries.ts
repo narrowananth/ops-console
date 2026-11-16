@@ -1856,6 +1856,16 @@ export function useLocalServers(sessionId: string, enabled: boolean, poll: boole
   });
 }
 
+/** Stops a server of this Session that no Session process owns, such as one left running by `nohup`. */
+export function useStopServer(sessionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (port: number) =>
+      apiSend('POST', `/sessions/${sessionId}/local-servers/${port}/stop`, undefined, z.undefined()),
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.localServers(sessionId) }),
+  });
+}
+
 /** The Session's processes; `process.changed` and `process.removed` refetch it. */
 export function useProcesses(sessionId: string, enabled: boolean) {
   return useQuery({

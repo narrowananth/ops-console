@@ -31,6 +31,21 @@ export function familyOf(table: ProcessEntry[], root: number): Set<number> {
   return family;
 }
 
+/** `root` and the processes it started, by parent links only: no process group is followed. */
+export function descendantsOf(table: ProcessEntry[], root: number): Set<number> {
+  const found = new Set([root]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const entry of table) {
+      if (!found.has(entry.pid) && found.has(entry.ppid)) {
+        found.add(entry.pid);
+        grew = true;
+      }
+    }
+  }
+  return found;
+}
+
 export function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
