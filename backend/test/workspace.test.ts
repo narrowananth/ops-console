@@ -2,7 +2,15 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ConnectorId, GitHost, HealthStatus, PlaybookTrigger, PrReviewState, type WsEvent } from '@ops-console/shared';
+import {
+  ConnectorId,
+  GitHost,
+  HealthStatus,
+  PlaybookTrigger,
+  PrReviewState,
+  PrState,
+  type WsEvent,
+} from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { StartupRecovery } from '../src/common/recovery';
@@ -568,6 +576,55 @@ describe('Session diff', () => {
 });
 
 describe('pull requests', () => {
+  it('lists the commits and, checked with git against origin, the files that conflict with the base', async () => {
+    const ctx = await start();
+    const bare = path.join(await tempDir('ops-console-origin-'), 'origin.git');
+    git(path.dirname(bare), 'clone', '-q', '--bare', ctx.dir, bare);
+    const other = path.join(path.dirname(bare), 'other');
+    git(path.dirname(bare), 'clone', '-q', bare, other);
+    const commit = async (file: string, text: string, ref: string) => {
+      await writeFile(path.join(other, file), text);
+      git(other, 'add', '.');
+      git(other, 'commit', '-q', '-m', `change ${file}`);
+      git(other, 'push', '-q', 'origin', `HEAD:${ref}`);
+      return git(other, 'rev-parse', 'HEAD').toString().trim();
+    };
+    // #7 and main both change README's one line; #8 only adds a file. Neither head is in the Repo's folder.
+    git(other, 'checkout', '-q', '-b', 'fix');
+    const conflicting = await commit('README.md', 'fix\n', 'refs/pull/7/head');
+    git(other, 'checkout', '-q', '-B', 'add', 'origin/main');
+    const clean = await commit('NOTES.md', 'notes\n', 'refs/pull/8/head');
+    git(other, 'checkout', '-q', 'main');
+    await commit('README.md', 'main\n', 'refs/heads/main');
+    git(ctx.dir, 'remote', 'set-url', 'origin', bare);
+    ctx.host.prs = [hostPr(7, { head_sha: conflicting, branch: 'fix' }), hostPr(8, { head_sha: clean, branch: 'add' })];
+    ctx.host.commits = [
+      {
+        sha: conflicting,
+        message: 'change README.md',
+        author: 'colleague',
+        created_at: '2026-11-01T00:00:00Z',
+        url: null,
+      },
+    ];
+
+    const first = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/7`)).body.data;
+    expect(first.commits).toEqual(ctx.host.commits);
+    expect(first.conflicts).toMatchObject({ state: 'checking', files: [] });
+    const conflicts = (number: number) =>
+      until(
+        async () => (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/${number}`)).body.data.conflicts,
+        (value) => value.state !== 'checking',
+        `the merge check of #${number}`,
+      );
+    expect(await conflicts(7)).toMatchObject({ state: 'conflict', files: ['README.md'] });
+    expect(await conflicts(8)).toMatchObject({ state: 'clean', files: [] });
+
+    // A closed pull request has nothing to merge.
+    ctx.host.prs = [hostPr(9, { state: PrState.Closed })];
+    expect((await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/9`)).body.data.conflicts).toBeNull();
+  });
+
   it('lists from memory for 30 minutes, and Refresh reads the host again and says what changed', async () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1), hostPr(2)];

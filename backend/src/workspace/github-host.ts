@@ -1,6 +1,14 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { ErrorCode, PrChecks, type PrFile, type PrReviewEvent, PrReviewState, PrState } from '@ops-console/shared';
+import {
+  ErrorCode,
+  PrChecks,
+  type PrCommit,
+  type PrFile,
+  type PrReviewEvent,
+  PrReviewState,
+  PrState,
+} from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import type {
@@ -58,6 +66,28 @@ const nodeSchema = z.object({
 });
 
 type Node = z.infer<typeof nodeSchema>;
+
+/** The detail read adds the branch's commits, under their own name: `commits` is the newest one's checks. */
+const HISTORY_FIELDS = `history: commits(first: 100) { nodes { commit {
+  oid messageHeadline authoredDate url author { name user { login } } } } }`;
+
+const historySchema = z.object({
+  history: z.object({
+    nodes: z.array(
+      z.object({
+        commit: z.object({
+          oid: z.string(),
+          messageHeadline: z.string(),
+          authoredDate: z.string(),
+          url: z.string(),
+          author: z
+            .object({ name: z.string().nullable(), user: z.object({ login: z.string() }).nullable() })
+            .nullable(),
+        }),
+      }),
+    ),
+  }),
+});
 
 const restFileSchema = z.object({
   filename: z.string(),
@@ -168,14 +198,15 @@ export class GithubHost implements GitHostAdapter {
   async get(slug: string, number: number) {
     const [owner, name] = splitSlug(slug);
     const query = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {
-      pullRequest(number: $number) { ${PR_FIELDS} } } }`;
+      pullRequest(number: $number) { ${PR_FIELDS} ${HISTORY_FIELDS} } } }`;
     const [graph, files, review, issue] = await Promise.all([
       this.graphql(query, { owner, name }, { number }),
       this.rest(`repos/${slug}/pulls/${number}/files?per_page=100`),
       this.rest(`repos/${slug}/pulls/${number}/comments?per_page=100`),
       this.rest(`repos/${slug}/issues/${number}/comments?per_page=100`),
     ]);
-    const node = z.object({ repository: z.object({ pullRequest: nodeSchema }) }).parse(graph).repository.pullRequest;
+    const node = z.object({ repository: z.object({ pullRequest: nodeSchema.and(historySchema) }) }).parse(graph)
+      .repository.pullRequest;
     const resolved = new Map(
       node.reviewThreads.nodes.map((thread) => [String(thread.comments.nodes[0]?.databaseId), thread.isResolved]),
     );
@@ -215,7 +246,20 @@ export class GithubHost implements GitHostAdapter {
       pr: toPullRequest(node),
       files: z.array(restFileSchema).parse(files).map(toFile),
       comments,
+      commits: node.history.nodes.map(
+        ({ commit }): PrCommit => ({
+          sha: commit.oid,
+          message: commit.messageHeadline,
+          author: commit.author?.user?.login ?? commit.author?.name ?? 'unknown',
+          created_at: commit.authoredDate,
+          url: commit.url,
+        }),
+      ),
     };
+  }
+
+  headRef(number: number): string {
+    return `refs/pull/${number}/head`;
   }
 
   async postComment(slug: string, number: number, comment: NewHostComment): Promise<HostComment> {

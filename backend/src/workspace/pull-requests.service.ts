@@ -13,7 +13,9 @@ import {
   PR_HOSTS,
   type PrAgentReview,
   type PrComment,
+  type PrConflicts,
   type PrFileContent,
+  PrMergeState,
   PrReviewEvent,
   PrReviewState,
   PrState,
@@ -36,6 +38,7 @@ import {
 } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { jobPlaybook } from '../playbooks/job-steps';
+import { GIT, Git } from '../repos/git';
 import type { OpenPrBranches } from '../repos/open-pr-branches';
 import {
   GIT_HOSTS,
@@ -70,6 +73,9 @@ export const RATE_LIMIT_COOLDOWN_MS = 10 * 60_000;
 
 /** A pull request's detail read this recently is served from memory; older, like a list. */
 const DETAIL_TTL_MS = 15_000;
+
+/** A merge check at the same head commit is kept this long; the base may move under it, so not for long. */
+const CONFLICTS_TTL_MS = 2 * 60_000;
 
 /** `failed`: the last background read failed, so what is kept may be out of date. `tried`: when that read ran. */
 type Kept = { at: number; failed?: boolean; tried?: number };
@@ -168,6 +174,7 @@ export class PullRequestsService implements OpenPrBranches {
   private readonly cache = new Map<string, Entry>();
   private readonly ownerCache = new Map<string, OwnerEntry>();
   private readonly details = new Map<string, DetailEntry>();
+  private readonly conflicts = new Map<string, { at: number; head: string; value: PrConflicts }>();
   private readonly found = new Map<string, { at: number; pr: HostPullRequest | null }>();
   /** Background reads under way, one per cache key. */
   private readonly reading = new Map<string, Promise<void>>();
@@ -181,6 +188,7 @@ export class PullRequestsService implements OpenPrBranches {
     @Inject(GIT_HOSTS) private readonly hosts: GitHosts,
     @Inject(ConnectorsService) private readonly connectors: ConnectorsService,
     @Inject(ActionLogService) private readonly actionLog: ActionLogService,
+    @Inject(GIT) private readonly git: Git,
   ) {}
 
   async list(query: {
@@ -375,7 +383,7 @@ export class PullRequestsService implements OpenPrBranches {
 
   async get(repoId: string, number: number): Promise<PullRequestDetail> {
     const repo = this.hosted(repoId);
-    const { pr, files, comments } = await this.detail(repo, number);
+    const { pr, files, comments, commits } = await this.detail(repo, number);
     const checks = this.store.db
       .select()
       .from(prReplyChecks)
@@ -401,7 +409,53 @@ export class PullRequestsService implements OpenPrBranches {
       comment_passes: passes.map((row) =>
         toCommentPass(row, pr.head_sha, jobPlaybook(this.store.db, 'comment_pass', row)),
       ),
+      commits,
+      conflicts: this.conflictsOf(repo, pr),
     };
+  }
+
+  /**
+   * Whether an open pull request's branch merges into its base, as last checked at its head commit. A missing or old
+   * check starts one in the background and says `checking`; when it lands, the UI is told to read again.
+   */
+  private conflictsOf(repo: RepoRow, pr: HostPullRequest): PrConflicts | null {
+    if (pr.state !== PrState.Open) return null;
+    const key = `${repo.id}:#${pr.number}`;
+    const hit = this.conflicts.get(key);
+    const same = hit?.head === pr.head_sha;
+    if (!same || Date.now() - (hit?.at ?? 0) >= CONFLICTS_TTL_MS) {
+      this.inBackground(`conflicts:${key}`, async () => {
+        const value = await this.checkConflicts(repo, pr);
+        const before = this.conflicts.get(key);
+        this.conflicts.set(key, { at: Date.now(), head: pr.head_sha, value });
+        const changed =
+          before?.head !== pr.head_sha ||
+          before.value.state !== value.state ||
+          `${before.value.files}` !== `${value.files}`;
+        try {
+          if (changed) this.announce(repo.id, [{ repo_id: repo.id, number: pr.number }]);
+        } catch {
+          // The daemon stopped while git ran: nobody is left to tell.
+        }
+      });
+    }
+    return same && hit ? hit.value : { state: PrMergeState.Checking, files: [], checked_at: null };
+  }
+
+  /** Fetches the base and the head from origin into the Repo's folder, then asks `git merge-tree`. */
+  private async checkConflicts(repo: RepoRow, pr: HostPullRequest): Promise<PrConflicts> {
+    const checkedAt = new Date().toISOString();
+    try {
+      const base = await this.git.remoteHead(repo.path, pr.base_branch);
+      if (!(await this.git.hasCommit(repo.path, pr.head_sha))) {
+        await this.git.fetchRef(repo.path, this.adapter(repo).headRef(pr.number, pr.branch));
+      }
+      const files = await this.git.mergeConflicts(repo.path, base, pr.head_sha);
+      if (files === null) return { state: PrMergeState.Unknown, files: [], checked_at: checkedAt };
+      return { state: files.length > 0 ? PrMergeState.Conflict : PrMergeState.Clean, files, checked_at: checkedAt };
+    } catch {
+      return { state: PrMergeState.Unknown, files: [], checked_at: checkedAt };
+    }
   }
 
   /** One file of the pull request at `ref`, read from the host. */
@@ -619,6 +673,7 @@ export class PullRequestsService implements OpenPrBranches {
   drop(repoId: string): void {
     for (const key of this.cache.keys()) if (key.startsWith(`${repoId}:`)) this.cache.delete(key);
     for (const key of this.details.keys()) if (key.startsWith(`${repoId}:`)) this.details.delete(key);
+    for (const key of this.conflicts.keys()) if (key.startsWith(`${repoId}:`)) this.conflicts.delete(key);
     // The owner's list holds the Repo's pull requests too.
     const repo = this.store.db.select().from(repos).where(eq(repos.id, repoId)).get();
     const owner = repo?.remoteSlug?.split('/')[0]?.toLowerCase();

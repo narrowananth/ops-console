@@ -310,6 +310,39 @@ export class Git {
     return sha;
   }
 
+  /** Fetches `ref` from `origin` into no branch, so its commits are in the repository. Throws with git's first line. */
+  async fetchRef(dir: string, ref: string): Promise<void> {
+    await this.must(dir, ['fetch', '--quiet', 'origin', ref], { GIT_TERMINAL_PROMPT: '0' });
+  }
+
+  /** Whether `sha` is a commit the repository has. */
+  async hasCommit(dir: string, sha: string): Promise<boolean> {
+    return (await this.commitOf(dir, sha)) !== null;
+  }
+
+  /**
+   * The files that conflict when `head` merges into `base`, empty for a clean merge, worked out by `git merge-tree`
+   * without touching a branch or the work tree. Null when git cannot tell: an old git, or a commit it does not have.
+   */
+  async mergeConflicts(dir: string, base: string, head: string): Promise<string[] | null> {
+    try {
+      await run(
+        this.bin,
+        [...NO_PROGRAMS, '-C', dir, 'merge-tree', '--write-tree', '--name-only', '--no-messages', base, head],
+        {
+          maxBuffer: 10 * 1024 * 1024,
+        },
+      );
+      return [];
+    } catch (error) {
+      // Exit 1 is a merge with conflicts: the tree on the first line, then one conflicted path per line.
+      const { code, stdout } = error as { code?: unknown; stdout?: unknown };
+      if (code !== 1 || typeof stdout !== 'string') return null;
+      const [, ...paths] = stdout.split('\n');
+      return [...new Set(paths.map((path) => path.trim()).filter(Boolean))];
+    }
+  }
+
   /** Fetches `branch` from `origin`, so its commits are in the repository. Throws with git's first line. */
   async fetchBranch(dir: string, branch: string): Promise<void> {
     await this.must(dir, ['fetch', '--quiet', 'origin', `refs/heads/${branch}`], { GIT_TERMINAL_PROMPT: '0' });

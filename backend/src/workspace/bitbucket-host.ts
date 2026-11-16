@@ -1,6 +1,14 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { ErrorCode, PrChecks, type PrFile, PrReviewEvent, PrReviewState, PrState } from '@ops-console/shared';
+import {
+  ErrorCode,
+  PrChecks,
+  type PrCommit,
+  type PrFile,
+  PrReviewEvent,
+  PrReviewState,
+  PrState,
+} from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import type {
@@ -81,6 +89,22 @@ const diffstatSchema = z.object({
 });
 
 const statusSchema = z.object({ state: z.string() });
+
+const commitSchema = z.object({
+  hash: z.string(),
+  message: z.string(),
+  date: z.string(),
+  author: z
+    .object({
+      raw: z.string().nullish(),
+      user: z.object({ display_name: z.string().nullish(), nickname: z.string().nullish() }).nullish(),
+    })
+    .nullish(),
+  links: z.object({ html: z.object({ href: z.string() }).nullish() }).nullish(),
+});
+
+/** `Ada Lovelace <ada@example.com>` → `Ada Lovelace`. */
+const rawName = (raw: string | null | undefined) => raw?.replace(/\s*<[^>]*>\s*$/, '').trim() || 'unknown';
 
 type BitbucketPr = z.infer<typeof prSchema>;
 
@@ -253,13 +277,14 @@ export class BitbucketHost implements GitHostAdapter {
 
   async get(slug: string, number: number) {
     const base = `/repositories/${slug}/pullrequests/${number}`;
-    // Five reads side by side: each `bkt` call is a process and a round trip, so in a row they add up.
-    const [pr, stats, diff, comments, checks] = await Promise.all([
+    // Six reads side by side: each `bkt` call is a process and a round trip, so in a row they add up.
+    const [pr, stats, diff, comments, checks, history] = await Promise.all([
       this.json(base),
       this.json(`${base}/diffstat`, { pagelen: '500' }),
       this.exec(['api', `${base}/diff`], 'bkt api diff'),
       this.json(`${base}/comments`, { pagelen: '100' }),
       this.json(`${base}/statuses`, { pagelen: '100' }),
+      this.json(`${base}/commits`, { pagelen: '100' }),
     ]);
     const parsed = prSchema.parse(pr);
     const files = diffFiles(diff, page(diffstatSchema).parse(stats).values);
@@ -288,7 +313,24 @@ export class BitbucketHost implements GitHostAdapter {
       },
       files,
       comments: all.sort((a, b) => a.created_at.localeCompare(b.created_at)),
+      // Bitbucket lists the newest first.
+      commits: page(commitSchema)
+        .parse(history)
+        .values.map(
+          (commit): PrCommit => ({
+            sha: commit.hash,
+            message: commit.message.split('\n')[0] ?? '',
+            author: commit.author?.user ? who(commit.author.user) : rawName(commit.author?.raw),
+            created_at: commit.date,
+            url: commit.links?.html?.href ?? null,
+          }),
+        )
+        .reverse(),
     };
+  }
+
+  headRef(_number: number, branch: string): string {
+    return `refs/heads/${branch}`;
   }
 
   async postComment(slug: string, number: number, comment: NewHostComment): Promise<HostComment> {

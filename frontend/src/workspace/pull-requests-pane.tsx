@@ -1,5 +1,5 @@
 import { GitHost, PrChecks, PrReviewState, PrState, type PullRequest } from '@ops-console/shared';
-import { type ReactNode, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { z } from 'zod';
 import { Button } from '../components/ui/button';
 import { Dropdown } from '../components/ui/dropdown';
@@ -9,6 +9,7 @@ import { usePullRequests, useRefreshPullRequests } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
 import { ago } from '../monitor/scan-scope';
+import { FilterTabs, ListGroup, SearchField, useFolded } from './list-parts';
 
 type Pull = { repoId: string; number: number };
 
@@ -19,9 +20,16 @@ const ANY = 'any';
 
 const CHECKS: Record<PrChecks, string> = {
   [PrChecks.None]: '',
-  [PrChecks.Running]: '◐ checks running',
-  [PrChecks.Passed]: '✓ checks passed',
-  [PrChecks.Failed]: '✕ checks failed',
+  [PrChecks.Running]: '◐',
+  [PrChecks.Passed]: '✓',
+  [PrChecks.Failed]: '✕',
+};
+
+const CHECKS_TONE: Record<PrChecks, string> = {
+  [PrChecks.None]: '',
+  [PrChecks.Running]: 'text-warn',
+  [PrChecks.Passed]: 'text-ok',
+  [PrChecks.Failed]: 'text-accent-700',
 };
 
 const CHECKS_TIP: Record<PrChecks, string> = {
@@ -34,7 +42,7 @@ const CHECKS_TIP: Record<PrChecks, string> = {
 const REVIEWS: Record<PrReviewState, string> = {
   [PrReviewState.None]: '',
   [PrReviewState.Approved]: 'approved',
-  [PrReviewState.ChangesRequested]: 'changes requested',
+  [PrReviewState.ChangesRequested]: 'changes',
 };
 
 /** What the operator does next with a pull request, most urgent first. */
@@ -54,7 +62,7 @@ const NEXT_LABEL: Record<Next, string> = {
 const NEXT_DOT: Record<Next, string> = {
   changes: 'bg-accent',
   failing: 'bg-accent',
-  review: 'bg-accent',
+  review: 'bg-warn',
   waiting: 'bg-neutral-400',
   ready: 'bg-ok',
   done: 'bg-neutral-300',
@@ -83,83 +91,97 @@ const shortName = (slug: string) => slug.slice(slug.lastIndexOf('/') + 1);
 
 const projectKey = (pr: PullRequest) => `${pr.host}:${pr.slug.toLowerCase()}`;
 
-function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={on}
-      onClick={onClick}
-      className={`cursor-pointer rounded-full border px-2.5 py-0.5 text-xs transition-colors ${on ? 'border-text bg-text text-white' : 'border-line bg-transparent text-neutral-800 hover:bg-neutral-200'}`}
-    >
-      {children}
-    </button>
-  );
-}
-
 function PullRow({
   pr,
-  next,
   selected,
   onSelect,
 }: {
   pr: PullRequest;
-  next: Next;
   selected: Pull | null;
   onSelect: (pull: Pull) => void;
 }) {
   const repoId = pr.repo_id;
   const here = repoId !== null && OPENS_HERE.includes(pr.host);
   const active = here && selected?.repoId === repoId && selected.number === pr.number;
+  const approved = pr.approved_by.length > 0;
   const body = (
     <>
       <span className="flex w-full items-center gap-2">
-        <span aria-hidden className={`size-2 flex-none rounded-full ${NEXT_DOT[next]}`} />
-        <span className="min-w-0 truncate font-semibold">
-          #{pr.number} {pr.title}
-        </span>
+        <span className="min-w-0 flex-1 truncate font-medium">{pr.title}</span>
         <span
-          className="ml-auto flex-none font-mono text-xs font-normal text-neutral-700"
+          className="flex-none text-[11px] font-normal text-neutral-600 tabular-nums"
           title={`Opened ${new Date(pr.opened_at).toLocaleString()}`}
         >
           {ago(pr.opened_at)}
         </span>
         {!here && (
-          <span aria-hidden className="flex-none text-xs font-normal text-neutral-600">
+          <span aria-hidden className="-ml-1 flex-none text-[11px] font-normal text-neutral-600">
             ↗
           </span>
         )}
       </span>
-      <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-4 text-xs text-neutral-700">
-        <span title={pr.slug} className="max-w-[45%] truncate rounded-full bg-neutral-200 px-1.75 font-mono">
-          {shortName(pr.slug)}
+      <span className="flex w-full min-w-0 items-center gap-1.5 text-[11px] text-neutral-600">
+        <span className="min-w-0 flex-1 truncate">
+          <span className="font-mono text-neutral-800">#{pr.number}</span>{' '}
+          <span title={pr.slug} className="font-mono">
+            {shortName(pr.slug)}
+          </span>
+          {' · '}
+          {pr.author}
         </span>
-        <span>{pr.author}</span>
-        {pr.state !== PrState.Open && <span className="rounded-full bg-neutral-200 px-1.75">{pr.state}</span>}
+        {pr.state !== PrState.Open && <span className="flex-none rounded-sm bg-neutral-200 px-1">{pr.state}</span>}
+        {repoId === null && (
+          <span
+            className="flex-none"
+            title="Not imported as a Repo: its pull requests open on the Git host. Import it in Repos to review them here."
+          >
+            not imported
+          </span>
+        )}
+        {pr.by_agent && (
+          <span
+            title="A Session in the console worked on this branch"
+            className="flex-none rounded-sm bg-neutral-200 px-1"
+          >
+            agent
+          </span>
+        )}
         {CHECKS[pr.checks] && (
-          <span title={CHECKS_TIP[pr.checks]} className={pr.checks === PrChecks.Failed ? 'text-accent-700' : ''}>
+          <span title={CHECKS_TIP[pr.checks]} className={`flex-none ${CHECKS_TONE[pr.checks]}`}>
             {CHECKS[pr.checks]}
           </span>
         )}
-        {pr.approved_by.length > 0 ? (
-          <span className="text-ok">✓ approved by {pr.approved_by.join(', ')}</span>
+        {approved ? (
+          <span title={`Approved by ${pr.approved_by.join(', ')}`} className="flex-none text-ok">
+            approved
+          </span>
         ) : (
           REVIEWS[pr.review_state] && (
-            <span className={pr.review_state === PrReviewState.ChangesRequested ? 'text-accent-700' : ''}>
+            <span
+              className={`flex-none ${pr.review_state === PrReviewState.ChangesRequested ? 'text-accent-700' : 'text-ok'}`}
+            >
               {REVIEWS[pr.review_state]}
             </span>
           )
         )}
-        {pr.comment_count > 0 && <span>{pr.comment_count} comments</span>}
-        {pr.by_agent && <span title="A Session in the console worked on this branch">agent</span>}
-        {repoId === null && (
-          <span title="Not imported as a Repo: its pull requests open on the Git host. Import it in Repos to review them here.">
-            not imported
+        {pr.comment_count > 0 && (
+          <span title={`${pr.comment_count} comments`} className="flex flex-none items-center gap-0.5">
+            <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden>
+              <path
+                d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+              />
+            </svg>
+            {pr.comment_count}
           </span>
         )}
       </span>
     </>
   );
-  const look = `flex w-full flex-col gap-0.5 px-3 py-2 text-[13px] no-underline ${item(active)}`;
+  const look = `flex w-full flex-col gap-0.5 px-2.5 py-1.75 text-[13px] no-underline ${item(active)}`;
   return (
     <li>
       {here ? (
@@ -194,6 +216,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
   const settled = useSettled(q.trim(), 400);
   const pulls = usePullRequests({ mine, q: settled });
   const refresh = useRefreshPullRequests();
+  const [isFolded, toggleFold] = useFolded('pr');
 
   const everything = pulls.data?.data ?? [];
   const projects = ascending(
@@ -203,7 +226,6 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
   const picked = projects.some(([key]) => key === project) ? project : ANY;
   const inProject = everything.filter((pr) => picked === ANY || projectKey(pr) === picked);
   const counts = {
-    all: inProject.length,
     review: inProject.filter((pr) => nextFor(pr) === 'review').length,
     failing: inProject.filter((pr) => nextFor(pr) === 'failing').length,
   };
@@ -211,11 +233,17 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
 
   return (
     <div className="pb-3">
-      <div className="sticky top-0 z-10 flex flex-col gap-2 border-b border-divider bg-bg px-3 pt-1 pb-2.5">
+      <div className="sticky top-0 z-10 flex flex-col gap-2 border-b border-divider bg-bg px-3 pt-0.5 pb-2">
         <div className="flex items-center gap-1.5">
+          <SearchField
+            label="Search pull requests"
+            value={q}
+            placeholder={mine ? '#, title or your email' : '#, title or author'}
+            onChange={setQ}
+          />
           <fieldset
             aria-label="Whose pull requests"
-            className="m-0 flex flex-1 gap-0.5 rounded-lg border-0 bg-neutral-200 p-0.75"
+            className="m-0 flex h-7.5 flex-none gap-0.5 rounded-md border-0 bg-neutral-200 p-0.5"
           >
             {(
               [
@@ -233,7 +261,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                 }
                 aria-pressed={mine === value}
                 onClick={() => setMine(value)}
-                className={`flex-1 cursor-pointer rounded-md border-0 py-1 text-xs transition-colors ${mine === value ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
+                className={`cursor-pointer rounded-sm border-0 px-2.5 text-xs transition-colors ${mine === value ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
               >
                 {label}
               </button>
@@ -265,48 +293,29 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
             </svg>
           </Button>
         </div>
-        <div className="relative">
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 16 16"
-            aria-hidden
-            className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-neutral-600"
-          >
-            <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-            <path d="M10.5 10.5 14 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-          </svg>
-          <input
-            type="search"
-            aria-label="Search pull requests"
-            value={q}
-            placeholder={mine ? 'Search number, title or your email' : 'Search number, title or author'}
-            onChange={(event) => setQ(event.target.value)}
-            className="w-full rounded-md border border-divider bg-card py-1.5 pr-2.5 pl-7.5 text-xs text-text outline-none focus:border-accent-400 focus:shadow-[0_0_0_3px_var(--color-accent-100)]"
-          />
-        </div>
         {/^#?\d+$/.test(settled) && pulls.isFetching && (
           <div role="status" className="px-0.5 text-xs text-neutral-700">
             Asking the Git hosts for #{settled.replace('#', '')}…
           </div>
         )}
         {everything.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Chip on={filter === 'all'} onClick={() => setFilter('all')}>
-              All {counts.all}
-            </Chip>
-            <Chip on={filter === 'review'} onClick={() => setFilter('review')}>
-              To review {counts.review}
-            </Chip>
-            <Chip on={filter === 'failing'} onClick={() => setFilter('failing')}>
-              Failing {counts.failing}
-            </Chip>
+          <div className="flex items-center gap-1">
+            <FilterTabs
+              label="What to do next"
+              value={filter}
+              onChange={setFilter}
+              filters={[
+                { value: 'all', label: 'All' },
+                { value: 'review', label: 'To review', count: counts.review },
+                { value: 'failing', label: 'Failing', count: counts.failing, urgent: true },
+              ]}
+            />
             <Dropdown
               label="Filter by project"
-              caption="Project"
+              caption=""
               variant="chip"
               opens="down"
-              align="left"
+              align="right"
               searchable
               value={picked}
               options={[
@@ -318,6 +327,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                 })),
               ]}
               onChange={setProject}
+              className="ml-auto min-w-0"
               listClassName="w-max min-w-52 max-w-md"
             />
           </div>
@@ -350,23 +360,18 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
               const group = listed.filter((pr) => nextFor(pr) === next);
               return (
                 group.length > 0 && (
-                  <section key={next} aria-label={NEXT_LABEL[next]} className="px-2 pb-1">
-                    <h3 className="m-0 flex items-center px-2 pt-3 pb-1 text-[11px] font-semibold tracking-[0.08em] text-neutral-700 uppercase">
-                      {NEXT_LABEL[next]}
-                      <span className="ml-auto font-mono font-normal tracking-normal">{group.length}</span>
-                    </h3>
-                    <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
-                      {group.map((pr) => (
-                        <PullRow
-                          key={`${projectKey(pr)}#${pr.number}`}
-                          pr={pr}
-                          next={next}
-                          selected={selected}
-                          onSelect={onSelect}
-                        />
-                      ))}
-                    </ul>
-                  </section>
+                  <ListGroup
+                    key={next}
+                    label={NEXT_LABEL[next]}
+                    count={group.length}
+                    dot={NEXT_DOT[next]}
+                    folded={isFolded(next)}
+                    onToggle={() => toggleFold(next)}
+                  >
+                    {group.map((pr) => (
+                      <PullRow key={`${projectKey(pr)}#${pr.number}`} pr={pr} selected={selected} onSelect={onSelect} />
+                    ))}
+                  </ListGroup>
                 )
               );
             })

@@ -172,7 +172,7 @@ export function Dropdown<T extends string>({
         onClick={toggle}
         className={
           chip
-            ? `flex flex-none cursor-pointer items-center gap-1.25 rounded-full border px-2.5 py-1 text-xs text-text transition-colors hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-50 ${
+            ? `flex max-w-full min-w-0 cursor-pointer items-center gap-1.25 rounded-full border px-2.5 py-1 text-xs text-text transition-colors hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-50 ${
                 open ? 'border-divider bg-neutral-200' : 'border-transparent bg-transparent'
               }`
             : `flex w-full cursor-pointer items-center gap-2 rounded-md border bg-card ${compact ? 'px-2.5 py-1 text-xs' : 'px-3 py-2 text-[13px]'} text-left text-text shadow-sm transition-colors hover:border-neutral-400 disabled:cursor-not-allowed disabled:opacity-50 ${
@@ -180,8 +180,10 @@ export function Dropdown<T extends string>({
               }`
         }
       >
-        {chip && caption && <span className="text-neutral-700">{caption}</span>}
-        <span className={chip ? 'font-semibold' : 'min-w-0 flex-1 truncate'}>{current?.label ?? value}</span>
+        {chip && caption && <span className="flex-none text-neutral-700">{caption}</span>}
+        <span className={chip ? 'min-w-0 truncate font-semibold' : 'min-w-0 flex-1 truncate'}>
+          {current?.label ?? value}
+        </span>
         <svg
           width="10"
           height="10"

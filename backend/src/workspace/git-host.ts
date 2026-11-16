@@ -1,4 +1,4 @@
-import type { GitHost, PrChecks, PrFile, PrReviewEvent, PrReviewState, PrState } from '@ops-console/shared';
+import type { GitHost, PrChecks, PrCommit, PrFile, PrReviewEvent, PrReviewState, PrState } from '@ops-console/shared';
 
 export const GIT_HOSTS = Symbol('GIT_HOSTS');
 
@@ -64,7 +64,13 @@ export interface GitHostAdapter {
   forgetOwner?(owner: string): void;
   /** One pull request in any state, read alone; null when the repository has none with that number. */
   find(slug: string, number: number): Promise<HostPullRequest | null>;
-  get(slug: string, number: number): Promise<{ pr: HostPullRequest; files: PrFile[]; comments: HostComment[] }>;
+  /** The pull request with its diff, comments and commits, oldest commit first. */
+  get(
+    slug: string,
+    number: number,
+  ): Promise<{ pr: HostPullRequest; files: PrFile[]; comments: HostComment[]; commits: PrCommit[] }>;
+  /** The ref on `origin` that holds the pull request's head commit, for a fetch: GitHub's covers a fork's branch. */
+  headRef(number: number, branch: string): string;
   postComment(slug: string, number: number, comment: NewHostComment): Promise<HostComment>;
   setResolved(slug: string, number: number, commentId: string, resolved: boolean): Promise<void>;
   /** Removes a comment from the host; the host refuses one the signed-in user did not write. */

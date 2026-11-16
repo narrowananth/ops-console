@@ -17,6 +17,7 @@ import {
 import { useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
 import { ago } from '../monitor/scan-scope';
+import { FilterTabs, ListGroup, SearchField, useFolded } from './list-parts';
 
 /** Idle Sessions listed before "Show N more". A search, or the open Session, lifts the limit. */
 const IDLE_SHOWN = 8;
@@ -191,7 +192,7 @@ const STATE_DOT: Record<SessionState, string> = {
   [SessionState.Failed]: 'bg-accent-700',
 };
 
-/** Two lines: state dot, title and time; then the Repo chip, the branch and, when not idle, the state. */
+/** Two lines: state dot, title, the state word and time; then the Repo and the branch. */
 function SessionRow({
   session,
   repo,
@@ -210,67 +211,49 @@ function SessionRow({
         aria-current={selected}
         title={session.branch ? `${session.title} · ${session.branch}` : session.title}
         onClick={onSelect}
-        className={`flex w-full flex-col gap-0.5 px-3 py-2 text-[13px] ${item(selected)}`}
+        className={`flex w-full flex-col gap-0.5 px-2.5 py-1.75 text-[13px] ${item(selected)}`}
       >
         <span className="flex items-center gap-2">
           <span
             aria-hidden
             title={SESSION_STATE_TIP[session.state]}
-            className={`size-2 flex-none rounded-full ${STATE_DOT[session.state]}`}
+            className={`size-2 flex-none rounded-full ${STATE_DOT[session.state]} ${session.state === SessionState.Working ? 'animate-pulse' : ''}`}
           />
-          <span className="min-w-0 flex-1 truncate font-semibold">{session.title}</span>
+          <span className="min-w-0 flex-1 truncate font-medium">{session.title}</span>
           {STATE_WORD[session.state] && (
             <span
               title={SESSION_STATE_TIP[session.state]}
-              className="flex-none rounded-full bg-accent-100 px-1.75 font-mono text-xs text-accent-700"
+              className="flex-none rounded-sm bg-accent-100 px-1.25 text-[11px] leading-4 font-medium text-accent-700"
             >
               {STATE_WORD[session.state]}
             </span>
           )}
           <span
-            className="flex-none font-mono text-xs text-neutral-700"
+            className="flex-none text-[11px] text-neutral-600 tabular-nums"
             title={`Started ${new Date(session.created_at).toLocaleString()}, last active ${new Date(session.last_active_at).toLocaleString()}`}
           >
             {ago(session.last_active_at)}
           </span>
         </span>
-        <span className="flex items-center gap-1.5 pl-4 text-xs text-neutral-700">
+        <span className="flex min-w-0 items-center gap-1 pl-4 font-mono text-[11px] text-neutral-600">
           <span
             title={repo ? `${repo.name} on ${repo.host}` : 'Anonymous: no Repo, a folder of its own'}
-            className="max-w-[45%] flex-none truncate rounded-full bg-neutral-200 px-1.75 font-mono"
+            className={`max-w-[50%] flex-none truncate ${repo ? 'text-neutral-800' : 'italic'}`}
           >
             {repo ? repo.name : 'No Repo'}
           </span>
-          {session.branch && <span className="min-w-0 truncate font-mono">{session.branch}</span>}
+          {session.branch && (
+            <>
+              <span aria-hidden className="flex-none text-neutral-400">
+                /
+              </span>
+              <span className="min-w-0 truncate">{session.branch}</span>
+            </>
+          )}
         </span>
       </button>
       {isBusy(session) && <RowStop session={session} />}
     </li>
-  );
-}
-
-function Group({ label, count, children }: { label: string; count: number; children: ReactNode }) {
-  return (
-    <section aria-label={label} className="px-2 pb-1">
-      <h3 className="m-0 flex items-center px-2 pt-3 pb-1 text-[11px] font-semibold tracking-[0.08em] text-neutral-700 uppercase">
-        {label}
-        <span className="ml-auto font-mono font-normal tracking-normal">{count}</span>
-      </h3>
-      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">{children}</ul>
-    </section>
-  );
-}
-
-function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={on}
-      onClick={onClick}
-      className={`cursor-pointer rounded-full border px-2.5 py-0.5 text-xs transition-colors ${on ? 'border-text bg-text text-white' : 'border-line bg-transparent text-neutral-800 hover:bg-neutral-200'}`}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -290,6 +273,7 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
   const [repoFilter, setRepoFilter] = useStored('workspace.session-repo', z.string(), ANY);
   const [starting, setStarting] = useState(false);
   const [all, setAll] = useStored('workspace.sessions-all-idle', z.boolean(), false);
+  const [isFolded, toggleFold] = useFolded('session');
   if (repos.isPending || sessions.isPending) return <Empty>Reading Sessions…</Empty>;
   if (repos.isError || sessions.isError) return <Empty>Could not read Sessions.</Empty>;
 
@@ -320,7 +304,7 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
     const repo = repoOf(session);
     return matches(session.title, session.branch, repo?.name ?? 'No Repo', repo?.branch ?? null);
   });
-  const counts = { all: found.length, needs: found.filter(needsYou).length, running: found.filter(working).length };
+  const counts = { needs: found.filter(needsYou).length, running: found.filter(working).length };
   const listed = found.filter(
     (session) => state === 'all' || (state === 'needs' ? needsYou(session) : working(session)),
   );
@@ -341,34 +325,28 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
     />
   );
 
+  const group = (key: string, label: string, dot: string, rows: Session[], more?: ReactNode) =>
+    rows.length > 0 && (
+      <ListGroup label={label} count={rows.length} dot={dot} folded={isFolded(key)} onToggle={() => toggleFold(key)}>
+        {(key === 'idle' ? idleShown : rows).map(row)}
+        {more}
+      </ListGroup>
+    );
+
   return (
     <div className="pb-3">
-      <div className="sticky top-0 z-10 flex flex-col gap-2 border-b border-divider bg-bg px-3 pt-1 pb-2.5">
+      <div className="sticky top-0 z-10 flex flex-col gap-2 border-b border-divider bg-bg px-3 pt-0.5 pb-2">
         <div className="flex items-center gap-1.5">
-          <div className="relative min-w-0 flex-1">
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 16 16"
-              aria-hidden
-              className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-neutral-600"
-            >
-              <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-              <path d="M10.5 10.5 14 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
-            <input
-              type="search"
-              aria-label="Search Sessions"
-              title="Matches a Session's title or branch, or its Repo's name or checked-out branch"
-              value={q}
-              placeholder="Search repo, branch, Session"
-              onChange={(event) => setQ(event.target.value)}
-              className="w-full rounded-md border border-divider bg-card py-1.5 pr-2.5 pl-7.5 text-xs text-text outline-none focus:border-accent-400 focus:shadow-[0_0_0_3px_var(--color-accent-100)]"
-            />
-          </div>
+          <SearchField
+            label="Search Sessions"
+            title="Matches a Session's title or branch, or its Repo's name or checked-out branch"
+            value={q}
+            placeholder="Search Sessions"
+            onChange={setQ}
+          />
           <Button
             variant="primary"
-            className="flex-none px-3 py-1.5 text-xs"
+            className="h-7.5 flex-none px-3 text-xs"
             aria-expanded={starting}
             title="New Session: pick a Repo and a branch, or none, and talk to the agent"
             onClick={() => setStarting(!starting)}
@@ -386,55 +364,50 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
             }}
           />
         )}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Chip on={state === 'all'} onClick={() => setState('all')}>
-            All {counts.all}
-          </Chip>
-          <Chip on={state === 'needs'} onClick={() => setState('needs')}>
-            Needs you {counts.needs}
-          </Chip>
-          <Chip on={state === 'running'} onClick={() => setState('running')}>
-            Running {counts.running}
-          </Chip>
+        <div className="flex items-center gap-1">
+          <FilterTabs
+            label="Session state"
+            value={state}
+            onChange={setState}
+            filters={[
+              { value: 'all', label: 'All' },
+              { value: 'needs', label: 'Needs you', count: counts.needs, urgent: true },
+              { value: 'running', label: 'Running', count: counts.running },
+            ]}
+          />
           <Dropdown
             label="Filter by Repo"
-            caption="Repo"
+            caption=""
             variant="chip"
             opens="down"
-            align="left"
+            align="right"
             searchable
             value={repoPicked}
             options={repoOptions}
             onChange={setRepoFilter}
+            className="ml-auto min-w-0"
             listClassName="w-max min-w-52 max-w-sm"
           />
         </div>
       </div>
-      {needs.length > 0 && (
-        <Group label="Needs you" count={needs.length}>
-          {needs.map(row)}
-        </Group>
-      )}
-      {running.length > 0 && (
-        <Group label="Running" count={running.length}>
-          {running.map(row)}
-        </Group>
-      )}
-      {idle.length > 0 && (
-        <Group label="Idle" count={idle.length}>
-          {idleShown.map(row)}
-          {!searching && (idleHidden > 0 || all) && idle.length > IDLE_SHOWN && (
-            <li>
-              <button
-                type="button"
-                onClick={() => setAll(!all)}
-                className="cursor-pointer rounded-sm border-0 bg-transparent px-3 py-1 text-xs text-accent-700 hover:underline"
-              >
-                {all ? 'Show fewer' : `Show ${idleHidden} more`}
-              </button>
-            </li>
-          )}
-        </Group>
+      {group('needs', 'Needs you', 'bg-accent', needs)}
+      {group('running', 'Running', 'bg-ok', running)}
+      {group(
+        'idle',
+        'Idle',
+        'bg-neutral-400',
+        idle,
+        !searching && (idleHidden > 0 || all) && idle.length > IDLE_SHOWN && (
+          <li>
+            <button
+              type="button"
+              onClick={() => setAll(!all)}
+              className="cursor-pointer rounded-sm border-0 bg-transparent px-2.5 py-1 text-xs text-neutral-700 hover:text-text hover:underline"
+            >
+              {all ? 'Show fewer' : `Show ${idleHidden} more`}
+            </button>
+          </li>
+        ),
       )}
       {listed.length === 0 && (
         <Empty>

@@ -95,7 +95,11 @@ async function routeWorkspace(page: Page, all: unknown[] = [session('s1')]) {
     route.fulfill({ json: { data: [PR], meta: { synced_at: NOW, stale: false, next_cursor: null } } }),
   );
   await page.route('**/api/repos/r1/pull-requests/7', (route) =>
-    route.fulfill({ json: { data: { ...PR, files: [], comments: [], reply_checks: [], comment_passes: [] } } }),
+    route.fulfill({
+      json: {
+        data: { ...PR, files: [], comments: [], reply_checks: [], comment_passes: [], commits: [], conflicts: null },
+      },
+    }),
   );
   return created;
 }

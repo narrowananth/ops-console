@@ -120,6 +120,7 @@ export class GitlabHost implements GitHostAdapter {
 
   find = async () => null;
   get = async () => this.unsupported();
+  headRef = (_number: number, branch: string) => `refs/heads/${branch}`;
   fileAt = async () => this.unsupported();
   deleteComment = async () => this.unsupported();
   postComment = async () => this.unsupported();
