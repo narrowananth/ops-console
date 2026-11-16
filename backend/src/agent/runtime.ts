@@ -96,6 +96,17 @@ import { type Run, RunRegistry, type RunSummary } from './runs';
 import { SessionKinds } from './session-kinds';
 import { sessionTitle, shortTitle } from './session-title';
 import {
+  BROWSER_EVALUATE_TOOL,
+  BROWSER_QUIET_TOOLS,
+  type BrowserTools,
+  browserEvaluateInputSchema,
+  PROCESS_OUTPUT_TOOL,
+  type ProcessTools,
+  START_PROCESS_TOOL,
+  STOP_PROCESS_TOOL,
+  startProcessInputSchema,
+} from './session-tools';
+import {
   emitSessionUpdated,
   extraRepoIds,
   NEW_SESSION_TITLE,
@@ -398,6 +409,20 @@ export class AgentRuntime implements OnModuleDestroy {
 
   setSessionSpawner(spawner: SessionSpawner): void {
     this.spawner = spawner;
+  }
+
+  /** Who runs the browser tools. Set once by the Browser module. */
+  private browserTools: BrowserTools | null = null;
+
+  setBrowserTools(tools: BrowserTools): void {
+    this.browserTools = tools;
+  }
+
+  /** Who runs the process tools. Set once by the Processes module. */
+  private processTools: ProcessTools | null = null;
+
+  setProcessTools(tools: ProcessTools): void {
+    this.processTools = tools;
   }
 
   /** A run does not survive a restart: its Session fails and its Approvals expire (Behavior 18). */
@@ -954,17 +979,30 @@ export class AgentRuntime implements OnModuleDestroy {
           run.onFinish === null && run.purpose === RunPurpose.Chat && this.spawner?.offers(run.sessionId)
             ? this.spawner
             : null;
+        // The browser and the Session's processes: only a chat the operator started, never a job (ADR 0007).
+        const operatorChat = run.onFinish === null && run.purpose === RunPurpose.Chat && !run.readOnly;
+        const browser = operatorChat && this.browserTools?.offers(run.sessionId) ? this.browserTools : null;
+        const processes = operatorChat && this.processTools?.offers(run.sessionId) ? this.processTools : null;
         const saver = outputFolder === null ? null : this.outputs;
         // The integration CLIs run in the daemon, outside the sandbox, in the Session's output folder.
         const integrations =
           outputFolder === null
             ? null
             : { run: (input: IntegrationInput) => runCli(input.cli, input.args, outputFolder) };
-        return opener || joiner || spawner || saver || integrations
+        return opener || joiner || spawner || saver || integrations || browser || processes
           ? {
               mcpServers: {
                 [CONSOLE_TOOLS_SERVER]: consoleToolsServer(
-                  { opener, joiner, spawner, spawnCallId: () => run.spawnCallIds.shift() ?? '', saver, integrations },
+                  {
+                    opener,
+                    joiner,
+                    spawner,
+                    spawnCallId: () => run.spawnCallIds.shift() ?? '',
+                    saver,
+                    integrations,
+                    browser,
+                    processes,
+                  },
                   run.sessionId,
                 ),
               },
@@ -1376,6 +1414,14 @@ export class AgentRuntime implements OnModuleDestroy {
       if (input.tool_name === SPAWN_SESSIONS_TOOL) return this.approveSpawnSessions(run, toolInput, input.tool_use_id);
       if (input.tool_name === SAVE_FILE_TOOL) return this.approveSaveFile(run, toolInput, input.tool_use_id);
       if (input.tool_name === RUN_INTEGRATION_TOOL) return this.approveIntegration(run, toolInput, input.tool_use_id);
+      if (input.tool_name === START_PROCESS_TOOL) return this.approveStartProcess(run, toolInput, input.tool_use_id);
+      if (input.tool_name === BROWSER_EVALUATE_TOOL) return this.approveEvaluate(run, toolInput, input.tool_use_id);
+      if (
+        BROWSER_QUIET_TOOLS.has(input.tool_name) ||
+        input.tool_name === PROCESS_OUTPUT_TOOL ||
+        input.tool_name === STOP_PROCESS_TOOL
+      )
+        return this.allowLogged(run, input.tool_name, toolInput, input.tool_use_id);
       if (input.tool_name === 'Bash' && typeof toolInput.command === 'string' && skipsCommitHooks(toolInput.command)) {
         this.steps.finish(input.tool_use_id, { ok: false, error: HOOK_BYPASS_REASON });
         return {
@@ -1742,6 +1788,109 @@ export class AgentRuntime implements OnModuleDestroy {
         permissionDecisionReason: approved
           ? 'The operator approved saving this file.'
           : 'The operator denied saving this file. Do not retry it, by this tool or by a command.',
+      },
+    };
+  }
+
+  /** A browser or process tool that asks for nothing: a loopback page or the Session's own process. Each call is a row. */
+  private allowLogged(run: Run, toolName: string, toolInput: Record<string, unknown>, stepId: string): HookJSONOutput {
+    const row = this.actionLog.start({
+      sessionId: run.sessionId,
+      kind: ActionKind.Query,
+      target: 'session browser',
+      command: stepText(toolName, toolInput),
+      isProd: false,
+    });
+    run.toolRows.set(stepId, row);
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        permissionDecisionReason: "This tool acts on the Session's own browser and processes.",
+      },
+    };
+  }
+
+  /** Starting a process asks in every Access mode: it runs as the operator, outside the sandbox. */
+  private async approveStartProcess(
+    run: Run,
+    toolInput: Record<string, unknown>,
+    stepId: string,
+  ): Promise<HookJSONOutput> {
+    const refuse = (reason: string): HookJSONOutput => {
+      this.steps.finish(stepId, { ok: false, error: reason });
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: reason,
+        },
+      };
+    };
+    const parsed = startProcessInputSchema.safeParse(toolInput);
+    if (!this.processTools || !parsed.success) return refuse('Give the process a name and a command.');
+    let summary: string;
+    try {
+      summary = this.processTools.describeStart(run.sessionId, parsed.data).summary;
+    } catch (error) {
+      return refuse(error instanceof ApiError ? error.message : 'That process cannot start.');
+    }
+    return this.askLogged(run, stepId, summary, ActionKind.Shell, 'session process', parsed.data.command, {
+      yes: 'The operator approved starting this process.',
+      no: 'The operator denied starting this process. Do not retry it, by this tool or by a command.',
+    });
+  }
+
+  /** A script in the page asks in every Access mode: it is the one browser tool that can make a page send data out. */
+  private async approveEvaluate(run: Run, toolInput: Record<string, unknown>, stepId: string): Promise<HookJSONOutput> {
+    const parsed = browserEvaluateInputSchema.safeParse(toolInput);
+    if (!this.browserTools || !parsed.success) {
+      this.steps.finish(stepId, { ok: false, error: 'Give the script to run.' });
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'Give the script to run.',
+        },
+      };
+    }
+    return this.askLogged(
+      run,
+      stepId,
+      this.browserTools.describeEvaluate(parsed.data.script),
+      ActionKind.Query,
+      'session browser',
+      `browser_evaluate ${parsed.data.script.slice(0, 500)}`,
+      {
+        yes: 'The operator approved this script.',
+        no: 'The operator denied this script. Do not retry it.',
+      },
+    );
+  }
+
+  private async askLogged(
+    run: Run,
+    stepId: string,
+    summary: string,
+    kind: ActionKind,
+    target: string,
+    command: string,
+    reasons: { yes: string; no: string },
+  ): Promise<HookJSONOutput> {
+    const row = this.actionLog.start({ sessionId: run.sessionId, kind, target, command, isProd: false });
+    run.toolRows.set(stepId, row);
+    const decision = await this.ask(
+      run,
+      { actionLogId: row, sessionId: run.sessionId, kind: ApprovalKind.Command, summary, isProd: false },
+      stepId,
+    );
+    const approved = decision === ApprovalStatus.Approved;
+    if (!approved) this.steps.finish(stepId, { ok: false, error: 'denied by the operator' });
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: approved ? 'allow' : 'deny',
+        permissionDecisionReason: approved ? reasons.yes : reasons.no,
       },
     };
   }

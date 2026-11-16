@@ -112,6 +112,8 @@ agent Session.
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
 | `workspace` | `repo`, `pr_review` and `anonymous` Sessions; each `repo` Session in a git worktree of its own under `session-worktrees/` in the data directory, made from the fetched default branch; a Session's diff read from its worktree, and a `repo` Session following the branch its worktree is on; branch checkout with stash, in the worktree; a Session starts on any branch (one the Repo's own folder holds starts detached at its commit; a branch only `origin` has is fetched; a new name is made at the newest default branch) and the file list behind the composer's `@` menu (`/file-menu`); pull requests, their commits and a conflict check, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews, Reply checks and Comment passes, one job per pull request at a time, each in a scratch copy at the pull request's head commit (an Agent Review makes one only when a Playbook step writes; the built-in's test step does); an Agent Review also fetches the target branch to compare with, may run the tests and build, and the console posts its findings and one summary comment; for the others the console commits, pushes, replies and resolves; Pull request opening: the console pushes a `repo` Session's branch and opens its pull request on the Git host, for a click in the Session header (the agent drafts the text) and for a Fix's PR stage |
 | `monitor` | Services, Routes, Scans and Alerts through `pup`; finding a Service's code; the Alert's Session; Verification and Reports; the operator's Review; the Fix from ticket to merged PR |
+| `browser` | A Session's Browser panel: the operator's Google Chrome (`OPS_CONSOLE_CHROME_PATH` names another) run headless through `playwright-core`, one Chrome and profile folder (`browser/<session>`) per Session, started with its first tab and stopped after its last tab or 10 idle minutes; tabs in memory; the page streamed as JPEG frames over `/browser/:tabId`, with input sent back; the outside hosts a page called; the agent's `browser_*` tools, held to loopback pages |
+| `processes` | Session processes: commands the daemon runs as the operator, outside the Run sandbox, in a Session's worktree through node-pty and the login shell, kept in `session_processes` and in memory, streamed over `/processes/:id`; the scan for Local servers (`lsof`); a Session's `package.json` scripts; the agent's `start_process`, `process_output` and `stop_process` |
 | `devtools` | `devtools` Sessions scoped to Connections; ties MCP calls to their Connection; the PROD-write rule; the instructions that make the agent hand over Results and a Comparison |
 | `updates` | The newest GitHub release, the version record (`update.json`), install through `install.sh`, auto-update, the wait for running agent runs |
 | `terminals` | node-pty terminals behind an authenticated WebSocket; the Setup agent, its MCP tools, local file, folder, URL and Keychain reads with secrets masked; the Full Disk Access and Start at login gates |
@@ -124,6 +126,7 @@ agent Session.
 | `lib` | API client, TanStack queries, `/ws` live events, session token, Remembered view storage, the page a link came from (`return-to.ts`), sorting, the finish chime, clipboard copy |
 | `monitor` | Monitor page: scan range and status codes, ticked Services, Alerts, Samples, Reports, Review and Fix |
 | `agent-runs` | Agent runs page: run health, why a run is slow or ended, time split, timeline, steps, queued messages, desktop alerts |
+| `browser` | The Session's Browser panel (tabs, toolbar, the drawn page, device menu, Local servers), the Terminals dock (one xterm per Session process, Run menu), the header buttons, and loopback links in the transcript that open in the panel |
 | `workspace` | Workspace page: the Sessions inbox (Needs you, Running, Idle; filter tabs, Repo picker, + New with a Repo and branch picker), the pull request list grouped by next step (project picker, Mine and All), a pull request's page (Overview, Files changed and Commits tabs, a sidebar of folding sections with the checks, five merge checks, people, threads and Sessions, the conflict box), files with Expand all and Collapse all, threads, the Agent Review, Reply check and Comment pass cards, the Session's Changes panel, the Open pull request form, the Repos chip, queued messages, attachments, output file chips on the turn that wrote them, the composer's `$` skills, `/` commands and `@` files menus, the batch card of a `spawn_sessions` call and the skill chip on a skill message |
 | `devtools` | Dev tools page (terminal-style `devtools` Sessions scoped to Connections, Results, Comparison) and the Connections page and form |
 | `integrations` | Integrations page: Connectors and MCP Servers |
@@ -150,12 +153,13 @@ query refetches, batched over 40 ms. A running agent's events refetch its transc
   `account.switched`.
 - Integrations: `connection.checked` for MCP Servers, Connectors and Connections.
 - Keychain: `keychain.wait_changed` when a call has waited past 10 seconds, and when the wait ends; `keychain.handover_refused` when the handover was refused.
+- Browser and processes: `browser.tabs_changed`, `browser.servers_changed`, `process.changed`, `process.removed`.
 - Workspace: `pull_request.refreshed`, `pull_request.commented`, `pull_request.reviewed`, `pull_request.job_changed` (a Reply check or Comment pass).
 - Playbooks: `playbook_step.updated`, for each step of any job; `skills.changed`, when a Skill is created, edited or deleted, or a Skill pack is installed or uninstalled.
 - Monitor: `scan.started`, `scan.finished`, `alert.detected`, `alert.updated`, `alert.regressed`,
   `verification.stepped`, `alert.verified`, `alert.reviewed`, `fix.advanced`, `alert.resolved`.
 
-`/terminals/:id` is a raw stream to one terminal behind the same token check.
+`/terminals/:id` is a raw stream to one terminal behind the same token check. `/browser/:tabId` (frames out, input in) and `/processes/:id` (output out, input in) are the same kind of stream, with the same check.
 
 **Start-up recovery.** Before the port opens: Sessions left `working`, `waiting_input` or
 `waiting_approval` fail and their Approvals expire; a running Agent Review, Report, Fix, Reply check, Comment pass, Playbook step or Scan
@@ -235,13 +239,15 @@ off. Per Session it keeps the draft message and the attachments; per browser, th
 Changes panel's width and view, and the Playbook panel's width. The page a link came from rides in the router state, so a Skills page opened from a Playbook offers the way back until the operator leaves it by another route. A stored value that no longer parses falls back to the
 default.
 
+**Session browser and processes.** A `repo` or `anonymous` Session has a Browser panel and a Terminals dock (ADR 0007). A tab's page is a real Chrome page with nothing blocked; the daemon only records the outside hosts it called. The operator's address field opens any `http` or `https` URL; the agent opens and acts only on loopback pages that are not the console's own. A process starts when the operator runs a script or types in a new terminal, or approves the agent's `start_process` (an Approval in every Access mode showing the command); it runs as the operator in the login shell with only `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG` and the terminal settings from the daemon, never the session token. Stopping walks the process family: SIGHUP to the shell, SIGTERM to its children, SIGKILL after 3 seconds. A daemon exit stops every process and every Chrome; after a restart the processes list as stopped with Restart, and tabs are gone. Local servers come from `lsof`, tagged with a Session when the listening process belongs to one of its processes or runs in its folders. The browser and process tools exist only in a chat the operator started; a job, a `pr_review` Session and a read-only run have none.
+
 ## `state.db` holds
 
 Settings the operator changed, Claude accounts, Sessions and the Connections a `devtools` Session
 names, the Action Log and Approvals, MCP Servers the operator removed or disabled, Connectors (config
 and last check), Connections (no secrets), Repos, Agent Reviews, Reply checks, Comment passes, the ids of comments the agent
 posted, Services, Routes, Scans and their Route results, Alerts and their events, Reports, Reviews
-and Fixes, Playbooks, the Trigger each one holds, each job's copy of its Playbook steps, Custom Skills, the installed Skill packs, the Built-in skills each Playbook holds, and the skill each message was sent with. Pull requests stay on the Git host. Session messages stay in the Claude Code transcript, in
+and Fixes, Playbooks, the Trigger each one holds, each job's copy of its Playbook steps, Custom Skills, the installed Skill packs, the Built-in skills each Playbook holds, the skill each message was sent with, and the Session processes (name, command, folder, who started them). Pull requests stay on the Git host. Session messages stay in the Claude Code transcript, in
 the config dir of the Session's Claude account.
 
 ## Agent runs
@@ -315,6 +321,7 @@ Where the build departs from `design/ops-console.html` on purpose:
 - **Workspace lists** (`design/ops-console-sidebar.html`, shipped from `design/workspace-variants.html` Inbox): the Sessions list is flat and grouped Needs you, Running and Idle with the Repo as a chip and a filter, and one + New picks a Repo (or none) and a branch; the pull request list is grouped by the next step, with a project picker.
 - **Pull request page** (shipped from `design/workspace-pr-variants.html` Cockpit, then given tabs): Overview, Files changed and Commits, and a right sidebar of folding sections with five merge checks and the conflict box. The design's blockers, suggestions and nits stay replaced by the Agent Review card.
 - **Composer menus**: `$` skills, `/` commands (stop, diff, pr, skills, files) and `@` files, and the **Repos chip** that opens other imported Repos to the Session.
+- **Session browser and Terminals** (`design/session-browser.html`): a Browser panel and a Terminals dock under the Session. Neither design file has them.
 - **Spawned Sessions**: the **batch card** in the starting Session's transcript, and a "Started from" link in each Spawned Session's header.
 - **Copy icon** on every code block: fenced blocks in the agent's text, commands in Approvals, raw errors and step output, replay requests and text files.
 - **Check reply** and **Address comments** Triggers, with their cards on a pull request.

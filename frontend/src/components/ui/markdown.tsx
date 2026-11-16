@@ -116,7 +116,7 @@ const HEADING_CLASS = [
   'text-[13px] font-semibold',
 ];
 
-/** Markdown an agent wrote, drawn. Links and images show as written. */
+/** Markdown an agent wrote, drawn. Images show as written. */
 export function Markdown({ source, className = '' }: { source: string; className?: string }) {
   const code = 'rounded bg-neutral-200 px-1 text-xs';
   return (

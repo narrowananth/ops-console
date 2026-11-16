@@ -19,6 +19,10 @@ export enum ErrorCode {
   BranchMoved = 'branch_moved',
   SkillNotFound = 'skill_not_found',
   ReadOnly = 'read_only',
+  BrowserNotAvailable = 'browser_not_available',
+  UrlNotAllowed = 'url_not_allowed',
+  ChromeMissing = 'chrome_missing',
+  NothingLoaded = 'nothing_loaded',
 }
 
 export const errorBodySchema = z.object({

@@ -92,6 +92,7 @@ export class AgentModule {
         ConnectionLookup,
         ConnectionLookup,
         ProdWriteRule,
+        OutputFiles,
         SessionsService,
         ActionLogService,
         AgentRuntime,

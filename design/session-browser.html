@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Session browser: panel states</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg:#f3f2f2; --surface:#ebe9e8; --card:#fbfafa; --text:#201e1d; --accent:#ec3013;
+    --line:rgba(32,30,29,.11); --divider:rgba(32,30,29,.18);
+    --ok:#2f7d3b; --warn:#b26b00; --info:#2a5db0;
+    --n200:#eae7e7; --n300:#d7d3d3; --n500:#9b9797; --n600:#7d7979; --n700:#605d5d;
+    --a100:#fff2ef; --a200:#ffe0d9;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#dedbda; color:var(--text); font:13px/1.4 "Archivo",system-ui,sans-serif; padding:32px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .lede { color:var(--n700); margin:0 0 28px; }
+  .variant { margin-bottom:48px; }
+  .variant > h2 { font-size:16px; margin:0 0 2px; }
+  .variant > .why { color:var(--n700); margin:0 0 10px; max-width:1100px; }
+  .frame { width:1280px; height:720px; background:var(--bg); border:1px solid var(--divider); border-radius:10px;
+           display:flex; overflow:hidden; position:relative; box-shadow:0 6px 24px rgba(0,0,0,.08); }
+  .mono { font-family:var(--mono); }
+  button { font:inherit; color:inherit; }
+
+  /* app rail (the console's own sidebar, folded) */
+  .app { width:56px; flex:none; border-right:1px solid var(--line); display:flex; flex-direction:column; align-items:center; gap:6px; padding:12px 0; }
+  .logo { width:30px; height:30px; border-radius:8px; background:var(--accent); margin-bottom:10px; }
+  .app i { width:34px; height:34px; border-radius:9px; display:grid; place-items:center; color:var(--n600); font-style:normal; font-size:15px; }
+  .app i.on { background:var(--card); color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.12); }
+
+  /* shared bits */
+  .dot { width:8px; height:8px; border-radius:50%; flex:none; display:inline-block; }
+  .d-need { background:var(--accent); } .d-run { background:var(--ok); } .d-idle { background:var(--n300); }
+  .chip { display:inline-flex; align-items:center; gap:4px; padding:1px 7px; border-radius:99px; background:var(--n200); font-size:11px; color:var(--n700); white-space:nowrap; }
+  .chip.need { background:var(--a200); color:#9b1f0a; } .chip.run { background:#e3f1e5; color:var(--ok); }
+  .seg { display:flex; gap:2px; background:var(--n200); padding:3px; border-radius:9px; }
+  .seg b { flex:1; text-align:center; font-weight:400; padding:4px 10px; border-radius:7px; color:var(--n700); white-space:nowrap; }
+  .seg b.on { background:var(--card); color:var(--text); font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,.1); }
+  .search { display:flex; align-items:center; gap:6px; border:1px solid var(--line); background:var(--card); border-radius:9px; padding:6px 10px; color:var(--n500); }
+  .search kbd { margin-left:auto; font:11px var(--mono); border:1px solid var(--line); border-radius:5px; padding:0 5px; color:var(--n600); }
+  .btn { border:1px solid var(--line); background:var(--card); border-radius:9px; padding:6px 12px; cursor:pointer; }
+  .btn.pri { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  .sub { color:var(--n600); font-size:12px; }
+  .grp { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--n600); padding:12px 14px 4px; display:flex; gap:6px; align-items:center; }
+  .grp em { font-style:normal; margin-left:auto; font-family:var(--mono); }
+
+  /* session row */
+  .row { padding:9px 14px; border-radius:10px; margin:0 6px; cursor:pointer; }
+  .row.sel { background:var(--card); box-shadow:0 1px 2px rgba(0,0,0,.1); }
+  .row .t { display:flex; gap:8px; align-items:center; font-weight:600; }
+  .row .t span.n { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+  .row .m { display:flex; gap:6px; align-items:center; margin:3px 0 0 16px; color:var(--n600); font-size:12px; white-space:nowrap; overflow:hidden; }
+  .row .m .br { font-family:var(--mono); font-size:11px; overflow:hidden; text-overflow:ellipsis; }
+
+  /* detail */
+  .detail { flex:1; min-width:0; display:flex; flex-direction:column; background:var(--bg); }
+  .dh { padding:14px 22px 10px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px; }
+  .dh h3 { margin:0; font-size:16px; }
+  .dh .sp { flex:1; }
+  .conv { flex:1; padding:18px 22px; overflow:hidden; display:flex; flex-direction:column; gap:12px; }
+  .msg { max-width:640px; padding:10px 14px; border-radius:12px; background:var(--card); border:1px solid var(--line); }
+  .msg.me { align-self:flex-end; background:var(--a100); border-color:var(--a200); }
+  .tool { font:12px var(--mono); color:var(--n700); background:var(--surface); border-radius:8px; padding:6px 10px; max-width:640px; }
+  .appr { border:1px solid var(--accent); background:var(--a100); border-radius:12px; padding:10px 14px; max-width:640px; display:flex; gap:10px; align-items:center; }
+  .appr .sp { flex:1; }
+  .comp { margin:0 22px 18px; border:1px solid var(--line); background:var(--card); border-radius:12px; padding:12px 14px; color:var(--n500); display:flex; }
+  .comp b { margin-left:auto; color:#fff; background:var(--accent); border-radius:8px; padding:2px 12px; font-weight:600; }
+
+  
+  /* session browser */
+  .frame { width:1280px; height:720px; }
+  .sess { width:300px; flex:none; border-right:1px solid var(--line); display:flex; flex-direction:column; padding-top:12px; }
+  .sess .grp:first-child { padding-top:4px; }
+  .bbtn { position:relative; }
+  .bbtn.on { background:var(--text); color:#fff; border-color:var(--text); }
+  .bbtn .pip { position:absolute; top:-6px; right:-8px; background:var(--ok); color:#fff; font:600 10px var(--mono); border-radius:99px; padding:1px 6px; }
+  .split { flex:1; display:flex; min-width:0; }
+  .conv2 { width:380px; flex:none; border-right:1px solid var(--line); display:flex; flex-direction:column; min-width:0; }
+  .conv2 .conv { padding:14px 16px; gap:10px; }
+  .conv2 .comp { margin:0 16px 14px; }
+  .bp { flex:1; min-width:0; display:flex; flex-direction:column; background:var(--surface); }
+  .btabs { display:flex; align-items:flex-end; gap:4px; padding:8px 10px 0; }
+  .bt { display:flex; align-items:center; gap:7px; padding:6px 10px; border-radius:9px 9px 0 0; color:var(--n700); max-width:190px; font-size:12px; white-space:nowrap; }
+  .bt span.t { overflow:hidden; text-overflow:ellipsis; }
+  .bt.on { background:var(--card); color:var(--text); font-weight:600; border:1px solid var(--line); border-bottom:0; }
+  .bt .fav { width:12px; height:12px; border-radius:3px; background:var(--accent); flex:none; }
+  .bt .fav.b { background:var(--info); }
+  .bt .x { color:var(--n500); }
+  .bt .ag { font:600 9px var(--mono); background:var(--a200); color:#9b1f0a; border-radius:99px; padding:1px 6px; }
+  .bt.plus { color:var(--n600); font-size:15px; padding:4px 10px; }
+  .btool { display:flex; align-items:center; gap:6px; padding:7px 10px; background:var(--card); border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+  .ib { width:28px; height:28px; border-radius:8px; border:0; background:transparent; display:grid; place-items:center; color:var(--n700); font-size:14px; }
+  .ib.off { opacity:.35; }
+  .addr { white-space:nowrap; overflow:hidden; flex:1; display:flex; align-items:center; gap:6px; background:var(--surface); border:1px solid var(--line); border-radius:9px; padding:5px 10px; font:12px var(--mono); min-width:0; }
+  .addr .lk { color:var(--ok); }
+  .dev { display:flex; align-items:center; gap:5px; border:1px solid var(--line); background:var(--card); border-radius:9px; padding:4px 9px; font-size:12px; }
+  .ext { display:flex; align-items:center; gap:5px; border:1px solid var(--line); background:var(--card); border-radius:9px; padding:4px 10px; font-size:12px; font-weight:600; }
+  .stage { flex:1; position:relative; overflow:hidden; display:flex; align-items:flex-start; justify-content:center; padding:0; background:#e4e1e0; }
+  .page { width:100%; height:100%; background:#fff; color:#1b1f2a; }
+  .page .nav { height:46px; display:flex; align-items:center; gap:18px; padding:0 22px; border-bottom:1px solid #e5e7eb; font-size:13px; }
+  .page .nav b { font-size:15px; }
+  .page .hero { padding:34px 30px; }
+  .page h2 { margin:0 0 6px; font-size:26px; }
+  .page .p { color:#5b6272; margin:0 0 16px; }
+  .page .btnp { display:inline-block; background:#4f46e5; color:#fff; border-radius:8px; padding:8px 16px; font-weight:600; }
+  .page .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:26px; }
+  .page .grid i { display:block; height:96px; border-radius:10px; background:#eef0f6; }
+  .phone { width:300px; height:620px; margin-top:18px; border-radius:26px; border:8px solid #1e1e22; overflow:hidden; background:#fff; box-shadow:0 8px 30px rgba(0,0,0,.25); }
+  .phone .page .hero { padding:20px 16px; } .phone .page h2 { font-size:20px; } .phone .page .grid { grid-template-columns:1fr 1fr; }
+  .badge { position:absolute; left:12px; bottom:12px; display:flex; align-items:center; gap:8px; background:rgba(32,30,29,.88); color:#fff; border-radius:99px; padding:6px 14px; font-size:12px; }
+  .badge .dot { background:var(--accent); }
+  .blocked { position:absolute; right:12px; bottom:12px; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:7px 12px; font-size:12px; color:var(--n700); }
+  .blocked b { color:var(--n700); }
+  .stage .srv, .stage .empty { width:100%; align-self:stretch; }
+  .srv { padding:22px 26px; display:flex; flex-direction:column; gap:10px; background:var(--card); height:100%; }
+  .srv h4 { margin:0; font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--n600); }
+  .sr { display:flex; align-items:center; gap:10px; border:1px solid var(--line); border-radius:10px; padding:9px 12px; background:var(--bg); }
+  .sr .pt { font:600 13px var(--mono); }
+  .sr .sp { flex:1; }
+  .sr .tag { font:600 10px var(--mono); border-radius:99px; padding:1px 7px; background:#e3f1e5; color:var(--ok); }
+  .sr .fold { font:11px var(--mono); color:var(--n600); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:260px; }
+  .empty { height:100%; background:var(--card); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; padding:30px; }
+  .empty h4 { margin:0; font-size:16px; } .empty p { margin:0; color:var(--n700); max-width:340px; }
+  .menu { position:absolute; right:10px; top:84px; width:250px; background:var(--card); border:1px solid var(--line); border-radius:12px; box-shadow:0 12px 34px rgba(0,0,0,.2); padding:6px; z-index:3; }
+  .menu .h { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--n600); padding:6px 10px 3px; }
+  .menu .it { padding:6px 10px; border-radius:8px; display:flex; gap:8px; align-items:center; }
+  .menu .it.on { background:var(--surface); font-weight:600; }
+  .menu .it em { margin-left:auto; font:normal 11px var(--mono); color:var(--n600); }
+  .menu hr { border:0; border-top:1px solid var(--line); margin:5px 0; }
+  .lnk { color:var(--info); text-decoration:underline; }
+
+  .col2 { flex:1; min-width:0; display:flex; flex-direction:column; }
+  .col2 .split { min-height:0; }
+  .dock { height:228px; flex:none; border-top:1px solid var(--divider); background:#1c1b1a; color:#e8e6e5; display:flex; flex-direction:column; }
+  .dock .dt { display:flex; align-items:center; gap:6px; padding:6px 10px; background:#262524; font-size:12px; }
+  .dock .pt { display:flex; align-items:center; gap:7px; padding:4px 10px; border-radius:8px; color:#a8a4a3; }
+  .dock .pt.on { background:#3a3837; color:#fff; font-weight:600; }
+  .dock .pt em { font:normal 10px var(--mono); color:#8f8b8a; }
+  .dock .run { margin-left:auto; display:flex; gap:6px; }
+  .dock .run span { border:1px solid #4a4847; border-radius:8px; padding:3px 10px; color:#e8e6e5; }
+  .dock pre { margin:0; padding:10px 14px; font:12px/1.5 var(--mono); flex:1; overflow:hidden; white-space:pre-wrap; }
+  .dock .g { color:#7bd88f; } .dock .d { color:#8f8b8a; }
+  .apr { border:1px solid var(--accent); background:var(--a100); border-radius:12px; padding:10px 12px; font-size:12px; display:flex; flex-direction:column; gap:6px; }
+  .apr code { font:12px var(--mono); background:var(--card); border:1px solid var(--line); border-radius:7px; padding:5px 8px; display:block; }
+  .apr .r { display:flex; gap:8px; align-items:center; }
+</style>
+</head>
+<body>
+<h1>Session browser: panel states</h1><p class="lede">Spec: docs/specs/session-browser.md. The Browser panel sits beside the conversation, like the Changes panel. Loopback pages only; the agent drives the same tabs.</p><div class="variant"><h2>1 · Page open, agent working</h2><p class="why">Tabs, toolbar, the live page, "Agent is using this tab" and the outside hosts the page called (listed, nothing blocked). The agent's tab is tagged agent; the operator can type or click at any time.</p><div class="frame"><div class="app"><div class="logo"></div><i>◉</i><i class="on">▤</i><i>⌘</i><i>⚙</i></div><aside class="sess"><div class="grp">Needs you <em>1</em></div>
+  <div class="row"><div class="t"><span class="dot d-need"></span><span class="n">Fix checkout webhook auth</span><span class="sub">approval</span></div><div class="m"><span>storefront-api</span><span class="br">fix/webhook-auth</span></div></div>
+  <div class="grp">Running <em>1</em></div>
+  <div class="row sel"><div class="t"><span class="dot d-run"></span><span class="n">Add dark mode to settings</span><span class="sub">2m</span></div><div class="m"><span>web</span><span class="br">feat/dark-mode</span></div></div>
+  <div class="grp">Idle <em>2</em></div>
+  <div class="row"><div class="t"><span class="dot d-idle"></span><span class="n">Bump Node to 22</span><span class="sub">1h</span></div><div class="m"><span>checkout-api</span><span class="br">chore/node-22</span></div></div>
+</aside><div class="split"><div class="conv2"><div class="dh" style="padding:12px 16px;gap:8px"><span class="dot d-run"></span><h3 style="font-size:15px">Add dark mode to settings</h3><span class="sp"></span><button class="btn bbtn on" style="padding:4px 10px">Browser</button><button class="btn" style="padding:4px 10px">Terminals</button><button class="btn" style="padding:4px 10px">Diff</button></div>
+  <div class="conv"><div class="msg me">Add a dark mode switch to the settings page and check it in the browser.</div>
+  <div class="tool">▸ Ran pnpm dev → listening on :5173</div>
+  <div class="tool">▸ browser_open localhost:5173/settings<br>▸ browser_click "Dark mode" · browser_screenshot</div>
+  <div class="msg">The switch works and the page repaints. The sidebar keeps its light background: fixing that next.</div></div>
+  <div class="comp">Ask anything. @ files, $ skills, / commands <b>Send</b></div></div><section class="bp" style="position:relative"><div class="btabs"><div class="bt on"><span class="fav"></span><span class="t">Settings · Acme</span><span class="ag">agent</span><span class="x">×</span></div><div class="bt"><span class="fav b"></span><span class="t">Storybook</span><span class="x">×</span></div><div class="bt plus">+</div></div><div class="btool"><button class="ib">←</button><button class="ib off">→</button><button class="ib">↻</button><div class="addr"><span class="lk">●</span>localhost:5173/settings</div><button class="dev">▭ Fill ▾</button><button class="ext" title="Open in external browser">↗ External</button><button class="ib" title="Menu">⋯</button></div><div class="stage"><div class="page"><div class="nav"><b>Acme</b><span>Home</span><span>Settings</span><span>Billing</span></div><div class="hero"><h2>Settings</h2><p class="p">Appearance and notifications.</p><span class="btnp">Dark mode: on</span><div class="grid"><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div><div class="badge"><span class="dot"></span>Agent is using this tab</div><div class="blocked"><b>Called</b> fonts.example.com, api.example.com</div></div></section></div></div></div><div class="variant"><h2>2 · New tab: Local servers</h2><p class="why">A blank tab lists listening loopback servers. This Session's come first (the process folder is inside its worktree). A click opens one. The console's own ports never appear.</p><div class="frame"><div class="app"><div class="logo"></div><i>◉</i><i class="on">▤</i><i>⌘</i><i>⚙</i></div><aside class="sess"><div class="grp">Needs you <em>1</em></div>
+  <div class="row"><div class="t"><span class="dot d-need"></span><span class="n">Fix checkout webhook auth</span><span class="sub">approval</span></div><div class="m"><span>storefront-api</span><span class="br">fix/webhook-auth</span></div></div>
+  <div class="grp">Running <em>1</em></div>
+  <div class="row sel"><div class="t"><span class="dot d-run"></span><span class="n">Add dark mode to settings</span><span class="sub">2m</span></div><div class="m"><span>web</span><span class="br">feat/dark-mode</span></div></div>
+  <div class="grp">Idle <em>2</em></div>
+  <div class="row"><div class="t"><span class="dot d-idle"></span><span class="n">Bump Node to 22</span><span class="sub">1h</span></div><div class="m"><span>checkout-api</span><span class="br">chore/node-22</span></div></div>
+</aside><div class="split"><div class="conv2"><div class="dh" style="padding:12px 16px;gap:8px"><span class="dot d-run"></span><h3 style="font-size:15px">Add dark mode to settings</h3><span class="sp"></span><button class="btn bbtn on" style="padding:4px 10px">Browser</button><button class="btn" style="padding:4px 10px">Terminals</button><button class="btn" style="padding:4px 10px">Diff</button></div>
+  <div class="conv"><div class="msg me">Add a dark mode switch to the settings page and check it in the browser.</div>
+  <div class="tool">▸ Ran pnpm dev → listening on :5173</div>
+  <div class="tool">▸ browser_open localhost:5173/settings<br>▸ browser_click "Dark mode" · browser_screenshot</div>
+  <div class="msg">The switch works and the page repaints. The sidebar keeps its light background: fixing that next.</div></div>
+  <div class="comp">Ask anything. @ files, $ skills, / commands <b>Send</b></div></div><section class="bp" style="position:relative"><div class="btabs"><div class="bt on"><span class="fav" style="background:var(--n400,#bbb)"></span><span class="t">New tab</span><span class="x">×</span></div><div class="bt plus">+</div></div><div class="btool"><button class="ib off">←</button><button class="ib off">→</button><button class="ib">↻</button><div class="addr"><span class="lk">●</span>Type an address or pick a server</div><button class="dev">▭ Fill ▾</button><button class="ext" title="Open in external browser">↗ External</button><button class="ib" title="Menu">⋯</button></div><div class="stage" style="padding:0"><div class="srv"><h4>Local servers</h4>
+ <div class="sr"><span class="dot d-run"></span><span class="pt">:5173</span><span>node · vite</span><span class="tag">this Session</span><span class="sp"></span><span class="fold">…/session-worktrees/web/feat-dark-mode</span><button class="btn" style="padding:3px 10px">Open</button></div>
+ <div class="sr"><span class="dot d-run"></span><span class="pt">:6006</span><span>node · storybook</span><span class="tag">this Session</span><span class="sp"></span><span class="fold">…/session-worktrees/web/feat-dark-mode</span><button class="btn" style="padding:3px 10px">Open</button></div>
+ <h4 style="margin-top:10px">Other local servers</h4>
+ <div class="sr"><span class="dot d-idle"></span><span class="pt">:8080</span><span>java</span><span class="sp"></span><span class="fold">~/code/checkout-api</span><button class="btn" style="padding:3px 10px">Open</button></div>
+ <div class="sub" style="margin-top:4px">Loopback only. Other links open in your browser. The console's own ports are not listed.</div></div></div></section></div></div></div><div class="variant"><h2>3 · Device size and link menu</h2><p class="why">A preset sets the page size and pixel ratio; the panel scales it to fit. The menu also holds the link target (per browser) and clears the Session's cookies.</p><div class="frame"><div class="app"><div class="logo"></div><i>◉</i><i class="on">▤</i><i>⌘</i><i>⚙</i></div><aside class="sess"><div class="grp">Needs you <em>1</em></div>
+  <div class="row"><div class="t"><span class="dot d-need"></span><span class="n">Fix checkout webhook auth</span><span class="sub">approval</span></div><div class="m"><span>storefront-api</span><span class="br">fix/webhook-auth</span></div></div>
+  <div class="grp">Running <em>1</em></div>
+  <div class="row sel"><div class="t"><span class="dot d-run"></span><span class="n">Add dark mode to settings</span><span class="sub">2m</span></div><div class="m"><span>web</span><span class="br">feat/dark-mode</span></div></div>
+  <div class="grp">Idle <em>2</em></div>
+  <div class="row"><div class="t"><span class="dot d-idle"></span><span class="n">Bump Node to 22</span><span class="sub">1h</span></div><div class="m"><span>checkout-api</span><span class="br">chore/node-22</span></div></div>
+</aside><div class="split"><div class="conv2"><div class="dh" style="padding:12px 16px;gap:8px"><span class="dot d-run"></span><h3 style="font-size:15px">Add dark mode to settings</h3><span class="sp"></span><button class="btn bbtn on" style="padding:4px 10px">Browser</button><button class="btn" style="padding:4px 10px">Terminals</button><button class="btn" style="padding:4px 10px">Diff</button></div>
+  <div class="conv"><div class="msg me">Add a dark mode switch to the settings page and check it in the browser.</div>
+  <div class="tool">▸ Ran pnpm dev → listening on :5173</div>
+  <div class="tool">▸ browser_open localhost:5173/settings<br>▸ browser_click "Dark mode" · browser_screenshot</div>
+  <div class="msg">The switch works and the page repaints. The sidebar keeps its light background: fixing that next.</div></div>
+  <div class="comp">Ask anything. @ files, $ skills, / commands <b>Send</b></div></div><section class="bp" style="position:relative"><div class="btabs"><div class="bt on"><span class="fav"></span><span class="t">Settings · Acme</span><span class="x">×</span></div><div class="bt plus">+</div></div><div class="btool"><button class="ib">←</button><button class="ib off">→</button><button class="ib">↻</button><div class="addr"><span class="lk">●</span>localhost:5173/settings</div><button class="dev">▭ iPhone SE ▾</button><button class="ext" title="Open in external browser">↗ External</button><button class="ib" title="Menu">⋯</button></div><div class="stage" style="background:#d9d5d4"><div class="phone"><div class="page"><div class="nav"><b>Acme</b><span>Home</span><span>Settings</span><span>Billing</span></div><div class="hero"><h2>Settings</h2><p class="p">Appearance and notifications.</p><span class="btnp">Dark mode: on</span><div class="grid"><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div></div></div><div class="menu"><div class="h">Device</div><div class="it">Fill</div><div class="it">iPhone 14 Pro Max<em>430×932</em></div><div class="it on">iPhone SE<em>375×667</em></div><div class="it">iPad Mini<em>768×1024</em></div><div class="it">Desktop 1440×900</div><div class="it">Custom size…</div><div class="it">Rotate</div><hr><div class="h">Open links</div><div class="it on">In the console ✓</div><div class="it">In the external browser</div><hr><div class="it">Clear this Session's cookies</div></div></section></div></div></div><div class="variant"><h2>4 · Nothing listening</h2><p class="why">Reload loads the page once a server is up.</p><div class="frame"><div class="app"><div class="logo"></div><i>◉</i><i class="on">▤</i><i>⌘</i><i>⚙</i></div><aside class="sess"><div class="grp">Needs you <em>1</em></div>
+  <div class="row"><div class="t"><span class="dot d-need"></span><span class="n">Fix checkout webhook auth</span><span class="sub">approval</span></div><div class="m"><span>storefront-api</span><span class="br">fix/webhook-auth</span></div></div>
+  <div class="grp">Running <em>1</em></div>
+  <div class="row sel"><div class="t"><span class="dot d-run"></span><span class="n">Add dark mode to settings</span><span class="sub">2m</span></div><div class="m"><span>web</span><span class="br">feat/dark-mode</span></div></div>
+  <div class="grp">Idle <em>2</em></div>
+  <div class="row"><div class="t"><span class="dot d-idle"></span><span class="n">Bump Node to 22</span><span class="sub">1h</span></div><div class="m"><span>checkout-api</span><span class="br">chore/node-22</span></div></div>
+</aside><div class="split"><div class="conv2"><div class="dh" style="padding:12px 16px;gap:8px"><span class="dot d-run"></span><h3 style="font-size:15px">Add dark mode to settings</h3><span class="sp"></span><button class="btn bbtn on" style="padding:4px 10px">Browser</button><button class="btn" style="padding:4px 10px">Terminals</button><button class="btn" style="padding:4px 10px">Diff</button></div>
+  <div class="conv"><div class="msg me">Add a dark mode switch to the settings page and check it in the browser.</div>
+  <div class="tool">▸ Ran pnpm dev → listening on :5173</div>
+  <div class="tool">▸ browser_open localhost:5173/settings<br>▸ browser_click "Dark mode" · browser_screenshot</div>
+  <div class="msg">The switch works and the page repaints. The sidebar keeps its light background: fixing that next.</div></div>
+  <div class="comp">Ask anything. @ files, $ skills, / commands <b>Send</b></div></div><section class="bp" style="position:relative"><div class="btabs"><div class="bt on"><span class="fav"></span><span class="t">localhost:5173</span><span class="x">×</span></div><div class="bt plus">+</div></div><div class="btool"><button class="ib off">←</button><button class="ib off">→</button><button class="ib">↻</button><div class="addr"><span class="lk">●</span>localhost:5173</div><button class="dev">▭ Fill ▾</button><button class="ext" title="Open in external browser">↗ External</button><button class="ib" title="Menu">⋯</button></div><div class="stage"><div class="empty"><h4>Nothing is listening on :5173</h4><p>Start the dev server in this Session, then reload.</p><button class="btn pri">Reload</button></div></div></section></div></div></div><div class="variant"><h2>5 · Chrome missing</h2><p class="why">The panel says so; External and link opening still work and the agent gets no browser tools.</p><div class="frame"><div class="app"><div class="logo"></div><i>◉</i><i class="on">▤</i><i>⌘</i><i>⚙</i></div><aside class="sess"><div class="grp">Needs you <em>1</em></div>
+  <div class="row"><div class="t"><span class="dot d-need"></span><span class="n">Fix checkout webhook auth</span><span class="sub">approval</span></div><div class="m"><span>storefront-api</span><span class="br">fix/webhook-auth</span></div></div>
+  <div class="grp">Running <em>1</em></div>
+  <div class="row sel"><div class="t"><span class="dot d-run"></span><span class="n">Add dark mode to settings</span><span class="sub">2m</span></div><div class="m"><span>web</span><span class="br">feat/dark-mode</span></div></div>
+  <div class="grp">Idle <em>2</em></div>
+  <div class="row"><div class="t"><span class="dot d-idle"></span><span class="n">Bump Node to 22</span><span class="sub">1h</span></div><div class="m"><span>checkout-api</span><span class="br">chore/node-22</span></div></div>
+</aside><div class="split"><div class="conv2"><div class="dh" style="padding:12px 16px;gap:8px"><span class="dot d-run"></span><h3 style="font-size:15px">Add dark mode to settings</h3><span class="sp"></span><button class="btn bbtn on" style="padding:4px 10px">Browser</button><button class="btn" style="padding:4px 10px">Terminals</button><button class="btn" style="padding:4px 10px">Diff</button></div>
+  <div class="conv"><div class="msg me">Add a dark mode switch to the settings page and check it in the browser.</div>
+  <div class="tool">▸ Ran pnpm dev → listening on :5173</div>
+  <div class="tool">▸ browser_open localhost:5173/settings<br>▸ browser_click "Dark mode" · browser_screenshot</div>
+  <div class="msg">The switch works and the page repaints. The sidebar keeps its light background: fixing that next.</div></div>
+  <div class="comp">Ask anything. @ files, $ skills, / commands <b>Send</b></div></div><section class="bp" style="position:relative"><div class="btabs"><div class="bt on"><span class="fav"></span><span class="t">New tab</span><span class="x">×</span></div><div class="bt plus">+</div></div><div class="btool"><button class="ib off">←</button><button class="ib off">→</button><button class="ib off">↻</button><div class="addr" style="color:var(--n500)">Google Chrome is needed</div><button class="dev off" style="opacity:.4">▭ Fill ▾</button><button class="ext" style="opacity:.4">↗ External</button></div><div class="stage"><div class="empty"><h4>Google Chrome is needed</h4><p>The console runs pages in the Chrome installed on this Mac. Install it, or set OPS_CONSOLE_CHROME_PATH. Links still open in your browser.</p></div></div></section></div></div></div><div class="variant"><h2>6 · Panel closed, server running</h2><p class="why">The Browser button shows the port of a server this Session started. The panel does not open itself.</p><div class="frame"><div class="app"><div class="logo"></div><i>◉</i><i class="on">▤</i><i>⌘</i><i>⚙</i></div><aside class="sess"><div class="grp">Needs you <em>1</em></div>
+  <div class="row"><div class="t"><span class="dot d-need"></span><span class="n">Fix checkout webhook auth</span><span class="sub">approval</span></div><div class="m"><span>storefront-api</span><span class="br">fix/webhook-auth</span></div></div>
+  <div class="grp">Running <em>1</em></div>
+  <div class="row sel"><div class="t"><span class="dot d-run"></span><span class="n">Add dark mode to settings</span><span class="sub">2m</span></div><div class="m"><span>web</span><span class="br">feat/dark-mode</span></div></div>
+  <div class="grp">Idle <em>2</em></div>
+  <div class="row"><div class="t"><span class="dot d-idle"></span><span class="n">Bump Node to 22</span><span class="sub">1h</span></div><div class="m"><span>checkout-api</span><span class="br">chore/node-22</span></div></div>
+</aside><div class="split"><div class="conv2" style="width:auto;flex:1;border-right:0"><div class="dh" style="padding:12px 16px;gap:8px"><span class="dot d-run"></span><h3 style="font-size:15px">Add dark mode to settings</h3><span class="sp"></span><button class="btn bbtn" style="padding:4px 10px">Browser<span class="pip">:5173</span></button><button class="btn" style="padding:4px 10px">Terminals</button><button class="btn" style="padding:4px 10px">Diff</button></div>
+  <div class="conv"><div class="msg me">Add a dark mode switch to the settings page and check it in the browser.</div>
+  <div class="tool">▸ Ran pnpm dev → listening on :5173</div>
+  <div class="tool">▸ browser_open localhost:5173/settings<br>▸ browser_click "Dark mode" · browser_screenshot</div>
+  <div class="msg">The switch works and the page repaints. The sidebar keeps its light background: fixing that next.</div></div>
+  <div class="comp">Ask anything. @ files, $ skills, / commands <b>Send</b></div></div><section class="bp" style="display:none"></section></div></div></div><div class="variant"><h2>7 · Run the project: Terminals dock and the agent asking to start a process</h2><p class="why">The dock runs the Session's processes as you (api, web, db side by side); package.json scripts sit in Run. The agent asks once per command, with the exact command and "Runs as you, outside the sandbox". The browser opens the web app and the agent drives it while you watch.</p><div class="frame"><div class="app"><div class="logo"></div><i>◉</i><i class="on">▤</i><i>⌘</i><i>⚙</i></div><aside class="sess"><div class="grp">Needs you <em>1</em></div>
+  <div class="row"><div class="t"><span class="dot d-need"></span><span class="n">Fix checkout webhook auth</span><span class="sub">approval</span></div><div class="m"><span>storefront-api</span><span class="br">fix/webhook-auth</span></div></div>
+  <div class="grp">Running <em>1</em></div>
+  <div class="row sel"><div class="t"><span class="dot d-run"></span><span class="n">Add dark mode to settings</span><span class="sub">2m</span></div><div class="m"><span>web</span><span class="br">feat/dark-mode</span></div></div>
+  <div class="grp">Idle <em>2</em></div>
+  <div class="row"><div class="t"><span class="dot d-idle"></span><span class="n">Bump Node to 22</span><span class="sub">1h</span></div><div class="m"><span>checkout-api</span><span class="br">chore/node-22</span></div></div>
+</aside><div class="col2"><div class="split"><div class="conv2" style="width:360px"><div class="dh" style="padding:12px 16px;gap:8px"><span class="dot d-run"></span><h3 style="font-size:15px">Run project, test login</h3><span class="sp"></span><button class="btn bbtn on" style="padding:4px 10px">Browser</button><button class="btn bbtn on" style="padding:4px 10px">Terminals</button></div>
+ <div class="conv"><div class="msg me">Run the whole project and test the login flow. I will watch.</div>
+ <div class="msg">I need the API and the web app up. Starting the API first.</div>
+ <div class="apr"><b>Start a process? <span class="sub">Approval</span></b><span class="sub">Runs as you, outside the sandbox, with this Repo's environment.</span><code>pnpm --filter api dev</code><span class="sub">in …/session-worktrees/shop/feat/login</span><div class="r"><button class="btn" style="padding:3px 12px">Deny</button><button class="btn pri" style="padding:3px 12px">Start</button></div></div></div>
+ <div class="comp">Ask anything. @ files, $ skills, / commands <b>Send</b></div></div><section class="bp" style="position:relative"><div class="btabs"><div class="bt on"><span class="fav"></span><span class="t">Sign in · Shop</span><span class="ag">agent</span><span class="x">×</span></div><div class="bt"><span class="fav b"></span><span class="t">Storybook</span><span class="x">×</span></div><div class="bt plus">+</div></div><div class="btool"><button class="ib">←</button><button class="ib off">→</button><button class="ib">↻</button><div class="addr"><span class="lk">●</span>localhost:5173/login</div><button class="dev">▭ Fill ▾</button><button class="ext" title="Open in external browser">↗ External</button><button class="ib" title="Menu">⋯</button></div><div class="stage"><div class="page"><div class="nav"><b>Shop</b><span>Cart</span></div><div class="hero"><h2>Sign in</h2><p class="p">Email and password.</p><div style="border:1px solid #d6d9e0;border-radius:8px;padding:8px 10px;margin-bottom:8px;width:260px;color:#5b6272">sam@example.com</div><div style="border:1px solid #d6d9e0;border-radius:8px;padding:8px 10px;margin-bottom:12px;width:260px;color:#5b6272">••••••••</div><span class="btnp">Sign in</span></div></div><div class="badge"><span class="dot"></span>Agent is using this tab</div></div></section></div><div class="dock"><div class="dt"><div class="pt on"><span class="dot d-run"></span>api <em>pnpm --filter api dev</em></div><div class="pt"><span class="dot d-run"></span>web <em>pnpm --filter web dev</em></div><div class="pt"><span class="dot d-idle"></span>db <em>exited 0</em></div><div class="run"><span>Run ▾</span><span>Stop</span><span>Restart</span></div></div>
+<pre><span class="d">$ pnpm --filter api dev</span>
+<span class="g">[api]</span> connected to postgres://localhost:5432/shop_dev
+<span class="g">[api]</span> migrations up to date
+<span class="g">[api]</span> listening on http://localhost:4000
+<span class="g">[api]</span> POST /auth/login 200 41ms</pre></div></div></div></div></body></html>

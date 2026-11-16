@@ -251,6 +251,23 @@ dev-tools Session and an anonymous Session, which have no Repo. A pull request h
 replies, with no composer, and an Alert has one for its Verification and Fix. The agent may start Spawned Sessions from one.
 _Avoid_: chat, thread
 
+**Browser panel**:
+The panel beside a Session's conversation that shows pages from the Session's Chrome, one tab each. The operator and the
+agent drive the same tabs. It blocks no request the page makes; the panel lists the outside hosts the page called. The agent
+opens only loopback pages in it.
+
+**Local server**:
+A process listening on a loopback port, as the daemon's scan sees it, with its port, name and folder. One that a Session
+process started, or that runs in the Session's folders, is tagged with that Session.
+
+**Session process**:
+A command the daemon runs for a Session as the operator, outside the Run sandbox, in the Session worktree: a dev server, a
+database, a test watch, a shell. The operator starts it, or approves the agent's `start_process`. It runs until stopped,
+the Session is deleted or the daemon exits, and shows in the Terminals dock.
+
+**Link target**:
+Where a link opens: "In the console", the Browser panel, or "In the external browser". Set per browser.
+
 **Spawned Session**:
 A Session the agent started in an imported Repo through `spawn_sessions`, with a task the agent wrote, after the operator
 approved the whole list at once. It is a `repo` Session in every other way: its own worktree, branch and pull request, in
