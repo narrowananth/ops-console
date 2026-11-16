@@ -1,39 +1,21 @@
 import { GitHost, PrChecks, PrReviewState, PrState, type PullRequest } from '@ops-console/shared';
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { z } from 'zod';
-import { BrandIcon } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
+import { Dropdown } from '../components/ui/dropdown';
 import { Empty } from '../components/ui/empty';
 import { item } from '../components/ui/item';
-import { usePullRequests, useRefreshPullRequests, useRepos } from '../lib/queries';
+import { usePullRequests, useRefreshPullRequests } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
-import { ago, when } from '../monitor/scan-scope';
+import { ago } from '../monitor/scan-scope';
 
 type Pull = { repoId: string; number: number };
 
 /** Hosts whose pull requests open in the console; GitLab's are listed and open on GitLab. */
 const OPENS_HERE: GitHost[] = [GitHost.Github, GitHost.Bitbucket];
 
-const BRAND = {
-  [GitHost.Github]: 'github',
-  [GitHost.Gitlab]: 'gitlab',
-  [GitHost.Bitbucket]: 'bitbucket',
-} as const;
-
-type Project = { key: string; host: GitHost; slug: string; repoId: string | null; prs: PullRequest[] };
-
-/** Pull requests by repository, A→Z by `slug`. */
-function byProject(prs: PullRequest[]): Project[] {
-  const out = new Map<string, Project>();
-  for (const pr of prs) {
-    const key = `${pr.host}:${pr.slug.toLowerCase()}`;
-    const project = out.get(key) ?? { key, host: pr.host, slug: pr.slug, repoId: pr.repo_id, prs: [] };
-    project.prs.push(pr);
-    out.set(key, project);
-  }
-  return ascending([...out.values()], (project) => project.slug);
-}
+const ANY = 'any';
 
 const CHECKS: Record<PrChecks, string> = {
   [PrChecks.None]: '',
@@ -49,6 +31,43 @@ const CHECKS_TIP: Record<PrChecks, string> = {
   [PrChecks.Failed]: 'At least one CI check failed on the newest commit',
 };
 
+const REVIEWS: Record<PrReviewState, string> = {
+  [PrReviewState.None]: '',
+  [PrReviewState.Approved]: 'approved',
+  [PrReviewState.ChangesRequested]: 'changes requested',
+};
+
+/** What the operator does next with a pull request, most urgent first. */
+type Next = 'changes' | 'failing' | 'review' | 'waiting' | 'ready' | 'done';
+
+const NEXT_ORDER: Next[] = ['changes', 'failing', 'review', 'waiting', 'ready', 'done'];
+
+const NEXT_LABEL: Record<Next, string> = {
+  changes: 'Changes requested',
+  failing: 'Checks failing',
+  review: 'To review',
+  waiting: 'Waiting on review',
+  ready: 'Ready to merge',
+  done: 'Merged or closed',
+};
+
+const NEXT_DOT: Record<Next, string> = {
+  changes: 'bg-accent',
+  failing: 'bg-accent',
+  review: 'bg-accent',
+  waiting: 'bg-neutral-400',
+  ready: 'bg-ok',
+  done: 'bg-neutral-300',
+};
+
+function nextFor(pr: PullRequest): Next {
+  if (pr.state !== PrState.Open) return 'done';
+  if (pr.review_state === PrReviewState.ChangesRequested) return 'changes';
+  if (pr.checks === PrChecks.Failed) return 'failing';
+  if (pr.review_state === PrReviewState.Approved || pr.approved_by.length > 0) return 'ready';
+  return pr.is_mine ? 'waiting' : 'review';
+}
+
 /** `value`, once it has stood still for `ms`: a number typed in the search asks the Git host, so keystrokes wait. */
 function useSettled(value: string, ms: number): string {
   const [settled, setSettled] = useState(value);
@@ -59,51 +78,139 @@ function useSettled(value: string, ms: number): string {
   return settled;
 }
 
-const FOLDED_KEY = 'ops-console-pr-folded';
+/** The repository's own name: `name` of `owner/name`. */
+const shortName = (slug: string) => slug.slice(slug.lastIndexOf('/') + 1);
 
-/** Projects the operator folded, kept across reloads. */
-function useFolded() {
-  const [folded, setFolded] = useState<string[]>(() => {
-    try {
-      const value: unknown = JSON.parse(localStorage.getItem(FOLDED_KEY) ?? '[]');
-      return Array.isArray(value) ? value.filter((key): key is string => typeof key === 'string') : [];
-    } catch {
-      return [];
-    }
-  });
-  const save = (next: string[]) => {
-    setFolded(next);
-    localStorage.setItem(FOLDED_KEY, JSON.stringify(next));
-  };
-  return {
-    folded,
-    toggle: (key: string) => save(folded.includes(key) ? folded.filter((other) => other !== key) : [...folded, key]),
-    set: save,
-  };
+const projectKey = (pr: PullRequest) => `${pr.host}:${pr.slug.toLowerCase()}`;
+
+function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      className={`cursor-pointer rounded-full border px-2.5 py-0.5 text-xs transition-colors ${on ? 'border-text bg-text text-white' : 'border-line bg-transparent text-neutral-800 hover:bg-neutral-200'}`}
+    >
+      {children}
+    </button>
+  );
 }
 
-const REVIEWS: Record<PrReviewState, string> = {
-  [PrReviewState.None]: '',
-  [PrReviewState.Approved]: 'approved',
-  [PrReviewState.ChangesRequested]: 'changes requested',
-};
+function PullRow({
+  pr,
+  next,
+  selected,
+  onSelect,
+}: {
+  pr: PullRequest;
+  next: Next;
+  selected: Pull | null;
+  onSelect: (pull: Pull) => void;
+}) {
+  const repoId = pr.repo_id;
+  const here = repoId !== null && OPENS_HERE.includes(pr.host);
+  const active = here && selected?.repoId === repoId && selected.number === pr.number;
+  const body = (
+    <>
+      <span className="flex w-full items-center gap-2">
+        <span aria-hidden className={`size-2 flex-none rounded-full ${NEXT_DOT[next]}`} />
+        <span className="min-w-0 truncate font-semibold">
+          #{pr.number} {pr.title}
+        </span>
+        <span
+          className="ml-auto flex-none font-mono text-xs font-normal text-neutral-700"
+          title={`Opened ${new Date(pr.opened_at).toLocaleString()}`}
+        >
+          {ago(pr.opened_at)}
+        </span>
+        {!here && (
+          <span aria-hidden className="flex-none text-xs font-normal text-neutral-600">
+            ↗
+          </span>
+        )}
+      </span>
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-4 text-xs text-neutral-700">
+        <span title={pr.slug} className="max-w-[45%] truncate rounded-full bg-neutral-200 px-1.75 font-mono">
+          {shortName(pr.slug)}
+        </span>
+        <span>{pr.author}</span>
+        {pr.state !== PrState.Open && <span className="rounded-full bg-neutral-200 px-1.75">{pr.state}</span>}
+        {CHECKS[pr.checks] && (
+          <span title={CHECKS_TIP[pr.checks]} className={pr.checks === PrChecks.Failed ? 'text-accent-700' : ''}>
+            {CHECKS[pr.checks]}
+          </span>
+        )}
+        {pr.approved_by.length > 0 ? (
+          <span className="text-ok">✓ approved by {pr.approved_by.join(', ')}</span>
+        ) : (
+          REVIEWS[pr.review_state] && (
+            <span className={pr.review_state === PrReviewState.ChangesRequested ? 'text-accent-700' : ''}>
+              {REVIEWS[pr.review_state]}
+            </span>
+          )
+        )}
+        {pr.comment_count > 0 && <span>{pr.comment_count} comments</span>}
+        {pr.by_agent && <span title="A Session in the console worked on this branch">agent</span>}
+        {repoId === null && (
+          <span title="Not imported as a Repo: its pull requests open on the Git host. Import it in Repos to review them here.">
+            not imported
+          </span>
+        )}
+      </span>
+    </>
+  );
+  const look = `flex w-full flex-col gap-0.5 px-3 py-2 text-[13px] no-underline ${item(active)}`;
+  return (
+    <li>
+      {here ? (
+        <button
+          type="button"
+          aria-current={active}
+          onClick={() => onSelect({ repoId, number: pr.number })}
+          className={look}
+        >
+          {body}
+        </button>
+      ) : (
+        <a
+          href={pr.url}
+          target="_blank"
+          rel="noreferrer"
+          title={`Opens on ${pr.host} in a new tab: only imported GitHub and Bitbucket pull requests open in the console`}
+          className={look}
+        >
+          {body}
+        </a>
+      )}
+    </li>
+  );
+}
 
 export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null; onSelect: (pull: Pull) => void }) {
   const [mine, setMine] = useStored('workspace.pr-mine', z.boolean(), true);
   const [q, setQ] = useStored('workspace.pr-search', z.string(), '');
+  const [filter, setFilter] = useStored('workspace.pr-filter', z.enum(['all', 'review', 'failing']), 'all');
+  const [project, setProject] = useStored('workspace.pr-project', z.string(), ANY);
   const settled = useSettled(q.trim(), 400);
   const pulls = usePullRequests({ mine, q: settled });
   const refresh = useRefreshPullRequests();
-  const repos = useRepos();
-  const repoName = (id: string) => repos.data?.data.find((repo) => repo.id === id)?.name ?? '';
-  const fold = useFolded();
-  const projects = pulls.data ? byProject(pulls.data.data) : [];
-  // A search shows every match.
-  const isFolded = (key: string) => settled === '' && fold.folded.includes(key);
-  const allFolded = projects.length > 0 && projects.every((project) => isFolded(project.key));
+
+  const everything = pulls.data?.data ?? [];
+  const projects = ascending(
+    [...new Map(everything.map((pr) => [projectKey(pr), pr.slug])).entries()],
+    ([, slug]) => slug,
+  );
+  const picked = projects.some(([key]) => key === project) ? project : ANY;
+  const inProject = everything.filter((pr) => picked === ANY || projectKey(pr) === picked);
+  const counts = {
+    all: inProject.length,
+    review: inProject.filter((pr) => nextFor(pr) === 'review').length,
+    failing: inProject.filter((pr) => nextFor(pr) === 'failing').length,
+  };
+  const listed = inProject.filter((pr) => filter === 'all' || nextFor(pr) === filter);
 
   return (
-    <div>
+    <div className="pb-3">
       <div className="sticky top-0 z-10 flex flex-col gap-2 border-b border-divider bg-bg px-3 pt-1 pb-2.5">
         <div className="flex items-center gap-1.5">
           <fieldset
@@ -183,26 +290,36 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
             Asking the Git hosts for #{settled.replace('#', '')}…
           </div>
         )}
-        {pulls.data && pulls.data.data.length > 0 && (
-          <div className="flex items-center gap-2 px-0.5 text-xs text-neutral-700">
-            <span>
-              <strong className="font-semibold text-text">{pulls.data.data.length}</strong>{' '}
-              {pulls.data.data.length === 1 ? 'pull request' : 'pull requests'} in{' '}
-              <strong className="font-semibold text-text">{projects.length}</strong>{' '}
-              {projects.length === 1 ? 'project' : 'projects'}
-            </span>
-            {projects.length > 1 && (
-              <button
-                type="button"
-                onClick={() => fold.set(allFolded ? [] : projects.map((project) => project.key))}
-                className="ml-auto flex cursor-pointer items-center gap-1 rounded border-0 bg-transparent px-1 py-0.5 text-xs text-neutral-700 hover:bg-neutral-200 hover:text-text"
-              >
-                <span aria-hidden className={`text-xs transition-transform ${allFolded ? '' : 'rotate-90'}`}>
-                  ▶
-                </span>
-                {allFolded ? 'Expand all' : 'Collapse all'}
-              </button>
-            )}
+        {everything.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Chip on={filter === 'all'} onClick={() => setFilter('all')}>
+              All {counts.all}
+            </Chip>
+            <Chip on={filter === 'review'} onClick={() => setFilter('review')}>
+              To review {counts.review}
+            </Chip>
+            <Chip on={filter === 'failing'} onClick={() => setFilter('failing')}>
+              Failing {counts.failing}
+            </Chip>
+            <Dropdown
+              label="Filter by project"
+              caption="Project"
+              variant="chip"
+              opens="down"
+              align="left"
+              searchable
+              value={picked}
+              options={[
+                { value: ANY, label: 'All projects', description: `${everything.length} pull requests` },
+                ...projects.map(([key, slug]) => ({
+                  value: key,
+                  label: slug,
+                  description: `${everything.filter((pr) => projectKey(pr) === key).length} pull requests`,
+                })),
+              ]}
+              onChange={setProject}
+              listClassName="w-max min-w-52 max-w-md"
+            />
           </div>
         )}
       </div>
@@ -218,7 +335,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
               {pulls.data.meta.synced_at && new Date(pulls.data.meta.synced_at).toLocaleTimeString()}.
             </div>
           )}
-          {pulls.data.data.length === 0 ? (
+          {everything.length === 0 ? (
             <Empty>
               {settled !== ''
                 ? `No ${mine ? 'pull requests of yours' : 'pull requests'} match “${settled}”.`
@@ -226,121 +343,33 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                   ? 'No open pull requests of yours.'
                   : 'No open pull requests.'}
             </Empty>
+          ) : listed.length === 0 ? (
+            <Empty>No pull request in this view.</Empty>
           ) : (
-            <div className="flex flex-col gap-1 px-2 pt-2 pb-3">
-              {projects.map((project) => (
-                <section key={project.key} aria-label={project.slug}>
-                  <h3 className="m-0">
-                    <button
-                      type="button"
-                      aria-expanded={!isFolded(project.key)}
-                      onClick={() => fold.toggle(project.key)}
-                      className="flex w-full cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-xs font-semibold text-text hover:bg-neutral-200"
-                    >
-                      <span
-                        aria-hidden
-                        className={`flex-none text-xs text-neutral-600 transition-transform ${isFolded(project.key) ? '' : 'rotate-90'}`}
-                      >
-                        ▶
-                      </span>
-                      {project.host !== GitHost.Local && <BrandIcon brand={BRAND[project.host]} size="xs" />}
-                      <span className="min-w-0 truncate font-mono">{project.slug}</span>
-                      {project.repoId ? (
-                        <span
-                          title="Imported as a Repo: its pull requests open here in the console"
-                          className="flex-none rounded-full bg-accent-100 px-1.75 text-xs font-semibold text-accent-900"
-                        >
-                          local · {repoName(project.repoId)}
-                        </span>
-                      ) : (
-                        <span
-                          title="Not imported as a Repo: its pull requests open on the Git host. Import it in Repos to review them here."
-                          className="flex-none rounded-full bg-neutral-200 px-1.75 text-xs font-normal text-neutral-700"
-                        >
-                          not imported
-                        </span>
-                      )}
-                      <span className="ml-auto flex-none font-mono text-xs font-normal text-neutral-700">
-                        {project.prs.length}
-                      </span>
-                    </button>
-                  </h3>
-                  {!isFolded(project.key) && (
+            NEXT_ORDER.map((next) => {
+              const group = listed.filter((pr) => nextFor(pr) === next);
+              return (
+                group.length > 0 && (
+                  <section key={next} aria-label={NEXT_LABEL[next]} className="px-2 pb-1">
+                    <h3 className="m-0 flex items-center px-2 pt-3 pb-1 text-[11px] font-semibold tracking-[0.08em] text-neutral-700 uppercase">
+                      {NEXT_LABEL[next]}
+                      <span className="ml-auto font-mono font-normal tracking-normal">{group.length}</span>
+                    </h3>
                     <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
-                      {project.prs.map((pr) => {
-                        const repoId = pr.repo_id;
-                        const here = repoId !== null && OPENS_HERE.includes(pr.host);
-                        const active = here && selected?.repoId === repoId && selected.number === pr.number;
-                        const body = (
-                          <>
-                            <span className="flex w-full items-center gap-1.5 font-semibold">
-                              <span className="min-w-0 truncate">
-                                #{pr.number} {pr.title}
-                              </span>
-                              {pr.state !== PrState.Open && (
-                                <span className="flex-none rounded-full bg-neutral-200 px-1.75 text-xs font-normal text-neutral-700">
-                                  {pr.state}
-                                </span>
-                              )}
-                              <span
-                                className="ml-auto flex-none text-right font-mono text-[11px] leading-tight font-normal whitespace-nowrap text-neutral-700"
-                                title={`Opened ${new Date(pr.opened_at).toLocaleString()}`}
-                              >
-                                Opened {when(pr.opened_at)}
-                                <br />
-                                {ago(pr.opened_at)}
-                              </span>
-                              {!here && (
-                                <span aria-hidden className="flex-none text-xs font-normal text-neutral-600">
-                                  ↗
-                                </span>
-                              )}
-                            </span>
-                            <span className="flex flex-wrap gap-x-2 font-mono text-xs text-neutral-700">
-                              <span>{pr.author}</span>
-                              <span className="truncate">{pr.branch}</span>
-                              {pr.by_agent && <span title="A Session in the console worked on this branch">agent</span>}
-                              {CHECKS[pr.checks] && <span title={CHECKS_TIP[pr.checks]}>{CHECKS[pr.checks]}</span>}
-                              {pr.approved_by.length > 0 ? (
-                                <span className="text-ok">✓ approved by {pr.approved_by.join(', ')}</span>
-                              ) : (
-                                REVIEWS[pr.review_state] && <span>{REVIEWS[pr.review_state]}</span>
-                              )}
-                              {pr.comment_count > 0 && <span>{pr.comment_count} comments</span>}
-                            </span>
-                          </>
-                        );
-                        const look = `flex w-full flex-col gap-0.5 px-3 py-2 text-[13px] no-underline ${item(active)}`;
-                        return (
-                          <li key={`${project.key}#${pr.number}`}>
-                            {here ? (
-                              <button
-                                type="button"
-                                aria-current={active}
-                                onClick={() => onSelect({ repoId, number: pr.number })}
-                                className={look}
-                              >
-                                {body}
-                              </button>
-                            ) : (
-                              <a
-                                href={pr.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                title={`Opens on ${pr.host} in a new tab: only imported GitHub and Bitbucket pull requests open in the console`}
-                                className={look}
-                              >
-                                {body}
-                              </a>
-                            )}
-                          </li>
-                        );
-                      })}
+                      {group.map((pr) => (
+                        <PullRow
+                          key={`${projectKey(pr)}#${pr.number}`}
+                          pr={pr}
+                          next={next}
+                          selected={selected}
+                          onSelect={onSelect}
+                        />
+                      ))}
                     </ul>
-                  )}
-                </section>
-              ))}
-            </div>
+                  </section>
+                )
+              );
+            })
           )}
         </>
       )}

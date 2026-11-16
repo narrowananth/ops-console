@@ -40,7 +40,7 @@ import {
   openThreads,
   repliedThreads,
 } from './pr-jobs';
-import { PrMeta } from './pr-meta';
+import { PrMeta, PrReadiness } from './pr-meta';
 import { PrSessions } from './pr-sessions';
 import { CommentComposer, Thread } from './pr-thread';
 
@@ -100,37 +100,21 @@ function Loaded(props: {
   );
   const error = review.error ?? merge.error ?? agent.error ?? address.error ?? checkReplies.error;
 
-  return (
-    <div className="flex flex-col gap-4 px-5 py-4">
-      <header className="flex flex-col gap-2">
-        <h2 className="m-0 text-[17px] font-semibold">
-          #{pr.number} {pr.title}
-        </h2>
-        <PrMeta pr={pr} />
-        <div className="flex flex-wrap items-center gap-2">
-          {open && !pr.is_mine && (
-            <>
-              <Button
-                disabled={review.isPending}
-                title={`Approve this pull request on the Git host as you. ${viewed.count} of ${pr.files.length} files viewed.`}
-                onClick={() => review.mutate({ event: PrReviewEvent.Approve })}
-                className="px-3 py-1 text-xs"
-              >
-                Approve
-              </Button>
-              <Button
-                className="px-3 py-1 text-xs"
-                title="Say what needs to change. It posts a review on the Git host that asks the author for changes."
-                onClick={() => setChanges(changes === null ? '' : null)}
-              >
-                Request changes
-              </Button>
-            </>
-          )}
-          {open && (
+  const BTN = 'w-full justify-center px-3 py-1.5 text-xs';
+  const rail = (
+    <aside aria-label="Decision" className="w-72 flex-none border-l border-line bg-surface">
+      <div className="sticky top-0 flex max-h-[calc(100vh-7rem)] flex-col gap-4 overflow-y-auto p-4">
+        <PrReadiness
+          pr={pr}
+          heading={
+            <h3 className="m-0 text-xs font-semibold tracking-[0.08em] text-neutral-700 uppercase">Merge readiness</h3>
+          }
+        />
+        {open && (
+          <section aria-label="Actions" className="flex flex-col gap-2">
             <Button
               variant="primary"
-              className="px-3 py-1 text-xs"
+              className={BTN}
               disabled={agent.isPending || busy || reviewed}
               title={
                 busy
@@ -150,212 +134,268 @@ function Loaded(props: {
                     ? 'Reviewed at this commit'
                     : withPlaybook('Agent Review', reviewPlaybook)}
             </Button>
-          )}
-          {(replied > 0 || checking) && (
-            <Button
-              className="px-3 py-1 text-xs"
-              disabled={checkReplies.isPending || busy}
-              title={busy ? BUSY_TITLE : CHECK_REPLIES_TIP}
-              onClick={() => checkReplies.mutate()}
-            >
-              {(checkReplies.isPending || checking) && <Spinner />}
-              {checking ? 'Checking replies…' : `${withPlaybook('Check replies', checkPlaybook)} · ${replied}`}
-            </Button>
-          )}
-          {canAddress && (
-            <Button
-              className="px-3 py-1 text-xs"
-              disabled={address.isPending || busy}
-              title={busy ? BUSY_TITLE : ADDRESS_TIP}
-              onClick={() => setPicking(true)}
-            >
-              {address.isPending && <Spinner />}
-              {withPlaybook('Address comments', addressPlaybook)}
-            </Button>
-          )}
-          {open && !confirmMerge && (
-            <Button
-              className="ml-auto px-3 py-1 text-xs"
-              disabled={pr.review_state !== PrReviewState.Approved}
-              title={
-                pr.review_state === PrReviewState.Approved
-                  ? 'Merge this pull request on the Git host. You confirm first.'
-                  : 'Merge needs an approved review. Approve it here or on the Git host first.'
-              }
-              onClick={() => setConfirmMerge(true)}
-            >
-              Merge
-            </Button>
-          )}
-          {confirmMerge && (
-            <span className="ml-auto flex items-center gap-1.5 text-xs">
-              Merge #{pr.number} on the host?
+            {!pr.is_mine && (
+              <>
+                <Button
+                  className={`${BTN} border-ok bg-ok text-white hover:bg-ok/90`}
+                  disabled={review.isPending}
+                  title={`Approve this pull request on the Git host as you. ${viewed.count} of ${pr.files.length} files viewed.`}
+                  onClick={() => review.mutate({ event: PrReviewEvent.Approve })}
+                >
+                  Approve
+                </Button>
+                <Button
+                  className={BTN}
+                  title="Say what needs to change. It posts a review on the Git host that asks the author for changes."
+                  onClick={() => setChanges(changes === null ? '' : null)}
+                >
+                  Request changes
+                </Button>
+                {changes !== null && (
+                  <div className="flex flex-col gap-1.5">
+                    <textarea
+                      aria-label="What needs to change"
+                      value={changes}
+                      rows={3}
+                      onChange={(event) => setChanges(event.target.value)}
+                      placeholder="What needs to change"
+                      className="min-w-0 resize-y rounded-md border border-divider bg-card px-2 py-1 text-xs text-text"
+                    />
+                    <Button
+                      className={BTN}
+                      title="Post this as a review that requests changes on the Git host"
+                      disabled={changes.trim() === '' || review.isPending}
+                      onClick={() =>
+                        review.mutate(
+                          { event: PrReviewEvent.RequestChanges, body: changes },
+                          { onSuccess: () => setChanges(null) },
+                        )
+                      }
+                    >
+                      Send
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+            {(replied > 0 || checking) && (
               <Button
-                variant="primary"
-                className="px-2.5 py-1 text-xs"
-                disabled={merge.isPending}
-                title={`Merge ${pr.branch} into ${pr.base_branch} on the Git host now`}
-                onClick={() => merge.mutate(undefined, { onSettled: () => setConfirmMerge(false) })}
+                className={BTN}
+                disabled={checkReplies.isPending || busy}
+                title={busy ? BUSY_TITLE : CHECK_REPLIES_TIP}
+                onClick={() => checkReplies.mutate()}
+              >
+                {(checkReplies.isPending || checking) && <Spinner />}
+                {checking ? 'Checking replies…' : `${withPlaybook('Check replies', checkPlaybook)} · ${replied}`}
+              </Button>
+            )}
+            {canAddress && (
+              <Button
+                className={BTN}
+                disabled={address.isPending || busy}
+                title={busy ? BUSY_TITLE : ADDRESS_TIP}
+                onClick={() => setPicking(true)}
+              >
+                {address.isPending && <Spinner />}
+                {withPlaybook('Address comments', addressPlaybook)}
+              </Button>
+            )}
+            {!confirmMerge ? (
+              <Button
+                className={BTN}
+                disabled={pr.review_state !== PrReviewState.Approved}
+                title={
+                  pr.review_state === PrReviewState.Approved
+                    ? 'Merge this pull request on the Git host. You confirm first.'
+                    : 'Merge needs an approved review. Approve it here or on the Git host first.'
+                }
+                onClick={() => setConfirmMerge(true)}
               >
                 Merge
               </Button>
-              <Button className="px-2.5 py-1 text-xs" onClick={() => setConfirmMerge(false)}>
-                Keep open
-              </Button>
-            </span>
-          )}
-        </div>
-        <PrSessions pr={pr} />
-        {changes !== null && (
-          <div className="flex gap-1.5">
-            <input
-              aria-label="What needs to change"
-              value={changes}
-              onChange={(event) => setChanges(event.target.value)}
-              placeholder="What needs to change"
-              className="min-w-0 flex-1 border border-divider bg-card px-2 py-1 text-xs text-text"
-            />
-            <Button
-              className="px-2.5 py-1 text-xs"
-              title="Post this as a review that requests changes on the Git host"
-              disabled={changes.trim() === '' || review.isPending}
-              onClick={() =>
-                review.mutate(
-                  { event: PrReviewEvent.RequestChanges, body: changes },
-                  { onSuccess: () => setChanges(null) },
-                )
-              }
-            >
-              Send
-            </Button>
-          </div>
+            ) : (
+              <div className="flex flex-col gap-1.5 rounded-md border border-line bg-card p-2 text-xs">
+                Merge #{pr.number} on the host?
+                <div className="flex gap-1.5">
+                  <Button
+                    variant="primary"
+                    className="flex-1 justify-center px-2.5 py-1 text-xs"
+                    disabled={merge.isPending}
+                    title={`Merge ${pr.branch} into ${pr.base_branch} on the Git host now`}
+                    onClick={() => merge.mutate(undefined, { onSettled: () => setConfirmMerge(false) })}
+                  >
+                    Merge
+                  </Button>
+                  <Button className="flex-1 justify-center px-2.5 py-1 text-xs" onClick={() => setConfirmMerge(false)}>
+                    Keep open
+                  </Button>
+                </div>
+              </div>
+            )}
+            {error && (
+              <div role="alert" className="text-xs text-accent-700">
+                {error.message}
+              </div>
+            )}
+          </section>
         )}
-        {error && (
-          <div role="alert" className="text-xs text-accent-700">
-            {error.message}
-          </div>
-        )}
-        {noting && (
-          <AgentReviewDialog
-            onCancel={() => setNoting(false)}
-            onStart={(note) => {
-              setNoting(false);
-              agent.mutate(note || undefined);
-            }}
-          />
-        )}
-        {picking && (
-          <AddressCommentsDialog
-            pr={pr}
-            onCancel={() => setPicking(false)}
-            onStart={(commentIds) => {
-              setPicking(false);
-              address.mutate(commentIds);
-            }}
-          />
-        )}
-      </header>
-
-      {pr.latest_agent_review && <AgentReviewCard review={pr.latest_agent_review} sessionId={pr.agent_session_id} />}
-      <CommentPassCard passes={pr.comment_passes} prUrl={pr.url} sessionId={pr.agent_session_id} />
-
-      {pr.body.trim() !== '' && (
-        <section aria-label="Description" className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">
-          <header
-            className={`flex items-center gap-2 bg-surface px-4 py-2 text-xs ${descriptionFolded ? '' : 'border-b border-divider'}`}
-          >
-            <FoldTitle label="Description" folded={descriptionFolded} onToggle={toggleDescription}>
-              <strong>Description</strong>
-            </FoldTitle>
-            <span className="text-neutral-700">by {pr.author}</span>
-          </header>
-          <div hidden={descriptionFolded}>
-            <Markdown source={pr.body} className="px-4 py-3" />
-          </div>
+        <section aria-label="Sessions" className="flex flex-col gap-2">
+          <h3 className="m-0 text-xs font-semibold tracking-[0.08em] text-neutral-700 uppercase">Session</h3>
+          <PrSessions pr={pr} />
         </section>
-      )}
-
-      <section aria-label="Files" className="flex flex-col gap-2">
-        <div className="flex items-center gap-3 text-xs tracking-[0.08em] text-neutral-700 uppercase">
-          Files · {pr.files.length}
-          <DiffStat
-            additions={pr.files.reduce((sum, file) => sum + file.additions, 0)}
-            deletions={pr.files.reduce((sum, file) => sum + file.deletions, 0)}
-          />
-          {pr.files.length > 1 && (
-            <span className="flex items-center gap-1 tracking-normal normal-case">
-              <button
-                type="button"
-                title="Open every file on its lines"
-                onClick={() => setBulk({ open: true })}
-                className={FOLD_ALL}
-              >
-                Expand all
-              </button>
-              <button
-                type="button"
-                title="Fold every file to its name, to get to the comments and the end of the page"
-                onClick={() => setBulk({ open: false })}
-                className={FOLD_ALL}
-              >
-                Collapse all
-              </button>
+        <section aria-label="People" className="flex flex-col gap-1.5 text-[13px]">
+          <h3 className="m-0 text-xs font-semibold tracking-[0.08em] text-neutral-700 uppercase">People</h3>
+          <span>
+            {pr.author} <span className="text-xs text-neutral-700">author</span>
+          </span>
+          {pr.approved_by.map((name) => (
+            <span key={name}>
+              {name} <span className="text-xs text-ok">approved</span>
             </span>
+          ))}
+        </section>
+      </div>
+    </aside>
+  );
+
+  return (
+    <div className="flex min-h-full flex-col">
+      <header className="flex flex-col gap-2 border-b border-line px-5 pt-4 pb-3">
+        <h2 className="m-0 text-[17px] font-semibold">
+          #{pr.number} {pr.title}
+        </h2>
+        <PrMeta pr={pr} />
+      </header>
+      <div className="flex flex-1">
+        <div className="flex min-w-0 flex-1 flex-col gap-4 px-5 py-4">
+          {noting && (
+            <AgentReviewDialog
+              onCancel={() => setNoting(false)}
+              onStart={(note) => {
+                setNoting(false);
+                agent.mutate(note || undefined);
+              }}
+            />
           )}
-          {pr.files.length > 0 && (
-            <span
-              title="Files you ticked Viewed, kept in this browser. A file whose change changes reads unviewed again."
-              className="ml-auto flex items-center gap-2 tracking-normal normal-case"
+          {picking && (
+            <AddressCommentsDialog
+              pr={pr}
+              onCancel={() => setPicking(false)}
+              onStart={(commentIds) => {
+                setPicking(false);
+                address.mutate(commentIds);
+              }}
+            />
+          )}
+
+          {pr.latest_agent_review && (
+            <AgentReviewCard review={pr.latest_agent_review} sessionId={pr.agent_session_id} />
+          )}
+          <CommentPassCard passes={pr.comment_passes} prUrl={pr.url} sessionId={pr.agent_session_id} />
+
+          {pr.body.trim() !== '' && (
+            <section
+              aria-label="Description"
+              className="overflow-hidden rounded-xl border border-line bg-card shadow-sm"
             >
-              <span className={viewed.count === pr.files.length ? 'font-semibold text-ok' : ''}>
-                {viewed.count} / {pr.files.length} viewed
-              </span>
-              <span aria-hidden className="h-1.5 w-20 overflow-hidden rounded-full bg-neutral-300">
-                <span
-                  className="block h-full rounded-full bg-ok transition-[width]"
-                  style={{ width: `${(viewed.count / pr.files.length) * 100}%` }}
-                />
-              </span>
-            </span>
+              <header
+                className={`flex items-center gap-2 bg-surface px-4 py-2 text-xs ${descriptionFolded ? '' : 'border-b border-divider'}`}
+              >
+                <FoldTitle label="Description" folded={descriptionFolded} onToggle={toggleDescription}>
+                  <strong>Description</strong>
+                </FoldTitle>
+                <span className="text-neutral-700">by {pr.author}</span>
+              </header>
+              <div hidden={descriptionFolded}>
+                <Markdown source={pr.body} className="px-4 py-3" />
+              </div>
+            </section>
           )}
-        </div>
-        {pr.files.map((file) => (
-          <PrFileView
-            key={`${pr.head_sha}:${file.name}`}
-            pr={pr}
-            file={file}
-            viewed={viewed.isViewed(file)}
-            onViewed={(next) => viewed.set(file, next)}
-            bulk={bulk}
-          />
-        ))}
-      </section>
 
-      <section aria-label="Comments" className="flex flex-col gap-2">
-        <div className="text-xs tracking-[0.08em] text-neutral-700 uppercase">Comments · {pr.comments.length}</div>
-        {roots.length === 0 ? (
-          <div className="text-[13px] text-neutral-700">
-            No comments yet. Hover a line in a file and press + to comment on it.
-          </div>
-        ) : (
-          <ul className="m-0 flex list-none flex-col gap-2 p-0">
-            {roots.map((root) => (
-              <li key={root.id}>
-                <Thread pr={pr} root={root} />
-              </li>
+          <section aria-label="Files" className="flex flex-col gap-2">
+            <div className="flex items-center gap-3 text-xs tracking-[0.08em] text-neutral-700 uppercase">
+              Files · {pr.files.length}
+              <DiffStat
+                additions={pr.files.reduce((sum, file) => sum + file.additions, 0)}
+                deletions={pr.files.reduce((sum, file) => sum + file.deletions, 0)}
+              />
+              {pr.files.length > 1 && (
+                <span className="flex items-center gap-1 tracking-normal normal-case">
+                  <button
+                    type="button"
+                    title="Open every file on its lines"
+                    onClick={() => setBulk({ open: true })}
+                    className={FOLD_ALL}
+                  >
+                    Expand all
+                  </button>
+                  <button
+                    type="button"
+                    title="Fold every file to its name, to get to the comments and the end of the page"
+                    onClick={() => setBulk({ open: false })}
+                    className={FOLD_ALL}
+                  >
+                    Collapse all
+                  </button>
+                </span>
+              )}
+              {pr.files.length > 0 && (
+                <span
+                  title="Files you ticked Viewed, kept in this browser. A file whose change changes reads unviewed again."
+                  className="ml-auto flex items-center gap-2 tracking-normal normal-case"
+                >
+                  <span className={viewed.count === pr.files.length ? 'font-semibold text-ok' : ''}>
+                    {viewed.count} / {pr.files.length} viewed
+                  </span>
+                  <span aria-hidden className="h-1.5 w-20 overflow-hidden rounded-full bg-neutral-300">
+                    <span
+                      className="block h-full rounded-full bg-ok transition-[width]"
+                      style={{ width: `${(viewed.count / pr.files.length) * 100}%` }}
+                    />
+                  </span>
+                </span>
+              )}
+            </div>
+            {pr.files.map((file) => (
+              <PrFileView
+                key={`${pr.head_sha}:${file.name}`}
+                pr={pr}
+                file={file}
+                viewed={viewed.isViewed(file)}
+                onViewed={(next) => viewed.set(file, next)}
+                bulk={bulk}
+              />
             ))}
-          </ul>
-        )}
-        <CommentComposer
-          label="Comment on the pull request"
-          draft={`${pr.repo_id}#${pr.number}.comment`}
-          placeholder="Leave a comment on the pull request"
-          submitLabel="Comment"
-          pending={comment.isPending}
-          error={comment.error}
-          onSubmit={(body, done) => comment.mutate({ body }, { onSuccess: done })}
-        />
-      </section>
+          </section>
+
+          <section aria-label="Comments" className="flex flex-col gap-2">
+            <div className="text-xs tracking-[0.08em] text-neutral-700 uppercase">Comments · {pr.comments.length}</div>
+            {roots.length === 0 ? (
+              <div className="text-[13px] text-neutral-700">
+                No comments yet. Hover a line in a file and press + to comment on it.
+              </div>
+            ) : (
+              <ul className="m-0 flex list-none flex-col gap-2 p-0">
+                {roots.map((root) => (
+                  <li key={root.id}>
+                    <Thread pr={pr} root={root} />
+                  </li>
+                ))}
+              </ul>
+            )}
+            <CommentComposer
+              label="Comment on the pull request"
+              draft={`${pr.repo_id}#${pr.number}.comment`}
+              placeholder="Leave a comment on the pull request"
+              submitLabel="Comment"
+              pending={comment.isPending}
+              error={comment.error}
+              onSubmit={(body, done) => comment.mutate({ body }, { onSuccess: done })}
+            />
+          </section>
+        </div>
+        {rail}
+      </div>
     </div>
   );
 }

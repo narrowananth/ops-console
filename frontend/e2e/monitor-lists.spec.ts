@@ -152,7 +152,9 @@ test('logs group under High, Medium and Low on All, titled by Route, and a tier 
   await expect(heads).toHaveCount(0);
 });
 
-test('a pull request row shows when it was opened, and a Session row when it started', async ({ page }) => {
+test('a pull request row says how long ago it opened, and a Session row how long since it was active', async ({
+  page,
+}) => {
   const repo = {
     id: 'r1',
     name: 'apis',
@@ -242,9 +244,10 @@ test('a pull request row shows when it was opened, and a Session row when it sta
     }),
   );
   await page.goto(`${daemon.url}/workspace?tab=pulls#token=${daemon.token}`);
-  await expect(page.getByText(/Opened Feb 5 · /)).toBeVisible();
+  // The full date is in the tooltip.
+  await expect(page.getByTitle(/^Opened .*2026/)).toHaveText(/\dd ago$/);
   await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
-  await expect(page.getByText(/^Started .* · active 3h ago$/)).toBeVisible();
+  await expect(page.getByTitle(/^Started .*, last active /)).toHaveText('3h ago');
 });
 
 test('a running Scan shows Scanning… with a Stop button that cancels it', async ({ page }) => {
