@@ -1,5 +1,6 @@
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
+import type { Readable } from 'node:stream';
 import { Inject, Injectable, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import {
   type BrowserClientMessage,
@@ -8,6 +9,7 @@ import {
   ErrorCode,
   type PatchTabBody,
   SessionKind,
+  type StagedFile,
   TabOpener,
 } from '@ops-console/shared';
 import { type BrowserContext, chromium, type Page } from 'playwright-core';
@@ -25,6 +27,7 @@ import {
   openInDefaultBrowser,
 } from './browser-options';
 import { BrowserTab, type TabHooks } from './browser-tab';
+import { killOrphanChromes } from './orphans';
 
 const TITLE_POLL_MS = 2000;
 const CHROME_STOPPED = 'Chrome stopped. Close this tab and open a new one.';
@@ -61,8 +64,9 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
     this.idleMs = options.idleMs ?? DEFAULT_IDLE_MS;
   }
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
     this.sessions.onRemoved((id) => this.dropSession(id));
+    await killOrphanChromes(this.dataDir);
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -291,6 +295,14 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
     }
     if (body.action) await tab.act(body.action);
     return tab;
+  }
+
+  async stageFile(tabId: string, name: string, body: Readable): Promise<StagedFile> {
+    return this.live(tabId).stageFile(name, body);
+  }
+
+  async chooseFiles(tabId: string, ids: string[]): Promise<void> {
+    await this.live(tabId).chooseFiles(ids);
   }
 
   async close(tabId: string): Promise<void> {

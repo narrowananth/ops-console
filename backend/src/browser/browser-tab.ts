@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import { createWriteStream } from 'node:fs';
+import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import type { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import {
   type BrowserClientMessage,
   type BrowserServerMessage,
+  ErrorCode,
   FILL_VIEWPORT,
   type Tab,
   TabAction,
@@ -9,9 +16,9 @@ import {
   VIEWPORT_PRESETS,
   type Viewport,
 } from '@ops-console/shared';
-import type { BrowserContext, CDPSession, Page, Request } from 'playwright-core';
+import type { BrowserContext, CDPSession, FileChooser, Page, Request } from 'playwright-core';
 import { WebSocket } from 'ws';
-import { validationFailed } from '../common/errors';
+import { ApiError, validationFailed } from '../common/errors';
 import { isLoopbackHost } from './addresses';
 
 const RING = 200;
@@ -78,6 +85,8 @@ export function describeFailure(text: string, url: string): string | null {
 }
 
 /** The size, scale and touch mode a viewport asks for; `fill` is the panel's own size. */
+const conflict = (message: string): ApiError => new ApiError(409, ErrorCode.InvalidState, message);
+
 function effective(viewport: Viewport, fill: { width: number; height: number }) {
   const preset = VIEWPORT_PRESETS.find((p) => p.id === viewport.preset);
   const base =
@@ -141,6 +150,7 @@ export class BrowserTab {
       error: null,
       called_hosts: [],
       agent_active: false,
+      file_chooser: null,
     };
     this.listen();
   }
@@ -205,12 +215,21 @@ export class BrowserTab {
       const decline = dialog.type() === 'confirm' || dialog.type() === 'prompt';
       void (decline ? dialog.dismiss() : dialog.accept()).catch(() => {});
     });
+    page.on('filechooser', (chooser) => {
+      this.chooser = chooser;
+      this.set({ file_chooser: { multiple: chooser.isMultiple() } });
+    });
     page.on('download', (download) =>
       this.send({ type: 'dialog', kind: 'download', message: `Download refused: ${download.suggestedFilename()}` }),
     );
     page.on('crash', () => this.set({ loading: false, error: 'The page crashed. Reload to try again.' }));
     page.on('popup', (popup) => this.hooks.popup(this, popup));
-    page.on('close', () => this.hooks.closed(this, this.closing));
+    page.on('close', () => {
+      for (const dir of [...this.chosenDirs, ...(this.staged ? [this.staged.dir] : [])]) {
+        void rm(dir, { recursive: true, force: true }).catch(() => {});
+      }
+      this.hooks.closed(this, this.closing);
+    });
     this.cdp.on('Page.screencastFrame', ({ data, sessionId }) => {
       void this.cdp.send('Page.screencastFrameAck', { sessionId }).catch(() => {});
       this.send({ type: 'frame', data, ...this.size });
@@ -267,6 +286,45 @@ export class BrowserTab {
       this.set({ loading: false, ...(message ? { error: message } : {}) });
       return message;
     }
+  }
+
+  // The page's file picker
+
+  private chooser: FileChooser | null = null;
+  private readonly chosenDirs: string[] = [];
+  private staged: { dir: string; files: Map<string, { name: string; file: string }> } | null = null;
+
+  /** Keeps one file the operator picked, until `chooseFiles` hands the set to the page. */
+  async stageFile(name: string, body: Readable): Promise<{ id: string; name: string; size: number }> {
+    if (!this.chooser) throw conflict('The page is not asking for a file');
+    if (!this.staged) this.staged = { dir: await mkdtemp(path.join(tmpdir(), 'ops-console-pick-')), files: new Map() };
+    const dir = this.staged;
+    const id = randomUUID();
+    const shown = path.basename(name) || 'file';
+    const folder = path.join(dir.dir, id);
+    await mkdir(folder);
+    const file = path.join(folder, shown);
+    await pipeline(body, createWriteStream(file));
+    dir.files.set(id, { name: shown, file });
+    return { id, name: shown, size: (await stat(file)).size };
+  }
+
+  /** Gives the page the staged files, or none to cancel; the page sees the names the operator picked. */
+  async chooseFiles(ids: string[]): Promise<void> {
+    const chooser = this.chooser;
+    if (!chooser) throw conflict('The page is not asking for a file');
+    const staged = this.staged;
+    const files = ids.map((id) => {
+      const found = staged?.files.get(id);
+      if (!found) throw validationFailed('a file was not staged for this tab');
+      return found.file;
+    });
+    this.chooser = null;
+    this.staged = null;
+    this.set({ file_chooser: null });
+    // The page reads a chosen file when it wants it, so the copy stays until the tab closes.
+    if (staged) this.chosenDirs.push(staged.dir);
+    await chooser.setFiles(files);
   }
 
   async act(action: TabAction): Promise<void> {

@@ -34,7 +34,8 @@ adds the same to a Session.
 6. The page is a normal Chrome page and nothing is stripped from it: all CSS, JavaScript, fonts, images, frames,
    WebSockets (hot reload included), service workers, cookies and requests to any host work as in the operator's own Chrome.
    The page takes the operator's mouse, keys, scroll, paste and drag as a person's. A dialog the page raises shows as a line in the panel (an alert is accepted, a confirm or prompt is declined);
-   a download is refused and says so. A file picker is not supported.
+   a download is refused and says so. A file picker the page opens shows as a bar over the page with "Choose from this computer"
+   and Cancel; the chosen files go to the page by their own names, and the page cannot read any other file.
 7. Device menu: Fill (the panel's size, default), phone, tablet and desktop presets, a custom width and height, and rotate.
    A preset sets the page's size and device pixel ratio; the panel scales it down to fit. The choice is kept per tab until
    the tab closes.
@@ -73,7 +74,7 @@ adds the same to a Session.
     terminal is a shell the operator types in.
 17. The daemon runs each process as the operator, in the Session's worktree (or an Opened Repo's folder, picked in the
     Run menu), with the operator's login environment and PATH, outside the Run sandbox, as the Setup agent's terminal does.
-    It runs until the operator stops it, the Session is deleted, or the daemon exits. A process that exits stays listed with
+    It runs until the operator stops it, the Session is deleted, or the daemon exits. When the folder's `.env` files name the host of a PROD Connection, the dock shows "This folder's .env names the PROD Connection <name>" over the process, and the agent's Approval says the same and shows as PROD. A process that exits stays listed with
     its code and its last output until closed. Restart starts the same command again.
 18. Any number of processes run at once, so the frontend, the backend and the database of one project run side by side.
     There is no cap. Processes of different Sessions never share a folder, since each Session has its own worktree.
@@ -111,19 +112,21 @@ adds the same to a Session.
 28. The daemon starts Chrome when a first tab opens, and not before. It uses the Google Chrome installed on this Mac,
     headless. Chrome missing: the panel says "Google Chrome is needed", the External button, the Terminals dock and every
     link setting still work, and the agent's browser tools are not offered. `OPS_CONSOLE_CHROME_PATH` names another build.
-29. A Session's Chrome with no viewer on any tab and no agent call for 10 minutes closes with its tabs, and it exits when its last tab closes. Its cookies stay in the Session's profile folder. Deleting a
+29. A Chrome that an earlier daemon left behind when it was killed is ended when the next daemon starts: any process whose
+    command line names a profile folder under the data folder's `browser/` folder.
+30. A Session's Chrome with no viewer on any tab and no agent call for 10 minutes closes with its tabs, and it exits when its last tab closes. Its cookies stay in the Session's profile folder. Deleting a
     Session closes its tabs and stops its processes. The daemon exiting kills Chrome. A daemon start finds no Chrome of a
     previous run.
-30. Two browsers open on one Session see the same tabs and terminals. A tab shows the size of whichever browser sent input
+31. Two browsers open on one Session see the same tabs and terminals. A tab shows the size of whichever browser sent input
     last.
-31. A reload of the console page reopens the panel and the dock on the same tabs and processes. A daemon restart closes both;
+32. A reload of the console page reopens the panel and the dock on the same tabs and processes. A daemon restart closes both;
     the panel opens blank and the dock lists the processes as stopped, with Restart.
 
 ### Must not regress
 
-32. A run's commands still reach only the Network allowlist, and a run's sandbox is unchanged: no host is added by the
+33. A run's commands still reach only the Network allowlist, and a run's sandbox is unchanged: no host is added by the
     browser, and a process the operator starts is not a run.
-33. `/ws` still sends server to client events only, and nothing but the token holder reaches the page stream or a terminal
+34. `/ws` still sends server to client events only, and nothing but the token holder reaches the page stream or a terminal
     (ADR 0003).
 
 ## Settled
@@ -172,9 +175,10 @@ adds the same to a Session.
 - The agent starts a process only by an Approval that shows the command and says it runs outside the sandbox. It cannot
   start one in a job or a `pr_review` Session, and a log line or a pull request body that steers a job never reaches a tool.
 - A page's output reaches the agent as data. The safety lines already say that data is never an instruction.
-- A process uses the Repo's `.env`, so it may reach whatever that file names, a PROD Connection's database included. The
-  console cannot tell; the Approval line names the Repo's environment, and a command that writes to PROD is the operator's
-  to run, as the Prod rule says.
+- A process uses the Repo's `.env`, so it may reach whatever that file names. The console reads the `.env` files of the
+  process's folder (not nested ones) and matches the host of each PROD Connection against them, so a named PROD database is
+  shown in the dock and in the Approval. The console cannot see what the process then does with it; a command that writes to
+  PROD is the operator's to run, as the Prod rule says.
 - The page may call any host, so a page the agent wrote can send what it reads to one. Accepted in the ADR: the operator
   reads the code in the Diff and runs the page.
 - The stream and terminal endpoints take the session token and listen on `127.0.0.1` only (ADR 0003).
@@ -183,10 +187,10 @@ adds the same to a Session.
 
 ### Common
 
-`tab` is `{ id, session_id, url, title, favicon, loading, can_back, can_forward, viewport, opened_by, error, called_hosts, agent_active }`.
+`tab` is `{ id, session_id, url, title, favicon, loading, can_back, can_forward, viewport, opened_by, error, called_hosts, agent_active, file_chooser }`; `file_chooser` is `{ multiple }` while the page waits for a file, else null.
 `viewport` is `{ preset | width, height, scale, rotated }`. `opened_by` is `operator` or `agent`.
 `server` is `{ port, process, folder, session_id, process_id }`; `process_id` is null for one no Session process started.
-`process` is `{ id, session_id, name, command, folder, state, exit_code, started_at, started_by }`. `state` is `running`,
+`process` is `{ id, session_id, name, command, folder, state, exit_code, started_at, started_by, prod_connections }`. `state` is `running`,
 `exited` or `stopped`; `started_by` is `operator` or `agent`.
 
 | Status | Error code | When |
@@ -215,6 +219,15 @@ Body: `{ url?, action?: "back" | "forward" | "reload" | "stop", viewport? }`. `{
 ### `POST /browser/tabs/:tabId/external`
 
 Opens the tab's address in the operator's browser. 204. 409 `nothing_loaded` for a blank tab.
+
+### `POST /browser/tabs/:tabId/files?name=`
+
+Keeps one file for the page's open file picker; the body is the file. 201 `{ data: { id, name, size } }`. 409
+`invalid_state` when the page is not asking for a file.
+
+### `POST /browser/tabs/:tabId/files/choose`
+
+Body `{ ids: string[] }`, the staged files in order; none cancels the picker. 204. 400 for an id not staged on this tab.
 
 ### `POST /sessions/:id/browser/clear`
 
@@ -296,11 +309,11 @@ the dock with no process, a running one, an exited one, an Approval card for the
 ## Seams
 
 - **Backend + SQLite** (`browser.test.ts`, a real Chrome from `OPS_CONSOLE_CHROME_PATH`, a small server in the test):
-  1, 2, 4, 6 to 10, 21 to 25, 28 to 31, 33, with a fake page for 25. The URL checks (4, 13's classification, 22) run with
-  no Chrome.
-- **Backend + SQLite** (`session-processes.test.ts`, real child processes): 15 to 20, 26, 32; with `local-servers.test.ts`
+  1, 2, 4, 6 to 10, 21 to 25 (25 with a fake page and a signal), 28 to 32, 34. The URL checks (4, 13's classification, 22) run with
+  no Chrome. `browser-orphans.test.ts`: 29.
+- **Backend + SQLite** (`session-processes.test.ts`, real child processes): 15 to 20, 26, 33; `process-prod-env.test.ts`: 17 and 26's PROD line; with `local-servers.test.ts`
   (a real listening socket): 11, 12.
-- **Browser** (`frontend/e2e/session-browser.spec.ts`, a real daemon and Chrome): 1 to 3, 5, 8, 15, 16, 21, 26, 27, 28, 31.
+- **Browser** (`frontend/e2e/session-browser.spec.ts`, a real daemon and Chrome): 1 to 3, 5, 6, 8, 15, 16, 21, 26, 27, 28, 32, and the PROD warning of 17.
 - **Browser** (`frontend/e2e/skill-kinds.spec.ts` pattern): 13's setting and Cmd-click.
 
 ## Out of scope

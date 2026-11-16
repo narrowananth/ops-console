@@ -2,6 +2,7 @@ import { realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { Inject, Injectable, type OnModuleDestroy } from '@nestjs/common';
 import {
+  ConnectionEnv,
   type CreateProcessBody,
   ErrorCode,
   type LocalServer,
@@ -20,11 +21,12 @@ import { AgentRuntime } from '../agent/runtime';
 import { SessionKinds } from '../agent/session-kinds';
 import { extraRepoIds, type SessionRow, SessionsService } from '../agent/sessions.service';
 import { ApiError } from '../common/errors';
-import { repos, sessionProcesses, sessions } from '../db/schema';
+import { connections, repos, sessionProcesses, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { loadPty } from '../terminals/pty';
 import { LOCAL_SERVER_SCANNER, type LocalServerScanner } from './local-servers';
 import { familyOf, isAlive, processTable, signal } from './process-tree';
+import { prodConnectionsNamedIn } from './prod-env';
 import { readScripts, shellWord } from './scripts';
 
 const REPLAY_CHARS = 256 * 1024;
@@ -44,6 +46,7 @@ type Live = {
   exitCode: number | null;
   startedAt: string;
   stopRequested: boolean;
+  prod: string[];
   exited: Promise<void>;
 };
 
@@ -266,13 +269,27 @@ export class ProcessesService implements OnModuleDestroy {
   describeStart(
     sessionId: string,
     input: { name: string; command: string; folder?: string },
-  ): { summary: string; folder: string } {
+  ): { summary: string; folder: string; prod: string[] } {
     const session = this.supported(sessionId);
     const folder = this.folderFor(session, this.handler(session).workingDir(session), input.folder);
+    const prod = this.prodIn(folder);
+    const warning = prod.length
+      ? `\nThis folder's .env names the PROD Connection${prod.length > 1 ? 's' : ''} ${prod.join(', ')}. The process can reach ${prod.length > 1 ? 'them' : 'it'}.`
+      : '';
     return {
       folder,
-      summary: `Start "${input.name}" in ${folder}:\n${input.command}\nRuns as you, outside the sandbox, with this Repo's environment.`,
+      prod,
+      summary: `Start "${input.name}" in ${folder}:\n${input.command}\nRuns as you, outside the sandbox, with this Repo's environment.${warning}`,
     };
+  }
+
+  private prodIn(folder: string): string[] {
+    const prod = this.store.db
+      .select({ name: connections.name, config: connections.config })
+      .from(connections)
+      .where(eq(connections.env, ConnectionEnv.Prod))
+      .all();
+    return prodConnectionsNamedIn(folder, prod);
   }
 
   startForAgent(sessionId: string, input: { name: string; command: string; folder?: string }): Promise<SessionProcess> {
@@ -333,6 +350,7 @@ export class ProcessesService implements OnModuleDestroy {
       exit_code: live?.exitCode ?? null,
       started_at: live?.startedAt ?? row.createdAt,
       started_by: row.startedBy === TabOpener.Agent ? TabOpener.Agent : TabOpener.Operator,
+      prod_connections: live?.prod ?? [],
     };
   }
 
@@ -435,6 +453,7 @@ export class ProcessesService implements OnModuleDestroy {
       exitCode: null,
       startedAt: new Date().toISOString(),
       stopRequested: false,
+      prod: this.prodIn(row.folder),
       exited: new Promise<void>((resolve) => {
         finished = resolve;
       }),

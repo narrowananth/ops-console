@@ -217,6 +217,13 @@ export function TerminalsDock({
           {error}
         </p>
       )}
+      {current !== undefined && current.prod_connections.length > 0 && (
+        <p role="status" className="m-0 border-b border-line bg-accent-100 px-3 py-1.5 text-xs text-accent-900">
+          This folder's .env names the PROD Connection{current.prod_connections.length > 1 ? 's' : ''}{' '}
+          {current.prod_connections.join(', ')}. The process can reach{' '}
+          {current.prod_connections.length > 1 ? 'them' : 'it'}.
+        </p>
+      )}
       {processes.isPending ? (
         <p className="m-0 px-4 py-3 text-xs text-neutral-700">Reading the processes…</p>
       ) : processes.isError ? (

@@ -87,7 +87,7 @@ export interface BrowserTools {
 export interface ProcessTools {
   offers(sessionId: string): boolean;
   /** The words the operator's Approval shows. Throws an `ApiError` for a folder the Session may not use. */
-  describeStart(sessionId: string, input: StartProcessInput): { summary: string; folder: string };
+  describeStart(sessionId: string, input: StartProcessInput): { summary: string; folder: string; prod: string[] };
   startForAgent(sessionId: string, input: StartProcessInput): Promise<{ name: string; state: string }>;
   outputOf(sessionId: string, name: string, lines: number): string;
   stopByName(sessionId: string, name: string): Promise<{ name: string; state: string }>;
@@ -102,20 +102,26 @@ const text = (value: unknown): ToolResult => ({
   content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
 });
 
-/** A Stop on the run ends the call: the tool answers at once while the page's own work finishes on its own. */
-async function guarded(work: () => Promise<ToolResult>, failure: string, extra?: unknown): Promise<ToolResult> {
-  const signal = (extra as { signal?: AbortSignal } | undefined)?.signal;
+/**
+ * A Stop on the run ends the call: the tool answers at once with "Stopped by the operator." while the page's own work
+ * finishes on its own. Two signals end it: the run's, and the one the MCP request carries when it is cancelled.
+ */
+async function guarded(
+  work: () => Promise<ToolResult>,
+  failure: string,
+  extra: unknown,
+  runSignal: AbortSignal | undefined,
+): Promise<ToolResult> {
+  const signals = [runSignal, (extra as { signal?: AbortSignal } | undefined)?.signal].filter(
+    (signal): signal is AbortSignal => signal !== undefined,
+  );
+  const stopped: ToolResult = { content: [{ type: 'text', text: 'Stopped by the operator.' }], isError: true };
   try {
-    if (!signal) return await work();
-    if (signal.aborted) return { content: [{ type: 'text', text: 'Stopped by the operator.' }], isError: true };
-    const stopped = new Promise<ToolResult>((resolve) =>
-      signal.addEventListener(
-        'abort',
-        () => resolve({ content: [{ type: 'text', text: 'Stopped by the operator.' }], isError: true }),
-        { once: true },
-      ),
-    );
-    return await Promise.race([work(), stopped]);
+    if (signals.some((signal) => signal.aborted)) return stopped;
+    const ended = new Promise<ToolResult>((resolve) => {
+      for (const signal of signals) signal.addEventListener('abort', () => resolve(stopped), { once: true });
+    });
+    return await Promise.race([work(), ended]);
   } catch (error) {
     const why = error instanceof ApiError ? error.message : failure;
     return { content: [{ type: 'text', text: why }], isError: true };
@@ -123,7 +129,14 @@ async function guarded(work: () => Promise<ToolResult>, failure: string, extra?:
 }
 
 /** The browser and process tools of one run. The runtime's PreToolUse hook gates each call. */
-export function sessionTools(browser: BrowserTools | null, processes: ProcessTools | null, sessionId: string) {
+export function sessionTools(
+  browser: BrowserTools | null,
+  processes: ProcessTools | null,
+  sessionId: string,
+  runSignal?: AbortSignal,
+) {
+  const guard = (work: () => Promise<ToolResult>, failure: string, extra: unknown) =>
+    guarded(work, failure, extra, runSignal);
   return [
     ...(browser
       ? [
@@ -132,7 +145,7 @@ export function sessionTools(browser: BrowserTools | null, processes: ProcessToo
             "Opens a page in the Session's browser panel, which the operator watches. Loopback addresses only (localhost, 127.0.0.1, [::1]): a dev server this Session runs. Waits for the page to load. Start the server first with start_process, or ask the operator to.",
             browserOpenInputSchema.shape,
             (args, extra) =>
-              guarded(
+              guard(
                 async () => text(await browser.open(sessionId, args.url, args.tab_id)),
                 'The page did not open.',
                 extra,
@@ -143,14 +156,14 @@ export function sessionTools(browser: BrowserTools | null, processes: ProcessToo
             'Returns the page as an accessibility tree. Each element has a ref such as e12; browser_click and browser_type take it. Read the page again after it changes.',
             browserTabInputSchema.shape,
             (args, extra) =>
-              guarded(async () => text(await browser.snapshot(sessionId, args.tab_id)), 'No snapshot.', extra),
+              guard(async () => text(await browser.snapshot(sessionId, args.tab_id)), 'No snapshot.', extra),
           ),
           tool(
             'browser_screenshot',
             'Takes a picture of the page. It is shown in the conversation and saved nowhere else.',
             browserTabInputSchema.shape,
             (args, extra) =>
-              guarded(
+              guard(
                 async () => {
                   const shot = await browser.screenshot(sessionId, args.tab_id);
                   return { content: [{ type: 'image' as const, data: shot.base64, mimeType: shot.mimeType }] };
@@ -164,7 +177,7 @@ export function sessionTools(browser: BrowserTools | null, processes: ProcessToo
             'Clicks the element with this ref from the last browser_snapshot.',
             browserClickInputSchema.shape,
             (args, extra) =>
-              guarded(
+              guard(
                 async () => text(await browser.click(sessionId, args.ref, args.tab_id)),
                 'The click failed.',
                 extra,
@@ -175,9 +188,10 @@ export function sessionTools(browser: BrowserTools | null, processes: ProcessToo
             'Types text into the element with this ref, and presses Enter after it when submit is true.',
             browserTypeInputSchema.shape,
             (args, extra) =>
-              guarded(
+              guard(
                 async () => text(await browser.type(sessionId, args.ref, args.text, args.submit ?? false, args.tab_id)),
                 'The text was not typed.',
+                extra,
               ),
           ),
           tool(
@@ -185,9 +199,10 @@ export function sessionTools(browser: BrowserTools | null, processes: ProcessToo
             'Presses one key on the page, such as Enter, Escape, Tab or ArrowDown.',
             browserPressInputSchema.shape,
             (args, extra) =>
-              guarded(
+              guard(
                 async () => text(await browser.press(sessionId, args.key, args.tab_id)),
                 'The key was not pressed.',
+                extra,
               ),
           ),
           tool(
@@ -195,7 +210,7 @@ export function sessionTools(browser: BrowserTools | null, processes: ProcessToo
             'Scrolls the page by dx and dy pixels.',
             browserScrollInputSchema.shape,
             (args, extra) =>
-              guarded(
+              guard(
                 async () => text(await browser.scroll(sessionId, args.dx, args.dy, args.tab_id)),
                 'The page did not scroll.',
                 extra,
@@ -206,9 +221,10 @@ export function sessionTools(browser: BrowserTools | null, processes: ProcessToo
             'Runs a script in the page and returns its result as JSON. The operator approves each script. Use browser_snapshot and browser_click first; use this for what they cannot read.',
             browserEvaluateInputSchema.shape,
             (args, extra) =>
-              guarded(
+              guard(
                 async () => text(await browser.evaluate(sessionId, args.script, args.tab_id)),
                 'The script failed.',
+                extra,
               ),
           ),
           tool(
@@ -216,9 +232,10 @@ export function sessionTools(browser: BrowserTools | null, processes: ProcessToo
             "Returns the page's last console messages.",
             browserEntriesInputSchema.shape,
             (args, extra) =>
-              guarded(
+              guard(
                 async () => text(await browser.consoleEntries(sessionId, args.count, args.tab_id)),
                 'No console messages.',
+                extra,
               ),
           ),
           tool(
@@ -226,9 +243,10 @@ export function sessionTools(browser: BrowserTools | null, processes: ProcessToo
             "Returns the page's last requests with their status.",
             browserEntriesInputSchema.shape,
             (args, extra) =>
-              guarded(
+              guard(
                 async () => text(await browser.networkEntries(sessionId, args.count, args.tab_id)),
                 'No requests.',
+                extra,
               ),
           ),
         ]
@@ -240,7 +258,7 @@ export function sessionTools(browser: BrowserTools | null, processes: ProcessToo
             "Starts a long-running command, such as a dev server, in the Session's Terminals panel, after the operator approves it. It runs as the operator, outside your sandbox, with the Repo's environment, and keeps running after your turn. Give a short name and the command. Then read its output with process_output and open its address with browser_open.",
             startProcessInputSchema.shape,
             (args, extra) =>
-              guarded(
+              guard(
                 async () => {
                   const started = await processes.startForAgent(sessionId, args);
                   return text(
@@ -256,18 +274,14 @@ export function sessionTools(browser: BrowserTools | null, processes: ProcessToo
             "Returns the last lines of a Session process's output, such as the address a dev server listens on.",
             processOutputInputSchema.shape,
             (args, extra) =>
-              guarded(
-                async () => text(processes.outputOf(sessionId, args.name, args.lines)),
-                'No such process.',
-                extra,
-              ),
+              guard(async () => text(processes.outputOf(sessionId, args.name, args.lines)), 'No such process.', extra),
           ),
           tool(
             'stop_process',
             'Stops a process of this Session by name.',
             stopProcessInputSchema.shape,
             (args, extra) =>
-              guarded(async () => text(await processes.stopByName(sessionId, args.name)), 'No such process.', extra),
+              guard(async () => text(await processes.stopByName(sessionId, args.name)), 'No such process.', extra),
           ),
         ]
       : []),

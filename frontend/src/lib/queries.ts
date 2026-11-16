@@ -100,6 +100,7 @@ import {
   skillPackListSchema,
   skillPackSchema,
   skillSchema,
+  stagedFileSchema,
   startAtLoginSchema,
   statusCodeCountSchema,
   type Tab,
@@ -113,7 +114,7 @@ import {
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { z } from 'zod';
-import { apiGet, apiSend } from './api';
+import { apiGet, apiSend, apiUpload } from './api';
 import { sessionToken } from './session';
 
 export const queryKeys = {
@@ -1811,6 +1812,24 @@ export function useCloseTab(sessionId: string) {
 export function useOpenExternal() {
   return useMutation({
     mutationFn: (tabId: string) => apiSend('POST', `/browser/tabs/${tabId}/external`, undefined, z.undefined()),
+  });
+}
+
+/** Gives the page's open file picker the files the operator chose; none cancels it. */
+export function useChooseFiles() {
+  return useMutation({
+    mutationFn: async ({ tabId, files }: { tabId: string; files: File[] }) => {
+      const ids: string[] = [];
+      for (const file of files) {
+        const staged = await apiUpload(
+          `/browser/tabs/${tabId}/files?name=${encodeURIComponent(file.name)}`,
+          file,
+          z.object({ data: stagedFileSchema }),
+        );
+        ids.push(staged.data.id);
+      }
+      await apiSend('POST', `/browser/tabs/${tabId}/files/choose`, { ids }, z.undefined());
+    },
   });
 }
 

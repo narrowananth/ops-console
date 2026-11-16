@@ -12,6 +12,7 @@ import {
   WS_PROTOCOL,
 } from '@ops-console/shared';
 import { chromium } from 'playwright-core';
+import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { sessionTools } from '../src/agent/session-tools';
@@ -27,6 +28,11 @@ const chromePath = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   chromium.executablePath(),
 ].find((candidate): candidate is string => Boolean(candidate) && existsSync(candidate as string));
+
+// CI runs on macOS runners that have Google Chrome. Without it the real-browser tests would skip and pass, so it fails here.
+it.runIf(!chromePath && Boolean(process.env.CI))('finds Google Chrome, so the browser tests run', () => {
+  throw new Error('No Google Chrome found: the browser tests would skip. Install it or set OPS_CONSOLE_CHROME_PATH.');
+});
 
 const PAGE = `<!doctype html><html><head><title>Dev app</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -66,6 +72,11 @@ class DevServer {
       case '/redirect':
         res.writeHead(302, { location: 'http://example.invalid/' });
         return res.end();
+      case '/upload':
+        return send(
+          'text/html',
+          '<title>Upload</title><input id="f" type="file" multiple><button id="pick" onclick="document.getElementById(\'f\').click()">Pick</button>',
+        );
       case '/blank':
         return send('text/html', '<title>Blank</title>');
       case '/dialogs':
@@ -340,6 +351,51 @@ describe.skipIf(!chromePath)('Session browser in a real Chrome', () => {
     expect(await size()).toEqual([500, 400, 1]);
     const unknown = await set({ ...preset, preset: 'toaster' });
     expect(unknown.status).toBe(400);
+  });
+
+  describe("the page's file picker", () => {
+    const pick = async (names: Record<string, string>, ids = true) => {
+      const { tab_id: tabId } = await h.tools.open(session, `${dev.url}/upload`);
+      const { snapshot } = await h.tools.snapshot(session, tabId);
+      const ref = /button "Pick"[^\n]*\[ref=(\w+)\]/.exec(snapshot)?.[1] as string;
+      await h.tools.click(session, ref, tabId);
+      const tab = await settled(h, session, tabId, (t) => t.file_chooser !== null);
+      const staged: string[] = [];
+      for (const [name, body] of Object.entries(names)) {
+        const saved = await request(h.daemon.url)
+          .post(`/api/browser/tabs/${tabId}/files?name=${encodeURIComponent(name)}`)
+          .set(h.daemon.auth)
+          .set('Content-Type', 'application/octet-stream')
+          .send(Buffer.from(body));
+        expect(saved.status).toBe(201);
+        staged.push(saved.body.data.id);
+      }
+      return { tabId, tab, staged: ids ? staged : [] };
+    };
+
+    it('shows the operator a picker, hands the page the chosen files by their names, and clears the request', async () => {
+      const { tabId, tab, staged } = await pick({ 'notes.txt': 'hello', 'a b.csv': 'x,y' });
+      expect(tab.file_chooser).toEqual({ multiple: true });
+      const chosen = await h.http.post(`/browser/tabs/${tabId}/files/choose`, { ids: staged });
+      expect(chosen.status).toBe(204);
+      expect(
+        await read<string[]>(h, session, tabId, `[...document.getElementById('f').files].map((f) => f.name)`),
+      ).toEqual(['notes.txt', 'a b.csv']);
+      expect(await read<string>(h, session, tabId, `document.getElementById('f').files[0].size + ''`)).toBe('5');
+      expect((await settled(h, session, tabId)).file_chooser).toBeNull();
+    });
+
+    it('gives the page no file when the operator cancels, and refuses files nobody asked for', async () => {
+      const { tabId } = await pick({});
+      expect((await h.http.post(`/browser/tabs/${tabId}/files/choose`, { ids: [] })).status).toBe(204);
+      expect(await read<number>(h, session, tabId, `document.getElementById('f').files.length`)).toBe(0);
+      const none = await request(h.daemon.url)
+        .post(`/api/browser/tabs/${tabId}/files?name=late.txt`)
+        .set(h.daemon.auth)
+        .set('Content-Type', 'application/octet-stream')
+        .send(Buffer.from('x'));
+      expect(none.status).toBe(409);
+    });
   });
 
   describe('through the stream', () => {

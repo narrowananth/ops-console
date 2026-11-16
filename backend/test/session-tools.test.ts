@@ -4,9 +4,12 @@ import { AgentRuntime } from '../src/agent/runtime';
 import {
   BROWSER_CLICK_TOOL,
   BROWSER_EVALUATE_TOOL,
+  type BrowserTools,
   PROCESS_OUTPUT_TOOL,
+  type ProcessTools,
   START_PROCESS_TOOL,
   STOP_PROCESS_TOOL,
+  sessionTools,
 } from '../src/agent/session-tools';
 import { BrowserModule } from '../src/browser/browser.module';
 import { ProcessesModule } from '../src/processes/processes.module';
@@ -164,5 +167,71 @@ describe('the agent starts processes and uses the browser', () => {
     for (const call of ctx.daemon.sdk.calls.slice(before)) {
       expect(names(call).some((name) => name === 'start_process' || name.startsWith('browser_'))).toBe(false);
     }
+  });
+});
+
+describe('a Stop on the run', () => {
+  type Handler = (
+    args: Record<string, unknown>,
+    extra: unknown,
+  ) => Promise<{
+    content: { type: string; text?: string }[];
+    isError?: boolean;
+  }>;
+  /** A browser whose calls never answer: the page is still loading when the operator presses Stop. */
+  const hanging = (): BrowserTools => {
+    const never = () => new Promise<never>(() => {});
+    return {
+      offers: () => true,
+      describeEvaluate: String,
+      open: never,
+      snapshot: never,
+      screenshot: never,
+      click: never,
+      type: never,
+      press: never,
+      scroll: never,
+      evaluate: never,
+      consoleEntries: never,
+      networkEntries: never,
+    };
+  };
+  const handlers = (signal?: AbortSignal, processes: ProcessTools | null = null) =>
+    new Map(
+      sessionTools(hanging(), processes, 's1', signal).map((entry) => [
+        entry.name,
+        entry.handler as unknown as Handler,
+      ]),
+    );
+
+  it('ends a browser call that is still waiting, whichever tool it is', async () => {
+    const run = new AbortController();
+    const calls = handlers(run.signal);
+    const pending = [...calls].map(
+      ([name, handler]) =>
+        [
+          name,
+          handler({ url: 'http://localhost:1/', ref: 'e1', text: 'x', key: 'Tab', dy: 1, script: '1' }, {}),
+        ] as const,
+    );
+    run.abort();
+    for (const [name, call] of pending) {
+      const result = await call;
+      expect([name, result.isError, result.content[0]?.text]).toEqual([name, true, 'Stopped by the operator.']);
+    }
+  });
+
+  it('also ends a call when the request itself is cancelled, and refuses one that starts after the Stop', async () => {
+    const request = new AbortController();
+    const open = handlers().get('browser_open');
+    if (!open) throw new Error('no browser_open');
+    const waiting = open({ url: 'http://localhost:1/' }, { signal: request.signal });
+    request.abort();
+    expect((await waiting).content[0]?.text).toBe('Stopped by the operator.');
+
+    const run = new AbortController();
+    run.abort();
+    const late = handlers(run.signal).get('browser_snapshot');
+    expect((await late?.({}, {}))?.isError).toBe(true);
   });
 });

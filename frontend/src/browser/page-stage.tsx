@@ -1,5 +1,6 @@
 import type { BrowserServerMessage, Tab } from '@ops-console/shared';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { useChooseFiles } from '../lib/queries';
 import { createPainter } from './frame-painter';
 import { fillSize, fitScale, isFill, pageSize, type Size, toPagePoint } from './geometry';
 import { buttonName, isPasteShortcut, keyMessage, modifiersOf, wheelPixels } from './input';
@@ -44,6 +45,8 @@ export function PageStage({
   const [frame, setFrame] = useState<Size | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const fill = isFill(tab.viewport);
+  const choose = useChooseFiles();
+  const picker = useRef<HTMLInputElement>(null);
 
   const paint = useMemo(
     () =>
@@ -239,6 +242,44 @@ export function PageStage({
           </span>
         )}
       </div>
+      {tab.file_chooser && (
+        <div
+          role="dialog"
+          aria-label="The page asks for a file"
+          className="absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-line bg-card px-3 py-2 text-xs shadow-md"
+        >
+          <span>{tab.file_chooser.multiple ? 'The page asks for files.' : 'The page asks for a file.'}</span>
+          <input
+            ref={picker}
+            type="file"
+            hidden
+            multiple={tab.file_chooser.multiple}
+            aria-label="Choose from this computer"
+            onChange={(event) => {
+              const files = [...(event.target.files ?? [])];
+              event.target.value = '';
+              if (files.length > 0) choose.mutate({ tabId: tab.id, files });
+            }}
+          />
+          <button
+            type="button"
+            disabled={choose.isPending}
+            onClick={() => picker.current?.click()}
+            className="cursor-pointer rounded-md border border-line bg-card px-2.5 py-1 text-xs font-semibold hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Choose from this computer
+          </button>
+          <button
+            type="button"
+            disabled={choose.isPending}
+            onClick={() => choose.mutate({ tabId: tab.id, files: [] })}
+            className="cursor-pointer border-0 bg-transparent px-1 text-xs text-neutral-700 hover:text-text"
+          >
+            Cancel
+          </button>
+          {choose.isError && <span role="alert">{choose.error.message}</span>}
+        </div>
+      )}
       {notice && (
         <div
           role="status"

@@ -1002,6 +1002,7 @@ export class AgentRuntime implements OnModuleDestroy {
                     integrations,
                     browser,
                     processes,
+                    signal: run.abort.signal,
                   },
                   run.sessionId,
                 ),
@@ -1829,16 +1830,26 @@ export class AgentRuntime implements OnModuleDestroy {
     };
     const parsed = startProcessInputSchema.safeParse(toolInput);
     if (!this.processTools || !parsed.success) return refuse('Give the process a name and a command.');
-    let summary: string;
+    let described: { summary: string; prod: string[] };
     try {
-      summary = this.processTools.describeStart(run.sessionId, parsed.data).summary;
+      described = this.processTools.describeStart(run.sessionId, parsed.data);
     } catch (error) {
       return refuse(error instanceof ApiError ? error.message : 'That process cannot start.');
     }
-    return this.askLogged(run, stepId, summary, ActionKind.Shell, 'session process', parsed.data.command, {
-      yes: 'The operator approved starting this process.',
-      no: 'The operator denied starting this process. Do not retry it, by this tool or by a command.',
-    });
+    // A folder whose .env names a PROD Connection shows the Approval as PROD.
+    return this.askLogged(
+      run,
+      stepId,
+      described.summary,
+      ActionKind.Shell,
+      'session process',
+      parsed.data.command,
+      described.prod.length > 0,
+      {
+        yes: 'The operator approved starting this process.',
+        no: 'The operator denied starting this process. Do not retry it, by this tool or by a command.',
+      },
+    );
   }
 
   /** A script in the page asks in every Access mode: it is the one browser tool that can make a page send data out. */
@@ -1861,6 +1872,7 @@ export class AgentRuntime implements OnModuleDestroy {
       ActionKind.Query,
       'session browser',
       `browser_evaluate ${parsed.data.script.slice(0, 500)}`,
+      false,
       {
         yes: 'The operator approved this script.',
         no: 'The operator denied this script. Do not retry it.',
@@ -1875,13 +1887,14 @@ export class AgentRuntime implements OnModuleDestroy {
     kind: ActionKind,
     target: string,
     command: string,
+    isProd: boolean,
     reasons: { yes: string; no: string },
   ): Promise<HookJSONOutput> {
-    const row = this.actionLog.start({ sessionId: run.sessionId, kind, target, command, isProd: false });
+    const row = this.actionLog.start({ sessionId: run.sessionId, kind, target, command, isProd });
     run.toolRows.set(stepId, row);
     const decision = await this.ask(
       run,
-      { actionLogId: row, sessionId: run.sessionId, kind: ApprovalKind.Command, summary, isProd: false },
+      { actionLogId: row, sessionId: run.sessionId, kind: ApprovalKind.Command, summary, isProd },
       stepId,
     );
     const approved = decision === ApprovalStatus.Approved;

@@ -147,6 +147,8 @@ export function consoleToolsServer(
     integrations?: IntegrationRunner | null;
     browser?: BrowserTools | null;
     processes?: ProcessTools | null;
+    /** Aborts when the operator stops the run. */
+    signal?: AbortSignal;
   },
   sessionId: string,
 ): McpSdkServerConfigWithInstance {
@@ -159,6 +161,7 @@ export function consoleToolsServer(
     integrations = null,
     browser = null,
     processes = null,
+    signal,
   } = tools;
   return createSdkMcpServer({
     name: CONSOLE_TOOLS_SERVER,
@@ -216,7 +219,7 @@ export function consoleToolsServer(
             ),
           ]
         : []),
-      ...sessionTools(browser, processes, sessionId),
+      ...sessionTools(browser, processes, sessionId, signal),
     ],
   });
 }

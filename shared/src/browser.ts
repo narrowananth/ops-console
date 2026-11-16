@@ -64,11 +64,19 @@ export const tabSchema = z.object({
   called_hosts: z.array(z.string()),
   /** True while an agent tool call is running on this tab. */
   agent_active: z.boolean(),
+  /** Set while the page waits for the operator to pick a file. */
+  file_chooser: z.object({ multiple: z.boolean() }).nullable(),
 });
 export type Tab = z.infer<typeof tabSchema>;
 
 export const browserStateSchema = z.object({ chrome: z.enum(ChromeState), tabs: z.array(tabSchema) });
 export type BrowserState = z.infer<typeof browserStateSchema>;
+
+export const chooseFilesBodySchema = z.object({ ids: z.array(z.string().min(1)).max(50) });
+export type ChooseFilesBody = z.infer<typeof chooseFilesBodySchema>;
+
+export const stagedFileSchema = z.object({ id: z.string(), name: z.string(), size: z.number().int() });
+export type StagedFile = z.infer<typeof stagedFileSchema>;
 
 export const createTabBodySchema = z.object({ url: z.string().min(1).max(2048).optional() });
 export type CreateTabBody = z.infer<typeof createTabBodySchema>;
@@ -90,6 +98,8 @@ export const sessionProcessSchema = z.object({
   exit_code: z.number().int().nullable(),
   started_at: z.string(),
   started_by: z.enum(TabOpener),
+  /** PROD Connections whose host the folder's `.env` files name, read when the process started. */
+  prod_connections: z.array(z.string()),
 });
 export type SessionProcess = z.infer<typeof sessionProcessSchema>;
 

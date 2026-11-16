@@ -37,8 +37,9 @@ a page or a Session process reaches.
 A page the agent wrote can send what it reads to any host. If text the agent read steers it, the page could post the
 Repo's files or `.env` values to a host off the allowlist. The operator reads the code in the Session's diff and runs the
 page; the console cannot stop this without blocking the page. A process runs with the Repo's own `.env`, so it may reach
-whatever that file names, a PROD Connection's database included, and the console cannot tell. A command that writes to
-PROD is the operator's to run, as the Prod rule says.
+whatever that file names. The console shows a PROD Connection whose host that file holds, in the dock and in the agent's
+Approval, but cannot see what the process does with it. A command that writes to PROD is the operator's to run, as the
+Prod rule says.
 
 A steered chat can read a loopback page and click in it. The pages it reaches are the operator's own dev servers.
 
