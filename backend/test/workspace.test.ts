@@ -206,6 +206,12 @@ describe('Sessions in a Repo', () => {
     ctx.daemon.sdk.script({ text: 'two' });
 
     expect((await ctx.http.post(`/sessions/${first}/messages`, { text: 'go' })).status).toBe(202);
+    // The scripts go to runs in the order they reach the SDK: the second run starts once the first is held there.
+    await until(
+      async () => ctx.daemon.sdk.calls.length,
+      (calls) => calls === 1,
+      "the first run's call",
+    );
     await ctx.http.post(`/sessions/${second}/messages`, { text: 'go' });
     const busy = await ctx.http.post(`/sessions/${first}/messages`, { text: 'again' });
     expect(busy.status).toBe(409);
