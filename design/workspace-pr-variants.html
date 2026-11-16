@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workspace: pull request screen variants</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg:#f3f2f2; --surface:#ebe9e8; --card:#fbfafa; --text:#201e1d; --accent:#ec3013;
+    --line:rgba(32,30,29,.11); --divider:rgba(32,30,29,.18);
+    --ok:#2f7d3b; --warn:#b26b00; --bad:#b4210e;
+    --n200:#eae7e7; --n300:#d7d3d3; --n500:#9b9797; --n600:#7d7979; --n700:#605d5d;
+    --a100:#fff2ef; --a200:#ffe0d9;
+    --add:#e7f5ea; --addb:#c6e9cf; --addt:#1d6b30; --del:#fdeceb; --delb:#f9cdc7; --delt:#a3200d; --hunk:#e9f0fb; --hunkt:#3d5f92;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#dedbda; color:var(--text); font:13px/1.4 "Archivo",system-ui,sans-serif; padding:32px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .lede { color:var(--n700); margin:0 0 28px; max-width:1100px; }
+  .variant { margin-bottom:48px; }
+  .variant > h2 { font-size:16px; margin:0 0 2px; }
+  .variant > .why { color:var(--n700); margin:0 0 10px; max-width:1100px; }
+  .frame { width:1280px; height:760px; background:var(--bg); border:1px solid var(--divider); border-radius:10px; display:flex; overflow:hidden; position:relative; box-shadow:0 6px 24px rgba(0,0,0,.08); }
+  .mono { font-family:var(--mono); }
+  button { font:inherit; color:inherit; }
+
+  .app { width:56px; flex:none; border-right:1px solid var(--line); display:flex; flex-direction:column; align-items:center; gap:6px; padding:12px 0; }
+  .logo { width:30px; height:30px; border-radius:8px; background:var(--accent); margin-bottom:10px; }
+  .app i { width:34px; height:34px; border-radius:9px; display:grid; place-items:center; color:var(--n600); font-style:normal; font-size:15px; }
+  .app i.on { background:var(--card); color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.12); }
+
+  .dot { width:8px; height:8px; border-radius:50%; flex:none; display:inline-block; }
+  .d-need { background:var(--accent); } .d-run { background:var(--ok); } .d-idle { background:var(--n300); }
+  .chip { display:inline-flex; align-items:center; gap:4px; padding:1px 8px; border-radius:99px; background:var(--n200); font-size:11px; color:var(--n700); white-space:nowrap; }
+  .chip.need { background:var(--a200); color:#9b1f0a; } .chip.ok { background:#e3f1e5; color:var(--ok); } .chip.warn { background:#fbeccd; color:var(--warn); } .chip.bad { background:var(--a200); color:var(--bad); }
+  .seg { display:flex; gap:2px; background:var(--n200); padding:3px; border-radius:9px; }
+  .seg b { flex:1; text-align:center; font-weight:400; padding:4px 10px; border-radius:7px; color:var(--n700); white-space:nowrap; }
+  .seg b.on { background:var(--card); color:var(--text); font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,.1); }
+  .search { display:flex; align-items:center; gap:6px; border:1px solid var(--line); background:var(--card); border-radius:9px; padding:6px 10px; color:var(--n500); }
+  .search kbd { margin-left:auto; font:11px var(--mono); border:1px solid var(--line); border-radius:5px; padding:0 5px; color:var(--n600); }
+  .btn { border:1px solid var(--line); background:var(--card); border-radius:9px; padding:6px 12px; cursor:pointer; white-space:nowrap; }
+  .btn.pri { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  .btn.ok { background:var(--ok); border-color:var(--ok); color:#fff; font-weight:600; }
+  .btn.off { opacity:.45; cursor:not-allowed; }
+  .btn.sm { padding:3px 9px; font-size:12px; }
+  .sub { color:var(--n600); font-size:12px; }
+  .st { font-size:11px; display:inline-flex; gap:3px; align-items:center; }
+  .st.ok { color:var(--ok); } .st.bad { color:var(--bad); } .st.run { color:var(--warn); } .st.mute { color:var(--n600); }
+  .add { color:var(--addt); } .del { color:var(--delt); }
+  .sp { flex:1; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .panel > h5 { margin:0; padding:8px 14px; background:var(--surface); font-size:12px; display:flex; gap:8px; align-items:center; }
+  .panel > .in { padding:10px 14px; }
+
+  /* PR list pane (shared) */
+  .list { width:300px; flex:none; border-right:1px solid var(--line); display:flex; flex-direction:column; }
+  .list .top { padding:14px 12px 8px; display:flex; flex-direction:column; gap:8px; }
+  .filters { display:flex; gap:6px; flex-wrap:wrap; }
+  .filters .chip { padding:2px 9px; background:transparent; border:1px solid var(--line); }
+  .filters .chip.on { background:var(--text); color:#fff; border-color:var(--text); }
+  .grp { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--n600); padding:10px 14px 4px; display:flex; }
+  .grp em { font-style:normal; margin-left:auto; font-family:var(--mono); }
+  .row { padding:8px 12px; border-radius:10px; margin:0 6px; }
+  .row.sel { background:var(--card); box-shadow:0 1px 2px rgba(0,0,0,.1); }
+  .row .t { display:flex; gap:8px; align-items:center; font-weight:600; }
+  .row .t .n { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+  .row .m { display:flex; gap:6px; align-items:center; margin:3px 0 0 16px; color:var(--n600); font-size:12px; white-space:nowrap; overflow:hidden; }
+  .num { font-family:var(--mono); color:var(--n600); font-weight:400; }
+  .railmini { width:52px; flex:none; border-right:1px solid var(--line); display:flex; flex-direction:column; align-items:center; gap:8px; padding:12px 0; }
+  .railmini .pr { width:34px; height:34px; border-radius:9px; display:grid; place-items:center; font:600 11px var(--mono); background:var(--card); border:1px solid var(--line); position:relative; }
+  .railmini .pr.on { border:2px solid var(--accent); }
+  .railmini .pr i { position:absolute; top:-3px; right:-3px; width:9px; height:9px; border-radius:50%; background:var(--accent); }
+
+  .detail { flex:1; min-width:0; display:flex; flex-direction:column; }
+  .scrollc { flex:1; overflow:hidden; display:flex; flex-direction:column; gap:12px; padding:16px 22px; }
+  .meta { display:flex; gap:8px; align-items:center; flex-wrap:wrap; color:var(--n700); }
+  .acts { display:flex; gap:8px; align-items:center; }
+  .link { display:flex; gap:8px; align-items:center; background:var(--surface); border-radius:9px; padding:6px 10px; color:var(--n700); }
+  .find { display:flex; gap:10px; padding:8px 0; border-top:1px solid var(--line); align-items:flex-start; }
+  .find:first-child { border-top:0; }
+  .tabs2 { display:flex; gap:20px; padding:0 22px; border-bottom:1px solid var(--line); }
+  .tabs2 span { padding:9px 0; color:var(--n700); border-bottom:2px solid transparent; }
+  .tabs2 span.on { color:var(--text); font-weight:600; border-color:var(--accent); }
+  .tabs2 em { font:normal 11px var(--mono); background:var(--n200); border-radius:99px; padding:0 6px; margin-left:4px; }
+  .bar { height:6px; border-radius:99px; background:var(--n300); overflow:hidden; width:90px; display:inline-block; }
+  .bar i { display:block; height:100%; background:var(--ok); }
+
+  /* checklist */
+  .chk { display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-top:1px solid var(--line); }
+  .chk:first-child { border-top:0; }
+  .chk .ic { width:18px; height:18px; border-radius:50%; flex:none; display:grid; place-items:center; font-size:11px; color:#fff; margin-top:1px; }
+  .ic.ok { background:var(--ok); } .ic.bad { background:var(--bad); } .ic.wait { background:var(--n500); } .ic.run { background:var(--warn); }
+  .chk b { display:block; } .chk .sub { display:block; }
+
+  /* diff */
+  .dfile { border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--card); }
+  .dfile > header { display:flex; gap:10px; align-items:center; padding:7px 12px; background:var(--surface); font:12px var(--mono); }
+  .code { font:12px/1.55 var(--mono); }
+  .ln { display:flex; white-space:pre; }
+  .ln span:first-child { width:36px; text-align:right; color:var(--n500); padding-right:6px; flex:none; user-select:none; }
+  .ln span:nth-child(2) { width:36px; text-align:right; color:var(--n500); padding-right:8px; flex:none; }
+  .ln.a { background:var(--add); } .ln.d { background:var(--del); } .ln.h { background:var(--hunk); color:var(--hunkt); }
+  .ln.a span:last-child { color:var(--addt); } .ln.d span:last-child { color:var(--delt); }
+  .inline { margin:6px 12px 6px 84px; border:1px solid var(--accent); background:var(--a100); border-radius:10px; padding:8px 12px; font:13px/1.4 "Archivo",system-ui,sans-serif; }
+  .tree { width:270px; flex:none; border-right:1px solid var(--line); padding:12px 8px; display:flex; flex-direction:column; gap:2px; }
+  .tree .f { display:flex; gap:8px; align-items:center; padding:5px 8px; border-radius:7px; font:12px var(--mono); }
+  .tree .f.sel { background:var(--card); box-shadow:0 1px 2px rgba(0,0,0,.1); }
+  .tree .f .nm { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+  .tree .d { font:11px var(--mono); color:var(--n600); padding:6px 8px 2px; }
+  .box { width:14px; height:14px; border-radius:4px; border:1.5px solid var(--n400,#bab6b6); flex:none; display:grid; place-items:center; font-size:10px; color:#fff; }
+  .box.on { background:var(--ok); border-color:var(--ok); }
+
+  /* thread */
+  .thr { border:1px solid var(--line); border-radius:10px; background:var(--card); padding:10px 12px; }
+  .thr .who { display:flex; gap:8px; align-items:center; margin-bottom:4px; }
+  .av { width:22px; height:22px; border-radius:50%; background:var(--n300); display:grid; place-items:center; font-size:10px; font-weight:700; color:var(--n700); flex:none; }
+
+  /* P3 right rail */
+  .side { width:280px; flex:none; border-left:1px solid var(--line); padding:16px 16px; display:flex; flex-direction:column; gap:12px; background:var(--surface); }
+  .side h6 { margin:0; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--n600); }
+  .side .btn { text-align:center; width:100%; }
+  .stickybot { border-top:1px solid var(--divider); background:var(--card); padding:10px 22px; display:flex; gap:8px; align-items:center; }
+</style>
+</head>
+<body>
+
+<h1>Workspace: pull request screen variants</h1>
+<p class="lede">Today's PR detail is one long scroll: status pills, a metadata block, five buttons, "Sessions on …: none", then description, files and comments. The Merge button sits far from what it depends on, and the review state is split across pills, a card and a comment count. All four variants keep the Inbox list pane from the Workspace variant A and change the detail. Same PR in every frame: #4498, 8 files, 3 comments, agent review ready with 1 high finding, review requested.</p>
+
+<!-- templates -->
+<template id="appRail"><div class="logo"></div><i>◔</i><i class="on">▤</i><i>⛁</i><i>⑂</i><i>⚙</i></template>
+<template id="prList">
+  <div class="top">
+    <div style="display:flex;gap:8px;align-items:center">
+      <div class="seg" style="flex:1"><b>Sessions</b><b class="on">Pull requests</b></div>
+      <button class="btn">⟳</button>
+    </div>
+    <div class="search">⌕ Number, title or author</div>
+    <div class="filters"><span class="chip on">Mine</span><span class="chip">All</span><span class="chip">Needs review 2</span><span class="chip">Failing 1</span></div>
+  </div>
+  <div class="grp">Needs your review <em>2</em></div>
+  <div class="row sel"><div class="t"><span class="dot d-need"></span><span class="n"><span class="num">#4498</span> Live video webhook auth</span><span class="sub">2d</span></div><div class="m"><span class="chip mono">storefront-api</span><span>maya</span><span class="st ok">✓</span><span class="st mute">💬 3</span></div></div>
+  <div class="row"><div class="t"><span class="dot d-need"></span><span class="n"><span class="num">#212</span> Add feed access rules</span><span class="sub">1d</span></div><div class="m"><span class="chip mono">atlas</span><span>dev</span><span class="st bad">✕ checks</span></div></div>
+  <div class="grp">Yours: changes requested <em>1</em></div>
+  <div class="row"><div class="t"><span class="dot d-run"></span><span class="n"><span class="num">#88</span> Remove convert-svg route</span><span class="sub">4h</span></div><div class="m"><span class="chip mono">web-admin</span><span class="st bad">changes</span><span class="st mute">💬 3</span></div></div>
+  <div class="grp">Ready to merge <em>1</em></div>
+  <div class="row"><div class="t"><span class="dot d-idle"></span><span class="n"><span class="num">#4510</span> Bump lockfile deps</span><span class="sub">6h</span></div><div class="m"><span class="chip mono">storefront-api</span><span class="st ok">✓ approved</span></div></div>
+</template>
+<template id="railMini">
+  <div class="pr on">4498<i></i></div><div class="pr">212<i></i></div><div class="pr">88</div><div class="pr">4510</div>
+</template>
+
+<!-- ============================ P1 ============================ -->
+<section class="variant">
+  <h2>P1 · Tabbed: header with actions, Overview / Files / Comments</h2>
+  <p class="why">One compact header: title, branch, status chips, the actions in one row, Merge pinned right. Sub-tabs split the long scroll. Overview answers "can I merge?" with a readiness checklist plus the agent review and description. Smallest change from today; every current feature has a home.</p>
+  <div class="frame">
+    <div class="app" data-t="appRail"></div>
+    <div class="list" data-t="prList"></div>
+    <div class="detail">
+      <div style="padding:16px 22px 12px">
+        <div style="display:flex;gap:10px;align-items:baseline"><h3 style="margin:0;font-size:19px"><span class="num">#4498</span> Live video webhook auth</h3><span class="sp"></span><span class="sub">Open on GitHub ↗</span></div>
+        <div class="meta" style="margin:6px 0 12px"><span class="chip mono">storefront-api</span><span class="mono">fix/live-video-auth → main</span><span>by maya</span><span class="add">+128</span><span class="del">−34</span><span class="chip ok">✓ Checks passed</span><span class="chip warn">Review requested</span></div>
+        <div class="acts"><button class="btn pri">Agent Review</button><button class="btn">Approve</button><button class="btn">Request changes</button><button class="btn">Address comments · 2</button><span class="sp"></span><button class="btn off">Merge</button></div>
+      </div>
+      <div class="tabs2"><span class="on">Overview</span><span>Files<em>3/8 viewed</em></span><span>Comments<em>3</em></span><span>Session</span></div>
+      <div class="scrollc">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="panel"><h5>Ready to merge?</h5><div class="in">
+            <div class="chk"><span class="ic ok">✓</span><div><b>Checks passed</b><span class="sub">12 of 12 on 9f3c2ab</span></div></div>
+            <div class="chk"><span class="ic wait">–</span><div><b>No approval yet</b><span class="sub">Approve to unlock Merge</span></div></div>
+            <div class="chk"><span class="ic bad">!</span><div><b>2 threads open</b><span class="sub">1 resolved</span></div></div>
+          </div></div>
+          <div class="panel"><h5>Agent review <span class="chip ok">Ready</span><span class="sub sp" style="text-align:right">9f3c2ab</span></h5><div class="in">
+            <div class="find"><span class="chip bad">high</span><div><b>Signature compared with <span class="mono">==</span></b><div class="sub mono">live-video.controller.ts:42</div></div></div>
+            <div class="find"><span class="chip">low</span><div><b>No replayed-timestamp test</b><div class="sub mono">live-video.spec.ts</div></div></div>
+          </div></div>
+        </div>
+        <div class="panel"><h5>Description <span class="sub">by maya</span><span class="sp"></span><span class="sub">▾</span></h5><div class="in">
+          <b>Summary</b><br>Verifies the provider signature on <span class="mono">POST /webhooks/live-video</span> and rejects unsigned calls with 401. Adds mocked tests for both paths.
+        </div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ P2 ============================ -->
+<section class="variant">
+  <h2>P2 · Review focus: file tree + diff, list folds to a rail</h2>
+  <p class="why">For when the job is reading code. List folds to a number rail, a file tree with Viewed ticks and comment counts takes its place, and the diff gets the width. Agent findings and comments sit inline on their line. The header shrinks to one line; "Review ▾" collects Approve, Request changes and Agent Review. Fastest for large diffs (this repo's PRs reach +7000 lines).</p>
+  <div class="frame">
+    <div class="app" data-t="appRail"></div>
+    <div class="railmini" data-t="railMini"></div>
+    <div class="tree">
+      <div style="padding:2px 8px 8px"><b>Files</b> <span class="sub">8 · </span><span class="add">+128</span> <span class="del">−34</span><div style="margin-top:6px"><span class="bar"><i style="width:37%"></i></span> <span class="sub">3 / 8 viewed</span></div></div>
+      <div class="d">src/webhooks/</div>
+      <div class="f sel"><span class="box"></span><span class="nm">live-video.controller.ts</span><span class="chip bad">1</span></div>
+      <div class="f"><span class="box"></span><span class="nm">live-video.guard.ts</span><span class="chip ok">new</span></div>
+      <div class="f"><span class="box on">✓</span><span class="nm">live-video.module.ts</span></div>
+      <div class="f"><span class="box"></span><span class="nm">live-video.spec.ts</span><span class="chip">1</span></div>
+      <div class="d">src/config/</div>
+      <div class="f"><span class="box on">✓</span><span class="nm">webhooks.config.ts</span></div>
+      <div class="f"><span class="box"></span><span class="nm">env.schema.ts</span></div>
+      <div class="d">root</div>
+      <div class="f"><span class="box on">✓</span><span class="nm">.env.example</span></div>
+      <div class="f"><span class="box"></span><span class="nm">README.md</span></div>
+    </div>
+    <div class="detail">
+      <div style="padding:12px 18px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center">
+        <h3 style="margin:0;font-size:15px"><span class="num">#4498</span> Live video webhook auth</h3>
+        <span class="chip ok">✓ Checks</span><span class="chip warn">Review requested</span><span class="chip bad">2 open</span>
+        <span class="sp"></span>
+        <button class="btn sm">Overview</button>
+        <button class="btn pri sm">Review ▾</button>
+        <button class="btn sm off">Merge</button>
+      </div>
+      <div class="scrollc" style="padding:14px 18px">
+        <div class="dfile">
+          <header><span class="box"></span><b>src/webhooks/live-video.controller.ts</b><span class="sp"></span><span class="add">+62</span><span class="del">−8</span><span class="sub">Viewed</span></header>
+          <div class="code">
+            <div class="ln h"><span></span><span></span><span>@@ -38,7 +38,16 @@ export class LiveVideoController {</span></div>
+            <div class="ln"><span>38</span><span>38</span><span>  @Post()</span></div>
+            <div class="ln"><span>39</span><span>39</span><span>  async handle(@Req() req, @Body() body) {</span></div>
+            <div class="ln d"><span>40</span><span></span><span>-   return this.service.process(body);</span></div>
+            <div class="ln a"><span></span><span>40</span><span>+   const sig = req.headers['x-signature'];</span></div>
+            <div class="ln a"><span></span><span>41</span><span>+   if (!sig || sig !== sign(req.rawBody)) {</span></div>
+            <div class="inline"><div style="display:flex;gap:8px;align-items:center;margin-bottom:3px"><span class="chip bad">high</span><b>Agent review</b><span class="sub">9f3c2ab</span></div>Plain <span class="mono">!==</span> leaks timing. Use <span class="mono">timingSafeEqual</span>.<div style="margin-top:6px;display:flex;gap:6px"><button class="btn sm">Post to GitHub</button><button class="btn sm">Fix with agent</button><button class="btn sm">Dismiss</button></div></div>
+            <div class="ln a"><span></span><span>42</span><span>+     throw new UnauthorizedException();</span></div>
+            <div class="ln a"><span></span><span>43</span><span>+   }</span></div>
+            <div class="ln a"><span></span><span>44</span><span>+   return this.service.process(body);</span></div>
+            <div class="ln"><span>41</span><span>45</span><span>  }</span></div>
+          </div>
+        </div>
+        <div class="dfile">
+          <header><span class="box"></span><b>src/webhooks/live-video.guard.ts</b><span class="chip ok">new</span><span class="sp"></span><span class="add">+41</span><span class="sub">▸ collapsed</span></header>
+        </div>
+        <div class="dfile">
+          <header><span class="box"></span><b>src/webhooks/live-video.spec.ts</b><span class="sp"></span><span class="add">+47</span><span class="sub">▸ collapsed</span></header>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ P3 ============================ -->
+<section class="variant">
+  <h2>P3 · Cockpit: content centre, decision rail on the right</h2>
+  <p class="why">The right rail is the decision: merge readiness checklist, the actions stacked, linked Session, people. It stays put while the centre scrolls through agent review, description, files and comments, so Approve and Merge never scroll away. Most informative at a glance; costs 280px of width.</p>
+  <div class="frame">
+    <div class="app" data-t="appRail"></div>
+    <div class="list" data-t="prList"></div>
+    <div class="detail">
+      <div style="padding:16px 22px 10px;border-bottom:1px solid var(--line)">
+        <h3 style="margin:0 0 6px;font-size:19px"><span class="num">#4498</span> Live video webhook auth</h3>
+        <div class="meta"><span class="chip mono">storefront-api</span><span class="mono">fix/live-video-auth → main</span><span>by maya</span><span class="add">+128</span><span class="del">−34</span><span class="sp"></span><span class="sub">Open on GitHub ↗</span></div>
+      </div>
+      <div style="display:flex;flex:1;min-height:0">
+        <div class="scrollc" style="flex:1;min-width:0">
+          <div class="panel"><h5>Agent review <span class="chip ok">Ready</span></h5><div class="in">
+            <div class="find"><span class="chip bad">high</span><div><b>Signature compared with <span class="mono">==</span></b><div class="sub mono">live-video.controller.ts:42</div></div></div>
+            <div class="find"><span class="chip">low</span><div><b>No replayed-timestamp test</b><div class="sub mono">live-video.spec.ts</div></div></div>
+          </div></div>
+          <div class="panel"><h5>Description <span class="sub">by maya</span></h5><div class="in">Verifies the provider signature on <span class="mono">POST /webhooks/live-video</span> and rejects unsigned calls with 401.</div></div>
+          <div class="panel"><h5>Files · 8 <span class="add">+128</span><span class="del">−34</span><span class="sp"></span><span class="sub">3 / 8 viewed</span><span class="bar"><i style="width:37%"></i></span></h5><div class="in" style="padding:4px 14px">
+            <div class="chk"><span class="box"></span><span class="mono">live-video.controller.ts</span><span class="sp"></span><span class="add">+62</span><span class="del">−8</span></div>
+            <div class="chk"><span class="box"></span><span class="mono">live-video.guard.ts</span><span class="sp"></span><span class="add">+41</span></div>
+            <div class="chk"><span class="box on">✓</span><span class="mono">live-video.module.ts</span><span class="sp"></span><span class="add">+2</span></div>
+            <div class="sub" style="padding:6px 0">+ 5 more</div>
+          </div></div>
+        </div>
+        <div class="side">
+          <h6>Merge readiness</h6>
+          <div>
+            <div class="chk"><span class="ic ok">✓</span><div><b>Checks passed</b></div></div>
+            <div class="chk"><span class="ic wait">–</span><div><b>Approval</b><span class="sub">none yet</span></div></div>
+            <div class="chk"><span class="ic bad">!</span><div><b>2 open threads</b></div></div>
+            <div class="chk"><span class="ic ok">✓</span><div><b>Agent reviewed</b><span class="sub">at this commit</span></div></div>
+          </div>
+          <button class="btn ok">Approve</button>
+          <button class="btn">Request changes</button>
+          <button class="btn">Address comments · 2</button>
+          <button class="btn off">Merge</button>
+          <h6 style="margin-top:6px">Session</h6>
+          <div class="link"><span class="dot d-idle"></span>Pull request 4498 <span class="sub">idle</span></div>
+          <h6>People</h6>
+          <div style="display:flex;gap:8px;align-items:center"><span class="av">M</span>maya <span class="sub">author</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ P4 ============================ -->
+<section class="variant">
+  <h2>P4 · Timeline: agent findings and threads as one feed, decision bar at the bottom</h2>
+  <p class="why">One chronological feed: description, the agent review with per-finding actions, comment threads, check results. Files collapse to a compact table that opens a diff. A sticky bottom bar holds Approve, Request changes and Merge, like a composer. Reads like a conversation, which matches the rest of the console; least like a code host.</p>
+  <div class="frame">
+    <div class="app" data-t="appRail"></div>
+    <div class="list" data-t="prList"></div>
+    <div class="detail">
+      <div style="padding:16px 22px 10px;border-bottom:1px solid var(--line)">
+        <div style="display:flex;gap:10px;align-items:baseline"><h3 style="margin:0;font-size:19px"><span class="num">#4498</span> Live video webhook auth</h3><span class="sp"></span><span class="sub">Open on GitHub ↗</span></div>
+        <div class="meta" style="margin-top:6px"><span class="chip mono">storefront-api</span><span class="mono">fix/live-video-auth → main</span><span>by maya</span><span class="chip ok">✓ Checks</span><span class="chip warn">Review requested</span></div>
+      </div>
+      <div class="scrollc">
+        <div class="thr"><div class="who"><span class="av">M</span><b>maya</b><span class="sub">opened · 2d</span></div>Verifies the provider signature on <span class="mono">POST /webhooks/live-video</span> and rejects unsigned calls with 401. <span class="sub">Show full description ▾</span></div>
+        <div class="thr" style="border-color:var(--accent);background:var(--a100)">
+          <div class="who"><span class="av" style="background:var(--accent);color:#fff">◆</span><b>Agent review</b><span class="chip ok">Ready</span><span class="sub">9f3c2ab · 1 high, 1 low</span></div>
+          <div class="find"><span class="chip bad">high</span><div style="flex:1"><b>Signature compared with <span class="mono">==</span></b><div class="sub mono">live-video.controller.ts:42</div></div><button class="btn sm">Post to GitHub</button><button class="btn sm">Fix</button></div>
+          <div class="find"><span class="chip">low</span><div style="flex:1"><b>No replayed-timestamp test</b><div class="sub mono">live-video.spec.ts</div></div><button class="btn sm">Post to GitHub</button><button class="btn sm">Fix</button></div>
+        </div>
+        <div class="thr"><div class="who"><span class="av">J</span><b>jordan</b><span class="sub">on <span class="mono">guard.ts:18</span> · 1d</span><span class="chip warn" style="margin-left:auto">open</span></div>Should the tolerance window be configurable?<div style="margin-top:6px"><button class="btn sm">Reply</button> <button class="btn sm">Resolve</button></div></div>
+        <div class="panel"><h5>Files · 8 <span class="add">+128</span><span class="del">−34</span><span class="sp"></span><span class="sub">3 / 8 viewed</span><span class="bar"><i style="width:37%"></i></span></h5><div class="in" style="padding:2px 14px">
+          <div class="chk"><span class="box"></span><span class="mono">live-video.controller.ts</span><span class="sp"></span><span class="chip bad">1</span><span class="add">+62</span><span class="del">−8</span></div>
+          <div class="chk"><span class="box"></span><span class="mono">live-video.guard.ts</span><span class="sp"></span><span class="chip">1</span><span class="add">+41</span></div>
+        </div></div>
+      </div>
+      <div class="stickybot">
+        <span class="chip bad">2 open threads</span><span class="sub">Merge unlocks after approval</span><span class="sp"></span>
+        <button class="btn pri sm">Agent Review</button><button class="btn sm">Address comments</button><button class="btn">Request changes</button><button class="btn ok">Approve</button><button class="btn off">Merge</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll('[data-t]').forEach(el => el.append(document.getElementById(el.dataset.t).content.cloneNode(true)));
+</script>
+</body>
+</html>

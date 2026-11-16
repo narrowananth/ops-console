@@ -31,7 +31,7 @@ export function PrSessions({ pr }: { pr: PullRequest }) {
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs">
+    <div className="flex flex-col items-stretch gap-2 text-xs">
       <span title="Your Sessions checked out on this pull request's branch" className="text-neutral-700">
         Sessions on {pr.branch}:
       </span>
@@ -41,14 +41,14 @@ export function PrSessions({ pr }: { pr: PullRequest }) {
           key={session.id}
           to={sessionPath(session.id)}
           title="Open this Session"
-          className="rounded-full border border-line bg-card px-2.5 py-0.5 text-text no-underline hover:border-accent-300 hover:bg-accent-100"
+          className="truncate rounded-md border border-line bg-card px-2.5 py-1 text-text no-underline hover:border-accent-300 hover:bg-accent-100"
         >
           {session.title} · {session.state.replace('_', ' ')}
         </Link>
       ))}
       {pr.state === PrState.Open && (
         <Button
-          className="px-2.5 py-0.5 text-xs"
+          className="justify-center px-2.5 py-1 text-xs"
           disabled={repoId === null || create.isPending}
           title={
             repoId === null

@@ -46,10 +46,41 @@ const session = (id: string, repoId: string, title: string, state = 'idle', bran
   spawned: [],
 });
 
-test('a Repo shows its 3 newest Sessions and folds, so the next Repo stays in reach', async ({ page }) => {
-  await page.route('**/api/repos', (route) =>
-    route.fulfill({ json: { data: [repo('r1', 'analytics'), repo('r2', 'apis')], meta: { next_cursor: null } } }),
+const repoRoutes = async (page: Page, repos: ReturnType<typeof repo>[], sessions: ReturnType<typeof session>[]) => {
+  await page.route('**/api/repos', (route) => route.fulfill({ json: { data: repos, meta: { next_cursor: null } } }));
+  await page.route(/\/api\/sessions\?kind=repo/, (route) => route.fulfill({ json: { data: sessions } }));
+};
+
+test('Sessions list by what needs you, then running, then idle; a long idle list folds', async ({ page }) => {
+  const idle = Array.from({ length: 9 }, (_, n) => session(`i${n}`, 'r1', `idle job ${n}`));
+  await repoRoutes(
+    page,
+    [repo('r1', 'analytics'), repo('r2', 'apis'), repo('r3', 'artifacts')],
+    [
+      session('w1', 'r1', 'approve the push', 'waiting_approval'),
+      session('s5', 'r1', 'long job', 'working', 'feature/jobs'),
+      ...idle,
+      session('s7', 'r2', 'check domain'),
+    ],
   );
+  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+
+  const needs = page.getByRole('region', { name: 'Needs you' });
+  const running = page.getByRole('region', { name: 'Running' });
+  const idleGroup = page.getByRole('region', { name: 'Idle' });
+  await expect(needs.getByRole('listitem')).toHaveText([/approve the push.*approval.*analytics/]);
+  await expect(running.getByRole('listitem')).toHaveText([/long job.*analytics.*feature\/jobs/]);
+  // Eight idle Sessions show; the other two wait behind "Show 2 more". Artifacts has none and does not appear.
+  await expect(idleGroup.getByRole('listitem')).toHaveCount(9);
+  await expect(page.getByText('artifacts')).toHaveCount(0);
+  await idleGroup.getByRole('button', { name: 'Show 2 more' }).click();
+  await expect(idleGroup.getByRole('listitem')).toHaveCount(11);
+  await idleGroup.getByRole('button', { name: 'Show fewer' }).click();
+  await expect(idleGroup.getByRole('listitem')).toHaveCount(9);
+});
+
+test('+ New picks a Repo and a branch, or no Repo, and starts a Session there', async ({ page }) => {
+  await repoRoutes(page, [repo('r1', 'analytics'), repo('r2', 'apis')], [session('s1', 'r2', 'check domain')]);
   await page.route('**/api/repos/*/branches', (route) =>
     route.fulfill({
       json: {
@@ -60,36 +91,17 @@ test('a Repo shows its 3 newest Sessions and folds, so the next Repo stays in re
       },
     }),
   );
-  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
-    route.fulfill({
-      json: {
-        data: [
-          session('s1', 'r1', 'fix login'),
-          session('s2', 'r1', 'audit queries'),
-          session('s3', 'r1', 'add metrics'),
-          session('s4', 'r1', 'old idea'),
-          session('s5', 'r1', 'long job', 'working', 'feature/jobs'),
-          session('s6', 'r1', 'older idea'),
-          session('s7', 'r2', 'check domain'),
-        ],
-      },
-    }),
-  );
+  const started: unknown[] = [];
+  await page.route('**/api/sessions', (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    started.push(route.request().postDataJSON());
+    return route.fulfill({ json: { data: session('s9', 'r1', 'new one', 'idle', 'release') } });
+  });
   await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
 
-  const analytics = page.getByRole('region', { name: 'analytics' });
-  await expect(analytics.getByRole('listitem')).toHaveCount(4);
-  await expect(analytics).toContainText('long job');
-  await expect(analytics).toContainText('feature/jobs');
-  await expect(analytics).toContainText('1 running');
-  await expect(analytics).not.toContainText('old idea');
-  await analytics.getByRole('button', { name: 'Show 2 more' }).click();
-  await expect(analytics.getByRole('listitem')).toHaveCount(6);
-  await analytics.getByRole('button', { name: 'Show fewer' }).click();
-
-  const branch = analytics.getByRole('button', { name: 'Branch for a new Session in analytics' });
+  const branch = page.getByRole('button', { name: 'Branch for a new Session in analytics' });
   await expect(branch).toHaveCount(0);
-  await analytics.getByRole('button', { name: 'New Session in analytics' }).click();
+  await page.getByRole('button', { name: '+ New' }).click();
   await branch.click();
   await expect(page.getByRole('option', { name: /^main/ })).toContainText('checked out');
   // The search narrows the branches as it is typed.
@@ -97,73 +109,70 @@ test('a Repo shows its 3 newest Sessions and folds, so the next Repo stays in re
   await expect(page.getByRole('option')).toHaveCount(1);
   await page.getByRole('option', { name: /^release/ }).click();
   await expect(branch).toContainText('release');
+  await page.getByRole('button', { name: 'Start', exact: true }).click();
+  await expect.poll(() => started).toEqual([{ repo_id: 'r1', branch: 'release' }]);
 
-  await analytics.getByRole('button', { name: /^analytics/ }).click();
-  await expect(analytics.getByRole('listitem')).toHaveCount(0);
-  await expect(page.getByRole('region', { name: 'apis' })).toContainText('check domain');
-  await page.reload();
-  await expect(page.getByRole('region', { name: 'analytics' }).getByRole('listitem')).toHaveCount(0);
+  // With no Repo there is no branch to pick.
+  await page.getByRole('button', { name: '+ New' }).click();
+  await page.getByRole('button', { name: 'Repo for a new Session' }).click();
+  await page.getByRole('option', { name: /^No Repo/ }).click();
+  await expect(page.getByRole('button', { name: /^Branch for a new Session/ })).toHaveCount(0);
 });
 
-test('Collapse all and Expand all fold every Repo; a search keeps the matching Repos and Sessions, open', async ({
+test('the state chips, the Repo filter and a search narrow the list; a search matches Repo, branch and title', async ({
   page,
 }) => {
-  await page.route('**/api/repos', (route) =>
-    route.fulfill({ json: { data: [repo('r1', 'analytics'), repo('r2', 'apis')], meta: { next_cursor: null } } }),
-  );
-  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
-    route.fulfill({
-      json: {
-        data: [
-          session('s1', 'r1', 'fix login'),
-          session('s2', 'r1', 'audit queries'),
-          session('s3', 'r1', 'add metrics'),
-          session('s4', 'r1', 'old idea'),
-          session('s7', 'r2', 'check domain', 'idle', 'feature/dns'),
-        ],
-      },
-    }),
+  await repoRoutes(
+    page,
+    [repo('r1', 'analytics'), repo('r2', 'apis')],
+    [
+      session('s1', 'r1', 'fix login'),
+      session('s2', 'r1', 'audit queries', 'waiting_input'),
+      session('s3', 'r1', 'long job', 'working'),
+      session('s7', 'r2', 'check domain', 'idle', 'feature/dns'),
+    ],
   );
   await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
-  const analytics = page.getByRole('region', { name: 'analytics' });
-  const apis = page.getByRole('region', { name: 'apis' });
+  const list = page.locator('aside').filter({ has: page.getByRole('tablist', { name: 'Workspace' }) });
 
-  await page.getByRole('button', { name: 'Collapse all' }).click();
-  await expect(analytics.getByRole('listitem')).toHaveCount(0);
-  await expect(apis.getByRole('listitem')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Expand all' }).click();
-  await expect(analytics.getByRole('listitem')).toHaveCount(3);
-  await expect(apis.getByRole('listitem')).toHaveCount(1);
-  await page.getByRole('button', { name: 'Collapse all' }).click();
+  await expect(list.getByRole('button', { name: 'All 4' })).toHaveAttribute('aria-pressed', 'true');
+  await list.getByRole('button', { name: 'Needs you 1' }).click();
+  await expect(list.getByRole('listitem')).toHaveText([/audit queries/]);
+  await list.getByRole('button', { name: 'Running 1' }).click();
+  await expect(list.getByRole('listitem')).toHaveText([/long job/]);
+  await list.getByRole('button', { name: 'All 4' }).click();
+
+  await list.getByRole('button', { name: /Filter by Repo/ }).click();
+  await page.getByRole('option', { name: /^apis/ }).click();
+  await expect(list.getByRole('listitem')).toHaveText([/check domain/]);
+  await list.getByRole('button', { name: /Filter by Repo/ }).click();
+  await page.getByRole('option', { name: /^All Repos/ }).click();
+  await expect(list.getByRole('listitem')).toHaveCount(4);
 
   const search = page.getByRole('searchbox', { name: 'Search Sessions' });
   await search.fill('dns');
-  await expect(analytics).toHaveCount(0);
-  await expect(apis.getByRole('listitem')).toHaveText([/check domain/]);
+  await expect(list.getByRole('listitem')).toHaveText([/check domain/]);
   await search.fill('Analytics');
-  await expect(apis).toHaveCount(0);
-  await expect(analytics.getByRole('listitem')).toHaveCount(4);
-  await expect(analytics.getByRole('button', { name: /Show \d more/ })).toHaveCount(0);
+  await expect(list.getByRole('listitem')).toHaveCount(3);
   await search.fill('nothing like it');
-  await expect(page.getByText('No Repo or Session matches “nothing like it”.')).toBeVisible();
+  await expect(page.getByText('No Session matches “nothing like it”.')).toBeVisible();
   await search.fill('');
-  await expect(analytics.getByRole('listitem')).toHaveCount(0);
+  await expect(list.getByRole('listitem')).toHaveCount(4);
 });
 
-test('the tabs, search and Repo count stay in view while the Sessions list scrolls', async ({ page }) => {
-  const repos = Array.from({ length: 30 }, (_, n) => repo(`r${n}`, `service-${n}`));
+test('the tabs and search stay in view while the Sessions list scrolls', async ({ page }) => {
+  const sessions = Array.from({ length: 30 }, (_, n) => session(`s${n}`, 'r1', `job ${n}`));
   await page.setViewportSize({ width: 1280, height: 600 });
-  await page.route('**/api/repos', (route) => route.fulfill({ json: { data: repos, meta: { next_cursor: null } } }));
-  await page.route(/\/api\/sessions\?kind=repo/, (route) => route.fulfill({ json: { data: [] } }));
+  await repoRoutes(page, [repo('r1', 'analytics')], sessions);
   await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
   const search = page.getByRole('searchbox', { name: 'Search Sessions' });
   const tabs = page.getByRole('tablist', { name: 'Workspace' });
-  await expect(page.getByRole('region', { name: 'service-29' })).toHaveCount(1);
+  await page.getByRole('button', { name: 'Show 22 more' }).click();
+  await expect(page.getByText('job 29', { exact: true })).toHaveCount(1);
 
-  await page.getByRole('region', { name: 'service-29' }).scrollIntoViewIfNeeded();
+  await page.getByText('job 29', { exact: true }).scrollIntoViewIfNeeded();
   await expect(tabs).toBeInViewport();
   await expect(search).toBeInViewport();
-  await expect(page.getByRole('button', { name: 'Collapse all' })).toBeInViewport();
 });
 
 test('removing a Repo with Sessions asks whether to keep or delete them', async ({ page }) => {
@@ -855,24 +864,21 @@ test('a Session that has edited nothing shows no Diff button or panel, even whil
   await expect(page.getByRole('complementary', { name: 'Diff' })).toHaveCount(0);
 });
 
-test('a repo row keeps its counts and New Session button apart, even for a long Repo name', async ({ page }) => {
+test('a Session row keeps its Repo chip and state apart, even for a long Repo name', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.route('**/api/repos', (route) =>
-    route.fulfill({
-      json: { data: [repo('r1', 'shopify-fraud-orders-lambda-with-a-very-long-name', 1)], meta: { next_cursor: null } },
-    }),
-  );
-  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
-    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform', 'working')] } }),
+  await repoRoutes(
+    page,
+    [repo('r1', 'shopify-fraud-orders-lambda-with-a-very-long-name', 1)],
+    [session('s1', 'r1', 'engage platform', 'waiting_input')],
   );
   await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
 
-  const row = page.getByRole('region', { name: /shopify-fraud/ });
-  const plus = row.getByRole('button', { name: /^New Session in/ });
-  const counts = row.getByText('1 running');
-  await expect(plus).toBeVisible();
-  await expect(counts).toBeVisible();
-  const [a, b] = [await counts.boundingBox(), await plus.boundingBox()];
+  const row = page.getByRole('region', { name: 'Needs you' }).getByRole('listitem');
+  const chip = row.getByText(/shopify-fraud/);
+  const state = row.getByText('question', { exact: true });
+  await expect(chip).toBeVisible();
+  await expect(state).toBeVisible();
+  const [a, b] = [await chip.boundingBox(), await state.boundingBox()];
   expect((a?.x ?? 0) + (a?.width ?? 0)).toBeLessThanOrEqual(b?.x ?? 0);
 });
 
@@ -937,7 +943,7 @@ test('the side panel collapses to a rail that counts Sessions waiting on you, an
   );
   await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
 
-  await expect(page.getByRole('region', { name: 'analytics' })).toContainText('fix login');
+  await expect(page.getByRole('region', { name: 'Needs you' })).toContainText('fix login');
   await page.getByRole('button', { name: 'Collapse the side panel' }).click();
   await expect(page.getByRole('tablist', { name: 'Workspace' })).toHaveCount(0);
   const rail = page.getByRole('navigation', { name: 'Workspace panel' });
