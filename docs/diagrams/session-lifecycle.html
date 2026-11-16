@@ -15,11 +15,11 @@
 </head>
 <body>
   <div class="diagram-container">
-<svg viewBox="0 0 1460 1000" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="session-lifecycle-title session-lifecycle-desc">
+<svg viewBox="0 0 1460 1048" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="session-lifecycle-title session-lifecycle-desc">
 <title id="session-lifecycle-title">A Session&#x27;s states from message to finish</title>
 <desc id="session-lifecycle-desc">A Session is idle, working, waiting for the operator&#x27;s answer, waiting for an Approval, or failed; stop and finish return it to idle, and a daemon restart fails the ones that were running.</desc>
 <defs><marker id="session-lifecycle-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker><marker id="session-lifecycle-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker><marker id="session-lifecycle-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker></defs>
-<rect x="0" y="0" width="1460" height="1000" fill="#f5f5f5"/>
+<rect x="0" y="0" width="1460" height="1048" fill="#f5f5f5"/>
 <text x="56" y="56" fill="#4f5d75" font-size="10.5" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start" letter-spacing="0.18em">STATE MACHINE · SESSION · AGENT RUN · RECOVERY</text>
 <text x="56" y="100" fill="#2d3142" font-size="36" font-weight="400" font-family="'Instrument Serif', serif" text-anchor="start">A Session&#x27;s states from message to finish</text>
 <text x="150" y="158" fill="#5a6580" font-size="8.5" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.16em">REST</text>
@@ -50,43 +50,46 @@
 <rect x="546" y="504" width="136" height="76" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.3"/><rect x="554" y="512" width="50.4" height="12" rx="2" fill="#ffffff" stroke="#bf4520" stroke-width="0.8"/><text x="579.2" y="521" fill="#bf4520" font-size="7" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">SESSION</text><text x="614" y="546" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">waiting_approval</text><text x="614" y="559" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Approval pending</text><text x="614" y="570" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">for the operator</text><circle cx="682" cy="504" r="9" fill="#2d3142"/><text x="682" y="507.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
 <rect x="1010" y="368" width="136" height="76" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.3"/><rect x="1018" y="376" width="50.4" height="12" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="1043.2" y="385" fill="#2d3142" font-size="7" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">SESSION</text><text x="1078" y="410" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">failed</text><text x="1078" y="423" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">run ended in error</text><text x="1078" y="434" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">transcript stays</text><circle cx="1146" cy="368" r="9" fill="#2d3142"/><text x="1146" y="371.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
 <rect x="1242" y="368" width="136" height="76" rx="6" fill="rgba(45,49,66,0.07)" stroke="#4f5d75" stroke-width="1.3"/><rect x="1250" y="376" width="45.2" height="12" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="1272.6" y="385" fill="#2d3142" font-size="7" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">DAEMON</text><text x="1310" y="410" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Start-up recovery</text><text x="1310" y="423" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">fails running work</text><text x="1310" y="434" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">expires Approvals</text><circle cx="1378" cy="368" r="9" fill="#2d3142"/><text x="1378" y="371.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
-<rect x="56" y="644" width="1348" height="240" rx="8" fill="rgba(45,49,66,0.05)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="56" y="644" width="1348" height="288" rx="8" fill="rgba(45,49,66,0.05)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
 <rect x="72" y="638" width="140" height="12" fill="#f5f5f5"/>
 <text x="142" y="647" fill="#5a6580" font-size="7.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">EDGE CASES AND TIPS</text>
 <circle cx="84" cy="676" r="9" fill="#2d3142"/>
 <text x="84" y="679.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">1</text>
-<text x="108" y="680" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A message on an idle or failed Session starts a run. A message sent while the Session works is queued and sent when the run ends. A pr_review Session takes no messages (409 invalid_state).</text>
-<circle cx="84" cy="704" r="9" fill="#2d3142"/>
-<text x="84" y="707.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">2</text>
-<text x="108" y="708" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A run is a Claude Agent SDK query() in the folder its kind supplies, resuming the stored SDK session. Runs live in the daemon&#x27;s memory. Stop aborts the query and expires its Approvals; the Session goes to</text>
-<text x="108" y="724" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">idle, like a run that finished, while the job that started it sees it fail. Editing the last message rewinds the agent&#x27;s file edits.</text>
-<circle cx="84" cy="748" r="9" fill="#2d3142"/>
-<text x="84" y="751.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">3</text>
-<text x="108" y="752" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The agent&#x27;s question reaches the operator through canUseTool. The next message answers it and the Session returns to working.</text>
-<circle cx="84" cy="776" r="9" fill="#2d3142"/>
-<text x="84" y="779.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
-<text x="108" y="780" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Waits for a supervised-mode prompt, a PROD write (every mode) or open_pull_request. With several Approvals pending the Session returns to working only when none is left. Kinds: prod_write, command, edit.</text>
-<circle cx="84" cy="804" r="9" fill="#2d3142"/>
-<text x="84" y="807.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
-<text x="108" y="808" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The run ended with an error code, for example a limit with no account to move to, or unauthorized. The failure is shown in the Session and a new message runs again.</text>
-<circle cx="84" cy="832" r="9" fill="#2d3142"/>
-<text x="84" y="835.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
-<text x="108" y="836" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Before the port opens: Sessions left working, waiting_input or waiting_approval fail and their Approvals expire. A running Agent Review, Report, Fix, Reply check, Comment pass, Playbook step or Scan fails</text>
-<text x="108" y="852" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">too (interrupted for all but the Agent Review).</text>
-<path d="M 56,920 L 1404,920" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
-<text x="56" y="944" fill="#4f5d75" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start" letter-spacing="0.14em">LEGEND</text>
-<rect x="56" y="959" width="20" height="13" rx="3" fill="#ffffff" stroke="#2d3142" stroke-width="1.1"/>
-<text x="84" y="969" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Stage or state</text>
-<rect x="190.39999999999998" y="959" width="20" height="13" rx="3" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.1"/>
-<text x="218.4" y="969" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Operator decision</text>
-<rect x="341.59999999999997" y="959" width="20" height="13" rx="3" fill="rgba(45,49,66,0.07)" stroke="#4f5d75" stroke-width="1.1"/>
-<text x="369.6" y="969" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Job or store</text>
-<path d="M 464.79999999999995,965 L 498.79999999999995,965" stroke="#bf4520" stroke-width="1.4" marker-end="url(#session-lifecycle-arrow-accent)"/>
-<text x="508.8" y="969" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Happy path</text>
-<path d="M 592.8,965 L 626.8,965" stroke="#4f5d75" stroke-width="1.1" stroke-dasharray="5,4" marker-end="url(#session-lifecycle-arrow)"/>
-<text x="636.8" y="969" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Return or retry</text>
-<path d="M 748.8,965 L 782.8,965" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#session-lifecycle-arrow)"/>
-<text x="792.8" y="969" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Flow</text>
+<text x="108" y="680" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A message on an idle or failed Session starts a run. A message sent while the Session works is queued and sent when the run ends. A pr_review Session takes no messages (409</text>
+<text x="108" y="696" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">invalid_state). The Sessions inbox groups them: Needs you (waiting_input, waiting_approval, failed), Running (working) and Idle.</text>
+<circle cx="84" cy="720" r="9" fill="#2d3142"/>
+<text x="84" y="723.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">2</text>
+<text x="108" y="724" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The console fetches the Repo&#x27;s default branch before each run. A run is a Claude Agent SDK query() in the folder its kind supplies (a repo Session&#x27;s own worktree), resuming the stored</text>
+<text x="108" y="740" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">SDK session. Runs live in the daemon&#x27;s memory. Stop aborts the query and expires its Approvals; the Session goes to idle, like a run that finished, while the job that started it sees it</text>
+<text x="108" y="756" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">fail. Editing the last message rewinds the agent&#x27;s file edits.</text>
+<circle cx="84" cy="780" r="9" fill="#2d3142"/>
+<text x="84" y="783.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">3</text>
+<text x="108" y="784" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The agent&#x27;s question reaches the operator through canUseTool. The next message answers it and the Session returns to working.</text>
+<circle cx="84" cy="808" r="9" fill="#2d3142"/>
+<text x="84" y="811.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
+<text x="108" y="812" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Waits for a supervised-mode prompt, a PROD write, save_file, spawn_sessions or an Integration command write (the last three ask in every mode; Don&#x27;t ask again this Session skips one</text>
+<text x="108" y="828" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">CLI&#x27;s writes). open_pull_request never waits. With several Approvals pending the Session returns to working only when none is left. Kinds: prod_write, command, edit.</text>
+<circle cx="84" cy="852" r="9" fill="#2d3142"/>
+<text x="84" y="855.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
+<text x="108" y="856" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The run ended with an error code, for example a limit with no account to move to, or unauthorized. The failure is shown in the Session and a new message runs again.</text>
+<circle cx="84" cy="880" r="9" fill="#2d3142"/>
+<text x="84" y="883.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
+<text x="108" y="884" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Before the port opens: Sessions left working, waiting_input or waiting_approval fail and their Approvals expire. A running Agent Review, Report, Fix, Reply check, Comment pass, Playbook</text>
+<text x="108" y="900" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">step or Scan fails too (interrupted for all but the Agent Review).</text>
+<path d="M 56,968 L 1404,968" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<text x="56" y="992" fill="#4f5d75" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start" letter-spacing="0.14em">LEGEND</text>
+<rect x="56" y="1007" width="20" height="13" rx="3" fill="#ffffff" stroke="#2d3142" stroke-width="1.1"/>
+<text x="84" y="1017" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Stage or state</text>
+<rect x="190.39999999999998" y="1007" width="20" height="13" rx="3" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.1"/>
+<text x="218.4" y="1017" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Operator decision</text>
+<rect x="341.59999999999997" y="1007" width="20" height="13" rx="3" fill="rgba(45,49,66,0.07)" stroke="#4f5d75" stroke-width="1.1"/>
+<text x="369.6" y="1017" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Job or store</text>
+<path d="M 464.79999999999995,1013 L 498.79999999999995,1013" stroke="#bf4520" stroke-width="1.4" marker-end="url(#session-lifecycle-arrow-accent)"/>
+<text x="508.8" y="1017" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Happy path</text>
+<path d="M 592.8,1013 L 626.8,1013" stroke="#4f5d75" stroke-width="1.1" stroke-dasharray="5,4" marker-end="url(#session-lifecycle-arrow)"/>
+<text x="636.8" y="1017" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Return or retry</text>
+<path d="M 748.8,1013 L 782.8,1013" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#session-lifecycle-arrow)"/>
+<text x="792.8" y="1017" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Flow</text>
 </svg>
   </div>
 </body>

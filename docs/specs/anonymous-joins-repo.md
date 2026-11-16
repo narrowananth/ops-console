@@ -23,10 +23,10 @@ tool exists only inside an imported Repo. The agent could only clone a copy that
 5. A yes turns the Session into a `repo` Session on that Repo, on the branch checked out in the Repo's folder. The run
    in progress ends with the agent's one line, and the console starts the next turn at once in the Repo's folder, with
    the conversation so far. That turn tells the agent to work on a new branch (`git switch -c`), commit (the repo's hooks
-   run and must pass) and call `open_pull_request` when done; the operator approves, and the console pushes the branch and
-   opens the pull request (`console-opens-pull-request` Behavior 12). A Repo with no Git host the console can open on has
+   run and must pass) and call `open_pull_request` when done; the console pushes the branch and
+   opens the pull request at once, with no Approval (ADR 0002). A Repo with no Git host the console can open on has
    no such tool; the agent says so and leaves the commit on its branch. From then on the Session has a branch, the Changes panel, commit hooks and the pull request
-   button like any `repo` Session, and it moves from "No Repo" to its Repo's group in Workspace.
+   button like any `repo` Session, and it shows its Repo, not "No Repo", in the Workspace list.
 6. The tool is offered only in a run the operator started, in an Anonymous Session no Alert made. A Playbook step, a
    Verification and a Fix keep working in their own clone.
 7. A Session that already has a Repo cannot call it again.

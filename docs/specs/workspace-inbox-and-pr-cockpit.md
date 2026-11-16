@@ -1,6 +1,6 @@
 # Workspace inbox and pull request cockpit
 
-**Status:** built, not shipped
+**Status:** shipped
 **Design:** `design/workspace-variants.html` (Inbox, both tabs) and `design/workspace-pr-variants.html` (P3, Cockpit).
 
 ## Problem

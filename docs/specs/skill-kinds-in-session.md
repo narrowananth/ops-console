@@ -1,6 +1,7 @@
 # Skill Kinds in Session
 
 **Status:** shipped
+**Changed since:** the menu opens on `$` and `/` opens a commands menu (`session-start-and-composer-menus`). Read `$` for `/` below; a typed `/name` still runs a skill.
 **Design:** Skills page, the Playbook editor's Skills section and the Session composer in the Workspace tab of
 `design/ops-console.html`, all drawn with this spec: Discover / Yours on the Skills page, the `/` menu above the
 composer, and the skill chip on a message. Flow diagrams: `docs/diagrams/skill-message-routing.html` and

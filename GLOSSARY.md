@@ -235,6 +235,15 @@ The service holding a Repo's remote: GitHub, GitLab or Bitbucket.
 **Pull request opening**:
 The console's push of a Session's branch from its Session worktree to `origin` and its call to the Git host to open the pull request, run in the daemon as the operator. The Session keeps the pull request it opened for as long as it is on that branch. The agent writes the title and description; it never pushes or opens. The operator's click starts it in a Session, as does the agent's `open_pull_request` call, which needs no Approval, and a confirmed Fix starts it by itself. A branch that moved on `origin` is rebased onto it first, never forced.
 
+**Merge checks**:
+The five things the pull request page lists between a pull request and its merge: approval, checks, conflicts, open
+threads and the Agent Review. Merge stays disabled until a reviewer approved, and while the branch conflicts with its base.
+
+**Conflict check**:
+The console's background test of whether a pull request's branch merges into its base as both stand on `origin`: it
+fetches both into the Repo's folder and runs `git merge-tree`, which touches no branch and no work tree. The answer is kept
+two minutes per head commit. When git cannot fetch, the check reads "Conflicts not known" and does not disable Merge.
+
 **Session**:
 One conversation between the operator and the agent, named for its first task. It runs in one Repo on one branch, in a
 Session worktree, except a
