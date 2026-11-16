@@ -131,6 +131,8 @@ export const sessions = sqliteTable(
     openedPrBranch: text('opened_pr_branch'),
     /** JSON array of the other Repos' ids the operator opened to this Session's agent; null for none. */
     extraRepoIds: text('extra_repo_ids'),
+    /** JSON array of the integration CLIs whose writes the operator stopped being asked about in this Session; null for none. */
+    trustedClis: text('trusted_clis'),
     /** The Alert a Verification or Fix runs for. */
     alertId: text('alert_id').references((): AnySQLiteColumn => alerts.id, { onDelete: 'set null' }),
     state: text().$type<SessionState>().notNull().default(SessionState.Idle),
@@ -309,6 +311,8 @@ export const approvals = sqliteTable(
     sessionId: text('session_id').references(() => sessions.id, { onDelete: 'set null' }),
     kind: text().$type<ApprovalKind>().notNull(),
     summary: text().notNull(),
+    /** The integration CLI the operator may stop being asked about for the Session; null when the Approval offers no such choice. */
+    trustCli: text('trust_cli'),
     status: text().$type<ApprovalStatus>().notNull().default(ApprovalStatus.Pending),
     requestedAt: text('requested_at').notNull().default(nowIso),
     decidedAt: text('decided_at'),

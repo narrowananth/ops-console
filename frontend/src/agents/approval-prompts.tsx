@@ -38,7 +38,7 @@ function ApprovalCard({
 }: {
   approval: Approval;
   busy: boolean;
-  onDecide: (d: ApprovalStatus.Approved | ApprovalStatus.Denied) => void;
+  onDecide: (d: ApprovalStatus.Approved | ApprovalStatus.Denied, trustSession?: boolean) => void;
 }) {
   const prod = approval.is_prod || approval.kind === ApprovalKind.ProdWrite;
   return (
@@ -101,6 +101,16 @@ function ApprovalCard({
           </svg>
           Approve
         </Button>
+        {approval.trust_cli && (
+          <Button
+            className="px-3.5 py-1.5 text-[13px]"
+            disabled={busy}
+            title={`Approve this and run every ${approval.trust_cli} command in this Session without asking, until the Session is deleted`}
+            onClick={() => onDecide(ApprovalStatus.Approved, true)}
+          >
+            Don't ask again this Session for {approval.trust_cli}
+          </Button>
+        )}
         <Button
           className="px-3.5 py-1.5 text-[13px]"
           disabled={busy}
@@ -130,7 +140,7 @@ export function ApprovalPrompts({ sessionId }: { sessionId?: string }) {
           key={approval.id}
           approval={approval}
           busy={decide.isPending}
-          onDecide={(decision) => decide.mutate({ id: approval.id, decision })}
+          onDecide={(decision, trustSession) => decide.mutate({ id: approval.id, decision, trustSession })}
         />
       ))}
     </ul>

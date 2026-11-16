@@ -554,6 +554,8 @@ export const approvalSchema = z.object({
   target: z.string().nullable(),
   command: z.string().nullable(),
   is_prod: z.boolean(),
+  /** The integration CLI a yes may also cover for the rest of the Session; null when the Approval offers no such choice. */
+  trust_cli: z.string().nullable(),
 });
 
 export type Approval = z.infer<typeof approvalSchema>;
@@ -562,6 +564,8 @@ export const approvalListQuerySchema = pageQuerySchema.extend({ status: z.enum(A
 
 export const approvalDecisionSchema = z.object({
   decision: z.enum([ApprovalStatus.Approved, ApprovalStatus.Denied]),
+  /** With a yes: stop asking for this Approval's `trust_cli` in its Session, until the Session is deleted. */
+  trust_session: z.boolean().optional(),
 });
 
 export const claudeAccountSchema = z.object({

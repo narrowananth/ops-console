@@ -344,6 +344,40 @@ describe('Pull request opening', () => {
       expect(ctx.daemon.sdk.ran).toEqual([]);
     });
 
+    it('stops asking for one CLI in one Session after "don\'t ask again", and still asks in another Session', async () => {
+      const ctx = await start();
+      const id = ctx.daemon.createSession({ access_mode: AccessMode.Full, repoId: ctx.repoId, branch: 'work' });
+      const write = CALL('gh', ['pr', 'comment', '12', '--body', 'hi']);
+      ctx.daemon.sdk.script(write);
+      await ctx.http.post(`/sessions/${id}/messages`, { text: 'comment on pr 12' });
+      const [approval] = await until(
+        async () => (await ctx.http.get('/approvals?status=pending')).body.data as { id: string; trust_cli: string }[],
+        (list) => list.length === 1,
+        'the Approval',
+      );
+      expect(approval?.trust_cli).toBe('gh');
+      await ctx.http.post(`/approvals/${approval?.id}/decision`, { decision: 'approved', trust_session: true });
+      await until(
+        async () => (await ctx.http.get(`/sessions/${id}`)).body.data.state,
+        (state) => state === 'idle',
+        'the run to end',
+      );
+      // The same CLI in the same Session now runs with no Approval; a merge is still refused.
+      ctx.daemon.sdk.script(write, CALL('gh', ['pr', 'merge', '12']));
+      await converse(ctx.daemon, id, 'again');
+      expect((await ctx.http.get('/approvals?status=pending')).body.data).toEqual([]);
+      expect(ctx.daemon.sdk.ran.filter((step) => step.tool === RUN_INTEGRATION_TOOL)).toHaveLength(2);
+      // Another Session still asks.
+      const other = ctx.daemon.createSession({ access_mode: AccessMode.Full, repoId: ctx.repoId, branch: 'work' });
+      ctx.daemon.sdk.script(write);
+      await ctx.http.post(`/sessions/${other}/messages`, { text: 'comment on pr 12' });
+      await until(
+        async () => (await ctx.http.get('/approvals?status=pending')).body.data as unknown[],
+        (list) => list.length === 1,
+        'the other Session’s Approval',
+      );
+    });
+
     it('refuses a merge and a sign-in with no Approval, and runs nothing', async () => {
       for (const [cli, args] of [
         ['gh', ['pr', 'merge', '12']],

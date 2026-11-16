@@ -95,6 +95,17 @@ export function extraRepoIds(row: SessionRow): string[] {
   }
 }
 
+/** The integration CLIs whose writes the operator stopped being asked about in the Session. */
+export function trustedClis(row: SessionRow): string[] {
+  if (row.trustedClis === null) return [];
+  try {
+    const clis: unknown = JSON.parse(row.trustedClis);
+    return Array.isArray(clis) ? clis.filter((cli): cli is string => typeof cli === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 export function emitSessionUpdated(emit: Emit, row: SessionRow): void {
   emit('session.updated', {
     session_id: row.id,

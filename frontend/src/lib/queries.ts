@@ -486,8 +486,21 @@ export function usePendingApprovals() {
 
 export function useDecideApproval() {
   return useMutation({
-    mutationFn: ({ id, decision }: { id: string; decision: ApprovalStatus.Approved | ApprovalStatus.Denied }) =>
-      apiSend('POST', `/approvals/${id}/decision`, { decision }, z.object({ data: approvalSchema })),
+    mutationFn: ({
+      id,
+      decision,
+      trustSession,
+    }: {
+      id: string;
+      decision: ApprovalStatus.Approved | ApprovalStatus.Denied;
+      trustSession?: boolean;
+    }) =>
+      apiSend(
+        'POST',
+        `/approvals/${id}/decision`,
+        { decision, trust_session: trustSession },
+        z.object({ data: approvalSchema }),
+      ),
   });
 }
 

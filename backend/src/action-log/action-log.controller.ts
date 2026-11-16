@@ -35,6 +35,7 @@ export class ApprovalsController {
   @Post(':id/decision')
   decide(@Param() params: unknown, @Body() body: unknown): { data: Approval } {
     const { id } = parseInput(z.object({ id: z.string().min(1) }), params, 'params');
-    return { data: this.approvals.decide(id, parseInput(approvalDecisionSchema, body, 'body').decision) };
+    const { decision, trust_session } = parseInput(approvalDecisionSchema, body, 'body');
+    return { data: this.approvals.decide(id, decision, trust_session === true) };
   }
 }
