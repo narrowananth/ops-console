@@ -15,7 +15,7 @@
     --line: color-mix(in srgb, #201e1d 11%, transparent); --divider: color-mix(in srgb, #201e1d 18%, transparent);
     --n100: #f8f4f4; --n200: #eae7e7; --n300: #d7d3d3; --n400: #bab6b6; --n500: #9b9797; --n600: #7d7979;
     --n700: #605d5d; --n800: #444141; --n900: #2d2b2b;
-    --ok: #2f7d3b; --warn: #b26b00;
+    --ok: #2f7d3b; --warn: #b26b00; --info: #2a5db0;
     --add: #e7f5ea; --add-strong: #c6e9cf; --add-text: #1d6b30; --del: #fdeceb; --del-strong: #f9cdc7; --del-text: #a3200d;
     --hunk: #e9f0fb; --hunk-text: #3d5f92;
     --r-sm: 6px; --r: 10px; --r-lg: 14px; --r-xl: 18px;
@@ -32,7 +32,7 @@
     --n700: #b4b0ae; --n800: #d1cdcb; --n900: #efebea;
     --accent-100: #3a140d; --accent-200: #561b10; --accent-300: #7a2213; --accent-400: #a82a14; --accent-500: #ff563c;
     --accent-600: #ff6c55; --accent-700: #ff8c77; --accent-900: #ffe3dc;
-    --ok: #6cc47a; --warn: #f0a940;
+    --ok: #6cc47a; --warn: #f0a940; --info: #7aa7f0;
     --add: #15281a; --add-strong: #1f3d27; --add-text: #8bd699; --del: #2e1714; --del-strong: #4a221b; --del-text: #ff9c89;
     --hunk: #161f2d; --hunk-text: #93b3e3;
     --shadow-sm: 0 1px 2px rgba(0,0,0,.5); --shadow-md: 0 3px 10px rgba(0,0,0,.55);
@@ -246,22 +246,224 @@
   .stages { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; }
 
   /* Workspace */
-  .ws-side { width: 320px; flex: none; border-right: 1px solid var(--line); overflow-y: auto; }
+  .ws-side { width: 320px; flex: none; border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .ws-list { flex: 1; min-height: 0; overflow-y: auto; }
   .ws-main { flex: 1; min-width: 0; overflow-y: auto; }
-  .rg-head { display: flex; align-items: center; gap: 4px; border-radius: var(--r); padding-right: 6px; }
-  .rg-head:hover { background: var(--n200); }
-  .rg-btn { display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; border: 0; background: transparent; padding: 8px 0 8px 8px; text-align: left; }
+  .ws-bar { position: sticky; top: 0; z-index: 10; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--divider); background: var(--bg); padding: 2px 12px 8px; }
+  .ws-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .ws-search { position: relative; flex: 1; min-width: 0; }
+  .ws-search svg { position: absolute; top: 50%; left: 10px; transform: translateY(-50%); color: var(--n600); pointer-events: none; }
+  .ws-search input { display: block; width: 100%; height: 30px; border: 1px solid var(--divider); background: var(--card); padding: 0 10px 0 30px; font-size: 12px; outline: none; }
+  .ws-search input:focus, .menu .msearch:focus { border-color: var(--accent-400); box-shadow: 0 0 0 3px var(--accent-100); }
+  .ws-search input::placeholder { color: var(--n600); }
+  .ws-flt { display: flex; flex: none; gap: 1px; }
+  .ws-flt button { display: flex; align-items: center; gap: 3px; border: 0; background: transparent; padding: 4px 6px; font-size: 12px; color: var(--n700); white-space: nowrap; transition: background .15s; }
+  .ws-flt button:hover { background: var(--n200); color: var(--text); }
+  .ws-flt button.on { background: var(--card); color: var(--text); font-weight: 600; box-shadow: var(--shadow-sm); }
+  .ws-flt .n { border-radius: 999px; padding: 0 5px; font: 500 10px/16px var(--mono); color: var(--n600); }
+  .ws-flt .on .n { background: var(--n200); color: var(--text); }
+  .ws-flt .hot .n { background: var(--accent); color: #fff; }
+  .ws-pick { position: relative; margin-left: auto; min-width: 0; }
+  .ws-pick .chipdd { max-width: 100%; padding: 4px 8px; }
+  .ws-pick .chipdd .v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ws-pick .menu { top: calc(100% + 4px); right: 0; width: 248px; max-height: 320px; overflow-y: auto; }
+  .ws-whose { display: flex; flex: none; gap: 2px; height: 30px; border-radius: var(--r); background: var(--n200); padding: 2px; }
+  .ws-whose button { border: 0; background: transparent; border-radius: var(--r-sm); padding: 0 10px; font-size: 12px; color: var(--n700); }
+  .ws-whose button:hover { color: var(--text); }
+  .ws-whose button.on { background: var(--card); color: var(--text); font-weight: 600; box-shadow: var(--shadow-sm); }
+  .ws-new { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); background: var(--card); border-radius: var(--r-lg); padding: 8px; box-shadow: var(--shadow-sm); }
+  .ws-new .drop { padding: 6px 10px; font-size: 12px; }
+  .ws-new .menu { top: calc(100% + 4px); left: 0; width: 280px; max-height: 300px; overflow-y: auto; }
+  .ws-new .hint { flex: 1; min-width: 0; font-size: 12px; color: var(--n700); }
+  .menu .msearch { display: block; width: 100%; margin-bottom: 4px; border: 1px solid var(--divider); background: var(--bg); padding: 6px 10px; font-size: 13px; outline: none; }
+  .opt { align-items: flex-start; gap: 10px; padding: 8px 10px; }
+  .opt .ot { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+  .opt .ol { font-size: 13px; overflow-wrap: anywhere; }
+  .opt.sel .ol { font-weight: 600; }
+  .opt .od { font-size: 12px; color: var(--n700); }
+  .opt .ck { margin-top: 2px; width: 12px; flex: none; font-size: 12px; color: var(--accent); visibility: hidden; }
+  .opt.sel .ck { visibility: visible; }
+  .menu .nomatch { padding: 8px 10px; font-size: 12px; color: var(--n700); }
+  .ws-g { padding: 0 8px; }
+  .ws-gh { display: flex; width: 100%; align-items: center; gap: 6px; margin-top: 8px; border: 0; background: transparent; padding: 6px 8px; text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--n700); transition: background .15s; }
+  .ws-gh:hover { background: var(--n200); color: var(--text); }
+  .ws-gh .chev, .rail-h .chev, .ft .chev { flex: none; color: var(--n600); transition: transform .15s; }
+  .ws-gh .gd { width: 6px; height: 6px; flex: none; border-radius: 50%; }
+  .ws-gh .cnt { margin-left: auto; font: 500 11px var(--mono); letter-spacing: normal; color: var(--n600); }
+  .folded > h3 .chev, .folded > header .chev, .folded > .ft .chev { transform: rotate(-90deg); }
+  .folded > .fbody { display: none !important; }
+  .folded > button .chev { transform: rotate(-90deg); }
+  .ws-g ul { display: flex; flex-direction: column; gap: 1px; padding-bottom: 4px; }
+  .d-need { background: var(--accent); } .d-run { background: var(--ok); } .d-idle { background: var(--n400); } .d-warn { background: var(--warn); } .d-done { background: var(--n300); }
+  .ws-li { position: relative; }
+  .ws-row { flex-direction: column; gap: 2px; padding: 7px 10px; font-size: 13px; text-decoration: none; }
+  .ws-row .l1 { display: flex; width: 100%; align-items: center; gap: 8px; }
+  .ws-row .t { flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ws-row .sd { width: 8px; height: 8px; flex: none; border-radius: 50%; }
+  .ws-row .sd.pulse { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .4; } }
+  .ws-row .w { flex: none; border-radius: 4px; background: var(--accent-100); color: var(--accent-700); padding: 0 5px; font-size: 11px; line-height: 16px; font-weight: 500; }
+  .ws-row .ago { flex: none; font-size: 11px; font-weight: 400; color: var(--n600); font-variant-numeric: tabular-nums; }
+  .ws-row .l2 { display: flex; min-width: 0; align-items: center; gap: 4px; padding-left: 16px; font: 11px var(--mono); color: var(--n600); }
+  .ws-row .rp { max-width: 50%; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--n800); }
+  .ws-row .rp.none { font-style: italic; color: var(--n600); }
+  .ws-row .sl { flex: none; color: var(--n400); }
+  .ws-row .l2 .br { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ws-row.sel .ago, .ws-row.sel .l2 { color: var(--accent-900); }
+  .ws-stop { position: absolute; top: 6px; right: 8px; display: flex; align-items: center; gap: 4px; border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 1px 8px; font: 12px var(--mono); color: var(--accent-700); box-shadow: var(--shadow-sm); opacity: 0; }
+  .ws-stop:hover { border-color: var(--accent-400); }
+  .ws-li:hover .ws-stop, .ws-stop:focus-visible { opacity: 1; }
+  .ws-stop i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: currentColor; }
+  .ws-more { border: 0; background: transparent; border-radius: var(--r-sm); padding: 4px 10px; font-size: 12px; color: var(--n700); }
+  .ws-more:hover { color: var(--text); text-decoration: underline; }
+  .ws-empty { margin: 0; padding: 24px 16px; text-align: center; font-size: 13px; color: var(--n700); }
+  .ws-note { margin: 8px 12px 0; border-radius: var(--r); background: var(--accent-100); padding: 8px 12px; font-size: 12px; color: var(--accent-700); }
+  .pl2 { display: flex; width: 100%; min-width: 0; align-items: center; gap: 6px; font-size: 11px; font-weight: 400; color: var(--n600); }
+  .pl2 .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pl2 .who .mono { color: var(--n800); }
+  .pl2 .who .mono.s2 { color: var(--n600); }
+  .pl2 .bg { flex: none; border-radius: 4px; background: var(--n200); padding: 0 4px; }
+  .pl2 .fl { flex: none; }
+  .pl2 .cc { display: flex; flex: none; align-items: center; gap: 2px; }
+  .ws-row .ext { flex: none; margin-left: -4px; font-size: 11px; font-weight: 400; color: var(--n600); }
+
   .plusbtn { display: flex; width: 26px; height: 26px; flex: none; align-items: center; justify-content: center; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--accent); font-weight: 800; font-size: 16px; }
   .plusbtn:hover { background: var(--accent-100); }
-  .ses-row { flex-direction: column; padding: 8px 12px 8px 28px; font-size: 13px; }
+
+  /* Session view */
   .msg { margin: 8px 20px; display: flex; flex-direction: column; gap: 6px; border-radius: var(--r-xl); padding: 14px 20px; font-size: 14px; }
   .msg.you { border: 1px solid var(--line); background: var(--surface); }
   .msg .who { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--n700); }
-  .composer { border-radius: var(--r-lg); border: 1px solid var(--divider); background: var(--card); box-shadow: var(--shadow-sm); }
+  .spawn { display: flex; flex-direction: column; gap: 8px; border-radius: var(--r-lg); border: 1px solid var(--line); background: var(--surface); padding: 10px 14px; }
+  .spawn > .cap { font-size: 12px; font-weight: 600; letter-spacing: .03em; }
+  .spawn li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+  .spawn .st { flex: none; border-radius: 999px; background: var(--n200); padding: 0 7px; font: 12px var(--mono); color: var(--n700); }
+  .spawn .st.go { background: var(--accent-100); color: var(--accent-700); }
+  .spawn .open { margin-left: auto; border: 0; background: transparent; border-radius: var(--r); padding: 2px 8px; font-size: 12px; font-weight: 600; color: var(--text); }
+  .spawn .open:hover { background: var(--n200); }
+  .chip-l { display: inline-flex; max-width: 360px; align-items: center; gap: 4px; border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 2px 10px; font-size: 12px; color: var(--text); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  a.chip-l:hover, button.chip-l:hover { border-color: var(--accent-300); background: var(--accent-100); }
+  .sform { display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--line); background: var(--n100); padding: 12px 24px; }
+  .sform label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--n700); }
+  .sform .field { background: var(--card); font-size: 13px; padding: 6px 10px; }
+  .composer { position: relative; border-radius: var(--r-lg); border: 1px solid var(--divider); background: var(--card); box-shadow: var(--shadow-sm); }
+  .composer:focus-within { border-color: var(--accent-400); box-shadow: 0 0 0 3px var(--accent-100); }
   .composer textarea { display: block; width: 100%; min-height: 64px; resize: none; border: 0; background: transparent; padding: 14px 16px 6px; font-size: 14px; outline: none; }
-  .composer .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px 10px; }
-  .brchip { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 4px 12px; font-size: 12px; }
+  .composer .bar { display: flex; align-items: flex-end; gap: 6px; padding: 6px 10px 10px; }
+  .composer .bar .l { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .composer .bar .r { display: flex; flex: none; align-items: center; gap: 6px; }
+  .attach { display: flex; width: 30px; height: 30px; flex: none; align-items: center; justify-content: center; border: 1px solid var(--line); background: var(--card); border-radius: 999px; color: var(--n700); padding: 0; }
+  .attach:hover { border-color: var(--accent-300); color: var(--text); }
+  .brchip { display: flex; align-items: center; gap: 6px; max-width: 280px; border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 4px 12px; font-size: 12px; }
   .brchip:hover { background: var(--n200); }
+  .brchip.open { background: var(--n200); border-color: var(--divider); }
+  .brchip:disabled { cursor: default; }
+  .brchip:disabled:hover { background: var(--card); }
+  .cm { position: absolute; z-index: 20; right: 0; bottom: calc(100% + 6px); left: 0; display: flex; max-height: 288px; flex-direction: column; overflow-y: auto; border-radius: var(--r-lg); border: 1px solid var(--line); background: var(--card); padding: 6px; box-shadow: var(--shadow-lg); }
+  .cm-h { padding: 6px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--n700); }
+  .cm-r { display: flex; align-items: center; gap: 10px; border-radius: var(--r); padding: 6px 10px; font-size: 13px; cursor: pointer; }
+  .cm-r:hover { background: var(--n200); }
+  .cm-r.act { background: var(--accent-100); color: var(--accent-900); }
+  .cm-r .nm { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 13px var(--mono); }
+  .cm-r .ds { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--n700); }
+  .cm-r .ds.mono { font-family: var(--mono); }
+  .cm-r .tg { flex: none; border-radius: 999px; background: var(--n200); padding: 0 8px; font-size: 10px; white-space: nowrap; color: var(--n700); }
+  .cm-r .tg.pack { background: var(--accent-100); color: var(--accent-700); }
+  .cm-r .tg.proj { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
+  .cm .none { padding: 8px 10px; font-size: 12px; color: var(--n700); }
+  .cm-f { margin: 4px 0 0; border-top: 1px solid var(--line); padding: 6px 10px 2px; font-size: 11px; color: var(--n700); }
+  .sdiff { display: flex; width: 420px; flex: none; flex-direction: column; border-left: 1px solid var(--line); background: var(--bg); }
+  .sdiff .tool { border: 0; background: transparent; border-radius: var(--r-sm); padding: 2px 8px; font-size: 12px; color: var(--n700); }
+  .sdiff .tool:hover { background: var(--n200); color: var(--text); }
+  .sdf { border-radius: var(--r); border: 1px solid var(--line); background: var(--card); overflow: hidden; }
+  .sdf > button { display: flex; width: 100%; align-items: center; gap: 8px; border: 0; background: var(--card); border-radius: 0; padding: 6px 10px; text-align: left; font: 12px var(--mono); }
+  .sdf > button:hover { background: var(--n200); }
+  .sdf .st { width: 12px; flex: none; font-weight: 600; color: var(--warn); }
+  .sdf .st.a { color: var(--add-text); }
+  .sdf.folded > .fbody { display: none !important; }
+  .folded > button .chev { transform: rotate(-90deg); }
+  .sdf .fbody { border-top: 1px solid var(--line); }
+
+  /* Pull request page */
+  .prh { display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--line); padding: 20px 24px 0; }
+  .prh h2 { font-size: 20px; line-height: 1.3; }
+  .prh h2 span { font-weight: 400; color: var(--n600); }
+  .prh-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+  .avatar { display: flex; width: 36px; height: 36px; flex: none; align-items: center; justify-content: center; border-radius: 50%; background: var(--info); color: #fff; font-size: 13px; font-weight: 600; }
+  .avatar.sm { width: 24px; height: 24px; font-size: 10px; }
+  .brn { max-width: 288px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 4px; background: var(--n200); padding: 2px 6px; font: 12px var(--mono); color: var(--text); }
+  .stag { border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; font-size: 12px; font-weight: 500; text-transform: capitalize; }
+  .pr-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; font-size: 12px; color: var(--n700); }
+  .pr-sub a { color: var(--text); font-weight: 500; }
+  .prtabs { display: flex; width: max-content; gap: 4px; border-radius: var(--r-xl); background: var(--n200); padding: 4px; }
+  .prtabs button { display: flex; align-items: center; gap: 8px; border: 0; background: transparent; border-radius: var(--r-lg); padding: 6px 16px; font-size: 13px; font-weight: 600; color: var(--n700); transition: background .15s; }
+  .prtabs button:hover { background: color-mix(in srgb, var(--card) 60%, transparent); color: var(--text); }
+  .prtabs button.on { background: var(--card); font-weight: 700; color: var(--text); box-shadow: var(--shadow-md); }
+  .prtabs button.on svg { color: var(--accent); }
+  .prtabs .n { border-radius: 999px; background: var(--n300); padding: 1px 7px; font: 600 10px var(--mono); color: var(--n800); }
+  .prbody { display: flex; flex: 1; gap: 24px; }
+  .prmain { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 20px; padding: 16px 0 24px 24px; }
+  .prside { width: 304px; flex: none; }
+  .prside > div { position: sticky; top: 0; display: flex; max-height: calc(100vh - 68px); flex-direction: column; overflow-y: auto; padding: 8px 20px 8px 4px; }
+  .rail { border-bottom: 1px solid var(--line); padding: 12px 0; }
+  .rail:last-child { border-bottom: 0; }
+  .rail-h { display: flex; width: 100%; align-items: center; gap: 8px; border: 0; background: transparent; padding: 4px; text-align: left; font-size: 13px; font-weight: 600; }
+  .rail-h:hover { background: var(--n200); }
+  .rail-h .sm { flex: 1; min-width: 0; }
+  .rail .fbody { padding: 10px 4px 0 24px; }
+  .tm { display: flex; width: 18px; height: 18px; flex: none; align-items: center; justify-content: center; border-radius: 50%; border: 1.5px solid; font-size: 10px; line-height: 1; font-weight: 700; }
+  .tm.ok { border-color: var(--ok); color: var(--ok); } .tm.bad { border-color: var(--accent-600); color: var(--accent-700); }
+  .tm.run { border-color: var(--warn); color: var(--warn); } .tm.wait { border-color: var(--n400); color: var(--n600); }
+  .mchecks { display: flex; flex-direction: column; gap: 10px; }
+  .mchecks li { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; }
+  .mchecks .d { display: block; font-size: 12px; color: var(--n700); }
+  .rail .btnrow { display: flex; flex-direction: column; gap: 6px; }
+  .rail .btnrow .btn { justify-content: center; }
+  .ppl { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+  .ppl li { display: flex; align-items: center; gap: 8px; }
+  .ft { display: inline-flex; min-width: 0; align-items: center; gap: 6px; margin-left: -4px; border: 0; background: transparent; padding: 2px 4px; text-align: left; font: inherit; color: inherit; }
+  .ft:hover { background: var(--n200); }
+  .card.folded > .card-h { border-bottom: 0; }
+  .card .card-h .ft { font-weight: 700; }
+  .pill.pst { font-size: 11px; padding: 0 8px; background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
+  .sevchip { border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 600; background: var(--n100); color: var(--n500); }
+  .sevchip.hi { background: var(--accent-100); color: var(--accent-700); }
+  .sevchip.md { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }
+  .sevchip.lo { background: var(--n200); color: var(--n700); }
+  .conf { border-radius: var(--r-xl); border: 1px solid var(--accent-200); background: var(--card); box-shadow: var(--shadow-sm); overflow: hidden; }
+  .conf .top { display: flex; align-items: flex-start; gap: 10px; background: var(--accent-100); padding: 12px 16px; }
+  .conf .top strong { display: block; font-size: 13px; color: var(--accent-900); }
+  .conf .top span { font-size: 12px; color: var(--accent-700); }
+  .conf li { display: flex; width: 100%; align-items: center; gap: 8px; border: 0; border-top: 1px solid var(--divider); background: transparent; border-radius: 0; padding: 6px 16px; text-align: left; font: 12px var(--mono); }
+  .conf li:first-child { border-top-color: var(--accent-200); }
+  .conf button.li:hover { background: var(--n100); }
+  .conf .cf { flex: none; font-family: var(--sans); color: var(--accent-700); }
+  .conf details { border-top: 1px solid var(--divider); padding: 8px 16px; font-size: 12px; }
+  .conf pre { margin-top: 8px; overflow-x: auto; border-radius: var(--r); background: var(--surface); padding: 8px 12px; font: 12px/1.6 var(--mono); }
+  .cmts { overflow: hidden; border-radius: var(--r-xl); border: 1px solid var(--line); background: var(--card); box-shadow: var(--shadow-sm); }
+  .cmts .hd { border-bottom: 1px solid var(--divider); background: var(--surface); padding: 8px 16px; font-size: 12px; color: var(--n700); }
+  .cmts li { display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--divider); padding: 10px 16px; }
+  .cmts li:first-child { border-top: 0; }
+  .cmts li:hover { background: var(--n100); }
+  .cmts .msg1 { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+  .hash { flex: none; border-radius: 4px; background: var(--n200); padding: 2px 6px; font: 12px var(--mono); color: var(--text); text-decoration: none; }
+  a.hash:hover { background: var(--n300); color: var(--text); }
+  .foldall { border: 0; background: transparent; border-radius: 4px; padding: 2px 6px; font-size: 12px; color: var(--n700); }
+  .foldall:hover { background: var(--n200); color: var(--text); }
+  .file .file-h .sw { font-size: 12px; }
+  .cflag { flex: none; border-radius: 999px; background: var(--accent-100); color: var(--accent-700); padding: 1px 7px; font: 600 12px var(--sans); }
+  .mnu { position: absolute; z-index: 41; overflow: hidden; border-radius: var(--r-lg); border: 1px solid var(--divider); background: var(--card); padding: 4px 0; box-shadow: var(--shadow-lg); }
+  .mnu .mi { padding: 6px 12px; border-radius: 0; }
+  .mbar { display: flex; align-items: center; gap: 8px; align-self: flex-end; border-radius: var(--r); border: 1px solid var(--line); background: var(--card); padding: 8px 12px; font-size: 12px; box-shadow: var(--shadow-sm); }
+  .rq { display: flex; width: 384px; max-width: 100%; align-self: flex-end; flex-direction: column; gap: 6px; }
+  .rq textarea { min-width: 0; resize: vertical; border: 1px solid var(--divider); background: var(--card); padding: 6px 8px; font-size: 12px; }
+  .pass li { display: flex; flex-direction: column; gap: 4px; }
+  .pass .pl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+  .pass .oc { border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent); background: color-mix(in srgb, var(--ok) 10%, transparent); color: var(--ok); border-radius: 999px; padding: 0 8px; font-weight: 600; }
+  .prv { display: flex; min-height: 100%; flex-direction: column; }
+  .sesp { display: flex; height: 100%; min-height: 0; flex-direction: column; }
+  .btn.pressed { border-color: var(--accent-300); background: var(--accent-100); }
+  .pill.run { background: var(--accent-100); color: var(--accent-700); }
   .approval { display: flex; flex-direction: column; overflow: hidden; border-radius: var(--r-xl); border: 1px solid var(--line); background: var(--card); box-shadow: var(--shadow-sm); }
   .approval.is-prod { border-color: var(--accent-300); }
   .approval .a-body { display: flex; gap: 12px; padding: 14px 16px 12px; }
@@ -273,12 +475,8 @@
   .approval .a-foot { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surface, var(--n200)) 60%, transparent); }
   .approval .a-foot .hint { margin-left: auto; font-size: 12px; color: var(--n700); }
   .prod { background: var(--accent); color: var(--bg); padding: 1px 6px; font-size: 10px; font-weight: 800; }
-  .proj-h { display: flex; width: 100%; align-items: center; gap: 8px; border: 0; background: transparent; border-radius: var(--r); padding: 6px 8px; font-size: 12px; font-weight: 700; text-align: left; }
-  .proj-h:hover { background: var(--n200); }
   .tri { font-size: 10px; color: var(--n600); display: inline-block; transition: transform .15s; }
   .tri.open { transform: rotate(90deg); }
-  .pr-row { flex-direction: column; gap: 2px; padding: 8px 12px; font-size: 13px; text-decoration: none; }
-  .pr-meta { display: flex; flex-wrap: wrap; gap: 0 8px; font: 11px var(--mono); color: var(--n700); }
   .file { border-radius: var(--r); border: 1px solid var(--divider); background: var(--card); overflow: hidden; }
   .file-h { display: flex; align-items: center; gap: 8px; background: var(--surface); padding: 4px 8px; font: 12px var(--mono); }
   .file-h.open { border-bottom: 1px solid var(--divider); }
@@ -801,211 +999,579 @@
             <button class="on" data-go="wstab:sessions" style="font-size:13px;padding:6px 14px">Sessions</button>
             <button data-go="wstab:pulls" style="font-size:13px;padding:6px 14px">Pull requests</button>
           </div>
-
-          <!-- Sessions by Repo (sessions-pane.tsx) -->
-          <div data-pane="wstab:sessions" style="padding-bottom:12px">
-            <section aria-label="billing-api" style="padding:0 8px 6px">
-              <div class="rg-head"><button class="rg-btn"><span class="xs muted" style="width:12px">▾</span><span class="bi xs bb">B</span><strong class="mono m">billing-api</strong><span class="grow trunc mono xs muted">main</span><span class="mono xs acc">1 running</span><span class="mono xs muted">1</span></button><button class="plusbtn" title="New Session" aria-label="New Session in billing-api">+</button></div>
-              <ul style="display:flex;flex-direction:column;gap:2px">
-                <li><button class="it ses-row" data-go="ses:invoice"><span class="row" style="align-items:baseline"><span class="grow trunc b">Invoice number race</span><span class="pill acc mono">waiting approval</span></span><span class="trunc mono xs muted">fix/invoice-number</span></button></li>
-              </ul>
-            </section>
-            <section aria-label="checkout-api" style="padding:0 8px 6px">
-              <div class="rg-head"><button class="rg-btn"><span class="xs muted" style="width:12px">▾</span><span class="bi xs gh">GH</span><strong class="mono m">checkout-api</strong><span class="grow trunc mono xs muted">main</span><span class="mono xs muted">5</span></button><button class="plusbtn" title="New Session" aria-label="New Session in checkout-api">+</button></div>
-              <div style="display:flex;flex-direction:column;gap:6px;padding:4px 8px 8px">
-                <div class="row" style="gap:6px"><button class="drop mono grow" style="padding:6px 10px;font-size:12px"><span class="v">main</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button><button class="btn primary xs" style="padding:6px 14px">Start</button></div>
+          <div class="ws-list">
+          <!-- Sessions (sessions-pane.tsx, list-parts.tsx) -->
+          <div data-pane="wstab:sessions" data-list>
+            <div class="ws-bar">
+              <div class="ws-line">
+                <label class="ws-search"><svg width="13" height="13" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><input type="search" aria-label="Search Sessions" placeholder="Search Sessions" title="Matches a Session's title or branch, or its Repo's name or checked-out branch"></label>
+                <button class="btn primary xs" style="height:30px;padding:0 12px;flex:none" data-toggle="#newses" title="New Session: pick a Repo and a branch, or none, and talk to the agent">+ New</button>
               </div>
-              <ul style="display:flex;flex-direction:column;gap:2px">
-                <li><button class="it ses-row sel" data-go="ses:tax"><span class="row" style="align-items:baseline"><span class="grow trunc b">Fix empty cart tax</span><span class="pill mono">idle</span></span><span class="trunc mono xs muted">fix/empty-cart-tax</span></button></li>
-                <li><button class="it ses-row"><span class="row" style="align-items:baseline"><span class="grow trunc b">Payments timeout</span><span class="pill mono">idle</span></span><span class="trunc mono xs muted">fix/OPS-142-payments-timeout</span></button></li>
-                <li><button class="it ses-row"><span class="row" style="align-items:baseline"><span class="grow trunc b">Bump Node to 22</span><span class="pill mono">idle</span></span><span class="trunc mono xs muted">chore/node-22</span></button></li>
+
+              <!-- + New: the one place a Session starts (NewSession, RepoStart, AnonymousStart) -->
+              <div class="ws-new" id="newses" hidden>
+                <div style="position:relative">
+                  <button class="drop mono" data-toggle="#m-newrepo" aria-label="Repo for a new Session" title="Where the new Session works"><span class="v">checkout-api</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+                  <div class="menu" id="m-newrepo" role="listbox" aria-label="Repo for a new Session" data-pick-label hidden>
+                    <div class="menu-h">Start in</div>
+                    <input class="msearch" type="search" placeholder="Search" aria-label="Search Repo for a new Session">
+                    <button class="it opt" role="option" data-val="none" data-go="nrepo:none"><span class="ot"><span class="ol">No Repo</span><span class="od">anonymous: a folder of its own</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="billing-api" data-go="nrepo:repo"><span class="ot"><span class="ol">billing-api</span><span class="od">main</span></span><span class="ck">✓</span></button><button class="it opt sel" role="option" data-val="checkout-api" data-go="nrepo:repo"><span class="ot"><span class="ol">checkout-api</span><span class="od">main</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="mobile" data-go="nrepo:repo"><span class="ot"><span class="ol">mobile</span><span class="od">main</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="web" data-go="nrepo:repo"><span class="ot"><span class="ol">web</span><span class="od">main</span></span><span class="ck">✓</span></button>
+                    <div class="nomatch" hidden>No match</div>
+                  </div>
+                </div>
+                <div data-pane="nrepo:repo">
+                  <div class="row" style="gap:6px;align-items:flex-start">
+                    <div style="position:relative;flex:1;min-width:0">
+                      <button class="drop mono" data-toggle="#m-newbranch" aria-label="Branch for a new Session in checkout-api" title="The new Session works on main in checkout-api"><span class="v">main</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+                      <div class="menu" id="m-newbranch" role="listbox" aria-label="Branch for a new Session in checkout-api" style="width:max-content;min-width:240px;max-width:100%" hidden>
+                        <div class="menu-h">Start on branch</div>
+                        <input class="msearch" type="search" placeholder="Search" aria-label="Search Branch for a new Session in checkout-api">
+                        <button class="it opt" role="option" data-create data-base="main" hidden><span class="ot"><span class="ol">Create</span><span class="od">A new branch from main</span></span></button>
+                        <button class="it opt" role="option" data-val="chore/lint-config"><span class="ot"><span class="ol">chore/lint-config</span><span class="od">on origin</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="feat/price-cache"><span class="ot"><span class="ol">feat/price-cache</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="feat/tax-rounding"><span class="ot"><span class="ol">feat/tax-rounding</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="fix/empty-cart-tax"><span class="ot"><span class="ol">fix/empty-cart-tax</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="fix/null-shipping-line"><span class="ot"><span class="ol">fix/null-shipping-line</span><span class="od">open PR</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="fix/OPS-142-payments-timeout"><span class="ot"><span class="ol">fix/OPS-142-payments-timeout</span><span class="od">on origin</span></span><span class="ck">✓</span></button><button class="it opt sel" role="option" data-val="main"><span class="ot"><span class="ol">main</span><span class="od">checked out</span></span><span class="ck">✓</span></button>
+                        <div class="nomatch" hidden>No match</div>
+                      </div>
+                    </div>
+                    <button class="btn primary xs" style="padding:6px 14px" data-toggle="#newses" title="Start a Session on main">Start</button>
+                  </div>
+                </div>
+                <div data-pane="nrepo:none" hidden>
+                  <div class="row" style="gap:6px">
+                    <span class="hint">A folder of its own. Ask the agent to clone a repository or anything else.</span>
+                    <button class="btn primary xs" style="padding:6px 14px" data-toggle="#newses" title="New anonymous Session: no Repo, a folder of its own">Start</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="ws-line" style="gap:4px">
+                <div class="ws-flt" role="group" aria-label="Session state">
+                  <button class="on" data-go="sflt:all" data-flt="all" aria-pressed="true">All</button>
+                  <button class="hot" data-go="sflt:needs" data-flt="needs">Needs you <span class="n">3</span></button>
+                  <button data-go="sflt:running" data-flt="running">Running <span class="n">2</span></button>
+                </div>
+                <div class="ws-pick">
+                  <button class="chipdd" data-toggle="#m-repofilter" aria-label="Filter by Repo"><span class="v">All Repos</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+                  <div class="menu" id="m-repofilter" role="listbox" aria-label="Filter by Repo" data-pick="repo" hidden>
+                    <input class="msearch" type="search" placeholder="Search" aria-label="Search Filter by Repo">
+                    <button class="it opt sel" role="option" data-val="any"><span class="ot"><span class="ol">All Repos</span><span class="od">18 Sessions</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="none"><span class="ot"><span class="ol">No Repo</span><span class="od">anonymous</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="billing-api"><span class="ot"><span class="ol">billing-api</span><span class="od">5 Sessions</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="checkout-api"><span class="ot"><span class="ol">checkout-api</span><span class="od">5 Sessions</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="mobile"><span class="ot"><span class="ol">mobile</span><span class="od">2 Sessions</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="web"><span class="ot"><span class="ol">web</span><span class="od">4 Sessions</span></span><span class="ck">✓</span></button>
+                    <div class="nomatch" hidden>No match</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <section class="ws-g" data-g="needs" aria-label="Needs you">
+              <h3 style="margin:0"><button class="ws-gh" data-fold="s-needs" aria-label="Fold Needs you" title="Fold Needs you"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="gd d-need"></span>Needs you<span class="cnt">3</span></button></h3>
+              <ul class="fbody">
+                <li class="ws-li" data-text="invoice number race fix/invoice-number billing-api" data-pick="billing-api"><button class="it ws-row" data-go="ses:invoice" title="Invoice number race · fix/invoice-number"><span class="l1"><span class="sd d-need"></span><span class="t">Invoice number race</span><span class="w" title="Waiting on you: the agent needs your Approval to go on">approval</span><span class="ago">2m</span></span><span class="l2"><span class="rp" title="billing-api">billing-api</span><span class="sl">/</span><span class="br">fix/invoice-number</span></span></button><button class="ws-stop" aria-label="Stop Invoice number race" title="Stop the agent where it is. The conversation stays."><i></i>stop</button></li>
+                <li class="ws-li" data-text="which rounding rule for eu tax? feat/tax-rounding checkout-api" data-pick="checkout-api"><button class="it ws-row" data-go="ses:r1" title="Which rounding rule for EU tax? · feat/tax-rounding"><span class="l1"><span class="sd d-need"></span><span class="t">Which rounding rule for EU tax?</span><span class="w" title="Waiting on you: the agent asked a question. Your next message answers it.">question</span><span class="ago">14m</span></span><span class="l2"><span class="rp" title="checkout-api">checkout-api</span><span class="sl">/</span><span class="br">feat/tax-rounding</span></span></button><button class="ws-stop" aria-label="Stop Which rounding rule for EU tax?" title="Stop the agent where it is. The conversation stays."><i></i>stop</button></li>
+                <li class="ws-li" data-text="backfill order totals chore/backfill-totals billing-api" data-pick="billing-api"><button class="it ws-row" data-go="ses:r2" title="Backfill order totals · chore/backfill-totals"><span class="l1"><span class="sd " style="background:var(--accent-700)"></span><span class="t">Backfill order totals</span><span class="w" title="Failed: the last run stopped with an error. Send a message to go on.">failed</span><span class="ago">1h</span></span><span class="l2"><span class="rp" title="billing-api">billing-api</span><span class="sl">/</span><span class="br">chore/backfill-totals</span></span></button></li>
+
               </ul>
-              <button style="margin-top:2px;border:0;background:transparent;padding:4px 0 4px 28px;font-size:12px;color:var(--accent-700)">Show 2 more</button>
             </section>
-            <section aria-label="web" style="padding:0 8px 6px">
-              <div class="rg-head"><button class="rg-btn"><span class="xs muted" style="width:12px">▸</span><span class="bi xs gh">GH</span><strong class="mono m">web</strong><span class="grow trunc mono xs muted">main</span><span class="mono xs muted">2</span></button><button class="plusbtn" title="New Session">+</button></div>
+            <section class="ws-g" data-g="running" aria-label="Running">
+              <h3 style="margin:0"><button class="ws-gh" data-fold="s-running" aria-label="Fold Running" title="Fold Running"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="gd d-run"></span>Running<span class="cnt">2</span></button></h3>
+              <ul class="fbody">
+                <li class="ws-li" data-text="show tax-free shipping in the cart fix/cart-null-shipping web" data-pick="web"><button class="it ws-row" data-go="ses:facets" title="Show tax-free shipping in the cart · fix/cart-null-shipping"><span class="l1"><span class="sd d-run pulse"></span><span class="t">Show tax-free shipping in the cart</span><span class="ago">1m</span></span><span class="l2"><span class="rp" title="web">web</span><span class="sl">/</span><span class="br">fix/cart-null-shipping</span></span></button><button class="ws-stop" aria-label="Stop Show tax-free shipping in the cart" title="Stop the agent where it is. The conversation stays."><i></i>stop</button></li>
+                <li class="ws-li" data-text="cache price changes feat/price-cache checkout-api" data-pick="checkout-api"><button class="it ws-row" data-go="ses:r11" title="Cache price changes · feat/price-cache"><span class="l1"><span class="sd d-run pulse"></span><span class="t">Cache price changes</span><span class="ago">4m</span></span><span class="l2"><span class="rp" title="checkout-api">checkout-api</span><span class="sl">/</span><span class="br">feat/price-cache</span></span></button><button class="ws-stop" aria-label="Stop Cache price changes" title="Stop the agent where it is. The conversation stays."><i></i>stop</button></li>
+
+              </ul>
             </section>
-            <section aria-label="No Repo" style="padding:0 8px 6px">
-              <div class="rg-head"><span class="rg-btn" style="cursor:default"><span style="width:12px"></span><span style="display:inline-flex;width:18px;height:18px;align-items:center;justify-content:center;border-radius:5px;border:1px dashed var(--n500);font-size:10px;color:var(--n700)">∅</span><strong class="m">No Repo</strong><span class="grow trunc xs muted">anonymous</span><span class="mono xs muted">1</span></span><button class="plusbtn" title="New anonymous Session: no Repo, its own folder">+</button></div>
-              <ul><li><button class="it ses-row"><span class="row" style="align-items:baseline"><span class="grow trunc b">Clone acme/mobile and find the crash</span><span class="pill mono">idle</span></span></button></li></ul>
+            <section class="ws-g" data-g="idle" aria-label="Idle">
+              <h3 style="margin:0"><button class="ws-gh" data-fold="s-idle" aria-label="Fold Idle" title="Fold Idle"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="gd d-idle"></span>Idle<span class="cnt">13</span></button></h3>
+              <ul class="fbody">
+                <li class="ws-li" data-text="fix empty cart tax fix/empty-cart-tax checkout-api" data-pick="checkout-api"><button class="it ws-row sel" data-go="ses:tax" title="Fix empty cart tax · fix/empty-cart-tax"><span class="l1"><span class="sd d-idle"></span><span class="t">Fix empty cart tax</span><span class="ago">1h</span></span><span class="l2"><span class="rp" title="checkout-api">checkout-api</span><span class="sl">/</span><span class="br">fix/empty-cart-tax</span></span></button></li>
+                <li class="ws-li" data-text="apply the guard to invoice tax fix/invoice-null-shipping billing-api" data-pick="billing-api"><button class="it ws-row" data-go="ses:r21" title="Apply the guard to invoice tax · fix/invoice-null-shipping"><span class="l1"><span class="sd d-idle"></span><span class="t">Apply the guard to invoice tax</span><span class="ago">2h</span></span><span class="l2"><span class="rp" title="billing-api">billing-api</span><span class="sl">/</span><span class="br">fix/invoice-null-shipping</span></span></button></li>
+                <li class="ws-li" data-text="payments timeout fix/ops-142-payments-timeout checkout-api" data-pick="checkout-api"><button class="it ws-row" data-go="ses:r22" title="Payments timeout · fix/OPS-142-payments-timeout"><span class="l1"><span class="sd d-idle"></span><span class="t">Payments timeout</span><span class="ago">3h</span></span><span class="l2"><span class="rp" title="checkout-api">checkout-api</span><span class="sl">/</span><span class="br">fix/OPS-142-payments-timeout</span></span></button></li>
+                <li class="ws-li" data-text="bump node to 22 chore/node-22 web" data-pick="web"><button class="it ws-row" data-go="ses:r23" title="Bump Node to 22 · chore/node-22"><span class="l1"><span class="sd d-idle"></span><span class="t">Bump Node to 22</span><span class="ago">1d</span></span><span class="l2"><span class="rp" title="web">web</span><span class="sl">/</span><span class="br">chore/node-22</span></span></button></li>
+                <li class="ws-li" data-text="clone acme/mobile and find the crash no repo" data-pick="none"><button class="it ws-row" data-go="ses:r24" title="Clone acme/mobile and find the crash"><span class="l1"><span class="sd d-idle"></span><span class="t">Clone acme/mobile and find the crash</span><span class="ago">2d</span></span><span class="l2"><span class="rp none" title="Anonymous: no Repo, a folder of its own">No Repo</span></span></button></li>
+                <li class="ws-li" data-text="guard null shipping line in tax fix/null-shipping-line checkout-api" data-pick="checkout-api"><button class="it ws-row" data-go="ses:r25" title="Guard null shipping line in tax · fix/null-shipping-line"><span class="l1"><span class="sd d-idle"></span><span class="t">Guard null shipping line in tax</span><span class="ago">2d</span></span><span class="l2"><span class="rp" title="checkout-api">checkout-api</span><span class="sl">/</span><span class="br">fix/null-shipping-line</span></span></button></li>
+                <li class="ws-li" data-text="rename tax_rates columns chore/rename-tax-columns billing-api" data-pick="billing-api"><button class="it ws-row" data-go="ses:r26" title="Rename tax_rates columns · chore/rename-tax-columns"><span class="l1"><span class="sd d-idle"></span><span class="t">Rename tax_rates columns</span><span class="ago">3d</span></span><span class="l2"><span class="rp" title="billing-api">billing-api</span><span class="sl">/</span><span class="br">chore/rename-tax-columns</span></span></button></li>
+                <li class="ws-li" data-text="faster product search perf/search web" data-pick="web"><button class="it ws-row" data-go="ses:r27" title="Faster product search · perf/search"><span class="l1"><span class="sd d-idle"></span><span class="t">Faster product search</span><span class="ago">4d</span></span><span class="l2"><span class="rp" title="web">web</span><span class="sl">/</span><span class="br">perf/search</span></span></button></li>
+                <li class="ws-li more" data-text="fix the crash on launch fix/launch-crash mobile" data-pick="mobile" hidden><button class="it ws-row" data-go="ses:r28" title="Fix the crash on launch · fix/launch-crash"><span class="l1"><span class="sd d-idle"></span><span class="t">Fix the crash on launch</span><span class="ago">5d</span></span><span class="l2"><span class="rp" title="mobile">mobile</span><span class="sl">/</span><span class="br">fix/launch-crash</span></span></button></li>
+                <li class="ws-li more" data-text="retry webhook deliveries with backoff feat/webhook-backoff billing-api" data-pick="billing-api" hidden><button class="it ws-row" data-go="ses:r29" title="Retry webhook deliveries with backoff · feat/webhook-backoff"><span class="l1"><span class="sd d-idle"></span><span class="t">Retry webhook deliveries with backoff</span><span class="ago">6d</span></span><span class="l2"><span class="rp" title="billing-api">billing-api</span><span class="sl">/</span><span class="br">feat/webhook-backoff</span></span></button></li>
+                <li class="ws-li more" data-text="update readme badges docs/badges web" data-pick="web" hidden><button class="it ws-row" data-go="ses:r30" title="Update README badges · docs/badges"><span class="l1"><span class="sd d-idle"></span><span class="t">Update README badges</span><span class="ago">1w</span></span><span class="l2"><span class="rp" title="web">web</span><span class="sl">/</span><span class="br">docs/badges</span></span></button></li>
+                <li class="ws-li more" data-text="try the new date library spike/date-lib mobile" data-pick="mobile" hidden><button class="it ws-row" data-go="ses:r31" title="Try the new date library · spike/date-lib"><span class="l1"><span class="sd d-idle"></span><span class="t">Try the new date library</span><span class="ago">1w</span></span><span class="l2"><span class="rp" title="mobile">mobile</span><span class="sl">/</span><span class="br">spike/date-lib</span></span></button></li>
+                <li class="ws-li more" data-text="explain the nightly export no repo" data-pick="none" hidden><button class="it ws-row" data-go="ses:r32" title="Explain the nightly export"><span class="l1"><span class="sd d-idle"></span><span class="t">Explain the nightly export</span><span class="ago">2w</span></span><span class="l2"><span class="rp none" title="Anonymous: no Repo, a folder of its own">No Repo</span></span></button></li>
+                <li class="ws-more-li"><button class="ws-more" data-more>Show 5 more</button></li>
+
+              </ul>
             </section>
+            <p class="ws-empty" data-empty hidden></p>
           </div>
 
-          <!-- Pull requests (pull-requests-pane.tsx) -->
-          <div data-pane="wstab:pulls" hidden>
-            <div style="display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--divider);padding:4px 12px 10px">
-              <div class="row" style="gap:6px">
-                <div class="seg grow" role="group" aria-label="Whose pull requests"><button>Mine</button><button class="on">All</button></div>
-                <button class="btn icon" aria-label="Refresh pull requests" title="Read the Git hosts again"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <!-- Pull requests (pull-requests-pane.tsx, list-parts.tsx) -->
+          <div data-pane="wstab:pulls" data-list hidden>
+            <div class="ws-bar">
+              <div class="ws-line">
+                <label class="ws-search"><svg width="13" height="13" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><input type="search" aria-label="Search pull requests" placeholder="#, title or author"></label>
+                <div class="ws-whose" role="group" aria-label="Whose pull requests"><button data-go="whose:mine" title="Pull requests you opened, and the ones on a branch a Session worked on">Mine</button><button class="on" data-go="whose:all" title="Every open pull request in the repositories you can read on your connected Git hosts">All</button></div>
+                <button class="btn icon" style="width:30px;height:30px;flex:none" aria-label="Refresh pull requests" title="Read the Git hosts again now. Otherwise they are read every 30 minutes."><svg width="14" height="14" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
               </div>
-              <div style="position:relative"><svg width="13" height="13" viewBox="0 0 16 16" style="position:absolute;top:50%;left:10px;transform:translateY(-50%);color:var(--n600)"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-                <input class="field" type="search" placeholder="Search number, title or your email" style="width:100%;padding-left:30px;background:var(--card)"></div>
-              <div class="row xs muted" style="padding:0 2px"><span><strong style="color:var(--text);font-weight:600">5</strong> pull requests in <strong style="color:var(--text);font-weight:600">3</strong> projects</span><button class="ml row" style="gap:4px;border:0;background:transparent;padding:2px 4px;font-size:11px;color:var(--n700)"><span class="tri open" style="font-size:9px">▶</span>Collapse all</button></div>
+              <div class="ws-line" style="gap:4px">
+                <div class="ws-flt" role="group" aria-label="What to do next">
+                  <button class="on" data-go="pflt:all" data-flt="all" aria-pressed="true">All</button>
+                  <button data-go="pflt:review" data-flt="review">To review <span class="n">2</span></button>
+                  <button class="hot" data-go="pflt:failing" data-flt="failing">Failing <span class="n">1</span></button>
+                </div>
+                <div class="ws-pick">
+                  <button class="chipdd" data-toggle="#m-projfilter" aria-label="Filter by project"><span class="v">All projects</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+                  <div class="menu" id="m-projfilter" role="listbox" aria-label="Filter by project" data-pick="proj" hidden>
+                    <input class="msearch" type="search" placeholder="Search" aria-label="Search Filter by project">
+                    <button class="it opt sel" role="option" data-val="any"><span class="ot"><span class="ol">All projects</span><span class="od">7 pull requests</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="acme/billing-api"><span class="ot"><span class="ol">acme/billing-api</span><span class="od">2 pull requests</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="acme/checkout-api"><span class="ot"><span class="ol">acme/checkout-api</span><span class="od">4 pull requests</span></span><span class="ck">✓</span></button><button class="it opt" role="option" data-val="acme/infra"><span class="ot"><span class="ol">acme/infra</span><span class="od">1 pull request</span></span><span class="ck">✓</span></button>
+                    <div class="nomatch" hidden>No match</div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div style="display:flex;flex-direction:column;gap:4px;padding:8px 8px 12px">
-              <section>
-                <button class="proj-h"><span class="tri open">▶</span><span class="bi xs bb">B</span><span class="trunc mono">acme/billing-api</span><span class="pill" style="background:var(--accent-100);color:var(--accent-900);font-weight:600">local · billing-api</span><span class="ml mono xs muted" style="font-weight:400">1</span></button>
-                <ul><li><button class="it pr-row"><span class="trunc b" style="width:100%">#57 Retry invoice number on conflict</span><span class="pr-meta"><span>sam-lee</span><span class="trunc">fix/invoice-number</span><span>agent</span><span>◐ checks running</span></span></button></li></ul>
-              </section>
-              <section>
-                <button class="proj-h"><span class="tri open">▶</span><span class="bi xs gh">GH</span><span class="trunc mono">acme/checkout-api</span><span class="pill" style="background:var(--accent-100);color:var(--accent-900);font-weight:600">local · checkout-api</span><span class="ml mono xs muted" style="font-weight:400">3</span></button>
-                <ul style="display:flex;flex-direction:column;gap:2px">
-                  <li><button class="it pr-row" data-go="pr:412"><span class="trunc b" style="width:100%">#412 Guard null shipping line in tax</span><span class="pr-meta"><span>sam-lee</span><span class="trunc">fix/empty-cart-tax</span><span>agent</span><span>✓ checks passed</span><span class="okc">✓ approved by priya-rao</span><span>2 comments</span></span></button></li>
-                  <li><button class="it pr-row sel" data-go="pr:415"><span class="trunc b" style="width:100%">#415 Cache tax rates per region</span><span class="pr-meta"><span>priya-rao</span><span class="trunc">perf/tax-rate-cache</span><span>✓ checks passed</span><span>3 comments</span></span></button></li>
-                  <li><button class="it pr-row"><span class="trunc b" style="width:100%">#409 Search facet counts</span><span class="pr-meta"><span>alex-kim</span><span class="trunc">feat/facets</span><span>✕ checks failed</span><span>changes requested</span></span></button></li>
-                </ul>
-              </section>
-              <section>
-                <button class="proj-h"><span class="tri open">▶</span><span class="bi xs gl">GL</span><span class="trunc mono">acme/infra</span><span class="pill" style="font-weight:400">not imported</span><span class="ml mono xs muted" style="font-weight:400">1</span></button>
-                <ul><li><a class="it pr-row" href="#" title="Open on gitlab"><span class="row" style="width:100%"><span class="trunc b">#88 Raise worker memory to 1 GiB</span><span class="ml s faint" style="font-weight:400">↗</span></span><span class="pr-meta"><span>alex-kim</span><span class="trunc">ops/worker-memory</span><span>✓ checks passed</span></span></a></li></ul>
-              </section>
-            </div>
+            <!-- The stale warning, when a Git host did not answer: <div class="ws-note">The Git host did not answer. Showing what was read at 9:41 AM.</div> -->
+            <section class="ws-g" data-g="changes" aria-label="Changes requested">
+              <h3 style="margin:0"><button class="ws-gh" data-fold="p-changes" aria-label="Fold Changes requested" title="Fold Changes requested"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="gd d-need"></span>Changes requested<span class="cnt">1</span></button></h3>
+              <ul class="fbody">
+                <li class="ws-li" data-text="409 search facet counts alex-kim acme/checkout-api" data-pick="acme/checkout-api"><button class="it ws-row" data-go="pr:409"><span class="l1"><span class="t">Search facet counts</span><span class="ago" title="Opened">2d</span></span><span class="pl2"><span class="who"><span class="mono">#409</span> <span class="mono s2" title="acme/checkout-api">checkout-api</span> · alex-kim</span><span class="fl acc" title="At least one CI check failed on the newest commit">✕</span><span class="fl acc">changes</span><span class="cc" title="4 comments"><svg width="11" height="11" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>4</span></span></button></li>
+
+              </ul>
+            </section>
+            <section class="ws-g" data-g="failing" aria-label="Checks failing">
+              <h3 style="margin:0"><button class="ws-gh" data-fold="p-failing" aria-label="Fold Checks failing" title="Fold Checks failing"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="gd d-need"></span>Checks failing<span class="cnt">1</span></button></h3>
+              <ul class="fbody">
+                <li class="ws-li" data-text="402 retry webhook deliveries with backoff sam-lee acme/billing-api" data-pick="acme/billing-api"><button class="it ws-row" data-go="pr:402"><span class="l1"><span class="t">Retry webhook deliveries with backoff</span><span class="ago" title="Opened">1d</span></span><span class="pl2"><span class="who"><span class="mono">#402</span> <span class="mono s2" title="acme/billing-api">billing-api</span> · sam-lee</span><span class="bg fl" title="A Session in the console worked on this branch">agent</span><span class="fl acc" title="At least one CI check failed on the newest commit">✕</span><span class="cc" title="1 comments"><svg width="11" height="11" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>1</span></span></button></li>
+
+              </ul>
+            </section>
+            <section class="ws-g" data-g="review" aria-label="To review">
+              <h3 style="margin:0"><button class="ws-gh" data-fold="p-review" aria-label="Fold To review" title="Fold To review"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="gd d-warn"></span>To review<span class="cnt">2</span></button></h3>
+              <ul class="fbody">
+                <li class="ws-li" data-text="415 cache tax rates per region priya-rao acme/checkout-api" data-pick="acme/checkout-api"><button class="it ws-row sel" data-go="pr:415"><span class="l1"><span class="t">Cache tax rates per region</span><span class="ago" title="Opened">3h</span></span><span class="pl2"><span class="who"><span class="mono">#415</span> <span class="mono s2" title="acme/checkout-api">checkout-api</span> · priya-rao</span><span class="fl okc" title="Every CI check passed on the newest commit">✓</span><span class="cc" title="3 comments"><svg width="11" height="11" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>3</span></span></button></li>
+                <li class="ws-li" data-text="88 raise worker memory to 1 gib alex-kim acme/infra" data-pick="acme/infra"><a class="it ws-row" href="https://gitlab.example.com/acme/infra/-/merge_requests/88" target="_blank" rel="noreferrer" title="Opens on gitlab in a new tab: only imported GitHub and Bitbucket pull requests open in the console"><span class="l1"><span class="t">Raise worker memory to 1 GiB</span><span class="ago" title="Opened">5h</span><span class="ext" aria-hidden="true">↗</span></span><span class="pl2"><span class="who"><span class="mono">#88</span> <span class="mono s2" title="acme/infra">infra</span> · alex-kim</span><span class="fl" title="Not imported as a Repo: its pull requests open on the Git host. Import it in Repos to review them here.">not imported</span><span class="fl okc" title="Every CI check passed on the newest commit">✓</span></span></a></li>
+
+              </ul>
+            </section>
+            <section class="ws-g" data-g="waiting" aria-label="Waiting on review">
+              <h3 style="margin:0"><button class="ws-gh" data-fold="p-waiting" aria-label="Fold Waiting on review" title="Fold Waiting on review"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="gd d-idle"></span>Waiting on review<span class="cnt">1</span></button></h3>
+              <ul class="fbody">
+                <li class="ws-li" data-text="57 retry invoice number on conflict sam-lee acme/billing-api" data-pick="acme/billing-api"><button class="it ws-row" data-go="pr:57"><span class="l1"><span class="t">Retry invoice number on conflict</span><span class="ago" title="Opened">1d</span></span><span class="pl2"><span class="who"><span class="mono">#57</span> <span class="mono s2" title="acme/billing-api">billing-api</span> · sam-lee</span><span class="bg fl" title="A Session in the console worked on this branch">agent</span><span class="fl warnc" title="CI checks are still running on the newest commit">◐</span></span></button></li>
+
+              </ul>
+            </section>
+            <section class="ws-g" data-g="ready" aria-label="Ready to merge">
+              <h3 style="margin:0"><button class="ws-gh" data-fold="p-ready" aria-label="Fold Ready to merge" title="Fold Ready to merge"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="gd d-run"></span>Ready to merge<span class="cnt">1</span></button></h3>
+              <ul class="fbody">
+                <li class="ws-li" data-text="412 guard null shipping line in tax sam-lee acme/checkout-api" data-pick="acme/checkout-api"><button class="it ws-row" data-go="pr:412"><span class="l1"><span class="t">Guard null shipping line in tax</span><span class="ago" title="Opened">2d</span></span><span class="pl2"><span class="who"><span class="mono">#412</span> <span class="mono s2" title="acme/checkout-api">checkout-api</span> · sam-lee</span><span class="bg fl" title="A Session in the console worked on this branch">agent</span><span class="fl okc" title="Every CI check passed on the newest commit">✓</span><span class="fl okc" title="Approved by priya-rao">approved</span><span class="cc" title="2 comments"><svg width="11" height="11" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>2</span></span></button></li>
+
+              </ul>
+            </section>
+            <section class="ws-g" data-g="done" aria-label="Merged or closed">
+              <h3 style="margin:0"><button class="ws-gh" data-fold="p-done" aria-label="Fold Merged or closed" title="Fold Merged or closed"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="gd d-done"></span>Merged or closed<span class="cnt">1</span></button></h3>
+              <ul class="fbody">
+                <li class="ws-li" data-text="398 drop unused tax table sam-lee acme/checkout-api" data-pick="acme/checkout-api"><button class="it ws-row" data-go="pr:398"><span class="l1"><span class="t">Drop unused tax table</span><span class="ago" title="Opened">5d</span></span><span class="pl2"><span class="who"><span class="mono">#398</span> <span class="mono s2" title="acme/checkout-api">checkout-api</span> · sam-lee</span><span class="bg fl">merged</span><span class="fl okc" title="Every CI check passed on the newest commit">✓</span><span class="fl okc" title="Approved by priya-rao">approved</span></span></button></li>
+
+              </ul>
+            </section>
+            <p class="ws-empty" data-empty hidden></p>
+          </div>
+
           </div>
         </aside>
 
         <section class="ws-main">
-          <!-- Session view (session-view.tsx) -->
-          <div data-pane="wstab:sessions" style="display:flex;flex-direction:column;height:100%;min-height:0">
-            <header class="wrapr" style="gap:10px;border-bottom:1px solid var(--line);padding:12px 24px">
-              <span class="muted" style="font-size:14px">checkout-api /</span>
-              <h2 class="trunc" style="font-size:16px;flex:1 1 200px">Fix empty cart tax</h2>
-              <span class="mono s" style="border:1px solid var(--line);background:var(--card);border-radius:999px;padding:2px 10px">fix/empty-cart-tax</span>
-              <span class="pill" style="font-size:11px;padding:2px 8px">idle</span>
-              <button class="btn xs" style="padding:4px 10px">Delete</button>
+          <!-- Session view (session-view.tsx, composer-menus.tsx, extra-repos.tsx, session-diff.tsx, agents/spawn-card.tsx) -->
+          <div data-pane="wstab:sessions" style="height:100%;min-height:0">
+          <div data-pane="ses:tax" class="sesp">
+            <header style="display:flex;flex-direction:column;gap:6px;border-bottom:1px solid var(--line);padding:12px 24px">
+              <div class="row" style="gap:10px;min-width:0">
+                <span class="muted" style="flex:none;font-size:14px">checkout-api /</span>
+                <h2 class="trunc" style="font-size:14px;font-weight:700" title="Fix empty cart tax">Fix empty cart tax</h2>
+                <span class="pill" style="flex:none;font-size:11px;padding:2px 8px" title="Idle: waiting for your next message">idle</span>
+                <span class="ml row" style="flex:none;gap:8px">
+                  <button class="btn xs" data-toggle="#sdiff" data-pressed title="Show what this Session's branch changes">Diff <span class="mono b"><span style="color:var(--add-text)">+14</span> <span style="color:var(--del-text)">−1</span></span></button>
+                  <button class="btn xs" title="Delete this Session and its conversation. The files in the Repo stay as they are.">Delete</button>
+                </span>
+              </div>
+              <div class="wrapr" style="gap:8px">
+                <span class="chip-l mono" title="The branch this Session works on">fix/empty-cart-tax</span>
+                <button class="btn xs" data-toggle="#openpr" style="padding:2px 10px" title="Push this branch and open a pull request on the Git host. The agent drafts the text.">Open pull request</button>
+              </div>
             </header>
-            <ul style="flex:1;min-height:0;overflow-y:auto;padding:8px 0">
-              <li class="msg you"><span class="who">You</span><div>Reproduce the 500 on POST /v1/orders with an empty guest cart, then fix it.</div></li>
-              <li class="msg"><span class="who">Agent</span>
-                <div class="mono s muted">Read src/tax/apply.ts</div>
-                <div class="mono s muted">Ran pnpm test tax --run</div>
-                <div>Reproduced it: <code>applyTax</code> reads <code>shipping.amount</code> when <code>shipping</code> is null. I guarded it and added a test for an empty guest cart.</div>
-                <div class="file" style="font-size:12px"><div class="mono b" style="border-bottom:1px solid var(--line);background:var(--surface);padding:4px 8px">src/tax/apply.ts</div><div class="diff"><table>
-                  <tr class="h"><td colspan="4">@@ -85,6 +85,7 @@</td></tr>
-                  <tr class="d"><td class="g">86</td><td class="g"></td><td class="sg">−</td><td class="tx">  lines.push(shippingTax(cart.shipping.amount));</td></tr>
-                  <tr class="a"><td class="g"></td><td class="g">86</td><td class="sg">+</td><td class="tx">  if (cart.shipping) lines.push(shippingTax(cart.shipping.amount));</td></tr>
-                </table></div></div>
-                <div>Tests pass. Say so and I will push the branch and open a pull request.</div>
-              </li>
-            </ul>
-            <div style="display:flex;flex-direction:column;gap:8px;padding:0 24px 18px">
-              <div class="composer">
-                <textarea aria-label="Message">Push the branch and open a pull request.</textarea>
+            <!-- OpenPullRequestForm: opens from the button or /pr -->
+            <form class="sform" id="openpr" aria-label="Open pull request" hidden>
+              <label>Title<input class="field" value="Guard null shipping in applyTax"></label>
+              <label>Description<textarea class="field mono" style="min-height:96px;resize:vertical">applyTax read shipping.amount when a guest cart has no shipping line, which made POST /v1/orders return a 500. It now skips the shipping tax when shipping is null.</textarea></label>
+              <label>Base branch<input class="field mono" style="max-width:320px" value="main"></label>
+              <p class="s muted" style="margin:0">2 files have changes that are not committed. The pull request leaves them out.</p>
+              <div class="row" style="gap:8px"><button type="button" class="btn primary xs" style="padding:4px 12px" data-toggle="#openpr" title="Push the branch to origin and open the pull request on the Git host">Open pull request</button><button type="button" class="btn xs" style="padding:4px 12px" data-toggle="#openpr">Cancel</button></div>
+            </form>
+            <div class="row" style="flex:1;min-height:0;align-items:stretch;gap:0">
+              <div style="display:flex;min-width:0;flex:1;flex-direction:column">
+                <ul aria-label="Conversation" style="flex:1;min-height:0;overflow-y:auto;padding:8px 0">
+                  <li class="msg you"><span class="who">You</span><div>Reproduce the 500 on POST /v1/orders with an empty guest cart, then fix it.</div></li>
+                  <li class="msg"><span class="who">Agent</span>
+                    <div class="mono s muted">Read src/tax/apply.ts</div>
+                    <div class="mono s muted">Ran pnpm test tax --run</div>
+                    <div>Reproduced it: <code>applyTax</code> reads <code>shipping.amount</code> when <code>shipping</code> is null. I guarded it and added a test for an empty guest cart.</div>
+                    <div class="file" style="font-size:12px"><div class="mono b" style="border-bottom:1px solid var(--line);background:var(--surface);padding:4px 8px">src/tax/apply.ts</div><div class="diff"><table>
+                      <tr class="h"><td colspan="4">@@ -85,6 +85,7 @@</td></tr>
+                      <tr class="d"><td class="g">86</td><td class="g"></td><td class="sg">−</td><td class="tx">  lines.push(shippingTax(cart.shipping.amount));</td></tr>
+                      <tr class="a"><td class="g"></td><td class="g">86</td><td class="sg">+</td><td class="tx">  if (cart.shipping) lines.push(shippingTax(cart.shipping.amount));</td></tr>
+                    </table></div></div>
+                    <div>Tests pass. The same null shipping line breaks invoice tax in billing-api and the cart total in web, so I started a Session in each.</div>
+                    <!-- Batch card: the agent's spawn_sessions call (agents/spawn-card.tsx) -->
+                    <section class="spawn" aria-label="Sessions started together">
+                      <span class="cap" style="text-transform:uppercase">Started 2 of 2 Sessions</span>
+                      <ul style="display:flex;flex-direction:column;gap:6px">
+                        <li><strong>web</strong><span class="st go" title="Working: the agent is running">working</span><span class="mono muted trunc" style="max-width:240px" title="The branch this Session works on">fix/cart-null-shipping</span><button class="open" data-go="ses:facets" title="Open the Session &quot;Show tax-free shipping in the cart&quot;">Open</button></li>
+                        <li><strong>billing-api</strong><span class="st" title="Idle: waiting for your next message">idle</span><span class="mono muted trunc" style="max-width:240px" title="The branch this Session works on">fix/invoice-null-shipping</span><a class="chip-l" href="https://github.com/acme/billing-api/pull/58" target="_blank" rel="noreferrer" title="Open this pull request on the Git host">PR #58 ↗</a><button class="open" title="Open the Session &quot;Apply the guard to invoice tax&quot;">Open</button></li>
+                      </ul>
+                    </section>
+                  </li>
+                </ul>
+                <div style="display:flex;flex-direction:column;gap:8px;padding:0 24px 18px">
+                  <div class="composer" data-composer>
+                <div class="cm" data-mode="skills" role="listbox" aria-label="Skills" hidden><div class="cm-h">Skills</div><div class="cm-r" role="option" data-name="diagnosing-bugs" data-desc="Find the cause of a hard bug before editing"><span class="nm">$diagnosing-bugs</span><span class="ds">Find the cause of a hard bug before editing</span><span class="tg pack">Ops Console</span></div><div class="cm-r" role="option" data-name="release-notes" data-desc="Draft release notes from merged pull requests"><span class="nm">$release-notes</span><span class="ds">Draft release notes from merged pull requests</span><span class="tg">Custom</span></div><div class="cm-r" role="option" data-name="tax-rounding" data-desc="Check a change against the checkout rounding rules"><span class="nm">$tax-rounding</span><span class="ds">Check a change against the checkout rounding rules</span><span class="tg proj">Project</span></div><p class="none" hidden>No skills match</p><p class="cm-f">Enter picks, Esc closes. What you type after the name is the task.</p></div><div class="cm" data-mode="commands" role="listbox" aria-label="Commands" hidden><div class="cm-h">Commands</div><div class="cm-r" role="option" data-name="diff" data-desc="Show or hide the changed files"><span class="nm">/diff</span><span class="ds">Show or hide the changed files</span></div><div class="cm-r" role="option" data-name="pr" data-desc="Open a pull request for this branch"><span class="nm">/pr</span><span class="ds">Open a pull request for this branch</span></div><div class="cm-r" role="option" data-name="skills" data-desc="Pick a skill to run"><span class="nm">/skills</span><span class="ds">Pick a skill to run</span></div><div class="cm-r" role="option" data-name="files" data-desc="Search files to mention"><span class="nm">/files</span><span class="ds">Search files to mention</span></div><p class="none" hidden>No commands match</p><p class="cm-f">Enter runs it, Esc closes.</p></div><div class="cm" data-mode="files" role="listbox" aria-label="Files" hidden><div class="cm-h">Files</div><div class="cm-r" role="option" data-name="apply.ts" data-path="src/tax/apply.ts"><span class="nm">apply.ts</span><span class="ds mono">src/tax/</span></div><div class="cm-r" role="option" data-name="apply.test.ts" data-path="test/tax/apply.test.ts"><span class="nm">apply.test.ts</span><span class="ds mono">test/tax/</span></div><div class="cm-r" role="option" data-name="rates.ts" data-path="src/tax/rates.ts"><span class="nm">rates.ts</span><span class="ds mono">src/tax/</span></div><div class="cm-r" role="option" data-name="shipping.ts" data-path="src/tax/shipping.ts"><span class="nm">shipping.ts</span><span class="ds mono">src/tax/</span></div><div class="cm-r" role="option" data-name="package.json" data-path="package.json"><span class="nm">package.json</span><span class="ds mono"></span></div><div class="cm-r" role="option" data-name="README.md" data-path="README.md"><span class="nm">README.md</span><span class="ds mono"></span></div><p class="none" hidden>No files match</p><p class="cm-f">Enter inserts the path, Esc closes.</p></div>
+                <textarea aria-label="Message" placeholder="Ask anything. @ files, $ skills, / commands"></textarea>
                 <div class="bar">
-                  <button class="chipdd"><span class="c">Model</span><span class="v">Claude Opus 5.5</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
-                  <button class="chipdd"><span class="c">Effort</span><span class="v">High</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
-                  <button class="chipdd"><span class="c">Access</span><span class="v">Auto</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
-                  <div style="position:relative">
-                    <button class="brchip" data-toggle="#branches" title="Switch branch"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/></svg><span class="mono">fix/empty-cart-tax</span><span class="acc">changed</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
-                    
+                  <div class="l">
+                    <button class="attach" aria-label="Attach files" title="Attach files: images, logs, PDFs. They go in the text where the cursor is. You can also drop or paste them."><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 11.5-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg></button>
+                    <button class="chipdd"><span class="c">Model</span><span class="v">Claude Opus 5.5</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button><button class="chipdd"><span class="c">Effort</span><span class="v">High</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button><button class="chipdd"><span class="c">Access</span><span class="v">Auto</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+                    <div style="position:relative">
+                      <button class="chipdd" data-toggle="#xrepos" aria-label="Other Repos" title="Other Repos this Session's agent may read, edit and commit in, as in its own. Applies from its next run."><span class="c">Repos</span><span class="v" data-xcount>this one</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+                      <div class="menu" id="xrepos" data-xrepos style="bottom:calc(100% + 6px);left:0;width:288px;max-height:320px;overflow:auto" hidden>
+                        <div class="menu-h" style="text-transform:uppercase">Also open to this session</div>
+                        <p class="xs muted" style="margin:0;padding:0 10px 6px;font-size:12px">The agent can read, edit and commit in the ticked Repos. It never pushes.</p>
+                        <input class="msearch" type="search" placeholder="Search" aria-label="Search Repos">
+                        <button class="it opt" data-xrepo aria-pressed="false"><span class="ot"><span class="ol">billing-api</span></span><span class="ck">✓</span></button>
+                        <button class="it opt" data-xrepo aria-pressed="false"><span class="ot"><span class="ol">mobile</span></span><span class="ck">✓</span></button>
+                        <button class="it opt" data-xrepo aria-pressed="false"><span class="ot"><span class="ol">web</span></span><span class="ck">✓</span></button>
+                        <div class="nomatch" hidden>No match</div>
+                      </div>
+                    </div>
+                    <div style="position:relative;min-width:0">
+                      <button class="brchip" data-toggle="#branches" aria-label="Branch fix/empty-cart-tax" title="Switch branch. Changed: uncommitted edits are stashed before switching."><span style="display:flex"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/></svg></span><span class="mono trunc">fix/empty-cart-tax</span><span class="acc">changed</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+                      <div class="menu" id="branches" style="bottom:calc(100% + 6px);left:0;width:320px" hidden>
+                        <div class="row" style="padding:4px 10px 8px"><span class="s b grow">Branches in checkout-api</span><span class="mono xs muted trunc" style="max-width:150px">~/src/checkout-api</span></div>
+                        <ul aria-label="Branches" style="display:flex;max-height:240px;flex-direction:column;gap:2px;overflow-y:auto">
+                          <li><button class="it mono s" style="padding:8px 10px;gap:8px"><span class="grow trunc">feat/price-cache</span><span class="ck" style="visibility:hidden;color:var(--accent)">✓</span></button></li>
+                          <li><button class="it mono s" style="padding:8px 10px;gap:8px"><span class="grow trunc">feat/tax-rounding</span><span style="width:12px"></span></button></li>
+                          <li><button class="it sel mono s" style="padding:8px 10px;gap:8px;font-weight:600" aria-current="true"><span class="grow trunc">fix/empty-cart-tax</span><span style="width:12px;color:var(--accent)">✓</span></button></li>
+                          <li><button class="it mono s" style="padding:8px 10px;gap:8px"><span class="grow trunc">fix/null-shipping-line</span><span class="pill" style="font-family:var(--sans)" title="This branch has an open pull request">open PR</span><span style="width:12px"></span></button></li>
+                          <li><button class="it mono s" style="padding:8px 10px;gap:8px"><span class="grow trunc">fix/OPS-142-payments-timeout</span><span style="width:12px"></span></button></li>
+                          <li><button class="it mono s" style="padding:8px 10px;gap:8px"><span class="grow trunc">main</span><span style="width:12px"></span></button></li>
+                        </ul>
+                        <div class="row" style="margin-top:6px;gap:6px;border-top:1px solid var(--line);padding:8px 4px 0"><input class="field mono grow" style="font-size:12px;padding:6px 10px;background:var(--card)" aria-label="New branch name" placeholder="New branch from current"><button class="btn xs" disabled title="Make a new branch from the current one and switch this Session to it">Create</button></div>
+                      </div>
+                    </div>
                   </div>
-                  <button class="btn primary ml" title="Enter sends. Shift+Enter adds a new line." style="padding:6px 16px">Send</button>
+                  <div class="r"><button class="btn primary" style="padding:6px 16px" data-send disabled title="Enter sends. Shift+Enter adds a new line.">Send</button></div>
                 </div>
+              </div>
+                </div>
+              </div>
+
+              <!-- Session diff panel (session-diff.tsx), closed until Diff is pressed -->
+              <aside class="sdiff" id="sdiff" aria-label="Diff" hidden>
+                <div class="wrapr" style="gap:8px;border-bottom:1px solid var(--line);padding:10px 16px">
+                  <h3 style="font-size:14px">Changes</h3>
+                  <span class="mono xs muted trunc" title="The branch, and what it is compared with">fix/empty-cart-tax → main</span>
+                  <span class="dstat"><span class="p">+14</span><span class="n">−1</span><i><b class="y"></b><b class="y"></b><b class="y"></b><b class="y"></b><b></b></i></span>
+                  <span class="ml row" style="gap:4px"><button class="tool" data-expand="#sdiff .sdf">Collapse all</button><button class="tool">Split</button><button class="tool">Refresh</button><button class="tool" data-toggle="#sdiff" aria-label="Close the diff" title="Close">×</button></span>
+                </div>
+                <div style="flex:1;min-height:0;overflow-y:auto;padding:12px">
+                  <p class="xs muted" style="margin:0 0 8px 4px;font-size:12px">2 changed files</p>
+                  <ul aria-label="Changed files" style="display:flex;flex-direction:column;gap:8px">
+                    <li class="sdf"><button data-fold-self aria-label="src/tax/apply.ts, modified"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="st">M</span><span class="grow trunc"><span class="muted">src/tax/</span>apply.ts</span><span class="dstat"><span class="p">+1</span><span class="n">−1</span><i><b class="y"></b><b class="y"></b><b class="y"></b><b></b><b></b></i></span></button>
+                      <div class="fbody diff"><table>
+                        <tr class="h"><td colspan="4">@@ -85,6 +85,7 @@</td></tr>
+                        <tr class="d"><td class="g">86</td><td class="g"></td><td class="sg">−</td><td class="tx">  lines.push(shippingTax(cart.shipping.amount));</td></tr>
+                        <tr class="a"><td class="g"></td><td class="g">86</td><td class="sg">+</td><td class="tx">  if (cart.shipping) lines.push(shippingTax(cart.shipping.amount));</td></tr>
+                      </table></div></li>
+                    <li class="sdf"><button data-fold-self aria-label="test/tax/apply.test.ts, added"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="st a">A</span><span class="grow trunc"><span class="muted">test/tax/</span>apply.test.ts</span><span class="dstat"><span class="p">+13</span><span class="n">−0</span><i><b class="y"></b><b class="y"></b><b class="y"></b><b class="y"></b><b class="y"></b></i></span></button>
+                      <div class="fbody diff"><table>
+                        <tr class="h"><td colspan="4">@@ -0,0 +1,13 @@</td></tr>
+                        <tr class="a"><td class="g"></td><td class="g">1</td><td class="sg">+</td><td class="tx">it('skips shipping tax when the cart has no shipping line', () =&gt; {</td></tr>
+                        <tr class="a"><td class="g"></td><td class="g">2</td><td class="sg">+</td><td class="tx">  expect(applyTax({ ...guestCart, shipping: null }).total).toBe(0);</td></tr>
+                      </table></div></li>
+                  </ul>
+                </div>
+              </aside>
+            </div>
+          </div>
+
+          <div data-pane="ses:facets" class="sesp" hidden>
+            <header style="display:flex;flex-direction:column;gap:6px;border-bottom:1px solid var(--line);padding:12px 24px">
+              <div class="row" style="gap:10px;min-width:0">
+                <span class="muted" style="flex:none;font-size:14px">web /</span>
+                <h2 class="trunc" style="font-size:14px;font-weight:700" title="Show tax-free shipping in the cart">Show tax-free shipping in the cart</h2>
+                <span class="pill acc" style="flex:none;font-size:11px;padding:2px 8px" title="Working: the agent is running">working</span>
+                <span class="ml row" style="flex:none;gap:8px"><button class="btn xs" disabled title="Stop the agent first">Delete</button></span>
+              </div>
+              <div class="wrapr" style="gap:8px">
+                <button class="chip-l" data-go="ses:tax" title="The Session whose agent started this one with a task for this Repo">Started from Fix empty cart tax →</button>
+                <span class="chip-l mono" title="The branch this Session works on">fix/cart-null-shipping</span>
+                <button class="btn xs" disabled style="padding:2px 10px" title="Wait for the agent to finish">Open pull request</button>
+              </div>
+            </header>
+            <div style="display:flex;min-width:0;flex:1;flex-direction:column;min-height:0">
+              <ul aria-label="Conversation" style="flex:1;min-height:0;overflow-y:auto;padding:8px 0">
+                <li class="msg you"><span class="who">You</span><div>In web, the cart total reads <code>shipping.amount</code> when <code>shipping</code> is null. Guard it the way acme/checkout-api does in src/tax/apply.ts, and add a test.</div></li>
+                <li class="msg"><span class="who">Agent</span>
+                  <div class="mono s muted">Read src/cart/total.ts</div>
+                  <div class="mono s muted">Read src/cart/total.test.ts</div>
+                  <div>Reading how the cart total handles a guest cart.</div>
+                </li>
+              </ul>
+              <div style="display:flex;flex-direction:column;gap:8px;padding:0 24px 18px">
+                <div class="composer" data-composer>
+                <div class="cm" data-mode="skills" role="listbox" aria-label="Skills" hidden><div class="cm-h">Skills</div><div class="cm-r" role="option" data-name="diagnosing-bugs" data-desc="Find the cause of a hard bug before editing"><span class="nm">$diagnosing-bugs</span><span class="ds">Find the cause of a hard bug before editing</span><span class="tg pack">Ops Console</span></div><div class="cm-r" role="option" data-name="release-notes" data-desc="Draft release notes from merged pull requests"><span class="nm">$release-notes</span><span class="ds">Draft release notes from merged pull requests</span><span class="tg">Custom</span></div><div class="cm-r" role="option" data-name="tax-rounding" data-desc="Check a change against the checkout rounding rules"><span class="nm">$tax-rounding</span><span class="ds">Check a change against the checkout rounding rules</span><span class="tg proj">Project</span></div><p class="none" hidden>No skills match</p><p class="cm-f">Enter picks, Esc closes. What you type after the name is the task.</p></div><div class="cm" data-mode="commands" role="listbox" aria-label="Commands" hidden><div class="cm-h">Commands</div><div class="cm-r" role="option" data-name="stop" data-desc="Stop the agent where it is"><span class="nm">/stop</span><span class="ds">Stop the agent where it is</span></div><div class="cm-r" role="option" data-name="skills" data-desc="Pick a skill to run"><span class="nm">/skills</span><span class="ds">Pick a skill to run</span></div><div class="cm-r" role="option" data-name="files" data-desc="Search files to mention"><span class="nm">/files</span><span class="ds">Search files to mention</span></div><p class="none" hidden>No commands match</p><p class="cm-f">Enter runs it, Esc closes.</p></div><div class="cm" data-mode="files" role="listbox" aria-label="Files" hidden><div class="cm-h">Files</div><div class="cm-r" role="option" data-name="apply.ts" data-path="src/tax/apply.ts"><span class="nm">apply.ts</span><span class="ds mono">src/tax/</span></div><div class="cm-r" role="option" data-name="apply.test.ts" data-path="test/tax/apply.test.ts"><span class="nm">apply.test.ts</span><span class="ds mono">test/tax/</span></div><div class="cm-r" role="option" data-name="rates.ts" data-path="src/tax/rates.ts"><span class="nm">rates.ts</span><span class="ds mono">src/tax/</span></div><div class="cm-r" role="option" data-name="shipping.ts" data-path="src/tax/shipping.ts"><span class="nm">shipping.ts</span><span class="ds mono">src/tax/</span></div><div class="cm-r" role="option" data-name="package.json" data-path="package.json"><span class="nm">package.json</span><span class="ds mono"></span></div><div class="cm-r" role="option" data-name="README.md" data-path="README.md"><span class="nm">README.md</span><span class="ds mono"></span></div><p class="none" hidden>No files match</p><p class="cm-f">Enter inserts the path, Esc closes.</p></div>
+                <textarea aria-label="Message" placeholder="The agent is working. Type the next message: it sends when the run ends."></textarea>
+                <div class="bar">
+                  <div class="l">
+                    <button class="attach" aria-label="Attach files" title="Attach files: images, logs, PDFs. They go in the text where the cursor is. You can also drop or paste them."><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 11.5-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg></button>
+                    <button class="chipdd"><span class="c">Model</span><span class="v">Claude Opus 5.5</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button><button class="chipdd"><span class="c">Effort</span><span class="v">High</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button><button class="chipdd"><span class="c">Access</span><span class="v">Auto</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+                    <div style="position:relative">
+                      <button class="chipdd" data-toggle="#xrepos2" aria-label="Other Repos" title="Other Repos this Session's agent may read, edit and commit in, as in its own. Applies from its next run."><span class="c">Repos</span><span class="v" data-xcount>this one</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+                      <div class="menu" id="xrepos2" data-xrepos style="bottom:calc(100% + 6px);left:0;width:288px;max-height:320px;overflow:auto" hidden>
+                        <div class="menu-h" style="text-transform:uppercase">Also open to this session</div>
+                        <p class="xs muted" style="margin:0;padding:0 10px 6px;font-size:12px">The agent can read, edit and commit in the ticked Repos. It never pushes.</p>
+                        <input class="msearch" type="search" placeholder="Search" aria-label="Search Repos">
+                        <button class="it opt" data-xrepo aria-pressed="false"><span class="ot"><span class="ol">billing-api</span></span><span class="ck">✓</span></button>
+                        <button class="it opt" data-xrepo aria-pressed="false"><span class="ot"><span class="ol">mobile</span></span><span class="ck">✓</span></button>
+                        <button class="it opt" data-xrepo aria-pressed="false"><span class="ot"><span class="ol">web</span></span><span class="ck">✓</span></button>
+                        <div class="nomatch" hidden>No match</div>
+                      </div>
+                    </div>
+                    <button class="brchip" disabled title="This Session is running."><span style="display:flex"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/></svg></span><span class="mono trunc">fix/cart-null-shipping</span><span class="muted">clean</span></button>
+                  </div>
+                  <div class="r"><button class="btn" style="padding:6px 16px" title="Stop the agent where it is"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:currentColor"></span>Stop</button><button class="btn primary" style="padding:6px 16px" data-send disabled title="The agent is working. The message waits and sends when the run ends.">Queue</button></div>
+                </div>
+              </div>
               </div>
             </div>
           </div>
 
-          <!-- Pull request view (pull-request-view.tsx, pr-file.tsx, pr-thread.tsx) -->
+          </div>
+
+          <!-- Pull request page (pull-request-view.tsx, pr-tabs.tsx, pr-meta.tsx, pr-sidebar.tsx, pr-history.tsx, pr-file.tsx, pr-thread.tsx) -->
           <div data-pane="wstab:pulls" hidden>
-            <div data-pane="pr:415" style="display:flex;flex-direction:column;gap:16px;padding:16px 20px">
-              <header style="display:flex;flex-direction:column;gap:8px">
-                <h2 style="font-size:17px">#415 Cache tax rates per region</h2>
-                <div class="wrapr mono s muted" style="gap:0 12px"><a href="#" style="color:var(--text)">Open on the host</a><span>perf/tax-rate-cache → main</span><span>priya-rao</span><span>open</span><span>+48 −12</span><span>checks passed</span><span>review none</span><span>3 comments · 1 resolved</span></div>
-                <div class="wrapr">
-                  <button class="btn xs" title="1 of 2 files viewed">Approve</button>
-                  <button class="btn xs" data-toggle="#changes">Request changes</button>
-                  <button class="btn primary xs" disabled title="The agent already reviewed this commit. Push a change to review again.">Reviewed at this commit</button>
-                  <button class="btn xs ml" disabled title="Merge needs an approved review">Merge</button>
+            <div data-pane="pr:415" class="prv">
+              <header class="prh">
+                <h2><span>#415</span> Cache tax rates per region</h2>
+                <div class="prh-row">
+                  <div class="row" style="min-width:0;gap:12px">
+                    <span class="avatar" aria-hidden="true">PR</span>
+                    <div style="display:flex;min-width:0;flex-direction:column;gap:4px">
+                      <div class="wrapr" style="gap:6px"><span class="brn" title="Merging brings perf/tax-rate-cache into main">perf/tax-rate-cache</span><span class="faint" aria-hidden="true">→</span><span class="brn">main</span><span class="stag" data-merged hidden>merged</span></div>
+                      <div class="pr-sub"><span class="mono">#415</span><span aria-hidden="true">·</span><span title="Author">by priya-rao</span><span aria-hidden="true">·</span><span title="Opened">opened 3h ago</span><span aria-hidden="true">·</span><span class="mono" title="Lines added and removed across every file"><b style="color:var(--add-text)">+48</b> <b style="color:var(--del-text)">−12</b></span><span aria-hidden="true">·</span><a href="https://github.com/acme/checkout-api/pull/415" target="_blank" rel="noreferrer" title="Open #415 on github in a new tab">Open on the host ↗</a></div>
+                    </div>
+                  </div>
+                  <div class="wrapr" style="gap:6px;justify-content:flex-end" data-actions>
+                    <button class="btn xs" disabled title="The agent already reviewed this commit. Push a change to review again." style="padding:6px 12px">Reviewed at this commit</button>
+                    <button class="btn xs" id="approve" style="padding:6px 12px" title="Approve this pull request on the Git host as you. 1 of 2 files viewed."><span class="okc" aria-hidden="true">✓</span>Approve</button>
+                    <button class="btn primary xs" id="merge" style="padding:6px 12px" disabled title="Merge needs an approved review. Approve it here or on the Git host first.">Merge</button>
+                    <div style="position:relative"><button class="btn icon" data-toggle="#more" aria-label="More actions" title="More actions" style="width:30px;height:30px"><span style="font-size:16px;line-height:1">⋯</span></button>
+                      <div class="mnu menu" id="more" style="top:100%;right:0;margin-top:4px;width:208px;padding:6px" hidden><button class="it" data-toggle="#changes" style="padding:6px 10px;font-size:13px" title="Say what needs to change. It posts a review on the Git host that asks the author for changes.">Request changes</button></div></div>
+                  </div>
                 </div>
-                
+                <div class="mbar" id="merge-confirm" hidden>Merge #415 on the host?<button class="btn primary xs" id="do-merge" style="padding:4px 10px" title="Merge perf/tax-rate-cache into main on the Git host now">Merge</button><button class="btn xs" id="keep-open" style="padding:4px 10px">Keep open</button></div>
+                <div class="rq" id="changes" hidden><textarea rows="3" aria-label="What needs to change" placeholder="What needs to change"></textarea><div class="row" style="justify-content:flex-end;gap:6px"><button class="btn xs" style="padding:4px 10px" data-toggle="#changes">Cancel</button><button class="btn xs" style="padding:4px 10px" disabled title="Post this as a review that requests changes on the Git host">Send</button></div></div>
+                <div style="padding-bottom:12px"><div class="prtabs" role="tablist" aria-label="Pull request"><button role="tab" class="on" data-go="t415:overview" aria-selected="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Overview</button><button role="tab" class="" data-go="t415:files" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M12 10v6"/></svg>Files changed<span class="n">2</span></button><button role="tab" class="" data-go="t415:commits" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.5"/><path d="M12 3v5.5M12 15.5V21"/></svg>Commits<span class="n">3</span></button></div></div>
               </header>
-
-              <section class="card" aria-label="Agent Review">
-                <header class="card-h" style="padding:8px 12px"><strong>Agent Review</strong><span class="mono muted">9c1e4b7</span><span class="ml muted">ready</span></header>
-                <div style="display:flex;flex-direction:column;gap:12px;padding:10px 12px;font-size:13px">
-                  <p class="b" style="margin:0">Safe to merge after one fix: the cache never expires.</p>
-                  <ul style="display:flex;flex-direction:column;gap:6px">
-                    <li><span class="b">suggestion</span><span class="mono s muted"> src/tax/rates.ts:31</span><div>The cache never expires, so a rate change waits for a restart. Give entries a TTL.</div></li>
-                    <li><span class="b">nit</span><span class="mono s muted"> src/tax/rates.ts:36</span><div>Name the map for what it holds: <code>ratesByRegion</code>.</div></li>
+              <div class="prbody">
+                <div role="tabpanel" class="prmain">
+                  <div data-pane="t415:overview" style="display:flex;flex-direction:column;gap:20px">
+                <section class="card" aria-label="Agent Review" data-fk="agent-review">
+                  <header class="card-h" style="padding:8px 12px;border-bottom:1px solid var(--divider)"><button class="ft" data-fold="agent-review" aria-label="Fold Agent Review" title="Fold"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><strong>Agent Review</strong></button><span class="mono muted" title="The commit the agent reviewed">9c1e4b7</span><span class="pill" style="border:1px solid var(--divider);font-size:11px;font-weight:600;letter-spacing:.04em;padding:0 8px" title="Notes worth reading, but nothing that blocks a merge.">COMMENT</span>
+                    <span class="ml row" style="gap:8px"><span class="xs muted" title="How long the review took">took 2m 41s</span><span class="pill pst">ready</span></span></header>
+                  <div class="fbody" style="display:flex;flex-direction:column;gap:12px;padding:10px 12px;font-size:13px">
+                    <p class="b" style="margin:0">Safe to merge after one fix: the cache never expires.</p>
+                    <div class="wrapr s muted" style="gap:4px 12px"><span>Reviewed <span class="mono">9c1e4b7</span> against main at <span class="mono">e03a6d1</span></span><span>11/1/2026, 9:20:11 AM</span>
+                      <span class="wrapr" style="gap:6px" role="group" aria-label="Findings by severity"><span class="sevchip">0 Critical</span><span class="sevchip">0 High</span><span class="sevchip md">1 Medium</span><span class="sevchip lo">1 Low</span><span class="sevchip">0 Info</span></span></div>
+                    <ul style="display:flex;flex-direction:column;gap:6px">
+                      <li><span class="sevchip md">Medium</span><span class="mono s muted"> src/tax/rates.ts:31</span><div>The cache never expires, so a rate change waits for a restart. Give entries a TTL.</div></li>
+                      <li><span class="sevchip lo">Low</span><span class="mono s muted"> src/tax/rates.ts:25</span><div>Name the map for what it holds: <code>ratesByRegion</code>.</div></li>
+                    </ul>
+                    <div><div class="cap" style="font-size:12px;letter-spacing:.08em">PROD readiness</div>
+                      <ul><li>✓ Build</li><li>✓ Tests</li><li>! Performance<span class="muted"> · First call per region still reads the database</span></li><li>✓ Database &amp; migrations<span class="muted"> · No schema or index changes</span></li><li>✓ Rollback</li></ul></div>
+                    <div><div class="cap" style="font-size:12px;letter-spacing:.08em">Connections queried</div><ul class="mono s"><li>orders-db-dev: SELECT count(*) FROM tax_rates → 212</li></ul></div>
+                    <details><summary title="The agent's whole written review. The same text is in its summary comment on the Git host.">Full report</summary><p class="s muted" style="margin:8px 0 0">The cache holds each region's rates for the life of the process. A change to <code>tax_rates</code> reaches checkout only after a restart.</p></details>
+                  </div>
+                </section>
+                <section class="card" aria-label="Comment pass" data-fk="comment-pass">
+                  <header class="card-h" style="padding:8px 12px;border-bottom:1px solid var(--divider)"><button class="ft" data-fold="comment-pass" aria-label="Fold Address comments" title="Fold"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><strong>Address comments</strong></button><a class="mono" style="color:var(--text)" href="https://github.com/acme/checkout-api/commit/b71e930" target="_blank" rel="noreferrer" title="The commit this Comment pass pushed, on the Git host">b71e930</a>
+                    <span class="ml row" style="gap:8px"><span class="xs muted">took 1m 12s</span><span class="pill pst">ready</span></span></header>
+                  <div class="fbody pass" style="padding:10px 12px;font-size:13px">
+                    <ul aria-label="Threads" style="display:flex;flex-direction:column;gap:10px">
+                      <li aria-label="src/tax/rates.ts:25"><div class="pl"><span class="mono trunc">src/tax/rates.ts:25</span><span class="muted">sam-lee</span><span class="oc" title="The agent made the change or found it already made, replied, and resolved the thread">done</span></div>
+                        <div class="s muted">Use a Map keyed by region so the lookup is one call.</div><div class="s">Done in b71e930: the cache is a <code>Map</code> keyed by region.</div></li>
+                    </ul>
+                  </div>
+                </section>
+                <section aria-label="Description" data-fk="description" style="display:flex;flex-direction:column;gap:6px">
+                  <h3 style="font-size:14px;margin:0"><button class="ft" data-fold="description" aria-label="Fold Description" title="Fold"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><strong>Description</strong></button></h3>
+                  <div class="fbody md" style="padding-left:20px;font-size:13px"><p>Keeps tax rates per region in memory, so checkout stops reading <code>tax_rates</code> on every order.</p></div>
+                </section>
+                <section aria-label="Comments" style="display:flex;flex-direction:column;gap:12px">
+                  <h3 style="font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px">Activity <span class="xs muted" style="font-weight:400;font-size:12px">3 comments</span></h3>
+                  <div class="cbox"><textarea aria-label="Comment on the pull request" placeholder="What do you want to say?"></textarea><div class="row"><span class="xs faint">Markdown · ⌘↵ to send</span><span class="ml"><button class="btn primary xs" style="padding:4px 10px" disabled>Comment</button></span></div></div>
+                  <ul style="display:flex;flex-direction:column;gap:8px">
+                    <li><div class="thread">
+                      <div class="cmt"><div class="hd"><span class="ava">S</span><strong>sam-lee</strong><span class="pill acc" style="font-weight:600">agent</span><span class="faint">11/1/2026, 9:20:14 AM</span><span class="mono s muted trunc">src/tax/rates.ts:31</span><span class="ml row" style="gap:6px"><button class="btn xxs">Resolve</button></span></div><p>The cache never expires, so a rate change waits for a restart. Give entries a TTL.</p></div>
+                      <div class="reply"><button class="reply-btn">Reply…</button></div>
+                    </div></li>
+                    <li><div class="thread">
+                      <div class="cmt"><div class="hd"><span class="ava">A</span><strong>alex-kim</strong><span class="faint">11/1/2026, 8:02:51 AM</span></div><p>Do the EU regions need this too?</p></div>
+                      <div class="cmt"><div class="hd"><span class="ava">P</span><strong>priya-rao</strong><span class="faint">11/1/2026, 8:15:09 AM</span></div><p>Yes, every region goes through <code>rateFor</code>.</p></div>
+                      <div class="reply"><button class="reply-btn">Reply…</button></div>
+                    </div></li>
                   </ul>
-                  <div><div class="cap" style="font-size:10px">PROD readiness</div>
-                    <ul><li>✓ Build</li><li>✓ Tests</li><li>! Performance<span class="muted"> · First call per region still reads the database</span></li><li>✓ Database &amp; migrations<span class="muted"> · No schema or index changes</span></li><li>✓ Rollback</li></ul></div>
-                  <div><div class="cap" style="font-size:10px">Connections queried</div><ul class="mono s"><li>orders-db-dev: SELECT count(*) FROM tax_rates → 212</li></ul></div>
-                </div>
-              </section>
-
-              <section class="card" aria-label="Description">
-                <header class="card-h"><strong>Description</strong><span class="muted">by priya-rao</span></header>
-                <div class="md" style="padding:12px 16px;font-size:13px"><p>Keeps tax rates per region in memory, so checkout stops reading <code>tax_rates</code> on every order.</p></div>
-              </section>
-
-              <section aria-label="Files" style="display:flex;flex-direction:column;gap:8px">
-                <div class="row cap" style="gap:12px">Files · 2 <span class="dstat"><span class="p">+48</span><span class="n">−12</span><i><b class="y"></b><b class="y"></b><b class="y"></b><b class="y"></b><b></b></i></span>
-                  <span class="ml row" style="gap:8px;letter-spacing:normal;text-transform:none"><span id="viewed-count">1 / 2 viewed</span><span style="display:block;width:80px;height:6px;border-radius:999px;background:var(--n300);overflow:hidden"><b id="viewed-bar" style="display:block;height:100%;width:50%;border-radius:999px;background:var(--ok)"></b></span></span></div>
-
-                <section class="file" aria-label="src/tax/rates.ts">
-                  <div class="file-h open">
-                    <button class="row grow" style="border:0;background:transparent;padding:4px;font:inherit;text-align:left"><span class="tri open" style="font-size:9px">▶</span><span class="trunc" style="font-weight:600">src/tax/rates.ts</span></button>
-                    <span class="cbadge" title="1 comment thread on this file"><svg width="11" height="11" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>1</span>
-                    <span class="dstat"><span class="p">+40</span><span class="n">−10</span><i><b class="y"></b><b class="y"></b><b class="y"></b><b class="y"></b><b></b></i></span>
-                    <label class="viewed"><input type="checkbox" data-viewed> Viewed</label>
-                    <div style="position:relative"><button class="dots" data-toggle="#filemenu" aria-label="More for src/tax/rates.ts">⋯</button>
-                      </div>
-                  </div>
-                  <div class="file-body diff"><table>
-                    <tr class="h"><td colspan="4">@@ -24,10 +24,18 @@ export async function rateFor(region: string)</td></tr>
-                    <tr><td class="g">24</td><td class="g">24</td><td class="sg"><button class="plus" title="Add a comment on this line">+</button></td><td class="tx">import { db } from '../db';</td></tr>
-                    <tr class="a"><td class="g"></td><td class="g">25</td><td class="sg">+<button class="plus" title="Add a comment on this line">+</button></td><td class="tx">const cache = new Map&lt;string, Rate[]&gt;();</td></tr>
-                    <tr><td class="g">25</td><td class="g">26</td><td class="sg"><button class="plus">+</button></td><td class="tx"></td></tr>
-                    <tr><td class="g">26</td><td class="g">27</td><td class="sg"><button class="plus">+</button></td><td class="tx">export async function rateFor(region: string) {</td></tr>
-                    <tr class="d"><td class="g">27</td><td class="g"></td><td class="sg">−</td><td class="tx">  return db.query('SELECT * FROM tax_rates WHERE region = $1', [region]);</td></tr>
-                    <tr class="a"><td class="g"></td><td class="g">28</td><td class="sg">+<button class="plus">+</button></td><td class="tx">  const hit = cache.get(region);</td></tr>
-                    <tr class="a"><td class="g"></td><td class="g">29</td><td class="sg">+<button class="plus">+</button></td><td class="tx">  if (hit) return hit;</td></tr>
-                    <tr class="a"><td class="g"></td><td class="g">30</td><td class="sg">+<button class="plus">+</button></td><td class="tx">  const rates = await db.query('SELECT * FROM tax_rates WHERE region = $1', [region]);</td></tr>
-                    <tr class="a"><td class="g"></td><td class="g">31</td><td class="sg">+<button class="plus">+</button></td><td class="tx">  cache.set(region, rates);</td></tr>
-                    <tr><td class="below" colspan="4"><div>
-                      <div class="thread">
-                        <div class="cmt"><div class="hd"><span class="ava">S</span><strong>sam-lee</strong><span class="pill acc" style="font-weight:600">agent</span><span class="faint">11/1/2026, 9:20:14 AM</span>
-                          <span class="ml row" style="gap:6px"><button class="btn xxs">Resolve</button>
-                            <span style="position:relative"><button class="dots quiet" data-toggle="#cmtmenu" aria-label="More for the comment by sam-lee">⋯</button>
-                              </span></span></div>
-                          <p>The cache never expires, so a rate change waits for a restart. Give entries a TTL.</p></div>
-                        <div class="reply"><button class="reply-btn">Reply…</button></div>
-                      </div>
-                    </div></td></tr>
-                    <tr><td class="g">28</td><td class="g">32</td><td class="sg"><button class="plus">+</button></td><td class="tx">  return rates;</td></tr>
-                    <tr><td class="g">29</td><td class="g">33</td><td class="sg"><button class="plus">+</button></td><td class="tx">}</td></tr>
-                    <tr><td class="below" colspan="4"><div>
-                      <div class="cbox"><textarea aria-label="Comment on src/tax/rates.ts line 33" placeholder="Comment on line 33"></textarea>
-                        <div class="row"><span class="xs faint">Markdown · ⌘↵ to send</span><span class="ml row" style="gap:6px"><button class="btn xs" style="padding:4px 10px">Cancel</button><button class="btn primary xs" style="padding:4px 10px" disabled>Add comment</button></span></div></div>
-                    </div></td></tr>
-                  </table></div>
                 </section>
-
-                <section class="file" aria-label="test/tax/rates.test.ts">
-                  <div class="file-h">
-                    <button class="row grow" style="border:0;background:transparent;padding:4px;font:inherit;text-align:left"><span class="tri" style="font-size:9px">▶</span><span class="trunc muted" style="font-weight:600">test/tax/rates.test.ts</span></button>
-                    <span class="dstat"><span class="p">+8</span><span class="n">−2</span><i><b class="y"></b><b class="y"></b><b class="y"></b><b class="y"></b><b></b></i></span>
-                    <label class="viewed on"><input type="checkbox" checked data-viewed> Viewed</label>
-                    <button class="dots" aria-label="More for test/tax/rates.test.ts">⋯</button>
                   </div>
-                  <div class="file-body diff" hidden><table><tr class="h"><td colspan="4">@@ -1,4 +1,10 @@</td></tr><tr class="a"><td class="g"></td><td class="g">5</td><td class="sg">+</td><td class="tx">it('reads the database once per region', async () =&gt; {</td></tr></table></div>
-                </section>
-              </section>
-
-              <section aria-label="Comments" style="display:flex;flex-direction:column;gap:8px">
-                <div class="cap">Comments · 3</div>
-                <div class="thread">
-                  <div class="cmt"><div class="hd"><span class="ava">A</span><strong>alex-kim</strong><span class="faint">11/1/2026, 8:02:51 AM</span></div><p>Do the EU regions need this too?</p></div>
-                  <div class="cmt"><div class="hd"><span class="ava">P</span><strong>priya-rao</strong><span class="faint">11/1/2026, 8:15:09 AM</span></div><p>Yes, every region goes through <code>rateFor</code>.</p></div>
-                  <div class="reply"><button class="reply-btn">Reply…</button></div>
+                  <div data-pane="t415:files" hidden><section aria-label="Files" style="display:flex;flex-direction:column;gap:8px">
+                  <div class="row s muted" style="gap:12px"><span class="dstat"><span class="p">+48</span><span class="n">−12</span><i><b class="y"></b><b class="y"></b><b class="y"></b><b class="y"></b><b></b></i></span>
+                    <span class="row" style="gap:4px"><button class="foldall" data-bulk="open" title="Open every file on its lines">Expand all</button><button class="foldall" data-bulk="closed" title="Fold every file to its name, to get to the comments and the end of the page">Collapse all</button></span>
+                    <span class="ml row" style="gap:8px" title="Files you ticked Viewed, kept in this browser. A file whose change changes reads unviewed again."><span class="v-count">1 / 2 viewed</span><span style="display:block;width:80px;height:6px;border-radius:999px;background:var(--n300);overflow:hidden"><b class="v-bar" style="display:block;height:100%;width:50%;border-radius:999px;background:var(--ok)"></b></span></span></div>
+                  <section class="file" aria-label="src/tax/rates.ts">
+                    <div class="file-h open">
+                      <button class="row grow" data-file-fold style="border:0;background:transparent;padding:4px;font:inherit;text-align:left" aria-expanded="true" title="Fold this file"><span class="tri open" style="font-size:9px">▶</span><span class="trunc" style="font-weight:600">src/tax/rates.ts</span></button>
+                      <span class="cbadge" title="1 comment thread on lines of this file. Open the file to read them."><svg width="11" height="11" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>1</span>
+                      <span class="dstat"><span class="p">+40</span><span class="n">−10</span><i><b class="y"></b><b class="y"></b><b class="y"></b><b class="y"></b><b></b></i></span>
+                      <label class="viewed" title="Tick when you have read this file. It folds, and stays ticked in this browser until its change changes."><input type="checkbox" data-viewed> Viewed</label>
+                      <div style="position:relative"><button class="dots" data-toggle="#filemenu" aria-label="More for src/tax/rates.ts" title="Side by side, the whole file, or the file on the Git host">⋯</button>
+                        <div class="mnu menu" id="filemenu" role="menu" style="top:100%;right:0;margin-top:4px;width:192px" hidden>
+                          <button class="mi" role="menuitem">View side-by-side</button>
+                          <button class="mi" role="menuitem">View entire file</button>
+                          <a class="mi" role="menuitem" href="https://github.com/acme/checkout-api/blob/9c1e4b7/src/tax/rates.ts" target="_blank" rel="noreferrer">Open in source ↗</a>
+                        </div></div>
+                    </div>
+                    <div class="file-body diff"><table>
+                      <tr class="h"><td colspan="4">@@ -24,10 +24,18 @@ export async function rateFor(region: string)</td></tr>
+                      <tr><td class="g">24</td><td class="g">24</td><td class="sg"><button class="plus" title="Add a comment on this line">+</button></td><td class="tx">import { db } from '../db';</td></tr>
+                      <tr class="a"><td class="g"></td><td class="g">25</td><td class="sg">+<button class="plus" title="Add a comment on this line">+</button></td><td class="tx">const cache = new Map&lt;string, Rate[]&gt;();</td></tr>
+                      <tr><td class="g">25</td><td class="g">26</td><td class="sg"><button class="plus">+</button></td><td class="tx"></td></tr>
+                      <tr><td class="g">26</td><td class="g">27</td><td class="sg"><button class="plus">+</button></td><td class="tx">export async function rateFor(region: string) {</td></tr>
+                      <tr class="d"><td class="g">27</td><td class="g"></td><td class="sg">−</td><td class="tx">  return db.query('SELECT * FROM tax_rates WHERE region = $1', [region]);</td></tr>
+                      <tr class="a"><td class="g"></td><td class="g">28</td><td class="sg">+<button class="plus">+</button></td><td class="tx">  const hit = cache.get(region);</td></tr>
+                      <tr class="a"><td class="g"></td><td class="g">29</td><td class="sg">+<button class="plus">+</button></td><td class="tx">  if (hit) return hit;</td></tr>
+                      <tr class="a"><td class="g"></td><td class="g">30</td><td class="sg">+<button class="plus">+</button></td><td class="tx">  const rates = await db.query('SELECT * FROM tax_rates WHERE region = $1', [region]);</td></tr>
+                      <tr class="a"><td class="g"></td><td class="g">31</td><td class="sg">+<button class="plus">+</button></td><td class="tx">  cache.set(region, rates);</td></tr>
+                      <tr><td class="below" colspan="4"><div>
+                        <div class="thread">
+                          <div class="cmt"><div class="hd"><span class="ava">S</span><strong>sam-lee</strong><span class="pill acc" style="font-weight:600" title="The agent wrote this comment on your behalf">agent</span><span class="faint">11/1/2026, 9:20:14 AM</span>
+                            <span class="ml row" style="gap:6px"><button class="btn xxs" title="Mark this thread resolved on the Git host. Address comments skips resolved threads.">Resolve</button>
+                              <span style="position:relative"><button class="dots quiet" data-toggle="#cmtmenu" aria-label="More for the comment by sam-lee">⋯</button>
+                                <div class="mnu menu" id="cmtmenu" role="menu" style="top:100%;right:0;margin-top:4px;width:208px;padding:8px" hidden>
+                                  <p class="s" style="margin:0 0 8px">Delete this comment from the pull request? It cannot be undone.</p>
+                                  <div class="row" style="gap:6px"><button class="btn primary xs" style="padding:4px 10px">Delete</button><button class="btn xs" style="padding:4px 10px" data-toggle="#cmtmenu">Keep</button></div>
+                                </div></span></span></div>
+                            <p>The cache never expires, so a rate change waits for a restart. Give entries a TTL.</p></div>
+                          <div class="reply"><button class="reply-btn">Reply…</button></div>
+                        </div>
+                      </div></td></tr>
+                      <tr><td class="g">28</td><td class="g">32</td><td class="sg"><button class="plus">+</button></td><td class="tx">  return rates;</td></tr>
+                      <tr><td class="g">29</td><td class="g">33</td><td class="sg"><button class="plus">+</button></td><td class="tx">}</td></tr>
+                      <tr><td class="below" colspan="4"><div>
+                        <div class="cbox"><textarea aria-label="Comment on src/tax/rates.ts line 33" placeholder="Comment on line 33"></textarea>
+                          <div class="row"><span class="xs faint">Markdown · ⌘↵ to send</span><span class="ml row" style="gap:6px"><button class="btn xs" style="padding:4px 10px">Cancel</button><button class="btn primary xs" style="padding:4px 10px" disabled>Add comment</button></span></div></div>
+                      </div></td></tr>
+                    </table></div>
+                  </section>
+                  <section class="file" aria-label="test/tax/rates.test.ts">
+                    <div class="file-h">
+                      <button class="row grow" data-file-fold style="border:0;background:transparent;padding:4px;font:inherit;text-align:left" aria-expanded="false"><span class="tri" style="font-size:9px">▶</span><span class="trunc muted" style="font-weight:600">test/tax/rates.test.ts</span></button>
+                      
+                      <span class="dstat"><span class="p">+8</span><span class="n">−2</span><i><b class="y"></b><b class="y"></b><b class="y"></b><b class="y"></b><b></b></i></span>
+                      <label class="viewed on"><input type="checkbox" checked data-viewed> Viewed</label>
+                      <button class="dots" aria-label="More for test/tax/rates.test.ts">⋯</button>
+                    </div>
+                    <div class="file-body diff" hidden><table><tr class="h"><td colspan="4">@@ -1,4 +1,10 @@</td></tr><tr class="a"><td class="g"></td><td class="g">5</td><td class="sg">+</td><td class="tx">it('reads the database once per region', async () =&gt; {</td></tr></table></div>
+                  </section>
+                </section></div>
+                  <div data-pane="t415:commits" hidden><section class="cmts" aria-label="Commits"><div class="hd">3 commits on perf/tax-rate-cache that main lacks</div><ul><li><span class="avatar sm">PR</span><span class="msg1"><span class="trunc" style="font-size:13px;font-weight:500" title="Add a test that rates are read once per region">Add a test that rates are read once per region</span><span class="xs muted" style="font-size:12px">priya-rao · <span title="Committed">3h</span></span></span><a class="hash" href="https://github.com/acme/checkout-api/commit/9c1e4b7" target="_blank" rel="noreferrer" title="Open 9c1e4b7a on github">9c1e4b7</a></li><li><span class="avatar sm">PR</span><span class="msg1"><span class="trunc" style="font-size:13px;font-weight:500" title="Cache tax rates per region">Cache tax rates per region</span><span class="xs muted" style="font-size:12px">priya-rao · <span title="Committed">5h</span></span></span><a class="hash" href="https://github.com/acme/checkout-api/commit/b71e930" target="_blank" rel="noreferrer" title="Open b71e930c on github">b71e930</a></li><li><span class="avatar sm">PR</span><span class="msg1"><span class="trunc" style="font-size:13px;font-weight:500" title="Read tax rates through one function">Read tax rates through one function</span><span class="xs muted" style="font-size:12px">priya-rao · <span title="Committed">6h</span></span></span><a class="hash" href="https://github.com/acme/checkout-api/commit/2f6c1a8" target="_blank" rel="noreferrer" title="Open 2f6c1a8d on github">2f6c1a8</a></li></ul></section></div>
                 </div>
-                <div class="cbox"><textarea aria-label="Comment on the pull request" placeholder="Leave a comment on the pull request"></textarea>
-                  <div class="row"><span class="xs faint">Markdown · ⌘↵ to send</span><span class="ml"><button class="btn primary xs" style="padding:4px 10px" disabled>Comment</button></span></div></div>
-              </section>
+                <aside aria-label="Decision" class="prside"><div>
+                <section class="rail" aria-label="Checks" data-fk="checks"><h3 style="margin:0"><button class="rail-h" data-fold="pr-rail.checks" aria-label="Fold Checks" title="Fold"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sm">Checks passed</span><span class="tm ok" aria-hidden="true">✓</span></button></h3><div class="fbody"><p class="xs muted" style="margin:0;font-size:12px">Every CI check passed on the newest commit. <a href="https://github.com/acme/checkout-api/pull/415/checks" target="_blank" rel="noreferrer" style="color:var(--text)">See them on github ↗</a></p></div></section><section class="rail" aria-label="Merge readiness" data-fk="merge-checks"><h3 style="margin:0"><button class="rail-h" data-fold="pr-rail.merge-checks" aria-label="Fold Merge readiness" title="Fold"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sm"><span id="mc-count">3 of 5 merge checks passed</span></span><span id="mc-mark"><span class="tm bad" aria-hidden="true">✕</span></span></button></h3><div class="fbody"><ul class="mchecks"><li id="mc-approval"><span class="tm wait" aria-hidden="true">–</span><span><span style="font-weight:500">No approval yet</span><span class="d">Merge unlocks once a reviewer approves</span></span></li><li title=""><span class="tm ok" aria-hidden="true">✓</span><span><span style="font-weight:500">Checks passed</span></span></li><li title="Whether perf/tax-rate-cache merges into main as they stand on origin, checked with git"><span class="tm ok" aria-hidden="true">✓</span><span><span style="font-weight:500">No conflicts</span></span></li><li title=""><span class="tm bad" aria-hidden="true">✕</span><span><span style="font-weight:500">2 threads open</span><span class="d">0 resolved</span></span></li><li title=""><span class="tm ok" aria-hidden="true">✓</span><span><span style="font-weight:500">Agent reviewed this commit</span></span></li></ul></div></section><section class="rail" aria-label="People" data-fk="people"><h3 style="margin:0"><button class="rail-h" data-fold="pr-rail.people" aria-label="Fold People" title="Fold"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sm"><span id="ppl-sum">No approval yet</span></span></button></h3><div class="fbody"><ul class="ppl"><li><span class="avatar sm">PR</span><span class="trunc">priya-rao</span><span class="ml xs muted">author</span></li><li id="ppl-ok" hidden><span class="avatar sm">SL</span><span class="trunc">sam-lee</span><span class="ml xs okc">✓ approved</span></li><li class="xs muted" id="ppl-hint" style="font-size:12px">Merge unlocks once a reviewer approves.</li></ul></div></section><section class="rail" aria-label="Threads" data-fk="threads"><h3 style="margin:0"><button class="rail-h" data-fold="pr-rail.threads" aria-label="Fold Threads" title="Fold"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sm">2 threads open · 0 resolved</span><span class="tm bad" aria-hidden="true">✕</span></button></h3><div class="fbody"><div class="btnrow"><button class="btn xs" style="padding:6px 12px" title="Pick open threads, yours or a teammate's. The agent makes the changes they ask for, pushes one commit to this branch, replies in each thread and resolves the ones it did.">Address comments</button><button class="btn xs" style="padding:6px 12px" title="The agent checks every open thread that has a reply, in one run, against the code at the newest commit.">Check replies · 1</button></div></div></section><section class="rail" aria-label="Sessions" data-fk="sessions"><h3 style="margin:0"><button class="rail-h" data-fold="pr-rail.sessions" aria-label="Fold Sessions" title="Fold"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sm">Sessions on this branch</span></button></h3><div class="fbody"><div style="display:flex;flex-direction:column;gap:8px;font-size:12px"><span class="muted" title="Your Sessions checked out on this pull request's branch">Sessions on perf/tax-rate-cache:</span><span class="muted">none</span><button class="btn xs" style="justify-content:center;padding:4px 10px" title="Start a Session on this branch and tell the agent what to change. A branch only on origin is fetched first.">New Session</button></div></div></section>
+                </div></aside>
+              </div>
             </div>
 
-            <!-- My pull request, approved: Agent Review starts, Merge asks first -->
-            
+            <!-- A pull request of mine with a conflict: no Approve, Merge disabled, Agent Review starts -->
+            <div data-pane="pr:57" class="prv" hidden>
+              <header class="prh">
+                <h2><span>#57</span> Retry invoice number on conflict</h2>
+                <div class="prh-row">
+                  <div class="row" style="min-width:0;gap:12px">
+                    <span class="avatar" aria-hidden="true">SL</span>
+                    <div style="display:flex;min-width:0;flex-direction:column;gap:4px">
+                      <div class="wrapr" style="gap:6px"><span class="brn" title="Merging brings fix/invoice-number into main">fix/invoice-number</span><span class="faint" aria-hidden="true">→</span><span class="brn">main</span><span class="stag" data-merged hidden>merged</span></div>
+                      <div class="pr-sub"><span class="mono">#57</span><span aria-hidden="true">·</span><span title="Author">by sam-lee</span><span aria-hidden="true">·</span><span title="Opened">opened 1d ago</span><span aria-hidden="true">·</span><span class="mono" title="Lines added and removed across every file"><b style="color:var(--add-text)">+31</b> <b style="color:var(--del-text)">−6</b></span><span aria-hidden="true">·</span><a href="https://github.com/acme/billing-api/pull/57" target="_blank" rel="noreferrer" title="Open #57 on github in a new tab">Open on the host ↗</a></div>
+                    </div>
+                  </div>
+                  <div class="wrapr" style="gap:6px;justify-content:flex-end">
+                    <button class="btn xs" id="agent-review" style="padding:6px 12px" title="The agent follows the Review PR Playbook in a Scratch copy at the newest commit, compares the change with the target branch and may run the tests. It posts each finding on its line on the Git host, then one comment with the verdict.">Agent Review</button>
+                    <button class="btn primary xs" disabled style="padding:6px 12px" title="Merge waits until the conflicts with main are resolved on fix/invoice-number">Merge</button>
+                  </div>
+                </div>
+                <div style="padding-bottom:12px"><div class="prtabs" role="tablist" aria-label="Pull request"><button role="tab" class="on" data-go="t57:overview" aria-selected="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Overview</button><button role="tab" class="" data-go="t57:files" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M12 10v6"/></svg>Files changed<span class="n">2</span></button><button role="tab" class="" data-go="t57:commits" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.5"/><path d="M12 3v5.5M12 15.5V21"/></svg>Commits<span class="n">2</span></button></div></div>
+              </header>
+              <div class="prbody">
+                <div role="tabpanel" class="prmain">
+                  <div data-pane="t57:overview" style="display:flex;flex-direction:column;gap:20px">
+                <section class="conf" aria-label="Merge conflicts">
+                    <div class="top"><span class="acc" aria-hidden="true">⚠</span><div><strong>This pull request has conflicts</strong><span>fix/invoice-number and main changed the same lines in 1 file. It cannot merge until they are resolved on fix/invoice-number.</span></div></div>
+                    <ul style="margin:0"><li><button class="li" data-go="t57:files" title="Show this file in Files changed" style="display:flex;width:100%;align-items:center;gap:8px;border:0;background:transparent;border-radius:0;padding:0;text-align:left;font:inherit"><span class="grow trunc">src/invoices/number.ts</span><span class="cf">conflict</span></button></li></ul>
+                    <details open><summary style="font-size:12px;color:var(--n800)">Resolve on your machine</summary>
+                      <pre>git fetch origin
+git checkout fix/invoice-number
+git merge origin/main
+# fix the conflicted files, then
+git commit
+git push</pre></details>
+                  </section>
+                  <!-- Other states of the conflict check: "Checking for conflicts" (a running mark in Merge readiness, until the check lands; kept two minutes at the same head commit) and "Conflicts not known" (git could not fetch the branch from origin). Neither shows the box. -->
+                <section class="card" id="review-running" aria-label="Agent Review" hidden>
+                  <header class="card-h" style="padding:8px 12px;border-bottom:1px solid var(--divider)"><button class="ft" data-fold="agent-review" aria-label="Fold Agent Review" title="Fold"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><strong>Agent Review</strong></button><span class="ml row" style="gap:8px"><span class="pill acc"><span class="spin" style="width:8px;height:8px;border-width:1.5px"></span>&nbsp;running</span></span></header>
+                  <div class="fbody" style="padding:10px 12px;font-size:13px"><p class="b" style="margin:0 0 4px">Reading the change</p><p class="s muted" style="margin:0">Reading the change against main.</p></div>
+                </section>
+                <section aria-label="Description" data-fk="description" style="display:flex;flex-direction:column;gap:6px">
+                  <h3 style="font-size:14px;margin:0"><button class="ft" data-fold="description" aria-label="Fold Description" title="Fold"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><strong>Description</strong></button></h3>
+                  <div class="fbody md" style="padding-left:20px;font-size:13px"><p>When two orders race for the same invoice number, the insert fails on the unique index. This retries with the next number, up to three times.</p></div>
+                </section>
+                <section aria-label="Comments" style="display:flex;flex-direction:column;gap:12px">
+                  <h3 style="font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px">Activity <span class="xs muted" style="font-weight:400;font-size:12px">0 comments</span></h3>
+                  <div class="cbox"><textarea aria-label="Comment on the pull request" placeholder="What do you want to say?"></textarea><div class="row"><span class="xs faint">Markdown · ⌘↵ to send</span><span class="ml"><button class="btn primary xs" style="padding:4px 10px" disabled>Comment</button></span></div></div>
+                  <div class="s muted" style="font-size:13px">No comments yet. Open Files changed, hover a line and press + to comment on it.</div>
+                </section>
+                  </div>
+                  <div data-pane="t57:files" hidden><section aria-label="Files" style="display:flex;flex-direction:column;gap:8px">
+                  <div class="row s muted" style="gap:12px"><span class="dstat"><span class="p">+31</span><span class="n">−6</span><i><b class="y"></b><b class="y"></b><b class="y"></b><b class="y"></b><b></b></i></span>
+                    <span class="row" style="gap:4px"><button class="foldall" data-bulk="open" title="Open every file on its lines">Expand all</button><button class="foldall" data-bulk="closed" title="Fold every file to its name, to get to the comments and the end of the page">Collapse all</button></span>
+                    <span class="ml row" style="gap:8px" title="Files you ticked Viewed, kept in this browser. A file whose change changes reads unviewed again."><span class="v-count">1 / 2 viewed</span><span style="display:block;width:80px;height:6px;border-radius:999px;background:var(--n300);overflow:hidden"><b class="v-bar" style="display:block;height:100%;width:50%;border-radius:999px;background:var(--ok)"></b></span></span></div>
+                  <section class="file" aria-label="src/invoices/number.ts">
+                    <div class="file-h open">
+                      <button class="row grow" data-file-fold style="border:0;background:transparent;padding:4px;font:inherit;text-align:left" aria-expanded="true"><span class="tri open" style="font-size:9px">▶</span><span class="trunc" style="font-weight:600">src/invoices/number.ts</span></button>
+                      <span class="cflag" title="This file conflicts with main: both changed the same lines. Resolve it on the branch before it can merge.">conflict</span>
+                      <span class="dstat"><span class="p">+24</span><span class="n">−6</span><i><b class="y"></b><b class="y"></b><b class="y"></b><b class="y"></b><b></b></i></span>
+                      <label class="viewed"><input type="checkbox" data-viewed> Viewed</label>
+                      <button class="dots" aria-label="More for src/invoices/number.ts">⋯</button>
+                    </div>
+                    <div class="file-body diff"><table><tr class="h"><td colspan="4">@@ -12,7 +12,14 @@ export async function nextInvoiceNumber(tx: Tx)</td></tr><tr><td class="g">12</td><td class="g">12</td><td class="sg"><button class="plus">+</button></td><td class="tx">  const last = await tx.invoice.max("number");</td></tr><tr class="d"><td class="g">13</td><td class="g"></td><td class="sg">−</td><td class="tx">  return last + 1;</td></tr><tr class="a"><td class="g"></td><td class="g">13</td><td class="sg">+</td><td class="tx">  for (let attempt = 0; attempt &lt; 3; attempt++) {</td></tr><tr class="a"><td class="g"></td><td class="g">14</td><td class="sg">+</td><td class="tx">    const taken = await tx.invoice.exists(last + 1 + attempt);</td></tr><tr class="a"><td class="g"></td><td class="g">15</td><td class="sg">+</td><td class="tx">    if (!taken) return last + 1 + attempt;</td></tr><tr class="a"><td class="g"></td><td class="g">16</td><td class="sg">+</td><td class="tx">  }</td></tr></table></div>
+                  </section>
+                  <section class="file" aria-label="test/invoices/number.test.ts">
+                    <div class="file-h">
+                      <button class="row grow" data-file-fold style="border:0;background:transparent;padding:4px;font:inherit;text-align:left" aria-expanded="false"><span class="tri" style="font-size:9px">▶</span><span class="trunc muted" style="font-weight:600">test/invoices/number.test.ts</span></button>
+                      
+                      <span class="dstat"><span class="p">+7</span><span class="n">−0</span><i><b class="y"></b><b class="y"></b><b class="y"></b><b class="y"></b><b></b></i></span>
+                      <label class="viewed on"><input type="checkbox" checked data-viewed> Viewed</label>
+                      <button class="dots" aria-label="More for test/invoices/number.test.ts">⋯</button>
+                    </div>
+                    <div class="file-body diff" hidden><table><tr class="h"><td colspan="4">@@ -1,3 +1,9 @@</td></tr><tr class="a"><td class="g"></td><td class="g">4</td><td class="sg">+</td><td class="tx">it('retries when two orders race', async () =&gt; {</td></tr></table></div>
+                  </section>
+                </section></div>
+                  <div data-pane="t57:commits" hidden><section class="cmts" aria-label="Commits"><div class="hd">2 commits on fix/invoice-number that main lacks</div><ul><li><span class="avatar sm">SL</span><span class="msg1"><span class="trunc" style="font-size:13px;font-weight:500" title="Add a test for two orders racing for one number">Add a test for two orders racing for one number</span><span class="xs muted" style="font-size:12px">sam-lee · <span title="Committed">1d</span></span></span><a class="hash" href="https://github.com/acme/billing-api/commit/a93d1f6" target="_blank" rel="noreferrer" title="Open a93d1f60 on github">a93d1f6</a></li><li><span class="avatar sm">SL</span><span class="msg1"><span class="trunc" style="font-size:13px;font-weight:500" title="Retry invoice number on conflict">Retry invoice number on conflict</span><span class="xs muted" style="font-size:12px">sam-lee · <span title="Committed">1d</span></span></span><a class="hash" href="https://github.com/acme/billing-api/commit/5e0b7c4" target="_blank" rel="noreferrer" title="Open 5e0b7c4a on github">5e0b7c4</a></li></ul></section></div>
+                </div>
+                <aside aria-label="Decision" class="prside"><div>
+                <section class="rail" aria-label="Checks" data-fk="checks"><h3 style="margin:0"><button class="rail-h" data-fold="pr-rail.checks" aria-label="Fold Checks" title="Fold"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sm">Checks running</span><span class="tm run" aria-hidden="true">…</span></button></h3><div class="fbody"><p class="xs muted" style="margin:0;font-size:12px">CI checks are still running on the newest commit. <a href="https://github.com/acme/billing-api/pull/57/checks" target="_blank" rel="noreferrer" style="color:var(--text)">See them on github ↗</a></p></div></section><section class="rail" aria-label="Merge readiness" data-fk="merge-checks"><h3 style="margin:0"><button class="rail-h" data-fold="pr-rail.merge-checks" aria-label="Fold Merge readiness" title="Fold"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sm"><span id="mc57-count">1 of 5 merge checks passed</span></span><span class="tm bad" aria-hidden="true">✕</span></button></h3><div class="fbody"><ul class="mchecks"><li title=""><span class="tm wait" aria-hidden="true">–</span><span><span style="font-weight:500">No approval yet</span><span class="d">Merge unlocks once a reviewer approves</span></span></li><li title=""><span class="tm run" aria-hidden="true">…</span><span><span style="font-weight:500">Checks running</span></span></li><li title="Whether fix/invoice-number merges into main as they stand on origin, checked with git"><span class="tm bad" aria-hidden="true">✕</span><span><span style="font-weight:500">1 file conflicts</span><span class="d">with main</span></span></li><li title=""><span class="tm ok" aria-hidden="true">✓</span><span><span style="font-weight:500">No open threads</span><span class="d">0 resolved</span></span></li><li id="mc57-agent" title=""><span class="tm wait" aria-hidden="true">–</span><span><span style="font-weight:500">Not reviewed by the agent</span></span></li></ul></div></section><section class="rail" aria-label="People" data-fk="people"><h3 style="margin:0"><button class="rail-h" data-fold="pr-rail.people" aria-label="Fold People" title="Fold"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sm">No approval yet</span></button></h3><div class="fbody"><ul class="ppl"><li><span class="avatar sm">SL</span><span class="trunc">sam-lee</span><span class="ml xs muted">author</span></li><li class="xs muted" style="font-size:12px">Merge unlocks once a reviewer approves.</li></ul></div></section><section class="rail" aria-label="Threads" data-fk="threads"><h3 style="margin:0"><button class="rail-h" data-fold="pr-rail.threads" aria-label="Fold Threads" title="Fold"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sm">0 threads open · 0 resolved</span><span class="tm ok" aria-hidden="true">✓</span></button></h3><div class="fbody"><span class="xs muted" style="font-size:12px">Nothing for the agent to address.</span></div></section><section class="rail" aria-label="Sessions" data-fk="sessions"><h3 style="margin:0"><button class="rail-h" data-fold="pr-rail.sessions" aria-label="Fold Sessions" title="Fold"><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sm">Sessions on this branch</span></button></h3><div class="fbody"><div style="display:flex;flex-direction:column;gap:8px;font-size:12px"><span class="muted">Sessions on fix/invoice-number:</span><button class="chip-l" style="border-radius:var(--r);justify-content:flex-start" data-page="workspace" title="Open this Session">Invoice number race · waiting approval</button><button class="btn xs" style="justify-content:center;padding:4px 10px" title="Start a Session on this branch and tell the agent what to change. A branch only on origin is fetched first.">New Session</button></div></div></section>
+                </div></aside>
+              </div>
+            </div>
+
             <div data-pane="pr:none" hidden></div>
           </div>
         </section>
@@ -1348,12 +1914,19 @@
     if (group === 'intg') $('#intg-drawer').hidden = true;
   }));
 
-  /* data-toggle="selector": shows or hides menus and inline forms; a click outside closes an open menu. */
+  /* data-toggle="selector": shows or hides menus and inline forms; a click outside closes an open menu. One menu is open at a time. */
   $$('[data-toggle]').forEach((el) => el.addEventListener('click', (e) => {
     e.stopPropagation();
-    $$(el.dataset.toggle).forEach((t) => (t.hidden = !t.hidden));
-    const first = $$(el.dataset.toggle)[0];
+    const targets = $$(el.dataset.toggle);
+    $$('.menu:not([hidden])').forEach((m) => {
+      if (targets.includes(m)) return;
+      m.hidden = true;
+      $$(`[data-toggle="#${m.id}"]`).forEach((t) => t.classList.remove('open'));
+    });
+    targets.forEach((t) => (t.hidden = !t.hidden));
+    const first = targets[0];
     if (first && first.classList.contains('menu')) el.classList.toggle('open', !first.hidden);
+    if (first) $$(`[data-toggle="${el.dataset.toggle}"][data-pressed]`).forEach((t) => t.classList.toggle('pressed', !first.hidden));
   }));
   document.addEventListener('click', (e) => {
     $$('.menu:not([hidden])').forEach((m) => {
@@ -1404,22 +1977,209 @@
     $('[data-json-off]', sec).hidden = on;
   }));
 
-  /* Workspace: files marked viewed fold; Agent Review runs; Merge asks first. */
-  function countViewed() {
-    const boxes = $$('[data-pane="pr:415"] [data-viewed]');
-    const n = boxes.filter((b) => b.checked).length;
-    $('#viewed-count').textContent = `${n} / ${boxes.length} viewed`;
-    $('#viewed-bar').style.width = `${(n / boxes.length) * 100}%`;
+  /* Workspace: lists filter and fold, menus pick and search, the composer opens its $ / @ menus as you type, and the pull request page decides. */
+  function applyList(pane) {
+    const q = $('.ws-search input', pane).value.trim().toLowerCase();
+    const tab = $('.ws-flt .on', pane);
+    const flt = tab ? tab.dataset.flt : 'all';
+    const pick = pane.dataset.pick || 'any';
+    const all = pane.dataset.all === '1';
+    let total = 0;
+    const counts = {};
+    $$('section[data-g]', pane).forEach((g) => {
+      let n = 0;
+      $$('li[data-text]', g).forEach((li) => {
+        const found = (!q || li.dataset.text.includes(q)) && (pick === 'any' || li.dataset.pick === pick);
+        const ok = found && (flt === 'all' || g.dataset.g === flt);
+        li.dataset.match = ok ? '1' : '';
+        li.hidden = !ok || (li.classList.contains('more') && !all && !q);
+        if (found) counts[g.dataset.g] = (counts[g.dataset.g] || 0) + 1;
+        if (ok) n++;
+      });
+      $('.cnt', g).textContent = n;
+      g.hidden = n === 0;
+      total += n;
+    });
+    // A tab shows its count when it is above zero.
+    $$('[data-flt]', pane).forEach((b) => {
+      const n = b.dataset.flt === 'all' ? 0 : counts[b.dataset.flt] || 0;
+      const badge = $('.n', b);
+      if (badge) { badge.textContent = n; badge.hidden = n === 0; }
+    });
+    const more = $('[data-more]', pane);
+    if (more) {
+      const extra = $$('li.more', pane).filter((li) => li.dataset.match).length;
+      more.parentElement.hidden = !!q || extra === 0;
+      more.textContent = all ? 'Show fewer' : `Show ${extra} more`;
+    }
+    const empty = $('[data-empty]', pane);
+    const noun = pane.dataset.pane === 'wstab:sessions' ? 'Session' : 'pull request';
+    empty.hidden = total > 0;
+    empty.textContent = q ? `No ${noun} matches “${$('.ws-search input', pane).value.trim()}”.` : `No ${noun} in this view.`;
   }
+  $$('[data-list]').forEach((pane) => {
+    $('.ws-search input', pane).addEventListener('input', () => applyList(pane));
+    $$('[data-flt]', pane).forEach((b) => b.addEventListener('click', () => applyList(pane)));
+    const more = $('[data-more]', pane);
+    if (more) more.addEventListener('click', () => { pane.dataset.all = pane.dataset.all === '1' ? '' : '1'; applyList(pane); });
+  });
+
+  /* A header that folds its section. One key folds every copy: the sidebar sections hold on both pull requests. */
+  $$('[data-fold]').forEach((b) => b.addEventListener('click', () => {
+    const folded = !b.closest('section').classList.contains('folded');
+    $$(`[data-fold="${b.dataset.fold}"]`).forEach((x) => {
+      x.closest('section').classList.toggle('folded', folded);
+      x.setAttribute('aria-expanded', String(!folded));
+      x.title = folded ? 'Open' : 'Fold';
+    });
+  }));
+  $$('[data-fold-self]').forEach((b) => b.addEventListener('click', () => b.closest('.sdf').classList.toggle('folded')));
+  $$('[data-expand]').forEach((b) => b.addEventListener('click', () => {
+    const files = $$(b.dataset.expand);
+    const fold = b.textContent === 'Collapse all';
+    files.forEach((f) => f.classList.toggle('folded', fold));
+    b.textContent = fold ? 'Expand all' : 'Collapse all';
+  }));
+
+  /* A dropdown list: search narrows it, "Create <name>" offers a new branch, a pick fills its button and, in a list header, filters. */
+  $$('.menu[role=listbox]').forEach((menu) => {
+    const search = $('.msearch', menu);
+    const create = $('[data-create]', menu);
+    const opts = $$('[role=option]', menu).filter((o) => o !== create);
+    const triggers = () => $$(`[data-toggle="#${menu.id}"]`);
+    if (search) search.addEventListener('input', () => {
+      const q = search.value.trim().toLowerCase();
+      const typed = search.value.trim();
+      let n = 0;
+      opts.forEach((o) => { const ok = !q || o.textContent.toLowerCase().includes(q); o.hidden = !ok; if (ok) n++; });
+      if (create) {
+        const exact = opts.some((o) => $('.ol', o).textContent === typed);
+        create.hidden = !typed || exact;
+        $('.ol', create).textContent = `Create ${typed}`;
+        create.dataset.label = typed;
+        if (!create.hidden) n++;
+      }
+      $('.nomatch', menu).hidden = n > 0;
+    });
+    $$('[role=option]', menu).forEach((o) => o.addEventListener('click', () => {
+      opts.forEach((x) => x.classList.toggle('sel', x === o));
+      const label = o.dataset.label || $('.ol', o).textContent;
+      triggers().forEach((t) => { const v = $('.v', t); if (v) v.textContent = label; t.classList.remove('open'); });
+      menu.hidden = true;
+      const list = menu.closest('[data-list]');
+      if (list && menu.dataset.pick) { list.dataset.pick = o.dataset.val; applyList(list); }
+    }));
+  });
+  $$('[data-xrepos]').forEach((menu) => {
+    const count = $('[data-xcount]', menu.closest('.composer'));
+    $$('[data-xrepo]', menu).forEach((b) => b.addEventListener('click', () => {
+      b.classList.toggle('sel');
+      b.setAttribute('aria-pressed', String(b.classList.contains('sel')));
+      const n = $$('[data-xrepo].sel', menu).length;
+      count.textContent = n ? `+${n}` : 'this one';
+    }));
+    $('.msearch', menu).addEventListener('input', (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      let n = 0;
+      $$('[data-xrepo]', menu).forEach((b) => { const ok = !q || b.textContent.toLowerCase().includes(q); b.hidden = !ok; if (ok) n++; });
+      $('.nomatch', menu).hidden = n > 0;
+    });
+  });
+
+  /* The composer: "$" first opens skills, "/" first opens commands, "@" after a space or at the start opens files. */
+  $$('[data-composer]').forEach((box) => {
+    const ta = $('textarea', box);
+    const send = $('[data-send]', box);
+    const menus = Object.fromEntries($$('.cm', box).map((m) => [m.dataset.mode, m]));
+    const FILE = /(?:^|\s)@([^\s]*)$/;
+    let active = 0;
+    let dismissed = null;
+    const modeOf = (t) => (/^\$[^\s]*$/.test(t) ? 'skills' : /^\/[^\s]*$/.test(t) ? 'commands' : FILE.test(t) ? 'files' : null);
+    const shown = (mode) => $$('.cm-r', menus[mode]).filter((r) => !r.hidden);
+    function render() {
+      const t = ta.value;
+      const mode = dismissed === t ? null : modeOf(t);
+      if (send) send.disabled = t.trim() === '';
+      Object.entries(menus).forEach(([k, m]) => (m.hidden = k !== mode));
+      if (!mode) return;
+      const menu = menus[mode];
+      const rows = $$('.cm-r', menu);
+      const q = (mode === 'files' ? FILE.exec(t)[1] : t.slice(1)).toLowerCase();
+      const rank = (r) => {
+        const name = r.dataset.name.toLowerCase();
+        if (mode === 'files') return name.startsWith(q) ? 0 : name.includes(q) ? 1 : r.dataset.path.toLowerCase().includes(q) ? 2 : 9;
+        if (mode === 'commands') return name.startsWith(q) ? 0 : name.includes(q) ? 1 : (r.dataset.desc || '').toLowerCase().includes(q) ? 2 : 9;
+        return name.includes(q) || (r.dataset.desc || '').toLowerCase().includes(q) ? 0 : 9;
+      };
+      rows.sort((a, b) => rank(a) - rank(b) || (a.dataset.path || '').length - (b.dataset.path || '').length);
+      rows.forEach((r) => { r.hidden = !q ? false : rank(r) === 9; menu.insertBefore(r, $('.none', menu)); });
+      $('.none', menu).hidden = shown(mode).length > 0;
+      active = 0;
+      mark();
+    }
+    function mark() {
+      const mode = Object.keys(menus).find((k) => !menus[k].hidden);
+      if (!mode) return;
+      shown(mode).forEach((r, i) => r.classList.toggle('act', i === active));
+    }
+    function pick(row, mode) {
+      const t = ta.value;
+      if (mode === 'skills') ta.value = `$${row.dataset.name} ${t.replace(/^[$/]\S*\s?/, '')}`;
+      else if (mode === 'files') {
+        const path = row.dataset.path;
+        const at = /\s/.test(path) ? `@"${path}"` : `@${path}`;
+        ta.value = t.replace(FILE, (found) => `${found.startsWith('@') ? '' : found[0]}${at} `);
+      } else {
+        ta.value = '';
+        const run = { diff: () => $('[data-toggle="#sdiff"]').click(), pr: () => $('.sesp:not([hidden]) [data-toggle="#openpr"]').click(), skills: () => (ta.value = '$'), files: () => (ta.value = '@') }[row.dataset.name];
+        if (run) run();
+      }
+      ta.focus();
+      render();
+    }
+    Object.entries(menus).forEach(([mode, menu]) => $$('.cm-r', menu).forEach((row, i) => {
+      row.addEventListener('mousedown', (e) => e.preventDefault());
+      row.addEventListener('click', () => pick(row, mode));
+      row.addEventListener('mouseenter', () => { active = shown(mode).indexOf(row); mark(); });
+    }));
+    ta.addEventListener('input', () => { dismissed = null; render(); });
+    ta.addEventListener('keydown', (e) => {
+      const mode = Object.keys(menus).find((k) => !menus[k].hidden);
+      if (!mode) return;
+      const rows = shown(mode);
+      if (e.key === 'Escape') { dismissed = ta.value; render(); e.preventDefault(); return; }
+      if (!rows.length) return;
+      if (e.key === 'ArrowDown') active = (active + 1) % rows.length;
+      else if (e.key === 'ArrowUp') active = (active - 1 + rows.length) % rows.length;
+      else if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') pick(rows[Math.min(active, rows.length - 1)], mode);
+      else return;
+      e.preventDefault();
+      mark();
+    });
+  });
+
+  /* Pull request page: files fold, a Viewed tick folds one and counts, Expand all and Collapse all, Approve unlocks Merge, Merge asks first. */
+  function setFile(file, open) {
+    $('.file-body', file).hidden = !open;
+    $('.file-h', file).classList.toggle('open', open);
+    $('.tri', file).classList.toggle('open', open);
+    $('[data-file-fold]', file).setAttribute('aria-expanded', String(open));
+  }
+  function countViewed(root) {
+    const boxes = $$('[data-viewed]', root);
+    const n = boxes.filter((b) => b.checked).length;
+    $('.v-count', root).textContent = `${n} / ${boxes.length} viewed`;
+    $('.v-bar', root).style.width = `${(n / boxes.length) * 100}%`;
+  }
+  $$('[data-file-fold]').forEach((b) => b.addEventListener('click', () => { const f = b.closest('.file'); setFile(f, $('.file-body', f).hidden); }));
   $$('[data-viewed]').forEach((box) => box.addEventListener('change', () => {
     const file = box.closest('.file');
     box.closest('.viewed').classList.toggle('on', box.checked);
-    $('.file-body', file).hidden = box.checked;
-    $('.file-h', file).classList.toggle('open', !box.checked);
-    $('.tri', file).classList.toggle('open', !box.checked);
+    setFile(file, !box.checked);
     $('.file-h .trunc', file).classList.toggle('muted', box.checked);
-    countViewed();
+    countViewed(box.closest('.prv'));
   }));
+  $$('[data-bulk]').forEach((b) => b.addEventListener('click', () => $$('.file', b.closest('.prv')).forEach((f) => setFile(f, b.dataset.bulk === 'open'))));
   const review = $('#agent-review');
   if (review) review.addEventListener('click', () => {
     review.disabled = true;
@@ -1429,14 +2189,32 @@
     setTimeout(() => {
       review.textContent = 'Reviewed at this commit';
       review.title = 'The agent already reviewed this commit. Push a change to review again.';
-      $('#review-running .ml').textContent = 'ready';
-      $('#review-running p').textContent = 'No blockers. One suggestion is posted on the pull request.';
+      $('#review-running .pill').textContent = 'ready';
+      $('#review-running p.b').textContent = 'No blockers. One suggestion is posted on the pull request.';
+      $('#review-running p.s').textContent = 'Reviewed against main. The finding is on its line.';
+      $('#mc57-agent').innerHTML = '<span class="tm ok" aria-hidden="true">✓</span><span><span style="font-weight:500">Agent reviewed this commit</span></span>';
+      $('#mc57-count').textContent = '2 of 5 merge checks passed';
     }, 2200);
+  });
+  const approve = $('#approve');
+  if (approve) approve.addEventListener('click', () => {
+    $('#merge').disabled = false;
+    $('#merge').title = 'Merge this pull request on the Git host. You confirm first.';
+    $('#mc-approval').innerHTML = '<span class="tm ok" aria-hidden="true">✓</span><span><span style="font-weight:500">Approved by sam-lee</span></span>';
+    $('#mc-count').textContent = '4 of 5 merge checks passed';
+    $('#ppl-sum').textContent = '1 approval';
+    $('#ppl-ok').hidden = false;
+    $('#ppl-hint').hidden = true;
   });
   const merge = $('#merge');
   if (merge) {
-    merge.addEventListener('click', () => { merge.hidden = true; $('#merge-confirm').hidden = false; });
-    $('#keep-open').addEventListener('click', () => { merge.hidden = false; $('#merge-confirm').hidden = true; });
+    merge.addEventListener('click', () => { merge.disabled = true; $('#merge-confirm').hidden = false; });
+    $('#keep-open').addEventListener('click', () => { merge.disabled = false; $('#merge-confirm').hidden = true; });
+    $('#do-merge').addEventListener('click', () => {
+      $('#merge-confirm').hidden = true;
+      $('[data-actions]').hidden = true;
+      $('[data-merged]').hidden = false;
+    });
   }
 
   /* Dev tools: picking Connections sets the scope; none picked is every connected one. */

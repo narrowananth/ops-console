@@ -23,7 +23,7 @@
   <div class="diagram-container">
 <svg viewBox="0 64 1220 1020" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="agent-run-safety-title agent-run-safety-desc">
 <title id="agent-run-safety-title">Agent run safety: what runs where, and who approves</title>
-<desc id="agent-run-safety-desc">Trust boundaries of an agent run: shell commands run in the Seatbelt sandbox behind a network allowlist, while the daemon, MCP servers and the console tools run outside it, and Approvals gate PROD writes and pull request opening.</desc>
+<desc id="agent-run-safety-desc">Trust boundaries of an agent run: shell commands run in the Seatbelt sandbox behind a network allowlist, while the daemon, MCP servers and the console tools run outside it, and Approvals gate PROD writes, save_file and spawn_sessions while the console pushes and opens pull requests with none.</desc>
 <defs>
 <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
 <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
@@ -87,7 +87,7 @@
 <rect x="926" y="422" width="40" height="12" rx="2" fill="#f5f5f5"/>
 <text x="946" y="431" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">OPENS</text>
 <rect x="835" y="387" width="62" height="12" rx="2" fill="#f5f5f5"/>
-<text x="866" y="396" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">AFTER YES</text>
+<text x="866" y="396" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">PUSHES</text>
 <rect x="64" y="132" width="148" height="340" rx="6" fill="#f5f5f5"/>
 <rect x="64" y="132" width="148" height="340" rx="6" fill="rgba(79,93,117,0.10)" stroke="#5a6580" stroke-width="1"/>
 <rect x="72" y="138" width="31" height="12" rx="2" fill="transparent" stroke="#5a6580" stroke-opacity="0.45" stroke-width="0.8"/>
@@ -133,9 +133,9 @@
 <rect x="752" y="316" width="148" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
 <rect x="760" y="322" width="31" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
 <text x="775.5" y="331" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">TOOL</text>
-<text x="826" y="351" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">open_pull_request</text>
-<text x="826" y="364" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">+ join_repo · save_file</text>
-<text x="826" y="375" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">in-process · console only</text>
+<text x="826" y="351" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Console tools</text>
+<text x="826" y="364" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">open_pull_request</text>
+<text x="826" y="375" fill="#4f5d75" font-size="8.5" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">save_file · spawn_sessions</text>
 <circle cx="896" cy="320" r="8" fill="#2d3142"/>
 <text x="896" y="323.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
 <rect x="752" y="408" width="148" height="64" rx="6" fill="#f5f5f5"/>
@@ -143,7 +143,7 @@
 <rect x="760" y="414" width="26" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.45" stroke-width="0.8"/>
 <text x="773" y="423" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">GIT</text>
 <text x="826" y="443" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Pull request opening</text>
-<text x="826" y="456" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">git push · host CLI</text>
+<text x="826" y="456" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">push, rebase · host CLI</text>
 <text x="826" y="467" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">your keys · no force</text>
 <circle cx="896" cy="412" r="8" fill="#2d3142"/>
 <text x="896" y="415.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
@@ -177,7 +177,7 @@
 <rect x="312" y="570" width="21" height="12" rx="2" fill="transparent" stroke="rgba(191,69,32,0.50)" stroke-opacity="0.45" stroke-width="0.8"/>
 <text x="322.5" y="579" fill="#bf4520" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">FS</text>
 <text x="378" y="599" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Filesystem rules</text>
-<text x="378" y="612" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">write: folder · outputs</text>
+<text x="378" y="612" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">write: worktree · outputs</text>
 <text x="378" y="623" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">no data folder · ~/.ssh</text>
 <rect x="528" y="564" width="148" height="64" rx="6" fill="#f5f5f5"/>
 <rect x="528" y="564" width="148" height="64" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
@@ -212,10 +212,10 @@
 <text x="1074" y="688" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">other hosts · raw IP</text>
 <text x="1074" y="699" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">DNS · UDP · ssh</text>
 <text x="78" y="788" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Sandbox unavailable: the run fails before its first command. No Setting, flag or retry runs a command outside it.</text>
-<text x="78" y="810" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">ssh, Node fetch, raw IPs, DNS and UDP skip the proxy and fail. A run keeps the allowlist it started with.</text>
+<text x="78" y="810" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">ssh, Node fetch, raw IPs, DNS and UDP skip the proxy and fail. A blocked host turns the run Needs you until you allow it. A run keeps the allowlist it started with.</text>
 <text x="78" y="832" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A PROD write waits for an Approval in every Access mode, full included. Log row is written before any Bash or MCP call.</text>
-<text x="78" y="854" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Pull request, join_repo and save_file ask in every mode. save_file copies one output file; the daemon writes it.</text>
-<text x="78" y="876" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Never forces. A branch that moved gives branch_moved and opens nothing. Host not connected: refused before the push.</text>
+<text x="78" y="854" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">join_repo, save_file and spawn_sessions (one yes for its list) ask in every mode. run_integration reads run; writes ask unless Don't ask again this Session.</text>
+<text x="78" y="876" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">open_pull_request needs no Approval. Never forces: a branch that moved is rebased first, and a conflict pushes nothing. Host not connected: refused before the push.</text>
 <text x="78" y="898" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Stop, or a daemon restart, expires pending Approvals and fails the run. A denied request is not retried.</text>
 <text x="78" y="920" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Agent Review, Reply check and Comment pass also deny git push and CLI comment, review and api. Merge is a button.</text>
 <text x="78" y="942" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">MCP servers run outside the sandbox. Access Level and the PROD tag decide what the agent may call.</text>

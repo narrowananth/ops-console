@@ -121,7 +121,7 @@
 <rect x="556" y="306" width="26" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.45" stroke-width="0.8"/>
 <text x="569" y="315" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">MEM</text>
 <text x="622" y="339" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">List cache</text>
-<text x="622" y="352" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">PRs 60 s · detail 15 s</text>
+<text x="622" y="352" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">PRs 30 min · detail 15 s</text>
 <text x="622" y="363" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">stale-while-revalidate</text>
 <circle cx="692" cy="304" r="8" fill="#2d3142"/>
 <text x="692" y="307.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
@@ -178,7 +178,7 @@
 <text x="78" y="590" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">An unauthorized reply drops the token and signs the UI out. Any number of browsers on the Mac work at once, each with its own Remembered view.</text>
 <text x="78" y="616" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Events are sent only after the transaction commits, so a refetch never reads half a write. Pull requests and Session messages stay off state.db.</text>
 <text x="78" y="642" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">/ws sends events only, never commands. Events cover settings, Sessions, Approvals, Action Log, accounts, Connectors, Keychain waits, Workspace and Monitor.</text>
-<text x="78" y="668" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A list over 60 s (detail over 15 s) is served at once while a background read runs. A failed read keeps the old list and marks it stale. Refresh drops it.</text>
+<text x="78" y="668" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A list over 30 min (detail over 15 s) is served at once while a background read runs. A failed read keeps the old list and marks it stale. Refresh drops it.</text>
 <text x="78" y="694" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">monitor-scan: 6 h grid from the daily scan time. monitor-pr-watch: every 5 min and after each list refresh. A missed slot runs once at start.</text>
 <text x="78" y="720" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Before the port opens: working, waiting_input and waiting_approval Sessions fail, Approvals expire, running Scans, Fixes and jobs fail as interrupted.</text>
 <text x="78" y="746" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">429 or a rate-limit message becomes rate_limited and the UI shows stale data. Merge is a button for the operator only.</text>

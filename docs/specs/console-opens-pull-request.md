@@ -1,6 +1,7 @@
 # Console opens the pull request
 
 **Status:** shipped
+**Changed since:** the agent's `open_pull_request` call asks for no Approval and rebases a branch that moved on origin (ADR 0002). Behavior 12 and the settled lines on the agent's request describe the first design.
 **Design:** none. Workspace Session header: gains an "Open pull request" button, and a form under the header. A chat run gains a console tool the operator approves. Departs from the design, which has no such control.
 
 ## Problem

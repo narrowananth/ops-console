@@ -9,6 +9,7 @@ the Keychain. The console registers servers with `claude mcp add`. Fixed reads, 
 request list or a health check, call the same servers and CLIs directly, with no model turn.
 Judgment work runs as agent sessions. The agent writes a pull request's text; the console pushes the branch and opens
 the pull request through the Git host's CLI, since a run's sandbox cannot reach the operator's keys or sign-ins.
+The same limit reaches the agent's own use of those CLIs: a chat run asks the console to run one through its `run_integration` tool, and the daemon runs it as the operator ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md)).
 
 ## Consequences
 
