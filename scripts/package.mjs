@@ -40,6 +40,8 @@ const natives = {
   '@napi-rs/keyring': await nativeVersion('@napi-rs/keyring'),
   'node-pty': await nativeVersion('node-pty'),
   '@anthropic-ai/claude-agent-sdk': await nativeVersion('@anthropic-ai/claude-agent-sdk'),
+  // Drives the operator's own Chrome; it downloads no browser.
+  'playwright-core': await nativeVersion('playwright-core'),
 };
 await writeFile(
   path.join(stage, 'app/package.json'),

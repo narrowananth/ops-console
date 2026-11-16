@@ -1,5 +1,6 @@
 export * from './agents';
 export * from './api';
+export * from './browser';
 export * from './connections';
 export * from './connectors';
 export * from './devtools';

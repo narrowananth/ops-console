@@ -3,9 +3,9 @@ import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import { type IntegrationRunner, integrationInputSchema } from './integration-cli';
 import { type FileSaver, runSaveFile, saveFileInputSchema } from './output-files';
+import { type BrowserTools, CONSOLE_TOOLS_SERVER, type ProcessTools, sessionTools } from './session-tools';
 
-/** The console's own MCP server, in the daemon: it holds the tools the console runs for the agent. */
-export const CONSOLE_TOOLS_SERVER = 'ops-console';
+export { CONSOLE_TOOLS_SERVER };
 export const OPEN_PULL_REQUEST_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__open_pull_request`;
 export const JOIN_REPO_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__join_repo`;
 export const SPAWN_SESSIONS_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__spawn_sessions`;
@@ -145,10 +145,24 @@ export function consoleToolsServer(
     spawnCallId?: () => string;
     saver: FileSaver | null;
     integrations?: IntegrationRunner | null;
+    browser?: BrowserTools | null;
+    processes?: ProcessTools | null;
+    /** Aborts when the operator stops the run. */
+    signal?: AbortSignal;
   },
   sessionId: string,
 ): McpSdkServerConfigWithInstance {
-  const { opener, joiner, spawner = null, spawnCallId = () => '', saver, integrations = null } = tools;
+  const {
+    opener,
+    joiner,
+    spawner = null,
+    spawnCallId = () => '',
+    saver,
+    integrations = null,
+    browser = null,
+    processes = null,
+    signal,
+  } = tools;
   return createSdkMcpServer({
     name: CONSOLE_TOOLS_SERVER,
     tools: [
@@ -205,6 +219,7 @@ export function consoleToolsServer(
             ),
           ]
         : []),
+      ...sessionTools(browser, processes, sessionId, signal),
     ],
   });
 }

@@ -10,15 +10,19 @@ import {
   alertEventSchema,
   alertSchema,
   approvalSchema,
+  type BrowserState,
   branchSchema,
+  browserStateSchema,
   type CliProxySetting,
   type ConnectionTestResult,
   type ConnectionType,
   type ConnectorId,
   type CreateConnection,
   type CreatePlaybook,
+  type CreateProcessBody,
   type CreateScan,
   type CreateSkill,
+  type CreateTabBody,
   checkoutResultSchema,
   claudeAccountSchema,
   cliProxySchema,
@@ -44,6 +48,7 @@ import {
   healthSchema,
   keychainHandoverSchema,
   keychainWaitSchema,
+  localServersSchema,
   mcpServerListSchema,
   mcpServerSchema,
   messageSchema,
@@ -51,6 +56,7 @@ import {
   type OpenPullRequest,
   openedPullRequestSchema,
   outputFileSchema,
+  type PatchTabBody,
   type PlaybookPatch,
   type PlaybookTrigger,
   type PrReviewEvent,
@@ -82,9 +88,11 @@ import {
   type SkillRef,
   savedNetworkDomainSchema,
   scanSchema,
+  scriptsSchema,
   serviceSchema,
   sessionDefaultsSchema,
   sessionDiffSchema,
+  sessionProcessSchema,
   sessionPullRequestSchema,
   sessionSchema,
   skillListSchema,
@@ -92,8 +100,11 @@ import {
   skillPackListSchema,
   skillPackSchema,
   skillSchema,
+  stagedFileSchema,
   startAtLoginSchema,
   statusCodeCountSchema,
+  type Tab,
+  tabSchema,
   terminalListSchema,
   type UpdateConnection,
   type UpdateMcpServer,
@@ -103,7 +114,7 @@ import {
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { z } from 'zod';
-import { apiGet, apiSend } from './api';
+import { apiGet, apiSend, apiUpload } from './api';
 import { sessionToken } from './session';
 
 export const queryKeys = {
@@ -131,6 +142,10 @@ export const queryKeys = {
   messages: (id: string) => ['messages', id] as const,
   outputs: (id: string) => ['outputs', id] as const,
   sessionDiff: (id: string) => ['session-diff', id] as const,
+  browser: (id: string) => ['session-browser', id] as const,
+  localServers: (id: string) => ['local-servers', id] as const,
+  processes: (id: string) => ['session-processes', id] as const,
+  scripts: (id: string) => ['session-scripts', id] as const,
   sessionPullRequest: (id: string) => ['session-pull-request', id] as const,
   diskAccess: ['disk-access'] as const,
   startAtLogin: ['start-at-login'] as const,
@@ -1740,5 +1755,156 @@ export function useSkillMenu(sessionId: string, q: string, enabled: boolean) {
         `/skill-menu?session_id=${encodeURIComponent(sessionId)}&q=${encodeURIComponent(q)}`,
         z.object({ data: skillMenuSchema }),
       ).then((b) => b.data),
+  });
+}
+
+const SERVERS_POLL_MS = 5000;
+
+/** The Session's tabs and whether Chrome is there. `browser.tabs_changed` refetches it. */
+export function useBrowserState(sessionId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.browser(sessionId),
+    queryFn: () => apiGet(`/sessions/${sessionId}/browser`, z.object({ data: browserStateSchema })).then((b) => b.data),
+    enabled,
+  });
+}
+
+/** Puts a tab the page stream reported into the cached list, so the strip follows a load without a refetch. */
+export function useStoreTab(sessionId: string) {
+  const client = useQueryClient();
+  return (tab: Tab) =>
+    client.setQueryData<BrowserState>(
+      queryKeys.browser(sessionId),
+      (state) => state && { ...state, tabs: state.tabs.map((one) => (one.id === tab.id ? tab : one)) },
+    );
+}
+
+const tabResponse = z.object({ data: tabSchema });
+
+export function useCreateTab(sessionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateTabBody) =>
+      apiSend('POST', `/sessions/${sessionId}/browser/tabs`, body, tabResponse).then((b) => b.data),
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.browser(sessionId) }),
+  });
+}
+
+/** An address, an action (back, forward, reload, stop) or a viewport for one tab. */
+export function usePatchTab(sessionId: string) {
+  const storeTab = useStoreTab(sessionId);
+  return useMutation({
+    mutationFn: ({ tabId, body }: { tabId: string; body: PatchTabBody }) =>
+      apiSend('PATCH', `/browser/tabs/${tabId}`, body, tabResponse).then((b) => b.data),
+    onSuccess: storeTab,
+  });
+}
+
+export function useCloseTab(sessionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (tabId: string) => apiSend('DELETE', `/browser/tabs/${tabId}`, undefined, z.undefined()),
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.browser(sessionId) }),
+  });
+}
+
+/** Opens the tab's address in the operator's own browser, through the daemon. */
+export function useOpenExternal() {
+  return useMutation({
+    mutationFn: (tabId: string) => apiSend('POST', `/browser/tabs/${tabId}/external`, undefined, z.undefined()),
+  });
+}
+
+/** Gives the page's open file picker the files the operator chose; none cancels it. */
+export function useChooseFiles() {
+  return useMutation({
+    mutationFn: async ({ tabId, files }: { tabId: string; files: File[] }) => {
+      const ids: string[] = [];
+      for (const file of files) {
+        const staged = await apiUpload(
+          `/browser/tabs/${tabId}/files?name=${encodeURIComponent(file.name)}`,
+          file,
+          z.object({ data: stagedFileSchema }),
+        );
+        ids.push(staged.data.id);
+      }
+      await apiSend('POST', `/browser/tabs/${tabId}/files/choose`, { ids }, z.undefined());
+    },
+  });
+}
+
+/** Clears the Session's cookies and storage. */
+export function useClearBrowserData(sessionId: string) {
+  return useMutation({
+    mutationFn: () => apiSend('POST', `/sessions/${sessionId}/browser/clear`, undefined, z.undefined()),
+  });
+}
+
+/**
+ * The servers listening on a loopback port. `poll` asks every 5 seconds, while the panel is open; `browser.servers_changed`
+ * refetches it either way, for the Browser button's dot.
+ */
+export function useLocalServers(sessionId: string, enabled: boolean, poll: boolean) {
+  return useQuery({
+    queryKey: queryKeys.localServers(sessionId),
+    queryFn: () =>
+      apiGet(`/sessions/${sessionId}/local-servers`, z.object({ data: localServersSchema })).then(
+        (b) => b.data.servers,
+      ),
+    enabled,
+    refetchInterval: poll ? SERVERS_POLL_MS : false,
+  });
+}
+
+/** Stops a server of this Session that no Session process owns, such as one left running by `nohup`. */
+export function useStopServer(sessionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (port: number) =>
+      apiSend('POST', `/sessions/${sessionId}/local-servers/${port}/stop`, undefined, z.undefined()),
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.localServers(sessionId) }),
+  });
+}
+
+/** The Session's processes; `process.changed` and `process.removed` refetch it. */
+export function useProcesses(sessionId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.processes(sessionId),
+    queryFn: () =>
+      apiGet(`/sessions/${sessionId}/processes`, z.object({ data: z.array(sessionProcessSchema) })).then((b) => b.data),
+    enabled,
+  });
+}
+
+/** The scripts of the worktree's `package.json`, and the runner its lockfile names. */
+export function useScripts(sessionId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.scripts(sessionId),
+    queryFn: () => apiGet(`/sessions/${sessionId}/scripts`, z.object({ data: scriptsSchema })).then((b) => b.data),
+    enabled,
+  });
+}
+
+const processResponse = z.object({ data: sessionProcessSchema });
+
+/** Starts a script, a command or a shell; the new process arrives with `process.changed`. */
+export function useStartProcess(sessionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateProcessBody) =>
+      apiSend('POST', `/sessions/${sessionId}/processes`, body, processResponse).then((b) => b.data),
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.processes(sessionId) }),
+  });
+}
+
+/** Stop and Restart end or restart a process; Close removes an exited one. */
+export function useProcessAction(sessionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'stop' | 'restart' | 'close' }) =>
+      action === 'close'
+        ? apiSend('DELETE', `/processes/${id}`, undefined, z.undefined())
+        : apiSend('POST', `/processes/${id}/${action}`, undefined, processResponse),
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.processes(sessionId) }),
   });
 }

@@ -3,24 +3,18 @@ import {
   TERMINAL_TEXT_LIMIT,
   type TerminalServerMessage,
   terminalServerMessageSchema,
-  WS_PROTOCOL,
 } from '@ops-console/shared';
-import { FitAddon } from '@xterm/addon-fit';
-import { Terminal } from '@xterm/xterm';
-import '@xterm/xterm/css/xterm.css';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '../components/ui/button';
+import { XtermView } from '../components/ui/xterm-view';
 import { usePasteLimit } from '../lib/paste-limit';
 import { useAnswerSecret } from '../lib/queries';
-import { sessionToken } from '../lib/session';
 
 /**
  * The unsent line per terminal, so it survives a tab switch. Memory only: a typed line may hold a password the daemon
  * has not masked yet, so it never reaches browser storage.
  */
 const drafts = new Map<string, string>();
-
-const TERMINAL_BG = '#0f0e0e';
 
 /** What the Setup agent page offers to ask. */
 export const EXAMPLES = [
@@ -47,7 +41,6 @@ function takeQueued(): string {
  * operator is elsewhere or reloads, and the page attaches to it again; only Close ends it.
  */
 export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onClose: () => void }) {
-  const host = useRef<HTMLDivElement>(null);
   const socket = useRef<WebSocket | null>(null);
   const [line, setLineState] = useState(() => drafts.get(terminalId) ?? takeQueued());
   const paste = usePasteLimit(TERMINAL_TEXT_LIMIT, 'fit');
@@ -61,51 +54,6 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
   const [ended, setEnded] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
   const answer = useAnswerSecret();
-
-  useEffect(() => {
-    const token = sessionToken();
-    if (!host.current || token === null) return;
-    const terminal = new Terminal({
-      convertEol: true,
-      fontSize: 13,
-      disableStdin: true,
-      theme: { background: TERMINAL_BG },
-    });
-    const fit = new FitAddon();
-    terminal.loadAddon(fit);
-    terminal.open(host.current);
-    fit.fit();
-    const url = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/terminals/${terminalId}`;
-    const ws = new WebSocket(url, [WS_PROTOCOL, token]);
-    socket.current = ws;
-    const sendSize = () => {
-      if (ws.readyState === WebSocket.OPEN)
-        ws.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
-    };
-    ws.addEventListener('open', sendSize);
-    // The terminal fills its box, and Claude redraws at the new size whenever the box changes.
-    const resized = new ResizeObserver(() => {
-      const before = `${terminal.cols}x${terminal.rows}`;
-      fit.fit();
-      if (`${terminal.cols}x${terminal.rows}` !== before) sendSize();
-    });
-    resized.observe(host.current);
-    ws.addEventListener('message', (event) => {
-      const parsed = terminalServerMessageSchema.safeParse(JSON.parse(String(event.data)));
-      if (!parsed.success) return;
-      const message: TerminalServerMessage = parsed.data;
-      if (message.type === 'output') terminal.write(message.data);
-      else if (message.type === 'secret_requested')
-        setRequest({ request_id: message.request_id, label: message.label });
-      else if (message.type === 'refused') setRefused(message.reason);
-      else if (message.type === 'exit') setEnded(true);
-    });
-    return () => {
-      resized.disconnect();
-      ws.close();
-      terminal.dispose();
-    };
-  }, [terminalId]);
 
   const submit = () => {
     const reason = refuseSetupLine(line);
@@ -141,10 +89,20 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
           </Button>
         </div>
         <div className="flex min-h-0 flex-1 p-2.5">
-          <div
-            ref={host}
-            className="min-h-60 flex-1 overflow-hidden rounded-lg p-3"
-            style={{ background: TERMINAL_BG }}
+          <XtermView
+            path={`/terminals/${terminalId}`}
+            socketRef={socket}
+            className="min-h-60 flex-1 rounded-lg p-3"
+            onMessage={(raw, write) => {
+              const parsed = terminalServerMessageSchema.safeParse(raw);
+              if (!parsed.success) return;
+              const message: TerminalServerMessage = parsed.data;
+              if (message.type === 'output') write(message.data);
+              else if (message.type === 'secret_requested')
+                setRequest({ request_id: message.request_id, label: message.label });
+              else if (message.type === 'refused') setRefused(message.reason);
+              else if (message.type === 'exit') setEnded(true);
+            }}
           />
         </div>
       </section>

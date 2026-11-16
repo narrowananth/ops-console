@@ -17,16 +17,26 @@ import { QuestionPanel, trailingQuestions } from '../agents/question-panel';
 import { SessionChips } from '../agents/session-chips';
 import { StopRun } from '../agents/stop-run';
 import { MessageView, outputsByMessage } from '../agents/transcript';
+import { BrowserLinksProvider } from '../browser/browser-links';
+import { BROWSER_PANEL, BrowserPanel, type OpenRequest } from '../browser/browser-panel';
+import { isRunning } from '../browser/processes';
+import { sessionPort } from '../browser/servers';
+import { BrowserToggle, TerminalsToggle } from '../browser/session-buttons';
+import { TerminalsDock } from '../browser/terminals-dock';
+import { useLinkTarget } from '../browser/toolbar';
 import { AttachmentViewer, type Viewed } from '../components/ui/attachment-viewer';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
 import { type PathwayState, StatusPill } from '../components/ui/pathway';
 import { ResizeHandle, usePanelWidth } from '../components/ui/resize-handle';
 import {
+  useBrowserState,
   useDeleteSession,
   useEditMessage,
+  useLocalServers,
   useMessages,
   useOutputFiles,
+  useProcesses,
   useRepoPullRequests,
   useRepoSessions,
   useRepos,
@@ -78,6 +88,20 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const [body, setBody] = useState<HTMLDivElement | null>(null);
   const panel = usePanelWidth(DIFF_PANEL, body);
   const hasDiff = session?.kind === SessionKind.Repo;
+  // The Browser panel and the Terminals dock: for a Session that works in a folder, not a pull request review.
+  const hasBrowser = session?.kind === SessionKind.Repo || session?.kind === SessionKind.Anonymous;
+  const [browserOpen, setBrowserOpen] = useStored('workspace.session-browser-open', z.boolean(), false);
+  const [terminalsOpen, setTerminalsOpen] = useStored('workspace.session-terminals-open', z.boolean(), false);
+  const browserPanel = usePanelWidth(BROWSER_PANEL, body);
+  const [linkTarget] = useLinkTarget();
+  // The link the operator last clicked in the conversation, for the panel to open.
+  const [openRequest, setOpenRequest] = useState<OpenRequest | null>(null);
+  const requests = useRef(0);
+  const browser = useBrowserState(id, hasBrowser);
+  const processes = useProcesses(id, hasBrowser);
+  // A dot on the Browser button needs the Session's servers, and only while there is no tab to show them in.
+  const noTab = browser.data?.tabs.length === 0;
+  const servers = useLocalServers(id, hasBrowser && noTab === true && !browserOpen, false);
   const gone = sessions.isSuccess && session === undefined;
   const stop = useStopSession(id);
   const pulls = useRepoPullRequests(session?.kind === SessionKind.Repo ? session.repo_id : null);
@@ -108,13 +132,29 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const externalPull = pull;
   // A Session whose worktree changes nothing yet has nothing to show.
   const showDiff = hasDiff && (diff.data?.files.length ?? 0) > 0;
+  // The Diff and the Browser share the right column: opening one folds the other, and the Browser wins if both were left open.
+  const rightPanel = hasBrowser && browserOpen ? 'browser' : showDiff && diffOpen ? 'diff' : null;
+  const toggleDiff = () => {
+    setDiffOpen(rightPanel !== 'diff');
+    if (rightPanel !== 'diff') setBrowserOpen(false);
+  };
+  const toggleBrowser = () => {
+    setBrowserOpen(rightPanel !== 'browser');
+    if (rightPanel !== 'browser') setDiffOpen(false);
+  };
+  const openInBrowser = (url: string) => {
+    requests.current += 1;
+    setOpenRequest({ id: requests.current, url });
+    setBrowserOpen(true);
+    setDiffOpen(false);
+  };
+  const widths = rightPanel === 'browser' ? browserPanel : panel;
+  const size = rightPanel === 'browser' ? BROWSER_PANEL : DIFF_PANEL;
   // The `/` menu: what the Session can do now. A skill picked from the `$` menu; a typed `$name` or `/name` is read by
   // the daemon alone.
   const commands: ComposerCommand[] = [
     ...(working ? [{ name: 'stop', description: 'Stop the agent where it is', run: () => stop.mutate() }] : []),
-    ...(showDiff
-      ? [{ name: 'diff', description: 'Show or hide the changed files', run: () => setDiffOpen((now) => !now) }]
-      : []),
+    ...(showDiff ? [{ name: 'diff', description: 'Show or hide the changed files', run: toggleDiff }] : []),
     ...(openable.data?.can_open && !externalPull && !working
       ? [{ name: 'pr', description: 'Open a pull request for this branch', run: () => setFormOpen(true) }]
       : []),
@@ -141,6 +181,10 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   if (sessions.isPending) return <Empty>Reading the Session…</Empty>;
   if (session === undefined) return null;
   const repo = repos.data?.data.find((candidate) => candidate.id === session.repo_id);
+  // The other Repos the operator opened to this Session: folders a process may run in besides its own worktree.
+  const runFolders = (repos.data?.data ?? [])
+    .filter((one) => session.extra_repo_ids.includes(one.id))
+    .map((one) => ({ name: one.name, path: one.path }));
   const running = session.state === SessionState.Working || session.state === SessionState.WaitingApproval;
   const queued = session.queued_message;
   // A question waiting on the operator still holds the run: the next message answers it.
@@ -192,324 +236,349 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-col gap-1.5 border-b border-line px-6 py-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="flex-none text-sm text-neutral-700">{repo ? `${repo.name} /` : 'No Repo /'}</span>
-          <h2 className="m-0 min-w-0 truncate text-sm font-semibold" title={session.title}>
-            {session.title}
-          </h2>
-          <span title={SESSION_STATE_TIP[session.state]} className="flex-none">
-            <StatusPill state={SESSION_STATE[session.state]}>{session.state.replace('_', ' ')}</StatusPill>
-          </span>
-          <span className="ml-auto flex flex-none items-center gap-2">
-            {showDiff && <DiffToggle open={diffOpen} diff={diff.data} onToggle={() => setDiffOpen((now) => !now)} />}
-            <Button
-              className="px-2.5 py-1 text-xs"
-              title={
-                busy
-                  ? 'Stop the agent first'
-                  : 'Delete this Session and its conversation. The files in the Repo stay as they are.'
-              }
-              disabled={busy || remove.isPending}
-              onClick={() => remove.mutate(id)}
-            >
-              Delete
-            </Button>
-          </span>
-        </div>
-        {(branch ||
-          internalPull ||
-          externalPull ||
-          session.alert_id ||
-          session.playbook ||
-          session.spawned_by ||
-          openable.data?.can_open) && (
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            {session.spawned_by && (
-              <Link
-                to={sessionPath(session.spawned_by.id)}
-                title="The Session whose agent started this one with a task for this Repo"
-                className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
-              >
-                Started from {session.spawned_by.title} →
-              </Link>
-            )}
-            {branch && (
-              <span
-                title="The branch this Session works on"
-                className="max-w-90 truncate rounded-full border border-line bg-card px-2.5 py-0.5 font-mono text-xs"
-              >
-                {branch}
-              </span>
-            )}
-            {internalPull && (
-              <Link
-                to={pullRequestPath(internalPull.repo_id, internalPull.number)}
-                title={`Open pull request #${internalPull.number} in the Workspace's Pull requests tab`}
-                className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
-              >
-                PR #{internalPull.number} →
-              </Link>
-            )}
-            {externalPull && (
-              <a
-                href={externalPull.url}
-                target="_blank"
-                rel="noreferrer"
-                title={`Open pull request #${externalPull.number} on the Git host`}
-                className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
-              >
-                #{externalPull.number} on host ↗
-              </a>
-            )}
-            {openable.data?.can_open && !externalPull && (
+    <BrowserLinksProvider value={hasBrowser && linkTarget === 'app' ? openInBrowser : null}>
+      <div className="flex h-full min-h-0 flex-col">
+        <header className="flex flex-col gap-1.5 border-b border-line px-6 py-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="flex-none text-sm text-neutral-700">{repo ? `${repo.name} /` : 'No Repo /'}</span>
+            <h2 className="m-0 min-w-0 truncate text-sm font-semibold" title={session.title}>
+              {session.title}
+            </h2>
+            <span title={SESSION_STATE_TIP[session.state]} className="flex-none">
+              <StatusPill state={SESSION_STATE[session.state]}>{session.state.replace('_', ' ')}</StatusPill>
+            </span>
+            <span className="ml-auto flex flex-none items-center gap-2">
+              {hasBrowser && (
+                <>
+                  <BrowserToggle
+                    open={rightPanel === 'browser'}
+                    port={noTab ? sessionPort(servers.data ?? []) : null}
+                    onToggle={toggleBrowser}
+                  />
+                  <TerminalsToggle
+                    open={terminalsOpen}
+                    running={(processes.data ?? []).filter(isRunning).length}
+                    onToggle={() => setTerminalsOpen((now) => !now)}
+                  />
+                </>
+              )}
+              {showDiff && <DiffToggle open={rightPanel === 'diff'} diff={diff.data} onToggle={toggleDiff} />}
               <Button
-                className="px-2.5 py-0.5 text-xs"
+                className="px-2.5 py-1 text-xs"
                 title={
                   busy
-                    ? 'Wait for the agent to finish'
-                    : 'Push this branch and open a pull request on the Git host. The agent drafts the text.'
+                    ? 'Stop the agent first'
+                    : 'Delete this Session and its conversation. The files in the Repo stay as they are.'
                 }
-                disabled={busy || formOpen}
-                onClick={() => setFormOpen(true)}
+                disabled={busy || remove.isPending}
+                onClick={() => remove.mutate(id)}
               >
-                Open pull request
+                Delete
               </Button>
-            )}
-            {session.alert_id && (
-              <Link
-                to={alertPath(session.alert_id)}
-                title="Open the Monitor Alert this Session verifies and fixes"
-                className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
-              >
-                Alert →
-              </Link>
-            )}
-            {session.playbook && (
-              <PlaybookLink
-                playbook={session.playbook}
-                label={`Playbook: ${session.playbook.name}`}
-                title="The agent follows this Playbook's rules in every message here. Open it to read or change them."
-              />
-            )}
+            </span>
           </div>
-        )}
-        {remove.isError && (
-          <span role="alert" className="text-right text-xs text-accent-700">
-            {remove.error.message}
-          </span>
-        )}
-      </header>
-      {formOpen && openable.data?.can_open && openable.data.base_branch !== null && (
-        <OpenPullRequestForm
-          sessionId={id}
-          baseBranch={openable.data.base_branch}
-          uncommittedFiles={openable.data.uncommitted_files}
-          onClose={() => setFormOpen(false)}
-        />
-      )}
-      <div ref={setBody} className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="relative flex min-h-0 flex-1 flex-col">
-            <section
-              ref={latest.setScroller}
-              onScroll={latest.onScroll}
-              aria-label="Conversation"
-              className="relative min-h-0 flex-1 overflow-y-auto"
-            >
-              <div ref={latest.setContent}>
-                {messages.isPending ? (
-                  <Empty>Reading the conversation…</Empty>
-                ) : messages.isError ? (
-                  <Empty>Could not read the conversation: {messages.error.message}</Empty>
-                ) : messages.data.length === 0 ? (
-                  <Empty>
-                    {repo
-                      ? `Nothing said yet. Tell the agent what to do on ${session.branch}.`
-                      : 'Nothing said yet. This Session has no Repo: it works in a folder of its own. Ask it to clone a repo, or to do anything else.'}
-                  </Empty>
-                ) : (
-                  <ul className="m-0 list-none px-0 py-2">
-                    {messages.data.map((message) => (
-                      <MessageView
-                        key={message.id}
-                        message={message}
-                        outputs={{ sessionId: id, files: outputs.get(message.id) ?? [] }}
-                        onEdit={
-                          message.id === lastAsked && !busy
-                            ? (edited) =>
-                                editMessage
-                                  .mutateAsync({ messageId: message.id, text: edited })
-                                  .then((result) => setReverted(result))
-                            : undefined
-                        }
-                      />
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </section>
-            <ConversationMap messages={messages.data ?? []} scroller={latest.scroller} content={latest.content} />
-            <ScrollToEnd show={!latest.atEnd} onClick={latest.scrollToEnd} />
-          </div>
-          <div className="flex flex-col gap-2 px-6 pb-4.5">
-            <ApprovalPrompts sessionId={id} />
-            {questions.length > 0 && (
-              <QuestionPanel
-                // A new question set starts at its first question.
-                key={questions.map((question) => question.text).join('\n')}
-                questions={questions}
-                pending={send.isPending}
-                onSend={(answer) => send.mutate(answer)}
-              />
-            )}
-            {session.state === SessionState.Failed && session.last_error && (
-              <div
-                role="alert"
-                className="rounded-lg border border-accent-300 bg-accent-100 px-3 py-2 text-accent-900 text-xs"
-              >
-                {session.last_error}
-              </div>
-            )}
-            {queued !== null && (
-              <QueuedNote
-                text={queued}
-                held={!busy}
-                sending={queue.sendNow.isPending}
-                onSendNow={() => queue.sendNow.mutate()}
-                onCancel={() => {
-                  setText((current) => (current.trim() === '' ? queued : `${queued}\n\n${current}`));
-                  queue.takeBack.mutate();
-                }}
-              />
-            )}
-            {reverted && <RevertNote result={reverted} onClose={() => setReverted(null)} />}
-            {/* biome-ignore lint/a11y/noStaticElementInteractions: dropping files is a shortcut; Attach files does the same */}
-            <div
-              onDragOver={(event) => {
-                if (!event.dataTransfer.types.includes('Files')) return;
-                event.preventDefault();
-                setDropping(true);
-              }}
-              onDragLeave={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false);
-              }}
-              onDrop={(event) => {
-                setDropping(false);
-                const files = filesIn(event.dataTransfer);
-                if (files.length === 0) return;
-                event.preventDefault();
-                addFiles(files);
-              }}
-              className={`relative rounded-lg border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)] ${dropping ? 'border-dashed border-accent-400 bg-accent-100' : 'border-divider'}`}
-            >
-              {composerMenus.menu}
-              <MessageEditor
-                ref={editor}
-                label="Message"
-                value={text}
-                placeholder={
-                  running
-                    ? 'The agent is working. Type the next message: it sends when the run ends.'
-                    : 'Ask anything. @ files, $ skills, / commands'
-                }
-                onChange={(next) => {
-                  // A chip taken out of the text takes its file with it.
-                  const gone = placed.filter((name) => !next.includes(fileToken(name)));
-                  if (gone.length > 0) attachments.remove(gone);
-                  setText(next);
-                }}
-                find={attachments.find}
-                onOpen={(name) => {
-                  const item = attachments.find(name);
-                  if (item?.file) setViewed({ name, file: item.file });
-                  else if (item?.saved) setViewed({ name, path: item.saved.path });
-                }}
-                onEdit={(name) => {
-                  const item = attachments.find(name);
-                  if (item?.file) setEditing({ name, file: item.file });
-                  else if (item?.saved) setEditing({ name, path: item.saved.path });
-                }}
-                onPasteFiles={addFiles}
-                onSubmit={submit}
-                onKey={composerMenus.onKey}
-              />
-              <div className="flex items-end gap-1.5 px-2.5 pt-1.5 pb-2.5">
-                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-                  <AttachButton onFiles={addFiles} />
-                  <SessionChips session={session} variant="chip" />
-                  <ExtraRepos session={session} repos={repos.data?.data ?? []} />
-                  {repo && <BranchSwitcher session={session} all={sessions.data ?? []} repo={repo} />}
-                  {send.isError && (
-                    <span role="alert" className="text-xs text-accent-700">
-                      {send.error.message}
-                    </span>
-                  )}
-                </div>
-                <span className="flex flex-none items-center gap-1.5">
-                  {busy ? <StopRun sessionId={id} className="px-4 py-1.5" /> : <PlayRun sessionId={id} />}
-                  <Button
-                    variant="primary"
-                    title={
-                      running
-                        ? 'The agent is working. The message waits and sends when the run ends.'
-                        : uploading
-                          ? 'Waiting for the attached files to upload'
-                          : 'Enter sends. Shift+Enter adds a new line.'
-                    }
-                    className="px-4 py-1.5"
-                    disabled={empty || queued !== null || uploading || send.isPending || queue.queue.isPending}
-                    onClick={submit}
-                  >
-                    {running ? 'Queue' : 'Send'}
-                  </Button>
+          {(branch ||
+            internalPull ||
+            externalPull ||
+            session.alert_id ||
+            session.playbook ||
+            session.spawned_by ||
+            openable.data?.can_open) && (
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              {session.spawned_by && (
+                <Link
+                  to={sessionPath(session.spawned_by.id)}
+                  title="The Session whose agent started this one with a task for this Repo"
+                  className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
+                >
+                  Started from {session.spawned_by.title} →
+                </Link>
+              )}
+              {branch && (
+                <span
+                  title="The branch this Session works on"
+                  className="max-w-90 truncate rounded-full border border-line bg-card px-2.5 py-0.5 font-mono text-xs"
+                >
+                  {branch}
                 </span>
-              </div>
+              )}
+              {internalPull && (
+                <Link
+                  to={pullRequestPath(internalPull.repo_id, internalPull.number)}
+                  title={`Open pull request #${internalPull.number} in the Workspace's Pull requests tab`}
+                  className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
+                >
+                  PR #{internalPull.number} →
+                </Link>
+              )}
+              {externalPull && (
+                <a
+                  href={externalPull.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={`Open pull request #${externalPull.number} on the Git host`}
+                  className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
+                >
+                  #{externalPull.number} on host ↗
+                </a>
+              )}
+              {openable.data?.can_open && !externalPull && (
+                <Button
+                  className="px-2.5 py-0.5 text-xs"
+                  title={
+                    busy
+                      ? 'Wait for the agent to finish'
+                      : 'Push this branch and open a pull request on the Git host. The agent drafts the text.'
+                  }
+                  disabled={busy || formOpen}
+                  onClick={() => setFormOpen(true)}
+                >
+                  Open pull request
+                </Button>
+              )}
+              {session.alert_id && (
+                <Link
+                  to={alertPath(session.alert_id)}
+                  title="Open the Monitor Alert this Session verifies and fixes"
+                  className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
+                >
+                  Alert →
+                </Link>
+              )}
+              {session.playbook && (
+                <PlaybookLink
+                  playbook={session.playbook}
+                  label={`Playbook: ${session.playbook.name}`}
+                  title="The agent follows this Playbook's rules in every message here. Open it to read or change them."
+                />
+              )}
             </div>
-          </div>
-        </div>
-        {viewed && <AttachmentViewer viewed={viewed} onClose={() => setViewed(null)} />}
-        {editing && (
-          <PastedTextEditor
-            pasted={editing}
-            onClose={() => setEditing(null)}
-            onSave={(next) => {
-              // Nothing left to send: the file goes, and its card with it.
-              if (next.trim() === '') clearPasted(editing.name);
-              else attachments.rewrite(editing.name, next);
-              setEditing(null);
-            }}
-            onClear={() => {
-              clearPasted(editing.name);
-              setEditing(null);
-            }}
+          )}
+          {remove.isError && (
+            <span role="alert" className="text-right text-xs text-accent-700">
+              {remove.error.message}
+            </span>
+          )}
+        </header>
+        {formOpen && openable.data?.can_open && openable.data.base_branch !== null && (
+          <OpenPullRequestForm
+            sessionId={id}
+            baseBranch={openable.data.base_branch}
+            uncommittedFiles={openable.data.uncommitted_files}
+            onClose={() => setFormOpen(false)}
           />
         )}
-        {showDiff && diffOpen && (
-          <>
-            <ResizeHandle
-              label="Resize the diff panel"
-              width={panel.width}
-              initial={DIFF_PANEL.initial}
-              narrowest={DIFF_PANEL.narrowest}
-              widest={panel.widest}
-              onWidth={panel.setWidth}
-            />
-            <div style={{ width: panel.width }} className="flex min-h-0 flex-none">
-              <DiffPanel
-                diff={diff.data}
-                error={diff.error?.message ?? null}
-                loading={diff.isPending}
-                fetching={diff.isFetching}
-                onRefresh={() => void diff.refetch()}
-                onClose={() => setDiffOpen(false)}
-              />
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div ref={setBody} className="flex min-h-0 flex-1 overflow-hidden">
+            <div className="flex min-w-0 flex-1 flex-col">
+              <div className="relative flex min-h-0 flex-1 flex-col">
+                <section
+                  ref={latest.setScroller}
+                  onScroll={latest.onScroll}
+                  aria-label="Conversation"
+                  className="relative min-h-0 flex-1 overflow-y-auto"
+                >
+                  <div ref={latest.setContent}>
+                    {messages.isPending ? (
+                      <Empty>Reading the conversation…</Empty>
+                    ) : messages.isError ? (
+                      <Empty>Could not read the conversation: {messages.error.message}</Empty>
+                    ) : messages.data.length === 0 ? (
+                      <Empty>
+                        {repo
+                          ? `Nothing said yet. Tell the agent what to do on ${session.branch}.`
+                          : 'Nothing said yet. This Session has no Repo: it works in a folder of its own. Ask it to clone a repo, or to do anything else.'}
+                      </Empty>
+                    ) : (
+                      <ul className="m-0 list-none px-0 py-2">
+                        {messages.data.map((message) => (
+                          <MessageView
+                            key={message.id}
+                            message={message}
+                            outputs={{ sessionId: id, files: outputs.get(message.id) ?? [] }}
+                            onEdit={
+                              message.id === lastAsked && !busy
+                                ? (edited) =>
+                                    editMessage
+                                      .mutateAsync({ messageId: message.id, text: edited })
+                                      .then((result) => setReverted(result))
+                                : undefined
+                            }
+                          />
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </section>
+                <ConversationMap messages={messages.data ?? []} scroller={latest.scroller} content={latest.content} />
+                <ScrollToEnd show={!latest.atEnd} onClick={latest.scrollToEnd} />
+              </div>
+              <div className="flex flex-col gap-2 px-6 pb-4.5">
+                <ApprovalPrompts sessionId={id} />
+                {questions.length > 0 && (
+                  <QuestionPanel
+                    // A new question set starts at its first question.
+                    key={questions.map((question) => question.text).join('\n')}
+                    questions={questions}
+                    pending={send.isPending}
+                    onSend={(answer) => send.mutate(answer)}
+                  />
+                )}
+                {session.state === SessionState.Failed && session.last_error && (
+                  <div
+                    role="alert"
+                    className="rounded-lg border border-accent-300 bg-accent-100 px-3 py-2 text-accent-900 text-xs"
+                  >
+                    {session.last_error}
+                  </div>
+                )}
+                {queued !== null && (
+                  <QueuedNote
+                    text={queued}
+                    held={!busy}
+                    sending={queue.sendNow.isPending}
+                    onSendNow={() => queue.sendNow.mutate()}
+                    onCancel={() => {
+                      setText((current) => (current.trim() === '' ? queued : `${queued}\n\n${current}`));
+                      queue.takeBack.mutate();
+                    }}
+                  />
+                )}
+                {reverted && <RevertNote result={reverted} onClose={() => setReverted(null)} />}
+                {/* biome-ignore lint/a11y/noStaticElementInteractions: dropping files is a shortcut; Attach files does the same */}
+                <div
+                  onDragOver={(event) => {
+                    if (!event.dataTransfer.types.includes('Files')) return;
+                    event.preventDefault();
+                    setDropping(true);
+                  }}
+                  onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false);
+                  }}
+                  onDrop={(event) => {
+                    setDropping(false);
+                    const files = filesIn(event.dataTransfer);
+                    if (files.length === 0) return;
+                    event.preventDefault();
+                    addFiles(files);
+                  }}
+                  className={`relative rounded-lg border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)] ${dropping ? 'border-dashed border-accent-400 bg-accent-100' : 'border-divider'}`}
+                >
+                  {composerMenus.menu}
+                  <MessageEditor
+                    ref={editor}
+                    label="Message"
+                    value={text}
+                    placeholder={
+                      running
+                        ? 'The agent is working. Type the next message: it sends when the run ends.'
+                        : 'Ask anything. @ files, $ skills, / commands'
+                    }
+                    onChange={(next) => {
+                      // A chip taken out of the text takes its file with it.
+                      const gone = placed.filter((name) => !next.includes(fileToken(name)));
+                      if (gone.length > 0) attachments.remove(gone);
+                      setText(next);
+                    }}
+                    find={attachments.find}
+                    onOpen={(name) => {
+                      const item = attachments.find(name);
+                      if (item?.file) setViewed({ name, file: item.file });
+                      else if (item?.saved) setViewed({ name, path: item.saved.path });
+                    }}
+                    onEdit={(name) => {
+                      const item = attachments.find(name);
+                      if (item?.file) setEditing({ name, file: item.file });
+                      else if (item?.saved) setEditing({ name, path: item.saved.path });
+                    }}
+                    onPasteFiles={addFiles}
+                    onSubmit={submit}
+                    onKey={composerMenus.onKey}
+                  />
+                  <div className="flex items-end gap-1.5 px-2.5 pt-1.5 pb-2.5">
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                      <AttachButton onFiles={addFiles} />
+                      <SessionChips session={session} variant="chip" />
+                      <ExtraRepos session={session} repos={repos.data?.data ?? []} />
+                      {repo && <BranchSwitcher session={session} all={sessions.data ?? []} repo={repo} />}
+                      {send.isError && (
+                        <span role="alert" className="text-xs text-accent-700">
+                          {send.error.message}
+                        </span>
+                      )}
+                    </div>
+                    <span className="flex flex-none items-center gap-1.5">
+                      {busy ? <StopRun sessionId={id} className="px-4 py-1.5" /> : <PlayRun sessionId={id} />}
+                      <Button
+                        variant="primary"
+                        title={
+                          running
+                            ? 'The agent is working. The message waits and sends when the run ends.'
+                            : uploading
+                              ? 'Waiting for the attached files to upload'
+                              : 'Enter sends. Shift+Enter adds a new line.'
+                        }
+                        className="px-4 py-1.5"
+                        disabled={empty || queued !== null || uploading || send.isPending || queue.queue.isPending}
+                        onClick={submit}
+                      >
+                        {running ? 'Queue' : 'Send'}
+                      </Button>
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
-          </>
-        )}
+            {viewed && <AttachmentViewer viewed={viewed} onClose={() => setViewed(null)} />}
+            {editing && (
+              <PastedTextEditor
+                pasted={editing}
+                onClose={() => setEditing(null)}
+                onSave={(next) => {
+                  // Nothing left to send: the file goes, and its card with it.
+                  if (next.trim() === '') clearPasted(editing.name);
+                  else attachments.rewrite(editing.name, next);
+                  setEditing(null);
+                }}
+                onClear={() => {
+                  clearPasted(editing.name);
+                  setEditing(null);
+                }}
+              />
+            )}
+            {rightPanel !== null && (
+              <>
+                <ResizeHandle
+                  label={rightPanel === 'browser' ? 'Resize the browser' : 'Resize the diff panel'}
+                  width={widths.width}
+                  initial={size.initial}
+                  narrowest={size.narrowest}
+                  widest={widths.widest}
+                  onWidth={widths.setWidth}
+                />
+                <div style={{ width: widths.width }} className="flex min-h-0 flex-none">
+                  {rightPanel === 'browser' ? (
+                    <BrowserPanel key={id} sessionId={id} request={openRequest} onClose={() => setBrowserOpen(false)} />
+                  ) : (
+                    <DiffPanel
+                      diff={diff.data}
+                      error={diff.error?.message ?? null}
+                      loading={diff.isPending}
+                      fetching={diff.isFetching}
+                      onRefresh={() => void diff.refetch()}
+                      onClose={() => setDiffOpen(false)}
+                    />
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+          {hasBrowser && terminalsOpen && (
+            <TerminalsDock key={id} sessionId={id} folders={runFolders} onClose={() => setTerminalsOpen(false)} />
+          )}
+        </div>
       </div>
-    </div>
+    </BrowserLinksProvider>
   );
 }
 

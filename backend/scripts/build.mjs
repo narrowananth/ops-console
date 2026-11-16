@@ -4,7 +4,7 @@
 import { cp, rm } from 'node:fs/promises';
 import { build } from 'esbuild';
 
-const NATIVE = ['better-sqlite3', '@napi-rs/keyring', 'node-pty', '@anthropic-ai/claude-agent-sdk'];
+const NATIVE = ['better-sqlite3', '@napi-rs/keyring', 'node-pty', '@anthropic-ai/claude-agent-sdk', 'playwright-core'];
 
 await rm('dist', { recursive: true, force: true });
 await build({

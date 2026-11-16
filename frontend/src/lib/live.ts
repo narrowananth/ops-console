@@ -109,6 +109,11 @@ export function useLiveEvents(): void {
         refetch(queryKeys.sessions);
         refetch(queryKeys.sessionDiff(event.data.session_id));
       }
+      if (event.event === 'browser.tabs_changed') refetch(queryKeys.browser(event.data.session_id));
+      if (event.event === 'browser.servers_changed') refetch(queryKeys.localServers(event.data.session_id));
+      if (event.event === 'process.changed' || event.event === 'process.removed') {
+        refetch(queryKeys.processes(event.data.session_id));
+      }
       if (event.event === 'session.output') refetchEvery(queryKeys.messages(event.data.session_id), STREAM_MS);
       if (event.event === 'session.finished') refetch(queryKeys.messages(event.data.session_id));
       if (event.event === 'session.finished') {

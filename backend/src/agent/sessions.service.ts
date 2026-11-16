@@ -120,6 +120,7 @@ export function emitSessionUpdated(emit: Emit, row: SessionRow): void {
 export class SessionsService {
   /** Why each Session's last run failed; a restart or the next run clears it. */
   private readonly failures = new Map<string, string>();
+  private readonly removedListeners: ((id: string) => Promise<void> | void)[] = [];
 
   constructor(
     @Inject(STORE) private readonly store: Store,
@@ -329,6 +330,11 @@ export class SessionsService {
     });
   }
 
+  /** Runs after a Session is deleted, for what lives outside the database: browser tabs, processes. */
+  onRemoved(listener: (id: string) => Promise<void> | void): void {
+    this.removedListeners.push(listener);
+  }
+
   /** The transcript stays where Claude Code keeps it; Action Log rows and Approvals lose their `session_id`. */
   remove(id: string): void {
     const row = this.get(id);
@@ -338,6 +344,7 @@ export class SessionsService {
       .get(row.kind)
       ?.removed?.(row)
       .catch(() => {});
+    for (const listener of this.removedListeners) void Promise.resolve(listener(id)).catch(() => {});
   }
 }
 

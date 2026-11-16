@@ -964,3 +964,20 @@ export const playbookSteps = sqliteTable(
     check('playbook_steps_writes_bool', sql`${table.writes} IN (0, 1)`),
   ],
 );
+
+/** A command the daemon runs for a Session as the operator. Running state lives in memory; after a daemon restart every row is stopped. */
+export const sessionProcesses = sqliteTable(
+  'session_processes',
+  {
+    id: text().primaryKey().notNull(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    name: text().notNull(),
+    command: text().notNull(),
+    folder: text().notNull(),
+    startedBy: text('started_by').notNull(),
+    createdAt: text('created_at').notNull().default(nowIso),
+  },
+  (table) => [index('session_processes_session_idx').on(table.sessionId, table.createdAt)],
+);

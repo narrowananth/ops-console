@@ -16,6 +16,8 @@ export default defineConfig({
       '/api': backend,
       '/ws': { target: backend, ws: true },
       '/terminals': { target: backend, ws: true },
+      '/browser': { target: backend, ws: true },
+      '/processes': { target: backend, ws: true },
     },
   },
 });

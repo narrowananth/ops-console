@@ -8,6 +8,7 @@ import {
   SessionState,
   SwitchReason,
 } from './agents';
+import { sessionProcessSchema } from './browser';
 import { keychainWaitSchema } from './connections';
 import { HealthArea } from './health-watch';
 import { CheckTarget, HealthStatus } from './mcp';
@@ -24,6 +25,10 @@ const event = <E extends string, D extends z.ZodType>(name: E, data: D) =>
   z.object({ event: z.literal(name), at: z.string(), data });
 
 export const wsEventSchema = z.discriminatedUnion('event', [
+  event('browser.tabs_changed', z.object({ session_id: z.string() })),
+  event('browser.servers_changed', z.object({ session_id: z.string() })),
+  event('process.changed', z.object({ session_id: z.string(), process: sessionProcessSchema })),
+  event('process.removed', z.object({ session_id: z.string(), process_id: z.string() })),
   event('settings.updated', z.object({ keys: z.array(z.string()) })),
   event('update.changed', z.object({ status: z.enum(UpdateStatus) })),
   event('keychain.wait_changed', keychainWaitSchema),
