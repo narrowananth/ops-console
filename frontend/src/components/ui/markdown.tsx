@@ -94,7 +94,10 @@ function blocks(source: string): Block[] {
       out.push({ kind: 'list', ordered, items });
       continue;
     }
-    const text: string[] = [];
+    // The line that got here always joins the paragraph: a `| a | b |` row with no rule under it (a table still
+    // streaming in) opens no block above, and a paragraph that took no line would never advance.
+    const text: string[] = [line.trim()];
+    index++;
     while (index < lines.length) {
       const next = lines[index] ?? '';
       if (next.trim() === '' || opensBlock(next)) break;
