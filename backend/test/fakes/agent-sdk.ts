@@ -9,6 +9,7 @@ import type {
   RewindFilesResult,
   SDKMessage,
   SDKPermissionDenial,
+  WarmQuery,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentSdk } from '../../src/agent/agent-sdk';
 
@@ -99,6 +100,27 @@ export class FakeAgentSdk implements AgentSdk {
     this.rewinds.push({ userMessageId, options });
     if (this.rewindResult instanceof Error) throw this.rewindResult;
     return this.rewindResult;
+  }
+
+  /** Each process `startup` made, with whether a message used it or it was closed first. */
+  readonly warmed: { options: Options; used: boolean; closed: boolean }[] = [];
+
+  async startup(options: Options): Promise<WarmQuery> {
+    const process = { options, used: false, closed: false };
+    this.warmed.push(process);
+    return {
+      query: (prompt) => {
+        process.used = true;
+        if (typeof prompt !== 'string') throw new Error('the console sends its message as text');
+        return this.query(prompt, options) as ReturnType<WarmQuery['query']>;
+      },
+      close: () => {
+        process.closed = true;
+      },
+      [Symbol.asyncDispose]: async () => {
+        process.closed = true;
+      },
+    };
   }
 
   constructor(private readonly home: string) {}

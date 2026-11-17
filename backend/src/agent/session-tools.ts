@@ -73,7 +73,7 @@ export interface BrowserTools {
   describeEvaluate(script: string): string;
   open(sessionId: string, url: string, tabId?: string): Promise<object>;
   snapshot(sessionId: string, tabId?: string): Promise<{ snapshot: string } & object>;
-  screenshot(sessionId: string, tabId?: string): Promise<{ mimeType: 'image/png'; base64: string }>;
+  screenshot(sessionId: string, tabId?: string): Promise<{ mimeType: 'image/jpeg'; base64: string }>;
   click(sessionId: string, ref: string, tabId?: string): Promise<object>;
   type(sessionId: string, ref: string, text: string, submit?: boolean, tabId?: string): Promise<object>;
   press(sessionId: string, key: string, tabId?: string): Promise<object>;
@@ -87,7 +87,10 @@ export interface BrowserTools {
 export interface ProcessTools {
   offers(sessionId: string): boolean;
   /** The words the operator's Approval shows. Throws an `ApiError` for a folder the Session may not use. */
-  describeStart(sessionId: string, input: StartProcessInput): { summary: string; folder: string; prod: string[] };
+  describeStart(
+    sessionId: string,
+    input: StartProcessInput,
+  ): Promise<{ summary: string; folder: string; prod: string[] }>;
   startForAgent(sessionId: string, input: StartProcessInput): Promise<{ name: string; state: string }>;
   outputOf(sessionId: string, name: string, lines: number): string;
   stopByName(sessionId: string, name: string): Promise<{ name: string; state: string }>;

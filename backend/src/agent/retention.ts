@@ -1,6 +1,12 @@
+import { readdir, rm, stat } from 'node:fs/promises';
+import path from 'node:path';
 import { Inject, Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
+import { AccountsService } from '../accounts/accounts.service';
+import { sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
+import { skillRunsDir } from './skill-plugin';
+import { Transcripts } from './transcripts';
 
 /** How long the console keeps the steps, subagents and costs of finished runs. */
 export const KEEP_DAYS = 90;
@@ -15,6 +21,11 @@ export const BATCH_ROWS = 250;
 /** A pause between batches, so requests, the socket and runs go first. */
 const PAUSE_MS = 25;
 const CHECK_EVERY_MS = DAY_MS;
+
+/** A transcript no Session holds is deleted after this long without a write. */
+export const ORPHAN_TRANSCRIPT_DAYS = 14;
+/** A run's Skill folder is deleted by the start-up sweep once it is this old: a run that old is long over. */
+const SKILL_FOLDER_HOURS = 24;
 const FIRST_CHECK_MS = 60_000;
 
 /** A table that keeps the history of runs, and the indexed timestamp column that says how old a row is. */
@@ -39,11 +50,17 @@ export class Retention implements OnApplicationBootstrap, OnModuleDestroy {
   private timers: NodeJS.Timeout[] = [];
   private running: Promise<number> | null = null;
 
-  constructor(@Inject(STORE) private readonly store: Store) {}
+  constructor(
+    @Inject(STORE) private readonly store: Store,
+    @Inject(Transcripts) private readonly transcripts: Transcripts,
+    @Inject(AccountsService) private readonly accounts: AccountsService,
+  ) {}
 
   onApplicationBootstrap(): void {
-    const first = setTimeout(() => void this.run().catch(this.failed), FIRST_CHECK_MS);
-    const daily = setInterval(() => void this.run().catch(this.failed), CHECK_EVERY_MS);
+    void this.sweepSkillFolders().catch(this.failed);
+    const sweep = () => void Promise.all([this.run(), this.sweepTranscripts()]).catch(this.failed);
+    const first = setTimeout(sweep, FIRST_CHECK_MS);
+    const daily = setInterval(sweep, CHECK_EVERY_MS);
     first.unref();
     daily.unref();
     this.timers = [first, daily];
@@ -55,6 +72,35 @@ export class Retention implements OnApplicationBootstrap, OnModuleDestroy {
 
   private readonly failed = (error: unknown): void =>
     this.logger.warn(`pruning failed: ${error instanceof Error ? error.message : error}`);
+
+  /** Deletes the transcripts of conversations no Session holds any more, such as one a first-message edit replaced. */
+  async sweepTranscripts(): Promise<number> {
+    const held = new Set(
+      this.store.db
+        .select({ id: sessions.sdkSessionId })
+        .from(sessions)
+        .all()
+        .flatMap((row) => (row.id === null ? [] : [row.id])),
+    );
+    const removed = await this.transcripts.sweep(
+      this.accounts.all().map((account) => account.configDir),
+      held,
+      ORPHAN_TRANSCRIPT_DAYS * DAY_MS,
+    );
+    if (removed > 0) this.logger.log(`deleted ${removed} transcripts no Session holds`);
+    return removed;
+  }
+
+  /** Deletes what crashed runs left of their Skill folders in the temp folder. */
+  async sweepSkillFolders(): Promise<void> {
+    const root = skillRunsDir();
+    const before = Date.now() - SKILL_FOLDER_HOURS * 3_600_000;
+    for (const name of await readdir(root).catch(() => [])) {
+      const folder = path.join(root, name);
+      const info = await stat(folder).catch(() => null);
+      if (info !== null && info.mtimeMs < before) await rm(folder, { recursive: true, force: true });
+    }
+  }
 
   /** Prunes every retained table; a second call while one runs waits for it. Returns the rows deleted. */
   run(options: { now?: Date; batch?: number; pauseMs?: number } = {}): Promise<number> {

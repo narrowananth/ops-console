@@ -12,6 +12,7 @@ import {
   type JobPlaybook,
   PR_HOSTS,
   type PrAgentReview,
+  PrChecks,
   type PrComment,
   type PrConflicts,
   type PrFileContent,
@@ -19,13 +20,14 @@ import {
   PrReviewEvent,
   PrReviewState,
   PrState,
-  type PullRequest,
   type PullRequestDetail,
+  type PullRequestSummary,
   SessionKind,
 } from '@ops-console/shared';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { ActionLogService } from '../action-log/action-log.service';
 import { ApiError, validationFailed } from '../common/errors';
+import { asBackground } from '../common/spawn-pool';
 import { ConnectorsService } from '../connectors/connectors.service';
 import {
   agentComments,
@@ -111,7 +113,7 @@ function changedNumbers<T extends HostPullRequest>(
 }
 
 /** Mine searches a pull request's number, its title and the operator's login; All, its number, title and author. */
-const matches = (pr: PullRequest, q: string, who: string | null) =>
+const matches = (pr: PullRequestSummary, q: string, who: string | null) =>
   [`#${pr.number}`, String(pr.number), pr.title, who ?? ''].some((field) => field.toLowerCase().includes(q));
 
 const sameSlug = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -170,6 +172,28 @@ const signature = (pr: HostPullRequest) =>
     pr.resolved_count,
   ].join('|');
 
+/** What a read of one pull request alone gives right on every host; the rest of a kept copy stays as it was. */
+const readFields = (pr: HostPullRequest) => ({
+  title: pr.title,
+  state: pr.state,
+  review_state: pr.review_state,
+  approved_by: pr.approved_by,
+  head_sha: pr.head_sha,
+  merged_at: pr.merged_at,
+  comment_count: pr.comment_count,
+});
+
+/** Whether a background read of a pull request brought something the UI shows: its head, counts or comments. */
+const detailChanged = (before: HostDetail, after: HostDetail) =>
+  signature(before.pr) !== signature(after.pr) ||
+  before.comments.length !== after.comments.length ||
+  before.commits.length !== after.commits.length ||
+  before.files.length !== after.files.length ||
+  before.comments.some((comment, at) => {
+    const other = after.comments[at];
+    return other === undefined || other.id !== comment.id || other.resolved !== comment.resolved;
+  });
+
 /** Pull requests live on the Git host. This keeps list reads in memory for 30 minutes and adds what only the console knows. */
 @Injectable()
 export class PullRequestsService implements OpenPrBranches {
@@ -199,10 +223,10 @@ export class PullRequestsService implements OpenPrBranches {
     state: PrState;
     mine?: boolean;
     q?: string;
-  }): Promise<{ data: PullRequest[]; meta: { synced_at: string | null; stale: boolean; next_cursor: null } }> {
+  }): Promise<{ data: PullRequestSummary[]; meta: { synced_at: string | null; stale: boolean; next_cursor: null } }> {
     let stale = false;
     let oldest: number | null = null;
-    const data: PullRequest[] = [];
+    const data: PullRequestSummary[] = [];
     const seen = (at: number, wasStale: boolean) => {
       stale ||= wasStale;
       oldest = oldest === null ? at : Math.min(oldest, at);
@@ -307,7 +331,10 @@ export class PullRequestsService implements OpenPrBranches {
    * Pull request `number` asked of the host in every project the list knows and every imported Repo, so one on a page
    * the list did not read is found too. `failed` when a host could not be asked.
    */
-  private async lookup(number: number, listed: PullRequest[]): Promise<{ found: PullRequest[]; failed: boolean }> {
+  private async lookup(
+    number: number,
+    listed: PullRequestSummary[],
+  ): Promise<{ found: PullRequestSummary[]; failed: boolean }> {
     const imported = this.hostedRepos();
     const places = new Map<string, { host: GitHost; slug: string; repo: RepoRow | null }>();
     for (const pr of listed) {
@@ -323,7 +350,7 @@ export class PullRequestsService implements OpenPrBranches {
       if (this.connected(repo.host)) places.set(`${repo.host}:${slug.toLowerCase()}`, { host: repo.host, slug, repo });
     }
     let failed = false;
-    const out: PullRequest[] = [];
+    const out: PullRequestSummary[] = [];
     await Promise.all(
       [...places.entries()].map(async ([where, place]) => {
         const key = `${where}#${number}`;
@@ -370,7 +397,7 @@ export class PullRequestsService implements OpenPrBranches {
       before.set(repo.id, this.cache.get(this.key(repo.id, PrState.Open)));
       if (!this.cooling(repo.host)) this.drop(repo.id);
     }
-    void this.refreshAll(wanted, before, repoId ?? null);
+    void asBackground(() => this.refreshAll(wanted, before, repoId ?? null));
   }
 
   /** Branches with an open pull request; empty when the host cannot be read. */
@@ -401,8 +428,18 @@ export class PullRequestsService implements OpenPrBranches {
       .where(and(eq(prCommentPasses.repoId, repo.id), eq(prCommentPasses.prNumber, number)))
       .orderBy(desc(prCommentPasses.createdAt), desc(prCommentPasses.id))
       .all();
+    const review = this.store.db
+      .select()
+      .from(prAgentReviews)
+      .where(and(eq(prAgentReviews.repoId, repo.id), eq(prAgentReviews.prNumber, number)))
+      .orderBy(desc(prAgentReviews.createdAt), desc(prAgentReviews.id))
+      .get();
     return {
-      ...(this.decorate(repo, repo.host, repo.remoteSlug as string, [pr])[0] as PullRequest),
+      ...(this.decorate(repo, repo.host, repo.remoteSlug as string, [pr])[0] as PullRequestSummary),
+      body: pr.body,
+      latest_agent_review: review
+        ? toAgentReview(review, pr.head_sha, jobPlaybook(this.store.db, 'agent_review', review))
+        : null,
       repo_id: repo.id,
       files,
       comments: this.markComments(repo.id, number, comments),
@@ -449,9 +486,9 @@ export class PullRequestsService implements OpenPrBranches {
   private async checkConflicts(repo: RepoRow, pr: HostPullRequest): Promise<PrConflicts> {
     const checkedAt = new Date().toISOString();
     try {
-      const base = await this.git.remoteHead(repo.path, pr.base_branch);
+      const base = await this.git.remoteHead(repo.path, pr.base_branch, true);
       if (!(await this.git.hasCommit(repo.path, pr.head_sha))) {
-        await this.git.fetchRef(repo.path, this.adapter(repo).headRef(pr.number, pr.branch));
+        await this.git.fetchRef(repo.path, this.adapter(repo).headRef(pr.number, pr.branch), true);
       }
       const files = await this.git.mergeConflicts(repo.path, base, pr.head_sha);
       if (files === null) return { state: PrMergeState.Unknown, files: [], checked_at: checkedAt };
@@ -478,7 +515,15 @@ export class PullRequestsService implements OpenPrBranches {
     // An inline comment attaches to the commit the pull request is at now.
     const headSha = input.file_path ? (await this.detail(repo, number)).pr.head_sha : '';
     const posted = await adapter.postComment(slug, number, { ...input, head_sha: headSha });
-    this.drop(repo.id);
+    this.patch(
+      repo,
+      number,
+      (pr) => ({ ...pr, comment_count: pr.comment_count + 1 }),
+      (value) => ({
+        ...value,
+        comments: [...value.comments, posted].sort((a, b) => a.created_at.localeCompare(b.created_at)),
+      }),
+    );
     return this.markComments(repo.id, number, [posted])[0] as PrComment;
   }
 
@@ -487,14 +532,20 @@ export class PullRequestsService implements OpenPrBranches {
     const adapter = this.adapter(repo);
     const slug = repo.remoteSlug as string;
     // The kept read is what the operator clicked on; the host is asked again only for a comment it has not seen.
-    const found =
-      (await this.detail(repo, number)).comments.find((comment) => comment.id === commentId) ??
-      (await adapter.get(slug, number)).comments.find((comment) => comment.id === commentId);
+    let comments = (await this.detail(repo, number)).comments;
+    if (!comments.some((comment) => comment.id === commentId)) comments = (await adapter.get(slug, number)).comments;
+    const found = comments.find((comment) => comment.id === commentId);
     if (!found) throw new ApiError(404, ErrorCode.NotFound, 'no such comment');
     if (found.parent_id !== null) throw new ApiError(409, ErrorCode.InvalidState, 'only a thread can be resolved');
+    const moved = found.resolved === resolved ? 0 : resolved ? 1 : -1;
     await adapter.setResolved(slug, number, commentId, resolved);
-    this.drop(repo.id);
-    const after = (await adapter.get(slug, number)).comments;
+    const after = comments.map((comment) => (comment.id === commentId ? { ...comment, resolved } : comment));
+    this.patch(
+      repo,
+      number,
+      (pr) => ({ ...pr, resolved_count: Math.max(0, pr.resolved_count + moved) }),
+      (value) => ({ ...value, comments: after }),
+    );
     return this.markComments(repo.id, number, after).find((comment) => comment.id === commentId) as PrComment;
   }
 
@@ -503,9 +554,9 @@ export class PullRequestsService implements OpenPrBranches {
     const repo = this.hosted(repoId);
     const adapter = this.adapter(repo);
     const slug = repo.remoteSlug as string;
-    const found = this.markComments(repo.id, number, (await adapter.get(slug, number)).comments).find(
-      (comment) => comment.id === commentId,
-    );
+    let comments = (await this.detail(repo, number)).comments;
+    if (!comments.some((comment) => comment.id === commentId)) comments = (await adapter.get(slug, number)).comments;
+    const found = this.markComments(repo.id, number, comments).find((comment) => comment.id === commentId);
     if (!found) throw new ApiError(404, ErrorCode.NotFound, 'no such comment');
     if (!found.is_mine) throw new ApiError(409, ErrorCode.InvalidState, 'You can delete only your own comments');
     await adapter.deleteComment(slug, number, commentId);
@@ -520,7 +571,16 @@ export class PullRequestsService implements OpenPrBranches {
         )
         .run();
     });
-    this.drop(repo.id);
+    this.patch(
+      repo,
+      number,
+      (pr) => ({
+        ...pr,
+        comment_count: Math.max(0, pr.comment_count - 1),
+        resolved_count: Math.max(0, pr.resolved_count - (found.parent_id === null && found.resolved ? 1 : 0)),
+      }),
+      (value) => ({ ...value, comments: value.comments.filter((comment) => comment.id !== commentId) }),
+    );
   }
 
   /** Approve and request changes are refused on the operator's own pull request. */
@@ -542,7 +602,7 @@ export class PullRequestsService implements OpenPrBranches {
       }
     }
     await adapter.review(slug, number, event, body ?? '');
-    this.drop(repo.id);
+    await this.reload(repo, number);
     return this.get(repoId, number);
   }
 
@@ -551,7 +611,7 @@ export class PullRequestsService implements OpenPrBranches {
     const repo = this.hosted(repoId);
     const adapter = this.adapter(repo);
     const slug = repo.remoteSlug as string;
-    const { pr } = await adapter.get(slug, number);
+    const { pr } = await this.recent(repo, number);
     if (pr.state !== PrState.Open || pr.review_state !== PrReviewState.Approved) {
       throw new ApiError(409, ErrorCode.InvalidState, 'Only an open, approved pull request can be merged');
     }
@@ -572,7 +632,7 @@ export class PullRequestsService implements OpenPrBranches {
         : new ApiError(502, ErrorCode.UpstreamFailed, 'The host rejected the merge');
     }
     this.actionLog.finish(row, ActionOutcome.Ok);
-    this.drop(repo.id);
+    await this.reload(repo, number);
     return this.get(repoId, number);
   }
 
@@ -633,7 +693,7 @@ export class PullRequestsService implements OpenPrBranches {
           const value = await read();
           if (this.details.get(key) !== hit) return;
           this.details.set(key, { at: Date.now(), value });
-          if (JSON.stringify(value) !== JSON.stringify(hit.value)) {
+          if (detailChanged(hit.value, value)) {
             this.announce(repo.id, [{ repo_id: repo.id, number }]);
           }
         } catch {
@@ -666,7 +726,7 @@ export class PullRequestsService implements OpenPrBranches {
     if (this.reading.has(key)) return;
     this.reading.set(
       key,
-      work().finally(() => this.reading.delete(key)),
+      asBackground(work).finally(() => this.reading.delete(key)),
     );
   }
 
@@ -685,6 +745,148 @@ export class PullRequestsService implements OpenPrBranches {
     const owner = repo?.remoteSlug?.split('/')[0]?.toLowerCase();
     if (!repo || !owner) return;
     for (const key of this.ownerCache.keys()) if (key.startsWith(`${repo.host}:${owner}:`)) this.ownerCache.delete(key);
+  }
+
+  /**
+   * After the console wrote on a pull request outside a button (an agent's comment, a job's push): reads it again in
+   * the background and puts the result in the kept lists and detail, so the next read needs no cold host call.
+   */
+  wrote(repoId: string, number: number): void {
+    const repo = this.store.db
+      .select()
+      .from(repos)
+      .where(and(eq(repos.id, repoId), isNull(repos.removedAt)))
+      .get();
+    if (!repo || repo.remoteSlug === null || !this.hosts.supports(repo.host)) return;
+    const key = `${repo.id}:#${number}`;
+    this.inBackground(`wrote:${key}`, async () => {
+      try {
+        const before = this.details.get(key)?.value;
+        const after = await this.reload(repo, number);
+        if (before === undefined || detailChanged(before, after))
+          this.announce(repo.id, [{ repo_id: repo.id, number }]);
+      } catch {
+        // The kept copy stands; the next read of the host brings it up to date.
+        this.drop(repo.id);
+      }
+    });
+  }
+
+  /** A pull request the console just opened, put in the kept lists so the next list read needs no host call. */
+  noteOpened(
+    repoId: string,
+    opened: { number: number; url: string; title: string; body: string; branch: string; base: string; head: string },
+  ): void {
+    const repo = this.repoRow(repoId);
+    this.place(repo, {
+      number: opened.number,
+      url: opened.url,
+      title: opened.title,
+      author: this.login(repo.host) ?? 'unknown',
+      branch: opened.branch,
+      base_branch: opened.base,
+      head_sha: opened.head,
+      state: PrState.Open,
+      review_state: PrReviewState.None,
+      approved_by: [],
+      checks: PrChecks.None,
+      additions: 0,
+      deletions: 0,
+      body: opened.body,
+      opened_at: new Date().toISOString(),
+      merged_at: null,
+      comment_count: 0,
+      resolved_count: 0,
+    });
+  }
+
+  /** The pull request as the host has it now: replaces the kept detail and updates the kept lists. */
+  private async reload(repo: RepoRow, number: number): Promise<HostDetail> {
+    const value = await this.asking(repo.host, () => this.adapter(repo).get(repo.remoteSlug as string, number));
+    this.details.set(`${repo.id}:#${number}`, { at: Date.now(), value });
+    this.place(repo, value.pr);
+    return value;
+  }
+
+  /**
+   * The pull request for a write or a job start. A kept detail is reused after one read of the pull request alone
+   * confirms its head commit and state, which is one host call where a full read is six; otherwise it is read in full.
+   */
+  async recent(repo: RepoRow, number: number): Promise<HostDetail> {
+    const hit = this.details.get(`${repo.id}:#${number}`);
+    if (hit && !hit.failed && Date.now() - hit.at < DETAIL_TTL_MS) {
+      const now = await this.asking(repo.host, () => this.adapter(repo).find(repo.remoteSlug as string, number)).catch(
+        () => null,
+      );
+      if (now && now.head_sha === hit.value.pr.head_sha && now.state === hit.value.pr.state) {
+        return { ...hit.value, pr: { ...hit.value.pr, ...readFields(now) } };
+      }
+    }
+    return this.reload(repo, number);
+  }
+
+  /** Changes a pull request in every kept list that holds it and in its kept detail. */
+  private patch(
+    repo: RepoRow,
+    number: number,
+    change: (pr: HostPullRequest) => HostPullRequest,
+    detail: (value: HostDetail) => HostDetail = (value) => value,
+  ): void {
+    const slug = repo.remoteSlug as string;
+    const owner = slug.split('/')[0]?.toLowerCase() ?? '';
+    for (const [key, entry] of this.cache) {
+      if (key.startsWith(`${repo.id}:`)) entry.prs = entry.prs.map((pr) => (pr.number === number ? change(pr) : pr));
+    }
+    for (const [key, entry] of this.ownerCache) {
+      if (!key.startsWith(`${repo.host}:${owner}:`)) continue;
+      entry.prs = entry.prs.map((pr) =>
+        pr.number === number && sameSlug(pr.slug, slug) ? { ...change(pr), slug: pr.slug } : pr,
+      );
+    }
+    const key = `${repo.id}:#${number}`;
+    const hit = this.details.get(key);
+    if (hit) this.details.set(key, { ...hit, value: { ...detail(hit.value), pr: change(hit.value.pr) } });
+  }
+
+  /**
+   * Puts a pull request just read from the host into the kept lists of its state, drops it from the lists of the
+   * others, and brings the kept detail's fields up to date. A list nobody has read yet is left for its first read.
+   */
+  private place(repo: RepoRow, pr: HostPullRequest): void {
+    const slug = repo.remoteSlug as string;
+    const owner = slug.split('/')[0]?.toLowerCase() ?? '';
+    const put = <T extends HostPullRequest>(
+      prs: T[],
+      state: PrState,
+      make: () => T,
+      same: (one: T) => boolean,
+    ): T[] => {
+      const found = prs.find((one) => one.number === pr.number && same(one));
+      if (pr.state !== state) return found ? prs.filter((one) => one !== found) : prs;
+      if (!found) return [...prs, make()];
+      return prs.map((one) => (one === found ? { ...one, ...readFields(pr) } : one));
+    };
+    for (const state of Object.values(PrState)) {
+      const entry = this.cache.get(this.key(repo.id, state));
+      if (entry)
+        entry.prs = put(
+          entry.prs,
+          state,
+          () => pr,
+          () => true,
+        );
+      const owned = this.ownerCache.get(`${repo.host}:${owner}:${state}`);
+      if (owned)
+        owned.prs = put(
+          owned.prs,
+          state,
+          () => ({ ...pr, slug }),
+          (one) => sameSlug(one.slug, slug),
+        );
+    }
+    const key = `${repo.id}:#${pr.number}`;
+    const hit = this.details.get(key);
+    if (hit) this.details.set(key, { ...hit, value: { ...hit.value, pr: { ...hit.value.pr, ...readFields(pr) } } });
   }
 
   markComments(repoId: string, number: number, comments: HostComment[]): PrComment[] {
@@ -907,42 +1109,42 @@ export class PullRequestsService implements OpenPrBranches {
     return { at: hit.at, prs: hit.prs, stale: hit.failed === true };
   }
 
-  /** Adds what only the console knows: whose it is, which Session and which Agent Review belong to it. */
-  private decorate(repo: RepoRow | null, host: GitHost, slug: string, prs: HostPullRequest[]): PullRequest[] {
+  /**
+   * Adds what only the console knows: whose it is, which Session and which Agent Review belong to it. A list row has no
+   * description and only the brief of its newest Agent Review.
+   */
+  private decorate(repo: RepoRow | null, host: GitHost, slug: string, prs: HostPullRequest[]): PullRequestSummary[] {
     const login = this.login(host);
+    const listed = (pr: HostPullRequest) => {
+      const { slug: _slug, body: _body, ...fields } = pr as OwnedPullRequest;
+      return fields;
+    };
     if (repo === null) {
-      return prs.map((pr) => {
-        const { slug: _slug, ...fields } = pr as OwnedPullRequest;
-        return {
-          ...fields,
-          repo_id: null,
-          host,
-          slug,
-          by_agent: false,
-          is_mine: login !== null && pr.author === login,
-          agent_session_id: null,
-          latest_agent_review: null,
-        };
-      });
+      return prs.map((pr) => ({
+        ...listed(pr),
+        repo_id: null,
+        host,
+        slug,
+        by_agent: false,
+        is_mine: login !== null && pr.author === login,
+        agent_session_id: null,
+        latest_agent_review: null,
+      }));
     }
-    const rows = this.store.db.select().from(sessions).where(eq(sessions.repoId, repo.id)).all();
+    const rows = this.store.db
+      .select({ id: sessions.id, kind: sessions.kind, branch: sessions.branch, prNumber: sessions.prNumber })
+      .from(sessions)
+      .where(eq(sessions.repoId, repo.id))
+      .all();
     const worked = new Set(rows.filter((row) => row.kind === SessionKind.Repo).map((row) => row.branch));
     const reviewSession = new Map(
       rows.filter((row) => row.kind === SessionKind.PrReview).map((row) => [row.prNumber, row.id]),
     );
-    const latest = new Map<number, ReviewRow>();
-    const reviews = this.store.db
-      .select()
-      .from(prAgentReviews)
-      .where(eq(prAgentReviews.repoId, repo.id))
-      .orderBy(desc(prAgentReviews.createdAt), desc(prAgentReviews.id))
-      .all();
-    for (const review of reviews) if (!latest.has(review.prNumber)) latest.set(review.prNumber, review);
+    const latest = this.latestReviews(repo.id);
     return prs.map((pr) => {
       const review = latest.get(pr.number);
-      const { slug: _slug, ...fields } = pr as OwnedPullRequest;
       return {
-        ...fields,
+        ...listed(pr),
         repo_id: repo.id,
         host,
         slug,
@@ -951,9 +1153,28 @@ export class PullRequestsService implements OpenPrBranches {
         is_mine: (login !== null && pr.author === login) || worked.has(pr.branch),
         agent_session_id: reviewSession.get(pr.number) ?? null,
         latest_agent_review: review
-          ? toAgentReview(review, pr.head_sha, jobPlaybook(this.store.db, 'agent_review', review))
+          ? { status: review.status, decision: review.decision, stale: review.headSha !== pr.head_sha }
           : null,
       };
     });
+  }
+
+  /** The newest Agent Review of each pull request of a Repo, in one query. */
+  private latestReviews(repoId: string) {
+    const ranked = this.store.db
+      .select({
+        prNumber: prAgentReviews.prNumber,
+        status: prAgentReviews.status,
+        decision: prAgentReviews.decision,
+        headSha: prAgentReviews.headSha,
+        rank: sql<number>`row_number() over (partition by ${prAgentReviews.prNumber} order by ${prAgentReviews.createdAt} desc, ${prAgentReviews.id} desc)`.as(
+          'rank',
+        ),
+      })
+      .from(prAgentReviews)
+      .where(eq(prAgentReviews.repoId, repoId))
+      .as('ranked');
+    const rows = this.store.db.select().from(ranked).where(eq(ranked.rank, 1)).all();
+    return new Map(rows.map((row) => [row.prNumber, row]));
   }
 }

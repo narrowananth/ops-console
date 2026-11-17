@@ -41,19 +41,29 @@ export const INTEGRATIONS_RULE = `Integrations. The pup, gh, glab, bkt and slash
 
 /**
  * Where the agent puts a file for the operator. The sandbox blocks `open` and any write outside its folders, so the
- * agent writes into the Session's output folder, where the console shows it, and asks to save a copy elsewhere.
+ * agent writes into the Session's output folder, where the console shows it, and asks to save a copy elsewhere. The
+ * rule names the folder by its role; `sessionFolders` gives the path.
  */
-export const outputFilesRule = (folder: string) =>
-  `Files for the operator. Write every file meant for the operator (a PDF, a spreadsheet, a chart, an archive) in ${folder}. The console lists each file there in the conversation, and the operator opens or downloads it from the console. Never run open, xdg-open or start: your commands run in a sandbox that blocks them. When the operator asks you to put a file in another folder, such as ~/Downloads, call the ${SAVE_FILE_TOOL} tool with the file's name and the folder's absolute path. The operator approves it first, then the console copies the file. Never move a file with a command, never ask the operator to run mv, and do not retry if the operator says no. If that tool is not in your tool list, say so.`;
+export const OUTPUT_FILES_RULE = `Files for the operator. Write every file meant for the operator (a PDF, a spreadsheet, a chart, an archive) in the output folder listed under Session folders. The console lists each file there in the conversation, and the operator opens or downloads it from the console. Never run open, xdg-open or start: your commands run in a sandbox that blocks them. When the operator asks you to put a file in another folder, such as ~/Downloads, call the ${SAVE_FILE_TOOL} tool with the file's name and the folder's absolute path. The operator approves it first, then the console copies the file. Never move a file with a command, never ask the operator to run mv, and do not retry if the operator says no. If that tool is not in your tool list, say so.`;
 
 /** The other Repos the operator opened to the Session: the sandbox and the file tools let the run write in them. */
-export function repoFoldersRule(folders: string[]): string {
-  return `Other Repos. The operator opened these Repos' checkouts to this Session: ${folders.join(', ')}. You may read and edit files and run git commands (checkout, branch, add, commit) in them, as in your working folder. Change nothing outside the work the operator asked for. You still never push: ${OPEN_PULL_REQUEST_TOOL} opens a pull request for the working folder's branch only, so commit work in another Repo on its own branch and tell the operator the Repo and the branch.`;
+export const REPO_FOLDERS_RULE = `Other Repos. The operator opened the Repos listed under Session folders to this Session. You may read and edit files and run git commands (checkout, branch, add, commit) in their checkouts, as in your working folder. Change nothing outside the work the operator asked for. You still never push: ${OPEN_PULL_REQUEST_TOOL} opens a pull request for the working folder's branch only, so commit work in another Repo on its own branch and tell the operator the Repo and the branch.`;
+
+/**
+ * The paths that differ per Session, kept to the end of the rules so the text before them is the same for every
+ * Session of a Playbook and can share a prompt cache.
+ */
+export function sessionFolders(outputFolder: string | null, repoFolders: string[]): string {
+  const lines = [
+    ...(outputFolder === null ? [] : [`Output folder: ${outputFolder}`]),
+    ...(repoFolders.length === 0 ? [] : [`Other Repos: ${repoFolders.join(', ')}`]),
+  ];
+  return lines.length === 0 ? '' : `Session folders:\n${lines.join('\n')}`;
 }
 
 /**
  * The system prompt a run appends to Claude Code's own: the kind's instructions, the console's latest-code, pull request and commit
- * hook rules, the Playbook's rules, then the safety lines.
+ * hook rules, the Playbook's rules, the Session's folders, then the safety lines.
  */
 export function systemAppend(
   instructions: string | undefined,
@@ -69,10 +79,10 @@ export function systemAppend(
     INTEGRATIONS_RULE,
     COMMIT_HOOKS_RULE,
   ];
-  if (outputFolder !== null) parts.push(outputFilesRule(outputFolder));
-  if (repoFolders.length > 0) parts.push(repoFoldersRule(repoFolders));
+  if (outputFolder !== null) parts.push(OUTPUT_FILES_RULE);
+  if (repoFolders.length > 0) parts.push(REPO_FOLDERS_RULE);
   if (rules?.trim()) parts.push(`The operator's rules for this work:\n${rules.trim()}`);
-  parts.push(SAFETY_LINES);
+  parts.push(sessionFolders(outputFolder, repoFolders), SAFETY_LINES);
   return parts.filter(Boolean).join('\n\n');
 }
 

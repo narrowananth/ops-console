@@ -106,7 +106,7 @@ describe('automatic checks', () => {
   it('lists each Connection with its interval defaults, and leaves out one with no access', async () => {
     const { daemon } = await start();
     const read = await overview(daemon);
-    expect(read.areas.connections).toMatchObject({ interval: '30m', checking: null });
+    expect(read.areas.connections).toMatchObject({ interval: '2h', checking: null });
     expect(read.areas.integrations).toMatchObject({ interval: '1h', checking: null });
     expect(read.items.filter((one) => one.target === 'connection').map((one) => one.name)).toEqual(['pg-orders']);
     const none = await api(daemon).post('/connections', { ...PG, name: 'pg-none', access: 'none' });
@@ -193,7 +193,11 @@ describe('automatic checks', () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(runs()).toBe(base);
 
-    watch.tick(Date.now() + 31 * 60_000);
+    watch.tick(Date.now() + 61 * 60_000);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(runs()).toBe(base);
+
+    watch.tick(Date.now() + 121 * 60_000);
     await until(
       () => runs(),
       (count) => count > base,
@@ -208,12 +212,43 @@ describe('automatic checks', () => {
     expect(runs()).toBe(after);
   });
 
+  it('checks two Connections at a time, and a scheduled check waits while the operator’s own check runs', async () => {
+    const { daemon, tester, watch, id } = await start();
+    for (const name of ['pg-two', 'pg-three', 'pg-four']) {
+      await api(daemon).post('/connections', { ...PG, name });
+    }
+    await daemon.app.get(ConnectionsService).settled();
+    tester.runs.length = 0;
+    tester.delayMs = 60;
+    await watch.run(HealthArea.Connections);
+    expect(tester.runs).toHaveLength(4);
+    expect(tester.mostAtOnce).toBe(2);
+
+    tester.runs.length = 0;
+    tester.delayMs = 400;
+    const manual = api(daemon)
+      .post(`/connections/${id}/checks`)
+      .then((response) => response);
+    await until(
+      async () => tester.runs.length,
+      (count) => count === 1,
+      "the operator's check",
+    );
+    const scheduled = watch.run(HealthArea.Connections);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    // The scheduled run has not started any check while the operator's one is still going.
+    expect(tester.runs).toHaveLength(1);
+    await manual;
+    await scheduled;
+    expect(tester.runs).toHaveLength(5);
+  });
+
   it('shows the run while it goes, and refuses an area that does not exist', async () => {
     const { daemon, tester } = await start();
     tester.next = { status: HealthStatus.Ok, latency_ms: 1, detail: null };
     expect((await api(daemon).post('/health-watch/elsewhere/checks')).status).toBe(404);
     const settled = await api(daemon).post('/health-watch/connections/checks');
-    expect(settled.body.data.areas.connections.interval).toBe('30m');
+    expect(settled.body.data.areas.connections.interval).toBe('2h');
     await until(
       () => overview(daemon),
       (read) => read.areas.connections.checking === null && read.areas.connections.last_checked_at !== null,
@@ -229,7 +264,7 @@ describe('automatic checks', () => {
 
   it('offers 30 minutes, 1, 6, 12 and 24 hours and off, and reads an older 5 or 15 minutes as 30', async () => {
     const { daemon } = await start();
-    for (const interval of ['30m', '1h', '6h', '12h', '24h', 'off']) {
+    for (const interval of ['30m', '1h', '2h', '6h', '12h', '24h', 'off']) {
       const set = await api(daemon).patch('/settings', {
         health_checks: { connections: interval, integrations: interval },
       });

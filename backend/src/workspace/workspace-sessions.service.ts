@@ -19,6 +19,7 @@ import { SessionKinds } from '../agent/session-kinds';
 import { type SessionRow, SessionsService, toSession } from '../agent/sessions.service';
 import { DATA_DIR } from '../common/data-dir';
 import { ApiError, parseInput, validationFailed } from '../common/errors';
+import { asBackground } from '../common/spawn-pool';
 import { repos } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { GIT, Git, GitFailed } from '../repos/git';
@@ -79,7 +80,7 @@ export class WorkspaceSessionsService {
           folder,
           `git fetch origin ${defaultBranch} && git branch ${input.branch} origin/${defaultBranch}`,
           async () => {
-            const base = await this.git.codeBase(folder, [defaultBranch]);
+            const base = await this.git.codeBase(folder, [defaultBranch], true);
             await this.git.createBranch(folder, input.branch, base.ref);
           },
         );
@@ -88,7 +89,7 @@ export class WorkspaceSessionsService {
           null,
           folder,
           `git fetch origin ${input.branch} && git branch --track ${input.branch} origin/${input.branch}`,
-          () => this.git.trackBranch(folder, input.branch),
+          () => this.git.trackBranch(folder, input.branch, true),
         );
       } else {
         throw validationFailed(`invalid body: branch ${input.branch} is not in this Repo`);
@@ -110,7 +111,7 @@ export class WorkspaceSessionsService {
       this.sessions.remove(row.id);
       throw error;
     }
-    void this.followOrigin(row);
+    void asBackground(() => this.followOrigin(row));
     return toSession(row);
   }
 
@@ -177,7 +178,9 @@ export class WorkspaceSessionsService {
   /** Moves a new Session's worktree forward to its branch on origin once the Session is open. Never throws. */
   private async followOrigin(session: SessionRow): Promise<void> {
     const repo = this.repo(session.repoId);
-    await this.git.pull(this.worktreeDir(session.id), session.branch ?? repo.defaultBranch).catch(() => undefined);
+    await this.git
+      .pull(this.worktreeDir(session.id), session.branch ?? repo.defaultBranch, true)
+      .catch(() => undefined);
   }
 
   /**
@@ -188,10 +191,11 @@ export class WorkspaceSessionsService {
   private async refreshDefault(session: SessionRow): Promise<void> {
     const repo = this.repo(session.repoId);
     const dir = this.worktreeDir(session.id);
+    // A status git cannot read counts as changes: the worktree stays where it is and only the fetch runs.
     const follows =
       session.branch === repo.defaultBranch &&
       (await this.git.branchName(dir)) === null &&
-      !(await this.git.isDirty(dir));
+      !(await this.git.isDirty(dir).catch(() => true));
     if (follows) await this.git.pull(dir, repo.defaultBranch);
     else await this.git.remoteHead(repo.path, repo.defaultBranch).catch(() => undefined);
   }
@@ -219,7 +223,14 @@ export class WorkspaceSessionsService {
     const repo = this.repo(session.repoId);
     const folder = await this.ensure(session);
     let stashed = false;
-    if (await this.git.isDirty(folder)) {
+    const dirty = await this.git.isDirty(folder).catch((error) => {
+      throw new ApiError(
+        502,
+        ErrorCode.UpstreamFailed,
+        error instanceof GitFailed && error.message ? error.message : 'git status failed',
+      );
+    });
+    if (dirty) {
       await this.logged(sessionId, folder, `git stash push --include-untracked`, () =>
         this.git.stash(folder, `ops-console: before switching to ${branch}`),
       );

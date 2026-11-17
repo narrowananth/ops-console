@@ -196,7 +196,7 @@ One Datadog log event kept on an Alert, with secret values and request body valu
 
 **Alert**:
 One kind of failure in a Service's logs, raised by a Scan. It moves from open through verifying, verified, fixing and
-PR open to resolved, or is dismissed.
+PR open to resolved, or is dismissed. An open Alert no Scan has seen for 14 days is resolved by the console.
 _Avoid_: incident, issue
 
 **Verification**:

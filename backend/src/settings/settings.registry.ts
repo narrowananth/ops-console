@@ -21,6 +21,10 @@ export class SettingsRegistry {
     return this.definitions.get(key);
   }
 
+  get size(): number {
+    return this.definitions.size;
+  }
+
   all(): SettingDefinition[] {
     return [...this.definitions.values()];
   }

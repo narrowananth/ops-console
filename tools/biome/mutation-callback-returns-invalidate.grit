@@ -1,0 +1,17 @@
+language js
+
+// TanStack Query v5 awaits what a mutation callback returns: a returned `invalidateQueries` keeps the button's
+// spinner up until every refetch behind it ends. Write `void client.invalidateQueries(...)` instead.
+or {
+  `$name: ($params) => $client.invalidateQueries($args)`,
+  `$name: $param => $client.invalidateQueries($args)`,
+  `$name: ($params) => $client.refetchQueries($args)`,
+  `$name: $param => $client.refetchQueries($args)`
+} as $callback where {
+  $name <: or {
+    `onSuccess`,
+    `onSettled`,
+    `onError`
+  },
+  register_diagnostic(span=$callback, message="A mutation callback returns invalidateQueries, so the button waits for every refetch. Write `void client.invalidateQueries(...)`.", severity="error")
+}

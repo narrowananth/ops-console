@@ -36,8 +36,12 @@ links to it for the CLI and the MCP helpers. The bundle is signed ad hoc and car
 same Node build the same app and keep its Keychain access and Full Disk Access. A new Node makes a new app. The
 first time a version starts, the previous version's app hands over the Keychain items it holds
 (`keychain-handover.mjs take`), and the new app writes them back itself, so macOS doesn't ask for the login password
-once per item. The handover runs in the background, about half a minute, and the daemon's Keychain reads wait for it.
-`keychain-owner.json` in the data folder names the app that holds the items.
+once per item. The handover runs in the background and reads the keys listed in `keychain-manifest.json` directly and
+in parallel; with no list yet, the previous app finds them by scanning the login keychain, once. A Keychain call waits
+only for its own item, and `keychain-handover.pending` in the data folder, which holds the pid of the start moving the
+items, makes a second start and `mcp-exec` wait for it. `keychain-owner.json` in the data folder names the app that
+holds the items. Installing only does `launchctl kickstart -k` on the loaded job, so launchd starts the daemon once;
+the plist sets `UV_THREADPOOL_SIZE=16` and a Node compile cache (`~/.ops-console/compile-cache`, cleared by the next install).
 
 `ops-console start` writes a LaunchAgent plist (`RunAtLoad`, `KeepAlive`) that runs `current/Ops Console.app` on
 `current/app/main.js`, so launchd starts the daemon at login and again if it stops. macOS lists it as Ops Console
@@ -54,19 +58,21 @@ To try an install before a release, `pnpm build`, `pnpm package` and a `checksum
 then `OPS_CONSOLE_RELEASE_URL=file://<repo>/out sh install.sh`. It replaces the installed app, since both use
 `~/.ops-console` and the same data folder.
 
-The daemon reads the newest GitHub release 10 seconds after start and every minute (`UpdatesModule`; a dev build never
-updates). The operator installs it, or the `auto_update` setting (on by default) does, and either waits for running
+The daemon reads the newest GitHub release 10 seconds after start and every 10 minutes (`UpdatesModule`; a dev build never
+updates), and sends `update.changed` only when what the panel shows has moved. The operator installs it, or the `auto_update` setting (on by default) does, and either waits for running
 agent runs to finish unless the operator picks now. To install one, it runs the installed version's `install.sh` with
 `OPS_CONSOLE_VERSION` and then stops itself. `KeepAlive` has launchd start it again from `current`, now on the new
 version. `update.json` in the data folder records the version this
 data last ran on, so the first start on a new one can say what it came from.
 
-`bin/ops-console` also starts two helpers from the daemon bundle: `mcp-exec`, the launcher that
-reads a stdio MCP Server's env vars from the Keychain, and `mcp-setup`, the Setup agent's MCP
-Server.
+`bin/ops-console` also starts two helpers: `mcp-exec`, the launcher that reads a stdio MCP Server's env vars from the
+Keychain, from `app/mcp-exec.js`, a bundle of the Keychain and the launcher alone, so a start does not load the daemon;
+and `mcp-setup`, the Setup agent's MCP Server, from the daemon bundle.
 
 On start the daemon takes the data folder lock, applies pending migrations in one transaction, runs
-start-up recovery, opens the port, starts the scheduler and writes the runtime file.
+start-up recovery, opens the port, starts the scheduler and writes the runtime file. On stop it logs how long each
+provider's `onModuleDestroy` took; Probes and `claude` calls under way are aborted, and a registration or sign-in still
+running after 5 seconds is left for the next start.
 
 ## Stack
 
@@ -85,8 +91,8 @@ start-up recovery, opens the port, starts the scheduler and writes the runtime f
 Every outside system is an MCP server or a CLI registered with Claude Code (ADR 0005). A Connector
 hands off to the provider's browser sign-in, a secret the console must hold goes to the Keychain,
 and the console runs `claude mcp add` in every Claude account. Fixed reads run the CLIs with no
-model turn: `pup` for Scans, `gh`, `glab` and `bkt` for pull requests, `git ls-remote` when looking
-for a Service's code. The `slashdocs` CLI is a Connector's sign-in and has no MCP Server. Judgment work (Verification, Fix, Agent Review, Reply check, Comment pass, Dev tools questions) runs as an
+model turn: `pup` for Scans, `gh`, `glab` and `bkt` for pull requests, a `bkt` repository list (or `git ls-remote`
+when the list cannot be read) when looking for a Service's code. The `slashdocs` CLI is a Connector's sign-in and has no MCP Server. Judgment work (Verification, Fix, Agent Review, Reply check, Comment pass, Dev tools questions) runs as an
 agent Session.
 
 ## Backend modules
@@ -98,22 +104,21 @@ agent Session.
 | `auth` | Session token check on every `/api` route |
 | `settings` | Registered keys with schema and default; `GET` and `PATCH /api/settings` |
 | `scheduler` | Jobs with slots; a missed slot runs once at start |
-| `keychain` | `set`, `get`, `delete` in the login Keychain, each bounded at 60 seconds and failing `keychain_timeout`; the handover of items from the previous version's app, which reads wait for (at most 90 seconds) and which refuses an app that fails its check (`codesign`, real path, bundle identifier); the Keychain wait shown after 10 |
+| `keychain` | `set`, `get`, `delete` in the login Keychain, each bounded at 60 seconds and failing `keychain_timeout`, two native calls at a time, values kept in memory; the handover of items from the previous version's app, per key, which a read waits for (at most 90 seconds) and which refuses an app that fails its check (`codesign`, real path, bundle identifier); the Keychain wait shown after 10, and a call made while it shows fails at once |
 | `claude-cli` | `claude mcp add`, `remove`, `list`, `get`, `login`, and Claude account sign-in in this browser or by link and code, parsed with Zod |
-| `mcp-client` | Calls one tool on a server registered with Claude Code, for a fixed read |
-| `mcp` | Servers registered in every Claude account (`.claude.json`) and a Repo's `.mcp.json`; Probe, add, edit, reconnect, disable, remove; the `mcp-exec` launcher |
+| `mcp` | Servers registered in every Claude account (`.claude.json`: `claude mcp` in the active account, the entry copied into the others) and a Repo's `.mcp.json`; Probe of the active account, kept 5 minutes (another account's when it becomes active, or after 10), after the Keychain handover; add, edit, reconnect (one server alone), disable, remove; the `mcp-exec` launcher |
 | `connectors` | The nine Connectors: browser sign-in through `pup`, `gh`, `glab`, `bkt`, `slashdocs` or an MCP Server; cancel a sign-in; the MCP Server each registers; Homebrew install of a missing CLI; checks; config |
-| `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks; secrets via Keychain |
-| `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash, worktrees and checkout; a branch list answers from the last fetch and asks origin after, once a minute at most, then sends `repo.branches_changed` when a branch came or went; each Repo's host and `owner/name` read again from `origin` at start and with the list, and mapped to the Git host's new owner when the host renames one (`origin` is never edited) |
+| `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks, through one kept server per Connection for 5 minutes; secrets via Keychain, `secret_stored` from memory |
+| `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash, worktrees and checkout; a branch list answers from the last fetch and asks origin after, once a minute at most, then sends `repo.branches_changed` when a branch came or went; each Repo's host and `owner/name` read again from `origin` at start and in the background after a list (at most every 10 seconds), and mapped to the Git host's new owner when the host renames one (`origin` is never edited); a Repo's branch and changes come from one `git status`, kept 10 seconds, eight Repos at a time |
 | `network` | The Network allowlist an agent run starts with: built-in hosts, the host of each Repo's `origin`, and the operator's own domains in `network_domains`; read, add and remove (`/network-allowlist`), registered by `agent` |
 | `agent` | Sessions and their kinds, Claude Agent SDK runs, the Run sandbox rules, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors; stop a run, edit the last message (file edits rewound), attachments, output files, the `save_file` tool and the `run_integration` tool (integration CLIs run in the daemon outside the sandbox); every tool call of a run kept with its time (`run_steps`) and each run's cost (`run_usage`); run health, slow and failure reasons, stages and time split read from them; the message queued behind a run; a skill message, which hands the run its skill in place of the Playbook |
 | `playbooks` | Playbooks and the Trigger each one holds, the built-ins (each Trigger's method, steps and shared rules on evidence, data, Connections and git) and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each; Custom Skills, the Built-in skills in their Skill packs (a catalog in code, the installed packs in `state.db`), the `/skills`, `/skill-packs` and `/skill-menu` routes, the Project skills read from a Repo's folder for the menu, and the Skills each Playbook holds (registered by `agent`) |
 | `accounts` | Claude accounts, their usage, Auto-switch and Smart usage; the Claude account hub: with CLIProxy on, runs go to its loopback address with the API key from the Keychain and switching pauses |
 | `action-log` | Writes a row before any outside action; Approvals; redaction |
-| `workspace` | `repo`, `pr_review` and `anonymous` Sessions; each `repo` Session in a git worktree of its own under `session-worktrees/` in the data directory, made at once from the default branch as last fetched and moved to origin's newest in the background; a Session's diff read from its worktree, and a `repo` Session following the branch its worktree is on; branch checkout with stash, in the worktree; a Session starts on any branch (one the Repo's own folder holds starts detached at its commit; a branch only `origin` has is fetched; a new name is made at the newest default branch) and the file list behind the composer's `@` menu (`/file-menu`); pull requests, their commits and a conflict check, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews, Reply checks and Comment passes, one job per pull request at a time, each in a scratch copy at the pull request's head commit (an Agent Review makes one only when a Playbook step writes; the built-in's test step does); an Agent Review also fetches the target branch to compare with, may run the tests and build, and the console posts its findings and one summary comment; for the others the console commits, pushes, replies and resolves; Pull request opening: the console pushes a `repo` Session's branch and opens its pull request on the Git host, for a click in the Session header (the agent drafts the text) and for a Fix's PR stage |
-| `monitor` | Services, Routes, Scans and Alerts through `pup`; finding a Service's code; the Alert's Session; Verification and Reports; the operator's Review; the Fix from ticket to merged PR |
-| `browser` | A Session's Browser panel: the operator's Google Chrome (`OPS_CONSOLE_CHROME_PATH` names another) run headless through `playwright-core`, one Chrome and profile folder (`browser/<session>`) per Session, started with its first tab and stopped after its last tab or 10 idle minutes; tabs in memory; the page streamed as JPEG frames over `/browser/:tabId`, with input sent back; the outside hosts a page called; the agent's `browser_*` tools, held to loopback pages |
-| `processes` | Session processes: commands the daemon runs as the operator, outside the Run sandbox, in a Session's worktree through node-pty and the login shell, kept in `session_processes` and in memory, streamed over `/processes/:id`; the scan for Local servers (`lsof`); a Session's `package.json` scripts; the agent's `start_process`, `process_output` and `stop_process` |
+| `workspace` | `repo`, `pr_review` and `anonymous` Sessions; each `repo` Session in a git worktree of its own under `session-worktrees/` in the data directory, made at once from the default branch as last fetched and moved to origin's newest in the background; a Session's diff read from its worktree, and a `repo` Session following the branch its worktree is on; branch checkout with stash, in the worktree; a Session starts on any branch (one the Repo's own folder holds starts detached at its commit; a branch only `origin` has is fetched; a new name is made at the newest default branch) and the file list behind the composer's `@` menu (`/file-menu`); pull requests, their commits and a conflict check, comments, approve, request changes and the operator's merge through the Git host adapters (`gh`, `glab`, `bkt`); Agent Reviews, Reply checks and Comment passes, one job per pull request at a time, each in a scratch copy at the pull request's head commit (an Agent Review makes one only when a Playbook step writes; the built-in's test step does); an Agent Review also fetches the target branch to compare with, may run the tests and build, and the console posts its findings and one summary comment; for the others the console commits, pushes, replies and resolves; Pull request opening: the console pushes a `repo` Session's branch and opens its pull request on the Git host, for a click in the Session header (the text is drafted at once from the branch's commits, with no agent run) and for a Fix's PR stage; the base check and the push run side by side |
+| `monitor` | Services, Routes, Scans and Alerts through `pup` (a few searches at once); retention of Alerts, Scans and Alert events; finding a Service's code; the Alert's Session; Verification and Reports; the operator's Review; the Fix from ticket to merged PR |
+| `browser` | A Session's Browser panel: the operator's Google Chrome (`OPS_CONSOLE_CHROME_PATH` names another) run headless through `playwright-core`, one Chrome and profile folder (`browser/<session>`) per Session, started with its first tab and stopped after 10 idle minutes; tabs in memory; the page streamed as binary JPEG frames (quality 60, every second screencast frame, sized to the page) over `/browser/:tabId`, each frame acknowledged to Chrome once the socket took it, with input sent back; the outside hosts a page called; the agent's `browser_*` tools, held to loopback pages |
+| `processes` | Session processes: commands the daemon runs as the operator, outside the Run sandbox, in a Session's worktree through node-pty, kept in `session_processes` and in memory, streamed over `/processes/:id` in 8 ms batches; the login environment, read once from the login shell and kept until an rc file changes (`login-env.ts`); the scan for Local servers (`lsof`, shared with the process table); a Session's `package.json` scripts; the agent's `start_process`, `process_output` and `stop_process` |
 | `devtools` | `devtools` Sessions scoped to Connections; ties MCP calls to their Connection; the PROD-write rule; the instructions that make the agent hand over Results and a Comparison |
 | `updates` | The newest GitHub release, the version record (`update.json`), install through `install.sh`, auto-update, the wait for running agent runs |
 | `terminals` | node-pty terminals behind an authenticated WebSocket; the Setup agent, its MCP tools, local file, folder, URL and Keychain reads with secrets masked; the Full Disk Access and Start at login gates |
@@ -122,8 +127,8 @@ agent Session.
 
 | Folder | Holds |
 |---|---|
-| `app` | Sign-in gate with the restart panel while an update installs, sidebar with the running tasks tray, the update card, version panel and "Updated to" notice, page shell and routes, theme store, the remembered page address |
-| `lib` | API client, TanStack queries, `/ws` live events, session token, Remembered view storage, the page a link came from (`return-to.ts`), sorting, the finish chime, clipboard copy |
+| `app` | Sign-in gate with the restart panel while an update installs, sidebar with the running tasks tray, the update card, version panel and "Updated to" notice, page shell and routes (each page's code loads when its route opens), theme store, the remembered page address |
+| `lib` | API client (a few large lists check only their first and last items), TanStack queries, `/ws` live events and the waits on them, session token, Remembered view storage, the page a link came from (`return-to.ts`), sorting, the finish chime, clipboard copy |
 | `monitor` | Monitor page: scan range and status codes, ticked Services, Alerts, Samples, Reports, Review and Fix |
 | `agent-runs` | Agent runs page: run health, why a run is slow or ended, time split, timeline, steps, queued messages, desktop alerts |
 | `browser` | The Session's Browser panel (tabs, toolbar, the drawn page, device menu, Local servers), the Terminals dock (one xterm per Session process, Run menu), the header buttons, and loopback links in the transcript that open in the panel |
@@ -137,6 +142,10 @@ agent Session.
 | `agents` | Accounts & Usage page (accounts, sign-in by link, the CLIProxy hub, the chime), Session transcript, model, effort and Access mode chips, Approval prompts, the question panel, stop run, Report rendering |
 | `mcp`, `components/ui` | MCP status labels; shared controls, the folding card title, the side panel that folds to a rail, the job pathway and live timers, and the Tip layer that shows every element's `title` as a styled Tip on hover and keyboard focus, the code block with its copy icon, and the file viewer |
 
+**Rendering and loading.** The Session's composer holds the draft, so a key redraws the composer and not the conversation. Messages are memoized and the older ones carry `content-visibility: auto`; the Markdown parse is kept per text. The conversation map reads which messages are in view from an `IntersectionObserver`. A pull request file with a long diff draws its lines once it nears the screen, and the Dropdown draws at most 100 options. A sent message shows in the transcript at once and the composer empties at the click; the daemon's copy replaces it on the next read. Opening a Session, and the first key in its composer, ask the daemon to start the agent (`POST /sessions/:id/warm`) at most once a minute. The build splits React, the router, TanStack Query and Zod into vendor files; xterm loads with the Terminals dock or the Setup page.
+
+**Guardrails.** `biome check` runs the plugins in `tools/biome`, which fail a mutation callback that returns `invalidateQueries`. `backend/test/perf-budget.test.ts` holds every plain list to a time and size budget on a busy store.
+
 ## Data flow
 
 **REST.** Every `/api` call carries `Authorization: Bearer <token>`. Bodies and responses are Zod
@@ -145,8 +154,8 @@ local storage and drops it on `unauthorized`. Any number of browsers on the Mac 
 on the one daemon (`ops-console open <app>` signs another browser in): each keeps its own Remembered view, and `/ws` events reach all of them.
 
 **WebSocket.** `/ws` sends server-to-client events only, with the token as the second subprotocol.
-`Store.write` runs one transaction and sends its events after the commit; `Store.emit` sends an event with no state change behind it. A run's `session.output` goes out at most every 100 ms, each changed part whole. The UI turns each event into
-query refetches, batched over 40 ms. A running agent's events refetch its transcript at most every 800 ms and the pull request lists every 5 seconds. The socket reopens after a drop and the UI reads every query again. Events (`shared/src/ws.ts`):
+`Store.write` runs one transaction and sends its events after the commit; `Store.emit` sends an event with no state change behind it. A run's `session.output` goes out at most every 100 ms, each changed part whole; a text over 8,000 characters goes out every 400 ms and one over 32,000 every second. A client with over 1 MB waiting to send gets only the newest `session.output` of each part until its queue drains; every other event goes out in order. The UI turns each event into
+query refetches, batched over 40 ms. A `session.output` event puts its part into the cached transcript; the transcript is read again only when the part cannot be placed (a part before it is missing) and when the run finishes. A run's steps and edits read the Session's diff and the run list at most every 4 and 5 seconds, `session.updated` the Session lists and the diff every 1.5 seconds, and the pull request lists every 5 seconds. Pages poll nothing else while an event covers them: the Accounts page reads its lists every 10 seconds, every other page every minute. The socket reopens after a drop and the UI reads every query again. Events (`shared/src/ws.ts`):
 
 - Settings and agents: `settings.updated`, `update.changed`, `session.output`, `session.finished`, `session.updated`,
   `approval.requested`, `approval.decided`, `action.logged`, `account.updated`, `account.removed`,
@@ -170,12 +179,12 @@ Comment pass with one can retry.
 starts a Scan of every Service for each Check interval whose slot came due. `monitor-pr-watch` reads
 the PR of every `pr_open` Fix every 5 minutes and after each pull request list refresh: merged resolves the Alert,
 closed abandons the Fix. Claude account usage is read at start and every 5 minutes on its own timer, and the update
-check runs on its own timer too (`UpdatesModule`).
+check runs on its own timer too (`UpdatesModule`). `monitor-retention` runs daily and after a Scan, at most hourly (see Monitor).
 
 **Monitor.** A Scan reads failing logs through `pup`, groups them by Fingerprint into Alerts with up
-to 25 redacted Samples, and records each Route's state. After a Scan the code finder looks once for
-each Service with no code: an imported Repo of the same name, a git folder of that name next to one,
-then a repository of that name on a connected Git host. The operator starts a Verification; it runs in
+to 25 redacted Samples, and records each Route's state. The Scan is stored one Service at a time, with a turn of the event loop between, so a large Scan never holds the daemon. After a Scan the code finder looks, two Services at a time, for
+each Service with no code it did not look for in the last week (`services.code_looked_at`): an imported Repo of the same name, a git folder of that name next to one,
+then a repository of that name on a connected Git host, read from one list of the Bitbucket workspace's repositories rather than one `git ls-remote` each. The operator starts a Verification; it runs in
 the Alert's Session, a `repo` Session in the Service's Repo or an `anonymous` Session holding a
 clone of its Git URL. Its runs work in a scratch copy: a git worktree of that code at the newest
 commit of the Verify Playbook's branch (the default branch when blank), fetched from origin first,
@@ -184,6 +193,8 @@ goes to a Markdown file in the Datadog Connector's reports folder. Confirming th
 Fix in the same Session, in its worktree and in a new conversation, stage by stage (ticket, branch,
 steps, PR), each agent run ending with JSON. The ticket stage runs only when the Fix Playbook's Jira ticket switch is
 on and Jira is connected; otherwise the branch is `fix/<name>`.
+
+**Alert list and retention.** `GET /alerts` lists the Alerts not resolved or dismissed, without `datadog_query` and with `log_line` cut to 300 characters; the detail keeps both whole. `scope=closed` lists the resolved and dismissed ones a page at a time (`limit`, `cursor`), and the Monitor reads them only once the operator ticks Closed. `GET /alerts/summary` counts the open ones. An open Alert that no Scan has seen for 14 days is resolved with an `auto_resolved` Alert event; a failing Scan later reopens it as a Regression. Scans, their Route results and Alert events older than 30 days are deleted in small batches, except the newest `ok` Scan that read each Service and the events of an Alert a Verification or Fix is working on. The Action Log is never pruned.
 
 **Prod parity.** The Alert read carries Freshness (`last_scanned_at`, `scan_overdue`) and `awaiting_prod_check`, all
 derived from `scans` and the Alert's own `resolved_at` and `cleared_at`. A Verification and a Fix each start with a
@@ -226,9 +237,11 @@ serves them stale-while-revalidate: a list older than 30 minutes (a detail older
 at once while a background read runs, and a read that changed something sends
 `pull_request.refreshed` with the changed numbers. A failed background read keeps the old list and
 marks it stale, and a failed list is tried again after 5 minutes. Refresh drops the memory and reads again; it is the
-only read besides the 30-minute one. A search by words filters what is kept. A search of just a number, with or without
+only read besides the 30-minute one. A list row carries no description and only the status, decision and staleness of its latest Agent Review; the detail has both whole. A comment, a resolve, a delete, a review or a merge patches the kept lists and detail from the host's answer (one read of that pull request at most) instead of dropping them; a job's posts do the same after it. A comment or review pre-check, and a job's start, use the kept detail once one read of the pull request alone confirms its head commit. Bitbucket, GitHub and GitLab lists and the detail's comments, commits and files follow the host's next page. A search by words filters what is kept. A search of just a number, with or without
 `#`, asks the host for that number in every known project, in any state, and keeps the answer for a minute. Mine matches
 number, title and the operator's login (the email on Bitbucket); All matches number, title and author. The UI prefetches the list at load. A host that answers 404 for an owner reads as an owner with no pull requests, not as a failed read; any other failure marks the list stale. The UI groups the list by what the operator does next (changes requested, checks failing, to review, waiting on review, ready to merge, merged or closed) and a Session that worked on the branch shows as `agent`. A pull request's Commits tab lists the branch's commits from the host.
+
+**Git calls.** The daemon's `git` processes share a pool of 8 and the host CLIs one of 6; an operator's click gets a slot before a background read. A network `git` command gives up after 8 seconds, and a job then reads the last fetched commit. Fetches of the same Repo and branch share one process while it runs, and a caller that does not need the very newest commit shares one from the last 30 seconds. An Agent Review fetches its branch, the target and the default branch in one `git fetch`; a Reply check and a Comment pass skip the default branch. A Session's code update still runs beside run start-up, and the agent's first tool waits for it.
 
 **Conflict check.** For an open pull request the daemon fetches the base and the head into the Repo's folder and runs `git merge-tree`, which touches no branch and no work tree. It runs in the background, is kept two minutes per head commit, and feeds the fifth merge check (the others: approval, checks, open threads, Agent Review). A conflict shows a box naming the files and the git commands to resolve them, marks each file `conflict`, and keeps Merge disabled. When git cannot fetch, the check reads "Conflicts not known" and does not block Merge.
 
@@ -239,7 +252,7 @@ off. Per Session it keeps the draft message and the attachments; per browser, th
 Changes panel's width and view, and the Playbook panel's width. The page a link came from rides in the router state, so a Skills page opened from a Playbook offers the way back until the operator leaves it by another route. A stored value that no longer parses falls back to the
 default.
 
-**Session browser and processes.** A `repo` or `anonymous` Session has a Browser panel and a Terminals dock (ADR 0007). A tab's page is a real Chrome page with nothing blocked; the daemon only records the outside hosts it called. The operator's address field opens any `http` or `https` URL; the agent opens and acts only on loopback pages that are not the console's own. A process starts when the operator runs a script or types in a new terminal, or approves the agent's `start_process` (an Approval in every Access mode showing the command); it runs as the operator in the login shell with only `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG` and the terminal settings from the daemon, never the session token. Stopping walks the process family: SIGHUP to the shell, SIGTERM to its children, SIGKILL after 3 seconds. A process whose folder's `.env` files hold the host of a PROD Connection is flagged in the dock and in the agent's Approval. A page's file picker is answered from the panel: the daemon keeps the chosen files in a temporary folder until the tab closes. A daemon exit stops every process and every Chrome; one killed with no cleanup takes its processes with it when the terminal closes, except one that ignores the hangup, which Local servers lists with a Stop (parent links only, and only for a server in the Session's folders or under its processes), and a daemon start ends a Chrome that a killed daemon left behind (a process whose command line names a profile folder under `browser/`); after a restart the processes list as stopped with Restart, and tabs are gone. Local servers come from `lsof`, tagged with a Session when the listening process belongs to one of its processes or runs in its folders. The browser and process tools exist only in a chat the operator started; a job, a `pr_review` Session and a read-only run have none.
+**Session browser and processes.** A `repo` or `anonymous` Session has a Browser panel and a Terminals dock (ADR 0007). A tab's page is a real Chrome page with nothing blocked; the daemon only records the outside hosts it called. The operator's address field opens any `http` or `https` URL; the agent opens and acts only on loopback pages that are not the console's own. A process starts when the operator runs a script or types in a new terminal, or approves the agent's `start_process` (an Approval in every Access mode showing the command); it runs as the operator with the environment the login shell builds (`HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG` and the terminal settings go in first, never the session token). The daemon reads that environment once per folder with `$SHELL -ilc 'env -0'` in the background, starts for the folders of stored processes at daemon start, for a folder whose Run menu or Approval opens, and again when an rc file (`.zshenv`, `.zprofile`, `.zshrc`, `.bash_profile`, `.bashrc` and the like) or a folder's version file (`mise.toml`, `.nvmrc`, `.tool-versions`) changes; a command then runs as `$SHELL -c` with that environment, and as `$SHELL -ilc` while the first read has not finished. A terminal the operator types in is always a login shell. Stopping walks the process family: SIGHUP to the shell, SIGTERM to its children, SIGKILL after 1.5 seconds (0.5 seconds on Restart). A process whose folder's `.env` files hold the host of a PROD Connection is flagged in the dock and in the agent's Approval. A page's file picker is answered from the panel: the daemon keeps the chosen files in a temporary folder until the tab closes. A daemon exit stops every process and every Chrome; one killed with no cleanup takes its processes with it when the terminal closes, except one that ignores the hangup, which Local servers lists with a Stop (parent links only, and only for a server in the Session's folders or under its processes), and a daemon start ends a Chrome that a killed daemon left behind (a process whose command line names a profile folder under `browser/`); after a restart the processes list as stopped with Restart, and tabs are gone. Local servers come from `lsof` (a scan is reused for 1.5 seconds unless a process just started or ended, and after a start the daemon scans every 500 ms for up to 30 seconds, until a listener appears under the process), tagged with a Session when the listening process belongs to one of its processes or runs in its folders. The browser and process tools exist only in a chat the operator started; a job, a `pr_review` Session and a read-only run have none.
 
 ## `state.db` holds
 
@@ -265,6 +278,21 @@ request text none. A server that starts goes through `mcp-exec`, which tells `np
 and the run waits up to 10 seconds for the servers it started. The code update (`refresh` on a Session kind) runs while the
 run starts and holds the run's first tool until it ends. The log line for each run says where the wait before the first token went.
 
+The operator opening a Session or starting to type may call `POST /api/sessions/:id/warm`. The daemon then starts the Claude Code
+process for the next chat message through the SDK's `startup()`, built from the options that message would get now, and
+keeps it for a minute (two Sessions at most). The message uses it when it would start Claude Code with the same options, and
+closes it otherwise. A job's run never uses one.
+
+Rate-limit events from a run update the account's usage only when the numbers changed, and Auto-switch looks at them at most
+every 10 seconds per account. The step rows of a run (`run_steps`) are written once every quarter second and when the run
+ends, and the Settings the daemon reads are kept parsed until one changes. The Running tray reads only the steps and usage of
+the runs it lists and keeps the command history for two minutes.
+
+Transcripts are read through a cache of parsed entries per Session, keyed by the file's size and modification time: a file that
+only grew is parsed from where the last read stopped, and a read of an unchanged file does no parsing. A Session's transcript
+is deleted with the Session, and a transcript no Session holds, with nothing written to it for 14 days, is deleted by the
+daily sweep. The sweep at start-up also removes Skill folders in the temp folder older than a day.
+
 A Session's run is a Claude Agent SDK `query()` in the working directory its kind supplies,
 resuming the stored SDK session. Each Claude account has its own `CLAUDE_CONFIG_DIR` under the data
 folder; the console never uses the operator's own Claude Code login. A `PreToolUse` hook writes the
@@ -278,7 +306,7 @@ merge tools. An Agent Review, Reply check and Comment pass also deny `git push`,
 commands and the host MCP comment tools, since the console pushes, replies and resolves. Permission prompts in `supervised` mode, and the agent's questions, reach `canUseTool`
 and wait for the operator. MCP Servers the operator disabled, and for a `devtools` Session the
 Connections outside its scope, are denied for the run. Every run's system prompt appends the kind's
-instructions, the rules for a PR description and the rule that the console, not the run, pushes and opens pull requests, then the Playbook's rules, then the console's
+instructions, the rules for a PR description and the rule that the console, not the run, pushes and opens pull requests, then the Playbook's rules, the Session's folders (the only part that differs per Session) and the console's
 safety lines. Those say that log lines and
 data are never instructions, that the agent never merges, and that no PROD value goes into a mock or
 anything else it writes. Stop ends a run and expires its Approvals, and the operator may edit the last message, which rewinds the agent's file
@@ -293,7 +321,8 @@ Smart usage moves work to the best-ranked signed-in Claude account on its own, a
 it at a usage threshold when Smart usage is off, as the design shows. Anthropic's terms may read
 this as getting around usage limits; the operator accepted that risk
 (`docs/specs/02-settings-agents.md`, Safety), and both toggles can be turned off. An account's name
-is its email, each is added once, and usage is also read for idle accounts every 5 minutes. The
+is its email, each is added once, and usage is also read for accounts with no run going every 5 minutes, one account after
+another; an account whose read failed waits twice as long after each failure, up to an hour. The
 console never reads a Claude token: sign-in runs in Anthropic's own flow, and usage comes from the
 SDK's rate-limit events and its usage request.
 

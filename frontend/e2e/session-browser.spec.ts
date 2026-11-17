@@ -130,12 +130,22 @@ test('the Terminals dock runs a shell the operator types in, and stops it (15, 1
   await expect(dock.getByRole('tab', { name: /shell/ })).toBeVisible();
   await dock.locator('.xterm-helper-textarea').focus();
   await page.keyboard.type('echo dock-says-$((20 + 22))\n');
-  await expect(dock.locator('.xterm-rows')).toContainText('dock-says-42');
+  await expect(dock.locator('.xterm-rows:visible')).toContainText('dock-says-42');
 
+  // A second terminal comes in front; the first keeps its screen, mounted behind it.
+  await dock.getByRole('button', { name: 'Run', exact: true }).click();
+  await page.getByRole('menuitem', { name: /New terminal/ }).click();
+  await expect(dock.getByRole('tab', { name: /shell-2/ })).toBeVisible();
+  await expect(dock.locator('.xterm-rows:visible')).not.toContainText('dock-says-42');
+  await expect(dock.locator('.xterm')).toHaveCount(2);
+  await dock.getByRole('tab', { name: /shell(?!-2)/ }).click();
+  await expect(dock.locator('.xterm-rows:visible')).toContainText('dock-says-42');
   await dock.getByRole('button', { name: 'Stop' }).click();
   await expect(dock.getByRole('button', { name: 'Close', exact: true })).toBeEnabled();
-  const listed = await request.get(api(`/sessions/${id}/processes`), { headers: auth });
-  expect(((await listed.json()) as { data: { state: string }[] }).data[0]?.state).toBe('stopped');
+  await dock.getByRole('tab', { name: /shell-2/ }).click();
+  await dock.getByRole('button', { name: 'Stop' }).click();
+  await expect(dock.getByRole('button', { name: 'Close', exact: true })).toBeEnabled();
+  await expect.poll(async () => (await processesOf(request, id)).map((p) => p.state)).toEqual(['stopped', 'stopped']);
 });
 
 test('a file the page asks for is chosen in the panel and handed to the page by its name (6)', async ({
@@ -216,7 +226,7 @@ test("Run lists the folder's package.json scripts and starts one; Restart runs i
   await expect(page.getByRole('menuitem', { name: /hello/ })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: /quick/ })).toBeVisible();
   await page.getByRole('menuitem', { name: /hello/ }).click();
-  await expect(dock.locator('.xterm-rows')).toContainText('hello-from-script');
+  await expect(dock.locator('.xterm-rows:visible')).toContainText('hello-from-script');
 
   const first = (await processesOf(request, id)).find((p) => p.name === 'hello');
   expect(first?.state).toBe('running');
@@ -225,7 +235,7 @@ test("Run lists the folder's package.json scripts and starts one; Restart runs i
   await expect
     .poll(async () => (await processesOf(request, id)).find((p) => p.name === 'hello')?.started_at)
     .not.toBe(first?.started_at);
-  await expect(dock.locator('.xterm-rows')).toContainText('hello-from-script');
+  await expect(dock.locator('.xterm-rows:visible')).toContainText('hello-from-script');
   expect((await processesOf(request, id)).find((p) => p.name === 'hello')?.state).toBe('running');
 
   await dock.getByRole('button', { name: 'Stop' }).click();

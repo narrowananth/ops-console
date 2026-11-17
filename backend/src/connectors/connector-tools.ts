@@ -8,6 +8,10 @@ import { ApiError } from '../common/errors';
 const run = promisify(execFile);
 
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
+/** `bkt api /user` answers in under a second; one that has not by now is not going to. */
+const BITBUCKET_USER_TIMEOUT_MS = 10_000;
+/** A signed-in Bitbucket nickname is reused this long: the Connect flow and each check read it. */
+const BITBUCKET_USER_KEPT_MS = 10 * 60_000;
 
 /** What a browser sign-in printed for the operator: the page to open and, for a device sign-in, the code to enter. */
 export type SignInPrompt = { code: string | null; url: string | null };
@@ -44,8 +48,8 @@ export interface ConnectorTools {
   slashdocsLogin(server: string | null, signal: AbortSignal, onPrompt: (prompt: SignInPrompt) => void): Promise<void>;
   /** Whether a command is on the PATH. */
   installed(command: string): Promise<boolean>;
-  /** `brew install <formula>`. */
-  install(formula: string): Promise<void>;
+  /** One `brew install <formula…>`. */
+  install(formulas: string[]): Promise<void>;
 }
 
 const datadogStatusSchema = z.object({ authenticated: z.boolean(), org: z.string().nullish() }).loose();
@@ -172,10 +176,18 @@ export class CliConnectorTools implements ConnectorTools {
     );
   }
 
+  /** The nickname `bkt` signed in as, with when it was read; a sign-in or a signed-out read drops it. */
+  private bitbucketKept: { nickname: string; at: number } | null = null;
+
   async bitbucketUser(): Promise<string | null> {
+    if (this.bitbucketKept && Date.now() - this.bitbucketKept.at < BITBUCKET_USER_KEPT_MS) {
+      return this.bitbucketKept.nickname;
+    }
+    this.bitbucketKept = null;
     try {
-      const { stdout } = await run(this.bins.bkt, ['api', '/user'], { timeout: 60_000 });
+      const { stdout } = await run(this.bins.bkt, ['api', '/user'], { timeout: BITBUCKET_USER_TIMEOUT_MS });
       const user = z.object({ nickname: z.string() }).safeParse(JSON.parse(stdout));
+      if (user.success) this.bitbucketKept = { nickname: user.data.nickname, at: Date.now() };
       return user.success ? user.data.nickname : null;
     } catch (error) {
       if (typeof (error as { code?: unknown }).code === 'number') return null;
@@ -184,6 +196,7 @@ export class CliConnectorTools implements ConnectorTools {
   }
 
   async bitbucketLogin(signal: AbortSignal, onPrompt: (prompt: SignInPrompt) => void): Promise<void> {
+    this.bitbucketKept = null;
     await this.exec(
       this.bins.bkt,
       ['auth', 'login', 'https://bitbucket.org', '--kind', 'cloud', '--web'],
@@ -202,15 +215,15 @@ export class CliConnectorTools implements ConnectorTools {
     }
   }
 
-  async install(formula: string): Promise<void> {
+  async install(formulas: string[]): Promise<void> {
     try {
-      await run('brew', ['install', formula], {
+      await run('brew', ['install', ...formulas], {
         env: { ...process.env, HOMEBREW_NO_AUTO_UPDATE: '1', NONINTERACTIVE: '1' },
         maxBuffer: 10 * 1024 * 1024,
         timeout: INSTALL_TIMEOUT_MS,
       });
     } catch {
-      throw new ApiError(502, ErrorCode.UpstreamFailed, `\`brew install ${formula}\` failed`);
+      throw new ApiError(502, ErrorCode.UpstreamFailed, `\`brew install ${formulas.join(' ')}\` failed`);
     }
   }
 

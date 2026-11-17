@@ -1,4 +1,4 @@
-import { PrState, type PullRequest, SessionKind } from '@ops-console/shared';
+import { PrState, type PullRequestSummary, SessionKind } from '@ops-console/shared';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button, Spinner } from '../components/ui/button';
 import { useCreateRepoSession, useRepoSessions } from '../lib/queries';
@@ -9,7 +9,7 @@ import { sessionDraftKey, sessionPath } from './links';
  * The Sessions on a pull request's branch, each a link to it, and New Session, which starts one there and opens it
  * with the pull request named in its draft, for the operator to say what to change.
  */
-export function PrSessions({ pr }: { pr: PullRequest }) {
+export function PrSessions({ pr }: { pr: PullRequestSummary }) {
   const sessions = useRepoSessions();
   const create = useCreateRepoSession();
   const navigate = useNavigate();

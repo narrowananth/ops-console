@@ -33,15 +33,19 @@ export class FakeProbe implements Probe {
 
   /** `one` runs; it never waits `delayMs`, as one server connects in seconds. */
   ones = 0;
+  /** The config dir of each Probe, `run` and `one` alike, in order. */
+  readonly asked: string[] = [];
 
   async one(configDir: string, server: OneServer): Promise<ProbedServer> {
     this.ones += 1;
+    this.asked.push(configDir);
     if (this.broken.has(configDir)) throw new Error('Claude did not answer');
     return this.read(configDir, server.name);
   }
 
   async run(configDir: string, cwd: string): Promise<ProbedServer[]> {
     this.runs += 1;
+    this.asked.push(configDir);
     this.running += 1;
     this.mostAtOnce = Math.max(this.mostAtOnce, this.running);
     try {

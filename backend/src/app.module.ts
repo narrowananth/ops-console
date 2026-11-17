@@ -14,7 +14,6 @@ import type { KeychainHandoverTracker } from './keychain/handover-state';
 import type { Keychain } from './keychain/keychain';
 import { KeychainModule } from './keychain/keychain.module';
 import type { KeychainWaitTracker } from './keychain/keychain-wait';
-import { McpClientModule } from './mcp-client/mcp-client.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { SettingsModule } from './settings/settings.module';
 
@@ -44,7 +43,6 @@ export class AppModule {
         SchedulerModule,
         KeychainModule.forRoot(parts.keychain, parts.keychainWait, parts.keychainHandover),
         ClaudeCliModule.forRoot(parts.claudeBin),
-        McpClientModule.forRoot(parts.session.version),
         ...parts.modules,
       ],
       controllers: [HealthController],

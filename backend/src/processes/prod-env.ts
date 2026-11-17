@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 const ENV_FILE = /^\.env(\..+)?$/;
@@ -22,19 +22,39 @@ function hostsOf(config: Record<string, unknown>): string[] {
   return [...hosts];
 }
 
+const texts = new Map<string, { stamp: string; text: string }>();
+const MAX_FOLDERS = 64;
+
+/** The lower-cased text of a folder's `.env` files; read again only when one changed. */
+async function envText(folder: string): Promise<string> {
+  const files = (await readdir(folder)).filter((entry) => ENV_FILE.test(entry)).sort();
+  const infos = await Promise.all(files.map((name) => stat(path.join(folder, name))));
+  const stamp = files.map((name, i) => `${name}:${infos[i]?.mtimeMs}:${infos[i]?.size}`).join('|');
+  const known = texts.get(folder);
+  if (known?.stamp === stamp) return known.text;
+  let text = '';
+  for (const [i, name] of files.entries()) {
+    if ((infos[i]?.size ?? 0) <= MAX_BYTES)
+      text += `${(await readFile(path.join(folder, name), 'utf8')).toLowerCase()}\n`;
+  }
+  texts.delete(folder);
+  texts.set(folder, { stamp, text });
+  if (texts.size > MAX_FOLDERS) texts.delete(texts.keys().next().value ?? '');
+  return text;
+}
+
 /**
  * The PROD Connections whose host appears in the `.env` files of a folder. A process runs with that file, so it may
  * reach those databases; the console cannot tell what the process does with them, only that the file names them.
  */
-export function prodConnectionsNamedIn(folder: string, prod: readonly { name: string; config: string }[]): string[] {
+export async function prodConnectionsNamedIn(
+  folder: string,
+  prod: readonly { name: string; config: string }[],
+): Promise<string[]> {
   if (prod.length === 0) return [];
-  let text = '';
+  let text: string;
   try {
-    for (const entry of readdirSync(folder)) {
-      if (!ENV_FILE.test(entry)) continue;
-      const file = path.join(folder, entry);
-      if (statSync(file).size <= MAX_BYTES) text += `${readFileSync(file, 'utf8').toLowerCase()}\n`;
-    }
+    text = await envText(folder);
   } catch {
     return [];
   }

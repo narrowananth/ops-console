@@ -84,7 +84,15 @@ export function claudeEnv(configDir: ConfigDir): NodeJS.ProcessEnv {
 
 /** `claude mcp get` joins args with spaces, so an arg holding a space comes back split. */
 export class ClaudeCli {
+  /** Ends the `claude` calls under way when the daemon stops. */
+  private readonly stopping = new AbortController();
+
   constructor(readonly bin = 'claude') {}
+
+  /** Stops every `claude` call under way and refuses new ones: the daemon is shutting down. */
+  stopAll(): void {
+    this.stopping.abort();
+  }
 
   async mcpGet(name: string): Promise<McpServerConfig> {
     const output = await this.exec(['mcp', 'get', name], 'mcp get', { configDir: null });
@@ -224,7 +232,12 @@ export class ClaudeCli {
     exitCodes = [0],
   ): Promise<string> {
     try {
-      const { stdout } = await run(this.bin, args, { maxBuffer: 10 * 1024 * 1024, env: claudeEnv(configDir), cwd });
+      const { stdout } = await run(this.bin, args, {
+        maxBuffer: 10 * 1024 * 1024,
+        env: claudeEnv(configDir),
+        cwd,
+        signal: this.stopping.signal,
+      });
       return stdout;
     } catch (error) {
       const { code, stdout } = error as { code?: unknown; stdout?: unknown };

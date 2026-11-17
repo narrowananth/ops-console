@@ -25,8 +25,8 @@ import { RELEASES, type ReleaseSource } from './releases';
 
 export const UPDATES = 'updates';
 const FIRST_CHECK_MS = 10_000;
-/** A release is found within a minute of going out; each check is one small request to GitHub (`GithubReleases`). */
-const CHECK_EVERY_MS = 60_000;
+/** A release is found within ten minutes of going out; each check is one small request to GitHub (`GithubReleases`). */
+const CHECK_EVERY_MS = 10 * 60_000;
 /** How often an update waiting on agent runs looks again. */
 const IDLE_POLL_MS = 30_000;
 /** The states the Running count shows; a restart fails each of them. */
@@ -44,7 +44,7 @@ const versionRecord = z.object({
 type VersionRecord = z.infer<typeof versionRecord>;
 
 /**
- * The console's own version against the newest GitHub release. It checks 10 seconds after start and every minute, installs a
+ * The console's own version against the newest GitHub release. It checks 10 seconds after start and every 10 minutes, installs a
  * newer release when asked or, with auto-update on, by itself, and always waits for agent runs to finish unless the
  * operator says now. Installing restarts the daemon on the new version.
  */
@@ -60,6 +60,8 @@ export class UpdatesService implements OnApplicationBootstrap, OnModuleDestroy {
   /** The operator asked to install once no run is going. */
   private waitForIdle = false;
   private installing = false;
+  /** What the browsers last heard. */
+  private announced: string | null = null;
   private readonly timers: ReturnType<typeof setTimeout>[] = [];
 
   constructor(
@@ -122,7 +124,7 @@ export class UpdatesService implements OnApplicationBootstrap, OnModuleDestroy {
       this.error = null;
     } catch (error) {
       const message = `Could not reach GitHub: ${(error as Error).message}`;
-      // A check runs every minute: a lost connection is logged once, not at every check until it returns.
+      // A lost connection is logged once, not at every check until it returns.
       if (this.error === null) this.log.warn(message);
       this.error = message;
     }
@@ -228,7 +230,11 @@ export class UpdatesService implements OnApplicationBootstrap, OnModuleDestroy {
     return row?.n ?? 0;
   }
 
+  /** Tells every browser when what it shows moved; a check that finds the same state, only later, says nothing. */
   private announce(): void {
+    const shown = JSON.stringify([this.status, this.latest?.version ?? null, this.error, this.autoUpdate()]);
+    if (this.announced === shown) return;
+    this.announced = shown;
     this.store.write((_tx, emit) => emit('update.changed', { status: this.status }));
   }
 

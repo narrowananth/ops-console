@@ -62,7 +62,7 @@ export function OpenPullRequestForm({
           className={FIELD}
           value={title}
           readOnly={drafting}
-          placeholder={drafting ? 'The agent is writing the title…' : 'Title'}
+          placeholder={drafting ? 'Reading the commits…' : 'Title'}
           onChange={(event) => setTitle(event.target.value)}
         />
       </label>
@@ -72,7 +72,7 @@ export function OpenPullRequestForm({
           className={`${FIELD} min-h-32 resize-y font-mono`}
           value={description}
           readOnly={drafting}
-          placeholder={drafting ? 'The agent is writing the description…' : 'Description'}
+          placeholder={drafting ? 'Reading the commits…' : 'Description'}
           onChange={(event) => setDescription(event.target.value)}
         />
       </label>

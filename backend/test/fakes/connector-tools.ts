@@ -97,8 +97,14 @@ export class FakeConnectorTools implements ConnectorTools {
     return !this.missing.has(command);
   }
 
-  async install(formula: string): Promise<void> {
-    this.brewed.push(formula);
-    this.missing.delete(formula);
+  /** Each `brew install` call, so a test sees one command for several formulas. */
+  readonly brewCalls: string[][] = [];
+
+  async install(formulas: string[]): Promise<void> {
+    this.brewCalls.push(formulas);
+    for (const formula of formulas) {
+      this.brewed.push(formula);
+      this.missing.delete(formula);
+    }
   }
 }

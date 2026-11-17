@@ -10,9 +10,18 @@ while [ -L "$self" ]; do
   esac
 done
 root=$(cd "$(dirname "$self")/.." && pwd -P)
+# Keychain calls that wait for a password hold a thread each; the pool must outlast a few of them.
+export UV_THREADPOOL_SIZE=${UV_THREADPOOL_SIZE:-16}
 case ${1:-} in
-  daemon) exec "$root/node/bin/node" "$root/app/main.js" ;;
-  # The daemon bundle carries the Keychain module; the CLI bundle does not.
-  mcp-exec | mcp-setup) exec "$root/node/bin/node" "$root/app/main.js" "$@" ;;
+  daemon)
+    export NODE_COMPILE_CACHE=${NODE_COMPILE_CACHE:-$root/../../compile-cache}
+    exec "$root/node/bin/node" "$root/app/main.js"
+    ;;
+  # Small entry with the Keychain and the launcher only, not the whole daemon bundle.
+  mcp-exec)
+    shift
+    exec "$root/node/bin/node" "$root/app/mcp-exec.js" "$@"
+    ;;
+  mcp-setup) exec "$root/node/bin/node" "$root/app/main.js" "$@" ;;
 esac
 exec "$root/node/bin/node" "$root/cli/ops-console.js" "$@"

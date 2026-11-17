@@ -5,11 +5,13 @@ import {
   type AlertDetail,
   type AlertEvent,
   AlertEventKind,
+  type AlertListItem,
   AlertStatus,
   type AlertSummary,
   alertsQuerySchema,
   type CheckInterval,
   ErrorCode,
+  type Page,
   type Report,
   ScanStatus,
 } from '@ops-console/shared';
@@ -23,6 +25,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
   ne,
   notInArray,
   or,
@@ -31,6 +34,7 @@ import {
 } from 'drizzle-orm';
 import type { z } from 'zod';
 import { ApiError } from '../common/errors';
+import { afterCursor, toPage } from '../common/pagination';
 import { alertEvents, alerts, fixes, reports, reviews, routes, scans, services, sessions } from '../db/schema';
 import { STORE, type Store, type Tx } from '../db/store';
 import { jobPlaybook } from '../playbooks/job-steps';
@@ -43,10 +47,13 @@ import {
   samplesOf,
   toAlert,
   toAlertEvent,
+  toAlertListItem,
   toFix,
   toReport,
   toReview,
 } from './mappers';
+
+const CLOSED = [AlertStatus.Resolved, AlertStatus.Dismissed];
 
 const SEQ = sql`"alert_events"."rowid"`;
 
@@ -65,26 +72,47 @@ export class AlertsService {
     return row;
   }
 
-  list(query: z.infer<typeof alertsQuerySchema>): Alert[] {
+  /**
+   * The Alerts the Monitor lists: every one not yet resolved or dismissed, or with `scope=closed` the resolved and
+   * dismissed ones, newest sighting first, a page at a time.
+   */
+  list(query: z.infer<typeof alertsQuerySchema>): Page<AlertListItem> {
+    const closed = query.scope === 'closed';
+    const after = afterCursor(query.cursor);
+    const [seenAt = '', afterId = ''] = after?.split('|') ?? [];
     const filters: (SQL | undefined)[] = [
       query.status === undefined ? undefined : eq(alerts.status, query.status),
       query.severity === undefined ? undefined : eq(alerts.severity, query.severity),
       query.service_id === undefined ? undefined : eq(services.id, query.service_id),
+      closed
+        ? inArray(alerts.status, CLOSED)
+        : query.status === undefined
+          ? notInArray(alerts.status, CLOSED)
+          : undefined,
+      closed && after !== undefined
+        ? or(lt(alerts.lastSeenAt, seenAt), and(eq(alerts.lastSeenAt, seenAt), lt(alerts.id, afterId)))
+        : undefined,
     ];
     const { samples: _samples, ...columns } = getTableColumns(alerts);
-    const rows = this.store.db
+    const found = this.store.db
       .select({ alert: columns, route: routes, service: services })
       .from(alerts)
       .innerJoin(routes, eq(routes.id, alerts.routeId))
       .innerJoin(services, eq(services.id, routes.serviceId))
       .where(and(...filters))
       .orderBy(desc(alerts.lastSeenAt), desc(alerts.id))
+      .limit(closed ? query.limit + 1 : -1)
       .all();
     const read = this.scanRead();
     const sessionOf = this.sessionsByAlert();
-    return rows.map(({ alert, route, service }) =>
-      toAlert(alert, route, service, this.extra(alert, service, read, sessionOf)),
+    // Freshness depends on the Service and the status code only, so Alerts that share both share one answer.
+    const fresh = new Map<string, ReturnType<typeof freshnessOf>>();
+    const rows = found.map(({ alert, route, service }) =>
+      toAlertListItem(alert, route, service, this.extra(alert, service, read, sessionOf, fresh)),
     );
+    return closed
+      ? toPage(rows, query.limit, (row) => `${row.last_seen_at}|${row.id}`)
+      : { data: rows, meta: { next_cursor: null } };
   }
 
   /**
@@ -96,10 +124,7 @@ export class AlertsService {
       .select({ open: count() })
       .from(alerts)
       .where(
-        and(
-          notInArray(alerts.status, [AlertStatus.Resolved, AlertStatus.Dismissed]),
-          or(isNotNull(alerts.httpStatus), ne(alerts.status, AlertStatus.Open)),
-        ),
+        and(notInArray(alerts.status, CLOSED), or(isNotNull(alerts.httpStatus), ne(alerts.status, AlertStatus.Open))),
       )
       .get();
     return { open: row?.open ?? 0 };
@@ -236,7 +261,13 @@ export class AlertsService {
     return found;
   }
 
-  private extra(alert: AlertListRow, service: ServiceRow, read: ScanRead, sessionOf?: Map<string, string>) {
+  private extra(
+    alert: AlertListRow,
+    service: ServiceRow,
+    read: ScanRead,
+    sessionOf?: Map<string, string>,
+    memo?: Map<string, ReturnType<typeof freshnessOf>>,
+  ) {
     const waiting =
       alert.status === AlertStatus.Verified
         ? this.store.db
@@ -252,7 +283,12 @@ export class AlertsService {
         ? null
         : (this.store.db.select({ id: sessions.id }).from(sessions).where(eq(sessions.alertId, alert.id)).get()?.id ??
           null));
-    const fresh = freshnessOf(read.scans, alert, service, read.interval);
+    const key = `${service.id}|${alert.httpStatus}`;
+    let fresh = memo?.get(key);
+    if (!fresh) {
+      fresh = freshnessOf(read.scans, alert, service, read.interval);
+      memo?.set(key, fresh);
+    }
     return {
       waitingSince: waiting ?? null,
       sessionId,

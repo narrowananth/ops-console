@@ -1,15 +1,21 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, type OnModuleDestroy } from '@nestjs/common';
 import { type RunPurpose, type Subagent, SubagentStatus } from '@ops-console/shared';
 import { and, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
 import { redact } from '../action-log/redact';
 import { runAgents, runSteps, runUsage } from '../db/schema';
-import { STORE, type Store } from '../db/store';
+import { STORE, type Store, type Tx } from '../db/store';
 import { mergeLines, sumTokens, type UsageLine } from './pricing';
 import { phaseOf, type StepFacts } from './run-insight';
 import type { Run } from './runs';
 
 /** Steps rows kept to say how long a command usually takes. */
 const HISTORY_ROWS = 3000;
+
+/** The command history changes slowly; the tray list reads it on every tool call. */
+const HISTORY_TTL_MS = 2 * 60_000;
+
+/** Step writes wait this long to share one transaction. */
+const FLUSH_EVERY_MS = 250;
 
 type StepRow = typeof runSteps.$inferSelect;
 export type AgentRow = typeof runAgents.$inferSelect;
@@ -31,8 +37,35 @@ export function factsOf(row: StepRow): StepFacts {
 
 /** Writes each tool call of a run as it starts and ends, so the Agent runs page can say where the time went. */
 @Injectable()
-export class RunStepsLog {
+export class RunStepsLog implements OnModuleDestroy {
   constructor(@Inject(STORE) private readonly store: Store) {}
+
+  /** Step writes not yet saved, in the order they happened. Reads and the end of a run save them first. */
+  private pending: ((tx: Tx) => void)[] = [];
+  private flushTimer: NodeJS.Timeout | null = null;
+  private cached: { at: number; rows: StepFacts[] } | null = null;
+
+  onModuleDestroy(): void {
+    this.flush();
+  }
+
+  private queue(write: (tx: Tx) => void): void {
+    this.pending.push(write);
+    this.flushTimer ??= setTimeout(() => this.flush(), FLUSH_EVERY_MS);
+    this.flushTimer.unref();
+  }
+
+  /** Saves the queued step writes in one transaction. */
+  flush(): void {
+    if (this.flushTimer) clearTimeout(this.flushTimer);
+    this.flushTimer = null;
+    const writes = this.pending;
+    if (writes.length === 0) return;
+    this.pending = [];
+    this.store.write((tx) => {
+      for (const write of writes) write(tx);
+    });
+  }
 
   /** A subagent starts (the run's `task_started`): kept past the run, with how it ends. */
   agentStarted(run: Run, agent: Subagent): void {
@@ -100,33 +133,29 @@ export class RunStepsLog {
   }
 
   start(run: Run, step: { id: string; agentId: string | null; tool: string; summary: string }): void {
-    this.store.write((tx) =>
-      tx
-        .insert(runSteps)
-        .values({
-          id: step.id,
-          sessionId: run.sessionId,
-          runStartedAt: run.createdAt,
-          agentId: step.agentId,
-          tool: step.tool,
-          summary: redact(step.summary).slice(0, 300),
-          phase: phaseOf(step.tool),
-          startedAt: new Date().toISOString(),
-        })
-        .onConflictDoNothing()
-        .run(),
-    );
+    const values = {
+      id: step.id,
+      sessionId: run.sessionId,
+      runStartedAt: run.createdAt,
+      agentId: step.agentId,
+      tool: step.tool,
+      summary: redact(step.summary).slice(0, 300),
+      phase: phaseOf(step.tool),
+      startedAt: new Date().toISOString(),
+    };
+    this.queue((tx) => tx.insert(runSteps).values(values).onConflictDoNothing().run());
   }
 
   finish(id: string, outcome: { ok: boolean; error?: string }): void {
-    this.store.write((tx) =>
+    const set = {
+      finishedAt: new Date().toISOString(),
+      ok: outcome.ok,
+      error: outcome.error === undefined ? null : redact(outcome.error).slice(0, 500),
+    };
+    this.queue((tx) =>
       tx
         .update(runSteps)
-        .set({
-          finishedAt: new Date().toISOString(),
-          ok: outcome.ok,
-          error: outcome.error === undefined ? null : redact(outcome.error).slice(0, 500),
-        })
+        .set(set)
         .where(and(eq(runSteps.id, id), isNull(runSteps.finishedAt)))
         .run(),
     );
@@ -135,7 +164,7 @@ export class RunStepsLog {
   /** Time a call spent waiting on the operator. */
   waited(id: string, ms: number): void {
     if (ms <= 0) return;
-    this.store.write((tx) =>
+    this.queue((tx) =>
       tx
         .update(runSteps)
         .set({ waitedMs: sql`${runSteps.waitedMs} + ${Math.round(ms)}` })
@@ -146,6 +175,7 @@ export class RunStepsLog {
 
   /** A run ends with calls still open: the abort or the crash cut them off. */
   closeOpen(sessionId: string, why: string): void {
+    this.flush();
     this.closeOpenAgents(sessionId);
     this.store.write((tx) =>
       tx
@@ -222,20 +252,25 @@ export class RunStepsLog {
     });
   }
 
-  /** The steps of the run that began at `startedAt` in each Session, oldest first. */
-  stepsOf(sessionIds: string[]): StepRow[] {
-    if (sessionIds.length === 0) return [];
+  /** The steps of the given runs, oldest first. */
+  stepsOf(runs: RunKey[]): StepRow[] {
+    const keys = keysOf(runs);
+    if (keys === null) return [];
+    this.flush();
     return this.store.db
       .select()
       .from(runSteps)
-      .where(inArray(runSteps.sessionId, sessionIds))
+      .where(and(inArray(runSteps.sessionId, keys.sessions), inArray(runSteps.runStartedAt, keys.starts)))
       .orderBy(runSteps.startedAt)
-      .all();
+      .all()
+      .filter((row) => keys.has(row.sessionId, row.runStartedAt));
   }
 
-  /** Finished command steps of every run, newest first, for how long a command usually takes. */
+  /** Finished command steps of every run, newest first, for how long a command usually takes. Kept for a few minutes. */
   history(): StepFacts[] {
-    return this.store.db
+    const now = Date.now();
+    if (this.cached && now - this.cached.at < HISTORY_TTL_MS) return this.cached.rows;
+    const rows = this.store.db
       .select()
       .from(runSteps)
       .where(and(eq(runSteps.tool, 'Bash'), sql`${runSteps.finishedAt} is not null`))
@@ -243,17 +278,51 @@ export class RunStepsLog {
       .limit(HISTORY_ROWS)
       .all()
       .map(factsOf);
+    this.cached = { at: now, rows };
+    return rows;
   }
 
-  usageOf(sessionIds: string[]): UsageRow[] {
-    if (sessionIds.length === 0) return [];
-    return this.store.db.select().from(runUsage).where(inArray(runUsage.sessionId, sessionIds)).all().map(usageRowOf);
+  /** The saved usage of the given runs. */
+  usageOf(runs: RunKey[]): UsageRow[] {
+    const keys = keysOf(runs);
+    if (keys === null) return [];
+    return this.store.db
+      .select()
+      .from(runUsage)
+      .where(and(inArray(runUsage.sessionId, keys.sessions), inArray(runUsage.runStartedAt, keys.starts)))
+      .all()
+      .filter((row) => keys.has(row.sessionId, row.runStartedAt))
+      .map(usageRowOf);
   }
 
   /** The usage of every run that ended since `since`, for the day's total. */
   usageRowsSince(since: string): UsageRow[] {
     return this.store.db.select().from(runUsage).where(gte(runUsage.finishedAt, since)).all().map(usageRowOf);
   }
+}
+
+/** A run: the Session and the start that ties its steps and usage to it. */
+export type RunKey = { sessionId: string; runStartedAt: string | null };
+
+/** The sessions and starts a query narrows by, and the exact pairs to keep from its rows. */
+function keysOf(
+  runs: RunKey[],
+): { sessions: string[]; starts: string[]; has(session: string, start: string): boolean } | null {
+  const pairs = new Set<string>();
+  const sessions = new Set<string>();
+  const starts = new Set<string>();
+  for (const { sessionId, runStartedAt } of runs) {
+    if (runStartedAt === null) continue;
+    pairs.add(`${sessionId}\u0000${runStartedAt}`);
+    sessions.add(sessionId);
+    starts.add(runStartedAt);
+  }
+  if (pairs.size === 0) return null;
+  return {
+    sessions: [...sessions],
+    starts: [...starts],
+    has: (session, start) => pairs.has(`${session}\u0000${start}`),
+  };
 }
 
 /** One run's saved usage: the SDK's cost, every token, and the raw counts when they were kept. */

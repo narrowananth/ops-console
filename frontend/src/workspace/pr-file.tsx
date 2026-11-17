@@ -1,5 +1,5 @@
 import { GitHost, type PrFile, type PullRequestDetail } from '@ops-console/shared';
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { DiffLines, DiffStat, FullFileDiff, type LineComments, SplitDiff } from '../components/ui/diff';
 import { usePostComment, usePrFile } from '../lib/queries';
@@ -132,8 +132,43 @@ function FileMenu(props: {
   );
 }
 
-/** One changed file: fold it, mark it viewed (which folds it), or read it side by side or whole. */
-export function PrFileView({
+/** A file this long draws its lines only once it nears the screen; a shorter one draws at once. */
+const LAZY_LINES = 150;
+/** How far past the screen a file starts drawing, so a scroll meets lines already there. */
+const NEAR_PX = 800;
+
+/**
+ * True once `target` has come within `NEAR_PX` of the screen, and from then on: a file scrolled past keeps its lines,
+ * so its comment box and scroll position stay. `soon` skips the wait for a short file.
+ */
+function useNearScreen(target: React.RefObject<HTMLElement | null>, soon: boolean): boolean {
+  const [near, setNear] = useState(soon);
+  useEffect(() => {
+    const node = target.current;
+    if (near || !node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) setNear(true);
+      },
+      { rootMargin: `${NEAR_PX}px 0px` },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [near, target]);
+  return near;
+}
+
+/**
+ * One changed file: fold it, mark it viewed (which folds it), or read it side by side or whole. Props are compared
+ * without `onViewed`, which the page makes anew at each render and which only reads the file and pull request given
+ * here, so an event on the page redraws only the files that changed.
+ */
+export const PrFileView = memo(
+  ChangedFile,
+  (a, b) => a.pr === b.pr && a.file === b.file && a.viewed === b.viewed && a.bulk === b.bulk,
+);
+
+function ChangedFile({
   pr,
   file,
   viewed,
@@ -148,6 +183,8 @@ export function PrFileView({
   bulk: { open: boolean } | null;
 }) {
   const at = `${pr.repo_id}#${pr.number}.${file.name}`;
+  const section = useRef<HTMLElement>(null);
+  const near = useNearScreen(section, file.lines.length < LAZY_LINES);
   const [open, setOpen] = useStored(`workspace.pr-file-open.${at}`, z.boolean(), !viewed);
   useEffect(() => {
     if (bulk) setOpen(bulk.open);
@@ -207,7 +244,11 @@ export function PrFileView({
   };
 
   return (
-    <section aria-label={file.name} className="overflow-hidden rounded-md border border-divider bg-card">
+    <section
+      ref={section}
+      aria-label={file.name}
+      className="overflow-hidden rounded-md border border-divider bg-card [contain-intrinsic-size:auto_300px] [content-visibility:auto]"
+    >
       <div
         className={`flex items-center gap-2 bg-surface px-2 py-1 font-mono text-xs ${open ? 'border-b border-divider' : ''}`}
       >
@@ -278,7 +319,9 @@ export function PrFileView({
           }}
         />
       </div>
+      {open && !near && <div aria-hidden style={{ height: Math.min(file.lines.length * 20, 600) }} />}
       {open &&
+        near &&
         (file.lines.length === 0 ? (
           <div className="px-3 py-2 text-xs text-neutral-700">No text diff: binary, renamed or too large.</div>
         ) : full ? (

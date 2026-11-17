@@ -22,6 +22,7 @@ import type { RunSummary } from '../agent/runs';
 import { AgentRuntime, HOST_WRITE_DENIALS } from '../agent/runtime';
 import { SessionsService } from '../agent/sessions.service';
 import { ApiError } from '../common/errors';
+import { mapLimit } from '../common/map-limit';
 import { StartupRecovery } from '../common/recovery';
 import { agentComments, prAgentReviews } from '../db/schema';
 import { STORE, type Store } from '../db/store';
@@ -30,7 +31,7 @@ import { PlaybooksService } from '../playbooks/playbooks.service';
 import { parseSkillCopies, skillCopiesJson } from '../playbooks/skills.service';
 import { GIT, Git, GitFailed } from '../repos/git';
 import type { HostComment, HostPullRequest } from './git-host';
-import { JobFailed, PrJobs } from './pr-jobs';
+import { JobFailed, POST_PARALLEL, PrJobs } from './pr-jobs';
 import { PullRequestsService, toAgentReview } from './pull-requests.service';
 
 const outputSchema = z.object({
@@ -257,7 +258,7 @@ export class AgentReviewsService {
   async start(repoId: string, number: number, note?: string): Promise<PrAgentReview> {
     const repo = this.pulls.hosted(repoId);
     const slug = repo.remoteSlug as string;
-    const { pr, files, comments } = await this.pulls.adapter(repo).get(slug, number);
+    const { pr, files, comments } = await this.pulls.recent(repo, number);
     const reviewed = this.store.db
       .select({ id: prAgentReviews.id })
       .from(prAgentReviews)
@@ -313,7 +314,7 @@ export class AgentReviewsService {
     }
     const repo = this.pulls.hosted(row.repoId);
     const slug = repo.remoteSlug as string;
-    const { pr, files, comments } = await this.pulls.adapter(repo).get(slug, row.prNumber);
+    const { pr, files, comments } = await this.pulls.recent(repo, row.prNumber);
     if (pr.head_sha !== row.headSha) {
       throw new ApiError(409, ErrorCode.InvalidState, 'The pull request has new commits; review it again');
     }
@@ -355,12 +356,19 @@ export class AgentReviewsService {
     const steps = this.steps.rows(job);
     const repo = this.pulls.repoRow(row.repoId);
     const writes = steps.some((step) => step.writes);
-    const scratch = writes ? await this.jobs.makeScratch(repo, read.pr.branch, row.headSha, `review-${row.id}`) : null;
+    // The branch, the target and the production branch come in one `git fetch`; when that fails, each is asked alone.
+    const production = await this.git.defaultBranch(repo.path).catch(() => null);
+    const wanted = [read.pr.branch, read.pr.base_branch, ...(production ? [production] : [])];
+    const heads = await this.git.remoteHeads(repo.path, wanted).catch(() => null);
+    const scratch = writes
+      ? await this.jobs.makeScratch(repo, read.pr.branch, row.headSha, `review-${row.id}`, heads !== null)
+      : null;
     try {
       const place: ReviewPlace = {
         scratch,
-        base: await this.base(repo.path, read.pr.base_branch),
-        production: await this.production(repo.path, read.pr.base_branch),
+        base: await this.base(repo.path, read.pr.base_branch, heads),
+        production:
+          production && production !== read.pr.base_branch ? await this.base(repo.path, production, heads) : null,
       };
       this.store.write((tx) =>
         tx
@@ -394,19 +402,13 @@ export class AgentReviewsService {
   }
 
   /** The target branch's commit, fetched from `origin`; null when it cannot be read. */
-  private async base(dir: string, branch: string): Promise<ReviewPlace['base']> {
+  private async base(dir: string, branch: string, fetched: Map<string, string> | null): Promise<ReviewPlace['base']> {
     try {
-      return { branch, sha: await this.git.remoteHead(dir, branch) };
+      return { branch, sha: fetched?.get(branch) ?? (await this.git.remoteHead(dir, branch)) };
     } catch (error) {
       this.logger.warn(`base ${branch} not read: ${error instanceof GitFailed ? error.message : String(error)}`);
       return null;
     }
-  }
-
-  /** The Repo's default branch at its newest commit, fetched from `origin`; null when it is the target branch or cannot be read. */
-  private async production(dir: string, target: string): Promise<ReviewPlace['production']> {
-    const branch = await this.git.defaultBranch(dir).catch(() => null);
-    return branch && branch !== target ? this.base(dir, branch) : null;
   }
 
   /** After the operator posts a reply: a thread the agent started wakes the agent. */
@@ -456,7 +458,7 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
         .postComment(slug, number, { body: summary.text.trim(), head_sha: pr.head_sha, parent_id: root });
       this.record(repoId, number, posted.id, null);
       this.actionLog.finish(row, ActionOutcome.Ok);
-      this.pulls.drop(repoId);
+      this.pulls.wrote(repoId, number);
       this.store.write((_tx, emit) =>
         emit('pull_request.commented', { repo_id: repoId, number, comment_id: posted.id, by_agent: true }),
       );
@@ -482,9 +484,9 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
     const repo = this.pulls.repoRow(review.repoId);
     const adapter = this.pulls.adapter(repo);
     const earlier = await this.openAgentThreads(review.repoId, review.prNumber, slug);
-    const findings: Finding[] = [];
     let posted = 0;
-    for (const found of output.findings) {
+    // A few posts at a time: each is a host round trip. The findings keep the review's order.
+    const findings = await mapLimit(output.findings, POST_PARALLEL, async (found): Promise<Finding> => {
       const inline = found.file && found.line ? { file_path: found.file, line: found.line } : {};
       const finding: Finding = {
         severity: found.severity,
@@ -498,8 +500,7 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
       const same = found.file && found.line ? earlier.get(`${found.file}:${found.line}`) : undefined;
       if (same) {
         finding.comment_id = same;
-        findings.push(finding);
-        continue;
+        return finding;
       }
       const row = this.actionLog.start({
         sessionId,
@@ -530,10 +531,10 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
         finding.post_error = error instanceof Error ? error.message : 'post failed';
         this.actionLog.finish(row, ActionOutcome.Failed, finding.post_error);
       }
-      findings.push(finding);
-    }
+      return finding;
+    });
     await this.postSummary(review, sessionId, slug, headSha, output);
-    this.pulls.drop(review.repoId);
+    this.pulls.wrote(review.repoId, review.prNumber);
     this.finish(
       reviewId,
       review.repoId,

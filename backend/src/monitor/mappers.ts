@@ -1,9 +1,11 @@
 import {
   type Alert,
   type AlertEvent,
+  type AlertListItem,
   AlertStatus,
   type Fix,
   type JobPlaybook,
+  LIST_LOG_LINE_MAX,
   type Report,
   type Review,
   type Sample,
@@ -128,6 +130,17 @@ export function toAlert(
     scan_overdue: extra.scanOverdue,
     awaiting_prod_check: extra.awaitingProdCheck,
   };
+}
+
+/** An Alert for a list: no Datadog query, and the log line cut to what a row shows. */
+export function toAlertListItem(
+  row: AlertListRow,
+  route: RouteRow,
+  service: ServiceRow,
+  extra: Parameters<typeof toAlert>[3],
+): AlertListItem {
+  const { datadog_query: _query, ...alert } = toAlert(row, route, service, extra);
+  return { ...alert, log_line: alert.log_line.slice(0, LIST_LOG_LINE_MAX) };
 }
 
 export const samplesOf = (row: AlertRow): Sample[] => parseJson(row.samples, []);

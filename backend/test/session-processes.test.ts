@@ -109,6 +109,21 @@ describe('a Session process', () => {
     expect(view.messages.find((m) => m.type === 'exit')).toMatchObject({ code: 3 });
   });
 
+  it('tells every open page as soon as a server it started listens', async () => {
+    const { daemon, sessionId } = await start();
+    const feed = await listen(daemon);
+    const started = await startProcess(daemon, sessionId, {
+      name: 'api',
+      command: `sleep 1; ${node(fixtures.server)}`,
+    });
+    expect(started.state).toBe('running');
+    const changes = () =>
+      feed.events.filter((e) => e.event === 'browser.servers_changed' && e.data.session_id === sessionId).length;
+    // The start announces once; the scan that follows finds the listener and announces again, with no browser asking.
+    await until(changes, (count) => count >= 2, 'the servers event for the listener');
+    feed.close();
+  });
+
   it('tells every open page when a process starts and when it ends', async () => {
     const { daemon, sessionId } = await start();
     const feed = await listen(daemon);
@@ -316,12 +331,12 @@ describe('the agent’s start_process', () => {
   it('describes the exact command, the folder and where it runs, before anything starts', async () => {
     const { daemon, sessionId } = await start();
     const service = daemon.app.get(ProcessesService);
-    const described = service.describeStart(sessionId, { name: 'web', command: 'pnpm dev --port 5173' });
+    const described = await service.describeStart(sessionId, { name: 'web', command: 'pnpm dev --port 5173' });
     expect(described.folder).toBe(WORKING_DIR);
     expect(described.summary).toContain('pnpm dev --port 5173');
     expect(described.summary).toContain(WORKING_DIR);
     expect(described.summary).toContain("Runs as you, outside the sandbox, with this Repo's environment.");
-    expect(() => service.describeStart(sessionId, { name: 'web', command: 'ls', folder: '/' })).toThrow(
+    await expect(service.describeStart(sessionId, { name: 'web', command: 'ls', folder: '/' })).rejects.toThrow(
       /working folder/,
     );
     expect(await listProcesses(daemon, sessionId)).toEqual([]);

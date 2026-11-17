@@ -8,6 +8,22 @@ const backend = 'http://127.0.0.1:4556';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    rolldownOptions: {
+      output: {
+        // Libraries change less often than the app, so each keeps its own file and the browser keeps it cached across
+        // updates. xterm stays out: only the pages with a terminal load it.
+        codeSplitting: {
+          groups: [
+            { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/, priority: 30 },
+            { name: 'router', test: /node_modules[\\/](react-router|react-router-dom)[\\/]/, priority: 20 },
+            { name: 'query', test: /node_modules[\\/]@tanstack[\\/]/, priority: 20 },
+            { name: 'zod', test: /node_modules[\\/]zod[\\/]/, priority: 20 },
+          ],
+        },
+      },
+    },
+  },
   server: {
     host: '127.0.0.1',
     port: 4555,

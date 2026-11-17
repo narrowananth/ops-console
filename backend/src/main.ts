@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -15,10 +16,10 @@ import { startDaemon } from './daemon';
 import { DevtoolsModule } from './devtools/devtools.module';
 import { HealthWatchModule } from './health-watch/health-watch.module';
 import { adoptKeychainItems, HandoverRefused, otherVersionApps } from './keychain/handover';
+import { HandoverGate } from './keychain/handover-gate';
 import { KeychainHandoverTracker } from './keychain/handover-state';
 import { LoginKeychain } from './keychain/keychain';
 import { KeychainWaitTracker } from './keychain/keychain-wait';
-import { runMcpExec } from './mcp/launcher';
 import { McpServersModule } from './mcp/mcp-servers.module';
 import { SdkProbe } from './mcp/probe';
 import { MonitorModule } from './monitor/monitor.module';
@@ -33,10 +34,8 @@ import { WorkspaceModule } from './workspace/workspace.module';
 
 quietShadowedPrompt();
 
-const keychain = new LoginKeychain(process.env.OPS_CONSOLE_KEYCHAIN_SERVICE || undefined);
-
-// `ops-console mcp-exec <name> -- <command>`: the launcher for a stdio server whose env vars the console holds.
-if (process.argv[2] === 'mcp-exec') process.exit(await runMcpExec(process.argv.slice(3), keychain));
+// Each Keychain call holds one libuv thread while the Mac waits for a password; the default pool has four.
+process.env.UV_THREADPOOL_SIZE ??= '16';
 
 // `ops-console mcp-setup`: the MCP Server of the Dev tools setup agent.
 if (process.argv[2] === 'mcp-setup') {
@@ -61,14 +60,41 @@ const dataDir = path.resolve(
 );
 
 /**
- * An installed version takes the Keychain items over from the version before it, in the background so the daemon
- * answers at once; its Keychain waits for the handover. `pnpm dev` hands its items over itself.
+ * An installed daemon with no list of its keys yet asks its own app for them, once, in the background: later handovers
+ * then read those keys directly instead of scanning the login keychain. Nothing waits for it.
  */
-function adoptOnUpdate(handover: KeychainHandoverTracker): Promise<unknown> {
+function listOwnedKeys(holdsItems: boolean): void {
+  // After a handover that failed, the previous app still holds items this app cannot list.
+  if (!holdsItems || keychain.manifest() !== null) return;
+  execFile(
+    process.execPath,
+    [path.join(appDir, 'keychain-handover.mjs'), 'list', 'ops-console'],
+    { encoding: 'utf8', timeout: 5 * 60_000, maxBuffer: 50 * 1024 * 1024 },
+    (error, stdout) => {
+      if (error) return;
+      const keys = z.array(z.string()).safeParse(JSON.parse(stdout));
+      if (keys.success) keychain.confirmManifest(keys.data);
+    },
+  );
+}
+
+const keychainWait = new KeychainWaitTracker();
+const keychainHandover = new KeychainHandoverTracker();
+const handoverGate = new HandoverGate();
+const keychain = new LoginKeychain(process.env.OPS_CONSOLE_KEYCHAIN_SERVICE || undefined, handoverGate, {
+  wait: keychainWait,
+  manifestFile: path.join(dataDir, 'keychain-manifest.json'),
+});
+
+/**
+ * An installed version takes the Keychain items over from the version before it, in the background so the daemon
+ * answers at once; a Keychain call waits only for its own item. `pnpm dev` hands its items over itself.
+ */
+function adoptOnUpdate(handover: KeychainHandoverTracker): Promise<boolean> {
   const versionDir = path.dirname(realpathSync(appDir));
   const self = realpathSync(process.execPath);
   if (version === 'dev' || process.platform !== 'darwin' || !self.startsWith(`${versionDir}/`)) {
-    return Promise.resolve();
+    return Promise.resolve(false);
   }
   const log = (level: string, text: string) =>
     process.stdout.write(`${new Date().toISOString()} ${level} [keychain] ${text}\n`);
@@ -80,28 +106,40 @@ function adoptOnUpdate(handover: KeychainHandoverTracker): Promise<unknown> {
     ownerFile: path.join(dataDir, 'keychain-owner.json'),
     script: path.join(appDir, 'keychain-handover.mjs'),
     service: 'ops-console',
-    keychain,
+    keychain: {
+      set: (key, value) => keychain.moveIn(key, value),
+      get: (key) => keychain.get(key),
+      delete: (key) => keychain.delete(key),
+    },
+    gate: handoverGate,
+    manifest: { keys: () => keychain.manifest(), confirm: () => keychain.confirmManifest() },
   }).then(
-    (moved) => moved > 0 && log('INFO', `moved ${moved} items to ${version}'s app`),
+    (moved) => {
+      if (moved > 0) log('INFO', `moved ${moved} items to ${version}'s app`);
+      return true;
+    },
     (error: unknown) => {
       if (error instanceof HandoverRefused) {
         handover.refuse(error.reason);
         log('WARN', `refused the handover, items stay with the previous version's app: ${error.reason}`);
       } else log('WARN', `items stay with the previous version's app: ${(error as Error).message}`);
+      return false;
     },
   );
 }
 
-const keychainWait = new KeychainWaitTracker();
-const keychainHandover = new KeychainHandoverTracker();
+keychainHandover.begin();
+void adoptOnUpdate(keychainHandover).then((holdsItems) => {
+  handoverGate.finish();
+  keychainHandover.finish();
+  listOwnedKeys(holdsItems);
+});
 
 const daemon = await startDaemon({
   dataDir,
   port: env.OPS_CONSOLE_PORT,
   version,
-  keychain: new LoginKeychain(process.env.OPS_CONSOLE_KEYCHAIN_SERVICE || undefined, adoptOnUpdate(keychainHandover), {
-    wait: keychainWait,
-  }),
+  keychain,
   keychainWait,
   keychainHandover,
   uiDir: existsSync(uiDir) ? uiDir : null,

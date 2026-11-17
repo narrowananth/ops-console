@@ -36,7 +36,7 @@ Sessions and runs
    - `auto` (`auto`): the SDK's classifier runs edits and safe commands and asks for risky ones.
    - `full` (`bypassPermissions`): edits and commands run without asking.
 10. Changing a Session's model, effort or access mode applies from its next run.
-11. Deleting a Session removes its row. The transcript stays where Claude Code keeps it. Action Log rows and Approvals stay and lose their `session_id`. Deleting a Session whose run is going is refused with `session_busy`.
+11. Deleting a Session removes its row and its transcript, in every account folder it was copied to. Action Log rows and Approvals stay and lose their `session_id`. Deleting a Session whose run is going is refused with `session_busy`.
 11a. Stop ends a Session's run where it is, whether it is `working`, `waiting_input` or `waiting_approval`. The SDK query
     aborts, the run's `pending` Approvals become `expired` with their Action Log row `failed` and `error_message`
     `interrupted`, and a call still running gets `error_message` `stopped`. The Session goes back to `idle` and

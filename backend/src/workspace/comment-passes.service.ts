@@ -15,6 +15,7 @@ import { STOPPED } from '../agent/runs';
 import { AgentRuntime, HOST_WRITE_DENIALS } from '../agent/runtime';
 import { parseAgentJson } from '../common/agent-json';
 import { ApiError, validationFailed } from '../common/errors';
+import { mapLimit } from '../common/map-limit';
 import { prCommentPasses } from '../db/schema';
 import { type Emit, STORE, type Store } from '../db/store';
 import { JobSteps, jobPlaybook } from '../playbooks/job-steps';
@@ -25,6 +26,7 @@ import type { HostComment, HostPullRequest } from './git-host';
 import {
   fileLine,
   JobFailed,
+  POST_PARALLEL,
   PrJobs,
   type StoredThread,
   storedThreads,
@@ -145,7 +147,7 @@ export class CommentPassesService {
   async start(repoId: string, number: number, commentIds: string[]): Promise<CommentPass> {
     const repo = this.pulls.hosted(repoId);
     const slug = repo.remoteSlug as string;
-    const { pr, comments } = await this.pulls.adapter(repo).get(slug, number);
+    const { pr, comments } = await this.pulls.recent(repo, number);
     if (pr.state !== PrState.Open) throw new ApiError(409, ErrorCode.InvalidState, 'The pull request is not open');
     const threads = commentIds.map((id) => threadOf(comments, id));
     for (const [index, thread] of threads.entries()) {
@@ -159,7 +161,7 @@ export class CommentPassesService {
     const copy = this.playbooks.copyFor(PlaybookTrigger.AddressComments);
     const row = this.insert(repoId, pr, CommentPassKind.Address, threads, copy);
     // The running row is in before anything awaits, so a second start meets it as busy.
-    await this.jobs.release(prCommentPasses, earlier);
+    this.jobs.releaseLater(prCommentPasses, earlier);
     this.run(row.id, session, commentPassBrief(slug, pr, threads), false);
     return this.view(row, pr.head_sha);
   }
@@ -226,7 +228,7 @@ export class CommentPassesService {
   async startCheck(repoId: string, number: number): Promise<CommentPass> {
     const repo = this.pulls.hosted(repoId);
     const slug = repo.remoteSlug as string;
-    const { pr, comments } = await this.pulls.adapter(repo).get(slug, number);
+    const { pr, comments } = await this.pulls.recent(repo, number);
     if (pr.state !== PrState.Open) throw new ApiError(409, ErrorCode.InvalidState, 'The pull request is not open');
     const agents = this.jobs.agentCommentIds(repoId, number);
     const threads = comments
@@ -240,7 +242,7 @@ export class CommentPassesService {
     const earlier = this.earlier(repoId, number);
     const copy = this.playbooks.copyFor(PlaybookTrigger.CheckReply);
     const row = this.insert(repoId, pr, CommentPassKind.Check, threads, copy);
-    await this.jobs.release(prCommentPasses, earlier);
+    this.jobs.releaseLater(prCommentPasses, earlier);
     this.run(row.id, session, checkRepliesBrief(slug, pr, threads), false);
     return this.view(row, pr.head_sha);
   }
@@ -386,7 +388,8 @@ export class CommentPassesService {
       const message = error instanceof Error ? error.message : 'the host refused';
       misses = { count: (misses?.count ?? 0) + 1, first: misses?.first ?? message };
     };
-    for (const thread of threads) {
+    // A few threads at a time: each reply and resolve is a host round trip. The threads keep their order.
+    await mapLimit(threads, POST_PARALLEL, async (thread) => {
       if (thread.reply_comment_id === null) {
         const done = thread.outcome === ThreadOutcome.Done;
         const body = done && short ? `Done in ${short}. ${thread.reply}` : (thread.reply as string);
@@ -394,7 +397,7 @@ export class CommentPassesService {
           thread.reply_comment_id = await this.jobs.reply(repo, row.prNumber, session, thread.comment_id, body);
         } catch (error) {
           miss(error);
-          continue;
+          return;
         }
       }
       // A general comment has no thread to resolve on the hosts; its reply is the answer.
@@ -407,9 +410,9 @@ export class CommentPassesService {
           miss(error);
         }
       }
-    }
+    });
     this.update(row.id, { threads: JSON.stringify(threads) });
-    this.pulls.drop(row.repoId);
+    this.pulls.wrote(row.repoId, row.prNumber);
     const missed = misses as { count: number; first: string } | null;
     if (missed) {
       throw new JobFailed(

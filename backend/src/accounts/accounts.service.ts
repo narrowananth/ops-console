@@ -36,6 +36,10 @@ const NEW_ACCOUNT_LABEL = 'New account';
  * 429 to a client that asks every few seconds, and Claude Code then holds off for minutes.
  */
 export const USAGE_POLL_MS = 5 * 60_000;
+/** An account whose usage could not be read is left alone for twice as long each time, up to this. */
+const USAGE_BACKOFF_MAX_MS = 60 * 60_000;
+/** Rate-limit events arrive with every message; Auto-switch looks at most this often for them. */
+const AUTO_SWITCH_EVERY_MS = 10_000;
 
 export type AccountRow = typeof claudeAccounts.$inferSelect;
 
@@ -126,6 +130,11 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
   private readonly logins = new Map<string, Login>();
   private usageTimer: NodeJS.Timeout | undefined;
   private polling = false;
+  /** Accounts whose last usage read failed: how many in a row, and when the timer may try again. */
+  private readonly usageFailures = new Map<string, { count: number; retryAt: number }>();
+  /** Per account, when a rate-limit event last ran Auto-switch, and the run waiting for the quiet time to pass. */
+  private readonly eventSwitchAt = new Map<string, number>();
+  private readonly eventSwitchTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(
     @Inject(STORE) private readonly store: Store,
@@ -147,13 +156,14 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
   }
 
   onApplicationBootstrap(): void {
-    void this.pollUsage();
-    this.usageTimer = setInterval(() => void this.pollUsage(), USAGE_POLL_MS);
+    void this.pollUsage(true);
+    this.usageTimer = setInterval(() => void this.pollUsage(true), USAGE_POLL_MS);
     this.usageTimer.unref();
   }
 
   onModuleDestroy(): void {
     clearInterval(this.usageTimer);
+    for (const timer of this.eventSwitchTimers.values()) clearTimeout(timer);
     for (const login of this.logins.values()) login.abort.abort();
   }
 
@@ -501,42 +511,84 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
     const weekly = windowOf(info, 'seven_day');
     const asWindow = (window: Window | undefined) =>
       window ? { pct: window.utilization * 100, resetsAt: new Date(window.resetsAt * 1000).toISOString() } : null;
-    this.writeUsage(accountId, { fiveHour: asWindow(fiveHour), weekly: asWindow(weekly) });
+    const changed = this.writeUsage(accountId, { fiveHour: asWindow(fiveHour), weekly: asWindow(weekly) }, true);
     // A rejected run switches with reason `rate_limited` when it ends (Behavior 26).
-    if (info.status !== 'rejected') this.autoSwitch();
+    if (changed && info.status !== 'rejected') this.autoSwitchSoon(accountId);
   }
 
-  /** Reads the usage of every signed-in account from Anthropic (Behavior 22a). One failing account keeps its last values. */
-  async pollUsage(): Promise<void> {
+  /** Auto-switch for an account's stream of events: the first goes at once, the rest wait until the quiet time passed. */
+  private autoSwitchSoon(accountId: string): void {
+    if (this.eventSwitchTimers.has(accountId)) return;
+    const wait = (this.eventSwitchAt.get(accountId) ?? 0) + AUTO_SWITCH_EVERY_MS - Date.now();
+    const run = () => {
+      this.eventSwitchAt.set(accountId, Date.now());
+      this.autoSwitch();
+    };
+    if (wait <= 0) {
+      run();
+      return;
+    }
+    const timer = setTimeout(() => {
+      this.eventSwitchTimers.delete(accountId);
+      run();
+    }, wait);
+    timer.unref();
+    this.eventSwitchTimers.set(accountId, timer);
+  }
+
+  /**
+   * Reads the usage of the signed-in accounts from Anthropic (Behavior 22a), one after another. An account with a run
+   * going is skipped: its run reports usage itself. One failing account keeps its last values, and the timer's poll
+   * (`scheduled`) leaves it alone for longer after each failure.
+   */
+  async pollUsage(scheduled = false): Promise<void> {
     if (this.polling) return;
     this.polling = true;
     try {
       const rows = this.rows().filter((row) => row.signedIn && row.configDir !== null);
-      await Promise.all(
-        rows.map(async (row) => {
-          try {
-            const reading = await this.usageSource.read(this.configDir(row));
-            if (!reading) return;
-            // The folder signed in as someone else, such as through a `/login`: the numbers are not this account's.
-            if (reading.email && row.email && reading.email.toLowerCase() !== row.email.toLowerCase()) {
-              this.logger.warn(`"${row.label}" is signed in as ${reading.email}; checking it again`);
-              await this.check(row.id);
-              return;
-            }
-            this.writeUsage(row.id, reading);
-          } catch (error) {
-            this.logger.debug(`usage of "${row.label}" not read: ${error instanceof Error ? error.message : error}`);
+      for (const row of rows) {
+        if (this.runs.onAccount(row.id)) continue;
+        if (scheduled && (this.usageFailures.get(row.id)?.retryAt ?? 0) > Date.now()) continue;
+        try {
+          const reading = await this.usageSource.read(this.configDir(row));
+          if (!reading) continue;
+          // The folder signed in as someone else, such as through a `/login`: the numbers are not this account's.
+          if (reading.email && row.email && reading.email.toLowerCase() !== row.email.toLowerCase()) {
+            this.logger.warn(`"${row.label}" is signed in as ${reading.email}; checking it again`);
+            await this.check(row.id);
+            continue;
           }
-        }),
-      );
+          this.usageFailures.delete(row.id);
+          this.writeUsage(row.id, reading);
+        } catch (error) {
+          const count = (this.usageFailures.get(row.id)?.count ?? 0) + 1;
+          const wait = Math.min(USAGE_POLL_MS * 2 ** count, USAGE_BACKOFF_MAX_MS);
+          this.usageFailures.set(row.id, { count, retryAt: Date.now() + wait });
+          this.logger.debug(`usage of "${row.label}" not read: ${error instanceof Error ? error.message : error}`);
+        }
+      }
       this.autoSwitch();
     } finally {
       this.polling = false;
     }
   }
 
-  /** Windows missing from `reading` keep their last values. */
-  private writeUsage(accountId: string, reading: UsageReading): void {
+  /**
+   * Windows missing from `reading` keep their last values. With `skipSame`, numbers equal to the stored ones write
+   * nothing. Returns whether the numbers changed.
+   */
+  private writeUsage(accountId: string, reading: UsageReading, skipSame = false): boolean {
+    if (skipSame) {
+      const had = this.store.db.select().from(claudeAccounts).where(eq(claudeAccounts.id, accountId)).get();
+      const same = (window: UsageReading['fiveHour'], pct: number | null, resetsAt: string | null) =>
+        window === null || (window.pct === pct && window.resetsAt === resetsAt);
+      if (
+        had &&
+        same(reading.fiveHour, had.fiveHourPct, had.fiveHourResetsAt) &&
+        same(reading.weekly, had.weeklyPct, had.weeklyResetsAt)
+      )
+        return false;
+    }
     this.store.write((tx, emit) => {
       const row = tx
         .update(claudeAccounts)
@@ -552,6 +604,7 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
         .get();
       if (row) this.emitUpdated(emit, row);
     });
+    return true;
   }
 
   /**

@@ -23,7 +23,7 @@ import {
   type StepFacts,
   splitTime,
 } from './run-insight';
-import { factsOf, RunStepsLog, type UsageRow } from './run-steps';
+import { factsOf, type RunKey, RunStepsLog, type UsageRow } from './run-steps';
 import { costAndTokens, runUsageOf, totalOf } from './run-usage';
 import { RunRegistry } from './runs';
 import { SessionKinds } from './session-kinds';
@@ -56,30 +56,25 @@ export class RunInsights {
   /** Every run going, then every run that ended unfinished and was not dismissed. */
   list(): AgentRun[] {
     const rows = this.sessions.runRows();
-    const steps = this.log.stepsOf(rows.map((row) => row.id));
-    const usage = this.log.usageOf(rows.map((row) => row.id));
+    const runs = rows.map(keyOf);
+    const stepsByRun = groupBy(this.log.stepsOf(runs), (step) => runKey(step.sessionId, step.runStartedAt));
+    const usageByRun = new Map(
+      this.log.usageOf(runs).map((entry) => [runKey(entry.sessionId, entry.runStartedAt), entry]),
+    );
     const history = historyOf(this.log.history());
     const now = Date.now();
-    return rows.map((row) =>
-      this.build(
-        row,
-        steps.filter((step) => step.sessionId === row.id && step.runStartedAt === row.runStartedAt).map(factsOf),
-        usage.find((entry) => entry.sessionId === row.id && entry.runStartedAt === row.runStartedAt) ?? null,
-        history,
-        now,
-      ),
-    );
+    return rows.map((row) => {
+      const key = runKey(row.id, row.runStartedAt ?? '');
+      return this.build(row, (stepsByRun.get(key) ?? []).map(factsOf), usageByRun.get(key) ?? null, history, now);
+    });
   }
 
   /** One run with its steps, where the time went, and why it is slow or failed. */
   detail(id: string): RunDetail {
     const row = this.sessions.get(id);
     if (row.runStartedAt === null) throw new ApiError(404, ErrorCode.NotFound, 'the session has no run yet');
-    const facts = this.log
-      .stepsOf([id])
-      .filter((step) => step.runStartedAt === row.runStartedAt)
-      .map(factsOf);
-    const usage = this.log.usageOf([id]).find((entry) => entry.runStartedAt === row.runStartedAt) ?? null;
+    const facts = this.log.stepsOf([keyOf(row)]).map(factsOf);
+    const usage = this.log.usageOf([keyOf(row)])[0] ?? null;
     const history = historyOf(this.log.history().filter((step) => !facts.some((own) => own.id === step.id)));
     const now = Date.now();
     const run = this.build(row, facts, usage, history, now);
@@ -148,6 +143,7 @@ export class RunInsights {
           subagents,
           resetsAt: row.runLimitResetsAt,
         });
+    const blocked = this.blockedOf(row);
     const { health, reason } = healthOf({
       running,
       waiting,
@@ -156,7 +152,7 @@ export class RunInsights {
       history,
       now,
       failure,
-      blocked: this.blockedOf(row),
+      blocked,
     });
     const open = running ? openStep(steps) : null;
     return {
@@ -175,7 +171,7 @@ export class RunInsights {
       tokens: usage ? costAndTokens(usage).tokens : null,
       usage: usage ? runUsageOf(usage) : null,
       limit: limitOf(row),
-      blocked_hosts: this.blockedOf(row),
+      blocked_hosts: blocked,
       split:
         row.runStartedAt === null
           ? []
@@ -188,6 +184,21 @@ export class RunInsights {
             }),
     };
   }
+}
+
+const keyOf = (row: SessionRow): RunKey => ({ sessionId: row.id, runStartedAt: row.runStartedAt });
+
+const runKey = (sessionId: string, startedAt: string) => `${sessionId}\u0000${startedAt}`;
+
+function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const k = key(item);
+    const group = groups.get(k);
+    if (group) group.push(item);
+    else groups.set(k, [item]);
+  }
+  return groups;
 }
 
 /** The usage limit a run waits on or ended on. */

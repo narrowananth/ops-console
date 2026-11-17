@@ -28,9 +28,9 @@ The console already pushes and talks to every Git host outside the sandbox, sign
 ### Chat Session (Workspace)
 
 8. A Session on a Repo whose Git host is GitHub, GitLab or Bitbucket shows an "Open pull request" button in its header when its branch is not the Repo's default branch, has commits origin's base branch lacks, and has no open pull request. A Repo with no remote, or a local Repo, shows no button. Changes not yet committed are not part of the pull request; the form says so when there are any.
-9. The button opens a form under the header with a title, a description and a base branch. An agent turn in the same Session fills the title and description from the Session's diff, following the pull request description rule. While it runs the form shows a placeholder and the fields are read-only. If the turn fails or does not answer as asked, the fields start empty and the operator can write them.
+9. The button opens a form under the header with a title, a description and a base branch. The console fills the title and description at once from the branch's commits beyond its base: the first commit's subject, and for one commit its message body, for several a line per commit. No agent run is involved. A branch with no such commits starts with empty fields the operator can write.
 10. The base branch starts as the Repo's default branch. The operator may change it to any branch origin has.
-11. The operator edits the fields and confirms. The console pushes, opens the pull request and shows its number and link in the Session header, replacing the button. The Session's pull request list refreshes.
+11. The operator edits the fields and confirms. The console pushes and checks the base branch on origin side by side, so the branch can be on origin when the base turns out missing; it is never forced. The console then opens the pull request and shows its number and link in the Session header, replacing the button. The Session's pull request list refreshes.
 12. Asking the agent in chat to "create a PR" makes it call the `open_pull_request` tool with a title and a description. The tool is offered only to a Session in a Repo, in the Repo's own folder, on a supported Git host. Before it runs, an Approval asks in every Access mode, `full` included: "Push <branch> and open a pull request into <base> on <host>: <title>". Nothing is pushed before the yes. A yes has the console push and open it, as the button does, and the tool answers the agent with the link. A no pushes and opens nothing, and the agent is told not to retry. A call that cannot open anything (the default branch, no new commits, no supported host) is refused before the Approval, with the reason. The branch is the one checked out in the Repo's folder unless the agent names another, and the base is the Repo's default branch unless it names another. A run with no such tool, such as an anonymous Session (which can move into a Repo first, `anonymous-joins-repo`) or one in a scratch copy, says the operator opens it with the button or pushes by hand.
 13. Every push and every pull request opening writes an Action Log row first and finishes it `ok` or `failed`, with the failure reason.
 14. Two clicks at once, or two browsers, open one pull request. The second confirm finds the open pull request and shows it, with no error and no duplicate.
@@ -55,7 +55,7 @@ The console already pushes and talks to every Git host outside the sandbox, sign
 - **Host adapters**: each gains "open a pull request": title, description, head branch, base branch, answering the number and link. GitHub through `gh`, GitLab through `glab`, Bitbucket through `bkt`. A pull request already open for the head branch is returned in place of a new one.
 - **Operator click in chat, none in Fix**: ADR 0002. A Fix starts only after the Report is confirmed; a chat Session has no such gate, so the button is the gate.
 - **Agent's request**: the console's own in-process MCP server `ops-console`, with one tool, `open_pull_request` (title, description, optional base and branch). The Approval is raised by the run's PreToolUse hook, which runs in every Access mode, so `full` asks too. It is an ordinary `command` Approval; the Action Log rows come from the push and the opening themselves.
-- **Draft turn**: a normal agent run in the Session. It reads the Session's diff, writes JSON with a title and a description and changes nothing.
+- **Draft**: read from `git log` of the branch beyond its base. It changes nothing and takes no job slot.
 - **Host cannot be read**: the Session header treats it as no open pull request and offers the button; a click finds the open one, so none is duplicated.
 - **Uncommitted changes**: left out and named in the form. The console does not commit for the operator.
 - **`gh` sign-in via `GH_TOKEN`**: stays. Other `gh` uses in a run still need it.
@@ -106,7 +106,7 @@ What the header needs.
 
 ### `POST /sessions/:id/pull-request-draft`
 
-Runs the draft turn and answers 200 when it ends. The request lasts as long as the agent does.
+Reads the commits and answers 200 at once.
 
 ```json
 { "base_branch": "main" }
@@ -134,8 +134,8 @@ Errors: Common.
 
 Workspace Session header: an "Open pull request" button, shown by Behavior 8; the pull request's link the header already shows takes its place. The button opens a form under the header with Title, Description and Base branch fields and an Open pull request button.
 
-- **Loading**: the draft turn runs; fields read-only with a placeholder, the button disabled.
-- **Empty**: the draft failed; fields empty and editable.
+- **Loading**: the commits are read; fields read-only with a placeholder, the button disabled.
+- **Empty**: no commits to draft from; fields empty and editable.
 - **Opening**: the button is disabled and reads "Opening…" while the console pushes and opens.
 - **Error**: the message under the fields (Common errors), form kept. `connector_not_connected` links to Integrations.
 - **Uncommitted changes**: a line under the form names how many files are left out.

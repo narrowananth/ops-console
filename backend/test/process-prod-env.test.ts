@@ -25,7 +25,7 @@ describe('PROD Connections a folder names in its .env', () => {
     await writeFile(path.join(dir, '.env.local'), 'REDIS=redis://cache.billing.example.com\n');
     await mkdir(path.join(dir, 'nested'));
     await writeFile(path.join(dir, 'nested', '.env'), 'X=db.nested.example.com\n');
-    const found = prodConnectionsNamedIn(dir, [
+    const found = await prodConnectionsNamedIn(dir, [
       prod('orders-prod', 'db.orders.example.com'),
       prod('billing-cache', 'CACHE.billing.example.com'),
       prod('nested-prod', 'db.nested.example.com'),
@@ -37,9 +37,9 @@ describe('PROD Connections a folder names in its .env', () => {
 
   it('finds nothing in a folder with no .env or with no PROD Connection', async () => {
     const dir = await tempDir('ops-console-env-');
-    expect(prodConnectionsNamedIn(dir, [prod('orders-prod', 'db.orders.example.com')])).toEqual([]);
+    expect(await prodConnectionsNamedIn(dir, [prod('orders-prod', 'db.orders.example.com')])).toEqual([]);
     await writeFile(path.join(dir, '.env'), 'A=db.orders.example.com');
-    expect(prodConnectionsNamedIn(dir, [])).toEqual([]);
+    expect(await prodConnectionsNamedIn(dir, [])).toEqual([]);
   });
 
   it('names the PROD Connection on the process the operator starts and in the agent Approval text', async () => {
@@ -75,7 +75,9 @@ describe('PROD Connections a folder names in its .env', () => {
     const started = await startProcess(daemon, sessionId, { name: 'api', command: node(server) });
     expect(started.prod_connections).toEqual(['orders-prod']);
 
-    const described = daemon.app.get(ProcessesService).describeStart(sessionId, { name: 'api', command: 'pnpm dev' });
+    const described = await daemon.app
+      .get(ProcessesService)
+      .describeStart(sessionId, { name: 'api', command: 'pnpm dev' });
     expect(described.prod).toEqual(['orders-prod']);
     expect(described.summary).toContain("This folder's .env names the PROD Connection orders-prod");
   });

@@ -56,12 +56,15 @@ export function PageStage({
       ),
     [],
   );
-  const { connected, send } = usePageStream(tab.id, (message: BrowserServerMessage) => {
-    if (message.type === 'frame') paint(message);
-    else if (message.type === 'tab') onTab(message.tab);
-    else if (message.type === 'dialog') setNotice(message.message);
-    else onClosed();
-  });
+  const { connected, send } = usePageStream(
+    tab.id,
+    (message: BrowserServerMessage) => {
+      if (message.type === 'tab') onTab(message.tab);
+      else if (message.type === 'dialog') setNotice(message.message);
+      else onClosed();
+    },
+    paint,
+  );
 
   useEffect(() => {
     const node = stage.current;

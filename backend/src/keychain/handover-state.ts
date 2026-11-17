@@ -9,6 +9,25 @@ export const KEYCHAIN_HANDOVER = Symbol('KEYCHAIN_HANDOVER');
 export class KeychainHandoverTracker {
   private reason: string | null = null;
   private readonly listeners = new Set<(reason: string) => void>();
+  private under: Promise<void> | null = null;
+  private end: () => void = () => {};
+
+  /** The handover of the items starts; `idle` waits until `finish`. */
+  begin(): void {
+    this.under = new Promise((resolve) => {
+      this.end = resolve;
+    });
+  }
+
+  finish(): void {
+    this.end();
+    this.under = null;
+  }
+
+  /** Resolves at once when no handover is under way; work that starts servers waits on it, since a server reads the Keychain. */
+  idle(): Promise<void> {
+    return this.under ?? Promise.resolve();
+  }
 
   refuse(reason: string): void {
     if (this.reason !== null) return;

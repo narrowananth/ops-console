@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { lstatSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import os from 'node:os';
@@ -13,6 +14,7 @@ import type {
   SDKMessage,
   SDKTaskNotificationMessage,
   SDKTaskStartedMessage,
+  WarmQuery,
 } from '@anthropic-ai/claude-agent-sdk';
 import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import {
@@ -94,7 +96,7 @@ import { gitControl, runSandbox, worktreeGitDirs } from './run-sandbox';
 import { DEFAULT_JOB_RUN_LIMIT, RunSlots } from './run-slots';
 import { RunStepsLog } from './run-steps';
 import { type Run, RunRegistry, type RunSummary } from './runs';
-import { SessionKinds } from './session-kinds';
+import { type SessionKindHandler, SessionKinds } from './session-kinds';
 import { sessionTitle, shortTitle } from './session-title';
 import {
   BROWSER_EVALUATE_TOOL,
@@ -131,6 +133,18 @@ const TITLE_WAITS_MS = [0, 2000, 5000];
 
 /** Changes to a run's parts reach the pages at most this often. */
 const OUTPUT_EVERY_MS = 100;
+
+/** Each send carries the whole part, so a long text goes out less often: the cost of a send grows with its length. */
+function outputEveryMs(part: Part | undefined): number {
+  const length = part?.kind === 'text' ? part.text.length : 0;
+  return length > 32_000 ? 1000 : length > 8000 ? 400 : OUTPUT_EVERY_MS;
+}
+
+/** A spare process nobody used is closed after this long. */
+const WARM_TTL_MS = 60_000;
+const MAX_WARM = 2;
+
+type Warmed = { run: Run; query: WarmQuery; key: string; timer: NodeJS.Timeout | null };
 
 /** A shutdown waits this long for aborted runs to end. */
 const SHUTDOWN_WAIT_MS = 10_000;
@@ -331,6 +345,17 @@ function outcomeOf(result: RunResult, paused: boolean): RunOutcome {
   }
 }
 
+/**
+ * A name for the process `options` start: equal keys mean a process started for one serves the other. Hooks, the
+ * permission callback, the abort signal and the in-process tool servers belong to a run and are left out; the tools
+ * they offer come in as `tools`.
+ */
+function optionsKey(options: Options, tools: string[]): string {
+  const { hooks, canUseTool, abortController, mcpServers, ...rest } = options;
+  const text = JSON.stringify([rest, tools], (_key, value: unknown) => (typeof value === 'function' ? null : value));
+  return createHash('sha256').update(text).digest('hex');
+}
+
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
@@ -366,6 +391,15 @@ export class AgentRuntime implements OnModuleDestroy {
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
     recovery.register('agent sessions and approvals', () => this.recover());
+    // The conversation goes with its Session, from every account folder it was copied to.
+    sessions.onRemoved(async (id, row) => {
+      this.dropWarm(id);
+      if (row.sdkSessionId === null) return;
+      await this.transcripts.remove(
+        row.sdkSessionId,
+        this.accounts.all().map((account) => account.configDir),
+      );
+    });
     this.slots = new RunSlots(config.jobRunLimit ?? DEFAULT_JOB_RUN_LIMIT);
   }
 
@@ -381,6 +415,7 @@ export class AgentRuntime implements OnModuleDestroy {
    */
   async onModuleDestroy(): Promise<void> {
     this.closing = true;
+    for (const id of [...this.warmed.keys()]) this.dropWarm(id);
     for (const run of this.runs.all()) {
       run.abort.abort();
       run.answer?.('');
@@ -424,6 +459,93 @@ export class AgentRuntime implements OnModuleDestroy {
 
   setProcessTools(tools: ProcessTools): void {
     this.processTools = tools;
+  }
+
+  /** Spare Claude Code processes by Session, started by `warm` for the next message. */
+  private readonly warmed = new Map<string, Warmed>();
+  /** Sessions whose spare process is still starting. */
+  private readonly warming = new Set<string>();
+
+  /**
+   * Starts a Claude Code process for the Session's next chat message, so the message does not wait for the process to
+   * start. The process is made for the options the message would get now; a message that would start it differently
+   * (another account, model or Playbook, an edit) closes it and starts its own. An unused one is closed after
+   * `WARM_TTL_MS`. Needs no run going; a job's run never has one. Best effort: a failure is only logged.
+   */
+  warm(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    const kind = this.kinds.get(session.kind);
+    if (!kind?.acceptsMessages) {
+      throw new ApiError(409, ErrorCode.InvalidState, `a ${session.kind} session takes no messages`);
+    }
+    if (this.runs.get(sessionId)) throw new ApiError(409, ErrorCode.SessionBusy, "the session's run is still going");
+    const had = this.warmed.get(sessionId);
+    if (had) {
+      this.expireWarm(sessionId, had);
+      return;
+    }
+    if (this.warming.has(sessionId) || this.closing) return;
+    this.warming.add(sessionId);
+    void this.startWarm(session, kind)
+      .catch((error: unknown) => {
+        this.logger.debug(
+          `no spare process for session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      })
+      .finally(() => this.warming.delete(sessionId));
+  }
+
+  private async startWarm(session: SessionRow, kind: SessionKindHandler): Promise<void> {
+    const { rules, skills } = this.playbooks.forSession(session);
+    // The Skills' plugin folder is written when the run starts.
+    if (skills.length > 0) return;
+    const draft = this.newRun(session, kind, this.accounts.forRun().id, {
+      onFinish: null,
+      onPart: null,
+      options: { rules, skills },
+      spare: null,
+    });
+    const account = this.accounts.get(draft.accountId);
+    const { options, key } = await this.buildOptions(draft, session, account);
+    const query = await this.config.sdk.startup(options);
+    // A message sent while the process started took its own; the process is no use.
+    if (this.runs.get(session.id) || this.closing) {
+      query.close();
+      return;
+    }
+    // At most this many Sessions hold a spare process: each one is a whole Claude Code process.
+    while (this.warmed.size >= MAX_WARM) {
+      const oldest = this.warmed.keys().next().value;
+      if (oldest === undefined) break;
+      this.dropWarm(oldest);
+    }
+    const warmed: Warmed = { run: draft, query, key, timer: null };
+    this.warmed.set(session.id, warmed);
+    this.expireWarm(session.id, warmed);
+  }
+
+  private expireWarm(sessionId: string, warmed: Warmed): void {
+    if (warmed.timer) clearTimeout(warmed.timer);
+    warmed.timer = setTimeout(() => this.dropWarm(sessionId), this.config.warmTtlMs ?? WARM_TTL_MS);
+    warmed.timer.unref();
+  }
+
+  /** Closes the Session's spare process, if it has one. */
+  private dropWarm(sessionId: string): void {
+    const warmed = this.warmed.get(sessionId);
+    if (!warmed) return;
+    this.warmed.delete(sessionId);
+    if (warmed.timer) clearTimeout(warmed.timer);
+    warmed.query.close();
+  }
+
+  /** The Session's spare process, now the caller's to use or close. */
+  private takeWarm(sessionId: string): { run: Run; query: WarmQuery; key: string } | null {
+    const warmed = this.warmed.get(sessionId);
+    if (!warmed) return null;
+    this.warmed.delete(sessionId);
+    if (warmed.timer) clearTimeout(warmed.timer);
+    return warmed;
   }
 
   /** A run does not survive a restart: its Session fails and its Approvals expire (Behavior 18). */
@@ -591,50 +713,10 @@ export class AgentRuntime implements OnModuleDestroy {
     const kind = this.kinds.get(session.kind);
     if (!kind) throw new ApiError(409, ErrorCode.InvalidState, `a ${session.kind} session cannot run`);
     if (this.runs.get(sessionId)) throw new ApiError(409, ErrorCode.SessionBusy, "the session's run is still going");
-    const run: Run = {
-      sessionId,
-      messageId: crypto.randomUUID(),
-      accountId: this.accounts.forRun().id,
-      workingDir: options.cwd ?? kind.workingDir(session),
-      rules: options.rules ?? null,
-      skills: options.skills ?? [],
-      onlyHeldSkills: options.onlyHeldSkills ?? true,
-      parts: [],
-      growing: null,
-      blockedHosts: new Set(),
-      outputDirty: new Set(),
-      outputTimer: null,
-      sdkUuids: new Set(),
-      toolRows: new Map(),
-      said: [],
-      answer: null,
-      waits: 0,
-      createdAt: new Date().toISOString(),
-      onFinish,
-      onPart,
-      serverLabel: kind.serverLabel ?? null,
-      abort: new AbortController(),
-      stopped: false,
-      paused: false,
-      waitingSince: null,
-      sendQueuedAfter: false,
-      joinedRepo: false,
-      spawnCallIds: [],
-      subagents: new Map(),
-      taskOfToolUse: new Map(),
-      messageUsage: new Map(),
-      limitSince: null,
-      resumeAt: options.resumeAt ?? null,
-      deny: options.deny ?? [],
-      projectSettings: options.projectSettings ?? true,
-      readOnly: options.readOnly ?? false,
-      purpose: options.purpose ?? RunPurpose.Chat,
-      networkDomains: this.network.forRun(),
-      editRoots: [],
-      failure: null,
-      autoTitle: null,
-      fetching: null,
-    };
+    // A spare process `warm` started for the Session serves the message; its run takes the message's fields.
+    const spare = onFinish === null ? this.takeWarm(sessionId) : null;
+    const made = this.newRun(session, kind, this.accounts.forRun().id, { onFinish, onPart, options, spare });
+    const run = spare ? Object.assign(spare.run, made, { warm: { query: spare.query, key: spare.key } }) : made;
     this.runs.add(run);
     this.sessions.setFailure(sessionId, null);
     if (options.fresh) this.sessions.write(sessionId, { sdkSessionId: null });
@@ -655,6 +737,66 @@ export class AgentRuntime implements OnModuleDestroy {
     const executing = this.execute(run, options.prompt ?? text).finally(() => this.executing.delete(executing));
     this.executing.add(executing);
     return run;
+  }
+
+  /** A Run for a message in the Session; `spare` is the draft a warm process was started for, whose abort it keeps. */
+  private newRun(
+    session: SessionRow,
+    kind: SessionKindHandler,
+    accountId: string,
+    input: {
+      onFinish: ((summary: RunSummary) => void) | null;
+      onPart: ((part: Part) => void) | null;
+      options: RunOptions;
+      spare: { run: Run } | null;
+    },
+  ): Run {
+    const { onFinish, onPart, options, spare } = input;
+    return {
+      sessionId: session.id,
+      messageId: crypto.randomUUID(),
+      accountId,
+      workingDir: options.cwd ?? kind.workingDir(session),
+      rules: options.rules ?? null,
+      skills: options.skills ?? [],
+      onlyHeldSkills: options.onlyHeldSkills ?? true,
+      parts: [],
+      growing: null,
+      blockedHosts: new Set(),
+      outputDirty: new Set(),
+      outputTimer: null,
+      sdkUuids: new Set(),
+      toolRows: new Map(),
+      said: [],
+      answer: null,
+      waits: 0,
+      createdAt: new Date().toISOString(),
+      onFinish,
+      onPart,
+      serverLabel: kind.serverLabel ?? null,
+      abort: spare?.run.abort ?? new AbortController(),
+      stopped: false,
+      paused: false,
+      waitingSince: null,
+      sendQueuedAfter: false,
+      joinedRepo: false,
+      spawnCallIds: [],
+      subagents: new Map(),
+      taskOfToolUse: new Map(),
+      messageUsage: new Map(),
+      limitSince: null,
+      resumeAt: options.resumeAt ?? null,
+      deny: options.deny ?? [],
+      projectSettings: options.projectSettings ?? true,
+      readOnly: options.readOnly ?? false,
+      purpose: options.purpose ?? RunPurpose.Chat,
+      networkDomains: this.network.forRun(),
+      editRoots: [],
+      failure: null,
+      autoTitle: null,
+      fetching: null,
+      warm: null,
+    };
   }
 
   /**
@@ -767,24 +909,38 @@ export class AgentRuntime implements OnModuleDestroy {
     let messages: Message[] = [];
     if (session.sdkSessionId !== null && session.accountId !== null && kind) {
       const configDir = this.accounts.configDir(this.accounts.get(session.accountId));
-      const entries = await this.transcripts.read(session.sdkSessionId, kind.workingDir(session), configDir);
-      messages = this.withSkills(sessionId, toMessages(entries, run?.sdkUuids, kind.serverLabel));
+      const transcript = await this.transcripts.messages(
+        session.sdkSessionId,
+        kind.workingDir(session),
+        configDir,
+        run?.sdkUuids,
+        kind.serverLabel,
+      );
+      messages = this.withSkills(sessionId, transcript);
     }
     const last = messages.at(-1);
-    if (!run && session.state === SessionState.Failed && last?.role === 'agent') last.status = 'failed';
+    if (!run && session.state === SessionState.Failed && last?.role === 'agent') {
+      messages = [...messages.slice(0, -1), { ...last, status: 'failed' }];
+    }
     if (run) {
-      messages.push({
-        id: run.messageId,
-        role: 'agent',
-        status: 'streaming',
-        parts: [...run.parts],
-        created_at: run.createdAt,
-      });
+      messages = [
+        ...messages,
+        {
+          id: run.messageId,
+          role: 'agent',
+          status: 'streaming',
+          parts: [...run.parts],
+          created_at: run.createdAt,
+        },
+      ];
     }
     return messages;
   }
 
-  /** Shows a skill message as the operator typed it, with its skill, in place of the prompt the agent got. */
+  /**
+   * Shows a skill message as the operator typed it, with its skill, in place of the prompt the agent got. The
+   * transcript's messages are shared between reads, so a changed message is a copy.
+   */
   private withSkills(sessionId: string, messages: Message[]): Message[] {
     const pool = this.store.db
       .select()
@@ -792,17 +948,18 @@ export class AgentRuntime implements OnModuleDestroy {
       .where(eq(messageSkills.sessionId, sessionId))
       .orderBy(asc(messageSkills.createdAt))
       .all();
-    for (const message of messages) {
-      if (message.role === 'user') message.skill = null;
-      const first = message.role === 'user' ? message.parts[0] : undefined;
-      if (first?.kind !== 'text') continue;
-      const at = pool.findIndex((row) => row.prompt === first.text);
+    return messages.map((message) => {
+      if (message.role !== 'user') return message;
+      const first = message.parts[0];
+      const at = first?.kind === 'text' ? pool.findIndex((row) => row.prompt === first.text) : -1;
       const row = at < 0 ? undefined : pool.splice(at, 1)[0];
-      if (!row) continue;
-      message.parts = [{ kind: 'text', text: row.typed }];
-      message.skill = { kind: row.kind as SkillRef['kind'], name: row.name };
-    }
-    return messages;
+      if (!row) return { ...message, skill: null };
+      return {
+        ...message,
+        parts: [{ kind: 'text', text: row.typed }],
+        skill: { kind: row.kind as SkillRef['kind'], name: row.name },
+      };
+    });
   }
 
   /** Runs a job's run once a place is free; any other run starts at once. */
@@ -917,153 +1074,20 @@ export class AgentRuntime implements OnModuleDestroy {
     }
     // The code update runs beside the rest of the start-up; `beforeTool` holds the first tool until it ends.
     run.fetching = kind?.refresh && run.workingDir === kind.workingDir(session) ? kind.refresh(session) : null;
-    const configDir = this.accounts.configDir(account);
-    let resume = session.sdkSessionId;
-    if (resume !== null) {
-      // The conversation carries over: its transcript moves into the account the run uses (Behavior 23).
-      if (session.accountId !== null && session.accountId !== account.id) {
-        const from = this.accounts.configDir(this.accounts.get(session.accountId));
-        await this.transcripts.copy(resume, from, configDir);
-      }
-      // A transcript deleted outside the console starts a new SDK session (Behavior 6).
-      if (!(await this.transcripts.exists(resume, configDir))) resume = null;
-      // Claude Code finds a conversation by its folder: one begun in a scratch copy moves to this run's folder.
-      else await this.transcripts.place(resume, configDir, run.workingDir);
-    }
+    const { options, skillFolder, key } = await this.buildOptions(run, session, account);
     if (session.accountId !== account.id) this.sessions.write(run.sessionId, { accountId: account.id });
-    const instructions = kind?.instructions;
 
-    const attached = this.attachments.existingFolder(run.sessionId);
-    // A run the operator started writes its files for them in the Session's output folder (a read-only run has none).
-    const outputFolder = run.onFinish === null && !run.readOnly ? this.outputs.ensure(run.sessionId) : null;
-    // The run's Skills sit in a folder of their own that the Run sandbox lets it read.
-    const skillFolder = run.skills.length > 0 ? path.join(skillRunsDir(), crypto.randomUUID()) : null;
-    // The other Repos the operator opened to this Session, for a run of their own only (the output folder's rule).
-    const repoFolders = outputFolder === null ? [] : this.openedRepoFolders(session, run.workingDir);
-    const extraDirs = [attached, outputFolder, ...repoFolders].filter((folder) => folder !== null);
-    run.editRoots = editRoots({ workingDir: run.workingDir, outputFolder, repoFolders, configDir });
-    const scope = mcpScope(run.purpose, session.kind);
-    const options: Options = {
-      cwd: run.workingDir,
-      sandbox: runSandbox({
-        workingDir: run.workingDir,
-        dataDir: this.dataDir,
-        readable: [...(attached === null ? [] : [attached]), ...(skillFolder === null ? [] : [skillFolder])],
-        writable: outputFolder === null ? [] : [outputFolder],
-        repos: repoFolders.map((folder) => ({ path: folder, gitFile: gitFileOf(folder) })),
-        networkDomains: run.networkDomains,
-        readOnly: run.readOnly,
-        gitFile: gitFileOf(run.workingDir),
-        // A Session's own worktree commits into the Repo's git folder, which sits outside it.
-        ...(kind?.ownWorktree && run.workingDir === kind.workingDir(session)
-          ? { gitDirs: worktreeGitDirs(run.workingDir) }
-          : {}),
-      }),
-      // A folder that holds pull request code never adds its own settings, hooks, servers or memory to the run.
-      ...(run.projectSettings ? {} : { settingSources: ['user' as const] }),
-      ...(scope.none ? { strictMcpConfig: true } : {}),
-      // The operator's attached files sit outside the working folder; the agent reads them without asking.
-      ...(extraDirs.length === 0 ? {} : { additionalDirectories: extraDirs }),
-      ...(skillFolder === null
-        ? {}
-        : {
-            plugins: [{ type: 'local' as const, path: skillFolder, skipMcpDiscovery: true }],
-            ...(run.onlyHeldSkills ? { skills: skillNames(run.skills) } : {}),
-          }),
-      model: session.model,
-      effort: SDK_EFFORT[session.effort],
-      permissionMode: PERMISSION_MODES[session.accessMode],
-      allowDangerouslySkipPermissions: session.accessMode === AccessMode.Full,
-      ...(resume === null ? {} : { resume, ...(run.resumeAt === null ? {} : { resumeSessionAt: run.resumeAt }) }),
-      // Each message gets a file checkpoint, so editing it can put the agent's file edits back (Behavior 8a).
-      enableFileCheckpointing: true,
-      env: {
-        ...claudeEnv(configDir),
-        ...(await this.cliProxy.env()),
-        ...(await this.githubEnv()),
-        CLAUDE_CODE_MCP_STARTUP_WAIT_MS: scope.none ? '0' : MCP_STARTUP_WAIT_MS,
-      },
-      includePartialMessages: true,
-      abortController: run.abort,
-      // The console's own tools: the agent asks, the daemon pushes and opens the pull request as the operator.
-      ...(() => {
-        const opener = this.opener?.offers(run.sessionId, run.workingDir) ? this.opener : null;
-        // Only a run the operator started: a Playbook step or a Verification in an Anonymous Session stays where it is.
-        const joiner = run.onFinish === null && this.joiner?.offers(run.sessionId) ? this.joiner : null;
-        // A chat the operator started, in a Session no other Session spawned.
-        const spawner =
-          run.onFinish === null && run.purpose === RunPurpose.Chat && this.spawner?.offers(run.sessionId)
-            ? this.spawner
-            : null;
-        // The browser and the Session's processes: only a chat the operator started, never a job (ADR 0007).
-        const operatorChat = run.onFinish === null && run.purpose === RunPurpose.Chat && !run.readOnly;
-        const browser = operatorChat && this.browserTools?.offers(run.sessionId) ? this.browserTools : null;
-        const processes = operatorChat && this.processTools?.offers(run.sessionId) ? this.processTools : null;
-        const saver = outputFolder === null ? null : this.outputs;
-        // The integration CLIs run in the daemon, outside the sandbox, in the Session's output folder.
-        const integrations =
-          outputFolder === null
-            ? null
-            : { run: (input: IntegrationInput) => runCli(input.cli, input.args, outputFolder) };
-        return opener || joiner || spawner || saver || integrations || browser || processes
-          ? {
-              mcpServers: {
-                [CONSOLE_TOOLS_SERVER]: consoleToolsServer(
-                  {
-                    opener,
-                    joiner,
-                    spawner,
-                    spawnCallId: () => run.spawnCallIds.shift() ?? '',
-                    saver,
-                    integrations,
-                    browser,
-                    processes,
-                    signal: run.abort.signal,
-                  },
-                  run.sessionId,
-                ),
-              },
-            }
-          : {};
-      })(),
-      disallowedTools: [
-        ...MERGE_DENIALS,
-        ...WEB_DENIALS,
-        ...fileToolDenials(this.dataDir, run.workingDir, undefined, repoFolders),
-        ...(run.readOnly ? READ_ONLY_DENIALS : []),
-        // Log text steers a Verification: it writes to no Git host and to no Connection (ADR 0002).
-        ...(run.purpose === RunPurpose.Verify ? HOST_WRITE_DENIALS : []),
-        ...run.deny,
-      ],
-      systemPrompt: {
-        type: 'preset',
-        preset: 'claude_code',
-        append: systemAppend(instructions, run.rules, outputFolder, repoFolders),
-      },
-      // Servers the operator disabled stay out of the run.
-      settings: {
-        deniedMcpServers: [
-          ...this.store.db
-            .select()
-            .from(disabledMcpServers)
-            .all()
-            .map(({ name }) => name),
-          ...(this.kinds.get(session.kind)?.deniedServers?.(session) ?? []),
-          ...(run.purpose === RunPurpose.Verify ? this.writableConnections() : []),
-          ...(scope.withoutConnections ? this.connectionServers() : []),
-          ...scope.withoutConnectors,
-        ].map((name) => ({ serverName: name })),
-      },
-      hooks: {
-        PreToolUse: [{ hooks: [this.beforeTool(run)] }],
-        PostToolUse: [{ hooks: [this.afterTool(run)] }],
-        PostToolUseFailure: [{ hooks: [this.afterTool(run)] }],
-      },
-      canUseTool: this.permissionPrompt(run),
-    };
+    // A spare process started by `warm` serves the run when it was started for the same options; otherwise it is dropped.
+    const warm = run.warm;
+    run.warm = null;
+    if (warm && warm.key !== key) warm.query.close();
+    const spare = warm && warm.key === key ? warm.query : null;
 
     // Stop can land while the transcript moves, before the query listens for the abort.
-    if (run.stopped) return 'stopped';
+    if (run.stopped) {
+      spare?.close();
+      return 'stopped';
+    }
     if (skillFolder !== null) {
       try {
         await writeSkillPlugin(skillFolder, run.skills);
@@ -1083,7 +1107,7 @@ export class AgentRuntime implements OnModuleDestroy {
     let initAt: number | null = null;
     let firstTokenAt: number | null = null;
     try {
-      for await (const message of this.config.sdk.query(text, options)) {
+      for await (const message of spare ? spare.query(text) : this.config.sdk.query(text, options)) {
         if (message.type === 'system' && message.subtype === 'init') initAt ??= performance.now();
         if (firstTokenAt === null && (message.type === 'stream_event' || message.type === 'assistant')) {
           firstTokenAt = performance.now();
@@ -1150,6 +1174,169 @@ export class AgentRuntime implements OnModuleDestroy {
     if (rejected) return ErrorCode.RateLimited;
     if (signInFailed) return ErrorCode.Unauthorized;
     return failed ? ErrorCode.UpstreamFailed : 'done';
+  }
+
+  /**
+   * What a run's Claude Code process starts with: its transcript in the account's folder, its folders, MCP servers,
+   * hooks and prompt. `key` says whether two builds would start the same process, for `warm`.
+   */
+  private async buildOptions(
+    run: Run,
+    session: SessionRow,
+    account: AccountRow,
+  ): Promise<{ options: Options; skillFolder: string | null; key: string }> {
+    const kind = this.kinds.get(session.kind);
+    const configDir = this.accounts.configDir(account);
+    let resume = session.sdkSessionId;
+    if (resume !== null) {
+      // The conversation carries over: its transcript moves into the account the run uses (Behavior 23).
+      if (session.accountId !== null && session.accountId !== account.id) {
+        const from = this.accounts.configDir(this.accounts.get(session.accountId));
+        await this.transcripts.copy(resume, from, configDir);
+      }
+      // A transcript deleted outside the console starts a new SDK session (Behavior 6).
+      if (!(await this.transcripts.exists(resume, configDir))) resume = null;
+      // Claude Code finds a conversation by its folder: one begun in a scratch copy moves to this run's folder.
+      else await this.transcripts.place(resume, configDir, run.workingDir);
+    }
+    const instructions = kind?.instructions;
+
+    const attached = this.attachments.existingFolder(run.sessionId);
+    // A run the operator started writes its files for them in the Session's output folder (a read-only run has none).
+    const outputFolder = run.onFinish === null && !run.readOnly ? this.outputs.ensure(run.sessionId) : null;
+    // The run's Skills sit in a folder of their own that the Run sandbox lets it read.
+    const skillFolder = run.skills.length > 0 ? path.join(skillRunsDir(), crypto.randomUUID()) : null;
+    // The other Repos the operator opened to this Session, for a run of their own only (the output folder's rule).
+    const repoFolders = outputFolder === null ? [] : this.openedRepoFolders(session, run.workingDir);
+    const extraDirs = [attached, outputFolder, ...repoFolders].filter((folder) => folder !== null);
+    run.editRoots = editRoots({ workingDir: run.workingDir, outputFolder, repoFolders, configDir });
+    const scope = mcpScope(run.purpose, session.kind);
+    // The console tools this run offers, for `key`: the servers' own objects cannot be compared.
+    const tools: string[] = [];
+    const options: Options = {
+      cwd: run.workingDir,
+      sandbox: runSandbox({
+        workingDir: run.workingDir,
+        dataDir: this.dataDir,
+        readable: [...(attached === null ? [] : [attached]), ...(skillFolder === null ? [] : [skillFolder])],
+        writable: outputFolder === null ? [] : [outputFolder],
+        repos: repoFolders.map((folder) => ({ path: folder, gitFile: gitFileOf(folder) })),
+        networkDomains: run.networkDomains,
+        readOnly: run.readOnly,
+        gitFile: gitFileOf(run.workingDir),
+        // A Session's own worktree commits into the Repo's git folder, which sits outside it.
+        ...(kind?.ownWorktree && run.workingDir === kind.workingDir(session)
+          ? { gitDirs: worktreeGitDirs(run.workingDir) }
+          : {}),
+      }),
+      // A folder that holds pull request code never adds its own settings, hooks, servers or memory to the run.
+      ...(run.projectSettings ? {} : { settingSources: ['user' as const] }),
+      ...(scope.none ? { strictMcpConfig: true } : {}),
+      // The operator's attached files sit outside the working folder; the agent reads them without asking.
+      ...(extraDirs.length === 0 ? {} : { additionalDirectories: extraDirs }),
+      ...(skillFolder === null
+        ? {}
+        : {
+            plugins: [{ type: 'local' as const, path: skillFolder, skipMcpDiscovery: true }],
+            ...(run.onlyHeldSkills ? { skills: skillNames(run.skills) } : {}),
+          }),
+      model: session.model,
+      effort: SDK_EFFORT[session.effort],
+      permissionMode: PERMISSION_MODES[session.accessMode],
+      allowDangerouslySkipPermissions: session.accessMode === AccessMode.Full,
+      ...(resume === null ? {} : { resume, ...(run.resumeAt === null ? {} : { resumeSessionAt: run.resumeAt }) }),
+      // Each message gets a file checkpoint, so editing it can put the agent's file edits back (Behavior 8a).
+      enableFileCheckpointing: true,
+      env: {
+        ...claudeEnv(configDir),
+        ...(await this.cliProxy.env()),
+        ...(await this.githubEnv()),
+        CLAUDE_CODE_MCP_STARTUP_WAIT_MS: scope.none ? '0' : MCP_STARTUP_WAIT_MS,
+      },
+      includePartialMessages: true,
+      abortController: run.abort,
+      // The console's own tools: the agent asks, the daemon pushes and opens the pull request as the operator.
+      ...(() => {
+        const opener = this.opener?.offers(run.sessionId, run.workingDir) ? this.opener : null;
+        // Only a run the operator started: a Playbook step or a Verification in an Anonymous Session stays where it is.
+        const joiner = run.onFinish === null && this.joiner?.offers(run.sessionId) ? this.joiner : null;
+        // A chat the operator started, in a Session no other Session spawned.
+        const spawner =
+          run.onFinish === null && run.purpose === RunPurpose.Chat && this.spawner?.offers(run.sessionId)
+            ? this.spawner
+            : null;
+        // The browser and the Session's processes: only a chat the operator started, never a job (ADR 0007).
+        const operatorChat = run.onFinish === null && run.purpose === RunPurpose.Chat && !run.readOnly;
+        const browser = operatorChat && this.browserTools?.offers(run.sessionId) ? this.browserTools : null;
+        const processes = operatorChat && this.processTools?.offers(run.sessionId) ? this.processTools : null;
+        const saver = outputFolder === null ? null : this.outputs;
+        // The integration CLIs run in the daemon, outside the sandbox, in the Session's output folder.
+        const integrations =
+          outputFolder === null
+            ? null
+            : { run: (input: IntegrationInput) => runCli(input.cli, input.args, outputFolder) };
+        tools.push(
+          ...Object.entries({ opener, joiner, spawner, saver, integrations, browser, processes })
+            .filter(([, offered]) => offered)
+            .map(([name]) => name),
+        );
+        return opener || joiner || spawner || saver || integrations || browser || processes
+          ? {
+              mcpServers: {
+                [CONSOLE_TOOLS_SERVER]: consoleToolsServer(
+                  {
+                    opener,
+                    joiner,
+                    spawner,
+                    spawnCallId: () => run.spawnCallIds.shift() ?? '',
+                    saver,
+                    integrations,
+                    browser,
+                    processes,
+                    signal: run.abort.signal,
+                  },
+                  run.sessionId,
+                ),
+              },
+            }
+          : {};
+      })(),
+      disallowedTools: [
+        ...MERGE_DENIALS,
+        ...WEB_DENIALS,
+        ...fileToolDenials(this.dataDir, run.workingDir, undefined, repoFolders),
+        ...(run.readOnly ? READ_ONLY_DENIALS : []),
+        // Log text steers a Verification: it writes to no Git host and to no Connection (ADR 0002).
+        ...(run.purpose === RunPurpose.Verify ? HOST_WRITE_DENIALS : []),
+        ...run.deny,
+      ],
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        append: systemAppend(instructions, run.rules, outputFolder, repoFolders),
+      },
+      // Servers the operator disabled stay out of the run.
+      settings: {
+        deniedMcpServers: [
+          ...this.store.db
+            .select()
+            .from(disabledMcpServers)
+            .all()
+            .map(({ name }) => name),
+          ...(this.kinds.get(session.kind)?.deniedServers?.(session) ?? []),
+          ...(run.purpose === RunPurpose.Verify ? this.writableConnections() : []),
+          ...(scope.withoutConnections ? this.connectionServers() : []),
+          ...scope.withoutConnectors,
+        ].map((name) => ({ serverName: name })),
+      },
+      hooks: {
+        PreToolUse: [{ hooks: [this.beforeTool(run)] }],
+        PostToolUse: [{ hooks: [this.afterTool(run)] }],
+        PostToolUseFailure: [{ hooks: [this.afterTool(run)] }],
+      },
+      canUseTool: this.permissionPrompt(run),
+    };
+    return { options, skillFolder, key: optionsKey(options, tools) };
   }
 
   /** Keeps what a model message used, once per message id; the subagent it came from is found by its Task call. */
@@ -1297,11 +1484,11 @@ export class AgentRuntime implements OnModuleDestroy {
   /**
    * Tells the pages part `index` changed. A token arrives every few milliseconds and each event carries the whole
    * part, so sending every one would cost the daemon's one thread more with each agent running. Changes within
-   * `OUTPUT_EVERY_MS` go out together, each part as it stands then; nothing is lost.
+   * `OUTPUT_EVERY_MS` go out together (longer for a long text), each part as it stands then; nothing is lost.
    */
   private output(run: Run, index: number): void {
     run.outputDirty.add(index);
-    run.outputTimer ??= setTimeout(() => this.flushOutput(run), OUTPUT_EVERY_MS);
+    run.outputTimer ??= setTimeout(() => this.flushOutput(run), outputEveryMs(run.parts[index]));
   }
 
   /** Sends the parts changed since the last send, in order. Called when the run ends, so nothing is left behind. */
@@ -1865,7 +2052,7 @@ export class AgentRuntime implements OnModuleDestroy {
     if (!this.processTools || !parsed.success) return refuse('Give the process a name and a command.');
     let described: { summary: string; prod: string[] };
     try {
-      described = this.processTools.describeStart(run.sessionId, parsed.data);
+      described = await this.processTools.describeStart(run.sessionId, parsed.data);
     } catch (error) {
       return refuse(error instanceof ApiError ? error.message : 'That process cannot start.');
     }

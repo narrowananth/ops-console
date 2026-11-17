@@ -38,10 +38,23 @@ function originUrl(repoDir: string): string | null {
   return null;
 }
 
+/** A Repo's `origin` is read from disk at most this often: every run and every tray row asks for the list. */
+const ORIGIN_TTL_MS = 5000;
+
 /** The hosts an agent run's commands may reach (ADR 0006): built-in, the Repos' remotes and the operator's own. */
 @Injectable()
 export class NetworkAllowlistService {
+  private readonly origins = new Map<string, { at: number; url: string | null }>();
+
   constructor(@Inject(STORE) private readonly store: Store) {}
+
+  private originOf(repoDir: string): string | null {
+    const had = this.origins.get(repoDir);
+    if (had && Date.now() - had.at < ORIGIN_TTL_MS) return had.url;
+    const url = originUrl(repoDir);
+    this.origins.set(repoDir, { at: Date.now(), url });
+    return url;
+  }
 
   /** The host of each Repo's `origin`, with the name of the first Repo that has it. A Repo with none adds nothing. */
   private fromRepos(): NetworkAllowlist['from_repos'] {
@@ -53,7 +66,7 @@ export class NetworkAllowlistService {
       .all();
     const found = new Map<string, string>();
     for (const row of rows) {
-      const host = remoteHostname(originUrl(row.path));
+      const host = remoteHostname(this.originOf(row.path));
       // A remote that is no valid domain adds nothing: the run's list never holds `*` or a stray string.
       if (host && networkDomainSchema.safeParse(host).success && !found.has(host)) found.set(host, row.name);
     }

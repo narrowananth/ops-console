@@ -36,8 +36,6 @@ const git = (cwd: string, ...args: string[]) =>
     .toString()
     .trim();
 
-const json = (body: object): Step => ({ text: `\`\`\`json\n${JSON.stringify(body)}\n\`\`\`` });
-
 type Ctx = {
   daemon: AgentDaemon;
   host: FakeGitHost;
@@ -129,28 +127,21 @@ describe('Pull request opening', () => {
     expect(refused.body.error.code).toBe('invalid_state');
   });
 
-  it('has the agent draft the title and description and change nothing (9)', async () => {
+  it('drafts the title and description from the commits at once, with no agent run and nothing changed (9)', async () => {
     const ctx = await start();
     const id = await session(ctx);
-    ctx.daemon.sdk.script(json({ title: 'Default the order total', description: 'Reads a missing total as zero.' }));
-    const drafted = await ctx.http.post(`/sessions/${id}/pull-request-draft`, { base_branch: 'main' });
-    expect(drafted.status).toBe(200);
-    expect(drafted.body.data).toEqual({
-      title: 'Default the order total',
-      description: 'Reads a missing total as zero.',
-    });
-    const prompt = ctx.daemon.sdk.calls.at(-1)?.prompt ?? '';
-    expect(prompt).toContain('git diff main...work');
-    expect(prompt).toContain('Change nothing');
+    const one = await ctx.http.post(`/sessions/${id}/pull-request-draft`, { base_branch: 'main' });
+    expect(one.status).toBe(200);
+    expect(one.body.data).toEqual({ title: 'Fix the total', description: '' });
+    // Two commits: the first one's subject, and a line for each.
+    await writeFile(path.join(worktree(ctx, id), 'second.txt'), 'two\n');
+    git(worktree(ctx, id), 'switch', '-q', 'work');
+    git(worktree(ctx, id), 'add', '.');
+    git(worktree(ctx, id), 'commit', '-q', '-m', 'Add a test');
+    const two = await ctx.http.post(`/sessions/${id}/pull-request-draft`, {});
+    expect(two.body.data).toEqual({ title: 'Fix the total', description: '- Fix the total\n- Add a test' });
+    expect(ctx.daemon.sdk.calls).toEqual([]);
     expect(ctx.host.opened).toEqual([]);
-  });
-
-  it('gives empty fields when the draft turn does not answer as asked (9)', async () => {
-    const ctx = await start();
-    const id = await session(ctx);
-    ctx.daemon.sdk.script({ text: 'I could not read the diff.' });
-    const drafted = await ctx.http.post(`/sessions/${id}/pull-request-draft`, {});
-    expect(drafted.body.data).toEqual({ title: null, description: null });
   });
 
   it('pushes the branch to origin and opens the pull request, with Action Log rows (1, 2, 11, 13)', async () => {

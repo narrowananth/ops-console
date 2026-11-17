@@ -59,7 +59,9 @@ export function historyOf(steps: StepFacts[]): History {
     if (key === null || step.finishedAt === null || step.ok === null) continue;
     const took = step.finishedAt - step.startedAt - step.waitedMs;
     if (took < 0) continue;
-    history.set(key, [...(history.get(key) ?? []), took]);
+    const times = history.get(key);
+    if (times) times.push(took);
+    else history.set(key, [took]);
   }
   return history;
 }

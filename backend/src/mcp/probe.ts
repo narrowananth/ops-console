@@ -17,13 +17,16 @@ export type OneServer =
 
 /** Asks Claude Code which MCP servers one account's config connects. Tests replace it with a scripted fake. */
 export interface Probe {
-  /** `cwd` is the folder `local` and `project` scope servers belong to. Throws when Claude Code does not answer. */
-  run(configDir: string, cwd: string): Promise<ProbedServer[]>;
+  /**
+   * `cwd` is the folder `local` and `project` scope servers belong to. Throws when Claude Code does not answer or
+   * `signal` aborts.
+   */
+  run(configDir: string, cwd: string, signal?: AbortSignal): Promise<ProbedServer[]>;
   /**
    * Connects one server alone, with the account's stored sign-in: seconds, where `run` starts every server in the
-   * config. Throws when Claude Code does not answer.
+   * config. Throws when Claude Code does not answer or `signal` aborts.
    */
-  one(configDir: string, server: OneServer): Promise<ProbedServer>;
+  one(configDir: string, server: OneServer, options?: { signal?: AbortSignal; waitMs?: number }): Promise<ProbedServer>;
 }
 
 /** How long servers get to connect; a server still starting then reads `pending`, the rest as they stand. */
@@ -31,34 +34,51 @@ const WAIT_MS = 30_000;
 /** Ends a session that does not answer at all, such as one stuck before init. */
 const TIMEOUT_MS = WAIT_MS + 15_000;
 const POLL_MS = 500;
+/** A stdio server that failed its first start gets this long on the second: the download is done by then. */
+export const RETRY_WAIT_MS = 8_000;
 
 /**
  * An Agent SDK session under the account's config dir, started with a prompt that never arrives. Claude Code
  * connects the servers in its config and reports each state and tool list; no model turn runs, so no tokens are spent.
  */
 export class SdkProbe implements Probe {
-  run(configDir: string, cwd: string): Promise<ProbedServer[]> {
-    return this.ask(configDir, cwd, { settingSources: ['user', 'local', 'project'] });
+  run(configDir: string, cwd: string, signal?: AbortSignal): Promise<ProbedServer[]> {
+    return this.ask(configDir, cwd, { settingSources: ['user', 'local', 'project'] }, signal);
   }
 
-  async one(configDir: string, server: OneServer): Promise<ProbedServer> {
+  async one(
+    configDir: string,
+    server: OneServer,
+    { signal, waitMs }: { signal?: AbortSignal; waitMs?: number } = {},
+  ): Promise<ProbedServer> {
     const config =
       server.transport === 'stdio'
         ? { type: 'stdio' as const, command: server.command, args: server.args, env: server.env }
         : { type: server.transport, url: server.url, headers: server.headers };
-    const servers = await this.ask(configDir, server.transport === 'stdio' ? server.cwd : process.cwd(), {
-      settingSources: [],
-      strictMcpConfig: true,
-      mcpServers: { [server.name]: config },
-    });
+    const servers = await this.ask(
+      configDir,
+      server.transport === 'stdio' ? server.cwd : process.cwd(),
+      { settingSources: [], strictMcpConfig: true, mcpServers: { [server.name]: config } },
+      signal,
+      waitMs,
+    );
     const found = servers.find((item) => item.name === server.name);
     if (!found) throw new Error(`Claude Code did not load ${server.name}`);
     return found;
   }
 
-  private async ask(configDir: string, cwd: string, options: Partial<Options>): Promise<ProbedServer[]> {
+  private async ask(
+    configDir: string,
+    cwd: string,
+    options: Partial<Options>,
+    signal?: AbortSignal,
+    waitMs = WAIT_MS,
+  ): Promise<ProbedServer[]> {
     const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), TIMEOUT_MS);
+    // The daemon stopping ends the session, and with it the servers it started.
+    if (signal?.aborted) throw new Error('the daemon is stopping');
+    signal?.addEventListener('abort', () => abort.abort(), { once: true });
+    const timer = setTimeout(() => abort.abort(), waitMs + (TIMEOUT_MS - WAIT_MS));
     const idle = (async function* (): AsyncGenerator<SDKUserMessage> {
       await new Promise<void>((resolve) => abort.signal.addEventListener('abort', () => resolve(), { once: true }));
     })();
@@ -78,8 +98,9 @@ export class SdkProbe implements Probe {
     });
     try {
       await session.initializationResult();
-      const deadline = Date.now() + WAIT_MS;
+      const deadline = Date.now() + waitMs;
       for (;;) {
+        if (abort.signal.aborted) throw new Error('the Probe was stopped');
         const servers = await session.mcpServerStatus();
         if (servers.every((server) => server.status !== 'pending') || Date.now() >= deadline) {
           return servers.map((server) => ({

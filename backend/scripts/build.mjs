@@ -1,4 +1,4 @@
-// Bundles the daemon into dist/main.js. Native modules, the Agent SDK (it spawns the Claude Code binary from its
+// Bundles the daemon into dist/main.js and the `mcp-exec` launcher into dist/mcp-exec.js, which loads only the Keychain. Native modules, the Agent SDK (it spawns the Claude Code binary from its
 // platform package) and Nest's unused optional packages stay external; the release tarball installs the first two
 // next to it.
 import { cp, rm } from 'node:fs/promises';
@@ -8,8 +8,8 @@ const NATIVE = ['better-sqlite3', '@napi-rs/keyring', 'node-pty', '@anthropic-ai
 
 await rm('dist', { recursive: true, force: true });
 await build({
-  entryPoints: ['src/main.ts'],
-  outfile: 'dist/main.js',
+  entryPoints: { main: 'src/main.ts', 'mcp-exec': 'src/mcp-exec.ts' },
+  outdir: 'dist',
   bundle: true,
   platform: 'node',
   target: 'node24',

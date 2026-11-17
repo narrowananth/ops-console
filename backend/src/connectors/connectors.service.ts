@@ -14,6 +14,7 @@ import {
   type McpServer,
 } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
+import { bounded } from '../common/bounded';
 import { ApiError, validationFailed } from '../common/errors';
 import { mergeConfig } from '../common/merge-config';
 import { connectors } from '../db/schema';
@@ -22,6 +23,9 @@ import { McpServersService } from '../mcp/mcp-servers.service';
 import { CONNECTOR_TOOLS, type ConnectorTools, type SignInPrompt } from './connector-tools';
 
 type Row = typeof connectors.$inferSelect;
+
+/** A sign-in that has not let go this long after a stop is left; the process exit ends it. */
+const STOP_WAIT_MS = 5_000;
 
 /** A connected Connector is checked again on a list read when its last check is older than this. */
 export const RECHECK_AFTER_MS = 10 * 60_000;
@@ -48,13 +52,17 @@ export class ConnectorsService implements OnModuleDestroy {
   async onModuleDestroy(): Promise<void> {
     this.stopping = true;
     for (const signIn of this.signIns.values()) signIn.abort();
-    await Promise.allSettled(this.running);
+    this.mcp.abortInFlight();
+    await bounded(Promise.allSettled(this.running), STOP_WAIT_MS);
   }
 
   async list(): Promise<{ data: Connector[]; meta: { next_cursor: null } }> {
     await this.follow();
     const rows = this.rows();
-    const stale = rows.filter((row) => row.status !== HealthStatus.Off && isStale(row.lastCheckedAt));
+    // A Connector reached through its MCP server follows the kept readings (`follow`) and is read when opened (Check).
+    const stale = rows.filter(
+      (row) => row.status !== HealthStatus.Off && !SERVER_ONLY.includes(row.id) && isStale(row.lastCheckedAt),
+    );
     for (const row of stale) void this.recheck(row.id);
     return { data: await Promise.all(rows.map((row) => this.view(row))), meta: { next_cursor: null } };
   }
@@ -191,7 +199,17 @@ export class ConnectorsService implements OnModuleDestroy {
         const host = config.host ?? 'gitlab.com';
         await this.installMissing(['glab']);
         // `glab` asks to confirm before signing in again, with no flag to skip it.
-        if ((await this.tools.gitlabUser(host)) === null) await this.tools.gitlabLogin(host, signal, onPrompt);
+        const known = await this.tools.gitlabUser(host);
+        if (known !== null) {
+          // The read that decided to skip the sign-in already has the login.
+          return this.landed(id, signal, {
+            status: HealthStatus.Ok,
+            detail: null,
+            accountLabel: config.host ?? null,
+            login: known,
+          });
+        }
+        await this.tools.gitlabLogin(host, signal, onPrompt);
         break;
       }
       case ConnectorId.Bitbucket: {
@@ -207,7 +225,16 @@ export class ConnectorsService implements OnModuleDestroy {
             'bkt is not installed: install it from github.com/avivsinai/bitbucket-cli, then Connect again',
           );
         }
-        if ((await this.tools.bitbucketUser()) === null) await this.tools.bitbucketLogin(signal, onPrompt);
+        const known = await this.tools.bitbucketUser();
+        if (known !== null) {
+          return this.landed(id, signal, {
+            status: HealthStatus.Ok,
+            detail: null,
+            accountLabel: config.workspace || known,
+            login: known,
+          });
+        }
+        await this.tools.bitbucketLogin(signal, onPrompt);
         break;
       }
       case ConnectorId.Slashdocs: {
@@ -219,9 +246,16 @@ export class ConnectorsService implements OnModuleDestroy {
           );
         }
         // Already signed in, in the operator's terminal: nothing to open.
-        if ((await this.tools.slashdocsUser()) === null) {
-          await this.tools.slashdocsLogin(config.server?.trim() || null, signal, onPrompt);
+        const known = await this.tools.slashdocsUser();
+        if (known !== null) {
+          return this.landed(id, signal, {
+            status: HealthStatus.Ok,
+            detail: null,
+            accountLabel: config.server || null,
+            login: known.email,
+          });
         }
+        await this.tools.slashdocsLogin(config.server?.trim() || null, signal, onPrompt);
         break;
       }
       case ConnectorId.Shopify: {
@@ -244,28 +278,31 @@ export class ConnectorsService implements OnModuleDestroy {
   }
 
   /**
-   * The provider's sign-in finished: the drawer stops waiting and the check records the account at once. Steps after
-   * it, such as registering the MCP server, run on; one that fails records why.
+   * The provider's sign-in finished: the drawer stops waiting and the check records the account at once (or `proved`
+   * does, when the CLI had answered before). Steps after it, such as registering the MCP server, run on; one that
+   * fails records why.
    */
-  private async landed(id: ConnectorId, signal: AbortSignal): Promise<void> {
+  private async landed(id: ConnectorId, signal: AbortSignal, proved?: Reading): Promise<void> {
     if (signal.aborted) return;
     this.prompts.delete(id);
-    await this.check(id);
+    // A sign-in that was skipped because the CLI already answered has the account in hand: no second read.
+    if (proved) this.record(id, proved);
+    else await this.check(id);
   }
 
   /** Installs each command not on the PATH from Homebrew; its formula has the command's name. */
   private async installMissing(commands: string[]): Promise<void> {
-    for (const command of commands) {
-      if (await this.tools.installed(command)) continue;
-      if (!(await this.tools.installed('brew'))) {
-        throw new ApiError(
-          409,
-          ErrorCode.InvalidState,
-          `${command} is not installed and Homebrew is missing: install Homebrew from brew.sh, then Connect again`,
-        );
-      }
-      await this.tools.install(command);
+    const present = await Promise.all(commands.map((command) => this.tools.installed(command)));
+    const missing = commands.filter((_, index) => !present[index]);
+    if (missing.length === 0) return;
+    if (!(await this.tools.installed('brew'))) {
+      throw new ApiError(
+        409,
+        ErrorCode.InvalidState,
+        `${missing[0]} is not installed and Homebrew is missing: install Homebrew from brew.sh, then Connect again`,
+      );
     }
+    await this.tools.install(missing);
   }
 
   /** A sign-in that fails or is cancelled leaves `auth` with the reason (Behavior 6). */
@@ -362,7 +399,8 @@ export class ConnectorsService implements OnModuleDestroy {
       (row) => SERVER_ONLY.includes(row.id) && row.status !== HealthStatus.Off && !this.signIns.has(row.id),
     );
     if (riders.length === 0) return;
-    const servers = await this.mcp.list().catch(() => null);
+    // The kept readings only: a list read starts no Probe.
+    const servers = await this.mcp.list({ probe: false }).catch(() => null);
     for (const row of riders) {
       const found = servers?.data.find((server) => server.name === CONNECTOR_SERVERS[row.id]?.name);
       if (!found?.registered || found.status === HealthStatus.Checking) continue;
@@ -439,7 +477,12 @@ export class ConnectorsService implements OnModuleDestroy {
 }
 
 /** Connectors with no CLI of their own: their status is their MCP server's. */
-const SERVER_ONLY: ConnectorId[] = [ConnectorId.Jira, ConnectorId.Slack, ConnectorId.Sentry, ConnectorId.Shopify];
+export const SERVER_ONLY: ConnectorId[] = [
+  ConnectorId.Jira,
+  ConnectorId.Slack,
+  ConnectorId.Sentry,
+  ConnectorId.Shopify,
+];
 
 type McpSpec = NonNullable<(typeof CONNECTOR_SERVERS)[ConnectorId]>;
 

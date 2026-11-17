@@ -178,6 +178,7 @@ test('Check now starts the run, and an interval change saves the whole health_ch
   await expect(list.getByRole('option')).toContainText([
     '30 minutes',
     '1 hour',
+    '2 hours',
     '6 hours',
     '12 hours',
     '24 hours',
@@ -189,6 +190,7 @@ test('Check now starts the run, and an interval change saves the whole health_ch
   await page.keyboard.press('Escape');
   await expect(list).toHaveCount(0);
   await every.click();
+  await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   await expect(list.getByRole('option', { name: '6 hours' })).toBeFocused();

@@ -9,4 +9,6 @@ export type AgentConfig = {
   usage: UsageSource;
   /** How many job runs go at once; the rest wait their turn. */
   jobRunLimit?: number;
+  /** How long a spare Claude Code process waits for its message before it is closed. */
+  warmTtlMs?: number;
 };

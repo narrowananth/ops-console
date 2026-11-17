@@ -2,11 +2,12 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { McpServersService } from '../src/mcp/mcp-servers.service';
 import { parseRemote } from '../src/repos/git';
 import { ReposModule } from '../src/repos/repos.module';
+import { ReposService } from '../src/repos/repos.service';
 import { type AgentDaemon, api, signIn, startAgentDaemon, until } from './agent-fixtures';
 import { FakeFolderPicker } from './fakes/folder-picker';
 import { FakeProbe } from './fakes/probe';
@@ -14,6 +15,7 @@ import { tempDir } from './helpers';
 
 const running: AgentDaemon[] = [];
 afterEach(async () => {
+  vi.useRealTimers();
   for (const daemon of running.splice(0)) await daemon.stop();
 });
 
@@ -140,8 +142,12 @@ describe('importing', () => {
 });
 
 describe('listing', () => {
-  it('returns Repos by name with branch and dirty state read from git each time', async () => {
+  // Only the clock moves, so the 10-second keep can pass without a wait.
+  const clock = () => vi.useFakeTimers({ toFake: ['Date'], now: Date.now() });
+
+  it('returns Repos by name with branch and dirty state read from git, kept 10 seconds', async () => {
     const { daemon } = await start();
+    clock();
     const b = await makeRepo('b-repo');
     const a = await makeRepo('a-repo');
     await api(daemon).post('/repos', { path: b });
@@ -152,17 +158,22 @@ describe('listing', () => {
     git(a, 'checkout', '-q', '-b', 'topic');
     await writeFile(path.join(a, 'new.txt'), 'x');
     list = (await api(daemon).get('/repos')).body.data;
+    expect(list[0]).toMatchObject({ name: 'a-repo', branch: 'main', dirty: false });
+    vi.setSystemTime(Date.now() + 11_000);
+    list = (await api(daemon).get('/repos')).body.data;
     expect(list[0]).toMatchObject({ name: 'a-repo', branch: 'topic', dirty: true });
     expect(list[1]).toMatchObject({ name: 'b-repo', branch: 'main', dirty: false });
   });
 
   it('shows a Repo whose folder is gone as missing with no branch, and keeps two with one name apart', async () => {
     const { daemon } = await start();
+    clock();
     const gone = await makeRepo('same');
     const other = await makeRepo('same');
     await api(daemon).post('/repos', { path: gone });
     await api(daemon).post('/repos', { path: other });
     await rename(gone, `${gone}-moved`);
+    vi.setSystemTime(Date.now() + 11_000);
     const list = (await api(daemon).get('/repos')).body.data as Repo[];
     expect(list).toHaveLength(2);
     expect(list.filter((repo) => repo.missing)).toHaveLength(1);
@@ -220,11 +231,14 @@ describe('branches', () => {
     const { body } = await api(daemon).post('/repos', { path: dir });
     expect(body.data).toMatchObject({ host: 'bitbucket', remote_slug: 'vajro/apis' });
 
+    // The list follows the remote through a background sync; it runs at start and after 10 seconds.
     git(dir, 'remote', 'set-url', 'origin', 'git@ssh.bitbucket.org:superfans-io/apis.git');
+    await daemon.app.get(ReposService).syncRemotes();
     const moved = await api(daemon).get('/repos');
     expect(moved.body.data[0]).toMatchObject({ host: 'bitbucket', remote_slug: 'superfans-io/apis' });
 
     git(dir, 'remote', 'remove', 'origin');
+    await daemon.app.get(ReposService).syncRemotes();
     const gone = await api(daemon).get('/repos');
     expect(gone.body.data[0]).toMatchObject({ host: 'bitbucket', remote_slug: 'superfans-io/apis' });
   });

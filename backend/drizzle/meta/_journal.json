@@ -274,6 +274,13 @@
       "when": 1794896363631,
       "tag": "0038_cooing_norman_osborn",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1794900549908,
+      "tag": "0039_perf_indexes",
+      "breakpoints": true
     }
   ]
 }

@@ -9,7 +9,7 @@ export class SkillMenuController {
   constructor(@Inject(SkillMenuService) private readonly menu: SkillMenuService) {}
 
   @Get()
-  list(@Query() query: unknown): { data: SkillMenu } {
-    return { data: this.menu.menu(parseInput(skillMenuQuerySchema, query, 'query')) };
+  async list(@Query() query: unknown): Promise<{ data: SkillMenu }> {
+    return { data: await this.menu.menu(parseInput(skillMenuQuerySchema, query, 'query')) };
   }
 }

@@ -101,6 +101,8 @@ export enum AlertEventKind {
   FixAdvanced = 'fix_advanced',
   PrOpened = 'pr_opened',
   Resolved = 'resolved',
+  /** A Scan has not seen an open Alert for 14 days. */
+  AutoResolved = 'auto_resolved',
   Abandoned = 'abandoned',
 }
 
@@ -264,6 +266,14 @@ export const alertSchema = z.object({
 });
 
 export type Alert = z.infer<typeof alertSchema>;
+
+/** Longest `log_line` a list row carries; the detail has the whole line. */
+export const LIST_LOG_LINE_MAX = 300;
+
+/** An Alert as a list shows it: no Datadog query, and a `log_line` cut to 300 characters. The detail has both whole. */
+export const alertListItemSchema = alertSchema.omit({ datadog_query: true });
+
+export type AlertListItem = z.infer<typeof alertListItemSchema>;
 
 /** `GET /alerts/summary`: what the sidebar badge shows, without the list. */
 export const alertSummarySchema = z.object({
@@ -451,6 +461,11 @@ export const alertsQuerySchema = z.object({
   status: z.enum(AlertStatus).optional(),
   service_id: z.string().min(1).optional(),
   severity: z.enum(Severity).optional(),
+  /** `closed` lists only resolved and dismissed Alerts, a page at a time; the default lists every other Alert. */
+  scope: z.enum(['active', 'closed']).default('active'),
+  /** With `scope=closed`: Alerts per page, and where the last page ended (`meta.next_cursor`). */
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  cursor: z.string().min(1).optional(),
 });
 
 export const reviewAlertSchema = z

@@ -411,7 +411,7 @@ function BarsIcon() {
 /** Accounts & Usage: the Claude accounts with their Enable switch, and what each account's credit was spent on. */
 export function AgentsTab() {
   const [address, setAddress] = useAddress('tab', 'account', 'range');
-  const accounts = useAgentAccounts();
+  const accounts = useAgentAccounts(true);
   const tab = address.tab === 'usage' ? 'usage' : 'accounts';
   const buttons = useRef<Record<string, HTMLButtonElement | null>>({});
   const { hash } = useLocation();
@@ -497,9 +497,9 @@ export function AgentsTab() {
 
 /** The Claude accounts, Auto-switch, Smart usage and the defaults for new Sessions. */
 function AccountsPane() {
-  const accounts = useAgentAccounts();
+  const accounts = useAgentAccounts(true);
   const settings = useAgentSettings();
-  const hub = useCliProxy();
+  const hub = useCliProxy(true);
   const patch = usePatchSettings();
   const activate = useActivateAccount();
   const [linkFor, setLinkFor] = useState<string | null>(null);
