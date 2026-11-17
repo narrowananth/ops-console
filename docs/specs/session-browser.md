@@ -48,15 +48,17 @@ adds the same to a Session.
 
 ### Local servers
 
-11. The panel lists the servers listening on a loopback port: port, process name and the folder it runs in. A server
-    started by one of the Session's processes (Behavior 17) is tagged with that process; one whose folder is in the
-    Session's worktree, its Opened Repos or its output folder is tagged with the Session. Those come first. A click opens
-    it in the tab. The list refreshes every 5 seconds while a panel is open and when a process starts or ends. The console's
-    own ports (4545, 4555, 4556) are not listed. A server that is the Session's but that no Session process owns, such as one
-    started with `nohup` that outlived its terminal, shows a Stop button. Stop ends that process and what it started (by
-    parent links, never by process group) and refuses any server that is not the Session's.
-12. When a process of the Session starts listening and no tab is open, the Browser button shows a dot and the port. The
-    panel does not open itself.
+11. The panel lists the Session's own servers: port, process name and the folder it runs in. A server started by one of
+    the Session's processes (Behavior 17) is tagged with that process; one whose folder is in the Session's worktree, its
+    Opened Repos or its output folder is tagged with the Session. A server of any other process on the Mac is not listed.
+    A click opens one in the tab. The list refreshes every 5 seconds while a panel is open and when a process starts or
+    ends. The console's own ports (4545, 4555, 4556) are never listed. A server that is the Session's but that no Session
+    process owns, such as one started with `nohup` that outlived its terminal, shows a Stop button. Stop ends that process
+    and what it started (by parent links, never by process group).
+11a. When a process started while the Session is open begins listening, its page opens in the Browser panel with no
+    click: the panel opens, and the page goes in the blank tab or a new one. A server already listening when the Session
+    opened is not opened, and each port opens once. A process that listens but serves no page, such as a database, opens a
+    tab that shows the error; the operator closes it.
 
 ### Links
 
@@ -151,8 +153,8 @@ adds the same to a Session.
 - **Stream**: frames go to the panel over a WebSocket of their own, `/browser/:tabId`, behind the same token check as
   `/terminals/:id`. Input comes back on it. Process output has its own, `/processes/:id`. `/ws` is untouched.
 - **Isolation**: one Chrome and one profile folder per Session, tabs inside it, so a Session's cookies survive its Chrome exiting and no two Sessions share one.
-- **Local servers**: read with `lsof` for listening TCP sockets on loopback, each process's folder, and the process group of
-  the Session's processes.
+- **Local servers**: read with `lsof` for listening TCP sockets on loopback, each process's folder, and the processes under
+  the Session's own; only the Session's are returned.
 - **Link setting**: a per-browser pick in the panel's menu, not a daemon Setting.
 - **Environment of a process**: HOME, PATH, the login shell's variables and the Repo's own `.env` files as the project loads
   them. The daemon's own environment, the session token and the Keychain are not handed on, as for `run_integration`.
@@ -275,7 +277,7 @@ process }`), `process.removed` (`{ session_id, process_id }`), so the Browser bu
 ## UI
 
 The Browser panel, the Terminals dock, the Browser and Terminals buttons in the Session header (Workspace). States: no
-Chrome, loading, blank tab with the Local servers list, nothing listening, called hosts, crashed, "Agent is using this tab";
+Chrome, loading, blank tab with the Local servers list, no server for the Session, called hosts, crashed, "Agent is using this tab";
 the dock with no process, a running one, an exited one, an Approval card for the agent's `start_process`. The link menu holds
 "In the console" and "In the external browser". Departure: neither design file has a browser or a dock, so the mock is new
 (`design/session-browser.html`).
@@ -299,7 +301,7 @@ the dock with no process, a running one, an exited one, an Approval card for the
 
 - **Browser panel**: The panel beside a Session's conversation that shows pages from the Session's Chrome. Each tab is one
   page. The operator and the agent drive the same tabs.
-- **Local server**: A process listening on a loopback port, as the daemon's scan sees it, with its port, name and folder.
+- **Local server**: A Session's process listening on a loopback port, with its port, name and folder. Other listeners on the Mac are not shown.
 - **Session process**: A command the daemon runs for a Session, as the operator and outside the Run sandbox, in the
   Session's worktree: a dev server, a database, a test watch, a shell. The operator starts it, or approves the agent's
   `start_process`. It runs until stopped, the Session is deleted or the daemon exits. Shown in the Terminals dock.

@@ -263,7 +263,7 @@ export class ProcessesService implements OnModuleDestroy {
     this.store.emit('browser.servers_changed', { session_id: sessionId });
   }
 
-  /** Servers listening on a loopback port; the Session's own come first. */
+  /** The Session's servers on a loopback port: one a Session process started, or one running in the Session's folders. */
   async localServers(sessionId: string): Promise<LocalServer[]> {
     const session = this.supported(sessionId);
     const [listening, table, roots] = await Promise.all([
@@ -274,18 +274,20 @@ export class ProcessesService implements OnModuleDestroy {
     const families = [...this.live.entries()]
       .filter(([, live]) => live.sessionId === sessionId && live.state === ProcessState.Running)
       .map(([id, live]) => ({ id, pids: familyOf(table, live.pid) }));
-    const servers = listening.map((server): LocalServer => {
+    const servers: LocalServer[] = [];
+    for (const server of listening) {
       const owner = families.find((family) => family.pids.has(server.pid));
       const inFolders = server.folder !== '' && roots.some((root) => inside(server.folder, root));
-      return {
+      if (!owner && !inFolders) continue;
+      servers.push({
         port: server.port,
         process: server.process,
         folder: server.folder,
-        session_id: owner || inFolders ? sessionId : null,
+        session_id: sessionId,
         process_id: owner?.id ?? null,
-      };
-    });
-    return servers.sort((a, b) => Number(b.session_id !== null) - Number(a.session_id !== null) || a.port - b.port);
+      });
+    }
+    return servers.sort((a, b) => a.port - b.port);
   }
 
   /** The Approval's text for the agent's `start_process`. Throws when the folder is not one the Session may use. */

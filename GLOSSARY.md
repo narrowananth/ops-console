@@ -257,8 +257,8 @@ agent drive the same tabs. It blocks no request the page makes; the panel lists 
 opens only loopback pages in it.
 
 **Local server**:
-A process listening on a loopback port, as the daemon's scan sees it, with its port, name and folder. One that a Session
-process started, or that runs in the Session's folders, is tagged with that Session.
+A Session's process listening on a loopback port, with its port, name and folder: one a Session process started, or one
+running in the Session's folders. Other listeners on the Mac are not shown.
 
 **Session process**:
 A command the daemon runs for a Session as the operator, outside the Run sandbox, in the Session worktree: a dev server, a

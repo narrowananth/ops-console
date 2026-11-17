@@ -14,18 +14,14 @@ function Row({
   const { server, tag } = listed;
   return (
     <li className="flex items-center gap-2.5 rounded-lg border border-line bg-bg px-3 py-2">
-      <span aria-hidden className={`size-2 flex-none rounded-full ${tag === null ? 'bg-neutral-400' : 'bg-ok'}`} />
+      <span aria-hidden className="size-2 flex-none rounded-full bg-ok" />
       <span className="flex-none font-mono text-[13px] font-semibold">:{server.port}</span>
       <span className="min-w-0 flex-none truncate text-[13px]">{server.process}</span>
-      {tag !== null && (
-        <span className="flex-none rounded-full bg-diff-add px-2 font-mono text-[10px] font-semibold text-ok">
-          {tag}
-        </span>
-      )}
+      <span className="flex-none rounded-full bg-diff-add px-2 font-mono text-[10px] font-semibold text-ok">{tag}</span>
       <span title={server.folder} className="ml-auto min-w-0 truncate font-mono text-[11px] text-neutral-600">
         {shortFolder(server.folder)}
       </span>
-      {server.session_id !== null && server.process_id === null && (
+      {server.process_id === null && (
         <Button
           className="flex-none px-2.5 py-0.5 text-xs"
           title={`Stop the process on :${server.port}. No Terminals process owns it.`}
@@ -46,7 +42,7 @@ function Row({
 }
 
 /**
- * What a blank tab shows: the servers listening on a loopback port, this Session's first. A click opens one in the tab.
+ * What a blank tab shows: the servers this Session started or runs in its folders. A click opens one in the tab.
  */
 export function LocalServers({
   servers,
@@ -62,7 +58,7 @@ export function LocalServers({
   onOpen: (address: string) => void;
   onStop: (port: number) => void;
 }) {
-  const { mine, others } = listServers(servers ?? [], processes);
+  const listed = listServers(servers ?? [], processes);
   return (
     <div className="flex flex-col gap-2.5 px-6 py-5">
       {error !== null ? (
@@ -71,48 +67,23 @@ export function LocalServers({
         </p>
       ) : servers === undefined ? (
         <p className="m-0 text-xs text-neutral-700">Looking for local servers…</p>
-      ) : servers.length === 0 ? (
+      ) : listed.length === 0 ? (
         <p className="m-0 text-[13px] text-neutral-700">
-          No server is listening on this Mac. Run a script from Terminals, or type an address above.
+          No server is running for this Session. Start one from Terminals and its page opens here, or type an address
+          above.
         </p>
       ) : (
         <>
-          {mine.length > 0 && (
-            <>
-              <h4 className="m-0 text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">Local servers</h4>
-              <ul aria-label="Local servers" className="m-0 flex list-none flex-col gap-2 p-0">
-                {mine.map((listed) => (
-                  <Row
-                    key={`${listed.server.port}-${listed.server.folder}`}
-                    listed={listed}
-                    onOpen={onOpen}
-                    onStop={onStop}
-                  />
-                ))}
-              </ul>
-            </>
-          )}
-          {others.length > 0 && (
-            <>
-              <h4 className="m-0 mt-2 text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">
-                {mine.length > 0 ? 'Other local servers' : 'Local servers'}
-              </h4>
-              <ul aria-label="Other local servers" className="m-0 flex list-none flex-col gap-2 p-0">
-                {others.map((listed) => (
-                  <Row
-                    key={`${listed.server.port}-${listed.server.folder}`}
-                    listed={listed}
-                    onOpen={onOpen}
-                    onStop={onStop}
-                  />
-                ))}
-              </ul>
-            </>
-          )}
+          <h4 className="m-0 text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">Local servers</h4>
+          <ul aria-label="Local servers" className="m-0 flex list-none flex-col gap-2 p-0">
+            {listed.map((one) => (
+              <Row key={`${one.server.port}-${one.server.folder}`} listed={one} onOpen={onOpen} onStop={onStop} />
+            ))}
+          </ul>
         </>
       )}
       <p className="m-0 text-xs text-neutral-700">
-        Servers on this Mac's loopback. The console's own ports are not listed.
+        This Session's servers on the loopback. Type any address above to open another page.
       </p>
     </div>
   );

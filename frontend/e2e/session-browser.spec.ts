@@ -81,7 +81,7 @@ test('a Session shows the page the operator opens, takes input on it, and lists 
   await openSession(page, await newSession(request));
   await page.getByRole('button', { name: 'Browser', exact: true }).click();
   const panel = page.getByRole('complementary', { name: 'Browser' });
-  await expect(panel.getByText('Local servers', { exact: false })).toBeVisible();
+  await expect(panel.getByText('No server is running for this Session')).toBeVisible();
 
   await panel.getByRole('textbox', { name: 'Address' }).fill(origin);
   await panel.getByRole('textbox', { name: 'Address' }).press('Enter');
@@ -274,4 +274,27 @@ test("a server left running in the Session's folder shows in Local servers with 
   } finally {
     leftover.kill('SIGKILL');
   }
+});
+
+test("a server a process starts opens its page in the Browser panel, and the list holds only this Session's (11)", async ({
+  page,
+  request,
+}) => {
+  needsChrome();
+  const id = await newSession(request);
+  await openSession(page, id);
+  const script =
+    "require('node:http').createServer((_q, r) => { r.setHeader('content-type', 'text/html'); r.end('<title>Auto app</title><p>up</p>'); }).listen(0, '127.0.0.1')";
+  const started = await request.post(api(`/sessions/${id}/processes`), {
+    headers: auth,
+    data: { name: 'web', command: `node -e "${script}"` },
+  });
+  expect(started.ok()).toBe(true);
+
+  const panel = page.getByRole('complementary', { name: 'Browser' });
+  await expect(panel.getByRole('tab', { name: /Auto app/ })).toBeVisible({ timeout: 30_000 });
+  // Another tab shows the list: only the process's server is there, not every listener on the Mac.
+  await panel.getByRole('button', { name: 'New tab' }).click();
+  const list = panel.getByRole('list', { name: 'Local servers' });
+  await expect(list.getByRole('listitem')).toHaveCount(1);
 });
