@@ -1,5 +1,4 @@
 import {
-  AlertStatus,
   type ClaudeAccount,
   CliProxyStatus,
   HealthArea,
@@ -12,7 +11,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import {
   useAgentAccounts,
   useAgentRuns,
-  useAlerts,
+  useAlertSummary,
   useCliProxy,
   useConnections,
   useConnectors,
@@ -20,7 +19,6 @@ import {
   useMcpServers,
   useRepos,
 } from '../lib/queries';
-import { shown } from '../monitor/scan-scope';
 import { lastAddress } from './last-address';
 import { RunningTasks } from './running-tasks';
 import { useUi } from './ui-store';
@@ -117,7 +115,6 @@ const NEEDS_ATTENTION: HealthStatus[] = [HealthStatus.Auth, HealthStatus.Fail];
 
 /** The badge after a sidebar item: what is waiting there. */
 function useBadges(): Record<string, { text: string; tip: string; tone: 'alert' | 'attention' | 'count' } | undefined> {
-  const alerts = useAlerts().data ?? [];
   const connectors = useConnectors().data?.data ?? [];
   const servers = useMcpServers().data?.data ?? [];
   const connections = useConnections().data?.data;
@@ -127,9 +124,7 @@ function useBadges(): Record<string, { text: string; tip: string; tone: 'alert' 
   const brokenConnections = failingIn(HealthArea.Connections);
   const brokenIntegrations = failingIn(HealthArea.Integrations);
   const waiting = (useAgentRuns().data ?? []).filter((run) => run.health === RunHealth.NeedsYou).length;
-  const open = alerts.filter(
-    (alert) => alert.status !== AlertStatus.Resolved && alert.status !== AlertStatus.Dismissed && shown(alert),
-  ).length;
+  const open = useAlertSummary().data?.open ?? 0;
   const attention =
     connectors.filter((connector) => NEEDS_ATTENTION.includes(connector.status)).length +
     servers.filter((server) => server.used_by === null && NEEDS_ATTENTION.includes(server.status)).length;

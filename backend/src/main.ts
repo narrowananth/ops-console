@@ -127,8 +127,12 @@ const daemon = await startDaemon({
   ],
 }).catch(() => process.exit(1));
 
+/** A stop that takes longer than this ends the process: an update must not leave the console down for minutes. */
+const STOP_DEADLINE_MS = 20_000;
+
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
+    setTimeout(() => process.exit(1), STOP_DEADLINE_MS).unref();
     daemon.stop().then(
       () => process.exit(0),
       () => process.exit(1),

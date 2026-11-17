@@ -160,6 +160,29 @@ describe('Sessions in a Repo', () => {
     expect(git(ctx.dir, 'branch', '--show-current').toString().trim()).toBe('main');
   });
 
+  it('answers a branch list from the last fetch, then says when origin has a branch it did not list', async () => {
+    const ctx = await start();
+    const origin = path.join(await tempDir('ops-console-origin-'), 'orders-api.git');
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin]);
+    git(ctx.dir, 'remote', 'set-url', 'origin', origin);
+    git(ctx.dir, 'push', '-q', 'origin', 'main');
+    const teammate = path.join(await tempDir('ops-console-teammate-'), 'orders-api');
+    execFileSync('git', ['clone', '-q', origin, teammate]);
+    git(teammate, 'push', '-q', 'origin', 'main:fresh-branch');
+
+    const { events, close } = await listen(ctx.daemon);
+    const names = async () =>
+      ((await ctx.http.get(`/repos/${ctx.repoId}/branches`)).body.data as { name: string }[]).map((b) => b.name);
+    expect(await names()).not.toContain('fresh-branch');
+    await until(
+      () => events,
+      (seen) => seen.some((event) => event.event === 'repo.branches_changed' && event.data.repo_id === ctx.repoId),
+      'repo.branches_changed',
+    );
+    close();
+    expect(await names()).toContain('fresh-branch');
+  });
+
   it("searches a Repo Session's files for the @ menu, and every imported Repo's for an Anonymous Session", async () => {
     const ctx = await start();
     await mkdir(path.join(ctx.dir, 'src', 'orders'), { recursive: true });
@@ -285,7 +308,12 @@ describe('Sessions in a Repo', () => {
     const newest = git(teammate, 'rev-parse', 'HEAD').toString().trim();
 
     const id = await newSession(ctx);
-    expect(git(worktree(ctx, id), 'rev-parse', 'HEAD').toString().trim()).toBe(newest);
+    // The worktree opens at once from the last fetch and moves to origin's newest commit in the background.
+    await until(
+      async () => git(worktree(ctx, id), 'rev-parse', 'HEAD').toString().trim(),
+      (head) => head === newest,
+      'the newest commit',
+    );
     expect(existsSync(path.join(worktree(ctx, id), 'merged.ts'))).toBe(true);
     expect(existsSync(path.join(ctx.dir, 'merged.ts'))).toBe(false);
 

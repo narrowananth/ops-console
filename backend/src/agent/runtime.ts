@@ -69,6 +69,7 @@ import { ConnectionLookup } from './connection-lookup';
 import { editRoots, outsideEditRoots } from './edit-scope';
 import { HOOK_BYPASS_REASON, skipsCommitHooks } from './hook-bypass';
 import { classifyCli, type IntegrationInput, integrationInputSchema, outsideFile, runCli } from './integration-cli';
+import { mcpScope } from './mcp-scope';
 import { MessageInterceptors } from './message-interceptors';
 import { OutputFiles, saveFileInputSchema } from './output-files';
 import { blockParts, contentSchema, EDIT_TOOLS, questionInputSchema, stepText, toMessages } from './parts';
@@ -121,9 +122,9 @@ import { Transcripts } from './transcripts';
 /**
  * Claude Code starts a run's MCP servers in the background and lets the model in before they connect; a server
  * that takes seconds to start (Firebase through npx) then reads as "still connecting" for the whole turn. Runs
- * wait for them, up to Claude Code's own connect timeout.
+ * wait for the servers they start, up to this long; a run that starts none waits for nothing.
  */
-const MCP_STARTUP_WAIT_MS = '30000';
+const MCP_STARTUP_WAIT_MS = '10000';
 
 /** When to look for Claude Code's name for a new Session after its first run ends. */
 const TITLE_WAITS_MS = [0, 2000, 5000];
@@ -632,6 +633,7 @@ export class AgentRuntime implements OnModuleDestroy {
       editRoots: [],
       failure: null,
       autoTitle: null,
+      fetching: null,
     };
     this.runs.add(run);
     this.sessions.setFailure(sessionId, null);
@@ -883,6 +885,15 @@ export class AgentRuntime implements OnModuleDestroy {
     return ids.flatMap((id) => folders.get(id) ?? []).filter((folder) => folder !== workingDir);
   }
 
+  /** The MCP servers of every Connection. */
+  private connectionServers(): string[] {
+    return this.store.db
+      .select({ name: connectionRows.name })
+      .from(connectionRows)
+      .all()
+      .map((row) => row.name);
+  }
+
   /** The MCP servers of Connections whose Access Level lets them write. */
   private writableConnections(): string[] {
     return this.store.db
@@ -894,6 +905,7 @@ export class AgentRuntime implements OnModuleDestroy {
   }
 
   private async runOnce(run: Run, text: string, account: AccountRow): Promise<RunResult> {
+    const began = performance.now();
     const session = this.sessions.get(run.sessionId);
     const kind = this.kinds.get(session.kind);
     // The Session's own folder first: for a Repo Session, its worktree at the newest code. Other folders are ready.
@@ -903,6 +915,8 @@ export class AgentRuntime implements OnModuleDestroy {
         throw error;
       });
     }
+    // The code update runs beside the rest of the start-up; `beforeTool` holds the first tool until it ends.
+    run.fetching = kind?.refresh && run.workingDir === kind.workingDir(session) ? kind.refresh(session) : null;
     const configDir = this.accounts.configDir(account);
     let resume = session.sdkSessionId;
     if (resume !== null) {
@@ -928,6 +942,7 @@ export class AgentRuntime implements OnModuleDestroy {
     const repoFolders = outputFolder === null ? [] : this.openedRepoFolders(session, run.workingDir);
     const extraDirs = [attached, outputFolder, ...repoFolders].filter((folder) => folder !== null);
     run.editRoots = editRoots({ workingDir: run.workingDir, outputFolder, repoFolders, configDir });
+    const scope = mcpScope(run.purpose, session.kind);
     const options: Options = {
       cwd: run.workingDir,
       sandbox: runSandbox({
@@ -946,6 +961,7 @@ export class AgentRuntime implements OnModuleDestroy {
       }),
       // A folder that holds pull request code never adds its own settings, hooks, servers or memory to the run.
       ...(run.projectSettings ? {} : { settingSources: ['user' as const] }),
+      ...(scope.none ? { strictMcpConfig: true } : {}),
       // The operator's attached files sit outside the working folder; the agent reads them without asking.
       ...(extraDirs.length === 0 ? {} : { additionalDirectories: extraDirs }),
       ...(skillFolder === null
@@ -965,7 +981,7 @@ export class AgentRuntime implements OnModuleDestroy {
         ...claudeEnv(configDir),
         ...(await this.cliProxy.env()),
         ...(await this.githubEnv()),
-        CLAUDE_CODE_MCP_STARTUP_WAIT_MS: MCP_STARTUP_WAIT_MS,
+        CLAUDE_CODE_MCP_STARTUP_WAIT_MS: scope.none ? '0' : MCP_STARTUP_WAIT_MS,
       },
       includePartialMessages: true,
       abortController: run.abort,
@@ -1034,6 +1050,8 @@ export class AgentRuntime implements OnModuleDestroy {
             .map(({ name }) => name),
           ...(this.kinds.get(session.kind)?.deniedServers?.(session) ?? []),
           ...(run.purpose === RunPurpose.Verify ? this.writableConnections() : []),
+          ...(scope.withoutConnections ? this.connectionServers() : []),
+          ...scope.withoutConnectors,
         ].map((name) => ({ serverName: name })),
       },
       hooks: {
@@ -1060,8 +1078,20 @@ export class AgentRuntime implements OnModuleDestroy {
     let failed = false;
     let reportedCost = 0;
     let reportedTokens = 0;
+    // Where the wait before the first token went: the daemon's own set-up, Claude Code and its MCP servers, the model.
+    const ready = performance.now();
+    let initAt: number | null = null;
+    let firstTokenAt: number | null = null;
     try {
       for await (const message of this.config.sdk.query(text, options)) {
+        if (message.type === 'system' && message.subtype === 'init') initAt ??= performance.now();
+        if (firstTokenAt === null && (message.type === 'stream_event' || message.type === 'assistant')) {
+          firstTokenAt = performance.now();
+          const ms = (from: number, to: number | null) => (to === null ? 'n/a' : `${Math.round(to - from)} ms`);
+          this.logger.log(
+            `run of session ${run.sessionId} (${run.purpose}): set-up ${ms(began, ready)}, Claude Code and MCP servers ${ms(ready, initAt)}, model ${ms(initAt ?? ready, firstTokenAt)}`,
+          );
+        }
         if (message.type === 'rate_limit_event') {
           // An event whose shape changed in an SDK release leaves the last usage in place (Not required: exact usage).
           const info = rateLimitInfoSchema.safeParse(message.rate_limit_info);
@@ -1100,6 +1130,8 @@ export class AgentRuntime implements OnModuleDestroy {
     } catch (error) {
       if (!rejected && !signInFailed && !run.stopped) throw error;
     } finally {
+      // A reply that needed no tool never waited for the code update: the run still ends after it.
+      await run.fetching;
       // Saved even when the query threw: a run the limit cut off still used what it used.
       this.steps.addUsage(
         run,
@@ -1392,6 +1424,7 @@ export class AgentRuntime implements OnModuleDestroy {
   private beforeTool(run: Run): HookCallback {
     return async (input): Promise<HookJSONOutput> => {
       if (input.hook_event_name !== 'PreToolUse') return {};
+      await run.fetching;
       const toolInput = asRecord(input.tool_input);
       this.steps.start(run, {
         id: input.tool_use_id,

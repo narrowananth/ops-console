@@ -3,6 +3,7 @@ import {
   type Alert,
   type AlertDetail,
   type AlertEvent,
+  type AlertSummary,
   alertsQuerySchema,
   createScanSchema,
   type DatadogService,
@@ -119,6 +120,11 @@ export class MonitorController {
   @Get('alerts')
   listAlerts(@Query() query: unknown): { data: Alert[]; meta: { next_cursor: null } } {
     return list(this.alerts.list(parseInput(alertsQuerySchema, query, 'query')));
+  }
+
+  @Get('alerts/summary')
+  alertSummary(): { data: AlertSummary } {
+    return { data: this.alerts.summary() };
   }
 
   @Get('alerts/:id')

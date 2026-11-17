@@ -85,6 +85,8 @@ export type Run = {
   failure: string | null;
   /** The title the console gave a new Session from its first message; null when the Session was already named. */
   autoTitle: string | null;
+  /** The code update that runs while the run starts; no tool starts before it ends. Null when there is none. */
+  fetching: Promise<void> | null;
 };
 
 /** How a run ended, for the code that started it. `stopped` is set when the operator stopped it. */

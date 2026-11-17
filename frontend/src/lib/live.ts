@@ -26,8 +26,14 @@ const BATCH_MS = 40;
  * A running agent's events come many times a second, and each refetch behind them is heavy for the daemon: the whole
  * transcript, or the whole pull request list. These refetch at most this often per query.
  */
-const STREAM_MS = 400;
+const STREAM_MS = 800;
 const LIST_MS = 5000;
+
+/** A Session's state changes many times in a run; its list, run lists and diff (a `git` read) follow this often. */
+const SESSION_MS = 1500;
+
+/** Health runs report one event per item; each refetch behind them can probe a server. */
+const PROBE_MS = 3000;
 
 /** Wait before the socket reopens after it drops, doubling to the cap. */
 const RECONNECT_MIN_MS = 1000;
@@ -95,20 +101,22 @@ export function useLiveEvents(): void {
       ) {
         refetch(queryKeys.accounts);
       }
-      if (event.event === 'connection.checked' || event.event === 'health.changed') refetch(queryKeys.healthWatch);
+      if (event.event === 'connection.checked' || event.event === 'health.changed') {
+        refetchEvery(queryKeys.healthWatch, PROBE_MS);
+      }
       if (event.event === 'connection.checked') {
-        refetch(queryKeys.mcpServers);
-        refetch(queryKeys.connectors);
-        refetch(queryKeys.connections);
+        refetchEvery(queryKeys.mcpServers, PROBE_MS);
+        refetchEvery(queryKeys.connectors, PROBE_MS);
+        refetchEvery(queryKeys.connections, PROBE_MS);
       }
       if (event.event === 'approval.requested' || event.event === 'approval.decided') {
         refetch(queryKeys.approvals);
       }
       if (event.event === 'session.updated') {
-        refetch(queryKeys.session(event.data.session_id));
-        refetch(queryKeys.sessions);
-        refetch(queryKeys.sessionDiff(event.data.session_id));
+        refetchEvery(queryKeys.sessions, SESSION_MS);
+        refetchEvery(queryKeys.sessionDiff(event.data.session_id), SESSION_MS);
       }
+      if (event.event === 'repo.branches_changed') refetch(queryKeys.branches(event.data.repo_id));
       if (event.event === 'browser.tabs_changed') refetch(queryKeys.browser(event.data.session_id));
       if (event.event === 'browser.servers_changed') refetch(queryKeys.localServers(event.data.session_id));
       if (event.event === 'process.changed' || event.event === 'process.removed') {

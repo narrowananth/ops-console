@@ -9,6 +9,10 @@ export function openSqlite(dataDir: string): Database.Database {
   sqlite.pragma('synchronous = NORMAL');
   // A log that grew once (a migration, a big delete) is cut back to this after the next checkpoint.
   sqlite.pragma(`journal_size_limit = ${32 * 1024 * 1024}`);
+  // The default page cache is 2 MB; the file is tens of MB and the daemon's one thread waits on every read it misses.
+  sqlite.pragma('cache_size = -65536');
+  sqlite.pragma('temp_store = MEMORY');
+  sqlite.pragma('mmap_size = 268435456');
   sqlite.pragma('foreign_keys = ON');
   sqlite.pragma('busy_timeout = 5000');
   return sqlite;

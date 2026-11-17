@@ -265,6 +265,14 @@ export const alertSchema = z.object({
 
 export type Alert = z.infer<typeof alertSchema>;
 
+/** `GET /alerts/summary`: what the sidebar badge shows, without the list. */
+export const alertSummarySchema = z.object({
+  /** Alerts not yet resolved or dismissed that the Monitor lists with no status code picked. */
+  open: z.number().int().nonnegative(),
+});
+
+export type AlertSummary = z.infer<typeof alertSummarySchema>;
+
 export const alertDetailSchema = alertSchema.extend({
   samples: z.array(sampleSchema),
   latest_report: reportSchema.nullable(),

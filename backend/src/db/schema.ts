@@ -160,6 +160,7 @@ export const sessions = sqliteTable(
   },
   (table) => [
     index('sessions_spawned_by_idx').on(table.spawnedBySessionId),
+    index('sessions_alert_idx').on(table.alertId),
     index('sessions_active_idx').on(sql`${table.lastActiveAt} DESC`),
     index('sessions_repo_idx').on(table.repoId, sql`${table.lastActiveAt} DESC`),
     uniqueIndex('sessions_one_pr_review_idx').on(table.repoId, table.prNumber).where(sql`${table.kind} = 'pr_review'`),
@@ -296,6 +297,8 @@ export const actionLog = sqliteTable(
   (table) => [
     index('action_log_at_idx').on(sql`${table.at} DESC`),
     index('action_log_session_idx').on(table.sessionId, table.at),
+    index('action_log_connection_idx').on(table.connectionId),
+    index('action_log_alert_idx').on(table.alertId),
     check('action_log_is_prod_bool', sql`${table.isProd} IN (0, 1)`),
   ],
 );
@@ -317,7 +320,10 @@ export const approvals = sqliteTable(
     requestedAt: text('requested_at').notNull().default(nowIso),
     decidedAt: text('decided_at'),
   },
-  (table) => [index('approvals_pending_idx').on(table.requestedAt).where(sql`${table.status} = 'pending'`)],
+  (table) => [
+    index('approvals_pending_idx').on(table.requestedAt).where(sql`${table.status} = 'pending'`),
+    index('approvals_session_idx').on(table.sessionId),
+  ],
 );
 
 /** Servers the operator removed. Their config is gone from every account; the row keeps them listed to sign in again. */

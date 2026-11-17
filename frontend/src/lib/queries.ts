@@ -9,6 +9,7 @@ import {
   alertDetailSchema,
   alertEventSchema,
   alertSchema,
+  alertSummarySchema,
   approvalSchema,
   type BrowserState,
   branchSchema,
@@ -137,8 +138,9 @@ export const queryKeys = {
   pullRequestLists: ['pull-requests', 'list'] as const,
   pullRequestRepoLists: ['pull-requests', 'repo'] as const,
   monitor: ['monitor'] as const,
+  /** Datadog reads for the Services pane: a monitor event does not refresh them, since each one is a `pup` call. */
+  datadog: ['datadog'] as const,
   alert: (id: string) => ['monitor', 'alert', id] as const,
-  session: (id: string) => ['sessions', id] as const,
   messages: (id: string) => ['messages', id] as const,
   outputs: (id: string) => ['outputs', id] as const,
   sessionDiff: (id: string) => ['session-diff', id] as const,
@@ -215,7 +217,7 @@ export function useAutoUpdate() {
     onError: (_error, _value, context) => {
       if (context?.previous) client.setQueryData(queryKeys.updates, context.previous);
     },
-    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.updates }),
+    onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.updates }),
   });
 }
 
@@ -318,7 +320,7 @@ export function useCheckArea(area: HealthArea) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: () => apiSend('POST', `/health-watch/${area}/checks`, undefined, z.unknown()),
-    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.healthWatch }),
+    onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.healthWatch }),
   });
 }
 
@@ -365,7 +367,7 @@ export function useAddAccount() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: () => apiSend('POST', '/agent-accounts', undefined, z.object({ data: addedAccountSchema })),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.accounts }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.accounts }),
   });
 }
 
@@ -384,7 +386,7 @@ export function useStartLogin() {
   return useMutation({
     mutationFn: ({ id, via = SignInVia.Browser }: { id: string; via?: SignInVia }) =>
       apiSend('POST', `/agent-accounts/${id}/logins`, { via }, accountResponse),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.accounts }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.accounts }),
   });
 }
 
@@ -394,7 +396,7 @@ export function useSubmitSignInCode() {
   return useMutation({
     mutationFn: ({ id, code }: { id: string; code: string }) =>
       apiSend('POST', `/agent-accounts/${id}/logins/code`, { code }, accountResponse),
-    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.accounts }),
+    onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.accounts }),
   });
 }
 
@@ -402,7 +404,7 @@ export function useCancelLogin() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => apiSend('DELETE', `/agent-accounts/${id}/logins`, undefined, z.undefined()),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.accounts }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.accounts }),
   });
 }
 
@@ -411,7 +413,7 @@ export function useLogout() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => apiSend('POST', `/agent-accounts/${id}/logout`, undefined, accountResponse),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.accounts }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.accounts }),
   });
 }
 
@@ -419,7 +421,7 @@ export function useRemoveAccount() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => apiSend('DELETE', `/agent-accounts/${id}`, undefined, z.undefined()),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.accounts }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.accounts }),
   });
 }
 
@@ -488,7 +490,7 @@ export function useUpdateSession(id: string) {
       apply((session) => ({ ...session, ...patch }));
     },
     onSuccess: (saved) => apply(() => saved),
-    onError: () => client.invalidateQueries({ queryKey: queryKeys.sessions }),
+    onError: () => void client.invalidateQueries({ queryKey: queryKeys.sessions }),
   });
 }
 
@@ -534,7 +536,7 @@ function useMcpMutation<V>(send: (variables: V) => Promise<unknown>) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: send,
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.mcpServers }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.mcpServers }),
   });
 }
 
@@ -573,7 +575,7 @@ function useConnectorMutation<V>(send: (variables: V) => Promise<unknown>) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: send,
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.connectors }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.connectors }),
   });
 }
 
@@ -612,7 +614,7 @@ function useConnectionMutation<V, R = unknown>(send: (variables: V) => Promise<R
   const client = useQueryClient();
   return useMutation({
     mutationFn: send,
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.connections }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.connections }),
   });
 }
 
@@ -727,7 +729,7 @@ export function useAddNetworkDomain() {
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.networkAllowlist });
       // A run lists the hosts still refused; one just allowed leaves the list.
-      return client.invalidateQueries({ queryKey: queryKeys.sessions });
+      void client.invalidateQueries({ queryKey: queryKeys.sessions });
     },
   });
 }
@@ -774,7 +776,7 @@ export function useRemoveNetworkDomain() {
   return useMutation({
     mutationFn: (domain: string) =>
       apiSend('DELETE', `/network-allowlist/domains/${encodeURIComponent(domain)}`, undefined, z.undefined()),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.networkAllowlist }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.networkAllowlist }),
   });
 }
 
@@ -1003,6 +1005,14 @@ export function useRunControls(sessionId: string) {
   };
 }
 
+/** A Session the operator just made shows in the list at once; the read behind it confirms it. */
+function addSession(client: ReturnType<typeof useQueryClient>, session: Session): void {
+  client.setQueryData<Session[]>(queryKeys.sessions, (list) =>
+    list === undefined || list.some((kept) => kept.id === session.id) ? list : [session, ...list],
+  );
+  void client.invalidateQueries({ queryKey: queryKeys.sessions });
+}
+
 export function useCreateAnonymousSession() {
   const client = useQueryClient();
   return useMutation({
@@ -1010,7 +1020,7 @@ export function useCreateAnonymousSession() {
       apiSend('POST', '/sessions', { kind: 'anonymous', ...input }, z.object({ data: sessionSchema })).then(
         (body) => body.data,
       ),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.sessions }),
+    onSuccess: (session) => addSession(client, session),
   });
 }
 
@@ -1019,7 +1029,7 @@ export function useCreateRepoSession() {
   return useMutation({
     mutationFn: (input: { repo_id: string; branch: string; from_origin?: boolean; new_branch?: boolean }) =>
       apiSend('POST', '/sessions', input, z.object({ data: sessionSchema })).then((body) => body.data),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.sessions }),
+    onSuccess: (session) => addSession(client, session),
   });
 }
 
@@ -1075,7 +1085,7 @@ export function useSendMessage(sessionId: string) {
         typeof message === 'string' ? { text: message } : message,
         z.object({ data: z.object({ message_id: z.string() }) }),
       ),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) }),
   });
 }
 
@@ -1090,7 +1100,7 @@ export function useEditMessage(sessionId: string) {
         { text },
         z.object({ data: editedMessageSchema }),
       ).then((body) => body.data),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) }),
   });
 }
 
@@ -1238,7 +1248,7 @@ export function usePostComment(repoId: string, number: number) {
   return useMutation({
     mutationFn: (input: { body: string; parent_id?: string; file_path?: string; line?: number }) =>
       apiSend('POST', `/repos/${repoId}/pull-requests/${number}/comments`, input, z.object({ data: prCommentSchema })),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pulls }),
   });
 }
 
@@ -1252,7 +1262,7 @@ export function useResolveComment(repoId: string, number: number) {
         { resolved: input.resolved },
         z.object({ data: prCommentSchema }),
       ),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pulls }),
   });
 }
 
@@ -1261,7 +1271,7 @@ export function useDeleteComment(repoId: string, number: number) {
   return useMutation({
     mutationFn: (commentId: string) =>
       apiSend('DELETE', `/repos/${repoId}/pull-requests/${number}/comments/${commentId}`, undefined, z.undefined()),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pulls }),
   });
 }
 
@@ -1270,7 +1280,7 @@ export function useReviewPullRequest(repoId: string, number: number) {
   return useMutation({
     mutationFn: (input: { event: PrReviewEvent; body?: string }) =>
       apiSend('POST', `/repos/${repoId}/pull-requests/${number}/reviews`, input, z.unknown()),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pulls }),
   });
 }
 
@@ -1295,7 +1305,7 @@ export function useStartAgentReview(repoId: string, number: number) {
         note ? { note } : undefined,
         z.object({ data: prAgentReviewSchema }),
       ),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pulls }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pulls }),
   });
 }
 
@@ -1309,7 +1319,7 @@ export function useStartReplyCheck(repoId: string, number: number) {
         { comment_id: commentId },
         z.object({ data: replyCheckSchema }),
       ),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
   });
 }
 
@@ -1321,7 +1331,7 @@ export function useRetryReplyCheck(repoId: string, number: number) {
   return useMutation({
     mutationFn: ({ id, skip = false }: JobRetry) =>
       apiSend('POST', `/reply-checks/${id}/retry`, { skip }, z.object({ data: replyCheckSchema })),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
   });
 }
 
@@ -1336,7 +1346,7 @@ export function useCheckReplies(repoId: string, number: number) {
         undefined,
         z.object({ data: commentPassSchema }),
       ),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
   });
 }
 
@@ -1350,7 +1360,7 @@ export function useStartCommentPass(repoId: string, number: number) {
         { comment_ids: commentIds },
         z.object({ data: commentPassSchema }),
       ),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
   });
 }
 
@@ -1359,7 +1369,7 @@ export function useRetryCommentPass(repoId: string, number: number) {
   return useMutation({
     mutationFn: ({ id, skip = false }: JobRetry) =>
       apiSend('POST', `/comment-passes/${id}/retry`, { skip }, z.object({ data: commentPassSchema })),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
   });
 }
 
@@ -1368,7 +1378,7 @@ export function useRetryAgentReview(repoId: string, number: number) {
   return useMutation({
     mutationFn: ({ id, skip = false }: JobRetry) =>
       apiSend('POST', `/agent-reviews/${id}/retry`, { skip }, z.object({ data: prAgentReviewSchema })),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
   });
 }
 
@@ -1385,6 +1395,14 @@ export function useScans() {
   return useQuery({
     queryKey: [...queryKeys.monitor, 'scans'],
     queryFn: () => apiGet('/scans', listOf(scanSchema)).then((b) => b.data),
+  });
+}
+
+/** The open count behind the sidebar badge: a number, not the Alert list. */
+export function useAlertSummary() {
+  return useQuery({
+    queryKey: [...queryKeys.monitor, 'alert-summary'],
+    queryFn: () => apiGet('/alerts/summary', z.object({ data: alertSummarySchema })).then((b) => b.data),
   });
 }
 
@@ -1417,7 +1435,7 @@ export function useAlertReports(id: string) {
 }
 
 const refreshMonitor = (client: ReturnType<typeof useQueryClient>) =>
-  client.invalidateQueries({ queryKey: queryKeys.monitor });
+  void client.invalidateQueries({ queryKey: queryKeys.monitor });
 
 export function useStartScan() {
   const client = useQueryClient();
@@ -1443,7 +1461,7 @@ export function useCancelScan() {
 export function useDatadogServices(window: ScanWindow, codes: number[], enabled: boolean) {
   const picked = [...codes].sort((a, b) => a - b);
   return useQuery({
-    queryKey: [...queryKeys.monitor, 'datadog-services', window, picked],
+    queryKey: [...queryKeys.datadog, 'services', window, picked],
     queryFn: () =>
       apiGet(
         `/monitor/datadog-services?window=${window}${picked.length > 0 ? `&codes=${picked.join(',')}` : ''}`,
@@ -1458,7 +1476,7 @@ export function useDatadogServices(window: ScanWindow, codes: number[], enabled:
 /** The HTTP status codes from 400 up Datadog has requests for in the range, busiest first. */
 export function useStatusCodes(window: ScanWindow, enabled: boolean) {
   return useQuery({
-    queryKey: [...queryKeys.monitor, 'status-codes', window],
+    queryKey: [...queryKeys.datadog, 'status-codes', window],
     queryFn: () => apiGet(`/monitor/status-codes?window=${window}`, listOf(statusCodeCountSchema)).then((b) => b.data),
     enabled,
     staleTime: 2 * 60_000,
@@ -1786,7 +1804,7 @@ export function useCreateTab(sessionId: string) {
   return useMutation({
     mutationFn: (body: CreateTabBody) =>
       apiSend('POST', `/sessions/${sessionId}/browser/tabs`, body, tabResponse).then((b) => b.data),
-    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.browser(sessionId) }),
+    onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.browser(sessionId) }),
   });
 }
 
@@ -1804,7 +1822,7 @@ export function useCloseTab(sessionId: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (tabId: string) => apiSend('DELETE', `/browser/tabs/${tabId}`, undefined, z.undefined()),
-    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.browser(sessionId) }),
+    onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.browser(sessionId) }),
   });
 }
 
@@ -1862,7 +1880,7 @@ export function useStopServer(sessionId: string) {
   return useMutation({
     mutationFn: (port: number) =>
       apiSend('POST', `/sessions/${sessionId}/local-servers/${port}/stop`, undefined, z.undefined()),
-    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.localServers(sessionId) }),
+    onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.localServers(sessionId) }),
   });
 }
 
@@ -1893,7 +1911,7 @@ export function useStartProcess(sessionId: string) {
   return useMutation({
     mutationFn: (body: CreateProcessBody) =>
       apiSend('POST', `/sessions/${sessionId}/processes`, body, processResponse).then((b) => b.data),
-    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.processes(sessionId) }),
+    onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.processes(sessionId) }),
   });
 }
 
@@ -1905,6 +1923,6 @@ export function useProcessAction(sessionId: string) {
       action === 'close'
         ? apiSend('DELETE', `/processes/${id}`, undefined, z.undefined())
         : apiSend('POST', `/processes/${id}/${action}`, undefined, processResponse),
-    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.processes(sessionId) }),
+    onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.processes(sessionId) }),
   });
 }

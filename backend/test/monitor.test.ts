@@ -235,6 +235,18 @@ describe('Scans and Alerts', () => {
     expect(detail.waiting_since).toBeNull();
   });
 
+  it('counts the Alerts not yet resolved or dismissed for the sidebar badge, without the list', async () => {
+    const ctx = await start();
+    ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 12), route('GET', '/carts', 5)])];
+    await scan(ctx);
+    expect((await ctx.http.get('/alerts/summary')).body.data).toEqual({ open: 2 });
+    const [first] = await alertList(ctx);
+    ctx.store.write((tx) =>
+      tx.update(alerts).set({ status: AlertStatus.Dismissed }).where(eq(alerts.id, first.id)).run(),
+    );
+    expect((await ctx.http.get('/alerts/summary')).body.data).toEqual({ open: 1 });
+  });
+
   it('reads the window and envs the operator picked', async () => {
     const ctx = await start();
     ctx.datadog.readings = [

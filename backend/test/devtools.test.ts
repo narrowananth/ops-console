@@ -91,6 +91,22 @@ async function ask(daemon: AgentDaemon, sessionId: string, ...steps: Parameters<
   );
 }
 
+describe('servers outside Dev tools', () => {
+  it('a chat in another Session starts none of the Connections, so its run does not wait for their servers', async () => {
+    const daemon = await startAgentDaemon({
+      modules: [
+        McpServersModule.forRoot({ probe: new FakeProbe(), launcher: '/opt/ops-console/bin/ops-console' }),
+        ConnectionsModule.forRoot({ tester: new FakeConnectionTester(), launchDir: '/opt/ops-console/app/launch' }),
+      ],
+    });
+    running.push(daemon);
+    await connect(daemon, MONGO_PROD);
+    await connect(daemon, PG_STAGING);
+    await ask(daemon, daemon.createSession(), { text: 'ok' });
+    expect(denied(daemon)).toEqual(['mongo-prod', 'pg-staging']);
+  });
+});
+
 describe('scope', () => {
   it('stores the scope on the Session; an empty scope leaves every Connection with access in reach', async () => {
     const daemon = await start();
