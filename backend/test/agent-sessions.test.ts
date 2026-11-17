@@ -367,7 +367,7 @@ describe('attachments', () => {
 });
 
 describe('deleting a Session', () => {
-  it('is refused while its run goes, then removes the row and keeps the transcript and Action Log', async () => {
+  it('is refused while its run goes, then removes the row and its transcript and keeps the Action Log', async () => {
     const daemon = await start();
     const id = daemon.createSession({ access_mode: AccessMode.Full });
     const hold = gate();
@@ -393,8 +393,11 @@ describe('deleting a Session', () => {
     expect(log.body.data).toEqual([
       expect.objectContaining({ session_id: null, command: 'git status', outcome: 'ok' }),
     ]);
-    const transcripts = await readdir(path.join(daemon.home, 'projects'), { recursive: true });
-    expect(transcripts.some((file) => file.endsWith('.jsonl'))).toBe(true);
+    await until(
+      async () =>
+        (await readdir(path.join(daemon.home, 'projects'), { recursive: true })).filter((f) => f.endsWith('.jsonl')),
+      (left) => left.length === 0,
+    );
   });
 });
 

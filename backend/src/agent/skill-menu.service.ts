@@ -13,7 +13,7 @@ import { ApiError } from '../common/errors';
 import { repos } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { SkillsService } from '../playbooks/skills.service';
-import { readProjectSkills } from './project-skills';
+import { type ProjectSkill, readProjectSkills, readProjectSkillsAsync } from './project-skills';
 import { SessionKinds } from './session-kinds';
 import { type SessionRow, SessionsService } from './sessions.service';
 import { SKILL_PLUGIN } from './skill-plugin';
@@ -43,6 +43,9 @@ const byName = (a: SkillMenuItem, b: SkillMenuItem) =>
 /** The `$` menu of a Session, and the skill a message names. */
 @Injectable()
 export class SkillMenuService {
+  /** Reads going now, by folder: menu requests that overlap share one read. */
+  private readonly reading = new Map<string, Promise<ProjectSkill[]>>();
+
   constructor(
     @Inject(STORE) private readonly store: Store,
     @Inject(SessionsService) private readonly sessions: SessionsService,
@@ -54,10 +57,10 @@ export class SkillMenuService {
    * The skills a Session may call, read now. A Repo Session adds the Repo's own skills; an Anonymous Session has none of
    * those; a dev-tools or pull request reply Session has no menu (Behavior 8).
    */
-  menu(query: { session_id?: string; repo_id?: string; q?: string }): SkillMenu {
+  async menu(query: { session_id?: string; repo_id?: string; q?: string }): Promise<SkillMenu> {
     const { menuAllowed, folder } = this.scope(query.session_id, query.repo_id);
     if (!menuAllowed) return { items: [] };
-    const all = this.entries(folder);
+    const all = await this.entries(folder);
     const q = (query.q ?? '').replace(/^[$/]/, '').trim().toLowerCase();
     if (q === '') return { items: all.sort(byName) };
     // A name that starts with the text comes first, then names that hold it, then descriptions that do; each A to Z.
@@ -115,12 +118,20 @@ export class SkillMenuService {
     return builtin ? { copies: this.skills.packCopies(builtin.pack.id) } : false;
   }
 
-  private entries(folder: string | null): SkillMenuItem[] {
+  private async entries(folder: string | null): Promise<SkillMenuItem[]> {
     const project =
       folder === null
         ? []
-        : readProjectSkills(folder).map((skill) => ({ kind: SkillKind.Project, ...skill, pack: null }));
+        : (await this.projectSkills(folder)).map((skill) => ({ kind: SkillKind.Project, ...skill, pack: null }));
     return [...this.skills.menuEntries(), ...project];
+  }
+
+  private projectSkills(folder: string): Promise<ProjectSkill[]> {
+    const going = this.reading.get(folder);
+    if (going) return going;
+    const read = readProjectSkillsAsync(folder).finally(() => this.reading.delete(folder));
+    this.reading.set(folder, read);
+    return read;
   }
 
   private scope(sessionId?: string, repoId?: string): { menuAllowed: boolean; folder: string | null } {

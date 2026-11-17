@@ -1,4 +1,4 @@
-import { WS_PROTOCOL, type WsEvent } from '@ops-console/shared';
+import { SessionState, WS_PROTOCOL, type WsEvent } from '@ops-console/shared';
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
@@ -83,6 +83,36 @@ describe('WebSocket', () => {
     expect(events).toEqual([]);
     const read = await request(daemon.url).get('/api/settings').set('Authorization', `Bearer ${daemon.token}`);
     expect(read.body.data.theme).toBe('light');
+    socket.close();
+  });
+
+  it('sends a client that is not reading the newest of each part and every other event', async () => {
+    const daemon = await start();
+    const { events, socket } = await listen(daemon);
+    const store = daemon.app.get<Store>(STORE);
+    const output = (text: string) =>
+      store.emit('session.output', { session_id: 's', message_id: 'm', part_index: 0, part: { kind: 'text', text } });
+
+    socket.pause();
+    const sent = 400;
+    for (let i = 0; i < sent; i++) output(`${i}:${'x'.repeat(64 * 1024)}`);
+    store.emit('session.finished', {
+      session_id: 's',
+      message_id: 'm',
+      status: 'done',
+      state: SessionState.Idle,
+      error_code: null,
+      started_by: 'operator',
+    });
+    socket.resume();
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    const texts = events.flatMap((e) =>
+      e.event === 'session.output' && e.data.part.kind === 'text' ? [e.data.part.text] : [],
+    );
+    expect(texts.length).toBeLessThan(sent);
+    expect(texts.at(-1)?.startsWith(`${sent - 1}:`)).toBe(true);
+    expect(events.at(-1)?.event).toBe('session.finished');
     socket.close();
   });
 });

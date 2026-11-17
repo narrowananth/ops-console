@@ -1,4 +1,5 @@
 import { closeSync, openSync, readdirSync, readSync, statSync } from 'node:fs';
+import { open, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { SKILL_LIMITS } from '@ops-console/shared';
 
@@ -41,6 +42,17 @@ function readHead(file: string): string {
   }
 }
 
+/** The skill a SKILL.md head describes, or null when its name or description is missing or invalid. */
+function skillOf(head: string): ProjectSkill | null {
+  const fields = header(head);
+  const name = fields.get('name');
+  const description = fields.get('description');
+  if (!name || !NAME.test(name) || name.length > SKILL_LIMITS.name || !description) return null;
+  return { name, description: description.slice(0, SKILL_LIMITS.description) };
+}
+
+const byName = (a: ProjectSkill, b: ProjectSkill) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+
 /**
  * The skills in a Repo's working folder, A to Z. A folder with no `SKILL.md`, no valid name or no description is
  * skipped, never listed (Behavior 12). Reads only the header.
@@ -58,12 +70,33 @@ export function readProjectSkills(folder: string): ProjectSkill[] {
     const file = path.join(root, entry, 'SKILL.md');
     try {
       if (!statSync(file).isFile()) continue;
-      const fields = header(readHead(file));
-      const name = fields.get('name');
-      const description = fields.get('description');
-      if (!name || !NAME.test(name) || name.length > SKILL_LIMITS.name || !description) continue;
-      found.push({ name, description: description.slice(0, SKILL_LIMITS.description) });
+      const skill = skillOf(readHead(file));
+      if (skill) found.push(skill);
     } catch {}
   }
-  return found.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  return found.sort(byName);
+}
+
+/** `readProjectSkills` without holding the daemon's thread on the disk. */
+export async function readProjectSkillsAsync(folder: string): Promise<ProjectSkill[]> {
+  const root = path.join(folder, '.claude', 'skills');
+  const entries = await readdir(root).catch(() => []);
+  const read = async (entry: string): Promise<ProjectSkill | null> => {
+    const file = path.join(root, entry, 'SKILL.md');
+    try {
+      if (!(await stat(file)).isFile()) return null;
+      const handle = await open(file, 'r');
+      try {
+        const buffer = Buffer.alloc(MAX_HEADER_BYTES);
+        const { bytesRead } = await handle.read(buffer, 0, MAX_HEADER_BYTES, 0);
+        return skillOf(buffer.toString('utf8', 0, bytesRead));
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      return null;
+    }
+  };
+  const skills = await Promise.all(entries.map(read));
+  return skills.filter((skill): skill is ProjectSkill => skill !== null).sort(byName);
 }
