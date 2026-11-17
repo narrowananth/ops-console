@@ -51,8 +51,8 @@ adds the same to a Session.
 11. The panel lists the Session's own servers: port, process name and the folder it runs in. A server started by one of
     the Session's processes (Behavior 17) is tagged with that process; one whose folder is in the Session's worktree, its
     Opened Repos or its output folder is tagged with the Session. A server of any other process on the Mac is not listed.
-    A click opens one in the tab. The list refreshes every 5 seconds while a panel is open and when a process starts or
-    ends. The console's own ports (4545, 4555, 4556) are never listed. A server that is the Session's but that no Session
+    A click opens one in the tab. The list refreshes when a process starts or ends, within half a second of a started server listening, and
+    every 30 seconds while a panel is open. The console's own ports (4545, 4555, 4556) are never listed. A server that is the Session's but that no Session
     process owns, such as one started with `nohup` that outlived its terminal, shows a Stop button. Stop ends that process
     and what it started (by parent links, never by process group).
 11a. When a process started while the Session is open begins listening, its page opens in the Browser panel with no
@@ -120,7 +120,7 @@ adds the same to a Session.
     link setting still work, and the agent's browser tools are not offered. `OPS_CONSOLE_CHROME_PATH` names another build.
 29. A Chrome that an earlier daemon left behind when it was killed is ended when the next daemon starts: any process whose
     command line names a profile folder under the data folder's `browser/` folder.
-30. A Session's Chrome with no viewer on any tab and no agent call for 10 minutes closes with its tabs, and it exits when its last tab closes. Its cookies stay in the Session's profile folder. Deleting a
+30. A Session's Chrome with no viewer on any tab and no agent call for 10 minutes closes with its tabs. Closing the last tab leaves it running for the next tab, until that idle time ends it. Its cookies stay in the Session's profile folder. Deleting a
     Session closes its tabs and stops its processes. The daemon exiting kills Chrome. A daemon start finds no Chrome of a
     previous run.
 31. Two browsers open on one Session see the same tabs and terminals. A tab shows the size of whichever browser sent input
@@ -156,8 +156,8 @@ adds the same to a Session.
 - **Local servers**: read with `lsof` for listening TCP sockets on loopback, each process's folder, and the processes under
   the Session's own; only the Session's are returned.
 - **Link setting**: a per-browser pick in the panel's menu, not a daemon Setting.
-- **Environment of a process**: HOME, PATH, the login shell's variables and the Repo's own `.env` files as the project loads
-  them. The daemon's own environment, the session token and the Keychain are not handed on, as for `run_integration`.
+- **Environment of a process**: HOME, PATH, the login shell's variables (read once from the shell and kept until an rc file
+  changes, ADR 0007) and the Repo's own `.env` files as the project loads them. The daemon's own environment, the session token and the Keychain are not handed on, as for `run_integration`.
 - **T3 Code**: the design follows T3 Code's web mode (MIT, T3 Tools Inc.): a Chrome in the daemon, a streamed page, a port scan,
   agent browser tools. No code is copied, so `NOTICE` is unchanged.
 
@@ -261,7 +261,7 @@ Stops the server on `port` when it is this Session's. 204. 404 `not_found` for a
 
 ### WebSocket `/browser/:tabId`
 
-Raw stream behind the token. Server to client: `frame` (base64 JPEG, width, height), `tab` (a changed `tab`; it carries
+Raw stream behind the token. Server to client: a binary message per frame (width and height as two big-endian uint32, then the JPEG), `tab` (a changed `tab`; it carries
 `called_hosts` and `agent_active`), `dialog`. Client to server: `input` (pointer, key, wheel, text), `resize`, `focus`. `closed` then the socket closes.
 
 ### WebSocket `/processes/:id`

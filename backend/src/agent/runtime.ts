@@ -2052,7 +2052,7 @@ export class AgentRuntime implements OnModuleDestroy {
     if (!this.processTools || !parsed.success) return refuse('Give the process a name and a command.');
     let described: { summary: string; prod: string[] };
     try {
-      described = this.processTools.describeStart(run.sessionId, parsed.data);
+      described = await this.processTools.describeStart(run.sessionId, parsed.data);
     } catch (error) {
       return refuse(error instanceof ApiError ? error.message : 'That process cannot start.');
     }

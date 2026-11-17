@@ -21,7 +21,7 @@ afterEach(() => {
  * A stand-in for the daemon: a process that holds a pty running `command` as a Session process does, and is then killed
  * without a chance to clean up. The shell and what it started must go with the terminal.
  */
-async function killedHost(command: string): Promise<{ pids: number[] }> {
+async function killedHost(command: string, cached: boolean): Promise<{ pids: number[] }> {
   const dir = await tempDir('ops-console-hangup-');
   const worker = path.join(dir, 'worker.js');
   await writeFile(worker, 'console.log("pid " + process.pid); setInterval(() => {}, 1000);\n');
@@ -30,7 +30,7 @@ async function killedHost(command: string): Promise<{ pids: number[] }> {
     host,
     `const pty = require(${JSON.stringify(require.resolve('node-pty'))});
 const shell = process.env.SHELL || '/bin/zsh';
-const term = pty.spawn(shell, ${JSON.stringify(shellArgs(command.replaceAll('WORKER', worker)))}, {
+const term = pty.spawn(shell, ${JSON.stringify(shellArgs(command.replaceAll('WORKER', worker), cached ? {} : null))}, {
   name: 'xterm-256color', cols: 80, rows: 24, cwd: ${JSON.stringify(dir)},
   env: { HOME: process.env.HOME, USER: process.env.USER, TERM: 'xterm-256color' },
 });
@@ -57,7 +57,10 @@ setInterval(() => {}, 1000);
   return { pids };
 }
 
-describe('a Session process when the daemon is killed without cleanup', () => {
+describe.each([
+  ['the login shell', false],
+  ['the cached environment', true],
+])('a Session process run with %s when the daemon is killed without cleanup', (_how, cached) => {
   it.each([
     ['a command', `'${process.execPath}' WORKER`],
     [
@@ -66,7 +69,7 @@ describe('a Session process when the daemon is killed without cleanup', () => {
     ],
     ['a command run through another shell', `sh -c "'${process.execPath}' WORKER"`],
   ])('ends %s with the terminal', async (_name, command) => {
-    const { pids } = await killedHost(command);
+    const { pids } = await killedHost(command, cached);
     expect(pids.length).toBeGreaterThan(0);
     await gone(...pids);
     for (const pid of pids) expect(alive(pid)).toBe(false);

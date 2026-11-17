@@ -40,6 +40,11 @@ const ENTER_DELAY_MS = 80;
 const PASTE_START = '\x1b[200~';
 const PASTE_END = '\x1b[201~';
 const REPLAY_BYTES = 64 * 1024;
+/** Output that arrives within this window goes out as one message. */
+const FLUSH_MS = 8;
+/** A viewer this far behind pauses the terminal until it catches up. */
+const MAX_BUFFERED = 1_000_000;
+const DRAIN_CHECK_MS = 50;
 
 const keychainItemSchema = z.object({
   kind: z.enum(['generic', 'internet']).default('generic'),
@@ -58,6 +63,11 @@ type Terminal = {
   secrets: string[];
   requests: Map<string, SecretRequest>;
   replay: string;
+  /** Output read from the pty and not yet sent. */
+  pending: string;
+  flushing: NodeJS.Timeout | undefined;
+  /** Set while the pty is paused for a slow viewer. */
+  draining: NodeJS.Timeout | undefined;
 };
 
 @Injectable()
@@ -155,13 +165,17 @@ export class TerminalsService implements OnModuleDestroy {
       secrets: [],
       requests: new Map(),
       replay: '',
+      pending: '',
+      flushing: undefined,
+      draining: undefined,
     };
     this.terminals.set(id, terminal);
     pty.onData((data) => {
-      terminal.replay = (terminal.replay + data).slice(-REPLAY_BYTES);
-      this.send(terminal, { type: 'output', data });
+      terminal.pending += data;
+      terminal.flushing ??= setTimeout(() => this.flush(terminal), FLUSH_MS);
     });
     pty.onExit(({ exitCode }) => {
+      this.flush(terminal);
       this.send(terminal, { type: 'exit', code: exitCode });
       void this.end(id);
     });
@@ -181,7 +195,8 @@ export class TerminalsService implements OnModuleDestroy {
   attach(id: string, socket: WebSocket): void {
     const terminal = this.get(id);
     terminal.sockets.add(socket);
-    if (terminal.replay) socket.send(JSON.stringify({ type: 'output', data: terminal.replay }));
+    this.flush(terminal);
+    if (terminal.replay) socket.send(JSON.stringify({ type: 'output', data: terminal.replay.slice(-REPLAY_BYTES) }));
     for (const [requestId, request] of terminal.requests) {
       socket.send(JSON.stringify({ type: 'secret_requested', request_id: requestId, label: request.label }));
     }
@@ -302,6 +317,8 @@ export class TerminalsService implements OnModuleDestroy {
     const terminal = this.terminals.get(id);
     if (!terminal) return;
     this.terminals.delete(id);
+    clearTimeout(terminal.flushing);
+    clearInterval(terminal.draining);
     for (const request of terminal.requests.values()) request.reject(new Error('the terminal ended'));
     terminal.secrets.length = 0;
     try {
@@ -357,6 +374,28 @@ export class TerminalsService implements OnModuleDestroy {
     if (known !== -1) return known + 1;
     terminal.secrets.push(value);
     return terminal.secrets.length;
+  }
+
+  /** Sends what the pty printed since the last send as one message and keeps it for a viewer that opens late. */
+  private flush(terminal: Terminal): void {
+    clearTimeout(terminal.flushing);
+    terminal.flushing = undefined;
+    const data = terminal.pending;
+    if (!data) return;
+    terminal.pending = '';
+    terminal.replay += data;
+    // Trim in batches: slicing on every chunk copies the whole buffer for a terminal that prints a lot.
+    if (terminal.replay.length > REPLAY_BYTES * 2) terminal.replay = terminal.replay.slice(-REPLAY_BYTES);
+    this.send(terminal, { type: 'output', data });
+    const behind = () => [...terminal.sockets].some((socket) => socket.bufferedAmount > MAX_BUFFERED);
+    if (terminal.draining || !behind()) return;
+    terminal.pty.pause();
+    terminal.draining = setInterval(() => {
+      if (behind()) return;
+      clearInterval(terminal.draining);
+      terminal.draining = undefined;
+      terminal.pty.resume();
+    }, DRAIN_CHECK_MS);
   }
 
   private send(terminal: Terminal, message: TerminalServerMessage): void {

@@ -1,15 +1,30 @@
 import { output } from './command';
 
-export type ProcessEntry = { pid: number; ppid: number; pgid: number };
+export type ProcessEntry = { pid: number; ppid: number; pgid: number; command: string };
 
-export async function processTable(): Promise<ProcessEntry[]> {
-  const text = await output('ps', ['-axo', 'pid=,ppid=,pgid=']);
-  return text.split('\n').flatMap((line) => {
-    const [pid, ppid, pgid] = line.trim().split(/\s+/).map(Number);
-    return pid === undefined || ppid === undefined || pgid === undefined || Number.isNaN(pgid)
-      ? []
-      : [{ pid, ppid, pgid }];
+let last: { at: number; table: Promise<ProcessEntry[]> } | null = null;
+
+/**
+ * Every process with its parent, group and executable. A reading no older than `maxAgeMs` is shared, and callers that
+ * arrive while one runs wait for it: the local-server scan and the process list share one `ps`. Stopping a process
+ * reads fresh (the default).
+ */
+export function processTable(maxAgeMs = 0): Promise<ProcessEntry[]> {
+  if (last && Date.now() - last.at <= maxAgeMs) return last.table;
+  const table = output('ps', ['-axo', 'pid=,ppid=,pgid=,comm=']).then((text) =>
+    text.split('\n').flatMap((line) => {
+      const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+      return match
+        ? [{ pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]), command: match[4] ?? '' }]
+        : [];
+    }),
+  );
+  const mine = { at: Date.now(), table };
+  last = mine;
+  table.catch(() => {
+    if (last === mine) last = null;
   });
+  return table;
 }
 
 /**

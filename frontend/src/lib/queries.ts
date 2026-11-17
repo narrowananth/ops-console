@@ -1949,7 +1949,13 @@ export function useSkillMenu(sessionId: string, q: string, enabled: boolean) {
   });
 }
 
-const SERVERS_POLL_MS = 5000;
+/** A slow check on the servers while the panel is open; `browser.servers_changed` is what normally refreshes them. */
+const SERVERS_POLL_MS = 30_000;
+
+const browserStateQuery = (sessionId: string) => ({
+  queryKey: queryKeys.browser(sessionId),
+  queryFn: () => apiGet(`/sessions/${sessionId}/browser`, z.object({ data: browserStateSchema })).then((b) => b.data),
+});
 
 const browserStateQuery = (sessionId: string) => ({
   queryKey: queryKeys.browser(sessionId),
@@ -2038,8 +2044,8 @@ export function useClearBrowserData(sessionId: string) {
 }
 
 /**
- * The servers listening on a loopback port. `poll` asks every 5 seconds, while the panel is open; `browser.servers_changed`
- * refetches it either way, for the Browser button's dot.
+ * The servers listening on a loopback port. `browser.servers_changed` refetches it; `poll` adds a check every 30 seconds
+ * as well, for a server a shell started on its own.
  */
 export function useLocalServers(sessionId: string, enabled: boolean, poll: boolean) {
   return useQuery({

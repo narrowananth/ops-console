@@ -77,10 +77,10 @@ export class BrowserToolsService {
     }));
   }
 
-  async screenshot(sessionId: string, tabId?: string): Promise<{ mimeType: 'image/png'; base64: string }> {
+  async screenshot(sessionId: string, tabId?: string): Promise<{ mimeType: 'image/jpeg'; base64: string }> {
     return this.run(sessionId, tabId, async (tab) => ({
-      mimeType: 'image/png' as const,
-      base64: await tab.capture('png'),
+      mimeType: 'image/jpeg' as const,
+      base64: await tab.capture(),
     }));
   }
 

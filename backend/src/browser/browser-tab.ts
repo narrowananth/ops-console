@@ -10,6 +10,7 @@ import {
   type BrowserServerMessage,
   ErrorCode,
   FILL_VIEWPORT,
+  frameHeader,
   type Tab,
   TabAction,
   type TabOpener,
@@ -23,9 +24,16 @@ import { isLoopbackHost } from './addresses';
 
 const RING = 200;
 const MAX_HOSTS = 50;
-const JPEG_QUALITY = 70;
+/** The panel's frames: small, since the page changes under them all the time. */
+const FRAME_QUALITY = 60;
+/** What the agent reads in a screenshot. */
+const SHOT_QUALITY = 70;
 /** A viewer this far behind misses frames instead of queueing them. */
 const MAX_BUFFERED = 1_000_000;
+/** A frame is acknowledged once its viewers took it, or after this long, so one stalled viewer cannot freeze the rest. */
+const ACK_WAIT_MS = 250;
+/** Navigation events that arrive together are read once. */
+const READ_WAIT_MS = 150;
 /** Until a viewer reports its size. */
 const FILL_SIZE = { width: 1280, height: 800 };
 
@@ -39,6 +47,7 @@ export type TabHooks = {
   popup(opener: BrowserTab, page: Page): void;
 };
 
+type MouseMessage = Extract<BrowserClientMessage, { type: 'mouse' }>;
 const CDP_BUTTONS = { none: 0, left: 1, right: 2, middle: 4 } as const;
 const KEY_CODES: Record<string, number> = {
   Backspace: 8,
@@ -127,6 +136,10 @@ export class BrowserTab {
   private lastInput: WebSocket | null = null;
   private readonly viewerSizes = new Map<WebSocket, { width: number; height: number }>();
   private screencasting = false;
+  private reading: NodeJS.Timeout | undefined;
+  /** The newest mouse move not yet sent: moves arriving while one is in flight replace each other. */
+  private nextMove: MouseMessage | null = null;
+  private moving = false;
   private readonly requests = new WeakMap<Request, NetworkEntry>();
 
   private constructor(
@@ -227,14 +240,17 @@ export class BrowserTab {
     });
     page.on('popup', (popup) => this.hooks.popup(this, popup));
     page.on('close', () => {
+      clearTimeout(this.reading);
       for (const dir of [...this.chosenDirs, ...(this.staged ? [this.staged.dir] : [])]) {
         void rm(dir, { recursive: true, force: true }).catch(() => {});
       }
       this.hooks.closed(this, this.closing);
     });
     this.cdp.on('Page.screencastFrame', ({ data, sessionId }) => {
-      void this.cdp.send('Page.screencastFrameAck', { sessionId }).catch(() => {});
-      this.send({ type: 'frame', data, ...this.size });
+      // Chrome sends the next frame after this ack, so a slow viewer slows the page down instead of queueing frames.
+      void this.sendFrame(data)
+        .then(() => this.cdp.send('Page.screencastFrameAck', { sessionId }))
+        .catch(() => {});
     });
   }
 
@@ -250,12 +266,15 @@ export class BrowserTab {
       this.set({ called_hosts: [...called, host.hostname] });
   }
 
-  /** Reads title, icon and history after a navigation; a page that moved on mid-read is read again by its next event. */
+  /** Reads title, icon and history after a navigation, once for the events that arrive together. */
   private refresh(): void {
-    void this.read().catch(() => {});
+    clearTimeout(this.reading);
+    this.reading = setTimeout(() => void this.read().catch(() => {}), READ_WAIT_MS);
+    this.reading.unref();
   }
 
   private async read(): Promise<void> {
+    clearTimeout(this.reading);
     const [history, title, favicon] = await Promise.all([
       this.cdp.send('Page.getNavigationHistory'),
       this.page.title(),
@@ -280,7 +299,8 @@ export class BrowserTab {
   async load(url: string, timeout = 30_000): Promise<string | null> {
     this.set({ url, error: null, loading: true });
     try {
-      await this.page.goto(url, { waitUntil: 'load', timeout });
+      // The page is usable once its document is parsed; `loading` ends at the `load` event, which a slow image can hold.
+      await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout });
       await this.read().catch(() => {});
       return null;
     } catch (error) {
@@ -388,16 +408,24 @@ export class BrowserTab {
 
   private async applyNow(): Promise<void> {
     const { width, height, scale, mobile } = effective(this.state.viewport, this.fill);
-    await this.cdp.send('Emulation.setDeviceMetricsOverride', {
-      width,
-      height,
-      deviceScaleFactor: scale,
-      mobile,
-      screenWidth: width,
-      screenHeight: height,
-    });
-    await this.cdp.send('Emulation.setTouchEmulationEnabled', { enabled: mobile, maxTouchPoints: 5 });
+    await Promise.all([
+      this.cdp.send('Emulation.setDeviceMetricsOverride', {
+        width,
+        height,
+        deviceScaleFactor: scale,
+        mobile,
+        screenWidth: width,
+        screenHeight: height,
+      }),
+      this.cdp.send('Emulation.setTouchEmulationEnabled', { enabled: mobile, maxTouchPoints: 5 }),
+    ]);
+    const resized = width !== this.size.width || height !== this.size.height;
     this.size = { width, height };
+    // Frames are capped at the page's size, so a new size needs a screencast that knows it.
+    if (resized && this.screencasting) {
+      await this.cdp.send('Page.stopScreencast').catch(() => {});
+      await this.startScreencast();
+    }
     // Not awaited: it queues behind this turn.
     void this.refreshStill();
   }
@@ -406,26 +434,41 @@ export class BrowserTab {
 
   private send(message: BrowserServerMessage, only?: WebSocket): void {
     const text = JSON.stringify(message);
+    for (const viewer of only ? [only] : this.viewers) if (viewer.readyState === WebSocket.OPEN) viewer.send(text);
+  }
+
+  /** A frame is binary: its size, then the JPEG. It resolves once the viewers it went to took it. */
+  private async sendFrame(base64: string, size = this.size, only?: WebSocket): Promise<void> {
+    const header = frameHeader(size.width, size.height);
+    const jpeg = Buffer.from(base64, 'base64');
+    const packet = Buffer.concat([header, jpeg]);
+    const taken: Promise<void>[] = [];
     for (const viewer of only ? [only] : this.viewers) {
-      if (viewer.readyState !== WebSocket.OPEN) continue;
-      if (message.type === 'frame' && viewer.bufferedAmount > MAX_BUFFERED) continue;
-      viewer.send(text);
+      if (viewer.readyState !== WebSocket.OPEN || viewer.bufferedAmount > MAX_BUFFERED) continue;
+      taken.push(new Promise((resolve) => viewer.send(packet, { binary: true }, () => resolve())));
     }
+    if (taken.length === 0) return;
+    const timer = new Promise<void>((resolve) => setTimeout(resolve, ACK_WAIT_MS).unref());
+    await Promise.race([Promise.all(taken), timer]);
   }
 
   async attach(viewer: WebSocket): Promise<void> {
     this.viewers.add(viewer);
     this.send({ type: 'tab', tab: this.snapshot() }, viewer);
+    // A still page sends no screencast frame, so one screenshot shows it now. It goes out as soon as it is taken, in
+    // turn with any size change, and does not wait for the screencast to start.
+    const still = this.still().then(
+      (shot) => this.sendFrame(shot.data, shot, viewer),
+      () => {},
+    );
     if (this.viewers.size === 1) await this.startScreencast();
-    // A still page sends no screencast frame, so one screenshot shows it now.
-    const shot = await this.still().catch(() => null);
-    if (shot) this.send({ type: 'frame', ...shot }, viewer);
+    await still;
   }
 
   /** A JPEG of the page and the size it was taken at, read together inside the turn so they cannot disagree. */
   private still(): Promise<{ data: string; width: number; height: number }> {
     return this.turn(async () => {
-      const { data } = await this.cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: JPEG_QUALITY });
+      const { data } = await this.cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: FRAME_QUALITY });
       return { data, ...this.size };
     });
   }
@@ -434,16 +477,13 @@ export class BrowserTab {
   private async refreshStill(): Promise<void> {
     if (this.viewers.size === 0 || this.dead) return;
     const shot = await this.still().catch(() => null);
-    if (shot) this.send({ type: 'frame', ...shot });
+    if (shot) void this.sendFrame(shot.data, shot);
   }
 
-  /** The page as base64. Through CDP because Playwright's own screenshot clears the size the panel set. */
-  capture(format: 'jpeg' | 'png'): Promise<string> {
+  /** The page as a base64 JPEG for the agent. Through CDP because Playwright's own screenshot clears the size the panel set. */
+  capture(): Promise<string> {
     return this.turn(async () => {
-      const { data } = await this.cdp.send('Page.captureScreenshot', {
-        format,
-        ...(format === 'jpeg' ? { quality: JPEG_QUALITY } : {}),
-      });
+      const { data } = await this.cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: SHOT_QUALITY });
       return data;
     });
   }
@@ -462,9 +502,11 @@ export class BrowserTab {
     this.screencasting = true;
     await this.cdp.send('Page.startScreencast', {
       format: 'jpeg',
-      quality: JPEG_QUALITY,
-      maxWidth: 3840,
-      maxHeight: 3840,
+      quality: FRAME_QUALITY,
+      // The panel draws a page at its CSS size, so a larger frame (a phone preset's device pixels) is only bytes.
+      maxWidth: this.size.width,
+      maxHeight: this.size.height,
+      everyNthFrame: 2,
     });
   }
 
@@ -498,7 +540,31 @@ export class BrowserTab {
     }
   }
 
-  private async mouse(message: Extract<BrowserClientMessage, { type: 'mouse' }>): Promise<void> {
+  private async mouse(message: MouseMessage): Promise<void> {
+    if (message.action === 'move') {
+      this.nextMove = message;
+      if (this.moving) return;
+      this.moving = true;
+      try {
+        for (let move: MouseMessage | null = this.nextMove; move; move = this.nextMove) {
+          this.nextMove = null;
+          await this.dispatchMouse(move);
+        }
+      } finally {
+        this.moving = false;
+      }
+      return;
+    }
+    // A press goes after the move that led to it.
+    if (this.nextMove) {
+      const move = this.nextMove;
+      this.nextMove = null;
+      await this.dispatchMouse(move);
+    }
+    await this.dispatchMouse(message);
+  }
+
+  private async dispatchMouse(message: MouseMessage): Promise<void> {
     const bit = CDP_BUTTONS[message.button];
     if (message.action === 'down') this.buttons |= bit;
     if (message.action === 'up') this.buttons &= ~bit;
