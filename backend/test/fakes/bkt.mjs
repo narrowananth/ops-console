@@ -35,7 +35,13 @@ const bodies = {
         }
       : { values: [{ slug: 'billing', updated_on: '2026-10-02T10:00:00.000000+00:00' }] },
   '/repositories/acme/idle/pullrequests': { values: [] },
-  '/repositories/acme/orders/pullrequests': { values: [pr(1, 'orders')] },
+  // BKT_PAGED: the list has a second page, as a repository with more pull requests than one page holds.
+  '/repositories/acme/orders/pullrequests':
+    process.env.BKT_PAGED && page === 1
+      ? { values: [pr(1, 'orders')], next: 'https://api.example.com/next' }
+      : process.env.BKT_PAGED
+        ? { values: [pr(3, 'orders')] }
+        : { values: [pr(1, 'orders')] },
   '/repositories/acme/billing/pullrequests': {
     values: [pr(2, 'billing', { participants: [{ approved: false, state: 'changes_requested' }] })],
   },

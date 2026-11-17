@@ -161,6 +161,8 @@ export const sessions = sqliteTable(
   (table) => [
     index('sessions_spawned_by_idx').on(table.spawnedBySessionId),
     index('sessions_alert_idx').on(table.alertId),
+    index('sessions_state_idx').on(table.state),
+    index('sessions_run_outcome_idx').on(table.runOutcome),
     index('sessions_active_idx').on(sql`${table.lastActiveAt} DESC`),
     index('sessions_repo_idx').on(table.repoId, sql`${table.lastActiveAt} DESC`),
     uniqueIndex('sessions_one_pr_review_idx').on(table.repoId, table.prNumber).where(sql`${table.kind} = 'pr_review'`),
@@ -217,6 +219,8 @@ export const runSteps = sqliteTable(
     index('run_steps_session_idx').on(table.sessionId, table.startedAt),
     // Retention deletes the oldest steps first, in small batches.
     index('run_steps_started_idx').on(table.startedAt),
+    // The Bash history read filters by tool and takes the newest.
+    index('run_steps_tool_idx').on(table.tool, table.startedAt),
   ],
 );
 
@@ -563,6 +567,8 @@ export const services = sqliteTable(
     repoUrl: text('repo_url'),
     /** Null: the Datadog Connector's default. */
     checkInterval: text('check_interval').$type<CheckInterval>(),
+    /** When the code finder last looked for this Service's code and found none; null before it has looked. */
+    codeLookedAt: text('code_looked_at'),
     createdAt: text('created_at').notNull().default(nowIso),
   },
   (table) => [unique('services_name_env').on(table.name, table.env)],
@@ -695,6 +701,8 @@ export const alertEvents = sqliteTable(
   },
   (table) => [
     index('alert_events_alert_idx').on(table.alertId, table.at),
+    // Retention deletes the oldest events first.
+    index('alert_events_at_idx').on(table.at),
     check('alert_events_data_json', sql`json_valid(${table.data})`),
   ],
 );
@@ -759,43 +767,48 @@ export const reviews = sqliteTable(
     undoneAt: text('undone_at'),
   },
   (table) => [
+    index('reviews_report_idx').on(table.reportId),
     uniqueIndex('reviews_one_active_idx').on(table.reportId).where(sql`${table.undoneAt} IS NULL`),
     check('reviews_kind_with_decision', sql`(${table.decision} = 'confirmed') = (${table.kind} IS NOT NULL)`),
   ],
 );
 
-export const fixes = sqliteTable('fixes', {
-  id: text().primaryKey().notNull(),
-  reviewId: text('review_id')
-    .notNull()
-    .unique()
-    .references(() => reviews.id, { onDelete: 'cascade' }),
-  sessionId: text('session_id').references(() => sessions.id, { onDelete: 'set null' }),
-  stage: text()
-    .$type<FixStage>()
-    .notNull()
-    .default('ticket' as FixStage),
-  status: text()
-    .$type<FixStatus>()
-    .notNull()
-    .default('running' as FixStatus),
-  jiraKey: text('jira_key'),
-  jiraUrl: text('jira_url'),
-  /** Why the ticket stage went on without a ticket while Jira was connected; null otherwise. */
-  ticketSkipped: text('ticket_skipped'),
-  /** `<jira_key>-<slug>`, set with the key; `fix/<slug>` without a ticket. */
-  branch: text(),
-  prNumber: integer('pr_number'),
-  prUrl: text('pr_url'),
-  errorMessage: text('error_message'),
-  startedAt: text('started_at').notNull().default(nowIso),
-  finishedAt: text('finished_at'),
-  ...jobPlaybookColumns(),
-  /** The Playbook's Branch field as copied at start: where the code is read from. Null before Branch. */
-  playbookBranches: text('playbook_branches'),
-  /** The Playbook's Jira ticket switch as copied at start. */
-  playbookJiraTicket: bool('playbook_jira_ticket').notNull().default(false),
-});
+export const fixes = sqliteTable(
+  'fixes',
+  {
+    id: text().primaryKey().notNull(),
+    reviewId: text('review_id')
+      .notNull()
+      .unique()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').references(() => sessions.id, { onDelete: 'set null' }),
+    stage: text()
+      .$type<FixStage>()
+      .notNull()
+      .default('ticket' as FixStage),
+    status: text()
+      .$type<FixStatus>()
+      .notNull()
+      .default('running' as FixStatus),
+    jiraKey: text('jira_key'),
+    jiraUrl: text('jira_url'),
+    /** Why the ticket stage went on without a ticket while Jira was connected; null otherwise. */
+    ticketSkipped: text('ticket_skipped'),
+    /** `<jira_key>-<slug>`, set with the key; `fix/<slug>` without a ticket. */
+    branch: text(),
+    prNumber: integer('pr_number'),
+    prUrl: text('pr_url'),
+    errorMessage: text('error_message'),
+    startedAt: text('started_at').notNull().default(nowIso),
+    finishedAt: text('finished_at'),
+    ...jobPlaybookColumns(),
+    /** The Playbook's Branch field as copied at start: where the code is read from. Null before Branch. */
+    playbookBranches: text('playbook_branches'),
+    /** The Playbook's Jira ticket switch as copied at start. */
+    playbookJiraTicket: bool('playbook_jira_ticket').notNull().default(false),
+  },
+  (table) => [index('fixes_session_idx').on(table.sessionId)],
+);
 
 /** The Connections a `devtools` Session may reach. No rows: every Connection with access. */
 export const sessionConnections = sqliteTable(

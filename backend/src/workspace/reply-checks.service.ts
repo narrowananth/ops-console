@@ -63,7 +63,7 @@ export class ReplyChecksService {
   async start(repoId: string, number: number, commentId: string): Promise<ReplyCheck> {
     const repo = this.pulls.hosted(repoId);
     const slug = repo.remoteSlug as string;
-    const { pr, comments } = await this.pulls.adapter(repo).get(slug, number);
+    const { pr, comments } = await this.pulls.recent(repo, number);
     if (pr.state !== PrState.Open) throw new ApiError(409, ErrorCode.InvalidState, 'The pull request is not open');
     const thread = threadOf(comments, commentId);
     const root = thread[0];
@@ -113,7 +113,7 @@ export class ReplyChecksService {
       return created;
     });
     // The running row is in before anything awaits, so a second start meets it as busy.
-    await this.jobs.release(prReplyChecks, earlier);
+    this.jobs.releaseLater(prReplyChecks, earlier);
     this.run(row.id, session, replyCheckBrief(slug, pr, thread), pr.branch, false);
     return this.view(row);
   }
@@ -216,7 +216,7 @@ export class ReplyChecksService {
         );
       }
     }
-    this.pulls.drop(row.repoId);
+    this.pulls.wrote(row.repoId, row.prNumber);
     // A ready job needs no scratch copy; it goes before the status says so.
     await this.jobs.dropScratch(row.scratchPath);
     this.store.write((tx, emit) => {

@@ -551,7 +551,6 @@ Change nothing else. ${JSON_ONLY}
       });
       this.announce(tx, emit, fix);
     });
-    if (context.service.repoId) this.pulls.drop(context.service.repoId);
   }
 
   /** The console pushes the Fix branch and opens its pull request; the agent only committed and wrote the text. */

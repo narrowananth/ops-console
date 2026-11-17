@@ -1,10 +1,10 @@
-import type { Alert, ReportStep } from '@ops-console/shared';
+import type { AlertListItem, ReportStep } from '@ops-console/shared';
 import { ago } from './scan-scope';
 
 const WARNING = 'rounded-full bg-accent-100 px-2 py-px text-accent-700';
 
 /** How long since a Scan read the Alert's Service, as a warning once a Scan was missed. */
-export function FreshnessNote({ alert }: { alert: Alert }) {
+export function FreshnessNote({ alert }: { alert: AlertListItem }) {
   if (alert.last_scanned_at === null) {
     return (
       <span className={WARNING} title="No Scan has read this Service since the console began recording Scans.">
@@ -28,7 +28,7 @@ export function FreshnessNote({ alert }: { alert: Alert }) {
 }
 
 /** A merged Fix that no Scan has yet seen healthy. */
-export function MergeNote({ alert }: { alert: Alert }) {
+export function MergeNote({ alert }: { alert: AlertListItem }) {
   if (!alert.awaiting_prod_check) return null;
   return (
     <span

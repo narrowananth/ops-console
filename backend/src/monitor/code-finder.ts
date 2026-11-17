@@ -5,6 +5,9 @@ import { promisify } from 'node:util';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConnectorId, GitHost, HealthStatus } from '@ops-console/shared';
 import { eq, isNull } from 'drizzle-orm';
+import { z } from 'zod';
+import { mapLimit } from '../common/map-limit';
+import { asBackground, hostCliPool } from '../common/spawn-pool';
 import { connectors, repos, services } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { GIT, Git } from '../repos/git';
@@ -32,10 +35,73 @@ const HOST_NAME: Record<HostedName['host'], string> = {
   [GitHost.Bitbucket]: 'bitbucket.org',
 };
 
-/** `gh` for GitHub; `git ls-remote` over SSH, with no prompt, for GitLab and Bitbucket. */
+/** Services looked for at once. */
+const LOOKS_AT_ONCE = 2;
+/** A Service whose code was not found is looked for again after this. */
+const LOOK_AGAIN_MS = 7 * 86_400_000;
+/** A workspace's repository list is kept this long, so a Scan's Services share one read. */
+const NAMES_TTL_MS = 5 * 60_000;
+/** Pages of a workspace's repository list read: a bound on a runaway `next`. */
+const NAME_PAGES = 30;
+
+const namesPage = z.object({ values: z.array(z.object({ slug: z.string() })), next: z.string().nullish() });
+
+const slugOf = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+/**
+ * `gh` for GitHub; for Bitbucket one list of the workspace's repositories through `bkt`, and `git ls-remote` over SSH,
+ * with no prompt, when that list cannot be read and for GitLab.
+ */
 export class CliCodeHosts implements CodeHosts {
+  private readonly lists = new Map<string, { at: number; slugs: Promise<Set<string> | null> }>();
+
+  /** The repository slugs of a Bitbucket workspace; null when `bkt` cannot list them. */
+  private bitbucketSlugs(workspace: string): Promise<Set<string> | null> {
+    const key = workspace.toLowerCase();
+    const kept = this.lists.get(key);
+    if (kept && Date.now() - kept.at < NAMES_TTL_MS) return kept.slugs;
+    const slugs = (async () => {
+      try {
+        const found = new Set<string>();
+        for (let at = 1; at <= NAME_PAGES; at++) {
+          const { stdout } = await hostCliPool.run(() =>
+            run(
+              'bkt',
+              [
+                'api',
+                `/repositories/${workspace}`,
+                '-P',
+                'pagelen=100',
+                '-P',
+                `page=${at}`,
+                '-P',
+                'fields=next,values.slug',
+              ],
+              { timeout: 30_000, maxBuffer: 20 * 1024 * 1024 },
+            ),
+          );
+          const read = namesPage.parse(JSON.parse(stdout));
+          for (const value of read.values) found.add(value.slug.toLowerCase());
+          if (!read.next) break;
+        }
+        return found;
+      } catch {
+        return null;
+      }
+    })();
+    this.lists.set(key, { at: Date.now(), slugs });
+    return slugs;
+  }
+
   async find(repo: HostedName): Promise<string | null> {
     try {
+      if (repo.host === GitHost.Bitbucket) {
+        const slugs = await this.bitbucketSlugs(repo.owner);
+        if (slugs !== null) {
+          const slug = [repo.name.toLowerCase(), slugOf(repo.name)].find((candidate) => slugs.has(candidate));
+          return slug ? `git@${HOST_NAME[repo.host]}:${repo.owner}/${slug}.git` : null;
+        }
+      }
       if (repo.host === GitHost.Github) {
         await run('gh', ['repo', 'view', `${repo.owner}/${repo.name}`, '--json', 'name'], { timeout: 15_000 });
         return `github.com/${repo.owner}/${repo.name}`;
@@ -78,8 +144,8 @@ const plain = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '');
 export class CodeFinder {
   private readonly logger = new Logger('monitor');
   private readonly running = new Map<string, Promise<FindResult>>();
-  /** Services already looked for since start; a Scan does not look again. */
-  private readonly looked = new Set<string>();
+  private draining: Promise<void> | null = null;
+  private again = false;
 
   constructor(
     @Inject(STORE) private readonly store: Store,
@@ -88,18 +154,38 @@ export class CodeFinder {
     @Inject(CODE_HOSTS) private readonly hosts: CodeHosts,
   ) {}
 
-  /** After a Scan: looks once for each Service with no code, in the background. */
+  /**
+   * After a Scan: looks for each Service with no code that was not looked for in the last week, two at a time, in the
+   * background. Each look is kept in `services.code_looked_at`, so a restart does not look again.
+   */
   lookForUnlinked(): void {
-    const unlinked = this.store.db
-      .select()
-      .from(services)
-      .all()
-      .filter((row) => row.repoId === null && row.repoUrl === null && !this.looked.has(row.id));
-    for (const row of unlinked) {
-      void this.find(row.id).catch((error) =>
-        this.logger.warn(`code for ${row.name} not looked for: ${error instanceof Error ? error.message : error}`),
-      );
+    if (this.draining) {
+      this.again = true;
+      return;
     }
+    this.draining = asBackground(() => this.drain()).finally(() => {
+      this.draining = null;
+    });
+  }
+
+  private async drain(): Promise<void> {
+    do {
+      this.again = false;
+      const stale = new Date(Date.now() - LOOK_AGAIN_MS).toISOString();
+      const unlinked = this.store.db
+        .select()
+        .from(services)
+        .all()
+        .filter(
+          (row) =>
+            row.repoId === null && row.repoUrl === null && (row.codeLookedAt === null || row.codeLookedAt < stale),
+        );
+      await mapLimit(unlinked, LOOKS_AT_ONCE, (row) =>
+        this.find(row.id).catch((error) =>
+          this.logger.warn(`code for ${row.name} not looked for: ${error instanceof Error ? error.message : error}`),
+        ),
+      );
+    } while (this.again);
   }
 
   /** One look at a time per Service; a second caller shares it. */
@@ -112,7 +198,6 @@ export class CodeFinder {
   }
 
   private async look(serviceId: string): Promise<FindResult> {
-    this.looked.add(serviceId);
     const service = this.store.db.select().from(services).where(eq(services.id, serviceId)).get();
     if (!service) return { found: null, tried: [] };
     if (service.repoId) return { found: 'repo', tried: [] };
@@ -142,6 +227,9 @@ export class CodeFinder {
       const url = await this.hosts.find(repo);
       if (url) return this.link(service, { repoUrl: url }, 'url', tried);
     }
+    this.store.write((tx) =>
+      tx.update(services).set({ codeLookedAt: new Date().toISOString() }).where(eq(services.id, service.id)).run(),
+    );
     return { found: null, tried };
   }
 

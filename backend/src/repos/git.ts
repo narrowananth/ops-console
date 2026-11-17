@@ -3,8 +3,16 @@ import { lstat, readFile, realpath, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { GitHost, type SessionDiff, type SessionDiffFile, SessionDiffStatus } from '@ops-console/shared';
+import { gitPool } from '../common/spawn-pool';
 
-const run = promisify(execFile);
+const exec = promisify(execFile);
+
+/** Runs `git` through the shared pool, so a burst of reads cannot start dozens of processes. */
+const run = (
+  bin: string,
+  args: string[],
+  options: { maxBuffer?: number; env?: NodeJS.ProcessEnv; timeout?: number } = {},
+) => gitPool.run(() => exec(bin, args, { ...options, encoding: 'utf8' }));
 
 /**
  * Repository settings that make `git` run a program: a hook or `core.fsmonitor`. The daemon runs `git` outside the Run
@@ -19,6 +27,10 @@ const DIFF_LINES = 3000;
 const UNTRACKED_FILES = 200;
 /** An untracked file bigger than this shows as a file without its lines. */
 const UNTRACKED_BYTES = 512 * 1024;
+/** A fetch that takes longer is given up: a hung `ssh` must not stall a run, which reads the last fetched commit. */
+const FETCH_TIMEOUT_MS = 8000;
+/** A fetch of the same ref this recent stands for a new one, for callers that do not need the very newest commit. */
+const FETCH_REUSE_MS = 30_000;
 
 export const GIT = Symbol('GIT');
 
@@ -50,6 +62,9 @@ export function codeBaseStep(base: CodeBase): string {
 
 /** Reads from a local git repository. Tests use real repositories in temporary folders. */
 export class Git {
+  /** Fetches by repository and ref: callers that ask at once share one process. */
+  private readonly fetches = new Map<string, { at: number; running: boolean; done: Promise<void> }>();
+
   constructor(private readonly bin = 'git') {}
 
   /** The top folder of the repository holding `dir`, or `null` when it is not inside one or does not exist. */
@@ -77,29 +92,35 @@ export class Git {
    * detached HEAD. `fallback` is the default branch when origin names none.
    */
   async changes(dir: string, fallback: string, branch: string | null): Promise<SessionDiff> {
-    const named = (await this.try(dir, ['symbolic-ref', '--short', '-q', 'refs/remotes/origin/HEAD']))?.trim();
-    const main = named ? named.replace(/^origin\//, '') : fallback;
-    const base = (await this.commitOf(dir, `refs/remotes/origin/${main}`))
-      ? `origin/${main}`
-      : (await this.commitOf(dir, `refs/heads/${main}`))
-        ? main
-        : null;
-    const head = await this.commitOf(dir, 'HEAD');
+    const [named, head, untracked, current] = await Promise.all([
+      this.try(dir, ['symbolic-ref', '--short', '-q', 'refs/remotes/origin/HEAD']),
+      this.commitOf(dir, 'HEAD'),
+      this.try(dir, ['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '-z']),
+      this.branchName(dir),
+    ]);
+    const main = named?.trim() ? named.trim().replace(/^origin\//, '') : fallback;
+    const [remote, local] = await Promise.all([
+      this.commitOf(dir, `refs/remotes/origin/${main}`),
+      this.commitOf(dir, `refs/heads/${main}`),
+    ]);
+    const base = remote ? `origin/${main}` : local ? main : null;
     const fork = base && head ? ((await this.try(dir, ['merge-base', base, head]))?.trim() ?? head) : head;
-    const files: SessionDiffFile[] = fork
-      ? parseDiff(
-          (await this.try(dir, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '-M', fork])) ??
-            '',
-        )
-      : [];
-    const untracked =
-      (await this.try(dir, ['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '-z'])) ?? '';
-    for (const name of untracked.split('\0').filter(Boolean).slice(0, UNTRACKED_FILES)) {
-      files.push(await untrackedFile(path.join(dir, name), name));
-    }
+    const [diff, others] = await Promise.all([
+      fork
+        ? this.try(dir, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '-M', fork])
+        : Promise.resolve(null),
+      Promise.all(
+        (untracked ?? '')
+          .split('\0')
+          .filter(Boolean)
+          .slice(0, UNTRACKED_FILES)
+          .map((name) => untrackedFile(path.join(dir, name), name)),
+      ),
+    ]);
+    const files: SessionDiffFile[] = [...(fork ? parseDiff(diff ?? '') : []), ...others];
     files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     return {
-      branch: (await this.branchName(dir)) ?? branch,
+      branch: current ?? branch,
       base: fork ? (base ?? branch) : null,
       files,
       additions: files.reduce((sum, file) => sum + file.additions, 0),
@@ -119,9 +140,28 @@ export class Git {
     return url?.trim() || null;
   }
 
+  /** Whether `dir` has uncommitted changes. Throws when git cannot read the status: a failed read is not a clean tree. */
   async isDirty(dir: string): Promise<boolean> {
-    const out = await this.try(dir, ['status', '--porcelain']);
-    return (out ?? '').trim() !== '';
+    return (await this.status(dir)).dirty;
+  }
+
+  /**
+   * The checked-out branch (a detached HEAD reads as the short commit) and whether the work tree has changes, in one
+   * `git status`. `--no-optional-locks` keeps a read from taking the index lock a run's own `git` may hold. Throws with
+   * git's first line when git cannot read it.
+   */
+  async status(dir: string): Promise<{ branch: string | null; dirty: boolean }> {
+    const out = await this.read(dir, ['--no-optional-locks', 'status', '--porcelain=v2', '--branch']);
+    let head: string | null = null;
+    let oid: string | null = null;
+    let dirty = false;
+    for (const line of out.split('\n')) {
+      if (line.startsWith('# branch.head ')) head = line.slice('# branch.head '.length);
+      else if (line.startsWith('# branch.oid ')) oid = line.slice('# branch.oid '.length);
+      else if (line !== '' && !line.startsWith('#')) dirty = true;
+    }
+    const branch = head === '(detached)' ? (oid && oid !== '(initial)' ? oid.slice(0, 7) : null) : head;
+    return { branch, dirty };
   }
 
   /** Local branches by most recent commit. */
@@ -228,13 +268,11 @@ export class Git {
    * The first of `names` origin has, fetched now. When none can be fetched, the first one the Repo has locally, with
    * the fetch's error. Throws when no name is on origin or in the Repo.
    */
-  async codeBase(dir: string, names: string[]): Promise<CodeBase> {
+  async codeBase(dir: string, names: string[], reuse = false): Promise<CodeBase> {
     let error: string | null = null;
     for (const branch of names) {
       try {
-        await this.must(dir, ['fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
-          GIT_TERMINAL_PROMPT: '0',
-        });
+        await this.fetchOnce(dir, branchKey(branch), [branchSpec(branch)], reuse);
         const sha = await this.commitOf(dir, `refs/remotes/origin/${branch}`);
         if (sha) return { branch, ref: `origin/${branch}`, sha, fetched: true, error: null };
       } catch (failed) {
@@ -311,9 +349,9 @@ export class Git {
   }
 
   /** Fetches `branch` from `origin`, and moves a clean `dir` forward to it when that is a fast-forward. Never throws. */
-  async pull(dir: string, branch: string): Promise<void> {
+  async pull(dir: string, branch: string, reuse = false): Promise<void> {
     try {
-      await this.remoteHead(dir, branch);
+      await this.remoteHead(dir, branch, reuse);
     } catch {
       return;
     }
@@ -352,26 +390,38 @@ export class Git {
   }
 
   /** Fetches `branch` from `origin` and makes it a local branch tracking it. Throws with git's first line. */
-  async trackBranch(dir: string, branch: string): Promise<void> {
-    await this.must(dir, ['fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
-      GIT_TERMINAL_PROMPT: '0',
-    });
+  async trackBranch(dir: string, branch: string, reuse = false): Promise<void> {
+    await this.fetchOnce(dir, branchKey(branch), [branchSpec(branch)], reuse);
     await this.must(dir, ['branch', '--quiet', '--track', branch, `origin/${branch}`]);
   }
 
   /** Fetches `branch` from `origin` into `origin/<branch>` and gives the commit it is at. Throws with git's first line. */
-  async remoteHead(dir: string, branch: string): Promise<string> {
-    await this.must(dir, ['fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
-      GIT_TERMINAL_PROMPT: '0',
-    });
+  async remoteHead(dir: string, branch: string, reuse = false): Promise<string> {
+    await this.fetchOnce(dir, branchKey(branch), [branchSpec(branch)], reuse);
     const sha = (await this.try(dir, ['rev-parse', `refs/remotes/origin/${branch}`]))?.trim();
     if (!sha) throw new GitFailed(`no origin/${branch}`);
     return sha;
   }
 
+  /**
+   * Fetches every branch of `branches` from `origin` into `origin/<branch>` in one `git fetch`, and gives each one's
+   * commit. Throws with git's first line when any is missing on origin.
+   */
+  async remoteHeads(dir: string, branches: string[], reuse = false): Promise<Map<string, string>> {
+    const unique = [...new Set(branches)];
+    await this.fetchOnce(dir, `branches:${[...unique].sort().join('\0')}`, unique.map(branchSpec), reuse);
+    const heads = new Map<string, string>();
+    for (const branch of unique) {
+      const sha = (await this.try(dir, ['rev-parse', `refs/remotes/origin/${branch}`]))?.trim();
+      if (!sha) throw new GitFailed(`no origin/${branch}`);
+      heads.set(branch, sha);
+    }
+    return heads;
+  }
+
   /** Fetches `ref` from `origin` into no branch, so its commits are in the repository. Throws with git's first line. */
-  async fetchRef(dir: string, ref: string): Promise<void> {
-    await this.must(dir, ['fetch', '--quiet', 'origin', ref], { GIT_TERMINAL_PROMPT: '0' });
+  async fetchRef(dir: string, ref: string, reuse = false): Promise<void> {
+    await this.fetchOnce(dir, `ref:${ref}`, [ref], reuse);
   }
 
   /** Whether `sha` is a commit the repository has. */
@@ -403,8 +453,8 @@ export class Git {
   }
 
   /** Fetches `branch` from `origin`, so its commits are in the repository. Throws with git's first line. */
-  async fetchBranch(dir: string, branch: string): Promise<void> {
-    await this.must(dir, ['fetch', '--quiet', 'origin', `refs/heads/${branch}`], { GIT_TERMINAL_PROMPT: '0' });
+  async fetchBranch(dir: string, branch: string, reuse = false): Promise<void> {
+    await this.fetchOnce(dir, `head:${branch}`, [`refs/heads/${branch}`], reuse);
   }
 
   /**
@@ -420,18 +470,45 @@ export class Git {
 
   /** How many commits `branch` has that `origin/<base>` (the local `base` without it) lacks; 0 when either is missing. */
   async commitsAhead(dir: string, base: string, branch: string): Promise<number> {
-    const from = (await this.commitOf(dir, `refs/remotes/origin/${base}`))
-      ? `refs/remotes/origin/${base}`
-      : `refs/heads/${base}`;
-    if (!(await this.commitOf(dir, from)) || !(await this.commitOf(dir, `refs/heads/${branch}`))) return 0;
-    const count = await this.try(dir, ['rev-list', '--count', `${from}..refs/heads/${branch}`]);
-    return Number.parseInt(count ?? '0', 10) || 0;
+    for (const from of [`refs/remotes/origin/${base}`, `refs/heads/${base}`]) {
+      const count = await this.try(dir, ['rev-list', '--count', `${from}..refs/heads/${branch}`]);
+      if (count !== null) return Number.parseInt(count, 10) || 0;
+    }
+    return 0;
+  }
+
+  /** The commits `branch` has that `origin/<base>` (the local `base` without it) lacks, oldest first; none when either is missing. */
+  async commitsSince(dir: string, base: string, branch: string): Promise<{ subject: string; body: string }[]> {
+    for (const from of [`refs/remotes/origin/${base}`, `refs/heads/${base}`]) {
+      const out = await this.try(dir, [
+        'log',
+        '--reverse',
+        '--max-count=50',
+        '--format=%s%x1f%b%x1e',
+        `${from}..refs/heads/${branch}`,
+      ]);
+      if (out === null) continue;
+      return out
+        .split('\x1e')
+        .map((entry) => entry.replace(/^\n/, ''))
+        .filter((entry) => entry.trim() !== '')
+        .map((entry) => {
+          const [subject = '', body = ''] = entry.split('\x1f');
+          return { subject: subject.trim(), body: body.trim() };
+        });
+    }
+    return [];
   }
 
   /** Files with changes not committed yet: staged, unstaged and untracked. */
   async uncommittedFiles(dir: string): Promise<number> {
-    const out = await this.try(dir, ['status', '--porcelain']);
+    const out = await this.try(dir, ['--no-optional-locks', 'status', '--porcelain']);
     return (out ?? '').split('\n').filter((line) => line.trim() !== '').length;
+  }
+
+  /** The commit local branch `branch` is at; null when the Repo has no such branch. */
+  async branchHead(dir: string, branch: string): Promise<string | null> {
+    return this.commitOf(dir, `refs/heads/${branch}`);
   }
 
   /** The commit `dir` is at. */
@@ -484,13 +561,54 @@ export class Git {
     }
   }
 
+  /**
+   * One `git fetch` of `specs` from `origin` per repository and `key`: callers that ask while it runs share it, and one
+   * that asks within 30 seconds of a fetch that worked shares that too when `reuse` is set. Throws with git's first line.
+   */
+  private fetchOnce(dir: string, key: string, specs: string[], reuse: boolean): Promise<void> {
+    const id = `${dir}\0${key}`;
+    const kept = this.fetches.get(id);
+    if (kept && (kept.running || (reuse && Date.now() - kept.at < FETCH_REUSE_MS))) return kept.done;
+    const entry = { at: Date.now(), running: true, done: Promise.resolve() };
+    entry.done = this.must(
+      dir,
+      ['fetch', '--quiet', 'origin', ...specs],
+      { GIT_TERMINAL_PROMPT: '0' },
+      FETCH_TIMEOUT_MS,
+    ).then(
+      () => {
+        entry.running = false;
+        entry.at = Date.now();
+      },
+      (error) => {
+        if (this.fetches.get(id) === entry) this.fetches.delete(id);
+        throw error;
+      },
+    );
+    this.fetches.set(id, entry);
+    return entry.done;
+  }
+
   /** The first line of git's own message; it names the problem and holds no secrets. */
-  private async must(dir: string, args: string[], env: Record<string, string> = {}): Promise<void> {
+  private async must(dir: string, args: string[], env: Record<string, string> = {}, timeout?: number): Promise<void> {
     try {
       await run(this.bin, [...NO_PROGRAMS, '-C', dir, ...args], {
         maxBuffer: 10 * 1024 * 1024,
         env: { ...process.env, ...env },
+        timeout,
       });
+    } catch (error) {
+      const { stderr, killed } = error as { stderr?: unknown; killed?: unknown };
+      if (killed === true) throw new GitFailed(`git ${args[0]} timed out`);
+      throw new GitFailed(typeof stderr === 'string' ? (stderr.trim().split('\n')[0] ?? '') : '');
+    }
+  }
+
+  /** Output of a read that must work. Throws with git's first line. */
+  private async read(dir: string, args: string[]): Promise<string> {
+    try {
+      const { stdout } = await run(this.bin, [...NO_PROGRAMS, '-C', dir, ...args], { maxBuffer: 10 * 1024 * 1024 });
+      return stdout;
     } catch (error) {
       const { stderr } = error as { stderr?: unknown };
       throw new GitFailed(typeof stderr === 'string' ? (stderr.trim().split('\n')[0] ?? '') : '');
@@ -506,6 +624,9 @@ export class Git {
     }
   }
 }
+
+const branchKey = (branch: string) => `branch:${branch}`;
+const branchSpec = (branch: string) => `+refs/heads/${branch}:refs/remotes/origin/${branch}`;
 
 /** A URL git can clone: `github.com/acme/orders` gains `https://` and `.git`; a full or SSH URL is kept. */
 export function cloneUrl(url: string): string {

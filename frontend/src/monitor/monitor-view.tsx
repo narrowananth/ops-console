@@ -1,9 +1,10 @@
-import { ConnectorId, HealthStatus } from '@ops-console/shared';
+import { ConnectorId, ErrorCode, HealthStatus } from '@ops-console/shared';
 import { z } from 'zod';
 import { BrandIcon } from '../components/ui/brand-icon';
 import { Empty } from '../components/ui/empty';
 import { PanelRail, PanelToggle, RAIL_BUTTON } from '../components/ui/side-panel';
-import { useAlerts, useConnectors, useServices } from '../lib/queries';
+import { ApiError } from '../lib/api';
+import { useAlert, useConnectors, useServices } from '../lib/queries';
 import { useAddress, useStored } from '../lib/remember';
 import { AlertView } from './alert-view';
 import { LogsPane } from './logs-pane';
@@ -13,9 +14,11 @@ import { ServicesPane } from './services-pane';
 export function MonitorView() {
   // The picked Service and Alert live in the address: Back steps through them and a reload keeps them.
   const [{ service, alert }, setAddress] = useAddress('service', 'alert');
-  const alerts = useAlerts();
-  // An Alert that is gone leaves nothing picked.
-  const alertId = alert !== null && alerts.data && !alerts.data.some((row) => row.id === alert) ? null : alert;
+  // An Alert that is gone leaves nothing picked. The picked one is read alone: it may be a closed one, which the list
+  // holds only once asked for. The Alert's own view reads the same query.
+  const picked = useAlert(alert ?? '', alert !== null);
+  const alertId =
+    alert !== null && picked.error instanceof ApiError && picked.error.code === ErrorCode.NotFound ? null : alert;
   const connectors = useConnectors();
   const services = useServices();
   const datadog = connectors.data?.data.find((connector) => connector.id === ConnectorId.Datadog);

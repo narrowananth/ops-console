@@ -1,8 +1,8 @@
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query } from '@nestjs/common';
 import {
-  type Alert,
   type AlertDetail,
   type AlertEvent,
+  type AlertListItem,
   type AlertSummary,
   alertsQuerySchema,
   createScanSchema,
@@ -11,6 +11,7 @@ import {
   type FindCodeResult,
   type Fix,
   type MonitorEnv,
+  type Page,
   patchRouteSchema,
   patchServiceSchema,
   type Report,
@@ -118,8 +119,8 @@ export class MonitorController {
   }
 
   @Get('alerts')
-  listAlerts(@Query() query: unknown): { data: Alert[]; meta: { next_cursor: null } } {
-    return list(this.alerts.list(parseInput(alertsQuerySchema, query, 'query')));
+  listAlerts(@Query() query: unknown): Page<AlertListItem> {
+    return this.alerts.list(parseInput(alertsQuerySchema, query, 'query'));
   }
 
   @Get('alerts/summary')

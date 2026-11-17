@@ -1,9 +1,9 @@
-import { type Alert, AlertStatus, type ScanWindow, SEVERITIES, type Severity } from '@ops-console/shared';
+import { type AlertListItem, AlertStatus, type ScanWindow, SEVERITIES, type Severity } from '@ops-console/shared';
 import { Fragment } from 'react';
 import { z } from 'zod';
 import { Empty } from '../components/ui/empty';
 import { item } from '../components/ui/item';
-import { useAlerts } from '../lib/queries';
+import { useAlerts, useClosedAlerts } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { FreshnessNote, MergeNote } from './prod-notes';
 import { ago, shown as inMonitor } from './scan-scope';
@@ -33,7 +33,7 @@ const TAB_TIP: Record<Severity | 'all', string> = {
 const CLOSED = [AlertStatus.Resolved, AlertStatus.Dismissed];
 
 /** Every word of `needle` sits in the Alert's route, message, title, status code, Service or status. */
-function matches(alert: Alert, needle: string): boolean {
+function matches(alert: AlertListItem, needle: string): boolean {
   const text = [
     alert.route ? `${alert.route.method} ${alert.route.path}` : '',
     alert.log_line,
@@ -62,7 +62,7 @@ function Row({
   showService,
   onSelect,
 }: {
-  alert: Alert;
+  alert: AlertListItem;
   selected: boolean;
   showService: boolean;
   onSelect: () => void;
@@ -149,6 +149,13 @@ export function LogsPane({
   const alerts = useAlerts();
   const [tier, setTier] = useStored<Severity | 'all'>('monitor.tier', z.enum(['all', ...SEVERITIES]), 'all');
   const [showClosed, setShowClosed] = useStored('monitor.closed', z.boolean(), false);
+  // Resolved and dismissed Alerts are read a page at a time, only once the operator asks for them.
+  const closed = useClosedAlerts(showClosed);
+  const listed = showClosed
+    ? [...(alerts.data ?? []), ...(closed.data?.pages.flatMap((page) => page.data) ?? [])].sort((a, b) =>
+        b.last_seen_at.localeCompare(a.last_seen_at),
+      )
+    : (alerts.data ?? []);
   const [query, setQuery] = useStored('monitor.logs-search', z.string(), '');
   const needle = query.trim().toLowerCase();
   // How many rows are drawn, for the list as it is now picked; a new pick starts at one page again.
@@ -159,7 +166,7 @@ export function LogsPane({
     { view, limit: LOGS_PAGE },
   );
 
-  const inScope = (alerts.data ?? []).filter(
+  const inScope = listed.filter(
     (alert) =>
       (service === null || alert.service.name === service) &&
       inMonitor(alert, codes) &&
@@ -292,6 +299,18 @@ export function LogsPane({
                 />
               </Fragment>
             ))}
+            {left === 0 && showClosed && closed.hasNextPage && (
+              <li className="px-1.5 pt-1 pb-2">
+                <button
+                  type="button"
+                  disabled={closed.isFetchingNextPage}
+                  onClick={() => void closed.fetchNextPage()}
+                  className="w-full cursor-pointer rounded-md border border-divider bg-card px-3 py-2 text-xs font-semibold text-text shadow-sm hover:bg-neutral-200 disabled:cursor-default disabled:opacity-60"
+                >
+                  {closed.isFetchingNextPage ? 'Reading…' : 'Load older resolved and dismissed'}
+                </button>
+              </li>
+            )}
             {left > 0 && (
               <li className="px-1.5 pt-1 pb-2">
                 <button

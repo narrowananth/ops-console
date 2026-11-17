@@ -8,7 +8,7 @@ import {
   agentRunSchema,
   alertDetailSchema,
   alertEventSchema,
-  alertSchema,
+  alertListItemSchema,
   alertSummarySchema,
   approvalSchema,
   type BrowserState,
@@ -112,7 +112,7 @@ import {
   type UpdateWhen,
   updateStateSchema,
 } from '@ops-console/shared';
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { z } from 'zod';
 import { apiGet, apiSend, apiUpload } from './api';
@@ -1406,17 +1406,34 @@ export function useAlertSummary() {
   });
 }
 
+/** Every Alert not yet resolved or dismissed. */
 export function useAlerts() {
   return useQuery({
     queryKey: [...queryKeys.monitor, 'alerts'],
-    queryFn: () => apiGet('/alerts', listOf(alertSchema)).then((b) => b.data),
+    queryFn: () => apiGet('/alerts', listOf(alertListItemSchema)).then((b) => b.data),
   });
 }
 
-export function useAlert(id: string) {
+/** Resolved and dismissed Alerts, newest sighting first, a page at a time; read once `enabled`. */
+export function useClosedAlerts(enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.monitor, 'alerts', 'closed'],
+    queryFn: ({ pageParam }) =>
+      apiGet(
+        `/alerts?scope=closed${pageParam === null ? '' : `&cursor=${encodeURIComponent(pageParam)}`}`,
+        z.object({ data: z.array(alertListItemSchema), meta: z.object({ next_cursor: z.string().nullable() }) }),
+      ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.meta.next_cursor,
+    enabled,
+  });
+}
+
+export function useAlert(id: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.alert(id),
     queryFn: () => apiGet(`/alerts/${id}`, z.object({ data: alertDetailSchema })).then((b) => b.data),
+    enabled,
   });
 }
 

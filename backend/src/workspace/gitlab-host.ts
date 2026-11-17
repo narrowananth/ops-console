@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { ErrorCode, PrChecks, PrReviewState, PrState } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
+import { hostCliPool } from '../common/spawn-pool';
 import type { GitHostAdapter, HostPullRequest, NewPullRequest, OwnedPullRequest } from './git-host';
 
 const run = promisify(execFile);
@@ -12,6 +13,11 @@ const STATES: Record<PrState, string> = {
   [PrState.Merged]: 'merged',
   [PrState.Closed]: 'closed',
 };
+
+/** Merge requests a page asks for, the most GitLab gives. */
+const PER_PAGE = 100;
+/** Pages one read follows: a bound on a runaway list, far above any merge request count. */
+const MAX_PAGES = 40;
 
 const mrSchema = z.object({
   iid: z.number().int(),
@@ -62,25 +68,23 @@ export class GitlabHost implements GitHostAdapter {
   constructor(private readonly bin = 'glab') {}
 
   async list(slug: string, state: PrState): Promise<HostPullRequest[]> {
-    const out = await this.json(
-      `projects/${encodeURIComponent(slug)}/merge_requests?state=${STATES[state]}&per_page=100`,
+    const found = await this.mergeRequests(
+      `projects/${encodeURIComponent(slug)}/merge_requests?state=${STATES[state]}`,
+      state,
     );
-    return z
-      .array(mrSchema)
-      .parse(out)
-      .map((mr) => {
-        const { slug: _slug, ...pr } = toPullRequest(mr);
-        return pr;
-      });
+    return found.map((mr) => {
+      const { slug: _slug, ...pr } = toPullRequest(mr);
+      return pr;
+    });
   }
 
   async owners(): Promise<string[]> {
     const [user, groups] = await Promise.all([
-      this.json('user'),
+      this.username(),
       this.json('groups?min_access_level=10&top_level_only=true&per_page=100'),
     ]);
     return [
-      z.object({ username: z.string() }).parse(user).username,
+      user,
       ...z
         .array(z.object({ full_path: z.string() }))
         .parse(groups)
@@ -89,13 +93,37 @@ export class GitlabHost implements GitHostAdapter {
   }
 
   async listOwner(owner: string, state: PrState): Promise<OwnedPullRequest[]> {
-    const user = z.object({ username: z.string() }).parse(await this.json('user')).username;
+    const user = await this.username();
     const where =
       owner === user
         ? `merge_requests?scope=all&author_username=${encodeURIComponent(owner)}`
         : `groups/${encodeURIComponent(owner)}/merge_requests?include_subgroups=true`;
-    const out = await this.json(`${where}&state=${STATES[state]}&per_page=100`);
-    return z.array(mrSchema).parse(out).map(toPullRequest);
+    return (await this.mergeRequests(`${where}&state=${STATES[state]}`, state)).map(toPullRequest);
+  }
+
+  private userRead: Promise<string> | null = null;
+
+  /** The signed-in username, read once. */
+  private username(): Promise<string> {
+    this.userRead ??= this.json('user')
+      .then((user) => z.object({ username: z.string() }).parse(user).username)
+      .catch((error) => {
+        this.userRead = null;
+        throw error;
+      });
+    return this.userRead;
+  }
+
+  /** Every merge request of a list, a page at a time until one comes back short. */
+  private async mergeRequests(path: string, state: PrState): Promise<z.infer<typeof mrSchema>[]> {
+    const rows: z.infer<typeof mrSchema>[] = [];
+    // Merged and closed lists are recent history: one page of them is read.
+    for (let at = 1; at <= (state === PrState.Open ? MAX_PAGES : 1); at++) {
+      const read = z.array(mrSchema).parse(await this.json(`${path}&per_page=${PER_PAGE}&page=${at}`));
+      rows.push(...read);
+      if (read.length < PER_PAGE) break;
+    }
+    return rows;
   }
 
   private unsupported(): never {
@@ -136,9 +164,13 @@ export class GitlabHost implements GitHostAdapter {
       for (const [key, value] of Object.entries(fields)) args.push('--raw-field', `${key}=${value}`);
     }
     try {
-      const pending = run(this.bin, args, { maxBuffer: 20 * 1024 * 1024, timeout: 60_000 });
-      pending.child.stdin?.end();
-      return JSON.parse((await pending).stdout);
+      return JSON.parse(
+        await hostCliPool.run(async () => {
+          const pending = run(this.bin, args, { maxBuffer: 20 * 1024 * 1024, timeout: 60_000 });
+          pending.child.stdin?.end();
+          return (await pending).stdout;
+        }),
+      );
     } catch (error) {
       const { stderr } = error as { stderr?: unknown };
       if (typeof stderr === 'string' && /\b429\b|rate limit/i.test(stderr)) {
