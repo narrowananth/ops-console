@@ -4,8 +4,28 @@ import type { z } from 'zod';
 
 const PREFIX = 'ops-console:';
 
+/** A typed draft would write to the disk at every key; `typing` writes from `useStored` wait this long for the next one. */
+const WRITE_DELAY_MS = 300;
+const queued = new Map<string, () => void>();
+let timer: ReturnType<typeof setTimeout> | null = null;
+
+/** Writes every stored value still waiting. Reads call it first, and the page does when it hides or closes. */
+export function flushStored(): void {
+  if (timer) clearTimeout(timer);
+  timer = null;
+  const writes = [...queued.values()];
+  queued.clear();
+  for (const write of writes) write();
+}
+
+window.addEventListener('pagehide', flushStored);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushStored();
+});
+
 /** A stored value, or `fallback` when there is none or it no longer parses (an older build, a hand edit). */
 export function readStored<T>(key: string, schema: z.ZodType<T>, fallback: T): T {
+  flushStored();
   try {
     const raw = localStorage.getItem(PREFIX + key);
     if (raw === null) return fallback;
@@ -18,6 +38,7 @@ export function readStored<T>(key: string, schema: z.ZodType<T>, fallback: T): T
 
 /** Stores `value`; the fallback itself is not stored, so a cleared draft or a default choice leaves no key behind. */
 export function writeStored<T>(key: string, value: T, fallback: T): void {
+  queued.delete(key);
   try {
     const json = JSON.stringify(value);
     if (json === JSON.stringify(fallback)) localStorage.removeItem(PREFIX + key);
@@ -33,7 +54,13 @@ type Update<T> = T | ((now: T) => T);
  * A choice the operator made on a page, kept in the browser until they change it: through page switches, reloads and
  * reopening the console. A key that changes (a draft per thread) reads the value stored under the new key.
  */
-export function useStored<T>(key: string, schema: z.ZodType<T>, fallback: T): [T, (next: Update<T>) => void] {
+export function useStored<T>(
+  key: string,
+  schema: z.ZodType<T>,
+  fallback: T,
+  /** `typing`: written after a pause in changes, for text typed key by key; any other value is written at once. */
+  mode: 'now' | 'typing' = 'now',
+): [T, (next: Update<T>) => void] {
   const [kept, setKept] = useState(() => ({ key, value: readStored(key, schema, fallback) }));
   const value = kept.key === key ? kept.value : readStored(key, schema, fallback);
   // biome-ignore lint/correctness/useExhaustiveDependencies: the schema and fallback are fixed per key.
@@ -42,10 +69,14 @@ export function useStored<T>(key: string, schema: z.ZodType<T>, fallback: T): [T
       setKept((now) => {
         const current = now.key === key ? now.value : readStored(key, schema, fallback);
         const value = typeof next === 'function' ? (next as (now: T) => T)(current) : next;
-        writeStored(key, value, fallback);
+        if (mode === 'typing') {
+          queued.set(key, () => writeStored(key, value, fallback));
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(flushStored, WRITE_DELAY_MS);
+        } else writeStored(key, value, fallback);
         return { key, value };
       }),
-    [key],
+    [key, mode],
   );
   return [value, set];
 }

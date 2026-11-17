@@ -88,6 +88,23 @@ A list of named things (Repos, projects, Services, envs, branches, Connections, 
 renders A→Z through `ascending` in `frontend/src/lib/sort.ts`. A list ordered by time or severity
 (Sessions, Alerts, logs, messages, pull requests in a project) keeps that order.
 
+## Performance
+
+- A mutation callback (`onSuccess`, `onSettled`, `onError`) never returns `invalidateQueries`. TanStack Query awaits
+  what it returns, so the button's spinner waits for every refetch. Write `void client.invalidateQueries(…)`. A Biome
+  plugin in `tools/biome` fails `pnpm check` on it.
+- A button never waits on network git. A click path reads the last fetch and lets a background read of the remote
+  catch up.
+- A list endpoint carries no unbounded column (Samples, report bodies, transcripts) and pages once it can grow past a
+  few hundred rows. `backend/test/perf-budget.test.ts` seeds a busy console and fails a plain read that takes over
+  300 ms or sends over 1.5 MB.
+- A new MCP server a run starts needs an entry in `agent/mcp-scope.ts`. A run starts only the servers its kind uses.
+- Every run logs its start-up stages: set-up, Claude Code with its MCP servers, model.
+- A stream event patches the cached query it belongs to (`session.output` into the transcript). It refetches only
+  when it cannot place the data.
+- A page's code loads with its route (`React.lazy` in `app/shell.tsx`), and a library that only one page uses, such as
+  xterm, loads with that page.
+
 ## Prose
 
 Prose written into this repo goes through the `humanizer` skill, including ADRs, specs,

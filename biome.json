@@ -41,6 +41,7 @@
       }
     }
   },
+  "plugins": ["./tools/biome/mutation-callback-returns-invalidate.grit", "./tools/biome/return-invalidate.grit"],
   "css": {
     "parser": {
       "tailwindDirectives": true

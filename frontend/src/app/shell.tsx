@@ -1,27 +1,45 @@
-import type { ReactNode } from 'react';
+import { type ComponentType, lazy, type ReactNode, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { AgentRunsActions, AgentRunsView } from '../agent-runs/agent-runs-view';
 import { useHealthAlerts, useRunAlerts } from '../agent-runs/alerts';
-import { AgentsTab } from '../agents/agents-tab';
-import { DevToolsTab } from '../devtools/devtools-tab';
-import { DevToolsView } from '../devtools/terminal-view';
-import { IntegrationsTab } from '../integrations/integrations-tab';
+import { Empty } from '../components/ui/empty';
 import { useLiveEvents } from '../lib/live';
 import { usePrefetchPullRequests } from '../lib/queries';
-import { MonitorView } from '../monitor/monitor-view';
-import { NewPlaybookButton, PlaybooksView } from '../playbooks/playbooks-view';
-import { ReposTab } from '../repos/repos-tab';
-import { PermissionsTab } from '../setup/permissions-tab';
 import { SetupAgentButton } from '../setup/setup-agent-link';
-import { SetupAgentTab } from '../setup/setup-agent-tab';
-import { NewSkillButton, SkillsView } from '../skills/skills-view';
-import { WorkspaceView } from '../workspace/workspace-view';
 import { KeychainWaitBanner } from './keychain-wait';
 import { lastPage, useKeepAddress } from './last-address';
 import { Page, PageColumn } from './page';
 import { ReturnButton } from './return-button';
 import { Sidebar } from './sidebar';
 import { UpdateNotice } from './updates';
+
+/**
+ * A page's code loads when the page opens, so the first screen carries only the shell and the page the operator
+ * lands on. `named` picks the component a module exports by name.
+ */
+function load<M, K extends keyof M>(importer: () => Promise<M>, named: K) {
+  return lazy(async () => ({ default: (await importer())[named] as ComponentType }));
+}
+
+const AgentRunsActions = load(() => import('../agent-runs/agent-runs-view'), 'AgentRunsActions');
+const AgentRunsView = load(() => import('../agent-runs/agent-runs-view'), 'AgentRunsView');
+const AgentsTab = load(() => import('../agents/agents-tab'), 'AgentsTab');
+const DevToolsTab = load(() => import('../devtools/devtools-tab'), 'DevToolsTab');
+const DevToolsView = load(() => import('../devtools/terminal-view'), 'DevToolsView');
+const IntegrationsTab = load(() => import('../integrations/integrations-tab'), 'IntegrationsTab');
+const MonitorView = load(() => import('../monitor/monitor-view'), 'MonitorView');
+const NewPlaybookButton = load(() => import('../playbooks/playbooks-view'), 'NewPlaybookButton');
+const PlaybooksView = load(() => import('../playbooks/playbooks-view'), 'PlaybooksView');
+const ReposTab = load(() => import('../repos/repos-tab'), 'ReposTab');
+const PermissionsTab = load(() => import('../setup/permissions-tab'), 'PermissionsTab');
+const SetupAgentTab = load(() => import('../setup/setup-agent-tab'), 'SetupAgentTab');
+const NewSkillButton = load(() => import('../skills/skills-view'), 'NewSkillButton');
+const SkillsView = load(() => import('../skills/skills-view'), 'SkillsView');
+const WorkspaceView = load(() => import('../workspace/workspace-view'), 'WorkspaceView');
+
+/** A page's body while its code loads; the header's own buttons simply appear when theirs does. */
+function Loading({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<Empty>Loading the page…</Empty>}>{children}</Suspense>;
+}
 
 /** A list page's body: one rounded card in a readable column. */
 function Card({ children, wide }: { children: ReactNode; wide?: boolean }) {
@@ -50,7 +68,9 @@ export function Shell() {
               path="/monitor"
               element={
                 <Page title="Monitor" sub="Datadog health of your services, their Alerts and fixes">
-                  <MonitorView />
+                  <Loading>
+                    <MonitorView />
+                  </Loading>
                 </Page>
               }
             />
@@ -58,7 +78,9 @@ export function Shell() {
               path="/workspace"
               element={
                 <Page title="Workspace" sub="Sessions in your Repos and their pull requests">
-                  <WorkspaceView />
+                  <Loading>
+                    <WorkspaceView />
+                  </Loading>
                 </Page>
               }
             />
@@ -69,9 +91,15 @@ export function Shell() {
                   title="Agent runs"
                   sub="Every agent run: how it goes, why it is slow, why it failed"
                   width="xwide"
-                  actions={<AgentRunsActions />}
+                  actions={
+                    <Suspense fallback={null}>
+                      <AgentRunsActions />
+                    </Suspense>
+                  }
                 >
-                  <AgentRunsView />
+                  <Loading>
+                    <AgentRunsView />
+                  </Loading>
                 </Page>
               }
             />
@@ -79,7 +107,9 @@ export function Shell() {
               path="/devtools"
               element={
                 <Page title="Dev tools" sub="Ask across your databases. PROD is read-only unless you allow write.">
-                  <DevToolsView />
+                  <Loading>
+                    <DevToolsView />
+                  </Loading>
                 </Page>
               }
             />
@@ -92,7 +122,9 @@ export function Shell() {
                   width="wide"
                   actions={<SetupAgentButton label="Add with Setup agent →" />}
                 >
-                  <IntegrationsTab />
+                  <Loading>
+                    <IntegrationsTab />
+                  </Loading>
                 </Page>
               }
             />
@@ -106,7 +138,9 @@ export function Shell() {
                   actions={<SetupAgentButton label="Import with Setup agent →" />}
                 >
                   <Card wide>
-                    <DevToolsTab />
+                    <Loading>
+                      <DevToolsTab />
+                    </Loading>
                   </Card>
                 </Page>
               }
@@ -116,7 +150,9 @@ export function Shell() {
               element={
                 <Page title="Repos" sub="Local git folders Sessions work in" width="wide">
                   <Card wide>
-                    <ReposTab />
+                    <Loading>
+                      <ReposTab />
+                    </Loading>
                   </Card>
                 </Page>
               }
@@ -125,7 +161,9 @@ export function Shell() {
               path="/setup"
               element={
                 <Page title="Setup agent" sub="Claude adds Connections, MCP servers and Connectors for you">
-                  <SetupAgentTab />
+                  <Loading>
+                    <SetupAgentTab />
+                  </Loading>
                 </Page>
               }
             />
@@ -136,7 +174,9 @@ export function Shell() {
                   title="Permissions"
                   sub="What macOS lets Ops Console do, and what an agent run's commands can reach"
                 >
-                  <PermissionsTab />
+                  <Loading>
+                    <PermissionsTab />
+                  </Loading>
                 </Page>
               }
             />
@@ -149,7 +189,9 @@ export function Shell() {
                   width="narrow"
                 >
                   <PageColumn>
-                    <AgentsTab />
+                    <Loading>
+                      <AgentsTab />
+                    </Loading>
                   </PageColumn>
                 </Page>
               }
@@ -160,9 +202,15 @@ export function Shell() {
                 <Page
                   title="Playbooks"
                   sub="What the agent follows when each Trigger starts it. One Playbook per Trigger."
-                  actions={<NewPlaybookButton />}
+                  actions={
+                    <Suspense fallback={null}>
+                      <NewPlaybookButton />
+                    </Suspense>
+                  }
                 >
-                  <PlaybooksView />
+                  <Loading>
+                    <PlaybooksView />
+                  </Loading>
                 </Page>
               }
             />
@@ -175,11 +223,15 @@ export function Shell() {
                   actions={
                     <>
                       <ReturnButton />
-                      <NewSkillButton />
+                      <Suspense fallback={null}>
+                        <NewSkillButton />
+                      </Suspense>
                     </>
                   }
                 >
-                  <SkillsView />
+                  <Loading>
+                    <SkillsView />
+                  </Loading>
                 </Page>
               }
             />

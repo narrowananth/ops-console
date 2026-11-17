@@ -127,8 +127,8 @@ agent Session.
 
 | Folder | Holds |
 |---|---|
-| `app` | Sign-in gate with the restart panel while an update installs, sidebar with the running tasks tray, the update card, version panel and "Updated to" notice, page shell and routes, theme store, the remembered page address |
-| `lib` | API client, TanStack queries, `/ws` live events, session token, Remembered view storage, the page a link came from (`return-to.ts`), sorting, the finish chime, clipboard copy |
+| `app` | Sign-in gate with the restart panel while an update installs, sidebar with the running tasks tray, the update card, version panel and "Updated to" notice, page shell and routes (each page's code loads when its route opens), theme store, the remembered page address |
+| `lib` | API client (a few large lists check only their first and last items), TanStack queries, `/ws` live events and the waits on them, session token, Remembered view storage, the page a link came from (`return-to.ts`), sorting, the finish chime, clipboard copy |
 | `monitor` | Monitor page: scan range and status codes, ticked Services, Alerts, Samples, Reports, Review and Fix |
 | `agent-runs` | Agent runs page: run health, why a run is slow or ended, time split, timeline, steps, queued messages, desktop alerts |
 | `browser` | The Session's Browser panel (tabs, toolbar, the drawn page, device menu, Local servers), the Terminals dock (one xterm per Session process, Run menu), the header buttons, and loopback links in the transcript that open in the panel |
@@ -142,6 +142,10 @@ agent Session.
 | `agents` | Accounts & Usage page (accounts, sign-in by link, the CLIProxy hub, the chime), Session transcript, model, effort and Access mode chips, Approval prompts, the question panel, stop run, Report rendering |
 | `mcp`, `components/ui` | MCP status labels; shared controls, the folding card title, the side panel that folds to a rail, the job pathway and live timers, and the Tip layer that shows every element's `title` as a styled Tip on hover and keyboard focus, the code block with its copy icon, and the file viewer |
 
+**Rendering and loading.** The Session's composer holds the draft, so a key redraws the composer and not the conversation. Messages are memoized and the older ones carry `content-visibility: auto`; the Markdown parse is kept per text. The conversation map reads which messages are in view from an `IntersectionObserver`. A pull request file with a long diff draws its lines once it nears the screen, and the Dropdown draws at most 100 options. A sent message shows in the transcript at once and the composer empties at the click; the daemon's copy replaces it on the next read. Opening a Session, and the first key in its composer, ask the daemon to start the agent (`POST /sessions/:id/warm`) at most once a minute. The build splits React, the router, TanStack Query and Zod into vendor files; xterm loads with the Terminals dock or the Setup page.
+
+**Guardrails.** `biome check` runs the plugins in `tools/biome`, which fail a mutation callback that returns `invalidateQueries`. `backend/test/perf-budget.test.ts` holds every plain list to a time and size budget on a busy store.
+
 ## Data flow
 
 **REST.** Every `/api` call carries `Authorization: Bearer <token>`. Bodies and responses are Zod
@@ -151,7 +155,7 @@ on the one daemon (`ops-console open <app>` signs another browser in): each keep
 
 **WebSocket.** `/ws` sends server-to-client events only, with the token as the second subprotocol.
 `Store.write` runs one transaction and sends its events after the commit; `Store.emit` sends an event with no state change behind it. A run's `session.output` goes out at most every 100 ms, each changed part whole; a text over 8,000 characters goes out every 400 ms and one over 32,000 every second. A client with over 1 MB waiting to send gets only the newest `session.output` of each part until its queue drains; every other event goes out in order. The UI turns each event into
-query refetches, batched over 40 ms. A running agent's events refetch its transcript at most every 800 ms and the pull request lists every 5 seconds. The socket reopens after a drop and the UI reads every query again. Events (`shared/src/ws.ts`):
+query refetches, batched over 40 ms. A `session.output` event puts its part into the cached transcript; the transcript is read again only when the part cannot be placed (a part before it is missing) and when the run finishes. A run's steps and edits read the Session's diff and the run list at most every 4 and 5 seconds, `session.updated` the Session lists and the diff every 1.5 seconds, and the pull request lists every 5 seconds. Pages poll nothing else while an event covers them: the Accounts page reads its lists every 10 seconds, every other page every minute. The socket reopens after a drop and the UI reads every query again. Events (`shared/src/ws.ts`):
 
 - Settings and agents: `settings.updated`, `update.changed`, `session.output`, `session.finished`, `session.updated`,
   `approval.requested`, `approval.decided`, `action.logged`, `account.updated`, `account.removed`,

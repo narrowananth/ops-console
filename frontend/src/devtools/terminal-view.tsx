@@ -366,7 +366,22 @@ export function DevToolsView() {
   // Each `+` opens another new terminal; each stays open, reloads included, until its first question or its `×`.
   const [kept, setKept] = useState(readKept);
   const { drafts, typed, picked } = kept;
-  useEffect(() => localStorage.setItem(KEPT_KEY, JSON.stringify(kept)), [kept]);
+  // A typed prompt changes `kept` at every key: the write waits for a pause, and leaving the page writes what waits.
+  const latestKept = useRef(kept);
+  latestKept.current = kept;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `kept` is the trigger; the write reads the ref
+  useEffect(() => {
+    const timer = setTimeout(() => localStorage.setItem(KEPT_KEY, JSON.stringify(latestKept.current)), 300);
+    return () => clearTimeout(timer);
+  }, [kept]);
+  useEffect(() => {
+    const write = () => localStorage.setItem(KEPT_KEY, JSON.stringify(latestKept.current));
+    window.addEventListener('pagehide', write);
+    return () => {
+      window.removeEventListener('pagehide', write);
+      write();
+    };
+  }, []);
   const setPicked = (id: string | null) => setKept((now) => ({ ...now, picked: id }));
   const setDrafts = (change: (all: Draft[]) => Draft[]) => setKept((now) => ({ ...now, drafts: change(now.drafts) }));
   const setTyped = (id: string, text: string) =>

@@ -50,6 +50,7 @@ import {
   keychainHandoverSchema,
   keychainWaitSchema,
   localServersSchema,
+  type Message,
   mcpServerListSchema,
   mcpServerSchema,
   messageSchema,
@@ -57,9 +58,11 @@ import {
   type OpenPullRequest,
   openedPullRequestSchema,
   outputFileSchema,
+  type Part,
   type PatchTabBody,
   type PlaybookPatch,
   type PlaybookTrigger,
+  ProcessState,
   type PrReviewEvent,
   playbookListSchema,
   playbookSchema,
@@ -84,6 +87,7 @@ import {
   type Session,
   type SessionDefaults,
   type SessionPatch,
+  SessionState,
   SignInVia,
   type SkillPatch,
   type SkillRef,
@@ -115,7 +119,8 @@ import {
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { z } from 'zod';
-import { apiGet, apiSend, apiUpload } from './api';
+import { apiGet, apiGetTrustedList, apiSend, apiUpload } from './api';
+import { waitForEvent } from './live-bus';
 import { sessionToken } from './session';
 
 export const queryKeys = {
@@ -131,6 +136,7 @@ export const queryKeys = {
   connections: ['connections'] as const,
   repos: ['repos'] as const,
   sessions: ['sessions'] as const,
+  agentRuns: ['sessions', 'runs'] as const,
   branches: (repoId: string) => ['branches', repoId] as const,
   pulls: ['pull-requests'] as const,
   pullRequest: (repoId: string, number: number) => ['pull-requests', 'detail', repoId, number] as const,
@@ -324,16 +330,21 @@ export function useCheckArea(area: HealthArea) {
   });
 }
 
-const ACCOUNTS_REFRESH_MS = 10_000;
+/** The Accounts page reads this often; the other pages only follow `/ws` events and ask now and then. */
+const ACCOUNTS_POLL_MS = 10_000;
+const ACCOUNTS_IDLE_MS = 60_000;
 
 const cliProxyResponse = z.object({ data: cliProxySchema });
 
-/** CLIProxy as the Claude account hub: on or off, its address, whether a key is saved, and how it last answered. */
-export function useCliProxy() {
+/**
+ * CLIProxy as the Claude account hub: on or off, its address, whether a key is saved, and how it last answered. `poll`:
+ * the page that shows it.
+ */
+export function useCliProxy(poll = false) {
   return useQuery({
     queryKey: queryKeys.cliProxy,
     queryFn: () => apiGet('/cliproxy', cliProxyResponse),
-    refetchInterval: ACCOUNTS_REFRESH_MS,
+    refetchInterval: poll ? ACCOUNTS_POLL_MS : ACCOUNTS_IDLE_MS,
   });
 }
 
@@ -351,12 +362,15 @@ export function useCliProxyAction() {
   });
 }
 
-/** Refetched every 10 seconds while mounted, so windows that reset and usage from runs show without a reload. */
-export function useAgentAccounts() {
+/**
+ * Windows that reset and usage from runs show without a reload: `poll`, on the Accounts page, reads every 10 seconds;
+ * anywhere else `/ws` events bring the changes and a read every minute catches a reset.
+ */
+export function useAgentAccounts(poll = false) {
   return useQuery({
     queryKey: queryKeys.accounts,
     queryFn: () => apiGet('/agent-accounts', accountListSchema),
-    refetchInterval: ACCOUNTS_REFRESH_MS,
+    refetchInterval: poll ? ACCOUNTS_POLL_MS : ACCOUNTS_IDLE_MS,
   });
 }
 
@@ -748,13 +762,19 @@ export function useAllowAndRestart(sessionId: string) {
       for (const domain of hosts) {
         await apiSend('POST', '/network-allowlist/domains', { domain }, z.object({ data: savedNetworkDomainSchema }));
       }
-      await apiSend('POST', `/sessions/${sessionId}/pause`, undefined, z.undefined());
-      const give = Date.now() + PAUSE_WAIT_MS;
-      for (;;) {
+      // The run's end arrives as `session.finished`; the wait starts before the pause so the event is not missed.
+      const ended = waitForEvent(
+        (event) => event.event === 'session.finished' && event.data.session_id === sessionId,
+        PAUSE_WAIT_MS,
+      );
+      try {
+        await apiSend('POST', `/sessions/${sessionId}/pause`, undefined, z.undefined());
         const { data } = await apiGet(`/agent-runs/${sessionId}`, z.object({ data: runDetailSchema }));
-        if (!data.run.running) break;
-        if (Date.now() > give) throw new Error('The run did not stop in time. Allow is saved; play it again by hand.');
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        if (data.run.running && !(await ended.done)) {
+          throw new Error('The run did not stop in time. Allow is saved; play it again by hand.');
+        }
+      } finally {
+        ended.stop();
       }
       await apiSend(
         'POST',
@@ -880,13 +900,16 @@ export function useRepoSessions() {
   });
 }
 
+const RUNS_IDLE_MS = 30_000;
+
 /** The Running tray and the Agent runs page: runs going now, and runs that ended unfinished until dismissed. */
 export function useAgentRuns() {
   return useQuery({
-    queryKey: [...queryKeys.sessions, 'runs'],
+    queryKey: queryKeys.agentRuns,
     queryFn: () => apiGet('/agent-runs', z.object({ data: z.array(agentRunSchema) })).then((b) => b.data),
-    // A run turns slow with no event, so the page asks again while one goes.
-    refetchInterval: (query) => (query.state.data?.some((run) => run.running) ? 5000 : false),
+    // `session.updated` and `session.output` bring the changes. A run turns slow with no event, so one that goes is
+    // read now and then.
+    refetchInterval: (query) => (query.state.data?.some((run) => run.running) ? RUNS_IDLE_MS : false),
   });
 }
 
@@ -957,6 +980,12 @@ export function useRunQueue(sessionId: string) {
     queue: useMutation({
       mutationFn: (text: string) =>
         apiSend('PUT', `/sessions/${sessionId}/queue`, { text }, z.object({ data: z.object({ queued: z.boolean() }) })),
+      // The queued note shows at once; the read after the call confirms it.
+      onMutate: (text) => {
+        client.setQueryData<Session[]>(queryKeys.sessions, (list) =>
+          list?.map((session) => (session.id === sessionId ? { ...session, queued_message: text } : session)),
+        );
+      },
       onSettled: () => {
         settled();
         void client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) });
@@ -1065,18 +1094,80 @@ export function useOutputFiles(sessionId: string) {
   });
 }
 
+/**
+ * Messages the operator sent that the transcript on disk may not hold yet: the agent writes the line a moment after the
+ * run starts, so a read right after the send would take the message off the page. Each waits for the user messages
+ * on the server to outnumber those there were at the send.
+ */
+type PendingSend = { users: number; at: number; message: Message };
+const pendingSends = new Map<string, PendingSend[]>();
+const PENDING_SEND_MS = 20_000;
+
+/** The server's transcript with the sends it does not hold yet, before the run's in-flight message. */
+function withPendingSends(sessionId: string, list: Message[]): Message[] {
+  const users = list.filter((message) => message.role === 'user').length;
+  const now = Date.now();
+  const waiting = (pendingSends.get(sessionId) ?? []).filter(
+    (one) => users <= one.users && now - one.at < PENDING_SEND_MS,
+  );
+  if (waiting.length === 0) pendingSends.delete(sessionId);
+  else pendingSends.set(sessionId, waiting);
+  if (waiting.length === 0) return list;
+  const at = list.at(-1)?.status === 'streaming' ? list.length - 1 : list.length;
+  return [...list.slice(0, at), ...waiting.map((one) => one.message), ...list.slice(at)];
+}
+
 export function useMessages(sessionId: string) {
   return useQuery({
     queryKey: queryKeys.messages(sessionId),
     queryFn: () =>
-      apiGet(`/sessions/${sessionId}/messages`, z.object({ data: z.array(messageSchema) })).then((b) => b.data),
+      apiGet(`/sessions/${sessionId}/messages`, z.object({ data: z.array(messageSchema) })).then((b) =>
+        withPendingSends(sessionId, b.data),
+      ),
     // Dev tools draws its terminal before the first question makes a Session.
     enabled: sessionId !== '',
   });
 }
 
+/**
+ * Puts one streamed part into the cached transcript, so a run's output needs no read of the whole file. False when the
+ * part cannot be placed (a part before it is missing): the caller reads the transcript instead.
+ */
+export function patchTranscript(
+  client: ReturnType<typeof useQueryClient>,
+  output: { session_id: string; message_id: string; part_index: number; part: Part },
+): boolean {
+  const key = queryKeys.messages(output.session_id);
+  const list = client.getQueryData<Message[]>(key);
+  // Nothing on a page shows it, so there is nothing to keep fresh.
+  if (list === undefined) return true;
+  const at = list.findIndex((message) => message.id === output.message_id);
+  const known = list[at];
+  if (known === undefined) {
+    if (output.part_index !== 0) return false;
+    const started: Message = {
+      id: output.message_id,
+      role: 'agent',
+      status: 'streaming',
+      parts: [output.part],
+      created_at: new Date().toISOString(),
+    };
+    client.setQueryData<Message[]>(key, [...list, started]);
+    return true;
+  }
+  if (output.part_index > known.parts.length) return false;
+  const parts = [...known.parts];
+  parts[output.part_index] = output.part;
+  client.setQueryData<Message[]>(
+    key,
+    list.map((message, index) => (index === at ? { ...message, parts } : message)),
+  );
+  return true;
+}
+
 export function useSendMessage(sessionId: string) {
   const client = useQueryClient();
+  const key = queryKeys.messages(sessionId);
   return useMutation({
     mutationFn: (message: string | { text: string; skill?: SkillRef }) =>
       apiSend(
@@ -1085,13 +1176,47 @@ export function useSendMessage(sessionId: string) {
         typeof message === 'string' ? { text: message } : message,
         z.object({ data: z.object({ message_id: z.string() }) }),
       ),
-    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) }),
+    // The message shows in the conversation at once; the read after the send brings the transcript's own copy.
+    onMutate: async (message) => {
+      await client.cancelQueries({ queryKey: key });
+      const list = client.getQueryData<Message[]>(key);
+      // An answer to the agent's question is no message of the conversation, so it has nothing to show.
+      const asked = client
+        .getQueryData<Session[]>(queryKeys.sessions)
+        ?.some((session) => session.id === sessionId && session.state === SessionState.WaitingInput);
+      if (list === undefined || asked) return undefined;
+      const sent: PendingSend = {
+        users: list.filter((one) => one.role === 'user').length,
+        at: Date.now(),
+        message: {
+          id: `sending-${crypto.randomUUID()}`,
+          role: 'user',
+          status: 'done',
+          parts: [{ kind: 'text', text: typeof message === 'string' ? message : message.text }],
+          created_at: new Date().toISOString(),
+          skill: typeof message === 'string' ? null : (message.skill ?? null),
+        },
+      };
+      pendingSends.set(sessionId, [...(pendingSends.get(sessionId) ?? []), sent]);
+      client.setQueryData<Message[]>(key, withPendingSends(sessionId, list));
+      return sent;
+    },
+    onError: (_error, _message, sent) => {
+      if (!sent) return;
+      pendingSends.set(
+        sessionId,
+        (pendingSends.get(sessionId) ?? []).filter((one) => one !== sent),
+      );
+      client.setQueryData<Message[]>(key, (list) => list?.filter((message) => message.id !== sent.message.id));
+    },
+    onSuccess: () => void client.invalidateQueries({ queryKey: key }),
   });
 }
 
 /** Edits the Session's last message and runs it again; the files the agent edited since it go back first. */
 export function useEditMessage(sessionId: string) {
   const client = useQueryClient();
+  const key = queryKeys.messages(sessionId);
   return useMutation({
     mutationFn: ({ messageId, text }: { messageId: string; text: string }) =>
       apiSend(
@@ -1100,20 +1225,49 @@ export function useEditMessage(sessionId: string) {
         { text },
         z.object({ data: editedMessageSchema }),
       ).then((body) => body.data),
-    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) }),
+    // The edited text shows at once and what the agent answered to the old one goes; a refused edit puts both back.
+    onMutate: async ({ messageId, text }) => {
+      await client.cancelQueries({ queryKey: key });
+      const before = client.getQueryData<Message[]>(key);
+      const at = before?.findIndex((message) => message.id === messageId) ?? -1;
+      if (before !== undefined && at >= 0) {
+        client.setQueryData<Message[]>(key, [
+          ...before.slice(0, at),
+          { ...(before[at] as Message), parts: [{ kind: 'text', text }] },
+        ]);
+      }
+      return { before };
+    },
+    onError: (_error, _input, context) => {
+      if (context?.before) client.setQueryData<Message[]>(key, context.before);
+    },
+    onSuccess: () => void client.invalidateQueries({ queryKey: key }),
   });
 }
 
+const WARM_EVERY_MS = 60_000;
+const warmedAt = new Map<string, number>();
+
 /**
- * What a repo Session's branch changes, read from the Repo folder. Read again when a run ends; while one goes and
- * `follow` is set, every few seconds, so edits show as the agent makes them.
+ * Asks the daemon to start the Session's agent before the first message, so the message does not wait for the start-up.
+ * At most once a minute per Session, and never an error to show: a daemon without the call answers 404.
  */
-export function useSessionDiff(sessionId: string, enabled: boolean, follow: boolean) {
+export function warmSession(sessionId: string): void {
+  const now = Date.now();
+  if (now - (warmedAt.get(sessionId) ?? 0) < WARM_EVERY_MS) return;
+  warmedAt.set(sessionId, now);
+  apiSend('POST', `/sessions/${sessionId}/warm`, undefined, z.unknown()).catch(() => undefined);
+}
+
+/**
+ * What a repo Session's branch changes, read from the Repo folder. `session.updated` (at most every 1.5 s) and the end
+ * of a run read it again, so edits show as the agent makes them.
+ */
+export function useSessionDiff(sessionId: string, enabled: boolean) {
   return useQuery({
     queryKey: queryKeys.sessionDiff(sessionId),
     queryFn: () => apiGet(`/sessions/${sessionId}/diff`, z.object({ data: sessionDiffSchema })).then((d) => d.data),
     enabled,
-    refetchInterval: follow ? 4000 : false,
   });
 }
 
@@ -1159,6 +1313,8 @@ export function useBranches(repoId: string) {
   return useQuery({
     queryKey: queryKeys.branches(repoId),
     queryFn: () => apiGet(`/repos/${repoId}/branches`, z.object({ data: z.array(branchSchema) })).then((b) => b.data),
+    // `repo.branches_changed` brings a newer list when the daemon's own read of origin finishes.
+    staleTime: 60_000,
   });
 }
 
@@ -1387,7 +1543,7 @@ const listOf = <T extends z.ZodType>(item: T) => z.object({ data: z.array(item) 
 export function useServices() {
   return useQuery({
     queryKey: [...queryKeys.monitor, 'services'],
-    queryFn: () => apiGet('/services', listOf(serviceSchema)).then((b) => b.data),
+    queryFn: () => apiGetTrustedList('/services', serviceSchema).then((b) => b.data),
   });
 }
 
@@ -1628,6 +1784,10 @@ export function useAskNewDevtoolsSession() {
         { kind: 'devtools', connection_ids: input.connectionIds, ...input.settings },
         z.object({ data: sessionSchema }),
       ).then((body) => body.data);
+      // The new terminal shows its tab as soon as the Session exists, not after the question is sent too.
+      client.setQueryData<Session[]>([...queryKeys.sessions, 'devtools'], (list) =>
+        list?.some((kept) => kept.id === session.id) ? list : [session, ...(list ?? [])],
+      );
       await apiSend(
         'POST',
         `/sessions/${session.id}/messages`,
@@ -1636,11 +1796,7 @@ export function useAskNewDevtoolsSession() {
       );
       return session;
     },
-    // The new terminal shows its tab at once, before the list is read again.
-    onSuccess: (session) => {
-      client.setQueryData<Session[]>([...queryKeys.sessions, 'devtools'], (list) => [session, ...(list ?? [])]);
-      void client.invalidateQueries({ queryKey: queryKeys.sessions });
-    },
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.sessions }),
   });
 }
 
@@ -1795,13 +1951,19 @@ export function useSkillMenu(sessionId: string, q: string, enabled: boolean) {
 
 const SERVERS_POLL_MS = 5000;
 
+const browserStateQuery = (sessionId: string) => ({
+  queryKey: queryKeys.browser(sessionId),
+  queryFn: () => apiGet(`/sessions/${sessionId}/browser`, z.object({ data: browserStateSchema })).then((b) => b.data),
+});
+
 /** The Session's tabs and whether Chrome is there. `browser.tabs_changed` refetches it. */
 export function useBrowserState(sessionId: string, enabled: boolean) {
-  return useQuery({
-    queryKey: queryKeys.browser(sessionId),
-    queryFn: () => apiGet(`/sessions/${sessionId}/browser`, z.object({ data: browserStateSchema })).then((b) => b.data),
-    enabled,
-  });
+  return useQuery({ ...browserStateQuery(sessionId), enabled });
+}
+
+/** How many tabs the Session has. A tab that only loads leaves the count, and so the caller, alone. */
+export function useBrowserTabCount(sessionId: string, enabled: boolean): number | undefined {
+  return useQuery({ ...browserStateQuery(sessionId), enabled, select: (state) => state.tabs.length }).data;
 }
 
 /** Puts a tab the page stream reported into the cached list, so the strip follows a load without a refetch. */
@@ -1901,14 +2063,26 @@ export function useStopServer(sessionId: string) {
   });
 }
 
+const processesQuery = (sessionId: string) => ({
+  queryKey: queryKeys.processes(sessionId),
+  queryFn: () =>
+    apiGet(`/sessions/${sessionId}/processes`, z.object({ data: z.array(sessionProcessSchema) })).then((b) => b.data),
+});
+
 /** The Session's processes; `process.changed` and `process.removed` refetch it. */
 export function useProcesses(sessionId: string, enabled: boolean) {
-  return useQuery({
-    queryKey: queryKeys.processes(sessionId),
-    queryFn: () =>
-      apiGet(`/sessions/${sessionId}/processes`, z.object({ data: z.array(sessionProcessSchema) })).then((b) => b.data),
-    enabled,
-  });
+  return useQuery({ ...processesQuery(sessionId), enabled });
+}
+
+/** How many of the Session's processes run. */
+export function useRunningProcessCount(sessionId: string, enabled: boolean): number {
+  return (
+    useQuery({
+      ...processesQuery(sessionId),
+      enabled,
+      select: (processes) => processes.filter((process) => process.state === ProcessState.Running).length,
+    }).data ?? 0
+  );
 }
 
 /** The scripts of the worktree's `package.json`, and the runner its lockfile names. */
