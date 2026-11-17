@@ -1,12 +1,10 @@
-import { WS_PATH, WS_PROTOCOL, type WsEvent, wsEventSchema } from '@ops-console/shared';
+import { WS_PATH, WS_PROTOCOL, wsEventSchema } from '@ops-console/shared';
 import { type QueryKey, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { playChime, unlockChime } from './chime';
-import { queryKeys } from './queries';
+import { type Listener, listeners } from './live-bus';
+import { patchTranscript, queryKeys } from './queries';
 import { sessionToken } from './session';
-
-type Listener = (event: WsEvent) => void;
-const listeners = new Set<Listener>();
 
 /** Runs `listener` for every event the console's one socket brings, for as long as the caller is mounted. */
 export function useLiveEvent(listener: Listener): void {
@@ -23,11 +21,15 @@ export function useLiveEvent(listener: Listener): void {
 const BATCH_MS = 40;
 
 /**
- * A running agent's events come many times a second, and each refetch behind them is heavy for the daemon: the whole
- * transcript, or the whole pull request list. These refetch at most this often per query.
+ * A running agent's output goes into the cached transcript as it arrives. Only a part that cannot be placed reads the
+ * whole transcript, and that at most this often. The pull request list, which is heavy for the daemon, also waits.
  */
 const STREAM_MS = 800;
 const LIST_MS = 5000;
+
+/** A run's steps and edits read the run list and the Session's diff (a `git` read) at most this often. */
+const RUNS_MS = 5000;
+const DIFF_MS = 4000;
 
 /** A Session's state changes many times in a run; its list, run lists and diff (a `git` read) follow this often. */
 const SESSION_MS = 1500;
@@ -122,7 +124,15 @@ export function useLiveEvents(): void {
       if (event.event === 'process.changed' || event.event === 'process.removed') {
         refetch(queryKeys.processes(event.data.session_id));
       }
-      if (event.event === 'session.output') refetchEvery(queryKeys.messages(event.data.session_id), STREAM_MS);
+      if (event.event === 'session.output') {
+        const { session_id, part } = event.data;
+        if (!patchTranscript(client, event.data)) refetchEvery(queryKeys.messages(session_id), STREAM_MS);
+        // A tool step or an edit is what moves the run list and the Session's diff; neither has an event of its own.
+        if (part.kind === 'step' || part.kind === 'diff') {
+          refetchEvery(queryKeys.sessionDiff(session_id), DIFF_MS);
+          refetchEvery(queryKeys.agentRuns, RUNS_MS);
+        }
+      }
       if (event.event === 'session.finished') refetch(queryKeys.messages(event.data.session_id));
       if (event.event === 'session.finished') {
         refetch(queryKeys.outputs(event.data.session_id));

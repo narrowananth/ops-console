@@ -6,7 +6,7 @@ import {
   type Part,
   splitAttachments,
 } from '@ops-console/shared';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { AttachmentViewer, outputAddress, PaperClip, size, type Viewed } from '../components/ui/attachment-viewer';
 import { Button, Spinner } from '../components/ui/button';
 import { CodeBlock } from '../components/ui/code-block';
@@ -24,7 +24,7 @@ import { SpawnCard } from './spawn-card';
 import { StepRun } from './step-run';
 
 /** One part of a Session's transcript: text, a tool step, a diff, a code block, a question or a Dev tools table. */
-function PartView({ part, sessionId }: { part: Part; sessionId: string | null }) {
+const PartView = memo(function PartView({ part, sessionId }: { part: Part; sessionId: string | null }) {
   if (part.kind === 'spawn') return sessionId === null ? null : <SpawnCard part={part} sessionId={sessionId} />;
   if (part.kind === 'result') return <ResultView part={part} connections={[]} />;
   if (part.kind === 'comparison') return <ComparisonView part={part} />;
@@ -62,7 +62,7 @@ function PartView({ part, sessionId }: { part: Part; sessionId: string | null })
       )}
     </div>
   );
-}
+});
 
 /** A message sent with a skill: its name and kind, and that the Playbook did not run for it. */
 function SkillChip({ skill }: { skill: NonNullable<Message['skill']> }) {
@@ -75,19 +75,41 @@ function SkillChip({ skill }: { skill: NonNullable<Message['skill']> }) {
   );
 }
 
+const sameFiles = (a: OutputFile[], b: OutputFile[]) =>
+  a === b || (a.length === b.length && a.every((file, at) => file === b[at]));
+
 /**
- * One message. The operator's messages have Copy; the last one also has Edit, given `onEdit`, which reruns the edited
- * text after putting back the files the agent edited since it.
+ * One message. The operator's messages have Copy; the last one also has Edit, when `editable`, which has `onEdit` rerun
+ * the edited text after putting back the files the agent edited since it. A message the operator has scrolled far past
+ * is `deferred`: the browser skips drawing it until it nears the screen. Props are plain values, so a stream that
+ * changes the last message draws only that one.
  */
-export function MessageView({
+export const MessageView = memo(
+  MessageItem,
+  (a, b) =>
+    a.message === b.message &&
+    a.sessionId === b.sessionId &&
+    a.editable === b.editable &&
+    a.deferred === b.deferred &&
+    a.onEdit === b.onEdit &&
+    sameFiles(a.files, b.files),
+);
+
+function MessageItem({
   message,
+  sessionId,
+  files,
+  editable,
+  deferred,
   onEdit,
-  outputs,
 }: {
   message: Message;
-  onEdit?: (text: string) => Promise<unknown>;
-  /** The files the agent wrote during this message's turn, and the Session they belong to. */
-  outputs?: { sessionId: string; files: OutputFile[] };
+  sessionId: string;
+  /** The files the agent wrote during this message's turn. */
+  files: OutputFile[];
+  editable: boolean;
+  deferred: boolean;
+  onEdit: (messageId: string, text: string) => Promise<unknown>;
 }) {
   const agent = message.role === 'agent';
   const text = message.parts.map((part) => ('text' in part ? part.text : '')).join('\n');
@@ -96,10 +118,10 @@ export function MessageView({
   const [pending, setPending] = useState(false);
   const [copied, copy] = useCopy();
   const rerun = () => {
-    if (!onEdit || draft === null || draft.trim() === '' || pending) return;
+    if (!editable || draft === null || draft.trim() === '' || pending) return;
     setPending(true);
     setError(null);
-    onEdit(draft.trim())
+    onEdit(message.id, draft.trim())
       .then(
         () => setDraft(null),
         (failure: unknown) => setError(failure instanceof Error ? failure.message : String(failure)),
@@ -110,7 +132,8 @@ export function MessageView({
   return (
     <li
       aria-label={agent ? undefined : 'Your message'}
-      className={`group mx-5 my-2 flex flex-col gap-1.5 rounded-xl px-5 py-3.5 ${agent ? '' : 'border border-line bg-surface'}`}
+      data-message-id={message.id}
+      className={`group mx-5 my-2 flex flex-col gap-1.5 rounded-xl px-5 py-3.5 ${agent ? '' : 'border border-line bg-surface'} ${deferred ? '[contain-intrinsic-size:auto_160px] [content-visibility:auto]' : ''}`}
     >
       <div className="flex min-h-5 items-center gap-1">
         <span className="text-xs tracking-[0.08em] text-neutral-700 uppercase">
@@ -141,7 +164,7 @@ export function MessageView({
             >
               {copyLabel(copied, 'Copy')}
             </button>
-            {onEdit && (
+            {editable && (
               <button
                 type="button"
                 onClick={() => setDraft(text)}
@@ -157,8 +180,8 @@ export function MessageView({
       {draft === null ? (
         agent ? (
           <>
-            <MessageParts message={message} sessionId={outputs?.sessionId ?? null} />
-            {outputs && message.status !== 'streaming' && <OutputChips {...outputs} />}
+            <MessageParts message={message} sessionId={sessionId} />
+            {message.status !== 'streaming' && <OutputChips sessionId={sessionId} files={files} />}
           </>
         ) : (
           <>

@@ -3,6 +3,9 @@ import { item, menu } from './item';
 
 export type DropdownOption<T extends string> = { value: T; label: string; description?: string };
 
+/** A list draws this many options; a repo with thousands of branches would otherwise put each in the page. */
+const MAX_OPTIONS = 100;
+
 /**
  * A button that opens a list of options with descriptions; the current one is tinted and ticked. `chip` is the
  * composer's borderless `Label Value ▼` button, whose list opens upward under a heading unless `opens` says down.
@@ -65,9 +68,18 @@ export function Dropdown<T extends string>({
   const current = options.find((option) => option.value === value);
   const chip = variant === 'chip';
   const needle = query.trim().toLowerCase();
-  const shown = needle
+  const matching = needle
     ? options.filter((option) => `${option.label} ${option.description ?? ''}`.toLowerCase().includes(needle))
     : options;
+  // The current option always draws, so the list opens on it.
+  const shown =
+    matching.length <= MAX_OPTIONS
+      ? matching
+      : [
+          ...matching.slice(0, MAX_OPTIONS),
+          ...(current && !needle && !matching.slice(0, MAX_OPTIONS).includes(current) ? [current] : []),
+        ];
+  const hidden = matching.length - shown.length;
 
   const typed = query.trim();
   const offerCreate =
@@ -281,6 +293,11 @@ export function Dropdown<T extends string>({
               </button>
             );
           })}
+          {hidden > 0 && (
+            <div className="px-2.5 py-2 text-xs text-neutral-700">
+              {searchable ? `${hidden} more: type to narrow the list` : `${hidden} more not shown`}
+            </div>
+          )}
         </div>
       )}
     </div>

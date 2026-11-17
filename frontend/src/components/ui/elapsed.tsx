@@ -9,34 +9,45 @@ export function duration(ms: number): string {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
-/** One clock for every live counter on the page, so two of them never disagree by a tick. */
-let tickNow = Date.now();
-let timer: ReturnType<typeof setInterval> | undefined;
-const listeners = new Set<() => void>();
+/** A clock every live counter of one step shares, so two of them never disagree by a tick. */
+type Clock = { now: number; timer: ReturnType<typeof setInterval> | undefined; listeners: Set<() => void> };
+const clocks = new Map<number, Clock>();
 
-function subscribe(listener: () => void): () => void {
-  if (listeners.size === 0) {
-    tickNow = Date.now();
-    timer = setInterval(() => {
-      tickNow = Date.now();
-      for (const one of listeners) one();
-    }, 1000);
-  }
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-    if (listeners.size === 0 && timer !== undefined) {
-      clearInterval(timer);
-      timer = undefined;
+function clockOf(step: number): Clock {
+  const clock = clocks.get(step) ?? { now: Date.now(), timer: undefined, listeners: new Set() };
+  clocks.set(step, clock);
+  return clock;
+}
+
+function subscribeTo(step: number): (listener: () => void) => () => void {
+  return (listener) => {
+    const clock = clockOf(step);
+    if (clock.listeners.size === 0) {
+      clock.now = Date.now();
+      clock.timer = setInterval(() => {
+        clock.now = Date.now();
+        for (const one of clock.listeners) one();
+      }, step);
     }
+    clock.listeners.add(listener);
+    return () => {
+      clock.listeners.delete(listener);
+      if (clock.listeners.size === 0 && clock.timer !== undefined) {
+        clearInterval(clock.timer);
+        clock.timer = undefined;
+      }
+    };
   };
 }
 
 const quiet = () => () => {};
+const subscribers = new Map<number, ReturnType<typeof subscribeTo>>();
 
-/** The time now, a second at a time and the same for every caller, while `live`. */
-export function useNow(live: boolean): number {
-  const shared = useSyncExternalStore(live ? subscribe : quiet, () => tickNow);
+/** The time now, `step` ms at a time (a second by default) and the same for every caller of that step, while `live`. */
+export function useNow(live: boolean, step = 1000): number {
+  const subscribe = subscribers.get(step) ?? subscribeTo(step);
+  subscribers.set(step, subscribe);
+  const shared = useSyncExternalStore(live ? subscribe : quiet, () => clockOf(step).now);
   // Not live: the moment of this render, which nothing counts on.
   return live ? shared : Date.now();
 }

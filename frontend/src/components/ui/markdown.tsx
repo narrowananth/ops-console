@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { memo, type ReactNode, useMemo } from 'react';
 import { InlineText } from '../../agents/inline-text';
 import { CodeBlock } from './code-block';
 
@@ -116,12 +116,13 @@ const HEADING_CLASS = [
   'text-[13px] font-semibold',
 ];
 
-/** Markdown an agent wrote, drawn. Images show as written. */
-export function Markdown({ source, className = '' }: { source: string; className?: string }) {
+/** Markdown an agent wrote, drawn. Images show as written. Parsed once per text, and drawn again only when it changes. */
+export const Markdown = memo(function Markdown({ source, className = '' }: { source: string; className?: string }) {
   const code = 'rounded bg-neutral-200 px-1 text-xs';
+  const parsed = useMemo(() => blocks(source), [source]);
   return (
     <div className={`flex min-w-0 flex-col gap-2.5 text-[13px] leading-relaxed ${className}`}>
-      {blocks(source).map((block, index): ReactNode => {
+      {parsed.map((block, index): ReactNode => {
         // Blocks sit by position and never reorder.
         const key = index;
         if (block.kind === 'heading') {
@@ -202,4 +203,4 @@ export function Markdown({ source, className = '' }: { source: string; className
       })}
     </div>
   );
-}
+});

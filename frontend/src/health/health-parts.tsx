@@ -267,7 +267,8 @@ function Problems({
 
 /** `FAILING 14 min`, counting up while it fails. */
 export function FailingPill({ since }: { since: string | null }) {
-  const now = useNow(since !== null);
+  // It shows minutes, so a coarse clock is enough.
+  const now = useNow(since !== null, SLOW_TICK_MS);
   return (
     <span className="rounded-full bg-accent-100 px-2 py-px font-sans text-xs font-semibold whitespace-nowrap text-accent-700">
       FAILING{since ? ` ${held(now - Date.parse(since))}` : ''}
@@ -306,6 +307,15 @@ const STRIPE: Record<string, { color: string; word: string }> = {
 };
 
 const SLOTS = 24;
+/** Rows of a list of items count in minutes and tens of seconds: a clock of one second would redraw every row. */
+const SLOW_TICK_MS = 30_000;
+const ROW_TICK_MS = 10_000;
+
+/** `checked 40s ago`; only this span ticks, not the history beside it. */
+function CheckedAgo({ at }: { at: string }) {
+  const now = useNow(true, ROW_TICK_MS);
+  return <span>checked {ago(now - Date.parse(at))}</span>;
+}
 
 /** The last 24 checks, oldest on the left: green ok, red failing, amber needs sign-in. */
 export function History({ points }: { points: HealthItem['history'] }) {
@@ -336,14 +346,13 @@ export function History({ points }: { points: HealthItem['history'] }) {
  * (never answered, or turned off) has nothing to say here: its row keeps its own "not connected" or "off" look.
  */
 export function HealthLine({ item, children }: { item: HealthItem; children?: ReactNode }) {
-  const now = useNow(item.last_checked_at !== null);
   const down = isRecovered(item) ? wasDown(item) : null;
   if (item.status === HealthStatus.Off) return null;
   if (item.history.length === 0 && item.last_checked_at === null) return null;
   return (
     <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-xs text-neutral-700">
       <History points={item.history} />
-      {item.last_checked_at && <span>checked {ago(now - Date.parse(item.last_checked_at))}</span>}
+      {item.last_checked_at && <CheckedAgo at={item.last_checked_at} />}
       {item.latency_ms !== null && <span className="font-mono">{item.latency_ms} ms</span>}
       {down && <span className="text-ok">{down}</span>}
       {children}

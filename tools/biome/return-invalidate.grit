@@ -1,0 +1,10 @@
+language js
+
+// A returned `invalidateQueries` is awaited by TanStack Query v5 wherever a callback hands it back (a mutation's
+// `onSuccess`, `onSettled` or `onError`, or a helper they return). Write `void client.invalidateQueries(...)`.
+or {
+  `return $client.invalidateQueries($args)`,
+  `return $client.refetchQueries($args)`
+} as $returned where {
+  register_diagnostic(span=$returned, message="Returning invalidateQueries makes the caller wait for every refetch. Write `void client.invalidateQueries(...)`.", severity="error")
+}

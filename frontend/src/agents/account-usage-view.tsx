@@ -636,8 +636,8 @@ export function AccountUsageView({
   onChange: (next: { account?: string | null; range?: string | null }) => void;
   onOpenAccounts: () => void;
 }) {
-  const accounts = useAgentAccounts();
-  const hub = useCliProxy();
+  const accounts = useAgentAccounts(true);
+  const hub = useCliProxy(true);
   const list = accounts.data?.data ?? [];
   const picked = account === 'none' || list.some((one) => one.id === account) ? account : null;
   const current = rangeOf(range);

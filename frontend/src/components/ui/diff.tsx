@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react';
+import { memo, type ReactNode, useCallback, useMemo, useRef } from 'react';
 
 type DiffLine = { sign: '+' | '-' | ' '; text: string };
 
@@ -65,14 +65,65 @@ function HunkRow({ text, span }: { text: string; span: number }) {
   );
 }
 
+/** One line of a unified diff. Memoized: a thousand-line file does not redraw its lines when one comment box opens. */
+const UnifiedRow = memo(function UnifiedRow({
+  row,
+  numbers,
+  commentable,
+  onAdd,
+  below,
+  span,
+}: {
+  row: Row;
+  numbers: boolean;
+  commentable: boolean;
+  onAdd: (line: number) => void;
+  /** What sits under the line; null for most lines. */
+  below: ReactNode;
+  span: number;
+}) {
+  return (
+    <>
+      <tr className={`group ${LOOK[row.sign].row}`}>
+        {numbers && (
+          <>
+            <td className={`${GUTTER} ${LOOK[row.sign].gutter}`}>{row.old ?? ''}</td>
+            <td className={`${GUTTER} ${LOOK[row.sign].gutter}`}>{row.new ?? ''}</td>
+          </>
+        )}
+        <td className={`relative w-px select-none pr-1 pl-3 align-top ${LOOK[row.sign].sign}`}>
+          {SIGN[row.sign]}
+          {commentable && row.new !== null && (
+            <button
+              type="button"
+              aria-label={`Comment on line ${row.new}`}
+              title="Add a comment on this line"
+              onClick={() => onAdd(row.new as number)}
+              className="absolute top-1/2 left-0.5 z-10 hidden size-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md border-0 bg-diff-hunk-text p-0 font-body text-sm leading-none font-semibold text-white shadow-sm group-hover:flex hover:scale-110"
+            >
+              +
+            </button>
+          )}
+        </td>
+        <td className="pr-4 whitespace-pre">{row.text}</td>
+      </tr>
+      <Below span={span} node={below} />
+    </>
+  );
+});
+
 /**
  * A unified diff: green added lines, red removed ones, blue hunk headers, with line numbers when hunks give them. With
  * `comments`, hovering an added or unchanged line shows a `+` that opens a comment on it, and threads sit under lines.
  */
-export function DiffLines({ lines, comments }: { lines: DiffLine[]; comments?: LineComments }) {
-  const rows = numbered(lines);
+export const DiffLines = memo(function DiffLines({ lines, comments }: { lines: DiffLine[]; comments?: LineComments }) {
+  const rows = useMemo(() => numbered(lines), [lines]);
   const numbers = rows.some((row) => row.hunk);
   const span = numbers ? 4 : 2;
+  // The rows get one function that always calls the latest `onAdd`, so a new comments object redraws none of them.
+  const latest = useRef(comments?.onAdd);
+  latest.current = comments?.onAdd;
+  const onAdd = useCallback((line: number) => latest.current?.(line), []);
   return (
     <div className="overflow-x-auto">
       <table className={TABLE}>
@@ -82,40 +133,23 @@ export function DiffLines({ lines, comments }: { lines: DiffLine[]; comments?: L
               // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no id
               <HunkRow key={index} text={row.text} span={span} />
             ) : (
-              // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no id
-              <Fragment key={index}>
-                <tr className={`group ${LOOK[row.sign].row}`}>
-                  {numbers && (
-                    <>
-                      <td className={`${GUTTER} ${LOOK[row.sign].gutter}`}>{row.old ?? ''}</td>
-                      <td className={`${GUTTER} ${LOOK[row.sign].gutter}`}>{row.new ?? ''}</td>
-                    </>
-                  )}
-                  <td className={`relative w-px select-none pr-1 pl-3 align-top ${LOOK[row.sign].sign}`}>
-                    {SIGN[row.sign]}
-                    {comments && row.new !== null && (
-                      <button
-                        type="button"
-                        aria-label={`Comment on line ${row.new}`}
-                        title="Add a comment on this line"
-                        onClick={() => comments.onAdd(row.new as number)}
-                        className="absolute top-1/2 left-0.5 z-10 hidden size-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md border-0 bg-diff-hunk-text p-0 font-body text-sm leading-none font-semibold text-white shadow-sm group-hover:flex hover:scale-110"
-                      >
-                        +
-                      </button>
-                    )}
-                  </td>
-                  <td className="pr-4 whitespace-pre">{row.text}</td>
-                </tr>
-                {comments && row.new !== null && <Below span={span} node={comments.below(row.new)} />}
-              </Fragment>
+              <UnifiedRow
+                // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no id
+                key={index}
+                row={row}
+                numbers={numbers}
+                commentable={comments !== undefined}
+                onAdd={onAdd}
+                below={comments && row.new !== null ? comments.below(row.new) : null}
+                span={span}
+              />
             ),
           )}
         </tbody>
       </table>
     </div>
   );
-}
+});
 
 type Pair = { hunk: string } | { left: Row | null; right: Row | null };
 
@@ -157,7 +191,8 @@ function Half({ row, side }: { row: Row | null; side: 'old' | 'new' }) {
 }
 
 /** The old file on the left, the new on the right, line against line. */
-export function SplitDiff({ lines }: { lines: DiffLine[] }) {
+export const SplitDiff = memo(function SplitDiff({ lines }: { lines: DiffLine[] }) {
+  const pairs = useMemo(() => paired(numbered(lines)), [lines]);
   return (
     <div className="overflow-x-auto">
       <table className={`${TABLE} table-fixed`}>
@@ -170,7 +205,7 @@ export function SplitDiff({ lines }: { lines: DiffLine[] }) {
           <col />
         </colgroup>
         <tbody>
-          {paired(numbered(lines)).map((pair, index) =>
+          {pairs.map((pair, index) =>
             'hunk' in pair ? (
               // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no id
               <HunkRow key={index} text={pair.hunk} span={6} />
@@ -186,10 +221,10 @@ export function SplitDiff({ lines }: { lines: DiffLine[] }) {
       </table>
     </div>
   );
-}
+});
 
 /** The whole new file, its added lines green and removed lines shown red where they were. */
-export function FullFileDiff({ lines, text }: { lines: DiffLine[]; text: string }) {
+export const FullFileDiff = memo(function FullFileDiff({ lines, text }: { lines: DiffLine[]; text: string }) {
   const rows = numbered(lines).filter((row) => !row.hunk);
   const added = new Set(rows.flatMap((row) => (row.sign === '+' && row.new !== null ? [row.new] : [])));
   const removed = new Map<number, Row[]>();
@@ -221,7 +256,7 @@ export function FullFileDiff({ lines, text }: { lines: DiffLine[]; text: string 
       </table>
     </div>
   );
-}
+});
 
 /** `+12 −3` with a five-block bar of the split, as Git hosts show it. */
 export function DiffStat({ additions, deletions }: { additions: number; deletions: number }) {
