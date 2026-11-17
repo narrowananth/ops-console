@@ -362,8 +362,10 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
   async attach(tabId: string, viewer: WebSocket): Promise<void> {
     const tab = this.live(tabId);
     const slot = this.slotOf(tab);
-    await tab.attach(viewer);
+    // The viewer joins the tab at once; the title poll must not wait for the first frame to be taken.
+    const attaching = tab.attach(viewer);
     this.pollTitles(slot);
+    await attaching;
   }
 
   async detach(tabId: string, viewer: WebSocket): Promise<void> {
