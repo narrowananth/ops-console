@@ -32,6 +32,24 @@ const SHOT_QUALITY = 70;
 const MAX_BUFFERED = 1_000_000;
 /** A frame is acknowledged once its viewers took it, or after this long, so one stalled viewer cannot freeze the rest. */
 const ACK_WAIT_MS = 250;
+/** A screenshot Chrome does not answer must not hold the queue that sizes the page. */
+const STILL_WAIT_MS = 3000;
+
+function within<T>(ms: number, work: Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Chrome did not answer')), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 /** Navigation events that arrive together are read once. */
 const READ_WAIT_MS = 150;
 /** Until a viewer reports its size. */
@@ -137,10 +155,10 @@ export class BrowserTab {
   private readonly viewerSizes = new Map<WebSocket, { width: number; height: number }>();
   private screencasting = false;
   private reading: NodeJS.Timeout | undefined;
-  private buttonsQueue: Promise<void> = Promise.resolve();
+  private inputQueue: Promise<void> = Promise.resolve();
+  private moveQueued = false;
   /** The newest mouse move not yet sent: moves arriving while one is in flight replace each other. */
   private nextMove: MouseMessage | null = null;
-  private moving = false;
   private readonly requests = new WeakMap<Request, NetworkEntry>();
 
   private constructor(
@@ -475,7 +493,10 @@ export class BrowserTab {
   /** A JPEG of the page and the size it was taken at, read together inside the turn so they cannot disagree. */
   private still(): Promise<{ data: string; width: number; height: number }> {
     return this.turn(async () => {
-      const { data } = await this.cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: FRAME_QUALITY });
+      const { data } = await within(
+        STILL_WAIT_MS,
+        this.cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: FRAME_QUALITY }),
+      );
       return { data, ...this.size };
     });
   }
@@ -529,50 +550,48 @@ export class BrowserTab {
     if (message.type === 'resize') return this.resize(viewer, message.width, message.height);
     this.takeInput(viewer);
     if (message.type === 'focus') return;
-    if (message.type === 'text') {
-      await this.cdp.send('Input.insertText', { text: message.text });
-    } else if (message.type === 'key') {
-      const text = message.text ?? (message.key === 'Enter' ? '\r' : undefined);
-      const typed = message.action === 'down' && text !== undefined && (message.modifiers & 6) === 0;
-      await this.cdp.send('Input.dispatchKeyEvent', {
-        type: message.action === 'up' ? 'keyUp' : typed ? 'keyDown' : 'rawKeyDown',
-        key: message.key,
-        code: message.code,
-        modifiers: message.modifiers,
-        windowsVirtualKeyCode: keyCode(message.key),
-        ...(typed ? { text } : {}),
+    if (message.type === 'mouse' && message.action === 'move') {
+      // Moves are many and only the newest matters: one turn in the queue reads the newest at its time.
+      this.nextMove = message;
+      if (this.moveQueued) return;
+      this.moveQueued = true;
+      return this.inOrder(async () => {
+        this.moveQueued = false;
+        await this.flushMove();
       });
-    } else {
-      await this.mouse(message);
     }
+    // Everything else goes one at a time in the order it came: a release never overtakes its press, nor a key its click.
+    return this.inOrder(async () => {
+      if (message.type === 'mouse') {
+        await this.flushMove();
+        await this.dispatchMouse(message);
+      } else if (message.type === 'text') {
+        await this.cdp.send('Input.insertText', { text: message.text });
+      } else {
+        const text = message.text ?? (message.key === 'Enter' ? '\r' : undefined);
+        const typed = message.action === 'down' && text !== undefined && (message.modifiers & 6) === 0;
+        await this.cdp.send('Input.dispatchKeyEvent', {
+          type: message.action === 'up' ? 'keyUp' : typed ? 'keyDown' : 'rawKeyDown',
+          key: message.key,
+          code: message.code,
+          modifiers: message.modifiers,
+          windowsVirtualKeyCode: keyCode(message.key),
+          ...(typed ? { text } : {}),
+        });
+      }
+    });
   }
 
-  private async mouse(message: MouseMessage): Promise<void> {
-    if (message.action === 'move') {
-      this.nextMove = message;
-      if (this.moving) return;
-      this.moving = true;
-      try {
-        for (let move: MouseMessage | null = this.nextMove; move; move = this.nextMove) {
-          this.nextMove = null;
-          await this.dispatchMouse(move);
-        }
-      } finally {
-        this.moving = false;
-      }
-      return;
-    }
-    // A press goes after the move that led to it, and a release after the press: one at a time, in the order they came.
-    const turn = this.buttonsQueue.then(async () => {
-      if (this.nextMove) {
-        const move = this.nextMove;
-        this.nextMove = null;
-        await this.dispatchMouse(move);
-      }
-      await this.dispatchMouse(message);
-    });
-    this.buttonsQueue = turn.catch(() => {});
-    await turn;
+  private inOrder(action: () => Promise<void>): Promise<void> {
+    const turn = this.inputQueue.then(action);
+    this.inputQueue = turn.catch(() => {});
+    return turn;
+  }
+
+  private async flushMove(): Promise<void> {
+    const move = this.nextMove;
+    this.nextMove = null;
+    if (move) await this.dispatchMouse(move);
   }
 
   private async dispatchMouse(message: MouseMessage): Promise<void> {
