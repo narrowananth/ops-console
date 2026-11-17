@@ -20,6 +20,9 @@ export const CONNECTOR_BRAND: Record<ConnectorId, BrandSlug> = {
   [ConnectorId.Sentry]: 'sentry',
   [ConnectorId.Shopify]: 'shopify',
   [ConnectorId.Slashdocs]: 'slashdocs',
+  [ConnectorId.GoogleDocs]: 'googledocs',
+  [ConnectorId.GoogleSheets]: 'googlesheets',
+  [ConnectorId.GoogleDrive]: 'googledrive',
 };
 
 /** Words in an MCP Server's name or command that say whose it is; the first match wins. */
@@ -34,6 +37,9 @@ const SERVER_HINTS: [RegExp, BrandSlug][] = [
   [/sentry/, 'sentry'],
   [/shopify/, 'shopify'],
   [/slashdocs/, 'slashdocs'],
+  [/google-docs/, 'googledocs'],
+  [/google-sheets/, 'googlesheets'],
+  [/google-drive/, 'googledrive'],
   [/mongo/, 'mongodb'],
   [/postgres|\bpg[-_]|\bpg$/, 'postgresql'],
   [/mysql/, 'mysql'],

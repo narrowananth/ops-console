@@ -85,7 +85,8 @@ test('a Session shows the page the operator opens, takes input on it, and lists 
 
   await panel.getByRole('textbox', { name: 'Address' }).fill(origin);
   await panel.getByRole('textbox', { name: 'Address' }).press('Enter');
-  await expect(panel.getByRole('tab', { name: /Dev shop/ })).toBeVisible();
+  // The first page waits on a cold Chrome start, slow on a CI runner.
+  await expect(panel.getByRole('tab', { name: /Dev shop/ })).toBeVisible({ timeout: 30_000 });
 
   // A click on the drawn page reaches the page's own script.
   const canvas = panel.locator('canvas');

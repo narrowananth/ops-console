@@ -182,6 +182,23 @@ export const MERGE_DENIALS = [
 ];
 
 /**
+ * Google Drive's server gives the agent no delete and no sharing today. Should it grow one, these stay denied in every
+ * Access mode, `full` included: removing a file or changing who may open it is the operator's to do in Drive.
+ */
+export const DRIVE_DENIALS = [
+  'delete',
+  'trash',
+  'untrash',
+  'empty_trash',
+  'share',
+  'unshare',
+  'create_permission',
+  'update_permission',
+  'delete_permission',
+  'remove_permission',
+].map((tool) => `mcp__google-drive__${tool}*`);
+
+/**
  * The Run sandbox filters a run's commands (ADR 0006), not the agent's own web tools, so a steered run could send out
  * what it reads through them.
  */
@@ -1304,6 +1321,7 @@ export class AgentRuntime implements OnModuleDestroy {
       })(),
       disallowedTools: [
         ...MERGE_DENIALS,
+        ...DRIVE_DENIALS,
         ...WEB_DENIALS,
         ...fileToolDenials(this.dataDir, run.workingDir, undefined, repoFolders),
         ...(run.readOnly ? READ_ONLY_DENIALS : []),

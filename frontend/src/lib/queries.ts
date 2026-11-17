@@ -42,6 +42,7 @@ import {
   fileMenuSchema,
   findCodeResultSchema,
   fixSchema,
+  type GoogleClientInput,
   HEALTH_CHECKS_DEFAULT,
   type HealthArea,
   type HealthChecksSetting,
@@ -607,6 +608,13 @@ export function useConnectConnectorWith() {
     await apiSend('PATCH', `/connectors/${id}`, { config }, z.object({ data: connectorSchema }));
     return apiSend('POST', `/connectors/${id}/connect`, {}, z.undefined());
   });
+}
+
+/** Saves the Google OAuth client the three Google Connectors share. The secret is sent once and never read back. */
+export function useSaveGoogleClient() {
+  return useConnectorMutation((body: GoogleClientInput) =>
+    apiSend('PUT', '/connectors/google/client', body, connectorListSchema),
+  );
 }
 
 /** Stops a sign-in still waiting on the browser; the Connector keeps the status it had. */

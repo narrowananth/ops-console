@@ -1,7 +1,8 @@
 import os from 'node:os';
 import path from 'node:path';
-import { AccessMode, type WsEvent } from '@ops-console/shared';
+import { AccessMode, RunPurpose, type WsEvent } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
+import { AgentRuntime } from '../src/agent/runtime';
 import { type AgentDaemon, api, converse, listen, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
 import type { Step } from './fakes/agent-sdk';
 
@@ -375,5 +376,59 @@ describe("the agent's questions", () => {
         input: { questions: [question], answers: { 'Which branch should the fix go on?': 'fix/webhook' } },
       },
     ]);
+  });
+});
+
+describe('Google Connectors', () => {
+  const GOOGLE = ['google-docs', 'google-sheets', 'google-drive'];
+  const denied = (daemon: AgentDaemon) =>
+    (
+      daemon.sdk.calls.at(-1)?.options.settings as { deniedMcpServers?: { serverName: string }[] } | undefined
+    )?.deniedMcpServers?.map((server) => server.serverName) ?? [];
+
+  it('keeps the Google servers out of every Job and in a chat', async () => {
+    const daemon = await start();
+    const runtime = daemon.app.get(AgentRuntime);
+    await converse(daemon, daemon.createSession(), 'read my sheet');
+    for (const name of GOOGLE) expect(denied(daemon)).not.toContain(name);
+
+    for (const purpose of [
+      RunPurpose.Verify,
+      RunPurpose.Fix,
+      RunPurpose.AgentReview,
+      RunPurpose.ReplyCheck,
+      RunPurpose.CommentPass,
+    ]) {
+      await runtime.runFor(daemon.createSession(), 'job', null, { purpose }).finished;
+      expect(denied(daemon), purpose).toEqual(expect.arrayContaining(GOOGLE));
+    }
+  });
+
+  it('asks before a Google call in supervised mode as for any MCP server, and runs it in full', async () => {
+    const daemon = await start();
+    const write: Step = { tool: 'mcp__google-sheets__update_values', input: { spreadsheetId: 'abc', values: [[1]] } };
+    const asked = await runTool(daemon, AccessMode.Supervised, write, 'approved');
+    expect(asked.approvals).toHaveLength(1);
+    const full = await runTool(daemon, AccessMode.Full, write);
+    expect(full.approvals).toEqual([asked.approvals[0]]);
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual([write.tool, write.tool]);
+  });
+
+  it('denies Drive delete and share in every Access mode, full included, and still reads permissions', async () => {
+    const daemon = await start();
+    const steps: Step[] = [
+      { tool: 'mcp__google-drive__delete_file', input: { fileId: 'abc' } },
+      { tool: 'mcp__google-drive__share_file', input: { fileId: 'abc', role: 'reader' } },
+      { tool: 'mcp__google-drive__update_permission', input: { fileId: 'abc' } },
+    ];
+    for (const mode of Object.values(AccessMode)) {
+      const id = daemon.createSession({ access_mode: mode });
+      daemon.sdk.script(...steps);
+      await converse(daemon, id, 'tidy my drive');
+    }
+    expect(daemon.sdk.ran).toEqual([]);
+    const read: Step = { tool: 'mcp__google-drive__get_file_permissions', input: { fileId: 'abc' } };
+    await runTool(daemon, AccessMode.Full, read);
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual([read.tool]);
   });
 });

@@ -1,12 +1,23 @@
-import { CONNECTOR_NAMES, type Connector, ConnectorId, type HealthItem, HealthStatus } from '@ops-console/shared';
-import { useState } from 'react';
+import {
+  CONNECTOR_NAMES,
+  type Connector,
+  ConnectorId,
+  GOOGLE_APIS,
+  GOOGLE_REDIRECT_URI,
+  type HealthItem,
+  HealthStatus,
+  isGoogleConnector,
+} from '@ops-console/shared';
+import { type ReactNode, useState } from 'react';
 import { BrandIcon, CONNECTOR_BRAND } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
+import { CodeBlock } from '../components/ui/code-block';
 import {
   useCancelConnectorSignIn,
   useConnectConnector,
   useConnectConnectorWith,
   useDisconnectConnector,
+  useSaveGoogleClient,
 } from '../lib/queries';
 import { type StatusLook, statusGlyph } from '../mcp/status';
 import { IntegrationRow, rowAction, rowActionAttention } from './integration-row';
@@ -41,6 +52,8 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
   const saved = typeof connector.config.server === 'string' ? connector.config.server : '';
   const [server, setServer] = useState(saved);
   const asksServer = connector.id === ConnectorId.Slashdocs;
+  const google = isGoogleConnector(connector.id);
+  const clientSaved = google && typeof connector.config.client_id === 'string' && connector.config.client_id !== '';
   const connected = connector.status !== HealthStatus.Off;
   const error = connect.error ?? connectWith.error ?? disconnect.error ?? cancel.error;
   const onConnect = () =>
@@ -79,8 +92,11 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
             <span className="text-neutral-700">Blank uses the server the slashdocs CLI already signed in to.</span>
           </label>
         )}
+        {google && <GoogleClientSteps connector={connector} />}
         <SignInStep
           connector={connector}
+          number={google ? 4 : 1}
+          blocked={google && !clientSaved ? 'Save the client first' : null}
           pending={connect.isPending || connectWith.isPending}
           cancelling={cancel.isPending}
           onConnect={onConnect}
@@ -130,6 +146,10 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
 /** Connect hands off to the provider's own sign-in page; nothing is typed here. */
 function SignInStep(props: {
   connector: Connector;
+  /** Which step this is: Google's three client steps come first. */
+  number?: number;
+  /** Why Connect cannot be pressed yet, when it cannot. */
+  blocked?: string | null;
   pending: boolean;
   cancelling: boolean;
   onConnect: () => void;
@@ -155,13 +175,14 @@ function SignInStep(props: {
     >
       <div className="flex items-start gap-3">
         <span className="flex size-6.5 shrink-0 items-center justify-center rounded-full bg-neutral-200 font-mono text-xs font-semibold">
-          1
+          {props.number ?? 1}
         </span>
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-semibold">
             {noSignIn ? `Add ${connector.name}` : `Sign in to ${connector.name}`}
           </div>
           <div className="text-xs text-neutral-700">{detail}</div>
+          {props.blocked && <div className="text-xs text-neutral-700">{props.blocked}</div>}
           {connector.status_detail && !signIn && (
             <div role="alert" className="text-xs text-accent-700">
               {connector.status_detail}
@@ -172,13 +193,15 @@ function SignInStep(props: {
           variant={connected ? 'secondary' : 'primary'}
           className="shrink-0"
           title={
-            signIn
-              ? 'Finish signing in, in the browser tab that opened'
-              : connected
-                ? `Sign in to ${connector.name} again, for another account or a sign-in that lapsed`
-                : undefined
+            props.blocked
+              ? props.blocked
+              : signIn
+                ? 'Finish signing in, in the browser tab that opened'
+                : connected
+                  ? `Sign in to ${connector.name} again, for another account or a sign-in that lapsed`
+                  : undefined
           }
-          disabled={props.pending || signIn !== null}
+          disabled={props.pending || signIn !== null || Boolean(props.blocked)}
           onClick={props.onConnect}
         >
           {signIn ? 'Waiting…' : connected ? 'Reconnect' : 'Connect'}
@@ -215,6 +238,140 @@ function SignInStep(props: {
         </div>
       )}
     </section>
+  );
+}
+
+/** Google's own page for connecting each product's MCP server, with the OAuth client steps. */
+const GUIDE_URL: Partial<Record<ConnectorId, string>> = {
+  [ConnectorId.GoogleDocs]: 'https://developers.google.com/workspace/docs/api/guides/configure-mcp-server',
+  [ConnectorId.GoogleSheets]: 'https://developers.google.com/workspace/sheets/api/guides/configure-mcp-server',
+  [ConnectorId.GoogleDrive]: 'https://developers.google.com/workspace/drive/api/guides/configure-mcp-server',
+};
+
+/** A numbered card, as the sign-in step is. */
+function Step({ number, title, children }: { number: number; title: string; children?: ReactNode }) {
+  return (
+    <section
+      aria-label={title}
+      className="flex flex-col gap-3 rounded-lg border border-line bg-card px-4 py-3.5 shadow-sm"
+    >
+      <div className="flex items-start gap-3">
+        <span className="flex size-6.5 shrink-0 items-center justify-center rounded-full bg-neutral-200 font-mono text-xs font-semibold">
+          {number}
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <div className="text-[13px] font-semibold">{title}</div>
+          {children}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Google ships no OAuth client a public repo can bundle, so the operator brings one, once, for all three Connectors.
+ * The first three steps: make the client, turn on the APIs, enter the client. The fourth is the sign-in.
+ */
+function GoogleClientSteps({ connector }: { connector: Connector }) {
+  const save = useSaveGoogleClient();
+  const savedId = typeof connector.config.client_id === 'string' ? connector.config.client_id : '';
+  const [editing, setEditing] = useState(false);
+  const [clientId, setClientId] = useState('');
+  const [secret, setSecret] = useState('');
+  const apis = GOOGLE_APIS[connector.id] ?? [];
+  const showForm = savedId === '' || editing;
+  const input = 'w-full border border-divider bg-card px-2 py-1.5 font-mono text-[13px] text-text';
+  return (
+    <>
+      <Step number={1} title="Create an OAuth client">
+        <div className="text-xs text-neutral-700">
+          In your Google Cloud project, create an OAuth client for an AI-powered agent. Add this redirect URI to it.{' '}
+          <a href={GUIDE_URL[connector.id]} target="_blank" rel="noreferrer">
+            Google's guide ↗
+          </a>
+        </div>
+        <CodeBlock
+          text={GOOGLE_REDIRECT_URI}
+          tone="light"
+          className="overflow-x-auto rounded-md bg-neutral-200 px-3 py-2 font-mono text-xs"
+        />
+      </Step>
+      <Step number={2} title="Enable the APIs">
+        <div className="text-xs text-neutral-700">Turn on both in the same project.</div>
+        {apis.map((api) => (
+          <CodeBlock
+            key={api}
+            text={api}
+            tone="light"
+            className="overflow-x-auto rounded-md bg-neutral-200 px-3 py-2 font-mono text-xs"
+          />
+        ))}
+      </Step>
+      <Step number={3} title="Enter the client">
+        {showForm ? (
+          <form
+            className="flex flex-col gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              save.mutate(
+                { client_id: clientId.trim(), client_secret: secret.trim() },
+                {
+                  onSuccess: () => {
+                    setClientId('');
+                    setSecret('');
+                    setEditing(false);
+                  },
+                },
+              );
+            }}
+          >
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="font-semibold">Client ID</span>
+              <input
+                value={clientId}
+                onChange={(event) => setClientId(event.target.value)}
+                placeholder="1234567890-abc.apps.googleusercontent.com"
+                autoComplete="off"
+                className={input}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="font-semibold">Client secret</span>
+              <input
+                type="password"
+                value={secret}
+                onChange={(event) => setSecret(event.target.value)}
+                autoComplete="off"
+                className={input}
+              />
+              <span className="text-neutral-700">Kept in the Keychain. One client serves Docs, Sheets and Drive.</span>
+            </label>
+            <div className="flex gap-2">
+              <Button
+                variant="primary"
+                type="submit"
+                disabled={save.isPending || clientId.trim() === '' || secret.trim() === ''}
+              >
+                Save
+              </Button>
+              {editing && <Button onClick={() => setEditing(false)}>Cancel</Button>}
+            </div>
+          </form>
+        ) : (
+          <div className="flex items-center gap-3 text-xs text-neutral-700">
+            <span>Client saved.</span>
+            <Button className="px-2.5 py-1 text-xs" onClick={() => setEditing(true)}>
+              Change
+            </Button>
+          </div>
+        )}
+        {save.error && (
+          <div role="alert" className="text-xs text-accent-700">
+            {save.error.message}
+          </div>
+        )}
+      </Step>
+    </>
   );
 }
 
