@@ -93,7 +93,7 @@ describe('local servers', () => {
     });
   });
 
-  it('tags a server by its folder when no Session process started it, and lists those first', async () => {
+  it('lists a server by its folder when no Session process started it, and leaves out one outside the Session', async () => {
     const { daemon, sessionId } = await start();
     const outside = await listenIn(await tempDir('ops-console-outside-'));
     const inWorktree = await listenIn(WORKING_DIR);
@@ -115,22 +115,15 @@ describe('local servers', () => {
     daemon.app.get(SessionsService).write(sessionId, { extraRepoIds: JSON.stringify([repoId]) });
     const inOpened = await listenIn(openedFolder);
 
-    await waitForPort(daemon, sessionId, outside);
     for (const port of [inWorktree, inOutputs, inOpened]) await waitForPort(daemon, sessionId, port);
     const listed = await servers(daemon, sessionId);
 
     const mine = [inWorktree, inOutputs, inOpened].sort((a, b) => a - b);
-    expect(listed.filter((s) => s.session_id === sessionId).map((s) => s.port)).toEqual(expect.arrayContaining(mine));
+    expect(listed.map((s) => s.port)).toEqual(expect.arrayContaining(mine));
+    expect(listed.some((s) => s.port === outside)).toBe(false);
+    expect(listed.every((s) => s.session_id === sessionId)).toBe(true);
     for (const server of listed.filter((s) => mine.includes(s.port))) expect(server.process_id).toBeNull();
-    expect(listed.find((s) => s.port === outside)).toMatchObject({ session_id: null, process_id: null });
-    const firstUntagged = listed.findIndex((s) => s.session_id === null);
-    expect(listed.slice(firstUntagged).every((s) => s.session_id === null)).toBe(true);
-    expect(listed.slice(0, firstUntagged).map((s) => s.port)).toEqual(
-      listed
-        .slice(0, firstUntagged)
-        .map((s) => s.port)
-        .sort((a, b) => a - b),
-    );
+    expect(listed.map((s) => s.port)).toEqual(listed.map((s) => s.port).sort((a, b) => a - b));
   });
 
   it('tags a server by its process even from another folder, and only for that Session', async () => {
@@ -144,9 +137,8 @@ describe('local servers', () => {
     });
     const port = portIn(await (await watch(daemon, started.id)).wait('listening on'));
 
-    const seen = await waitForPort(daemon, sessionId, port);
-    expect(seen).toMatchObject({ session_id: null, process_id: null });
     expect(await waitForPort(daemon, other, port)).toMatchObject({ session_id: other, process_id: started.id });
+    expect((await servers(daemon, sessionId)).some((s) => s.port === port)).toBe(false);
   });
 
   it("stops a server that runs in the Session's folder though no Session process owns it, and refuses any other", async () => {
@@ -154,7 +146,6 @@ describe('local servers', () => {
     const leftover = await listenIn(WORKING_DIR);
     const outside = await listenIn(await tempDir('ops-console-outside-'));
     await waitForPort(daemon, sessionId, leftover);
-    await waitForPort(daemon, sessionId, outside);
     const http = api(daemon);
 
     expect((await http.post(`/sessions/${sessionId}/local-servers/${outside}/stop`, {})).status).toBe(404);

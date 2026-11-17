@@ -2,32 +2,34 @@ import type { LocalServer, SessionProcess } from '@ops-console/shared';
 import { ascending } from '../lib/sort';
 
 /** A server with the tag the Local servers list shows beside it. */
-export type ListedServer = { server: LocalServer; tag: string | null };
+export type ListedServer = { server: LocalServer; tag: string };
 
-/**
- * This Session's servers first, tagged with the process that started them, or "this Session" when only the folder
- * matches; then the rest. Each group by port.
- */
-export function listServers(servers: readonly LocalServer[], processes: readonly SessionProcess[]) {
+/** The Session's servers by port, each tagged with the process that started it, or "this Session" when only the folder matches. */
+export function listServers(servers: readonly LocalServer[], processes: readonly SessionProcess[]): ListedServer[] {
   const named = new Map(processes.map((process) => [process.id, process.name]));
-  const mine: ListedServer[] = [];
-  const others: ListedServer[] = [];
-  for (const server of ascending(servers, (one) => String(one.port))) {
-    const process = server.process_id === null ? undefined : named.get(server.process_id);
-    if (server.process_id !== null || server.session_id !== null) {
-      mine.push({ server, tag: process ?? 'this Session' });
-    } else others.push({ server, tag: null });
-  }
-  return { mine, others };
+  return ascending(servers, (one) => String(one.port)).map((server) => ({
+    server,
+    tag: (server.process_id === null ? undefined : named.get(server.process_id)) ?? 'this Session',
+  }));
 }
 
-/** The port the Browser button shows when nothing is open: the first server that belongs to the Session. */
+/** The port the Browser button shows when nothing is open: the Session's first server. */
 export function sessionPort(servers: readonly LocalServer[]): number | null {
-  const first = ascending(
-    servers.filter((server) => server.process_id !== null || server.session_id !== null),
-    (server) => String(server.port),
-  )[0];
-  return first?.port ?? null;
+  return ascending(servers, (server) => String(server.port))[0]?.port ?? null;
+}
+
+/**
+ * The servers a Session process started since the view opened, not yet opened in a page: `before` holds the processes
+ * that were already there, `opened` the ports a page was opened for.
+ */
+export function freshServers(
+  servers: readonly LocalServer[],
+  before: ReadonlySet<string>,
+  opened: ReadonlySet<number>,
+): LocalServer[] {
+  return servers.filter(
+    (server) => server.process_id !== null && !before.has(server.process_id) && !opened.has(server.port),
+  );
 }
 
 /** A folder as the list shows it: the last three parts, with `…/` before them when there were more. */

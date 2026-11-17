@@ -3,6 +3,7 @@ import {
   FILE_TOKEN,
   fileToken,
   namesInText,
+  ProcessState,
   SessionKind,
   SessionState,
   type SkillRef,
@@ -20,7 +21,7 @@ import { MessageView, outputsByMessage } from '../agents/transcript';
 import { BrowserLinksProvider } from '../browser/browser-links';
 import { BROWSER_PANEL, BrowserPanel, type OpenRequest } from '../browser/browser-panel';
 import { isRunning } from '../browser/processes';
-import { sessionPort } from '../browser/servers';
+import { freshServers, serverAddress, sessionPort } from '../browser/servers';
 import { BrowserToggle, TerminalsToggle } from '../browser/session-buttons';
 import { TerminalsDock } from '../browser/terminals-dock';
 import { useLinkTarget } from '../browser/toolbar';
@@ -101,7 +102,35 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const processes = useProcesses(id, hasBrowser);
   // A dot on the Browser button needs the Session's servers, and only while there is no tab to show them in.
   const noTab = browser.data?.tabs.length === 0;
-  const servers = useLocalServers(id, hasBrowser && noTab === true && !browserOpen, false);
+  const processRunning = processes.data?.some((process) => process.state === ProcessState.Running) === true;
+  // While a process runs, the Session's servers are watched so a page opens when one comes up.
+  const servers = useLocalServers(
+    id,
+    hasBrowser && (processRunning || (noTab === true && !browserOpen)),
+    processRunning,
+  );
+  // A process started while this view is open gets its page opened when its server listens: the processes there at the
+  // start and the ports already opened are skipped.
+  const auto = useRef<{ id: string; before: Set<string> | null; opened: Set<number> }>({
+    id,
+    before: null,
+    opened: new Set(),
+  });
+  if (auto.current.id !== id) auto.current = { id, before: null, opened: new Set() };
+  const processList = processes.data;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the processes at the first read are the ones that do not open a page
+  useEffect(() => {
+    if (processList && auto.current.before === null) auto.current.before = new Set(processList.map((one) => one.id));
+  }, [processList, id]);
+  const serverList = servers.data;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `openInBrowser` only sets state
+  useEffect(() => {
+    const { before, opened } = auto.current;
+    if (!serverList || before === null) return;
+    const fresh = freshServers(serverList, before, opened);
+    for (const server of fresh) opened.add(server.port);
+    if (fresh[0]) openInBrowser(serverAddress(fresh[0].port));
+  }, [serverList]);
   const gone = sessions.isSuccess && session === undefined;
   const stop = useStopSession(id);
   const pulls = useRepoPullRequests(session?.kind === SessionKind.Repo ? session.repo_id : null);
