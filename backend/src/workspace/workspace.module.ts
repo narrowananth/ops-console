@@ -6,6 +6,7 @@ import { CliGitHosts } from './cli-git-hosts';
 import { CommentPassesService } from './comment-passes.service';
 import { FileMenuController } from './file-menu.controller';
 import { FileMenuService } from './file-menu.service';
+import { FOLDER_OPENER, type FolderOpener, openFolder } from './folder-opener';
 import { GIT_HOSTS, type GitHosts } from './git-host';
 import { PrJobs } from './pr-jobs';
 import { PrRunRetry } from './pr-run-retry';
@@ -20,13 +21,14 @@ import { WorkspaceSessionsService } from './workspace-sessions.service';
 /** Workspace: Sessions in a Repo or a folder of their own, their branches, and the pull requests on the Git host. */
 @Module({})
 export class WorkspaceModule {
-  static forRoot(config: { hosts?: GitHosts } = {}): DynamicModule {
+  static forRoot(config: { hosts?: GitHosts; opener?: FolderOpener } = {}): DynamicModule {
     return {
       module: WorkspaceModule,
       global: true,
       controllers: [WorkspaceSessionsController, PullRequestsController, FileMenuController],
       providers: [
         { provide: GIT_HOSTS, useValue: config.hosts ?? new CliGitHosts() },
+        { provide: FOLDER_OPENER, useValue: config.opener ?? openFolder },
         PullRequestsService,
         AgentReviewsService,
         PrJobs,

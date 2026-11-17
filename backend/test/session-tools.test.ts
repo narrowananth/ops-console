@@ -43,9 +43,9 @@ async function start() {
 }
 
 describe('the agent starts processes and uses the browser', () => {
-  it('asks for start_process in every Access mode, showing the command and that it runs outside the sandbox (26)', async () => {
+  it('asks for start_process in every Access mode but full, showing the command and that it runs outside the sandbox (26)', async () => {
     const { server } = await writeFixtures();
-    for (const mode of Object.values(AccessMode)) {
+    for (const mode of Object.values(AccessMode).filter((value) => value !== AccessMode.Full)) {
       const ctx = await start();
       const id = await ctx.chat(mode);
       const command = node(server);
@@ -62,6 +62,17 @@ describe('the agent starts processes and uses the browser', () => {
       await ctx.daemon.stop();
       running.pop();
     }
+  });
+
+  it('starts a process in full access with no Approval', async () => {
+    const { server } = await writeFixtures();
+    const ctx = await start();
+    const id = await ctx.chat(AccessMode.Full);
+    ctx.daemon.sdk.script({ tool: START_PROCESS_TOOL, input: { name: 'api', command: node(server) } });
+    await ctx.http.post(`/sessions/${id}/messages`, { text: 'start the api' });
+    await ctx.idle(id);
+    expect((await ctx.http.get('/approvals')).body.data).toEqual([]);
+    expect(ctx.daemon.sdk.ran.map((call) => call.tool)).toEqual([START_PROCESS_TOOL]);
   });
 
   it("starts, reads and stops a process by name for the agent, marked as the agent's (26)", async () => {
@@ -82,7 +93,7 @@ describe('the agent starts processes and uses the browser', () => {
   it('starts nothing on a no, and the agent is told not to retry (26)', async () => {
     const { server } = await writeFixtures();
     const ctx = await start();
-    const id = await ctx.chat(AccessMode.Full);
+    const id = await ctx.chat(AccessMode.Supervised);
     ctx.daemon.sdk.script({ tool: START_PROCESS_TOOL, input: { name: 'api', command: node(server) } });
     await ctx.http.post(`/sessions/${id}/messages`, { text: 'start the api' });
     const [wait] = await until(ctx.pending, (list) => list.length === 1, 'an Approval');
@@ -117,8 +128,17 @@ describe('the agent starts processes and uses the browser', () => {
     expect(log.map((row) => row.command).join('\n')).toContain('process_output');
   });
 
-  it('asks for browser_evaluate in every Access mode (23)', async () => {
-    for (const mode of [AccessMode.Full, AccessMode.Supervised]) {
+  it('runs browser_evaluate with no Approval in full access, and asks in the other modes (23)', async () => {
+    const full = await start();
+    const fullId = await full.chat(AccessMode.Full);
+    full.daemon.sdk.script({ tool: BROWSER_EVALUATE_TOOL, input: { script: 'document.title' } });
+    await full.http.post(`/sessions/${fullId}/messages`, { text: 'read the title' });
+    await full.idle(fullId);
+    expect((await full.http.get('/approvals')).body.data).toEqual([]);
+    expect(full.daemon.sdk.ran.map((call) => call.tool)).toEqual([BROWSER_EVALUATE_TOOL]);
+    await full.daemon.stop();
+    running.pop();
+    for (const mode of [AccessMode.Supervised, AccessMode.Auto]) {
       const ctx = await start();
       const id = await ctx.chat(mode);
       ctx.daemon.sdk.script({ tool: BROWSER_EVALUATE_TOOL, input: { script: 'document.title' } });

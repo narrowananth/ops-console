@@ -20,7 +20,7 @@ another.
    an entry's Repo matches no imported Repo; a name matches two Repos (both named, the agent asks which); two entries
    name the same Repo; an entry's task is blank. An entry naming the calling Session's own Repo is refused: that task is
    the Session's own.
-4. A valid call asks the operator in every Access mode, `full` included. One Approval lists every Session: Repo name,
+4. A valid call asks the operator in every Access mode but `full`, which starts the Sessions at once. One Approval lists every Session: Repo name,
    path and the task's first line, each. The operator approves or denies the batch as a whole; there is no per-entry
    choice.
 5. A no starts nothing. The agent is told not to ask again, and to say the tasks stay with the operator.
@@ -84,7 +84,7 @@ The agent can start Sessions, so it can start runs that open pull requests witho
 the reach one chat run already has per Repo ([ADR 0002](../adr/0002-operator-approves-agent-never-merges.md)): never a
 force push, never a merge. What is new is the count, and the one Approval gates it.
 
-- The Approval lists every Repo with the first line of its task and the task's length, in every Access mode, and only a
+- The Approval lists every Repo with the first line of its task and the task's length, in every Access mode but full, and only a
   yes starts any child.
 - The tool is offered only in a run the operator started, never in a job, so text read from logs or a pull request
   cannot reach it. A spawned Session cannot call it, so one yes never grows into more Sessions.

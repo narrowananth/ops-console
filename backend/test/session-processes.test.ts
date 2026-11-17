@@ -1,7 +1,7 @@
 import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { GitHost, SessionKind, type WsEvent } from '@ops-console/shared';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { SessionsService } from '../src/agent/sessions.service';
 import { repos } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
@@ -289,27 +289,29 @@ describe('starting a package script', () => {
 
     const scripts = await api(daemon).get(`/sessions/${sessionId}/scripts`);
     expect(scripts.body.data).toEqual({
-      runner,
       scripts: [
-        { name: 'dev', command: 'vite' },
-        { name: 'test', command: 'vitest' },
+        { id: 'package.json:dev', source: 'package.json', name: 'dev', run: `${runner} run dev`, command: 'vite' },
+        { id: 'package.json:test', source: 'package.json', name: 'test', run: `${runner} run test`, command: 'vitest' },
       ],
     });
-    const started = await startProcess(daemon, sessionId, { name: 'dev', script: 'dev' });
+    const started = await startProcess(daemon, sessionId, { name: 'dev', script: 'package.json:dev' });
     expect(started.command).toBe(`${runner} run dev`);
   });
 
   it('lists none for a folder without a package.json, and runs only a script that is in it', async () => {
     const { daemon, sessionId } = await start();
     await rm(path.join(WORKING_DIR, 'package.json'), { force: true });
-    expect((await api(daemon).get(`/sessions/${sessionId}/scripts`)).body.data).toEqual({ runner: 'npm', scripts: [] });
+    expect((await api(daemon).get(`/sessions/${sessionId}/scripts`)).body.data).toEqual({ scripts: [] });
 
     await writePackage({ dev: 'vite' });
-    const missing = await api(daemon).post(`/sessions/${sessionId}/processes`, { name: 'x', script: 'deploy' });
+    const missing = await api(daemon).post(`/sessions/${sessionId}/processes`, {
+      name: 'x',
+      script: 'package.json:deploy',
+    });
     expect(missing.status).toBe(422);
     const both = await api(daemon).post(`/sessions/${sessionId}/processes`, {
       name: 'x',
-      script: 'dev',
+      script: 'package.json:dev',
       command: 'ls',
     });
     expect(both.status).toBe(400);
@@ -319,11 +321,75 @@ describe('starting a package script', () => {
   it('quotes a script name so the shell reads it as one word', async () => {
     const { daemon, sessionId } = await start();
     await writePackage({ 'a b; echo injected': 'true' });
-    const started = await startProcess(daemon, sessionId, { name: 'odd', script: 'a b; echo injected' });
+    const started = await startProcess(daemon, sessionId, { name: 'odd', script: 'package.json:a b; echo injected' });
     expect(started.command).toBe("npm run 'a b; echo injected'");
     const view = await watch(daemon, started.id);
     await reach(daemon, sessionId, started.id, 'exited');
     expect(view.output()).not.toMatch(/^injected/m);
+  });
+});
+
+describe('scripts of any kind of project', () => {
+  const files = [
+    'Makefile',
+    'justfile',
+    'Cargo.toml',
+    'go.mod',
+    'pom.xml',
+    'compose.yaml',
+    'manage.py',
+    'package.json',
+  ];
+  // A package.json an earlier test left would list its scripts too.
+  const clear = async () => {
+    for (const file of files) await rm(path.join(WORKING_DIR, file), { force: true });
+  };
+  beforeEach(clear);
+  afterEach(clear);
+
+  it('lists make targets and just recipes with their first line, and runs one through its tool', async () => {
+    const { daemon, sessionId } = await start();
+    await writeFile(
+      path.join(WORKING_DIR, 'Makefile'),
+      [
+        'CC := gcc',
+        '.PHONY: build test',
+        'build: deps',
+        '\techo building',
+        'test lint:',
+        '\techo testing',
+        '%.o: %.c',
+        '\t$(CC) -c $<',
+        'URL = http://example.com',
+      ].join('\n'),
+    );
+    await writeFile(
+      path.join(WORKING_DIR, 'justfile'),
+      'set shell := ["bash", "-c"]\ndev port="80":\n  echo dev\n_hidden:\n  true\n',
+    );
+    const { scripts } = (await api(daemon).get(`/sessions/${sessionId}/scripts`)).body.data;
+    expect(scripts).toEqual([
+      { id: 'Makefile:build', source: 'Makefile', name: 'build', run: 'make build', command: 'echo building' },
+      { id: 'Makefile:test', source: 'Makefile', name: 'test', run: 'make test', command: 'echo testing' },
+      { id: 'Makefile:lint', source: 'Makefile', name: 'lint', run: 'make lint', command: 'echo testing' },
+      { id: 'justfile:dev', source: 'justfile', name: 'dev', run: 'just dev', command: 'echo dev' },
+    ]);
+    const started = await startProcess(daemon, sessionId, { name: 'build', script: 'Makefile:build' });
+    expect(started.command).toBe('make build');
+  });
+
+  it('lists the usual commands of a Cargo, Go, Maven or Docker Compose folder', async () => {
+    const { daemon, sessionId } = await start();
+    for (const file of ['Cargo.toml', 'go.mod', 'pom.xml', 'compose.yaml'])
+      await writeFile(path.join(WORKING_DIR, file), '');
+    const { scripts } = (await api(daemon).get(`/sessions/${sessionId}/scripts`)).body.data as {
+      scripts: { source: string; run: string }[];
+    };
+    const runs = (source: string) => scripts.filter((one) => one.source === source).map((one) => one.run);
+    expect(runs('Cargo')).toContain('cargo test');
+    expect(runs('Go')).toContain('go test ./...');
+    expect(runs('Maven')).toContain('mvn test');
+    expect(runs('Docker Compose')).toContain('docker compose up');
   });
 });
 

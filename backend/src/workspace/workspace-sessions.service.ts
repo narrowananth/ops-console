@@ -5,9 +5,12 @@ import {
   ActionActor,
   ActionKind,
   ActionOutcome,
+  type CommitSession,
+  type CommittedSession,
   type CreateRepoSession,
   createRepoSessionSchema,
   ErrorCode,
+  type FolderTarget,
   type Session,
   type SessionDiff,
   SessionKind,
@@ -23,6 +26,7 @@ import { asBackground } from '../common/spawn-pool';
 import { repos } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { GIT, Git, GitFailed } from '../repos/git';
+import { FOLDER_OPENER, type FolderOpener } from './folder-opener';
 
 /**
  * Sessions that run in a Repo. Each has a git worktree of its own under the data folder, so Sessions on different
@@ -40,6 +44,7 @@ export class WorkspaceSessionsService {
     @Inject(SessionsService) private readonly sessions: SessionsService,
     @Inject(ActionLogService) private readonly actionLog: ActionLogService,
     @Inject(DATA_DIR) private readonly dataDir: string,
+    @Inject(FOLDER_OPENER) private readonly opener: FolderOpener,
     @Inject(SessionKinds) kinds: SessionKinds,
   ) {
     kinds.register(SessionKind.Repo, {
@@ -252,6 +257,83 @@ export class WorkspaceSessionsService {
     return { session: toSession(this.sessions.write(sessionId, { branch })), stashed };
   }
 
+  /** The Session's worktree, or `invalid_state` when a repo Session has none yet. */
+  private async worktreeOrThrow(sessionId: string): Promise<{ dir: string; branch: string }> {
+    const session = this.sessions.get(sessionId);
+    if (session.kind !== SessionKind.Repo || session.repoId === null) {
+      throw new ApiError(409, ErrorCode.InvalidState, 'Only a repo Session has a branch');
+    }
+    const dir = await this.existingWorktree(sessionId);
+    if (dir === null) throw new ApiError(409, ErrorCode.InvalidState, 'The Session has no worktree yet');
+    const branch = (await this.git.branchName(dir)) ?? session.branch;
+    if (branch === null) throw new ApiError(409, ErrorCode.InvalidState, 'The Session is on no branch');
+    return { dir, branch };
+  }
+
+  /**
+   * Commits every change in the Session's worktree as the operator: with `message`, or one written from the files. With
+   * `new_branch` the commit lands on a new branch made from the current one, and the Session follows it. The Repo's
+   * git hooks are skipped, as in every scratch copy; the host's CI still checks the push.
+   */
+  async commit(sessionId: string, input: CommitSession): Promise<CommittedSession> {
+    const session = this.sessions.get(sessionId);
+    if (session.state !== SessionState.Idle && session.state !== SessionState.Failed) {
+      throw new ApiError(409, ErrorCode.InvalidState, 'The Session is still running');
+    }
+    const { dir, branch } = await this.worktreeOrThrow(sessionId);
+    const paths = await this.git.uncommittedPaths(dir);
+    const files = paths.length;
+    if (files === 0) throw new ApiError(409, ErrorCode.InvalidState, 'Nothing to commit');
+    const message = input.message?.trim() || commitMessage(paths);
+    let target = branch;
+    if (input.new_branch) {
+      target = await this.newBranchName(dir, message);
+      await this.logged(sessionId, dir, `git checkout -b ${target}`, () => this.git.checkout(dir, target, true));
+    }
+    const sha = await this.logged(sessionId, dir, `git commit -m ${JSON.stringify(message)}`, () =>
+      this.git.commitAll(dir, message),
+    );
+    if (sha === null) throw new ApiError(409, ErrorCode.InvalidState, 'Nothing to commit');
+    if (target !== session.branch) this.sessions.write(sessionId, { branch: target });
+    return { sha, branch: target, message, files };
+  }
+
+  /** `ops/<words of the message>`, with a number added when the branch exists. */
+  private async newBranchName(dir: string, message: string): Promise<string> {
+    const slug =
+      message
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40)
+        .replace(/-+$/, '') || 'changes';
+    const taken = new Set((await this.git.branches(dir)).map((branch) => branch.name));
+    for (let n = 1; ; n++) {
+      const name = n === 1 ? `ops/${slug}` : `ops/${slug}-${n}`;
+      if (!taken.has(name)) return name;
+    }
+  }
+
+  /** Opens the Session's worktree in the operator's editor or file manager. */
+  async openFolder(sessionId: string, target: FolderTarget): Promise<void> {
+    const dir = this.worktreeDir(sessionId);
+    const session = this.sessions.get(sessionId);
+    const where = (await isWorktree(dir))
+      ? dir
+      : session.kind === SessionKind.Repo && session.repoId
+        ? this.folder(session.repoId)
+        : null;
+    if (where === null) throw new ApiError(409, ErrorCode.InvalidState, 'The Session has no folder yet');
+    await this.opener(where, target).catch(() => {
+      throw new ApiError(502, ErrorCode.UpstreamFailed, 'Could not open the folder on this machine');
+    });
+  }
+
+  /** The folder and branch the push reads: the Session's worktree and the branch checked out in it. */
+  async pushTarget(sessionId: string): Promise<{ dir: string; branch: string }> {
+    return this.worktreeOrThrow(sessionId);
+  }
+
   /**
    * What the Session's own worktree changes against where it forked from the default branch. Nothing before the
    * Session has a worktree. Other Sessions' branches are in their own worktrees, so none of their changes show here.
@@ -288,12 +370,12 @@ export class WorkspaceSessionsService {
   }
 
   /** The Action Log row exists before git runs; a refusal from git becomes `upstream_failed`. */
-  private async logged(
+  private async logged<T>(
     sessionId: string | null,
     folder: string,
     command: string,
-    action: () => Promise<void>,
-  ): Promise<void> {
+    action: () => Promise<T>,
+  ): Promise<T> {
     const row = this.actionLog.start({
       sessionId,
       kind: ActionKind.Git,
@@ -303,8 +385,9 @@ export class WorkspaceSessionsService {
       actor: ActionActor.Operator,
     });
     try {
-      await action();
+      const result = await action();
       this.actionLog.finish(row, ActionOutcome.Ok);
+      return result;
     } catch (error) {
       const message = error instanceof GitFailed && error.message ? error.message : 'git failed';
       this.actionLog.finish(row, ActionOutcome.Failed, message);
@@ -336,4 +419,12 @@ async function isWorktree(dir: string): Promise<boolean> {
     (info) => info.isFile(),
     () => false,
   );
+}
+
+/** A commit message from the files a commit holds: `Update a.ts, b.ts and 2 more`. */
+export function commitMessage(names: string[]): string {
+  const base = names.map((name) => name.split('/').at(-1) ?? name);
+  if (base.length === 0) return 'Update files';
+  const shown = base.slice(0, 3).join(', ');
+  return base.length > 3 ? `Update ${shown} and ${base.length - 3} more` : `Update ${shown}`;
 }

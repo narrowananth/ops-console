@@ -1,5 +1,5 @@
 import type { SessionProcess } from '@ops-console/shared';
-import { type PointerEvent, useRef, useState } from 'react';
+import { Fragment, type PointerEvent, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Button } from '../components/ui/button';
 import { XtermView } from '../components/ui/xterm-view';
@@ -7,7 +7,7 @@ import { useProcessAction, useProcesses, useScripts, useStartProcess } from '../
 import { useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
 import { MenuButton, MenuHeading, MenuItem, MenuRule } from './menu-button';
-import { isRunning, scriptCommand, stateLabel, stateTone } from './processes';
+import { bySource, isRunning, stateLabel, stateTone } from './processes';
 
 /** The dock's height until the operator drags it, and its limits. */
 export const TERMINALS_DOCK = { key: 'workspace.session-terminals-height', initial: 260, shortest: 120 };
@@ -138,26 +138,33 @@ export function TerminalsDock({
                   Scripts are listed for this Session's folder only. Open a terminal here instead.
                 </p>
               ) : scripts.isPending ? (
-                <p className="m-0 px-2.5 py-1.5 text-xs text-neutral-700">Reading package.json…</p>
+                <p className="m-0 px-2.5 py-1.5 text-xs text-neutral-700">Reading the folder…</p>
               ) : scripts.isError ? (
                 <p role="alert" className="m-0 px-2.5 py-1.5 text-xs text-accent-700">
                   Could not read the scripts: {scripts.error.message}
                 </p>
               ) : scripts.data.scripts.length === 0 ? (
-                <p className="m-0 px-2.5 py-1.5 text-xs text-neutral-700">No scripts in package.json.</p>
+                <p className="m-0 px-2.5 py-1.5 text-xs text-neutral-700">
+                  Nothing to run found here: no package.json, Makefile, Cargo.toml, go.mod or the like.
+                </p>
               ) : (
-                ascending(scripts.data.scripts, (one) => one.name).map((script) => (
-                  <MenuItem
-                    key={script.name}
-                    title={script.command}
-                    hint={scriptCommand(scripts.data.runner, script.name)}
-                    onClick={() => {
-                      close();
-                      run({ name: script.name, script: script.name });
-                    }}
-                  >
-                    {script.name}
-                  </MenuItem>
+                bySource(scripts.data.scripts).map(([source, list]) => (
+                  <Fragment key={source}>
+                    <MenuHeading>{source}</MenuHeading>
+                    {list.map((script) => (
+                      <MenuItem
+                        key={script.id}
+                        title={script.command || script.run}
+                        hint={script.run}
+                        onClick={() => {
+                          close();
+                          run({ name: script.name, script: script.id });
+                        }}
+                      >
+                        {script.name}
+                      </MenuItem>
+                    ))}
+                  </Fragment>
                 ))
               )}
               <MenuRule />

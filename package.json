@@ -1,6 +1,6 @@
 {
   "name": "ops-console",
-  "version": "0.1.55",
+  "version": "0.1.56",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.22.0",
@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "pnpm --parallel --filter @ops-console/backend --filter @ops-console/frontend dev",
     "dev:open": "node scripts/dev-open.mjs",
+    "dev:sync-db": "node scripts/dev-sync-db.mjs",
     "build": "pnpm -r build",
     "check": "biome check . && pnpm -r typecheck && pnpm -r --workspace-concurrency=1 test",
     "db:generate": "pnpm --filter @ops-console/backend db:generate",

@@ -232,6 +232,21 @@ export const spawnedSessionSchema = z.object({
 
 export type SpawnedSession = z.infer<typeof spawnedSessionSchema>;
 
+/** A subagent the main agent started in a run, or one a subagent started in turn. */
+export const subagentSchema = z.object({
+  id: z.string(),
+  /** The subagent that started this one; null when the main agent did. */
+  parent_id: z.string().nullable(),
+  description: z.string(),
+  /** The subagent type, such as `Explore`. */
+  type: z.string().nullable(),
+  status: z.enum(SubagentStatus),
+  started_at: z.string(),
+  finished_at: z.string().nullable(),
+});
+
+export type Subagent = z.infer<typeof subagentSchema>;
+
 export const sessionSchema = z.object({
   id: z.string(),
   kind: z.enum(SessionKind),
@@ -268,24 +283,11 @@ export const sessionSchema = z.object({
   spawned_by: z.object({ id: z.string(), title: z.string() }).nullable(),
   /** The Sessions this one's agent started, oldest first. */
   spawned: z.array(spawnedSessionSchema),
+  /** The subagents the Session's latest run started, oldest first: working while the run waits on them. */
+  subagents: z.array(subagentSchema),
 });
 
 export type Session = z.infer<typeof sessionSchema>;
-
-/** A subagent the main agent started in a run, or one a subagent started in turn. */
-export const subagentSchema = z.object({
-  id: z.string(),
-  /** The subagent that started this one; null when the main agent did. */
-  parent_id: z.string().nullable(),
-  description: z.string(),
-  /** The subagent type, such as `Explore`. */
-  type: z.string().nullable(),
-  status: z.enum(SubagentStatus),
-  started_at: z.string(),
-  finished_at: z.string().nullable(),
-});
-
-export type Subagent = z.infer<typeof subagentSchema>;
 
 /** Raw token counts, each priced on its own: the cost is never kept without them. */
 export const tokenCountsSchema = z.object({

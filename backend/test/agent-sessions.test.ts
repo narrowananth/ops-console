@@ -613,6 +613,11 @@ describe('the Running tray', () => {
       expect.objectContaining({ id: 't1', parent_id: null, type: 'Explore', status: 'working' }),
       expect.objectContaining({ id: 't2', parent_id: 't1', status: 'done' }),
     ]);
+    // The Session carries the same subagents, for the waiting row and the Session panel.
+    expect((await api(daemon).get(`/sessions/${id}`)).body.data.subagents).toEqual([
+      expect.objectContaining({ id: 't1', status: 'working' }),
+      expect.objectContaining({ id: 't2', status: 'done' }),
+    ]);
 
     hold.open();
     await stateOf(daemon, id, 'idle');

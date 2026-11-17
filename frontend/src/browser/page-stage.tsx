@@ -140,7 +140,10 @@ export function PageStage({
     [],
   );
 
-  // A wheel listener that can stop the console from scrolling under the page needs `passive: false`.
+  // A wheel listener that can stop the console from scrolling under the page needs `passive: false`. A trackpad swipe
+  // sends a wheel event every few milliseconds: they are added up and sent once per frame drawn, at the newest place.
+  const wheelPending = useRef<{ x: number; y: number; at: { x: number; y: number }; modifiers: number } | null>(null);
+  const wheelFrame = useRef(0);
   const wheel = useRef((_event: WheelEvent) => {});
   wheel.current = (event) => {
     const target = canvas.current;
@@ -149,17 +152,37 @@ export function PageStage({
     event.preventDefault();
     const point = toPagePoint({ x: event.clientX, y: event.clientY }, target.getBoundingClientRect(), size);
     const travel = wheelPixels(event, size.height);
-    send({
-      type: 'mouse',
-      action: 'wheel',
-      ...point,
-      button: 'none',
-      click_count: 0,
-      delta_x: travel.x,
-      delta_y: travel.y,
+    const held = wheelPending.current;
+    wheelPending.current = {
+      x: (held?.x ?? 0) + travel.x,
+      y: (held?.y ?? 0) + travel.y,
+      at: point,
       modifiers: modifiersOf(event),
+    };
+    if (wheelFrame.current !== 0) return;
+    wheelFrame.current = requestAnimationFrame(() => {
+      wheelFrame.current = 0;
+      const next = wheelPending.current;
+      wheelPending.current = null;
+      if (!next) return;
+      send({
+        type: 'mouse',
+        action: 'wheel',
+        ...next.at,
+        button: 'none',
+        click_count: 0,
+        delta_x: next.x,
+        delta_y: next.y,
+        modifiers: next.modifiers,
+      });
     });
   };
+  useEffect(
+    () => () => {
+      if (wheelFrame.current !== 0) cancelAnimationFrame(wheelFrame.current);
+    },
+    [],
+  );
   useEffect(() => {
     const target = canvas.current;
     if (!target) return;

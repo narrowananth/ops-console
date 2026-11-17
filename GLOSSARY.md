@@ -55,14 +55,15 @@ unused is used first, and moving to the top pick on its own while it is on.
 
 **Access mode**:
 What the agent may do in a Session without asking: supervised, accept edits, auto or full. A PROD
-write asks in every mode.
+write asks in every mode. Full asks about nothing else: the console's own tools (integration writes,
+`join_repo`, `save_file`, `spawn_sessions`, `start_process`, `browser_evaluate`) run at once in it.
 
 **Approval**:
 The operator's yes or no on one agent action that needs it: a PROD write, or an edit or command in
 a mode that asks.
 
 **Integration command**:
-A `pup`, `gh`, `glab`, `bkt` or `slashdocs` command the agent asks the console to run through its `run_integration` tool. The daemon runs it outside the Run sandbox, as the operator. A read runs at once; a write needs an Approval, unless the operator chose "Don't ask again this Session" for that CLI, which holds until the Session is deleted; sign-in, tokens and merges are refused whatever the choice.
+A `pup`, `gh`, `glab`, `bkt` or `slashdocs` command the agent asks the console to run through its `run_integration` tool. The daemon runs it outside the Run sandbox, as the operator. A read runs at once; a write needs an Approval, unless the Session's Access mode is full or the operator chose "Don't ask again this Session" for that CLI, which holds until the Session is deleted; sign-in, tokens and merges are refused whatever the choice.
 
 **Opened Repo**:
 An imported Repo, other than the Session's own, that the operator ticked in the composer's Repos chip. The operator's own runs in that Session write and read its checkout and run `git` there, inside the Run sandbox. The agent never pushes from it.
@@ -273,6 +274,13 @@ A Session the agent started in an imported Repo through `spawn_sessions`, with a
 approved the whole list at once. It is a `repo` Session in every other way: its own worktree, branch and pull request, in
 the starting Session's model, effort and Access mode. It cannot start others. Its header names the Session that started it.
 _Avoid_: child chat, subtask
+
+**Subagent**:
+An agent the main agent starts inside a run with the Agent tool, for one independent part of the work. The main agent waits for all of them and gives the operator one merged answer. A Session keeps the subagents of its latest run, and the Session panel and the waiting row show them. Not a Spawned Session, which is a Session of its own.
+_Avoid_: child agent, worker
+
+**Session panel**:
+The right-hand panel that gathers a Session's surfaces (Browser, Terminal, Diff, pull request), its branch, changes, servers and lineage: the Session that started it, the Sessions it started and its subagents.
 
 **Batch card**:
 What the starting Session's transcript shows for a `spawn_sessions` call: each Spawned Session with its state, branch and

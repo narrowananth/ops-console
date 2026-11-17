@@ -379,6 +379,35 @@ export type OpenPullRequest = z.infer<typeof openPullRequestSchema>;
 
 export const openedPullRequestSchema = z.object({ number: z.number().int(), url: z.string() });
 
+/** `POST /sessions/:id/commit`: commits every change in the Session's worktree. A blank message is written from the files. */
+export const commitSessionSchema = z.strictObject({
+  message: z.string().trim().max(2000).optional(),
+  /** Commit on a new branch made from the current one; the Session follows it. */
+  new_branch: z.boolean().default(false),
+});
+
+export type CommitSession = z.infer<typeof commitSessionSchema>;
+
+export const committedSessionSchema = z.object({
+  sha: z.string(),
+  branch: z.string(),
+  message: z.string(),
+  files: z.number().int(),
+});
+
+export type CommittedSession = z.infer<typeof committedSessionSchema>;
+
+/** `POST /sessions/:id/push`: what the branch is on origin after the push. */
+export const pushedSessionSchema = z.object({ branch: z.string() });
+
+/** `POST /sessions/:id/open-folder`: where the daemon opens the Session's worktree on this machine. */
+export enum FolderTarget {
+  Editor = 'editor',
+  Folder = 'folder',
+}
+
+export const openFolderSchema = z.strictObject({ target: z.enum(FolderTarget) });
+
 export const checkoutSchema = z.object({ branch: z.string().trim().min(1), create: z.boolean().default(false) });
 
 export const checkoutResultSchema = z.object({ session: sessionSchema, stashed: z.boolean() });

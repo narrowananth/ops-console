@@ -28,6 +28,7 @@ import {
   claudeAccountSchema,
   cliProxySchema,
   commentPassSchema,
+  committedSessionSchema,
   connectionCheckSchema,
   connectionListSchema,
   connectionSchema,
@@ -37,6 +38,7 @@ import {
   datadogServiceSchema,
   diskAccessSchema,
   editedMessageSchema,
+  type FolderTarget,
   fileMenuSchema,
   findCodeResultSchema,
   fixSchema,
@@ -72,6 +74,7 @@ import {
   pullRequestDetailSchema,
   pullRequestDraftSchema,
   pullRequestListSchema,
+  pushedSessionSchema,
   type RemovedRepoSessions,
   type Repo,
   type ReviewAlert,
@@ -1306,6 +1309,45 @@ export function useOpenPullRequest(sessionId: string) {
       void client.invalidateQueries({ queryKey: queryKeys.sessionPullRequest(sessionId) });
       void client.invalidateQueries({ queryKey: queryKeys.pulls });
     },
+  });
+}
+
+/** Commits every change in the Session's worktree; a blank message is written by the daemon from the files. */
+export function useCommitSession(sessionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { message: string; new_branch: boolean }) =>
+      apiSend('POST', `/sessions/${sessionId}/commit`, input, z.object({ data: committedSessionSchema })).then(
+        (body) => body.data,
+      ),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.sessions });
+      void client.invalidateQueries({ queryKey: queryKeys.sessionDiff(sessionId) });
+      void client.invalidateQueries({ queryKey: queryKeys.sessionPullRequest(sessionId) });
+    },
+  });
+}
+
+/** Pushes the Session's branch to origin; no pull request opens. */
+export function usePushSession(sessionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiSend('POST', `/sessions/${sessionId}/push`, {}, z.object({ data: pushedSessionSchema })).then(
+        (body) => body.data,
+      ),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.sessionPullRequest(sessionId) });
+      void client.invalidateQueries({ queryKey: queryKeys.pulls });
+    },
+  });
+}
+
+/** Opens the Session's worktree in the editor or the file manager of the machine the daemon runs on. */
+export function useOpenFolder(sessionId: string) {
+  return useMutation({
+    mutationFn: (target: FolderTarget) =>
+      apiSend('POST', `/sessions/${sessionId}/open-folder`, { target }, z.undefined()),
   });
 }
 

@@ -107,8 +107,24 @@ describe('save_file', () => {
     await ctx.http.post(`/sessions/${ctx.id}/messages`, { text: 'put it in downloads' });
   }
 
-  it('asks in every Access mode with the file, its size and the folder, and copies only on a yes', async () => {
-    for (const mode of Object.values(AccessMode)) {
+  it('saves with no Approval in full access', async () => {
+    const ctx = await start();
+    await ctx.http.patch(`/sessions/${ctx.id}`, { access_mode: AccessMode.Full });
+    const downloads = await tempDir('ops-console-downloads-');
+    await mkdir(ctx.folder, { recursive: true });
+    await writeFile(path.join(ctx.folder, 'flow.pdf'), 'pdf!');
+    await ask(ctx, { name: 'flow.pdf', folder: downloads });
+    await until(
+      async () => (await ctx.http.get(`/sessions/${ctx.id}`)).body.data.state,
+      (state) => state === 'idle',
+      'the run to end',
+    );
+    expect((await ctx.http.get('/approvals')).body.data).toEqual([]);
+    expect(ctx.daemon.sdk.ran.map((call) => call.tool)).toEqual([SAVE_FILE_TOOL]);
+  });
+
+  it('asks in every Access mode but full with the file, its size and the folder, and copies only on a yes', async () => {
+    for (const mode of Object.values(AccessMode).filter((value) => value !== AccessMode.Full)) {
       const ctx = await start();
       await ctx.http.patch(`/sessions/${ctx.id}`, { access_mode: mode });
       const downloads = await tempDir('ops-console-downloads-');

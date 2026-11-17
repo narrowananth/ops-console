@@ -1,5 +1,5 @@
 import type { WarmQuery } from '@anthropic-ai/claude-agent-sdk';
-import type { Part, RunPurpose, SkillCopy, Subagent, TokenCounts } from '@ops-console/shared';
+import type { AccessMode, Part, RunPurpose, SkillCopy, Subagent, TokenCounts } from '@ops-console/shared';
 
 /** A run in progress. It lives in memory only: a daemon restart ends it (Behavior 18). */
 export type Run = {
@@ -8,6 +8,8 @@ export type Run = {
   messageId: string;
   accountId: string;
   workingDir: string;
+  /** The Session's Access mode when the run began; a change applies from the next run. */
+  accessMode: AccessMode;
   /** The Playbook rules this run follows; null for none. */
   rules: string | null;
   /** The Skills the run's Playbook holds. */

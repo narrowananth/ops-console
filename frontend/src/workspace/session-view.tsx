@@ -1,4 +1,4 @@
-import { type EditedMessage, type OutputFile, SessionKind, SessionState } from '@ops-console/shared';
+import { type EditedMessage, FolderTarget, type OutputFile, SessionKind, SessionState } from '@ops-console/shared';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
@@ -6,10 +6,11 @@ import { MessageView, outputsByMessage } from '../agents/transcript';
 import { BrowserLinksProvider } from '../browser/browser-links';
 import { BROWSER_PANEL, BrowserPanel, type OpenRequest } from '../browser/browser-panel';
 import { freshServers, serverAddress, sessionPort } from '../browser/servers';
-import { BrowserToggle, TerminalsToggle } from '../browser/session-buttons';
 import { useLinkTarget } from '../browser/toolbar';
 import { Button } from '../components/ui/button';
+import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { Empty } from '../components/ui/empty';
+import { BellIcon, BookIcon, PanelIcon } from '../components/ui/icons';
 import { type PathwayState, StatusPill } from '../components/ui/pathway';
 import { ResizeHandle, usePanelWidth } from '../components/ui/resize-handle';
 import {
@@ -18,8 +19,10 @@ import {
   useEditMessage,
   useLocalServers,
   useMessages,
+  useOpenFolder,
   useOutputFiles,
   useProcesses,
+  usePushSession,
   useRepoPullRequests,
   useRepoSessions,
   useRepos,
@@ -31,16 +34,22 @@ import {
 } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { PlaybookLink } from '../playbooks/job-steps';
+import { BranchSwitcher } from './branch-switcher';
+import { CommitDialog } from './commit-dialog';
 import type { ComposerCommand } from './composer-menus';
 import { ConversationMap, ScrollToEnd, useFollowLatest } from './conversation';
-import { alertPath, pullRequestPath, sessionPath } from './links';
+import { alertPath, pullRequestPath } from './links';
 import { OpenPullRequestForm } from './open-pull-request';
 import { SessionComposer } from './session-composer';
-import { DIFF_PANEL, DiffPanel, DiffToggle } from './session-diff';
+import { DIFF_PANEL, DiffPanel } from './session-diff';
+import { SessionPanel, SubagentWait, type Surface, workingSubagents } from './session-panel';
 import { SESSION_STATE_TIP } from './sessions-pane';
 
 // xterm is a third of the page's code, and only an open dock needs it.
 const TerminalsDock = lazy(async () => ({ default: (await import('../browser/terminals-dock')).TerminalsDock }));
+
+/** The Session card's size: narrow, as the thread panel of T3 Code, with the conversation keeping the rest. */
+const SESSION_PANEL = { key: 'workspace.session-card-width', initial: 380, narrowest: 300, keep: 480 };
 
 const NO_FILES: OutputFile[] = [];
 /** The newest messages that always draw in full; older ones are drawn when they near the screen. */
@@ -75,7 +84,9 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const hasBrowser = session?.kind === SessionKind.Repo || session?.kind === SessionKind.Anonymous;
   const [browserOpen, setBrowserOpen] = useStored('workspace.session-browser-open', z.boolean(), false);
   const [terminalsOpen, setTerminalsOpen] = useStored('workspace.session-terminals-open', z.boolean(), false);
+  const [sessionOpen, setSessionOpen] = useStored('workspace.session-panel-open', z.boolean(), true);
   const browserPanel = usePanelWidth(BROWSER_PANEL, body);
+  const sessionPanelWidth = usePanelWidth(SESSION_PANEL, body);
   const [linkTarget] = useLinkTarget();
   // The link the operator last clicked in the conversation, for the panel to open.
   const [openRequest, setOpenRequest] = useState<OpenRequest | null>(null);
@@ -86,7 +97,11 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const runningCount = useRunningProcessCount(id, hasBrowser);
   const processRunning = runningCount > 0;
   // While a process runs, the Session's servers are watched so a page opens when one comes up.
-  const servers = useLocalServers(id, hasBrowser && (processRunning || (noTab && !browserOpen)), processRunning);
+  const servers = useLocalServers(
+    id,
+    hasBrowser && (processRunning || (noTab && !browserOpen) || sessionOpen),
+    processRunning,
+  );
   // A process started while this view is open gets its page opened when its server listens: the processes there at the
   // start and the ports already opened are skipped.
   const auto = useRef<{ id: string; before: Set<string> | null; opened: Set<number> }>({
@@ -119,6 +134,11 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const openable = useSessionPullRequest(id, hasDiff);
   // The form that opens the pull request, while the operator has it open.
   const [formOpen, setFormOpen] = useState(false);
+  // The commit dialog, while the operator has it open.
+  const [commitOpen, setCommitOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const push = usePushSession(id);
+  const openFolder = useOpenFolder(id);
   // The branch in the Session's own worktree. While the agent works it may make one for its fix; after the run the
   // Session follows it.
   const branch = (working ? diff.data?.branch : null) ?? session?.branch ?? null;
@@ -137,23 +157,41 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   // A Session whose worktree changes nothing yet has nothing to show.
   const showDiff = hasDiff && (diff.data?.files.length ?? 0) > 0;
   // The Diff and the Browser share the right column: opening one folds the other, and the Browser wins if both were left open.
-  const rightPanel = hasBrowser && browserOpen ? 'browser' : showDiff && diffOpen ? 'diff' : null;
+  const rightPanel =
+    hasBrowser && browserOpen ? 'browser' : showDiff && diffOpen ? 'diff' : sessionOpen ? 'session' : null;
   const toggleDiff = () => {
     setDiffOpen(rightPanel !== 'diff');
-    if (rightPanel !== 'diff') setBrowserOpen(false);
+    if (rightPanel !== 'diff') {
+      setBrowserOpen(false);
+      setSessionOpen(false);
+    }
   };
-  const toggleBrowser = () => {
-    setBrowserOpen(rightPanel !== 'browser');
-    if (rightPanel !== 'browser') setDiffOpen(false);
+  const toggleSession = () => {
+    setSessionOpen(rightPanel !== 'session');
+    if (rightPanel !== 'session') {
+      setBrowserOpen(false);
+      setDiffOpen(false);
+    }
   };
   const openInBrowser = (url: string) => {
     requests.current += 1;
     setOpenRequest({ id: requests.current, url });
     setBrowserOpen(true);
     setDiffOpen(false);
+    setSessionOpen(false);
   };
-  const widths = rightPanel === 'browser' ? browserPanel : panel;
-  const size = rightPanel === 'browser' ? BROWSER_PANEL : DIFF_PANEL;
+  // A row of the Session panel: its surface takes the right column; the terminals open in the dock under it.
+  const openSurface = (surface: Surface) => {
+    if (surface === 'terminal') {
+      setTerminalsOpen((now) => !now);
+      return;
+    }
+    setBrowserOpen(surface === 'browser');
+    setDiffOpen(surface === 'diff');
+    setSessionOpen(false);
+  };
+  const widths = rightPanel === 'browser' ? browserPanel : rightPanel === 'session' ? sessionPanelWidth : panel;
+  const size = rightPanel === 'browser' ? BROWSER_PANEL : rightPanel === 'session' ? SESSION_PANEL : DIFF_PANEL;
   // The `/` menu's actions for this view; the composer adds `skills` and `files`.
   const commands: ComposerCommand[] = [
     ...(working ? [{ name: 'stop', description: 'Stop the agent where it is', run: () => stop.mutate() }] : []),
@@ -184,128 +222,52 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   return (
     <BrowserLinksProvider value={hasBrowser && linkTarget === 'app' ? openInBrowser : null}>
       <div className="flex h-full min-h-0 flex-col">
-        <header className="flex flex-col gap-1.5 border-b border-line px-6 py-3">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <span className="flex-none text-sm text-neutral-700">{repo ? `${repo.name} /` : 'No Repo /'}</span>
-            <h2 className="m-0 min-w-0 truncate text-sm font-semibold" title={session.title}>
-              {session.title}
-            </h2>
-            <span title={SESSION_STATE_TIP[session.state]} className="flex-none">
-              <StatusPill state={SESSION_STATE[session.state]}>{session.state.replace('_', ' ')}</StatusPill>
-            </span>
-            <span className="ml-auto flex flex-none items-center gap-2">
-              {hasBrowser && (
-                <>
-                  <BrowserToggle
-                    open={rightPanel === 'browser'}
-                    port={noTab ? sessionPort(servers.data ?? []) : null}
-                    onToggle={toggleBrowser}
-                  />
-                  <TerminalsToggle
-                    open={terminalsOpen}
-                    running={runningCount}
-                    onToggle={() => setTerminalsOpen((now) => !now)}
-                  />
-                </>
+        <header className="flex items-center gap-2.5 border-b border-line px-6 py-2.5">
+          <span className="flex-none text-sm text-neutral-700">{repo ? `${repo.name} /` : 'No Repo /'}</span>
+          <h2 className="m-0 min-w-0 truncate text-sm font-semibold" title={session.title}>
+            {session.title}
+          </h2>
+          <span title={SESSION_STATE_TIP[session.state]} className="flex-none">
+            <StatusPill state={SESSION_STATE[session.state]}>{session.state.replace('_', ' ')}</StatusPill>
+          </span>
+          <span className="ml-auto flex flex-none items-center gap-1">
+            <Button
+              variant="plain"
+              aria-pressed={rightPanel === 'session'}
+              aria-label="Session"
+              title="Session: surfaces, branch, servers and lineage"
+              className={`px-2.5 py-1 text-xs ${rightPanel === 'session' ? 'bg-neutral-200' : ''}`}
+              onClick={toggleSession}
+            >
+              <PanelIcon />
+              {working && workingSubagents(session.subagents).length > 0 && (
+                <span aria-hidden className="size-1.5 rounded-full bg-accent" />
               )}
-              {showDiff && <DiffToggle open={rightPanel === 'diff'} diff={diff.data} onToggle={toggleDiff} />}
-              <Button
-                className="px-2.5 py-1 text-xs"
-                title={
-                  busy
-                    ? 'Stop the agent first'
-                    : 'Delete this Session and its conversation. The files in the Repo stay as they are.'
-                }
-                disabled={busy || remove.isPending}
-                onClick={() => remove.mutate(id)}
-              >
-                Delete
-              </Button>
-            </span>
-          </div>
-          {(branch ||
-            internalPull ||
-            externalPull ||
-            session.alert_id ||
-            session.playbook ||
-            session.spawned_by ||
-            openable.data?.can_open) && (
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              {session.spawned_by && (
-                <Link
-                  to={sessionPath(session.spawned_by.id)}
-                  title="The Session whose agent started this one with a task for this Repo"
-                  className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
-                >
-                  Started from {session.spawned_by.title} →
-                </Link>
-              )}
-              {branch && (
-                <span
-                  title="The branch this Session works on"
-                  className="max-w-90 truncate rounded-full border border-line bg-card px-2.5 py-0.5 font-mono text-xs"
-                >
-                  {branch}
-                </span>
-              )}
-              {internalPull && (
-                <Link
-                  to={pullRequestPath(internalPull.repo_id, internalPull.number)}
-                  title={`Open pull request #${internalPull.number} in the Workspace's Pull requests tab`}
-                  className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
-                >
-                  PR #{internalPull.number} →
-                </Link>
-              )}
-              {externalPull && (
-                <a
-                  href={externalPull.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={`Open pull request #${externalPull.number} on the Git host`}
-                  className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
-                >
-                  #{externalPull.number} on host ↗
-                </a>
-              )}
-              {openable.data?.can_open && !externalPull && (
-                <Button
-                  className="px-2.5 py-0.5 text-xs"
-                  title={
-                    busy
-                      ? 'Wait for the agent to finish'
-                      : 'Push this branch and open a pull request on the Git host. The agent drafts the text.'
-                  }
-                  disabled={busy || formOpen}
-                  onClick={() => setFormOpen(true)}
-                >
-                  Open pull request
-                </Button>
-              )}
-              {session.alert_id && (
-                <Link
-                  to={alertPath(session.alert_id)}
-                  title="Open the Monitor Alert this Session verifies and fixes"
-                  className="rounded-full border border-line bg-card px-2.5 py-0.5 text-xs text-text no-underline hover:border-accent-300 hover:bg-accent-100"
-                >
-                  Alert →
-                </Link>
-              )}
-              {session.playbook && (
-                <PlaybookLink
-                  playbook={session.playbook}
-                  label={`Playbook: ${session.playbook.name}`}
-                  title="The agent follows this Playbook's rules in every message here. Open it to read or change them."
-                />
-              )}
-            </div>
-          )}
-          {remove.isError && (
-            <span role="alert" className="text-right text-xs text-accent-700">
-              {remove.error.message}
-            </span>
-          )}
+            </Button>
+          </span>
         </header>
+        {confirmDelete && (
+          <ConfirmDialog
+            title="Delete this Session?"
+            action="Delete"
+            pending={remove.isPending}
+            error={remove.isError ? remove.error.message : null}
+            onConfirm={() => remove.mutate(id, { onSuccess: () => setConfirmDelete(false) })}
+            onCancel={() => setConfirmDelete(false)}
+          >
+            “{session.title}” and its conversation are deleted. The files in the Repo stay as they are.
+          </ConfirmDialog>
+        )}
+        {commitOpen && (
+          <CommitDialog
+            sessionId={id}
+            branch={branch ?? ''}
+            files={openable.data?.uncommitted_files ?? 0}
+            additions={diff.data?.additions ?? null}
+            deletions={diff.data?.deletions ?? null}
+            onClose={() => setCommitOpen(false)}
+          />
+        )}
         {formOpen && openable.data?.can_open && openable.data.base_branch !== null && (
           <OpenPullRequestForm
             sessionId={id}
@@ -361,11 +323,10 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 />
                 <ScrollToEnd show={!latest.atEnd} onClick={latest.scrollToEnd} />
               </div>
+              <SubagentWait subagents={session.subagents} stopping={stop.isPending} onStop={() => stop.mutate()} />
               <SessionComposer
                 session={session}
-                repo={repo}
                 repos={repos.data?.data ?? []}
-                sessions={sessions.data ?? []}
                 lastMessage={messages.data?.at(-1)}
                 commands={commands}
                 reverted={reverted}
@@ -376,7 +337,13 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
             {rightPanel !== null && (
               <>
                 <ResizeHandle
-                  label={rightPanel === 'browser' ? 'Resize the browser' : 'Resize the diff panel'}
+                  label={
+                    rightPanel === 'browser'
+                      ? 'Resize the browser'
+                      : rightPanel === 'diff'
+                        ? 'Resize the diff panel'
+                        : 'Resize the Session panel'
+                  }
                   width={widths.width}
                   initial={size.initial}
                   narrowest={size.narrowest}
@@ -386,6 +353,111 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 <div style={{ width: widths.width }} className="flex min-h-0 flex-none">
                   {rightPanel === 'browser' ? (
                     <BrowserPanel key={id} sessionId={id} request={openRequest} onClose={() => setBrowserOpen(false)} />
+                  ) : rightPanel === 'session' ? (
+                    <SessionPanel
+                      session={session}
+                      branch={branch}
+                      pullRequest={
+                        pull
+                          ? {
+                              number: pull.number,
+                              href: pull.url,
+                              to: internalPull ? pullRequestPath(internalPull.repo_id, internalPull.number) : null,
+                            }
+                          : null
+                      }
+                      pullInfo={
+                        pull
+                          ? (() => {
+                              const known = pulls.data?.data.find((candidate) => candidate.number === pull.number);
+                              return known ? { title: known.title, checks: known.checks } : null;
+                            })()
+                          : null
+                      }
+                      publish={
+                        hasDiff && branch
+                          ? {
+                              uncommitted: openable.data?.uncommitted_files ?? 0,
+                              blocked: busy
+                                ? 'Wait for the agent to finish'
+                                : branch === repo?.default_branch
+                                  ? `${branch} is the default branch: change it from your own folder`
+                                  : null,
+                              canOpenPullRequest: Boolean(openable.data?.can_open && !externalPull) && !busy,
+                              onCommit: () => setCommitOpen(true),
+                              onPush: () => push.mutate(),
+                              onOpenPullRequest: () => setFormOpen(true),
+                              pushing: push.isPending,
+                              error: push.isError ? push.error.message : null,
+                            }
+                          : null
+                      }
+                      branchControl={
+                        repo ? (
+                          <BranchSwitcher session={session} all={sessions.data ?? []} repo={repo} opens="down" />
+                        ) : (
+                          <span className="px-2 font-mono text-sm">{branch}</span>
+                        )
+                      }
+                      folder={
+                        hasDiff
+                          ? {
+                              disabled: openFolder.isPending,
+                              onEditor: () => openFolder.mutate(FolderTarget.Editor),
+                              onFolder: () => openFolder.mutate(FolderTarget.Folder),
+                              error: openFolder.isError ? openFolder.error.message : null,
+                            }
+                          : null
+                      }
+                      links={
+                        session.alert_id || session.playbook ? (
+                          <>
+                            {session.alert_id && (
+                              <Link
+                                to={alertPath(session.alert_id)}
+                                title="Open the Monitor Alert this Session verifies and fixes"
+                                className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-text no-underline hover:bg-neutral-200"
+                              >
+                                <span className="flex w-4 flex-none justify-center text-neutral-700">
+                                  <BellIcon />
+                                </span>
+                                Alert →
+                              </Link>
+                            )}
+                            {session.playbook && (
+                              <div className="flex items-center gap-3 px-3 py-2 text-sm">
+                                <span className="flex w-4 flex-none justify-center text-neutral-700">
+                                  <BookIcon />
+                                </span>
+                                <PlaybookLink
+                                  playbook={session.playbook}
+                                  label={`Playbook: ${session.playbook.name}`}
+                                  title="The agent follows this Playbook's rules in every message here. Open it to read or change them."
+                                />
+                              </div>
+                            )}
+                          </>
+                        ) : null
+                      }
+                      remove={{
+                        disabled: busy || remove.isPending,
+                        title: busy
+                          ? 'Stop the agent first'
+                          : 'Delete this Session and its conversation. The files in the Repo stay as they are.',
+                        error: remove.isError ? remove.error.message : null,
+                        onDelete: () => setConfirmDelete(true),
+                      }}
+                      diff={diff.data}
+                      servers={servers.data ?? []}
+                      hasBrowser={hasBrowser}
+                      hasDiff={showDiff}
+                      browserPort={noTab ? sessionPort(servers.data ?? []) : null}
+                      terminalsRunning={runningCount}
+                      terminalsOpen={terminalsOpen}
+                      onOpen={openSurface}
+                      onOpenServer={(port) => openInBrowser(serverAddress(port))}
+                      onClose={() => setSessionOpen(false)}
+                    />
                   ) : (
                     <DiffPanel
                       diff={diff.data}

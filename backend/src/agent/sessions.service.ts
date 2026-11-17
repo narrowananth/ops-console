@@ -11,8 +11,10 @@ import {
   SessionKind,
   type SessionPatch,
   SessionState,
+  type Subagent,
   sessionDefaultsSchema,
   type sessionListQuerySchema,
+  subagentSchema,
 } from '@ops-console/shared';
 import { and, desc, eq, inArray, isNull, lt, or, type SQL, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -81,7 +83,19 @@ export function toSession(row: SessionRow): Session {
     queued_message: row.queuedText,
     spawned_by: null,
     spawned: [],
+    subagents: subagentsOf(row),
   };
+}
+
+/** The subagents the Session's latest run started, as the run kept them. */
+export function subagentsOf(row: SessionRow): Subagent[] {
+  if (row.runSubagents === null) return [];
+  try {
+    const parsed = z.array(subagentSchema).safeParse(JSON.parse(row.runSubagents));
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
+  }
 }
 
 /** The other Repos the operator opened to the Session's agent. */

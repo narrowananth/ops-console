@@ -132,8 +132,8 @@ describe('an Anonymous Session joins a Repo', () => {
     expect(ctx.daemon.app.get(RepoJoinService).offers(id)).toBe(true);
   });
 
-  it('asks first in every Access mode, and a yes moves the Session and starts the next turn in the Repo', async () => {
-    for (const mode of Object.values(AccessMode)) {
+  it('asks first in every Access mode but full, and a yes moves the Session and starts the next turn in the Repo', async () => {
+    for (const mode of Object.values(AccessMode).filter((value) => value !== AccessMode.Full)) {
       const ctx = await start();
       const id = await ctx.anonymous(mode);
       const hold = gate();
@@ -169,6 +169,27 @@ describe('an Anonymous Session joins a Repo', () => {
       const session = (await ctx.http.get(`/sessions/${id}`)).body.data;
       expect(session).toMatchObject({ kind: SessionKind.Repo, repo_id: ctx.repoId, branch: 'work' });
     }
+  });
+
+  it('moves the Session into the Repo with no Approval in full access', async () => {
+    const ctx = await start();
+    const id = await ctx.anonymous(AccessMode.Full);
+    ctx.daemon.sdk.script({ tool: JOIN_REPO_TOOL, input: { repo: 'orders-api' } });
+    await ctx.http.post(`/sessions/${id}/messages`, { text: 'fix the totals bug in orders-api' });
+    // The tool runs in the daemon; the fake SDK does not run it, so the test calls it as the tool would.
+    await until(
+      () => ctx.daemon.sdk.ran.length,
+      (count) => count === 1,
+      'the tool call',
+    );
+    expect((await ctx.http.get('/approvals')).body.data).toEqual([]);
+    await runJoinRepo(ctx.daemon.app.get(RepoJoinService), id, { repo: 'orders-api' });
+    await until(
+      () => ctx.daemon.sdk.calls.length,
+      (count) => count === 2,
+      'the next turn',
+    );
+    expect(ctx.daemon.sdk.calls[1]?.prompt).toContain('You are now in the Repo');
   });
 
   it('stays anonymous and starts nothing when the operator says no', async () => {

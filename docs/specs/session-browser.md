@@ -98,7 +98,7 @@ adds the same to a Session.
 22. `browser_open` takes a loopback URL only. An agent tool acts only on a tab whose address is on a loopback host: on a
     tab at another host it fails with "This tab is on <host>. Agent tools work on loopback pages." The operator moves the
     tab; the agent does not follow a link off loopback. The console's own ports are refused.
-23. The browser tools ask for no Approval except `browser_evaluate`, which asks in every Access mode and shows the script.
+23. The browser tools ask for no Approval except `browser_evaluate`, which asks in every Access mode but `full` and shows the script.
     Each call is an Action Log row.
 24. `browser_snapshot` returns the page as an accessibility tree with a reference per element; click, type and press take
     that reference. `browser_screenshot` returns an image in the transcript and saves nothing else. `browser_console` and
@@ -106,7 +106,7 @@ adds the same to a Session.
 25. While the agent acts, the panel shows "Agent is using this tab". The operator's own input goes through at once and the
     agent's next call sees the changed page. A Stop on the run ends the call in flight.
 26. The same chat has `start_process` (name, command, optional folder), `process_output` (name, last N lines, up to 500) and
-    `stop_process`. `start_process` raises an Approval in every Access mode, `full` included, showing the exact command, the
+    `stop_process`. `start_process` raises an Approval in every Access mode but `full`, showing the exact command, the
     folder and the line "Runs as you, outside the sandbox, with this Repo's environment". Only a yes has the daemon start it,
     as Behavior 17. `process_output` and `stop_process` of the Session's own processes ask for nothing.
 27. Asked to "run the project and test the login flow", the agent starts the processes it needs (each asks once), waits for

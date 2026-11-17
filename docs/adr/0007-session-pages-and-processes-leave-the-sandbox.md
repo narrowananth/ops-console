@@ -14,9 +14,9 @@ rc files cost on every start. Until the first read of a folder has finished, a c
 the operator types in is always a login shell.
 
 The operator starts a process, or approves the agent's `start_process` call, which shows the exact command and says it
-runs outside the sandbox, in every Access mode. The agent drives the panel in a chat the operator started with the
+runs outside the sandbox, in every Access mode but full. The agent drives the panel in a chat the operator started with the
 `browser_*` tools, with no Approval, but only on loopback pages (`localhost`, `127.0.0.1`, `::1`, not the console's own
-ports); it opens no other host and acts on no tab that has left loopback. `browser_evaluate` asks in every Access mode. No
+ports); it opens no other host and acts on no tab that has left loopback. `browser_evaluate` asks in every Access mode but full. No
 job, no `pr_review` Session and no read-only run has these tools. The operator's own address field opens any `http` or
 `https` page.
 

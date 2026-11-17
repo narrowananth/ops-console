@@ -115,10 +115,21 @@ export type LocalServer = z.infer<typeof localServerSchema>;
 
 export const localServersSchema = z.object({ servers: z.array(localServerSchema) });
 
-export const scriptsSchema = z.object({
-  runner: z.enum(['pnpm', 'npm', 'yarn', 'bun']),
-  scripts: z.array(z.object({ name: z.string(), command: z.string() })),
+/** One thing a folder can run: a package script, a make or just recipe, or a toolchain's usual command. */
+export const scriptSchema = z.object({
+  /** `source:name`, which the start of a process names. */
+  id: z.string(),
+  /** The tool that lists it: `package.json`, `Makefile`, `Cargo`, `Go` and so on. */
+  source: z.string(),
+  name: z.string(),
+  /** The command line that runs it, as the terminal shows it: `pnpm run dev`, `make test`. */
+  run: z.string(),
+  /** What it does, when the project says: a script's body or a recipe's first line. */
+  command: z.string(),
 });
+export type Script = z.infer<typeof scriptSchema>;
+
+export const scriptsSchema = z.object({ scripts: z.array(scriptSchema) });
 export type Scripts = z.infer<typeof scriptsSchema>;
 
 /** `script` or `command`, not both; neither opens a shell. */

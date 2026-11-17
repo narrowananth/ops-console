@@ -1,9 +1,12 @@
-import { ProcessState, type Scripts, type SessionProcess } from '@ops-console/shared';
+import { ProcessState, type Script, type SessionProcess } from '@ops-console/shared';
+import { ascending } from '../lib/sort';
 
-export type Runner = Scripts['runner'];
-
-/** The command a script starts as: `pnpm run dev`. */
-export const scriptCommand = (runner: Runner, script: string): string => `${runner} run ${script}`;
+/** The scripts a folder lists, one group per tool in the order the daemon found them, each A to Z. */
+export function bySource(scripts: Script[]): [string, Script[]][] {
+  const groups = new Map<string, Script[]>();
+  for (const script of scripts) groups.set(script.source, [...(groups.get(script.source) ?? []), script]);
+  return [...groups].map(([source, list]) => [source, ascending(list, (one) => one.name)]);
+}
 
 export const isRunning = (process: SessionProcess): boolean => process.state === ProcessState.Running;
 

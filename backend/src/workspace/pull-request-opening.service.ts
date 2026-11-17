@@ -92,6 +92,36 @@ export class PullRequestOpeningService implements PullRequestOpener {
     };
   }
 
+  /** Pushes the Session's branch with the operator's git access, never forced; no pull request opens. */
+  async pushBranch(sessionId: string): Promise<{ branch: string }> {
+    const found = this.target(sessionId);
+    if (!found) throw new ApiError(409, ErrorCode.InvalidState, 'Only a Session in a Repo pushes a branch');
+    const { repo } = found;
+    if (repo.host === GitHost.Local || repo.remoteSlug === null || !this.hosts.supports(repo.host)) {
+      throw new ApiError(409, ErrorCode.InvalidState, 'origin is not on a Git host the console can push to from here');
+    }
+    const { dir, branch } = await this.workspace.pushTarget(sessionId);
+    if (branch === repo.defaultBranch) {
+      throw new ApiError(409, ErrorCode.InvalidState, `${branch} is the default branch: push it from your own folder`);
+    }
+    const base = repo.defaultBranch;
+    const failed = await this.push(
+      {
+        sessionId,
+        dir,
+        repoId: repo.id,
+        remote: { host: repo.host, slug: repo.remoteSlug },
+        branch,
+        base,
+        title: '',
+        body: '',
+      },
+      repo.remoteSlug,
+    );
+    if (failed) throw failed;
+    return { branch };
+  }
+
   /**
    * A title and description from the commits the branch has beyond its base, read at once: the first commit's subject
    * and, for a single commit, its message body; for several, one line per commit. Nothing changes.

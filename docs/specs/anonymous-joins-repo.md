@@ -18,7 +18,7 @@ tool exists only inside an imported Repo. The agent could only clone a copy that
    naming both, and the agent asks which one.
 3. A call that matches no imported Repo is refused before it asks. The agent is told to clone the repository into its
    folder when it is on a Git host, and to tell the operator to import the Repo for branches and pull requests.
-4. A match asks the operator in every Access mode, `full` included: "Move this Session into the Repo <name> (<path>)".
+4. A match asks the operator in every Access mode but `full`, which moves at once: "Move this Session into the Repo <name> (<path>)".
    A no leaves the Session anonymous and the agent is told not to ask again.
 5. A yes turns the Session into a `repo` Session on that Repo, on the branch checked out in the Repo's folder. The run
    in progress ends with the agent's one line, and the console starts the next turn at once in the Repo's folder, with

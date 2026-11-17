@@ -1,7 +1,6 @@
 import { type SessionDiff, type SessionDiffFile, SessionDiffStatus } from '@ops-console/shared';
 import { useState } from 'react';
 import { z } from 'zod';
-import { Button } from '../components/ui/button';
 import { DiffLines, DiffStat, SplitDiff } from '../components/ui/diff';
 import { useStored } from '../lib/remember';
 
@@ -203,35 +202,6 @@ function FileDiff({
 
 function Note({ children }: { children: string }) {
   return <p className="m-0 px-3 py-2 text-xs text-neutral-700">{children}</p>;
-}
-
-/** The header button that opens and closes the diff, with the totals once read. */
-export function DiffToggle({
-  open,
-  diff,
-  onToggle,
-}: {
-  open: boolean;
-  diff: SessionDiff | undefined;
-  onToggle: () => void;
-}) {
-  const files = diff?.files.length ?? 0;
-  return (
-    <Button
-      aria-pressed={open}
-      title={open ? 'Close the diff' : "Show what this Session's branch changes"}
-      className={`px-2.5 py-1 text-xs ${open ? 'border-accent-300 bg-accent-100' : ''}`}
-      onClick={onToggle}
-    >
-      Diff
-      {diff && files > 0 && (
-        <span className="font-mono font-semibold">
-          <span className="text-diff-add-text">+{diff.additions}</span>{' '}
-          <span className="text-diff-del-text">−{diff.deletions}</span>
-        </span>
-      )}
-    </Button>
-  );
 }
 
 const TOOL =

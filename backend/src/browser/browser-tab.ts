@@ -598,7 +598,7 @@ export class BrowserTab {
     const bit = CDP_BUTTONS[message.button];
     if (message.action === 'down') this.buttons |= bit;
     if (message.action === 'up') this.buttons &= ~bit;
-    await this.cdp.send('Input.dispatchMouseEvent', {
+    const sent = this.cdp.send('Input.dispatchMouseEvent', {
       type: MOUSE_TYPES[message.action],
       x: message.x,
       y: message.y,
@@ -609,6 +609,14 @@ export class BrowserTab {
       deltaY: message.delta_y,
       modifiers: message.modifiers,
     });
+    // Chrome answers a move or a wheel only after it draws a frame, about 17 ms. Waiting for each made 120 wheel events
+    // of one trackpad swipe take 2 s, and the page kept scrolling after the fingers stopped. The events still reach
+    // Chrome in the order sent; only a press, a release or a key waits, so none overtakes another.
+    if (message.action === 'move' || message.action === 'wheel') {
+      sent.catch(() => {});
+      return;
+    }
+    await sent;
   }
 
   /** The tab shows the size of the viewer that sent input last. */

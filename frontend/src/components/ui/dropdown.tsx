@@ -124,8 +124,17 @@ export function Dropdown<T extends string>({
     setPlace((now) => {
       if (now === null) return now;
       const { top: _top, bottom: _bottom, ...rest } = now;
+      // A list that would run past the window's edge lines up with the button's other edge.
+      const width = list.current?.offsetWidth ?? 0;
+      const sideways =
+        rest.left !== undefined && box.left + width > window.innerWidth - margin
+          ? { left: undefined, right: Math.max(margin, window.innerWidth - box.right) }
+          : rest.right !== undefined && box.right - width < margin
+            ? { right: undefined, left: Math.max(margin, box.left) }
+            : {};
       return {
         ...rest,
+        ...sideways,
         ...(side === 'up' ? { bottom: window.innerHeight - box.top + 6 } : { top: box.bottom + 4 }),
         maxHeight: Math.min(320, room),
       };
