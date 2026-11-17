@@ -30,6 +30,18 @@ import { BrowserTab, type TabHooks } from './browser-tab';
 import { killOrphanChromes } from './orphans';
 
 const TITLE_POLL_MS = 2000;
+/** Chrome with nothing the console shows: no extensions, updates, sync or background requests. */
+const LAUNCH_ARGS = [
+  '--no-first-run',
+  '--no-default-browser-check',
+  '--disable-extensions',
+  '--disable-component-update',
+  '--disable-background-networking',
+  '--disable-sync',
+  '--disable-default-apps',
+  '--disable-features=Translate,MediaRouter,OptimizationHints',
+  '--password-store=basic',
+];
 const CHROME_STOPPED = 'Chrome stopped. Close this tab and open a new one.';
 
 type Slot = {
@@ -48,7 +60,7 @@ type Slot = {
   crashed: boolean;
 };
 
-/** A Session's Chrome and tabs: one Chrome per Session, started on its first tab and gone with its last. */
+/** A Session's Chrome and tabs: one Chrome per Session, started on its first tab and closed after the idle time. */
 @Injectable()
 export class BrowserService implements OnModuleInit, OnModuleDestroy {
   private readonly slots = new Map<string, Slot>();
@@ -184,16 +196,12 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
         headless: true,
         acceptDownloads: false,
         viewport: null,
-        args: ['--no-first-run', '--no-default-browser-check'],
+        args: LAUNCH_ARGS,
       })
       .then((context) => {
         slot.crashed = false;
         slot.spare = context.pages()[0];
         context.on('close', () => this.onChromeExit(slot));
-        slot.titles = setInterval(() => {
-          for (const tab of slot.tabs) void tab.pollTitle();
-        }, TITLE_POLL_MS);
-        slot.titles.unref();
         return context;
       })
       .catch((error: unknown) => {
@@ -237,7 +245,23 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
     slot.tabs = slot.tabs.filter((t) => t !== tab);
     tab.closeViewers();
     this.hooks.changed(slot.sessionId);
-    if (slot.tabs.length === 0 && !slot.stopping) void this.stop(slot);
+    // Chrome stays for the next tab until the idle time ends it.
+    if (slot.tabs.length === 0 && !slot.stopping) this.touch(slot);
+    this.pollTitles(slot);
+  }
+
+  /** A page can change its own title, and nothing announces it: tabs are read on a timer while a viewer is attached. */
+  private pollTitles(slot: Slot): void {
+    const watched = slot.tabs.some((tab) => tab.viewers.size > 0);
+    if (watched && !slot.titles) {
+      slot.titles = setInterval(() => {
+        for (const tab of slot.tabs) void tab.pollTitle();
+      }, TITLE_POLL_MS);
+      slot.titles.unref();
+    } else if (!watched && slot.titles) {
+      clearInterval(slot.titles);
+      slot.titles = undefined;
+    }
   }
 
   private onChromeExit(slot: Slot): void {
@@ -246,6 +270,7 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
     slot.context = null;
     slot.spare = undefined;
     clearInterval(slot.titles);
+    slot.titles = undefined;
     for (const tab of slot.tabs) tab.die(CHROME_STOPPED);
   }
 
@@ -336,7 +361,9 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
 
   async attach(tabId: string, viewer: WebSocket): Promise<void> {
     const tab = this.live(tabId);
+    const slot = this.slotOf(tab);
     await tab.attach(viewer);
+    this.pollTitles(slot);
   }
 
   async detach(tabId: string, viewer: WebSocket): Promise<void> {
@@ -344,7 +371,10 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
     if (!tab) return;
     await tab.detach(viewer);
     const slot = this.slots.get(tab.state.session_id);
-    if (slot) this.touch(slot);
+    if (slot) {
+      this.touch(slot);
+      this.pollTitles(slot);
+    }
   }
 
   async input(tabId: string, viewer: WebSocket, message: BrowserClientMessage): Promise<void> {

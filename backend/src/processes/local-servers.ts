@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { isConsolePort } from '../browser/addresses';
 import { output } from './command';
+import { processTable } from './process-tree';
 
 /** A listening TCP socket that accepts loopback connections, with the process behind it. `folder` is empty when unknown. */
 export type ListeningServer = { port: number; pid: number; process: string; folder: string };
@@ -8,7 +9,8 @@ export type ListeningServer = { port: number; pid: number; process: string; fold
 export const LOCAL_SERVER_SCANNER = Symbol('LOCAL_SERVER_SCANNER');
 
 export interface LocalServerScanner {
-  scan(): Promise<ListeningServer[]>;
+  /** A reading no older than `maxAgeMs` may be reused; the default reads fresh. */
+  scan(maxAgeMs?: number): Promise<ListeningServer[]>;
 }
 
 const LOOPBACK_HOSTS = new Set(['*', 'localhost', '[::1]', '[::]']);
@@ -45,9 +47,22 @@ function parseCwds(text: string): Map<number, string> {
   return cwds;
 }
 
-/** Reads listening sockets with `lsof`, each process's folder and its full name with one more call each. */
+/** Reads listening sockets with `lsof` and each process's folder with one more call; names come from the shared `ps`. */
 export class LsofScanner implements LocalServerScanner {
-  async scan(): Promise<ListeningServer[]> {
+  private last: { at: number; result: Promise<ListeningServer[]> } | null = null;
+
+  scan(maxAgeMs = 0): Promise<ListeningServer[]> {
+    if (this.last && Date.now() - this.last.at <= maxAgeMs) return this.last.result;
+    const result = this.read(maxAgeMs);
+    const mine = { at: Date.now(), result };
+    this.last = mine;
+    result.catch(() => {
+      if (this.last === mine) this.last = null;
+    });
+    return result;
+  }
+
+  private async read(maxAgeMs: number): Promise<ListeningServer[]> {
     const listeners = parseListeners(await output('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-F', 'pcn']));
     const byPort = new Map<number, (typeof listeners)[number]>();
     for (const listener of listeners) {
@@ -57,20 +72,16 @@ export class LsofScanner implements LocalServerScanner {
     }
     if (byPort.size === 0) return [];
     const pids = [...new Set([...byPort.values()].map((listener) => listener.pid))].join(',');
-    const [cwdText, nameText] = await Promise.all([
+    const [cwdText, table] = await Promise.all([
       output('lsof', ['-a', '-p', pids, '-d', 'cwd', '-Fn']),
-      output('ps', ['-o', 'pid=,comm=', '-p', pids]),
+      processTable(maxAgeMs),
     ]);
     const cwds = parseCwds(cwdText);
-    const names = new Map<number, string>();
-    for (const line of nameText.split('\n')) {
-      const match = /^\s*(\d+)\s+(.+)$/.exec(line);
-      if (match?.[1] && match[2]) names.set(Number(match[1]), path.basename(match[2]));
-    }
+    const names = new Map(table.map((entry) => [entry.pid, path.basename(entry.command)]));
     return [...byPort.entries()].map(([port, listener]) => ({
       port,
       pid: listener.pid,
-      process: names.get(listener.pid) ?? listener.command,
+      process: names.get(listener.pid) || listener.command,
       folder: cwds.get(listener.pid) ?? '',
     }));
   }

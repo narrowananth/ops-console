@@ -1,5 +1,6 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { LOCAL_SERVER_SCANNER, type LocalServerScanner, LsofScanner } from './local-servers';
+import { LoginEnv } from './login-env';
 import { ProcessGateway } from './process-gateway';
 import { ProcessesController } from './processes.controller';
 import { ProcessesService } from './processes.service';
@@ -16,6 +17,7 @@ export class ProcessesModule {
       providers: [
         ProcessesService,
         ProcessGateway,
+        LoginEnv,
         { provide: LOCAL_SERVER_SCANNER, useValue: options.scanner ?? new LsofScanner() },
       ],
       exports: [ProcessesService],

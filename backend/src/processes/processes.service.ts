@@ -1,6 +1,6 @@
 import { realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { Inject, Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import {
   ConnectionEnv,
   type CreateProcessBody,
@@ -25,15 +25,28 @@ import { connections, repos, sessionProcesses, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { loadPty } from '../terminals/pty';
 import { LOCAL_SERVER_SCANNER, type LocalServerScanner } from './local-servers';
+import { baseEnv, type Env, LoginEnv } from './login-env';
 import { descendantsOf, familyOf, isAlive, processTable, signal } from './process-tree';
 import { prodConnectionsNamedIn } from './prod-env';
 import { readScripts, shellWord } from './scripts';
 
 const REPLAY_CHARS = 256 * 1024;
-const STOP_GRACE_MS = 3000;
-/** A server that was just started needs a moment before it listens. */
-const LISTEN_DELAY_MS = 1500;
+const STOP_GRACE_MS = 1500;
+/** Restart starts the command again at once, so what ignores the hangup is killed sooner. */
+const RESTART_GRACE_MS = 500;
 const MAX_OUTPUT_LINES = 500;
+/** A started server needs a moment before it listens: the scanner is asked this often, for this long. */
+const LISTEN_POLL_MS = 500;
+const LISTEN_WATCH_MS = 30_000;
+/** A scan or process table this old is reused by a read. */
+const SCAN_CACHE_MS = 1500;
+/** Output that arrives within this window goes out as one message. */
+const FLUSH_MS = 8;
+/** A viewer this far behind pauses the process until it catches up. */
+const MAX_BUFFERED = 1_000_000;
+const DRAIN_CHECK_MS = 50;
+/** Folders whose login environment is read at start-up. */
+const WARM_FOLDERS = 3;
 
 type ProcessRow = typeof sessionProcesses.$inferSelect;
 
@@ -48,24 +61,23 @@ type Live = {
   stopRequested: boolean;
   prod: string[];
   exited: Promise<void>;
+  /** Output read from the pty and not yet sent. */
+  pending: string;
+  flushing: NodeJS.Timeout | undefined;
+  /** Set while the pty is paused for a slow viewer. */
+  draining: NodeJS.Timeout | undefined;
 };
 
 export type StartInput = Pick<CreateProcessBody, 'name' | 'folder'> & { command?: string; script?: string };
 
 const SUPPORTED_KINDS: string[] = [SessionKind.Repo, SessionKind.Anonymous];
 
-/** What a process's login shell gets from the daemon: the shell supplies PATH and the rest. */
-function shellEnv(shell: string): Record<string, string> {
-  const env: Record<string, string> = { SHELL: shell, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
-  for (const key of ['HOME', 'USER', 'LOGNAME', 'LANG']) {
-    const value = process.env[key];
-    if (value !== undefined) env[key] = value;
-  }
-  return env;
-}
-
-/** A login shell that reads the operator's rc files, so PATH and version managers are as in their terminal. */
-export const shellArgs = (command: string): string[] => (command ? ['-ilc', command] : ['-il']);
+/**
+ * A command runs as `-c` with the login environment read earlier, or as `-ilc` (a login shell that reads the operator's
+ * rc files) while that is not ready. A shell with no command is always the login shell, for the operator to type in.
+ */
+export const shellArgs = (command: string, env: Env | null = null): string[] =>
+  command ? [env ? '-c' : '-ilc', command] : ['-il'];
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
 const ANSI = /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b\[[0-?]*[ -/]*[@-~]|\u001b[()][0-9A-Za-z]|\u001b[=>]/g;
@@ -91,10 +103,12 @@ const waitUntil = async (done: () => boolean, ms: number): Promise<boolean> => {
  * running exists only in memory, so after a daemon restart every row is stopped.
  */
 @Injectable()
-export class ProcessesService implements OnModuleDestroy {
+export class ProcessesService implements OnModuleInit, OnModuleDestroy {
   private readonly live = new Map<string, Live>();
   private readonly sockets = new Map<string, Set<WebSocket>>();
-  private readonly timers = new Set<NodeJS.Timeout>();
+  private stopped = false;
+  /** When a Session's servers last changed: a read never reuses a scan older than this. */
+  private changedAt = 0;
 
   constructor(
     @Inject(STORE) private readonly store: Store,
@@ -102,14 +116,23 @@ export class ProcessesService implements OnModuleDestroy {
     @Inject(SessionKinds) private readonly kinds: SessionKinds,
     @Inject(OutputFiles) private readonly outputs: OutputFiles,
     @Inject(LOCAL_SERVER_SCANNER) private readonly scanner: LocalServerScanner,
+    @Inject(LoginEnv) private readonly loginEnv: LoginEnv,
     @Inject(AgentRuntime) runtime: AgentRuntime,
   ) {
     sessions.onRemoved((id) => this.release(id));
     runtime.setProcessTools(this);
   }
 
+  /** Reads the login environment of the folders that had processes, in the background: Restart then skips the shell's start-up. */
+  onModuleInit(): void {
+    const rows = this.store.db.select({ folder: sessionProcesses.folder }).from(sessionProcesses).all();
+    for (const folder of [...new Set(rows.map((row) => row.folder))].slice(0, WARM_FOLDERS)) {
+      this.loginEnv.warm(this.shell(), folder);
+    }
+  }
+
   async onModuleDestroy(): Promise<void> {
-    for (const timer of this.timers) clearTimeout(timer);
+    this.stopped = true;
     await Promise.all([...this.live.values()].map((live) => this.terminate(live)));
   }
 
@@ -165,7 +188,7 @@ export class ProcessesService implements OnModuleDestroy {
         .get(),
     );
     try {
-      this.spawn(row, await loadPty());
+      await this.spawn(row);
     } catch (error) {
       this.store.write((tx) => tx.delete(sessionProcesses).where(eq(sessionProcesses.id, row.id)).run());
       throw error;
@@ -183,8 +206,8 @@ export class ProcessesService implements OnModuleDestroy {
   async restart(id: string): Promise<SessionProcess> {
     const row = this.row(id);
     const live = this.live.get(id);
-    if (live?.state === ProcessState.Running) await this.terminate(live);
-    this.spawn(row, await loadPty());
+    if (live?.state === ProcessState.Running) await this.terminate(live, RESTART_GRACE_MS);
+    await this.spawn(row);
     return this.announce(row);
   }
 
@@ -201,7 +224,7 @@ export class ProcessesService implements OnModuleDestroy {
       tx.delete(sessionProcesses).where(eq(sessionProcesses.id, id)).run();
       emit('process.removed', { session_id: row.sessionId, process_id: id });
     });
-    this.store.emit('browser.servers_changed', { session_id: row.sessionId });
+    this.serversChanged(row.sessionId);
   }
 
   has(id: string): boolean {
@@ -222,6 +245,7 @@ export class ProcessesService implements OnModuleDestroy {
     socket.on('close', () => set.delete(socket));
     const live = this.live.get(id);
     if (!live) return;
+    this.flush(id, live);
     if (live.replay) this.sendTo(socket, { type: 'output', data: live.replay });
     if (live.state !== ProcessState.Running) this.sendTo(socket, { type: 'exit', code: live.exitCode });
   }
@@ -240,6 +264,8 @@ export class ProcessesService implements OnModuleDestroy {
   async scripts(sessionId: string, folder?: string): Promise<Scripts> {
     const session = this.supported(sessionId);
     const dir = this.folderFor(session, await this.workingDir(session), folder);
+    // The Run menu opens before a command starts: read the login environment now so the command skips the shell's start-up.
+    this.loginEnv.warm(this.shell(), dir);
     return readScripts(dir);
   }
 
@@ -260,15 +286,16 @@ export class ProcessesService implements OnModuleDestroy {
       for (const pid of family) signal(pid, 'SIGKILL');
       await waitUntil(allGone, STOP_GRACE_MS);
     }
-    this.store.emit('browser.servers_changed', { session_id: sessionId });
+    this.serversChanged(sessionId);
   }
 
   /** The Session's servers on a loopback port: one a Session process started, or one running in the Session's folders. */
   async localServers(sessionId: string): Promise<LocalServer[]> {
     const session = this.supported(sessionId);
+    const age = Math.min(SCAN_CACHE_MS, Date.now() - this.changedAt);
     const [listening, table, roots] = await Promise.all([
-      this.scanner.scan(),
-      processTable(),
+      this.scanner.scan(age),
+      processTable(age),
       this.sessionRoots(session),
     ]);
     const families = [...this.live.entries()]
@@ -291,13 +318,15 @@ export class ProcessesService implements OnModuleDestroy {
   }
 
   /** The Approval's text for the agent's `start_process`. Throws when the folder is not one the Session may use. */
-  describeStart(
+  async describeStart(
     sessionId: string,
     input: { name: string; command: string; folder?: string },
-  ): { summary: string; folder: string; prod: string[] } {
+  ): Promise<{ summary: string; folder: string; prod: string[] }> {
     const session = this.supported(sessionId);
     const folder = this.folderFor(session, this.handler(session).workingDir(session), input.folder);
-    const prod = this.prodIn(folder);
+    // The Approval waits for the operator: the login environment is ready by the time they say yes.
+    this.loginEnv.warm(this.shell(), folder);
+    const prod = await this.prodIn(folder);
     const warning = prod.length
       ? `\nThis folder's .env names the PROD Connection${prod.length > 1 ? 's' : ''} ${prod.join(', ')}. The process can reach ${prod.length > 1 ? 'them' : 'it'}.`
       : '';
@@ -308,7 +337,7 @@ export class ProcessesService implements OnModuleDestroy {
     };
   }
 
-  private prodIn(folder: string): string[] {
+  private prodIn(folder: string): Promise<string[]> {
     const prod = this.store.db
       .select({ name: connections.name, config: connections.config })
       .from(connections)
@@ -324,7 +353,9 @@ export class ProcessesService implements OnModuleDestroy {
   /** The last `lines` lines (up to 500) of a process's output, without terminal control codes. */
   outputOf(sessionId: string, name: string, lines: number): string {
     const row = this.byName(sessionId, name);
-    const text = (this.live.get(row.id)?.replay ?? '').replace(ANSI, '').replaceAll('\r\n', '\n').trimEnd();
+    const live = this.live.get(row.id);
+    if (live) this.flush(row.id, live);
+    const text = (live?.replay ?? '').replace(ANSI, '').replaceAll('\r\n', '\n').trimEnd();
     const kept = text.split('\n').map((line) => line.split('\r').pop() ?? '');
     return kept.slice(-Math.min(Math.max(Math.trunc(lines), 1), MAX_OUTPUT_LINES)).join('\n');
   }
@@ -363,6 +394,15 @@ export class ProcessesService implements OnModuleDestroy {
     return row;
   }
 
+  private shell(): string {
+    return process.env.SHELL || '/bin/zsh';
+  }
+
+  private serversChanged(sessionId: string): void {
+    this.changedAt = Date.now();
+    this.store.emit('browser.servers_changed', { session_id: sessionId });
+  }
+
   private view(row: ProcessRow): SessionProcess {
     const live = this.live.get(row.id);
     return {
@@ -379,18 +419,30 @@ export class ProcessesService implements OnModuleDestroy {
     };
   }
 
-  /** Tells the panels the process changed, and again once a server it started has had time to listen. */
+  /** Tells the panels the process changed, and again when a server it started listens. */
   private announce(row: ProcessRow): SessionProcess {
     const process = this.view(row);
     this.store.emit('process.changed', { session_id: row.sessionId, process });
-    this.store.emit('browser.servers_changed', { session_id: row.sessionId });
-    const timer = setTimeout(() => {
-      this.timers.delete(timer);
-      this.store.emit('browser.servers_changed', { session_id: row.sessionId });
-    }, LISTEN_DELAY_MS);
-    timer.unref();
-    this.timers.add(timer);
+    this.serversChanged(row.sessionId);
+    const live = this.live.get(row.id);
+    // A shell the operator types in may start a server much later: the panel's slow poll finds that one.
+    if (live && row.command) void this.watchListening(row, live);
     return process;
+  }
+
+  /** Asks the scanner often after a start, and tells the panels at the first listener under the process. */
+  private async watchListening(row: ProcessRow, live: Live): Promise<void> {
+    const until = Date.now() + LISTEN_WATCH_MS;
+    while (Date.now() < until && !this.stopped) {
+      await new Promise((resolve) => setTimeout(resolve, LISTEN_POLL_MS).unref());
+      if (this.live.get(row.id) !== live || live.state !== ProcessState.Running) return;
+      const listening = await this.scanner.scan().catch(() => []);
+      const family = familyOf(await processTable(SCAN_CACHE_MS).catch(() => []), live.pid);
+      if (listening.some((server) => family.has(server.pid))) {
+        this.serversChanged(row.sessionId);
+        return;
+      }
+    }
   }
 
   private uniqueName(sessionId: string, wanted: string): string {
@@ -459,14 +511,19 @@ export class ProcessesService implements OnModuleDestroy {
     return `${runner} run ${shellWord(script)}`;
   }
 
-  private spawn(row: ProcessRow, nodePty: Awaited<ReturnType<typeof loadPty>>): void {
-    const shell = process.env.SHELL || '/bin/zsh';
-    const pty = nodePty.spawn(shell, shellArgs(row.command), {
+  private async spawn(row: ProcessRow): Promise<void> {
+    const shell = this.shell();
+    const [nodePty, prod, login] = await Promise.all([
+      loadPty(),
+      this.prodIn(row.folder),
+      row.command ? this.loginEnv.get(shell, row.folder) : null,
+    ]);
+    const pty = nodePty.spawn(shell, shellArgs(row.command, login), {
       name: 'xterm-256color',
       cols: 120,
       rows: 30,
       cwd: row.folder,
-      env: shellEnv(shell),
+      env: login ? { ...login, SHELL: shell, TERM: 'xterm-256color', COLORTERM: 'truecolor' } : baseEnv(shell),
     });
     let finished: () => void = () => {};
     const live: Live = {
@@ -478,19 +535,22 @@ export class ProcessesService implements OnModuleDestroy {
       exitCode: null,
       startedAt: new Date().toISOString(),
       stopRequested: false,
-      prod: this.prodIn(row.folder),
+      prod,
       exited: new Promise<void>((resolve) => {
         finished = resolve;
       }),
+      pending: '',
+      flushing: undefined,
+      draining: undefined,
     };
     this.live.set(row.id, live);
     pty.onData((data) => {
-      live.replay += data;
-      // Trim in batches: slicing on every chunk copies the whole buffer for a process that prints a lot.
-      if (live.replay.length > REPLAY_CHARS * 2) live.replay = live.replay.slice(-REPLAY_CHARS);
-      this.broadcast(row.id, { type: 'output', data });
+      live.pending += data;
+      live.flushing ??= setTimeout(() => this.flush(row.id, live), FLUSH_MS);
     });
     pty.onExit(({ exitCode, signal: killedBy }) => {
+      this.flush(row.id, live);
+      clearInterval(live.draining);
       live.state = live.stopRequested ? ProcessState.Stopped : ProcessState.Exited;
       live.exitCode = live.stopRequested ? null : killedBy ? 128 + killedBy : exitCode;
       this.broadcast(row.id, { type: 'exit', code: live.exitCode });
@@ -498,19 +558,46 @@ export class ProcessesService implements OnModuleDestroy {
       // A Session that was deleted announces nothing.
       if (this.live.get(row.id) !== live) return;
       this.store.emit('process.changed', { session_id: row.sessionId, process: this.view(row) });
-      this.store.emit('browser.servers_changed', { session_id: row.sessionId });
+      this.serversChanged(row.sessionId);
     });
   }
 
-  /** SIGHUP to the shell, as a closing terminal sends it, and SIGTERM to what it started; SIGKILL to what is left after 3 s. */
-  private async terminate(live: Live): Promise<void> {
+  /** Sends what the pty printed since the last send as one message and keeps it for a viewer that opens late. */
+  private flush(id: string, live: Live): void {
+    clearTimeout(live.flushing);
+    live.flushing = undefined;
+    const data = live.pending;
+    if (!data) return;
+    live.pending = '';
+    live.replay += data;
+    // Trim in batches: slicing on every chunk copies the whole buffer for a process that prints a lot.
+    if (live.replay.length > REPLAY_CHARS * 2) live.replay = live.replay.slice(-REPLAY_CHARS);
+    this.broadcast(id, { type: 'output', data });
+    this.holdForSlowViewer(id, live);
+  }
+
+  /** A viewer with over 1 MB unsent pauses the process until every viewer has caught up. */
+  private holdForSlowViewer(id: string, live: Live): void {
+    const behind = () => [...(this.sockets.get(id) ?? [])].some((socket) => socket.bufferedAmount > MAX_BUFFERED);
+    if (live.draining || live.state !== ProcessState.Running || !behind()) return;
+    live.pty.pause();
+    live.draining = setInterval(() => {
+      if (behind()) return;
+      clearInterval(live.draining);
+      live.draining = undefined;
+      if (live.state === ProcessState.Running) live.pty.resume();
+    }, DRAIN_CHECK_MS);
+  }
+
+  /** SIGHUP to the shell, as a closing terminal sends it, and SIGTERM to what it started; SIGKILL to what is left after `graceMs`. */
+  private async terminate(live: Live, graceMs = STOP_GRACE_MS): Promise<void> {
     if (live.state !== ProcessState.Running) return;
     live.stopRequested = true;
     const family = familyOf(await processTable(), live.pid);
     signal(live.pid, 'SIGHUP');
     for (const pid of family) if (pid !== live.pid) signal(pid, 'SIGTERM');
     const allGone = () => [...family].every((pid) => !isAlive(pid));
-    if (!(await waitUntil(allGone, STOP_GRACE_MS))) {
+    if (!(await waitUntil(allGone, graceMs))) {
       for (const pid of familyOf(await processTable(), live.pid)) family.add(pid);
       for (const pid of family) signal(pid, 'SIGKILL');
       await waitUntil(allGone, STOP_GRACE_MS);
@@ -527,11 +614,14 @@ export class ProcessesService implements OnModuleDestroy {
       this.sockets.delete(id);
     }
     await Promise.all(mine.map(([, live]) => this.terminate(live)));
-    this.store.emit('browser.servers_changed', { session_id: sessionId });
+    this.serversChanged(sessionId);
   }
 
   private broadcast(id: string, message: ProcessServerMessage): void {
-    for (const socket of this.sockets.get(id) ?? []) this.sendTo(socket, message);
+    const sockets = this.sockets.get(id);
+    if (!sockets?.size) return;
+    const text = JSON.stringify(message);
+    for (const socket of sockets) if (socket.readyState === socket.OPEN) socket.send(text);
   }
 
   private sendTo(socket: WebSocket, message: ProcessServerMessage): void {

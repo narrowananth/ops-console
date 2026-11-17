@@ -1,4 +1,4 @@
-import { processServerMessageSchema, type SessionProcess } from '@ops-console/shared';
+import type { SessionProcess } from '@ops-console/shared';
 import { type PointerEvent, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Button } from '../components/ui/button';
@@ -233,17 +233,19 @@ export function TerminalsDock({
       ) : current === undefined ? (
         <p className="m-0 px-4 py-3 text-[13px] text-neutral-700">No process. Run a script or open a terminal.</p>
       ) : (
-        <XtermView
-          // A restart is a new run: the view attaches again and reads its output from the start.
-          key={`${current.id}:${current.started_at}`}
-          path={`/processes/${current.id}`}
-          interactive
-          className="min-h-0 flex-1 p-2.5"
-          onMessage={(raw, write) => {
-            const parsed = processServerMessageSchema.safeParse(raw);
-            if (parsed.success && parsed.data.type === 'output') write(parsed.data.data);
-          }}
-        />
+        // Every process keeps its view, stacked in one box, so a tab switch shows the screen as it was instead of
+        // reading the output again. A restart is a new run: its view attaches again and reads its output from the start.
+        <div className="relative min-h-0 flex-1">
+          {list.map((one) => (
+            <XtermView
+              key={`${one.id}:${one.started_at}`}
+              path={`/processes/${one.id}`}
+              interactive
+              hidden={one.id !== current.id}
+              className="absolute inset-0 p-2.5"
+            />
+          ))}
+        </div>
       )}
     </section>
   );

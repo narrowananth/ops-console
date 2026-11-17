@@ -7,6 +7,7 @@ import {
   type BrowserServerMessage,
   browserServerMessageSchema,
   ErrorCode,
+  readFrameHeader,
   SessionKind,
   type Tab,
   WS_PROTOCOL,
@@ -184,25 +185,31 @@ async function watch(daemon: AgentDaemon, tabId: string) {
   const socket = new WebSocket(`${daemon.url.replace('http', 'ws')}/browser/${tabId}`, [WS_PROTOCOL, daemon.token]);
   daemon.sockets.add(socket);
   const messages: BrowserServerMessage[] = [];
-  socket.on('message', (raw) => messages.push(browserServerMessageSchema.parse(JSON.parse(String(raw)))));
+  const frames: { width: number; height: number; jpeg: Uint8Array }[] = [];
+  socket.on('message', (raw, binary) => {
+    if (!binary) return void messages.push(browserServerMessageSchema.parse(JSON.parse(String(raw))));
+    const bytes = raw as Buffer;
+    const frame = readFrameHeader(Uint8Array.from(bytes).buffer);
+    if (frame) frames.push(frame);
+  });
   await new Promise((resolve, reject) => {
     socket.once('open', resolve);
     socket.once('error', reject);
   });
-  return { socket, messages, send: (message: object) => socket.send(JSON.stringify(message)) };
+  return { socket, messages, frames, send: (message: object) => socket.send(JSON.stringify(message)) };
 }
 
 /** Width and height from a JPEG's first start-of-frame marker. */
-function jpegSize(base64: string): { width: number; height: number } {
-  const bytes = Buffer.from(base64, 'base64');
+function jpegSize(bytes: Uint8Array): { width: number; height: number } {
+  const view = Buffer.from(bytes);
   let at = 2;
-  while (at + 9 < bytes.length) {
-    if (bytes[at] !== 0xff) throw new Error('not a JPEG marker');
-    const marker = bytes[at + 1] ?? 0;
+  while (at + 9 < view.length) {
+    if (view[at] !== 0xff) throw new Error('not a JPEG marker');
+    const marker = view[at + 1] ?? 0;
     if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
-      return { height: bytes.readUInt16BE(at + 5), width: bytes.readUInt16BE(at + 7) };
+      return { height: view.readUInt16BE(at + 5), width: view.readUInt16BE(at + 7) };
     }
-    at += 2 + bytes.readUInt16BE(at + 2);
+    at += 2 + view.readUInt16BE(at + 2);
   }
   throw new Error('no frame header');
 }
@@ -411,24 +418,26 @@ describe.skipIf(!chromePath)('Session browser in a real Chrome', () => {
       );
       // The page is still, so the last frame is the one the panel keeps showing.
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      const frames = viewer.messages.filter((m) => m.type === 'frame');
-      const last = frames.at(-1);
-      if (last?.type !== 'frame') throw new Error('no frame arrived');
+      const last = viewer.frames.at(-1);
+      if (!last) throw new Error('no frame arrived');
       expect({ width: last.width, height: last.height }).toEqual({ width: 360, height: 514 });
-      expect(jpegSize(last.data)).toEqual({ width: 360, height: 514 });
+      expect(jpegSize(last.jpeg)).toEqual({ width: 360, height: 514 });
     });
 
     it('sends frames, takes a resize and sends the page its mouse, keys and paste', async () => {
       const created = await openTab(h, session, dev.url);
       await settled(h, session, created.id);
       const viewer = await watch(h.daemon, created.id);
-      const frame = await until(
-        () => viewer.messages,
-        (messages) => messages.some((m) => m.type === 'frame'),
+      const [first] = await until(
+        () => viewer.frames,
+        (frames) => frames.length > 0,
         'a frame',
       );
-      const first = frame.find((m) => m.type === 'frame');
-      expect(first?.type === 'frame' && Buffer.from(first.data, 'base64').subarray(0, 2).toString('hex')).toBe('ffd8');
+      expect(
+        Buffer.from(first?.jpeg ?? [])
+          .subarray(0, 2)
+          .toString('hex'),
+      ).toBe('ffd8');
 
       viewer.send({ type: 'resize', width: 900, height: 700 });
       await until(
@@ -513,7 +522,7 @@ describe.skipIf(!chromePath)('Session browser in a real Chrome', () => {
     const profile = (id: string) => path.join(h.daemon.dataDir, 'browser', id);
     const cookie = async (id: string, tab: Tab) => read<string>(h, id, tab.id, 'document.cookie');
 
-    it('keeps each Session its own and keeps them through a Chrome exit', async () => {
+    it('keeps each Session its own, and keeps its Chrome for the next tab when the last one closes', async () => {
       const other = h.daemon.createSession();
       const a = await openTab(h, session, `${dev.url}/set`);
       const b = await openTab(h, other, `${dev.url}/blank`);
@@ -525,16 +534,33 @@ describe.skipIf(!chromePath)('Session browser in a real Chrome', () => {
 
       expect((await h.http.delete(`/browser/tabs/${a.id}`)).status).toBe(204);
       await until(
-        () => chromeRunning(profile(session)),
-        (running) => !running,
-        'Chrome to exit',
+        async () => (await state(h, session)).tabs,
+        (tabs) => tabs.length === 0,
+        'the tab to close',
       );
-      expect((await state(h, session)).tabs).toEqual([]);
+      expect(await chromeRunning(profile(session))).toBe(true);
 
       const again = await openTab(h, session, `${dev.url}/blank`);
       await settled(h, session, again.id);
       expect(await cookie(session, again)).toBe('sid=abc');
       expect(await chromeRunning(profile(other))).toBe(true);
+    });
+
+    it('keeps the cookies through the idle exit of Chrome', async () => {
+      const idle = await start({ idleMs: 1500 });
+      const sessionId = idle.daemon.createSession();
+      const first = await openTab(idle, sessionId, `${dev.url}/set`);
+      await settled(idle, sessionId, first.id);
+      expect((await idle.http.delete(`/browser/tabs/${first.id}`)).status).toBe(204);
+      const folder = path.join(idle.daemon.dataDir, 'browser', sessionId);
+      await until(
+        () => chromeRunning(folder),
+        (running) => !running,
+        'Chrome to exit',
+      );
+      const again = await openTab(idle, sessionId, `${dev.url}/blank`);
+      await settled(idle, sessionId, again.id);
+      expect(await read<string>(idle, sessionId, again.id, 'document.cookie')).toBe('sid=abc');
     });
 
     it('wipes them on clear, and with the Session', async () => {
@@ -658,8 +684,8 @@ describe.skipIf(!chromePath)('Session browser in a real Chrome', () => {
     it('take a screenshot, cap a script result and keep redacted console and network logs', async () => {
       const { tab_id: tabId } = await h.tools.open(session, `${dev.url}/`);
       const shot = await h.tools.screenshot(session, tabId);
-      expect(shot.mimeType).toBe('image/png');
-      expect(Buffer.from(shot.base64, 'base64').subarray(1, 4).toString()).toBe('PNG');
+      expect(shot.mimeType).toBe('image/jpeg');
+      expect(Buffer.from(shot.base64, 'base64').subarray(0, 2).toString('hex')).toBe('ffd8');
 
       const long = await h.tools.evaluate(session, '"x".repeat(200000)', tabId);
       expect(long.length).toBeLessThan(100_100);

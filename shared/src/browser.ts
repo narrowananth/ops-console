@@ -165,14 +165,40 @@ export const browserClientMessageSchema = z.discriminatedUnion('type', [
 ]);
 export type BrowserClientMessage = z.infer<typeof browserClientMessageSchema>;
 
-/** Daemon to browser panel. `frame` carries a base64 JPEG. */
+/**
+ * Daemon to browser panel, as JSON text. A page frame is not here: it is a binary message, `FRAME_HEADER_BYTES` of
+ * width and height (two big-endian uint32) and then the JPEG.
+ */
 export const browserServerMessageSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('frame'), data: z.string(), width: z.number(), height: z.number() }),
   z.object({ type: z.literal('tab'), tab: tabSchema }),
   z.object({ type: z.literal('dialog'), kind: z.string(), message: z.string() }),
   z.object({ type: z.literal('closed') }),
 ]);
 export type BrowserServerMessage = z.infer<typeof browserServerMessageSchema>;
+
+export const FRAME_HEADER_BYTES = 8;
+
+/** The size a frame's page was drawn at, as the first bytes of its binary message. */
+export function frameHeader(width: number, height: number): Uint8Array {
+  const header = new Uint8Array(FRAME_HEADER_BYTES);
+  const view = new DataView(header.buffer);
+  view.setUint32(0, width);
+  view.setUint32(4, height);
+  return header;
+}
+
+/** The size at the start of a binary frame message and where its JPEG begins. */
+export function readFrameHeader(
+  message: ArrayBuffer,
+): { width: number; height: number; jpeg: Uint8Array<ArrayBuffer> } | null {
+  if (message.byteLength <= FRAME_HEADER_BYTES) return null;
+  const view = new DataView(message);
+  return {
+    width: view.getUint32(0),
+    height: view.getUint32(4),
+    jpeg: new Uint8Array(message, FRAME_HEADER_BYTES),
+  };
+}
 
 /** Process stream, over `/processes/:id`. */
 export const processClientMessageSchema = z.discriminatedUnion('type', [

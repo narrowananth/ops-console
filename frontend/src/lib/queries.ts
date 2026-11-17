@@ -60,6 +60,7 @@ import {
   type PatchTabBody,
   type PlaybookPatch,
   type PlaybookTrigger,
+  ProcessState,
   type PrReviewEvent,
   playbookListSchema,
   playbookSchema,
@@ -1776,15 +1777,22 @@ export function useSkillMenu(sessionId: string, q: string, enabled: boolean) {
   });
 }
 
-const SERVERS_POLL_MS = 5000;
+/** A slow check on the servers while the panel is open; `browser.servers_changed` is what normally refreshes them. */
+const SERVERS_POLL_MS = 30_000;
+
+const browserStateQuery = (sessionId: string) => ({
+  queryKey: queryKeys.browser(sessionId),
+  queryFn: () => apiGet(`/sessions/${sessionId}/browser`, z.object({ data: browserStateSchema })).then((b) => b.data),
+});
 
 /** The Session's tabs and whether Chrome is there. `browser.tabs_changed` refetches it. */
 export function useBrowserState(sessionId: string, enabled: boolean) {
-  return useQuery({
-    queryKey: queryKeys.browser(sessionId),
-    queryFn: () => apiGet(`/sessions/${sessionId}/browser`, z.object({ data: browserStateSchema })).then((b) => b.data),
-    enabled,
-  });
+  return useQuery({ ...browserStateQuery(sessionId), enabled });
+}
+
+/** How many tabs the Session has. A view that only needs the count re-renders when the count changes, not on a page load. */
+export function useBrowserTabCount(sessionId: string, enabled: boolean) {
+  return useQuery({ ...browserStateQuery(sessionId), enabled, select: (state) => state.tabs.length });
 }
 
 /** Puts a tab the page stream reported into the cached list, so the strip follows a load without a refetch. */
@@ -1859,8 +1867,8 @@ export function useClearBrowserData(sessionId: string) {
 }
 
 /**
- * The servers listening on a loopback port. `poll` asks every 5 seconds, while the panel is open; `browser.servers_changed`
- * refetches it either way, for the Browser button's dot.
+ * The servers listening on a loopback port. `browser.servers_changed` refetches it; `poll` adds a check every 30 seconds
+ * as well, for a server a shell started on its own.
  */
 export function useLocalServers(sessionId: string, enabled: boolean, poll: boolean) {
   return useQuery({
@@ -1884,13 +1892,23 @@ export function useStopServer(sessionId: string) {
   });
 }
 
+const processesQuery = (sessionId: string) => ({
+  queryKey: queryKeys.processes(sessionId),
+  queryFn: () =>
+    apiGet(`/sessions/${sessionId}/processes`, z.object({ data: z.array(sessionProcessSchema) })).then((b) => b.data),
+});
+
 /** The Session's processes; `process.changed` and `process.removed` refetch it. */
 export function useProcesses(sessionId: string, enabled: boolean) {
+  return useQuery({ ...processesQuery(sessionId), enabled });
+}
+
+/** How many of the Session's processes run. A view that only needs the count re-renders when it changes, not on each output or exit code. */
+export function useRunningProcessCount(sessionId: string, enabled: boolean) {
   return useQuery({
-    queryKey: queryKeys.processes(sessionId),
-    queryFn: () =>
-      apiGet(`/sessions/${sessionId}/processes`, z.object({ data: z.array(sessionProcessSchema) })).then((b) => b.data),
+    ...processesQuery(sessionId),
     enabled,
+    select: (list) => list.filter((one) => one.state === ProcessState.Running).length,
   });
 }
 

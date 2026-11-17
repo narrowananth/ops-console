@@ -93,12 +93,11 @@ export function SetupTerminal({ terminalId, onClose }: { terminalId: string; onC
             path={`/terminals/${terminalId}`}
             socketRef={socket}
             className="min-h-60 flex-1 rounded-lg p-3"
-            onMessage={(raw, write) => {
+            onMessage={(raw) => {
               const parsed = terminalServerMessageSchema.safeParse(raw);
               if (!parsed.success) return;
               const message: TerminalServerMessage = parsed.data;
-              if (message.type === 'output') write(message.data);
-              else if (message.type === 'secret_requested')
+              if (message.type === 'secret_requested')
                 setRequest({ request_id: message.request_id, label: message.label });
               else if (message.type === 'refused') setRefused(message.reason);
               else if (message.type === 'exit') setEnded(true);
