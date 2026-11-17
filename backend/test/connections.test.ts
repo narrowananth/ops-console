@@ -114,7 +114,7 @@ describe('creating', () => {
 
   it('answers before Claude Code registers the server, and shows a failed registration on the Connection', async () => {
     const ctx = await start();
-    await writeFile(path.join(ctx.dirs[1] ?? '', 'mcp-fail-add'), '');
+    await writeFile(path.join(ctx.dirs[0] ?? '', 'mcp-fail-add'), '');
     const created = await api(ctx.daemon).post('/connections', PG);
     expect(created.status).toBe(201);
     await settled(ctx);
@@ -407,6 +407,8 @@ describe('editing and deleting', () => {
     const env = JSON.parse(ctx.keychain.values.get('mcp:pg-orders') ?? '{}');
     expect(env.DSN).toContain('db2.example.com');
     expect(env.DSN).toContain('new-secret-value');
+    // The kept server was started with the old launch; it is stopped.
+    expect(ctx.tester.forgotten).toEqual([body.data.id]);
   });
 
   it('removes the server from every account, the Keychain entries and the row', async () => {
@@ -417,6 +419,20 @@ describe('editing and deleting', () => {
     await settled(ctx);
     for (const dir of ctx.dirs) expect((await registered(dir))['pg-orders']).toBeUndefined();
     expect([...ctx.keychain.values.keys()]).toEqual([]);
+    expect(ctx.tester.forgotten).toEqual([body.data.id]);
+  });
+
+  it('reports secret_stored from what was saved, with one Keychain read per Connection however often it lists', async () => {
+    const ctx = await start();
+    const { body } = await api(ctx.daemon).post('/connections', PG);
+    let reads = 0;
+    const get = ctx.keychain.get.bind(ctx.keychain);
+    ctx.keychain.get = async (key) => {
+      reads += 1;
+      return get(key);
+    };
+    for (let i = 0; i < 3; i++) expect((await list(ctx))[0]).toMatchObject({ id: body.data.id, secret_stored: true });
+    expect(reads).toBeLessThanOrEqual(1);
   });
 
   it('edits and deletes without asking Claude for server health', async () => {

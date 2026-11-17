@@ -2,7 +2,6 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CLAUDE_CLI, type ClaudeCli, claudeEnv } from '../src/claude-cli/claude-cli';
-import { MCP_CLIENT, type McpClient } from '../src/mcp-client/mcp-client';
 import { startTestDaemon, type TestDaemon, tempDir } from './helpers';
 
 let daemon: TestDaemon;
@@ -88,22 +87,6 @@ describe('claude CLI wrapper', () => {
       'https://mcp.sentry.dev/mcp',
     ]);
     expect(calls).toContainEqual(['remove', 'pg-staging', '--scope', 'user']);
-  });
-});
-
-describe('MCP client', () => {
-  it('calls a tool on a registered stdio server with its env, no model turn', async () => {
-    const result = await daemon.app
-      .get<McpClient>(MCP_CLIENT)
-      .callTool('fake-stdio', 'count_open_prs', { repo: 'shop-api' });
-    expect(result.content).toEqual([{ type: 'text', text: 'hello from env: shop-api has 3 open PRs' }]);
-  });
-
-  it('reports a tool error as upstream_failed naming the server', async () => {
-    await expect(daemon.app.get<McpClient>(MCP_CLIENT).callTool('fake-stdio', 'broken')).rejects.toMatchObject({
-      code: 'upstream_failed',
-      message: expect.stringContaining('fake-stdio'),
-    });
   });
 });
 

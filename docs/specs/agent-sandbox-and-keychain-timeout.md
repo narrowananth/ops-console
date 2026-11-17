@@ -54,9 +54,18 @@ no reason why.
 11. Each Keychain `get`, `set` and `delete` waits at most 60 seconds. At that point the call fails with
     `keychain_timeout`. If the operator answers the prompt later, the answer is thrown away. A late `set`
     may still store its value in the Keychain; the console does not use the result.
-12. Keychain calls that wait for the version handover wait at most 90 seconds for it. After that they fail
-    with `keychain_timeout`. The handover itself keeps running. The 60 seconds of item 11 start after the
-    handover is done.
+12. A Keychain call for an item the version handover still has to move waits at most 90 seconds for that item.
+    After that it fails with `keychain_timeout`. The handover itself keeps running. A call for any other item
+    does not wait. The 60 seconds of item 11 start after the item has moved. `mcp-exec` waits for a handover
+    under way before it reads an item, since a server it starts would otherwise read the item from the app that
+    still holds it.
+12a. The daemon keeps every value it read or wrote in memory until it deletes or replaces it, and asks the Mac
+    at most two Keychain calls at a time. A call that starts while a Keychain wait already shows fails at once
+    with `keychain_timeout`. The daemon starts with 16 libuv threads, so waiting calls cannot hold every thread
+    its file and network work needs.
+12b. The handover reads the items from a list of the keys the console holds (`keychain-manifest.json` in the
+    data folder, key names only), in parallel. With no list yet, the previous app finds them by scanning the
+    login keychain, once, and the console writes the list from what it moved.
 13. A `keychain_timeout` ends the running Playbook step `failed` with "Keychain is waiting for the Mac's
     password prompt", and a failed step stops its job. The console does not retry on its own. The operator
     retries the job after answering the prompt. A run that needs a secret before it starts, such as the

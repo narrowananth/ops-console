@@ -11,6 +11,7 @@ export enum HealthArea {
 export enum HealthInterval {
   HalfHour = '30m',
   Hour = '1h',
+  TwoHours = '2h',
   SixHours = '6h',
   TwelveHours = '12h',
   Day = '24h',
@@ -32,7 +33,7 @@ export const healthChecksSettingSchema = z.object({
 export type HealthChecksSetting = z.infer<typeof healthChecksSettingSchema>;
 
 export const HEALTH_CHECKS_DEFAULT: HealthChecksSetting = {
-  connections: HealthInterval.HalfHour,
+  connections: HealthInterval.TwoHours,
   integrations: HealthInterval.Hour,
 };
 

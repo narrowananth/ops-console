@@ -79,6 +79,9 @@ ln -sfn "versions/$version" "$install_dir/current"
 mkdir -p "$bin_dir"
 ln -sfn "$install_dir/current/bin/ops-console" "$bin_dir/ops-console"
 
+# Compiled code is keyed by file content; entries for versions that are gone would only pile up.
+rm -rf "$install_dir/compile-cache"
+
 # Reinstalling the current version leaves the previous one in place.
 if [ "$previous" != "$version" ]; then
   for dir in "$install_dir"/versions/*; do

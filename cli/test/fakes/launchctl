@@ -33,6 +33,21 @@ const loadedPid = () => {
   return null;
 };
 
+const specFile = path.join(state, 'spec.json');
+/** Starts the job from what `bootstrap` read from its plist, as launchd does at load and again after `kickstart`. */
+const startJob = (spec) => {
+  const out = openSync(spec.log, 'a');
+  const child = spawn(spec.program[0], spec.program.slice(1), {
+    // Like launchd: the plist's variables and a HOME that is not the caller's.
+    env: { HOME: path.join(state, 'launchd-home'), ...spec.env },
+    stdio: ['ignore', out, out],
+    detached: true,
+  });
+  writeFileSync(pidFile, String(child.pid));
+  rmSync(goneFile, { force: true });
+  child.unref();
+};
+
 const [command, target, plistPath] = args;
 if (command === 'bootstrap') {
   if (loadedPid() !== null) {
@@ -46,16 +61,9 @@ if (command === 'bootstrap') {
   const env = {};
   for (const m of envBlock.matchAll(/<key>([^<]*)<\/key>\s*<string>([^<]*)<\/string>/g)) env[m[1]] = m[2];
   const log = /<key>StandardOutPath<\/key>\s*<string>([^<]*)<\/string>/.exec(plist)[1];
-  const out = openSync(log, 'a');
-  const child = spawn(program[0], program.slice(1), {
-    // Like launchd: the plist's variables and a HOME that is not the caller's.
-    env: { HOME: path.join(state, 'launchd-home'), ...env },
-    stdio: ['ignore', out, out],
-    detached: true,
-  });
-  writeFileSync(pidFile, String(child.pid));
-  rmSync(goneFile, { force: true });
-  child.unref();
+  const spec = { program, env, log };
+  writeFileSync(specFile, JSON.stringify(spec));
+  startJob(spec);
   process.exit(0);
 } else if (command === 'bootout') {
   const pid = loadedPid();
@@ -65,6 +73,17 @@ if (command === 'bootstrap') {
   }
   if (alive(pid)) process.kill(pid, 'SIGTERM');
   writeFileSync(goneFile, String(Date.now() + 1000));
+  process.exit(0);
+} else if (command === 'kickstart') {
+  // `kickstart -k <service>`: stops the running job with SIGTERM, then starts it again once it has exited.
+  const pid = loadedPid();
+  if (pid === null) {
+    console.error('Could not kickstart: 113: Could not find specified service');
+    process.exit(113);
+  }
+  if (alive(pid)) process.kill(pid, 'SIGTERM');
+  while (alive(pid)) await new Promise((resolve) => setTimeout(resolve, 50));
+  startJob(JSON.parse(readFileSync(specFile, 'utf8')));
   process.exit(0);
 } else if (command === 'enable' || command === 'disable') {
   process.exit(0);

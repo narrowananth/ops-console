@@ -8,4 +8,9 @@ node="$dir/../.data/Ops Console (dev).app/Contents/MacOS/Ops Console (dev)"
 # The dev daemon's Keychain items, not the installed app's.
 export OPS_CONSOLE_KEYCHAIN_SERVICE=ops-console-dev
 # Claude starts it from the session's folder, so tsx is told where the backend's tsconfig is (Nest's decorators).
-exec "$node" "$dir/../node_modules/tsx/dist/cli.mjs" --tsconfig "$dir/../tsconfig.json" "$dir/../src/main.ts" "$@"
+entry=main.ts
+if [ "${1:-}" = mcp-exec ]; then
+  entry=mcp-exec.ts
+  shift
+fi
+exec "$node" "$dir/../node_modules/tsx/dist/cli.mjs" --tsconfig "$dir/../tsconfig.json" "$dir/../src/$entry" "$@"

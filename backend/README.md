@@ -16,7 +16,6 @@ src/
 ├── scheduler/          # in-process jobs
 ├── keychain/           # login Keychain adapter, handover between app versions
 ├── claude-cli/         # claude mcp add/remove/list/get/login
-├── mcp-client/         # tool calls on registered MCP servers
 ├── mcp/                # MCP Servers, Probe, the mcp-exec launcher
 ├── connectors/         # the Connectors: sign-in, MCP Server, checks
 ├── connections/        # Connections, Access Levels, checks

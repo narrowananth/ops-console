@@ -3,7 +3,8 @@
 // new one `put`: `pnpm dev` when the dev app is new (`ops-console-dev`), and the installed daemon when it starts
 // on a new version (`ops-console`). Secrets pass through pipes, never a file or a log.
 //
-//   <old program> keychain-handover.mjs take <service>   stdout: {"<account>": "<secret>", …}
+//   <old program> keychain-handover.mjs take <service> [account…]   stdout: {"<account>": "<secret>", …}
+//   <old program> keychain-handover.mjs list <service>   stdout: ["<account>", …]
 //   <new program> keychain-handover.mjs put <service>    stdin: {"<account>": "<secret>", …}
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -39,21 +40,28 @@ function holder() {
   return at === -1 ? process.execPath : process.execPath.slice(0, at + '.app'.length);
 }
 
-/** Takes out the items this program holds; any other item stays, since reading it would ask for the password. */
-async function take(service) {
-  const accounts = consoleAccounts(service, holder());
+/**
+ * Takes out the items this program holds: the `accounts` given, which the console lists, or else those a scan of
+ * the login keychain finds. Any other item stays, since reading it would ask for the password.
+ */
+async function take(service, accounts) {
+  const names = accounts.length > 0 ? accounts : consoleAccounts(service, holder());
   const secrets = {};
   // Every read first, so a refused one leaves every item where it was.
-  for (const account of accounts) {
-    const secret = await new AsyncEntry(service, account).getPassword();
-    if (secret != null) secrets[account] = secret;
-  }
+  await Promise.all(
+    names.map(async (account) => {
+      const secret = await new AsyncEntry(service, account).getPassword();
+      if (secret != null) secrets[account] = secret;
+    }),
+  );
   const deleted = [];
   try {
-    for (const account of Object.keys(secrets)) {
-      await new AsyncEntry(service, account).deletePassword();
-      deleted.push(account);
-    }
+    await Promise.all(
+      Object.keys(secrets).map(async (account) => {
+        await new AsyncEntry(service, account).deletePassword();
+        deleted.push(account);
+      }),
+    );
   } catch (error) {
     for (const account of deleted) await new AsyncEntry(service, account).setPassword(secrets[account]);
     throw error;
@@ -66,9 +74,18 @@ async function put(service, secrets) {
 }
 
 if (import.meta.main) {
-  const [mode, service] = process.argv.slice(2);
-  if (!service) throw new Error('usage: keychain-handover.mjs take | put <service>');
-  if (mode === 'take') process.stdout.write(JSON.stringify(await take(service)));
-  else if (mode === 'put') await put(service, JSON.parse(readFileSync(0, 'utf8')));
-  else throw new Error('usage: keychain-handover.mjs take | put <service>');
+  const [mode, service, ...accounts] = process.argv.slice(2);
+  const usage = 'usage: keychain-handover.mjs take <service> [account…] | put <service>';
+  try {
+    if (!service) throw new Error(usage);
+    if (mode === 'take') process.stdout.write(JSON.stringify(await take(service, accounts)));
+    // The keys this program holds, with no secret: the console lists them once so later handovers read them directly.
+    else if (mode === 'list') process.stdout.write(JSON.stringify(consoleAccounts(service, holder())));
+    else if (mode === 'put') await put(service, JSON.parse(readFileSync(0, 'utf8')));
+    else throw new Error(usage);
+  } catch (error) {
+    // One line the daemon can log: a stack trace would end on Node's version line and hide the cause.
+    process.stderr.write(`${String(error?.message ?? error).split('\n')[0]}\n`);
+    process.exit(1);
+  }
 }

@@ -3,6 +3,7 @@ import net from 'node:net';
 import path from 'node:path';
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
+import { startAgentDaemon } from './agent-fixtures';
 import { removeDir, startTestDaemon, type TestDaemon, tempDir } from './helpers';
 
 const running: TestDaemon[] = [];
@@ -17,6 +18,14 @@ afterEach(async () => {
 });
 
 describe('daemon', () => {
+  it('logs how long each part took to stop', async () => {
+    const daemon = await startAgentDaemon();
+    await daemon.stop();
+    const timed = daemon.log.filter((line) => /\[daemon\] \w+ stopped in \d+ ms$/.test(line));
+    expect(timed.some((line) => line.includes('AgentRuntime stopped in'))).toBe(true);
+    expect(daemon.log.at(-1)).toContain('stopped');
+  });
+
   it('answers health with the session token and refuses without it', async () => {
     const daemon = await start();
 

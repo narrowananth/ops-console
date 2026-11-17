@@ -4,7 +4,7 @@ import { lstat, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { runningDaemon } from './daemon';
-import { load, unload } from './launchd';
+import { load, restart, unload } from './launchd';
 import { BIN_LINK, DATA_DIR, INSTALL_DIR, LOG_DIR, LOG_FILE, PLIST, VERSION_ROOT } from './paths';
 
 const START_TIMEOUT_MS = z.coerce
@@ -34,8 +34,9 @@ async function start(): Promise<number> {
   return launch();
 }
 
-async function launch(): Promise<number> {
-  const loaded = await load();
+/** Loads the job, or with `replacing` restarts it, and waits until a daemon other than the one `replacing` names answers. */
+async function launch(replacing?: number): Promise<number> {
+  const loaded = await (replacing === undefined ? load() : restart());
   if (!loaded.ok) {
     console.error(`launchctl could not load ${PLIST}: ${loaded.output}`);
     return 1;
@@ -43,7 +44,7 @@ async function launch(): Promise<number> {
   const deadline = Date.now() + START_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const running = await runningDaemon();
-    if (running) {
+    if (running && running.pid !== replacing) {
       console.log(
         `ops-console ${running.version} is running on http://127.0.0.1:${running.port} (pid ${running.pid}).`,
       );
@@ -106,13 +107,13 @@ function logs(): Promise<number> {
 }
 
 async function update(): Promise<number> {
-  const wasRunning = (await runningDaemon()) !== null;
+  const before = await runningDaemon();
   const env = { ...process.env };
   delete env.OPS_CONSOLE_VERSION;
   const installed = spawnSync('sh', [path.join(VERSION_ROOT, 'install.sh')], { stdio: 'inherit', env });
   if (installed.status !== 0) return installed.status ?? 1;
-  if (!wasRunning) return 0;
-  return launch();
+  if (!before) return 0;
+  return launch(before.pid);
 }
 
 async function uninstall(): Promise<number> {

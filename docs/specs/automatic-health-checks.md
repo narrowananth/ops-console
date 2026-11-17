@@ -9,8 +9,8 @@ A Connection that loses its password, a Connector that signs out or an MCP serve
 
 ## Behavior
 
-1. Connections and Integrations each check themselves on a schedule: every 5 minutes, 15 minutes, 30 minutes, 1 hour, 6 hours, or off. Defaults are 15 minutes for Connections and 30 minutes for Integrations. The daemon runs the checks, so they happen with no browser open. The interval is the setting `health_checks`, and each page keeps its own.
-2. A run of Connections checks every Connection whose Access Level is not `none`, one at a time. A run of Integrations checks every Connector that is not `off`, and every registered, enabled MCP server, one at a time. Checks are the ones the pages already use, and send no write.
+1. Connections and Integrations each check themselves on a schedule: every 30 minutes, 1 hour, 2 hours, 6 hours, 12 hours, 24 hours, or off. Defaults are 2 hours for Connections and 1 hour for Integrations. The daemon runs the checks, so they happen with no browser open. The interval is the setting `health_checks`, and each page keeps its own.
+2. A run of Connections checks every Connection whose Access Level is not `none`, two at a time, each through the kept server of that Connection when one runs. A run of Integrations checks every Connector that is not `off`, and every registered, enabled MCP server no server-only Connector stands for, two at a time; each server is read alone in the active account. A check waits while one the operator started runs. Checks are the ones the pages already use, and send no write.
 3. The first run starts about 20 seconds after the daemon starts, then each area runs when its interval has passed since its last run. Turning an interval off stops that area. Only one run of an area goes at a time.
 4. Check now starts a run of the area at once and answers at once. The page shows "Checking… N of M done" while it goes.
 5. Every check is kept: its status, detail, latency and time. Two checks of the same item with the same answer within 30 seconds are kept once. The history stripe shows the last 24 checks, oldest first. The console keeps 90 days of checks, pruned like the rest of the run history.
@@ -64,7 +64,7 @@ Returns `{ data: HealthOverview }`: `areas.connections` and `areas.integrations`
 
 ### `PATCH /settings`
 
-Key `health_checks`: `{ "connections": "<interval>", "integrations": "<interval>" }`, interval one of `5m`, `15m`, `30m`, `1h`, `6h`, `off`. Anything else: 400 `validation_failed`.
+Key `health_checks`: `{ "connections": "<interval>", "integrations": "<interval>" }`, interval one of `30m`, `1h`, `2h`, `6h`, `12h`, `24h`, `off`; `5m` and `15m` read as `30m`. Anything else: 400 `validation_failed`.
 
 ### WebSocket `health.changed`
 

@@ -1,5 +1,9 @@
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { ErrorCode } from '@ops-console/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { HandoverGate } from '../src/keychain/handover-gate';
 import { type KeychainEntry, KeychainTimeout, LoginKeychain } from '../src/keychain/keychain';
 import { KeychainWaitTracker } from '../src/keychain/keychain-wait';
 
@@ -179,5 +183,147 @@ describe('Keychain wait tracker', () => {
     await vi.advanceTimersByTimeAsync(50_000);
     expect(await pending).toBeInstanceOf(KeychainTimeout);
     expect(wait.state()).toEqual({ waiting: false, since: null, pending: 0 });
+  });
+});
+
+describe('Keychain reads and writes in memory', () => {
+  it('asks the Mac once for a key it read, and again after a delete', async () => {
+    let asked = 0;
+    const entry = new PromptingEntry();
+    const keychain = new LoginKeychain('t', undefined, {
+      entry: () => ({
+        setPassword: (value) => entry.setPassword(value),
+        getPassword: () => {
+          asked += 1;
+          return entry.getPassword();
+        },
+        deletePassword: () => entry.deletePassword(),
+      }),
+    });
+    const answer = async <T>(call: Promise<T>): Promise<T> => {
+      await vi.advanceTimersByTimeAsync(0);
+      entry.answers.shift()?.();
+      return call;
+    };
+    expect(await answer(keychain.get('k'))).toBe('secret');
+    expect(await keychain.get('k')).toBe('secret');
+    expect(asked).toBe(1);
+
+    await answer(keychain.set('k', 'new'));
+    expect(await keychain.get('k')).toBe('new');
+    expect(asked).toBe(1);
+
+    await answer(keychain.delete('k'));
+    entry.stored = null;
+    expect(await answer(keychain.get('k'))).toBeNull();
+    expect(asked).toBe(2);
+  });
+
+  it('keeps two native calls in flight, and the rest wait for one to answer', async () => {
+    const entries = new Map<string, PromptingEntry>();
+    const keychain = new LoginKeychain('t', undefined, {
+      entry: (_service, key) => {
+        const entry = entries.get(key) ?? new PromptingEntry();
+        entries.set(key, entry);
+        return entry;
+      },
+    });
+    const reads = ['a', 'b', 'c'].map((key) => keychain.get(key));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(entries.get('a')?.answers).toHaveLength(1);
+    expect(entries.get('b')?.answers).toHaveLength(1);
+    expect(entries.has('c')).toBe(false);
+
+    entries.get('a')?.answers[0]?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(entries.get('c')?.answers).toHaveLength(1);
+    entries.get('b')?.answers[0]?.();
+    entries.get('c')?.answers[0]?.();
+    expect(await Promise.all(reads)).toEqual(['secret', 'secret', 'secret']);
+  });
+
+  it('fails a new call at once while a Keychain wait already shows', async () => {
+    const wait = new KeychainWaitTracker();
+    const entry = new PromptingEntry();
+    const keychain = new LoginKeychain('t', undefined, { entry: () => entry, wait });
+    const stuck = keychain.get('a').catch(() => 'timed out');
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(wait.state().waiting).toBe(true);
+
+    await expect(keychain.get('b')).rejects.toBeInstanceOf(KeychainTimeout);
+    expect(entry.answers).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(50_000);
+    await stuck;
+  });
+});
+
+describe('Keychain handover per key', () => {
+  it('lets a key through once its item moved, while another still waits', async () => {
+    const entry = new PromptingEntry();
+    const gate = new HandoverGate();
+    const keychain = new LoginKeychain('t', gate, { entry: () => entry });
+    gate.expect(['moved', 'waiting']);
+
+    const waiting = keychain.get('waiting');
+    const free = keychain.get('unrelated');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(entry.answers).toHaveLength(1);
+    entry.answers.shift()?.();
+    expect(await free).toBe('secret');
+
+    gate.moved('moved');
+    const moved = keychain.get('moved');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(entry.answers).toHaveLength(1);
+    entry.answers.shift()?.();
+    expect(await moved).toBe('secret');
+
+    gate.finish();
+    await vi.advanceTimersByTimeAsync(0);
+    entry.answers.shift()?.();
+    expect(await waiting).toBe('secret');
+  });
+
+  it('holds every key until the handover says which items it moves', async () => {
+    const entry = new PromptingEntry();
+    const gate = new HandoverGate();
+    const keychain = new LoginKeychain('t', gate, { entry: () => entry });
+    const read = keychain.get('any');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(entry.answers).toHaveLength(0);
+    gate.expect(['other']);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(entry.answers).toHaveLength(1);
+    entry.answers.shift()?.();
+    expect(await read).toBe('secret');
+  });
+});
+
+describe('the list of keys the console holds', () => {
+  it('is kept once confirmed, never holds a value, and is read by the next start', async () => {
+    const file = path.join(await mkdtemp(path.join(tmpdir(), 'manifest-')), 'keychain-manifest.json');
+    const open = () => {
+      const entry = new PromptingEntry();
+      const keychain = new LoginKeychain('t', undefined, { entry: () => entry, manifestFile: file });
+      const answer = async <T>(call: Promise<T>): Promise<T> => {
+        await vi.advanceTimersByTimeAsync(0);
+        entry.answers.shift()?.();
+        return call;
+      };
+      return { keychain, answer };
+    };
+    const first = open();
+    expect(first.keychain.manifest()).toBeNull();
+    await first.answer(first.keychain.set('connection:1', 'hunter2'));
+    expect(first.keychain.manifest()).toBeNull();
+    first.keychain.confirmManifest();
+    await first.answer(first.keychain.set('mcp:pg', 'other-secret'));
+    await first.answer(first.keychain.delete('connection:1'));
+
+    const text = await readFile(file, 'utf8');
+    expect(JSON.parse(text)).toEqual({ keys: ['mcp:pg'] });
+    expect(text).not.toContain('hunter2');
+    expect(text).not.toContain('other-secret');
+    expect(open().keychain.manifest()).toEqual(['mcp:pg']);
   });
 });

@@ -1,9 +1,20 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AccessMode, Effort, Model, type Release, SessionKind, SessionState, UpdateStatus } from '@ops-console/shared';
+import {
+  AccessMode,
+  Effort,
+  Model,
+  type Release,
+  SessionKind,
+  SessionState,
+  UpdateStatus,
+  WS_PROTOCOL,
+  type WsEvent,
+} from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
+import WebSocket from 'ws';
 import { sessions } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { type Installer, ScriptInstaller } from '../src/updates/installer';
@@ -114,6 +125,31 @@ describe('the console version', () => {
     expect(checked).toMatchObject({ status: UpdateStatus.UpToDate, latest: { version: '1.2.3' }, error: null });
     expect(checked.checked_at).not.toBeNull();
     expect(ctx.installer.installed).toEqual([]);
+  });
+
+  it('tells the browsers when a check moves the status, and says nothing when it finds the same one', async () => {
+    const ctx = await start();
+    const socket = new WebSocket(`${ctx.daemon.url.replace('http', 'ws')}/ws`, [WS_PROTOCOL, ctx.daemon.token]);
+    const heard: WsEvent[] = [];
+    socket.on('message', (raw) => heard.push(JSON.parse(String(raw))));
+    await new Promise((resolve) => socket.once('open', resolve));
+    const changes = () => heard.filter((event) => event.event === 'update.changed');
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 150));
+
+    await call(ctx).post('/updates/checks');
+    await settle();
+    expect(changes()).toHaveLength(1);
+    await call(ctx).post('/updates/checks');
+    await call(ctx).post('/updates/checks');
+    await settle();
+    expect(changes()).toHaveLength(1);
+
+    await autoUpdate(ctx, false);
+    newer(ctx.releases);
+    await call(ctx).post('/updates/checks');
+    await settle();
+    expect(changes().at(-1)).toMatchObject({ data: { status: UpdateStatus.Available } });
+    socket.close();
   });
 
   it('installs a newer release by itself with auto-update on, then restarts on it', async () => {

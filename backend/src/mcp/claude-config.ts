@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { type McpOAuthClient, McpScope, McpTransport } from '@ops-console/shared';
 import { z } from 'zod';
@@ -114,4 +114,83 @@ export async function readProject(repoPath: string): Promise<RegisteredServer[]>
   } catch {
     return [];
   }
+}
+
+/** Where an account's own config holds a server; project scope lives in the Repo, not here. */
+type ConfigScope = 'user' | 'local' | 'project';
+
+type RawConfig = {
+  mcpServers?: Record<string, unknown>;
+  projects?: Record<string, { mcpServers?: Record<string, unknown> }>;
+};
+
+/** Where `scope` keeps its servers in an account's config: the top level for `user`, the folder's entry for `local`. */
+function serversOf(
+  config: RawConfig,
+  scope: ConfigScope,
+  localDir: string,
+  create: boolean,
+): Record<string, unknown> | null {
+  if (scope === 'user') {
+    if (create) config.mcpServers ??= {};
+    return config.mcpServers ?? null;
+  }
+  if (create) {
+    config.projects ??= {};
+    config.projects[localDir] ??= {};
+    config.projects[localDir].mcpServers ??= {};
+  }
+  return config.projects?.[localDir]?.mcpServers ?? null;
+}
+
+async function readRaw(configDir: string): Promise<RawConfig | null> {
+  try {
+    const parsed = JSON.parse(await readFile(configFile(configDir), 'utf8')) as unknown;
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as RawConfig) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** One server's entry as the account's `.claude.json` holds it, for copying to another account. */
+export async function readEntry(
+  configDir: string,
+  localDir: string,
+  scope: ConfigScope,
+  name: string,
+): Promise<unknown | null> {
+  const config = await readRaw(configDir);
+  return (config && serversOf(config, scope, localDir, false)?.[name]) ?? null;
+}
+
+/**
+ * Sets one server's entry in an account's config, or removes it when `entry` is `null`, and leaves every other key as
+ * it was. The file is read, changed and renamed into place, as Claude Code writes it; a `claude mcp` call per
+ * account costs about a second. A file that does not read as JSON is left alone and the call throws.
+ */
+export async function writeEntry(
+  configDir: string,
+  localDir: string,
+  scope: ConfigScope,
+  name: string,
+  entry: unknown | null,
+): Promise<void> {
+  const file = configFile(configDir);
+  let config: RawConfig = {};
+  try {
+    config = JSON.parse(await readFile(file, 'utf8')) as RawConfig;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  if (entry === null) {
+    const servers = serversOf(config, scope, localDir, false);
+    if (!servers || !(name in servers)) return;
+    delete servers[name];
+  } else {
+    const servers = serversOf(config, scope, localDir, true);
+    if (servers) servers[name] = entry;
+  }
+  const temp = `${file}.${process.pid}.tmp`;
+  await writeFile(temp, JSON.stringify(config, null, 2), { mode: 0o600 });
+  await rename(temp, file);
 }

@@ -36,8 +36,12 @@ links to it for the CLI and the MCP helpers. The bundle is signed ad hoc and car
 same Node build the same app and keep its Keychain access and Full Disk Access. A new Node makes a new app. The
 first time a version starts, the previous version's app hands over the Keychain items it holds
 (`keychain-handover.mjs take`), and the new app writes them back itself, so macOS doesn't ask for the login password
-once per item. The handover runs in the background, about half a minute, and the daemon's Keychain reads wait for it.
-`keychain-owner.json` in the data folder names the app that holds the items.
+once per item. The handover runs in the background and reads the keys listed in `keychain-manifest.json` directly and
+in parallel; with no list yet, the previous app finds them by scanning the login keychain, once. A Keychain call waits
+only for its own item, and `keychain-handover.pending` in the data folder, which holds the pid of the start moving the
+items, makes a second start and `mcp-exec` wait for it. `keychain-owner.json` in the data folder names the app that
+holds the items. Installing only does `launchctl kickstart -k` on the loaded job, so launchd starts the daemon once;
+the plist sets `UV_THREADPOOL_SIZE=16` and a Node compile cache (`~/.ops-console/compile-cache`, cleared by the next install).
 
 `ops-console start` writes a LaunchAgent plist (`RunAtLoad`, `KeepAlive`) that runs `current/Ops Console.app` on
 `current/app/main.js`, so launchd starts the daemon at login and again if it stops. macOS lists it as Ops Console
@@ -54,19 +58,21 @@ To try an install before a release, `pnpm build`, `pnpm package` and a `checksum
 then `OPS_CONSOLE_RELEASE_URL=file://<repo>/out sh install.sh`. It replaces the installed app, since both use
 `~/.ops-console` and the same data folder.
 
-The daemon reads the newest GitHub release 10 seconds after start and every minute (`UpdatesModule`; a dev build never
-updates). The operator installs it, or the `auto_update` setting (on by default) does, and either waits for running
+The daemon reads the newest GitHub release 10 seconds after start and every 10 minutes (`UpdatesModule`; a dev build never
+updates), and sends `update.changed` only when what the panel shows has moved. The operator installs it, or the `auto_update` setting (on by default) does, and either waits for running
 agent runs to finish unless the operator picks now. To install one, it runs the installed version's `install.sh` with
 `OPS_CONSOLE_VERSION` and then stops itself. `KeepAlive` has launchd start it again from `current`, now on the new
 version. `update.json` in the data folder records the version this
 data last ran on, so the first start on a new one can say what it came from.
 
-`bin/ops-console` also starts two helpers from the daemon bundle: `mcp-exec`, the launcher that
-reads a stdio MCP Server's env vars from the Keychain, and `mcp-setup`, the Setup agent's MCP
-Server.
+`bin/ops-console` also starts two helpers: `mcp-exec`, the launcher that reads a stdio MCP Server's env vars from the
+Keychain, from `app/mcp-exec.js`, a bundle of the Keychain and the launcher alone, so a start does not load the daemon;
+and `mcp-setup`, the Setup agent's MCP Server, from the daemon bundle.
 
 On start the daemon takes the data folder lock, applies pending migrations in one transaction, runs
-start-up recovery, opens the port, starts the scheduler and writes the runtime file.
+start-up recovery, opens the port, starts the scheduler and writes the runtime file. On stop it logs how long each
+provider's `onModuleDestroy` took; Probes and `claude` calls under way are aborted, and a registration or sign-in still
+running after 5 seconds is left for the next start.
 
 ## Stack
 
@@ -98,12 +104,11 @@ agent Session.
 | `auth` | Session token check on every `/api` route |
 | `settings` | Registered keys with schema and default; `GET` and `PATCH /api/settings` |
 | `scheduler` | Jobs with slots; a missed slot runs once at start |
-| `keychain` | `set`, `get`, `delete` in the login Keychain, each bounded at 60 seconds and failing `keychain_timeout`; the handover of items from the previous version's app, which reads wait for (at most 90 seconds) and which refuses an app that fails its check (`codesign`, real path, bundle identifier); the Keychain wait shown after 10 |
+| `keychain` | `set`, `get`, `delete` in the login Keychain, each bounded at 60 seconds and failing `keychain_timeout`, two native calls at a time, values kept in memory; the handover of items from the previous version's app, per key, which a read waits for (at most 90 seconds) and which refuses an app that fails its check (`codesign`, real path, bundle identifier); the Keychain wait shown after 10, and a call made while it shows fails at once |
 | `claude-cli` | `claude mcp add`, `remove`, `list`, `get`, `login`, and Claude account sign-in in this browser or by link and code, parsed with Zod |
-| `mcp-client` | Calls one tool on a server registered with Claude Code, for a fixed read |
-| `mcp` | Servers registered in every Claude account (`.claude.json`) and a Repo's `.mcp.json`; Probe, add, edit, reconnect, disable, remove; the `mcp-exec` launcher |
+| `mcp` | Servers registered in every Claude account (`.claude.json`: `claude mcp` in the active account, the entry copied into the others) and a Repo's `.mcp.json`; Probe of the active account, kept 5 minutes (another account's when it becomes active, or after 10), after the Keychain handover; add, edit, reconnect (one server alone), disable, remove; the `mcp-exec` launcher |
 | `connectors` | The nine Connectors: browser sign-in through `pup`, `gh`, `glab`, `bkt`, `slashdocs` or an MCP Server; cancel a sign-in; the MCP Server each registers; Homebrew install of a missing CLI; checks; config |
-| `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks; secrets via Keychain |
+| `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks, through one kept server per Connection for 5 minutes; secrets via Keychain, `secret_stored` from memory |
 | `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash, worktrees and checkout; a branch list answers from the last fetch and asks origin after, once a minute at most, then sends `repo.branches_changed` when a branch came or went; each Repo's host and `owner/name` read again from `origin` at start and with the list, and mapped to the Git host's new owner when the host renames one (`origin` is never edited) |
 | `network` | The Network allowlist an agent run starts with: built-in hosts, the host of each Repo's `origin`, and the operator's own domains in `network_domains`; read, add and remove (`/network-allowlist`), registered by `agent` |
 | `agent` | Sessions and their kinds, Claude Agent SDK runs, the Run sandbox rules, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors; stop a run, edit the last message (file edits rewound), attachments, output files, the `save_file` tool and the `run_integration` tool (integration CLIs run in the daemon outside the sandbox); every tool call of a run kept with its time (`run_steps`) and each run's cost (`run_usage`); run health, slow and failure reasons, stages and time split read from them; the message queued behind a run; a skill message, which hands the run its skill in place of the Playbook |

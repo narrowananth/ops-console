@@ -14,6 +14,7 @@ import {
   type UpdateConnection,
 } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
+import { bounded } from '../common/bounded';
 import { ApiError, validationFailed } from '../common/errors';
 import { mergeConfig } from '../common/merge-config';
 import { connections, sessionConnections } from '../db/schema';
@@ -28,6 +29,9 @@ type Row = typeof connections.$inferSelect;
 /** The Connection's own secret. The launch env vars the server reads sit under the MCP server's Keychain key. */
 const secretKey = (id: string) => `connection:${id}`;
 
+/** A registration still queued this long after a stop is left for the next save. */
+const STOP_WAIT_MS = 5_000;
+
 /** The folder of launch config files shipped with the app. */
 export const LAUNCH_DIR = Symbol('LAUNCH_DIR');
 
@@ -41,6 +45,11 @@ export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
   private queue: Promise<void> = Promise.resolve();
   /** Names whose server is queued to go, so a Connection can take one again at once. */
   private readonly leaving = new Set<string>();
+  /** Ids of the Connections whose secret the Keychain holds. Every write to `connection:<id>` goes through this service. */
+  private readonly stored = new Set<string>();
+  private storedRead: Promise<void> | null = null;
+  /** Checks and tests the operator started, still running. */
+  private operatorWork = 0;
 
   constructor(
     @Inject(STORE) private readonly store: Store,
@@ -56,7 +65,15 @@ export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
-    await this.settled();
+    this.mcp.abortInFlight();
+    // A registration still queued after this is left: the Connection shows it as not registered until it is saved again.
+    await bounded(this.settled(), STOP_WAIT_MS);
+    await bounded(this.tester.close?.() ?? Promise.resolve(), STOP_WAIT_MS);
+  }
+
+  /** Whether an operator's check, test or registration is running, so scheduled checks can wait their turn. */
+  busy(): boolean {
+    return this.operatorWork > 0 || this.leaving.size > 0;
   }
 
   /** Resolves once every queued registration has run. */
@@ -65,11 +82,34 @@ export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async list(): Promise<{ data: Connection[]; meta: { next_cursor: null } }> {
-    return { data: await Promise.all(this.rows().map((row) => this.view(row))), meta: { next_cursor: null } };
+    await this.readStored();
+    return { data: this.rows().map((row) => this.view(row)), meta: { next_cursor: null } };
   }
 
   async get(id: string): Promise<Connection> {
+    await this.readStored();
     return this.view(this.row(id));
+  }
+
+  private async saveSecret(id: string, secret: string): Promise<void> {
+    await this.keychain.set(secretKey(id), secret);
+    this.stored.add(id);
+  }
+
+  /** Reads which Connections have a secret from the Keychain once; after that the writes keep the set. */
+  private readStored(): Promise<void> {
+    this.storedRead ??= Promise.all(
+      this.rows().map(async (row) => {
+        if ((await this.keychain.get(secretKey(row.id))) !== null) this.stored.add(row.id);
+      }),
+    ).then(
+      () => {},
+      (error: unknown) => {
+        this.storedRead = null;
+        throw error;
+      },
+    );
+    return this.storedRead;
   }
 
   async create(body: CreateConnection): Promise<Connection> {
@@ -79,7 +119,7 @@ export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
     if (await this.taken(body.name)) throw new ApiError(409, ErrorCode.Duplicate, `${body.name} is already used`);
     const access = this.accessFor(body.type, body.access, body.env);
     const id = crypto.randomUUID();
-    if (body.secret) await this.keychain.set(secretKey(id), body.secret);
+    if (body.secret) await this.saveSecret(id, body.secret);
     this.store.write((tx) => {
       tx.insert(connections)
         .values({ id, name: body.name, type: body.type, env: body.env, access, config: JSON.stringify(config) })
@@ -107,8 +147,9 @@ export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
     const secret = body.secret ?? (await this.keychain.get(secretKey(id)));
     if (body.secret !== undefined || body.config !== undefined) this.checkKey(row.type, config, secret);
     const changed = [body.name, body.access, body.config, body.secret].some((value) => value !== undefined);
-    if (body.secret) await this.keychain.set(secretKey(id), body.secret);
+    if (body.secret) await this.saveSecret(id, body.secret);
     if (changed) {
+      await this.tester.forget?.(id);
       if (name !== row.name) this.leave(row.name);
       this.sync(id, name, () => this.register(name, { type: row.type, config, secret, access }));
     }
@@ -127,6 +168,8 @@ export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
   async remove(id: string): Promise<void> {
     const row = this.row(id);
     await this.keychain.delete(secretKey(id));
+    this.stored.delete(id);
+    await this.tester.forget?.(id);
     this.store.write((tx) => {
       tx.delete(connections).where(eq(connections.id, id)).run();
     });
@@ -175,16 +218,27 @@ export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
     type: ConnectionType,
     rawConfig: Record<string, unknown>,
     secret: string | null,
+    pool?: string,
   ): Promise<ConnectionTestResult> {
     const config = this.validConfig(type, rawConfig);
     this.checkKey(type, config, secret);
     const launch = launchFor({ type, config, secret, access: AccessLevel.Read, launchDir: this.launchDir });
     if (!launch) return { status: HealthStatus.Fail, latency_ms: null, detail: `no MCP server for ${type}` };
-    return this.tester.run(type, launch);
+    return this.tester.run(type, launch, pool);
   }
 
-  /** The same test with the stored secret; records the result. */
-  async check(id: string) {
+  /** The same test with the stored secret; records the result. `scheduled` is the health watch, which waits for the operator's own work. */
+  async check(id: string, options: { scheduled?: boolean } = {}) {
+    if (options.scheduled) return this.checked(id);
+    this.operatorWork += 1;
+    try {
+      return await this.checked(id);
+    } finally {
+      this.operatorWork -= 1;
+    }
+  }
+
+  private async checked(id: string) {
     const row = this.row(id);
     const secret = await this.keychain.get(secretKey(id));
     // A server started with no password or key falls back to whatever the machine has, such as a Firebase CLI login,
@@ -197,7 +251,7 @@ export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
             detail:
               'The saved password or key for this Connection is missing from the Keychain. Edit it and enter it again.',
           }
-        : await this.test(row.type, JSON.parse(row.config) as Record<string, unknown>, secret);
+        : await this.test(row.type, JSON.parse(row.config) as Record<string, unknown>, secret, id);
     const at = new Date().toISOString();
     this.store.write((tx, emit) => {
       tx.update(connections)
@@ -261,7 +315,7 @@ export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
     return parsed.data;
   }
 
-  private async view(row: Row): Promise<Connection> {
+  private view(row: Row): Connection {
     return {
       id: row.id,
       name: row.name,
@@ -275,7 +329,7 @@ export class ConnectionsService implements OnModuleInit, OnModuleDestroy {
       last_checked_at: row.lastCheckedAt,
       created_at: row.createdAt,
       is_prod: row.env === ConnectionEnv.Prod,
-      secret_stored: (await this.keychain.get(secretKey(row.id))) !== null,
+      secret_stored: this.stored.has(row.id),
     };
   }
 

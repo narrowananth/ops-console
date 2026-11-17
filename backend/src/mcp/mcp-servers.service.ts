@@ -25,15 +25,17 @@ import {
 import { eq } from 'drizzle-orm';
 import { AccountsService } from '../accounts/accounts.service';
 import { CLAUDE_CLI, type ClaudeCli, type McpServerToAdd, type McpTarget } from '../claude-cli/claude-cli';
+import { bounded } from '../common/bounded';
 import { DATA_DIR } from '../common/data-dir';
 import { ApiError } from '../common/errors';
 import { disabledMcpServers, removedMcpServers } from '../db/schema';
 import { STORE, type Store } from '../db/store';
+import { KEYCHAIN_HANDOVER, type KeychainHandoverTracker } from '../keychain/handover-state';
 import { KEYCHAIN, type Keychain } from '../keychain/keychain';
 import { ReposService } from '../repos/repos.service';
-import { configFile, type RegisteredServer, readProject, readRegistered } from './claude-config';
+import { configFile, type RegisteredServer, readEntry, readProject, readRegistered, writeEntry } from './claude-config';
 import { launcherArgv, parseEnv, secretsKey, unwrapLauncher } from './launcher';
-import { PROBE, type Probe, type ProbedServer } from './probe';
+import { PROBE, type Probe, type ProbedServer, RETRY_WAIT_MS } from './probe';
 
 /** Names of the servers that back a Connection. Settings › Connections owns them; the MCP list leaves them out. */
 @Injectable()
@@ -57,13 +59,19 @@ export type McpConfig = {
   launcher: string;
 };
 
-/** A Probe result is reused this long. Reconnect and every registration change ask again. */
-export const PROBE_TTL_MS = 60_000;
+/** The active account's Probe is reused this long; a registration change asks again. */
+export const PROBE_TTL_MS = 5 * 60_000;
+/** Another account's kept Probe is read again after this long; it is first read when the account becomes active. */
+export const OTHER_PROBE_TTL_MS = 10 * 60_000;
+/** A Remove or registration still queued this long after a stop is left for the next start. */
+const STOP_WAIT_MS = 5_000;
 
 type Account = ReturnType<AccountsService['all']>[number];
+/** How a read treats the kept Probes: `fresh` runs a new one and waits, `lazy` runs one in the background when due, `kept` runs none. */
+type Read = 'fresh' | 'lazy' | 'kept';
 /** `servers` is `null` when Claude Code did not answer. */
 /** `asked` holds the names the config registered when the Probe ran, so a name Claude Code leaves out is not asked about again. */
-type Probed = { servers: Map<string, ProbedServer> | null; at: number; asked: Set<string> };
+type Probed = { servers: Map<string, ProbedServer> | null; at: number; asked: Set<string>; stale?: boolean };
 
 /** Words back into one line, quoting those `splitCommand` would split. */
 export function joinCommand(words: string[]): string {
@@ -95,6 +103,8 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   /** Bumped when the config changes, so a Probe started before then is not kept. */
   private generation = 0;
   private readonly logins = new Set<AbortController>();
+  /** Ends the Probes under way when the daemon stops. */
+  private readonly stopping = new AbortController();
 
   constructor(
     @Inject(STORE) private readonly store: Store,
@@ -105,22 +115,33 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     @Inject(MCP_CONFIG) private readonly config: McpConfig,
     @Inject(DATA_DIR) private readonly dataDir: string,
     @Inject(ConnectionServers) private readonly connectionServers: ConnectionServers,
+    @Inject(KEYCHAIN_HANDOVER) private readonly handover: KeychainHandoverTracker,
     @Optional() @Inject(ReposService) private readonly repos?: ReposService,
   ) {}
 
-  /** Starts the first Probes, so the list has readings before Settings opens. */
+  /** Starts the first Probe, so the list has a reading before Settings opens; it waits for the Keychain handover. */
   onApplicationBootstrap(): void {
     void this.servers().catch((error) => this.logger.warn(`first Probe failed: ${String(error)}`));
   }
 
   async onModuleDestroy(): Promise<void> {
-    for (const login of this.logins) login.abort();
-    await this.settled();
+    this.abortInFlight();
+    await bounded(this.settled(), STOP_WAIT_MS);
   }
 
-  async list(): Promise<{ data: McpServer[]; meta: { next_cursor: null; connection_server_count: number } }> {
+  /** Ends the Probes, sign-ins and `claude` calls under way; the daemon is stopping. */
+  abortInFlight(): void {
+    this.stopping.abort();
+    this.claude.stopAll();
+    for (const login of this.logins) login.abort();
+  }
+
+  /** `probe: false` answers from the kept readings alone and starts none. */
+  async list(
+    options: { probe?: boolean } = {},
+  ): Promise<{ data: McpServer[]; meta: { next_cursor: null; connection_server_count: number } }> {
     const hidden = this.connectionServers.names();
-    const all = await this.servers();
+    const all = await this.servers(options.probe === false);
     return {
       data: all.filter((server) => !hidden.has(server.name)),
       meta: { next_cursor: null, connection_server_count: all.filter((server) => hidden.has(server.name)).length },
@@ -190,19 +211,22 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     return this.checkLater(name);
   }
 
-  /** Reconnect: registers the server where it is missing, then asks every account again. */
+  /** Reconnect: registers the server where it is missing, then reads that one server in the active account. */
   async reconnect(name: string): Promise<McpServer> {
     const current = this.require(await this.servers(), name);
     if (!current.registered)
       throw new ApiError(409, ErrorCode.InvalidState, `${name} is removed; authenticate to add it again`);
-    const views = await this.views(false);
+    const views = await this.views('kept');
     const have = views.find((view) => view.entries.has(name))?.entries.get(name);
+    let changed = false;
     if (have) {
       for (const view of views) {
         if (view.entries.has(name)) continue;
         await this.claude.mcpAdd(toAdd(have), await this.target(view.account));
+        changed = true;
       }
     }
+    if (changed) this.invalidate();
     return this.checkLater(name);
   }
 
@@ -246,14 +270,12 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     return active ? [active] : [];
   }
 
-  /**
-   * Reads one server alone in the active account and sends `connection.checked`: a second or two, where `recheck`
-   * starts every server in every account.
-   */
+  /** Reads one server alone in the active account and sends `connection.checked`: a second or two. */
   async checkOne(name: string): Promise<McpServer> {
+    const started = Date.now();
     const [account] = this.activeAccounts();
     if (account) await this.probeServer(account, await this.localDir(), name);
-    return this.answered(name);
+    return this.answered(name, started);
   }
 
   /**
@@ -265,11 +287,11 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     if (!account) return [];
     const pick = (views: Awaited<ReturnType<typeof this.views>>) =>
       views.find((view) => view.account.id === account.id);
-    let view = pick(await this.views(false));
+    let view = pick(await this.views('kept'));
     // No kept reading yet: connect this one server alone, not every server in the account.
     if (view?.state(name)?.status === HealthStatus.Checking) {
       await this.probeServer(account, await this.localDir(), name);
-      view = pick(await this.views(false));
+      view = pick(await this.views('kept'));
     }
     return view?.state(name)?.status === HealthStatus.Auth ? [account] : [];
   }
@@ -277,8 +299,17 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   /** Reads one server in one account into the kept Probe: it connects alone in a second or two. */
   private async probeServer(account: Account, local: string, name: string): Promise<void> {
     const entry = (await readRegistered(account.configDir, local)).find((item) => item.name === name);
+    if (!entry) {
+      // A Repo's `.mcp.json` server loads only through that folder, after the operator approves it there.
+      for (const repo of this.repos?.folders() ?? []) {
+        const names = (await readProject(repo.path)).map((item) => item.name);
+        if (!names.includes(name)) continue;
+        await this.probeOf(account, repo.path, names, 'fresh');
+        return;
+      }
+    }
     if (!entry || (entry.transport !== McpTransport.Stdio && entry.url === null)) {
-      await this.probeOf(account, local, entry ? [name] : [], true);
+      await this.probeOf(account, local, entry ? [name] : [], 'fresh');
       return;
     }
     const key = `${account.configDir}\n${local}`;
@@ -301,12 +332,16 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
           };
     let read: ProbedServer;
     try {
-      read = await this.probe.one(account.configDir, server);
+      await this.handover.idle();
+      const signal = this.stopping.signal;
+      read = await this.probe.one(account.configDir, server, { signal });
       // A stdio server's first start may download it (`npx -y`) and close before it answers; the second start is warm.
       if (server.transport === 'stdio' && read.status === 'failed')
-        read = await this.probe.one(account.configDir, server);
+        read = await this.probe.one(account.configDir, server, { signal, waitMs: RETRY_WAIT_MS });
     } catch {
-      return;
+      // The daemon is stopping: nothing is kept.
+      if (this.stopping.signal.aborted) return;
+      read = { name, status: 'failed', error: 'Claude did not answer', tools: [] };
     }
     if (generation !== this.generation) return;
     this.keep(key, read);
@@ -321,7 +356,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
       return;
     }
     // The others read `checking` until the account's Probe answers.
-    this.probes.set(key, { servers: new Map([[read.name, read]]), at: 0, asked: new Set([read.name]) });
+    this.probes.set(key, { servers: new Map([[read.name, read]]), at: 0, asked: new Set([read.name]), stale: true });
   }
 
   /**
@@ -364,7 +399,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     return (await this.servers()).find((server) => server.name === name) ?? null;
   }
 
-  /** Probes again and sends `connection.checked`. */
+  /** Reads the one server again and sends `connection.checked`. */
   recheck(name: string): Promise<McpServer> {
     return this.checked(name);
   }
@@ -416,8 +451,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /** The server from the kept Probes, sent as `connection.checked` without waiting for a new Probe. */
-  private async answered(name: string): Promise<McpServer> {
-    const started = Date.now();
+  private async answered(name: string, started = Date.now()): Promise<McpServer> {
     const server = this.require(await this.servers(), name);
     this.store.write((_tx, emit) =>
       emit('connection.checked', {
@@ -516,16 +550,37 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     }
     const spec = await this.specOf(name, scope, transport, target, env, headers, oauth);
     const touched: Account[] = [];
+    const local = await this.localDir();
     try {
       if (Object.keys(env).length > 0) await this.saveEnv(name, env);
       else await this.dropEnv(name);
-      // Project scope is one `.mcp.json` in the Repo, written once; the others register in every account at once.
+      // Project scope is one `.mcp.json` in the Repo, written once. Otherwise the active account registers through
+      // `claude mcp`, and the others get the entry it wrote copied into their config files.
+      const [first, ...others] = repo ? this.accounts.all().slice(0, 1) : this.registrationOrder();
+      if (first) {
+        const where = await this.target(first, repo);
+        const old = previous?.find((item) => item.account.id === first.id) ?? (repo ? previous?.[0] : undefined);
+        if (old) await this.claude.mcpRemove(name, old.entry.scope, where);
+        await this.claude.mcpAdd(spec, where);
+        touched.push(first);
+      }
+      const written = first && !repo ? await readEntry(first.configDir, local, spec.scope, name) : null;
       const results = await Promise.allSettled(
-        (repo ? this.accounts.all().slice(0, 1) : this.accounts.all()).map(async (account) => {
-          const where = await this.target(account, repo);
-          const old = previous?.find((item) => item.account.id === account.id) ?? (repo ? previous?.[0] : undefined);
-          if (old) await this.claude.mcpRemove(name, old.entry.scope, where);
-          await this.claude.mcpAdd(spec, where);
+        others.map(async (account) => {
+          const old = previous?.find((item) => item.account.id === account.id);
+          if (written === null) {
+            const where = await this.target(account);
+            if (old) await this.claude.mcpRemove(name, old.entry.scope, where);
+            await this.claude.mcpAdd(spec, where);
+          } else {
+            try {
+              if (old && old.entry.scope !== spec.scope)
+                await writeEntry(account.configDir, local, old.entry.scope, name, null);
+              await writeEntry(account.configDir, local, spec.scope, name, written);
+            } catch {
+              throw new ApiError(502, ErrorCode.UpstreamFailed, `could not write ${account.label}'s MCP config`);
+            }
+          }
           touched.push(account);
         }),
       );
@@ -535,7 +590,11 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
       // A new server leaves no trace (Behavior 5); an edit that fails part way is for the operator to retry.
       if (previous === null) {
         for (const account of touched) {
-          await this.claude.mcpRemove(name, spec.scope, await this.target(account, repo)).catch(() => {});
+          if (account.id === touched[0]?.id) {
+            await this.claude.mcpRemove(name, spec.scope, await this.target(account, repo)).catch(() => {});
+          } else {
+            await writeEntry(account.configDir, local, spec.scope, name, null).catch(() => {});
+          }
         }
         await this.dropEnv(name);
       }
@@ -543,6 +602,13 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     } finally {
       this.invalidate();
     }
+  }
+
+  /** Every account, the active one first: it is registered through `claude mcp` and the rest copy its entry. */
+  private registrationOrder(): Account[] {
+    const all = this.accounts.all();
+    const active = all.find((account) => account.id === this.accounts.activeId());
+    return active ? [active, ...all.filter((account) => account !== active)] : all;
   }
 
   private async specOf(
@@ -699,22 +765,25 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /**
-   * Every account with what its config registers and what the Probe reports. `fresh` waits for a new Probe;
-   * otherwise the last one is used as it is and a stale or missing one is asked again in the background.
+   * Every account with what its config registers and what the Probe reports. The last Probe is used as it is. `lazy`
+   * asks again in the background when the active account's is due or another's is old; `kept` starts none.
    */
-  private async views(fresh: boolean) {
+  private async views(read: Read) {
     const local = await this.localDir();
+    const active = this.activeAccounts()[0]?.id;
     return Promise.all(
       this.accounts.all().map(async (account) => {
         const entries = new Map((await readRegistered(account.configDir, local)).map((entry) => [entry.name, entry]));
-        const probed = account.signedIn ? await this.probeOf(account, local, [...entries.keys()], fresh) : null;
+        const probed = account.signedIn ? await this.probeOf(account, local, [...entries.keys()], read) : null;
         return {
           account,
           entries,
           probed,
-          /** This account's reading of one server; `null` when the account does not register it or is signed out. */
+          /** This account's reading of one server; `null` when the account does not register it, is signed out or has not been read. */
           state(name: string): Reading | null {
             if (!entries.has(name) || probed === null) return null;
+            // Another account is read when it becomes active: until then it says nothing.
+            if (probed === undefined && account.id !== active) return null;
             if (probed === undefined || !probed.asked.has(name)) {
               return { status: HealthStatus.Checking, detail: null, tools: [] };
             }
@@ -725,26 +794,33 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     );
   }
 
-  /** The kept Probe, or with `fresh` a new one; `undefined` when none has run yet and one is on its way. */
-  private async probeOf(account: Account, cwd: string, names: string[], fresh: true): Promise<Probed>;
-  private async probeOf(account: Account, cwd: string, names: string[], fresh: boolean): Promise<Probed | undefined>;
-  private async probeOf(account: Account, cwd: string, names: string[], fresh: boolean): Promise<Probed | undefined> {
+  /** The kept Probe, or with `fresh` a new one; `undefined` when none has run yet. `lazy` starts one in the background when due. */
+  private async probeOf(account: Account, cwd: string, names: string[], read: 'fresh'): Promise<Probed>;
+  private async probeOf(account: Account, cwd: string, names: string[], read: Read): Promise<Probed | undefined>;
+  private async probeOf(account: Account, cwd: string, names: string[], read: Read): Promise<Probed | undefined> {
     const key = `${account.configDir}\n${cwd}`;
-    if (fresh) return this.runProbe(key, account, cwd, names);
+    if (read === 'fresh') return this.runProbe(key, account, cwd, names);
     const kept = this.probes.get(key);
-    // A server added outside the console after the Probe ran is not in it: ask again (Behavior 14).
-    const added = kept && names.some((name) => !kept.asked.has(name));
-    if (!kept || added || Date.now() - kept.at >= PROBE_TTL_MS) {
-      void this.runProbe(key, account, cwd, names).catch(() => {});
-    }
+    if (read === 'lazy' && this.due(account, kept, names)) void this.runProbe(key, account, cwd, names).catch(() => {});
     return kept;
+  }
+
+  /**
+   * The active account is read when it has no Probe, a server is missing from it (added outside the console,
+   * Behavior 14), the config changed, or it is `PROBE_TTL_MS` old. Another account is read again only once a Probe it
+   * has is `OTHER_PROBE_TTL_MS` old: its first one comes when it becomes active.
+   */
+  private due(account: Account, kept: Probed | undefined, names: string[]): boolean {
+    const age = kept ? Date.now() - kept.at : Number.POSITIVE_INFINITY;
+    if (account.id !== this.activeAccounts()[0]?.id) return kept !== undefined && age >= OTHER_PROBE_TTL_MS;
+    return !kept || kept.stale === true || names.some((name) => !kept.asked.has(name)) || age >= PROBE_TTL_MS;
   }
 
   /** The config changed: a Probe under way is not kept, and the kept ones stay shown until new ones answer. */
   private invalidate(): void {
     this.generation += 1;
     this.probing.clear();
-    for (const [key, probed] of this.probes) this.probes.set(key, { ...probed, at: 0 });
+    for (const [key, probed] of this.probes) this.probes.set(key, { ...probed, stale: true });
   }
 
   /** One Probe per account and folder at a time; a changed reading sends `connection.checked`. */
@@ -755,7 +831,10 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     const run = (async () => {
       let result: Probed;
       try {
-        const turn = this.probeTurn.then(() => this.probe.run(account.configDir, cwd));
+        const turn = this.probeTurn.then(async () => {
+          await this.handover.idle();
+          return this.probe.run(account.configDir, cwd, this.stopping.signal);
+        });
         this.probeTurn = turn.catch(() => {});
         const servers = await turn;
         result = {
@@ -801,7 +880,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /** The servers in each Repo's `.mcp.json`, with each signed-in account's reading. A name a user or local server holds wins. */
-  private async projectItems(fresh: boolean) {
+  private async projectItems(read: Read) {
     const accounts = this.accounts.all();
     const items: { name: string; entry: RegisteredServer; repoId: string; file: string; states: Reading[] }[] = [];
     for (const repo of this.repos?.folders() ?? []) {
@@ -810,7 +889,9 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
       for (const entry of entries) {
         const states: Reading[] = [];
         for (const account of accounts.filter((item) => item.signedIn)) {
-          const probed = await this.probeOf(account, repo.path, names, fresh);
+          const probed = await this.probeOf(account, repo.path, names, read);
+          // Another account is read when it becomes active.
+          if (probed === undefined && account.id !== this.activeAccounts()[0]?.id) continue;
           states.push(
             probed === undefined || !probed.asked.has(entry.name)
               ? { status: HealthStatus.Checking, detail: null, tools: [] }
@@ -830,14 +911,15 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     return items;
   }
 
-  /** Every server as the kept Probes read it; `fresh` waits for new ones. */
-  private async servers(fresh = false): Promise<McpServer[]> {
+  /** Every server as the kept Probes read it; `peek` starts no Probe. */
+  private async servers(peek = false): Promise<McpServer[]> {
+    const read: Read = peek ? 'kept' : 'lazy';
     // What a Remove has done is read before anything is awaited, as the config below is. A check that began before a
     // Remove and ends after it sees the server in the config and no longer leaving: read at its end, the Removed row
     // would pass for a server added again outside the console and be dropped.
     const leaving = new Set(this.leaving);
     const removed = this.store.db.select().from(removedMcpServers).all();
-    const views = await this.views(fresh);
+    const views = await this.views(read);
     const disabled = new Set(
       this.store.db
         .select()
@@ -848,7 +930,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     const userNames = [...new Set(views.flatMap((view) => [...view.entries.keys()]))].filter(
       (name) => !leaving.has(name),
     );
-    const project = (await this.projectItems(fresh)).filter(
+    const project = (await this.projectItems(read)).filter(
       (item) => !userNames.includes(item.name) && !leaving.has(item.name),
     );
     const names = [...userNames, ...project.map((item) => item.name)];
@@ -937,29 +1019,16 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     return out;
   }
 
-  /** The server as it reads now, with a new Probe in the background; `connection.checked` reports it. */
+  /** The server as it reads now, with a read of that one server in the background; `connection.checked` reports it. */
   private async checkLater(name: string): Promise<McpServer> {
-    this.invalidate();
     void this.checked(name).catch((error) => this.logger.warn(`checking ${name} failed: ${String(error)}`));
     return this.get(name);
   }
 
-  /** A new Probe in every account, `connection.checked`, and the server as it reads now. */
+  /** Reads the one server in the active account, sends `connection.checked`, and answers as it reads now. */
   private async checked(name: string): Promise<McpServer> {
-    const started = Date.now();
-    this.invalidate();
-    const servers = await this.servers(true);
-    const server = this.require(servers, name);
-    this.store.write((_tx, emit) =>
-      emit('connection.checked', {
-        target: CheckTarget.McpServer,
-        id: name,
-        status: server.status,
-        detail: server.status_detail,
-        latency_ms: Date.now() - started,
-      }),
-    );
-    return server;
+    this.require(await this.servers(true), name);
+    return this.checkOne(name);
   }
 
   private require(servers: McpServer[], name: string): McpServer {

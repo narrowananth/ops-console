@@ -148,6 +148,8 @@ describe('connecting', () => {
       'the sign-in',
     );
     expect(ctx.tools.brewed).toEqual(['gh', 'github-mcp-server']);
+    // One `brew install` for both.
+    expect(ctx.tools.brewCalls).toEqual([['gh', 'github-mcp-server']]);
     // The account reads connected first; the server registers right after.
     const server = await until(
       () => mcpServer(ctx, 'github'),
@@ -368,7 +370,7 @@ describe('connecting', () => {
     }
   });
 
-  it('reads Slack connected while only an account that is not active needs its sign-in', async () => {
+  it('reads Slack connected while only an account that is not active needs its sign-in, and reads that account only once active', async () => {
     const ctx = await start();
     await api(ctx.daemon).post('/connectors/slack/connect', {});
     await until(
@@ -378,13 +380,16 @@ describe('connecting', () => {
     );
     const [, other] = ctx.dirs as [string, string];
     ctx.probe.set(other, 'slack', { status: 'needs-auth' });
-    const runs = ctx.probe.runs;
+    const [active] = ctx.dirs as [string, string];
+    const asked = ctx.probe.asked.length;
     await api(ctx.daemon).post('/mcp-servers/slack/checks', {});
     await until(
-      async () => ctx.probe.runs,
-      (count) => count >= runs + 2,
-      'the check in both accounts',
+      async () => ctx.probe.asked.slice(asked),
+      (found) => found.length > 0,
+      'the check of the one server',
     );
+    // Only the active account is asked, and only for that server.
+    expect(new Set(ctx.probe.asked.slice(asked))).toEqual(new Set([active]));
     expect(await one(ctx, 'slack')).toMatchObject({ status: 'ok', status_detail: null });
   });
 
