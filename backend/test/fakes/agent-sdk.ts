@@ -417,7 +417,7 @@ export class FakeAgentSdk implements AgentSdk {
     });
   }
 
-  /** `Bash(<prefix>:*)` and exact tool names, as Claude Code reads deny rules. */
+  /** `Bash(<prefix>:*)`, tool names and a trailing `*` on a tool name, as Claude Code reads deny rules. */
   private disallowed(rules: string[], tool: string, input: Record<string, unknown>): boolean {
     return rules.some((rule) => {
       const bash = /^Bash\((.+):\*\)$/.exec(rule);
@@ -428,7 +428,7 @@ export class FakeAgentSdk implements AgentSdk {
             .trim()
             .startsWith(bash[1] ?? '')
         );
-      return rule === tool;
+      return rule.endsWith('*') && !rule.startsWith('Bash(') ? tool.startsWith(rule.slice(0, -1)) : rule === tool;
     });
   }
 

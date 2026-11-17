@@ -281,6 +281,13 @@
       "when": 1794900549908,
       "tag": "0039_perf_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1794943025451,
+      "tag": "0040_connector_google",
+      "breakpoints": true
     }
   ]
 }

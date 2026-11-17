@@ -365,7 +365,10 @@ A short Agent SDK session that reads which MCP Servers connect and which tools t
 stops before the model runs.
 
 **Connector**:
-An outside service the operator signs in to: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs. It holds the sign-in and registers the service's MCP Server when it has one. Each is reached through a CLI or an MCP Server and is connected, checked and disconnected in Integrations, the one place a service is connected.
+An outside service the operator signs in to: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets, Google Drive. It holds the sign-in and registers the service's MCP Server when it has one. Each is reached through a CLI or an MCP Server and is connected, checked and disconnected in Integrations, the one place a service is connected. A Connector whose provider ships no OAuth client a public repo can bundle asks the operator for their own client first.
+
+**Google OAuth client**:
+The OAuth client the operator creates in their own Google Cloud project, entered once and shared by Google Docs, Google Sheets and Google Drive. Its ID is config and its secret is in the Keychain; both go when the last of the three is disconnected.
 
 **Setup agent**:
 Claude in a terminal in Setup agent that adds Connections, remote MCP Servers and Connectors

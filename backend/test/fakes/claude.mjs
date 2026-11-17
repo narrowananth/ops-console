@@ -173,6 +173,9 @@ To remove this server, run: claude mcp remove "sentry" -s local
           !['--scope', '--transport', '--header', '--client-id', '--callback-port'].includes(options[at - 1]),
       );
       const name = positional[0];
+      // The OAuth client secret arrives in the environment and is kept outside `.claude.json`, as Claude Code does.
+      if (process.env.MCP_CLIENT_SECRET)
+        writeFileSync(path.join(dir, `fake-mcp-secret-${name}.txt`), process.env.MCP_CLIENT_SECRET);
       // As Claude Code keeps a pre-registered OAuth app.
       const oauth = flag('--client-id')
         ? { oauth: { clientId: flag('--client-id'), callbackPort: Number(flag('--callback-port')) } }

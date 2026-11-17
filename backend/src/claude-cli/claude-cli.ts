@@ -36,6 +36,8 @@ export type McpServerToAdd = (
       url: string;
       headers: Record<string, string>;
       oauth?: McpOAuthClient | null;
+      /** The OAuth client's secret: handed over in the environment, which Claude Code keeps in its own credential store. */
+      clientSecret?: string | null;
     }
 ) & { scope: McpScope };
 
@@ -132,7 +134,14 @@ export class ClaudeCli {
             server.name,
             server.url,
           ];
-    await this.exec(['mcp', 'add', '--scope', server.scope, ...args], 'mcp add', target);
+    const secret = server.transport === 'stdio' ? null : (server.clientSecret ?? null);
+    await this.exec(
+      ['mcp', 'add', '--scope', server.scope, ...args],
+      'mcp add',
+      target,
+      [0],
+      secret === null ? undefined : { MCP_CLIENT_SECRET: secret },
+    );
   }
 
   async mcpRemove(name: string, scope: McpScope, target: McpTarget): Promise<void> {
@@ -230,11 +239,12 @@ export class ClaudeCli {
     subcommand: string,
     { configDir, cwd }: McpTarget,
     exitCodes = [0],
+    extraEnv?: Record<string, string>,
   ): Promise<string> {
     try {
       const { stdout } = await run(this.bin, args, {
         maxBuffer: 10 * 1024 * 1024,
-        env: claudeEnv(configDir),
+        env: extraEnv ? { ...claudeEnv(configDir), ...extraEnv } : claudeEnv(configDir),
         cwd,
         signal: this.stopping.signal,
       });

@@ -12,9 +12,32 @@ export enum ConnectorId {
   Sentry = 'sentry',
   Shopify = 'shopify',
   Slashdocs = 'slashdocs',
+  GoogleDocs = 'google_docs',
+  GoogleSheets = 'google_sheets',
+  GoogleDrive = 'google_drive',
 }
 
 export const CONNECTOR_ORDER: ConnectorId[] = Object.values(ConnectorId);
+
+/** The Connectors that share one Google OAuth client. */
+export const GOOGLE_CONNECTORS: ConnectorId[] = [
+  ConnectorId.GoogleDocs,
+  ConnectorId.GoogleSheets,
+  ConnectorId.GoogleDrive,
+];
+
+export const isGoogleConnector = (id: ConnectorId): boolean => GOOGLE_CONNECTORS.includes(id);
+
+/** All three Google servers sign in on this port, so the one redirect URI the operator adds to the client is this one. */
+export const GOOGLE_CALLBACK_PORT = 3119;
+export const GOOGLE_REDIRECT_URI = `http://localhost:${GOOGLE_CALLBACK_PORT}/callback`;
+
+/** The two APIs to enable in the operator's Google Cloud project: the product's own, then its MCP API. */
+export const GOOGLE_APIS: Record<string, [string, string]> = {
+  [ConnectorId.GoogleDocs]: ['docs.googleapis.com', 'docsmcp.googleapis.com'],
+  [ConnectorId.GoogleSheets]: ['sheets.googleapis.com', 'sheetsmcp.googleapis.com'],
+  [ConnectorId.GoogleDrive]: ['drive.googleapis.com', 'drivemcp.googleapis.com'],
+};
 
 export const CONNECTOR_NAMES: Record<ConnectorId, string> = {
   [ConnectorId.Datadog]: 'Datadog',
@@ -26,6 +49,9 @@ export const CONNECTOR_NAMES: Record<ConnectorId, string> = {
   [ConnectorId.Sentry]: 'Sentry',
   [ConnectorId.Shopify]: 'Shopify',
   [ConnectorId.Slashdocs]: 'slashdocs',
+  [ConnectorId.GoogleDocs]: 'Google Docs',
+  [ConnectorId.GoogleSheets]: 'Google Sheets',
+  [ConnectorId.GoogleDrive]: 'Google Drive',
 };
 
 /** How the console reaches the service (ADR 0005). */
@@ -39,6 +65,9 @@ export const CONNECTOR_VIA: Record<ConnectorId, string> = {
   [ConnectorId.Sentry]: 'Sentry MCP',
   [ConnectorId.Shopify]: 'Shopify Dev MCP',
   [ConnectorId.Slashdocs]: 'slashdocs CLI',
+  [ConnectorId.GoogleDocs]: 'Google Docs MCP',
+  [ConnectorId.GoogleSheets]: 'Google Sheets MCP',
+  [ConnectorId.GoogleDrive]: 'Google Drive MCP',
 };
 
 /**
@@ -71,6 +100,22 @@ export const CONNECTOR_SERVERS: Partial<
   },
   [ConnectorId.Sentry]: { name: 'sentry', transport: McpTransport.Http, target: 'https://mcp.sentry.dev/mcp' },
   [ConnectorId.Shopify]: { name: 'shopify', transport: McpTransport.Stdio, target: 'npx -y @shopify/dev-mcp@latest' },
+  // The operator's own OAuth client signs these in (`oauth` is added at Connect from the saved client ID).
+  [ConnectorId.GoogleDocs]: {
+    name: 'google-docs',
+    transport: McpTransport.Http,
+    target: 'https://docsmcp.googleapis.com/mcp/v1',
+  },
+  [ConnectorId.GoogleSheets]: {
+    name: 'google-sheets',
+    transport: McpTransport.Http,
+    target: 'https://sheetsmcp.googleapis.com/mcp/v1',
+  },
+  [ConnectorId.GoogleDrive]: {
+    name: 'google-drive',
+    transport: McpTransport.Http,
+    target: 'https://drivemcp.googleapis.com/mcp/v1',
+  },
 };
 
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:MM');
@@ -106,6 +151,10 @@ export const connectorConfigSchemas = {
   [ConnectorId.Shopify]: z.strictObject({}),
   /** The slashdocs server to sign in to; blank uses the CLI's active one. */
   [ConnectorId.Slashdocs]: z.strictObject({ server: z.string() }),
+  /** The ID of the Google OAuth client; blank until the operator saves one. Set only through `PUT /connectors/google/client`. */
+  [ConnectorId.GoogleDocs]: z.strictObject({ client_id: z.string() }),
+  [ConnectorId.GoogleSheets]: z.strictObject({ client_id: z.string() }),
+  [ConnectorId.GoogleDrive]: z.strictObject({ client_id: z.string() }),
 } satisfies Record<ConnectorId, z.ZodType>;
 
 export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknown>> = {
@@ -133,6 +182,9 @@ export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknow
   [ConnectorId.Sentry]: { org: null },
   [ConnectorId.Shopify]: {},
   [ConnectorId.Slashdocs]: { server: '' },
+  [ConnectorId.GoogleDocs]: { client_id: '' },
+  [ConnectorId.GoogleSheets]: { client_id: '' },
+  [ConnectorId.GoogleDrive]: { client_id: '' },
 };
 
 export const connectorSchema = z.object({
@@ -155,6 +207,13 @@ export const connectorListSchema = z.object({
   data: z.array(connectorSchema),
   meta: z.object({ next_cursor: z.null() }),
 });
+
+export const googleClientSchema = z.object({
+  client_id: z.string().trim().min(1),
+  client_secret: z.string().trim().min(1),
+});
+
+export type GoogleClientInput = z.infer<typeof googleClientSchema>;
 
 export const updateConnectorSchema = z.object({ config: z.record(z.string(), z.unknown()) });
 

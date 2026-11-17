@@ -361,12 +361,14 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
 
   /**
    * Registers the server a Connector rides on when it is missing or was removed, and turns it on: Connect asks for it.
-   * With a changed `env`, a registered one is registered again, so a new token takes its place. True when it was
-   * registered just now.
+   * With a changed `env`, a registered one is registered again, so a new token takes its place; so is one given an
+   * OAuth client `clientSecret`, which the entry in Claude Code's config does not hold. True when it was registered
+   * just now.
    */
   async ensureRegistered(
     spec: { name: string; transport: McpTransport; target: string; oauth?: McpOAuthClient },
     env?: Record<string, string>,
+    clientSecret?: string,
   ): Promise<boolean> {
     const found = (await this.servers()).find((server) => server.name === spec.name);
     if (found && !found.enabled) {
@@ -378,7 +380,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     // A server registered before it had its OAuth app signs in with dynamic registration, which it refuses.
     const oauth = spec.oauth ?? null;
     const sameOAuth = previous.every((item) => JSON.stringify(item.entry.oauth) === JSON.stringify(oauth));
-    if (found?.registered && same && sameOAuth) return false;
+    if (found?.registered && same && sameOAuth && clientSecret === undefined) return false;
     await this.register(
       spec.name,
       McpScope.User,
@@ -389,6 +391,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
       previous.length > 0 ? previous : null,
       null,
       oauth,
+      clientSecret ?? null,
     );
     this.dropRemoved(spec.name);
     return true;
@@ -541,6 +544,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     previous: { account: Account; entry: RegisteredServer }[] | null,
     repo: { id: string; path: string } | null = null,
     oauth: McpOAuthClient | null = null,
+    clientSecret: string | null = null,
   ): Promise<void> {
     if (transport === McpTransport.Stdio && Object.keys(headers).length > 0) {
       throw new ApiError(400, ErrorCode.ValidationFailed, 'headers are for http and sse servers');
@@ -548,7 +552,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     if (transport !== McpTransport.Stdio && Object.keys(env).length > 0) {
       throw new ApiError(400, ErrorCode.ValidationFailed, 'env vars are for stdio servers');
     }
-    const spec = await this.specOf(name, scope, transport, target, env, headers, oauth);
+    const spec = await this.specOf(name, scope, transport, target, env, headers, oauth, clientSecret);
     const touched: Account[] = [];
     const local = await this.localDir();
     try {
@@ -564,7 +568,9 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
         await this.claude.mcpAdd(spec, where);
         touched.push(first);
       }
-      const written = first && !repo ? await readEntry(first.configDir, local, spec.scope, name) : null;
+      // The secret lives in each account's own Claude Code store, not in the entry, so every account adds it itself.
+      const written =
+        first && !repo && clientSecret === null ? await readEntry(first.configDir, local, spec.scope, name) : null;
       const results = await Promise.allSettled(
         others.map(async (account) => {
           const old = previous?.find((item) => item.account.id === account.id);
@@ -619,6 +625,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     env: Record<string, string>,
     headers: Record<string, string>,
     oauth: McpOAuthClient | null = null,
+    clientSecret: string | null = null,
   ): Promise<McpServerToAdd> {
     if (transport === McpTransport.Stdio) {
       const [command, ...args] = splitCommand(target);
@@ -632,7 +639,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     } catch {
       throw new ApiError(400, ErrorCode.ValidationFailed, 'an http or sse server needs a URL');
     }
-    return { name, scope, transport, url: target, headers, oauth };
+    return { name, scope, transport, url: target, headers, oauth, clientSecret };
   }
 
   private async mergedEnv(name: string, changes: Record<string, string>): Promise<Record<string, string>> {

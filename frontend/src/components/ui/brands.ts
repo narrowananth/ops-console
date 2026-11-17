@@ -79,6 +79,24 @@ export const BRANDS = {
     // A slash over a page: the slashdocs mark, drawn here.
     path: 'M6 2h8.5L19 6.5V22H6V2zm7.5 1.5V7.5h4L13.5 3.5zM14.3 9.5h1.9l-4.5 10h-1.9l4.5-10z',
   },
+  googledocs: {
+    title: 'Google Docs',
+    hex: '#4285F4',
+    // A page with three lines of text, drawn here: the lines are counter-wound, so they cut through the page.
+    path: 'M6 2h8.5L19 6.5V22H6V2zm7.5 1.5V7.5h4L13.5 3.5zM8.5 11v1.4h7V11zM8.5 14.2v1.4h7v-1.4zM8.5 17.4v1.4h4.5v-1.4z',
+  },
+  googlesheets: {
+    title: 'Google Sheets',
+    hex: '#0F9D58',
+    // A page with a grid of cells, drawn here.
+    path: 'M6 2h8.5L19 6.5V22H6V2zm7.5 1.5V7.5h4L13.5 3.5zM8.5 11v2h2.8v-2zM12.7 11v2h2.8v-2zM8.5 14.4v2h2.8v-2zM12.7 14.4v2h2.8v-2zM8.5 17.8v2h2.8v-2zM12.7 17.8v2h2.8v-2z',
+  },
+  googledrive: {
+    title: 'Google Drive',
+    hex: '#F4B400',
+    // Three slanted bars in a triangle, drawn here.
+    path: 'M8.3 3h7.4l6.3 11h-7.4zM7.2 4.4 1 15.2l3.7 6.4 6.2-10.8zM6.3 21.6h12.2l3.5-6.4H9.8z',
+  },
   claude: {
     title: 'Claude',
     hex: '#D97757',
