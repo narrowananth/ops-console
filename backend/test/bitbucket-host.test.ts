@@ -75,6 +75,16 @@ describe('Bitbucket through bkt', () => {
     }
   });
 
+  it('follows the next page of a repository’s pull requests', async () => {
+    process.env.BKT_PAGED = '1';
+    try {
+      const prs = await new BitbucketHost(bkt).list('acme/orders', PrState.Open);
+      expect(prs.map((pr) => pr.number)).toEqual([1, 3]);
+    } finally {
+      delete process.env.BKT_PAGED;
+    }
+  });
+
   it('fails as upstream_failed when bkt does', async () => {
     const host = new BitbucketHost(bkt);
     await expect(host.list('acme/missing', PrState.Open)).rejects.toMatchObject({ code: 'upstream_failed' });

@@ -333,6 +333,12 @@ describe('Check reply', () => {
     script(ctx, stepTurns(PlaybookTrigger.CheckReply));
     ctx.daemon.sdk.script({ text: verdict('fixed', 'Fixed.') });
     const second = await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/reply-checks`, { comment_id: 'c1' });
+    // The earlier copy goes after the response, which does not wait for it.
+    await until(
+      () => ctx.store.db.select().from(prReplyChecks).where(eq(prReplyChecks.id, first.body.data.id)).get(),
+      (earlier) => earlier?.scratchPath === null,
+      'the earlier scratch copy to go',
+    );
     expect(existsSync(kept)).toBe(false);
     const earlier = ctx.store.db.select().from(prReplyChecks).where(eq(prReplyChecks.id, first.body.data.id)).get();
     expect(earlier).toMatchObject({ scratchPath: null, canRetry: false });

@@ -96,3 +96,33 @@ describe('a scratch copy the daemon’s git runs in', () => {
     await expect(git.requireWorktree(dir, repo)).rejects.toThrow(GitFailed);
   });
 });
+
+describe('the daemon’s git reads and fetches', () => {
+  it('reads a status git cannot give as a failure, not as a clean tree', async () => {
+    const git = new Git();
+    const folder = await tempDir('ops-console-not-a-repo-');
+    await expect(git.isDirty(folder)).rejects.toBeInstanceOf(GitFailed);
+  });
+
+  it('shares one fetch between callers that ask at once, and fetches several branches in one go', async () => {
+    const repo = await makeRepo();
+    const origin = path.join(await tempDir('ops-console-origin-'), 'origin.git');
+    sh(path.dirname(origin), 'init', '-q', '--bare', '-b', 'main', origin);
+    sh(repo, 'remote', 'add', 'origin', origin);
+    sh(repo, 'push', '-q', 'origin', 'main');
+    const git = new Git();
+    const [first, second] = await Promise.all([git.remoteHead(repo, 'main'), git.remoteHead(repo, 'main')]);
+    expect(first).toBe(second);
+    expect(first).toMatch(/^[0-9a-f]{40}$/);
+    // A branch pushed after a fetch shows only to a caller that does not accept the last fetch.
+    sh(repo, 'switch', '-q', '-c', 'topic');
+    await writeFile(path.join(repo, 'b.txt'), 'two\n');
+    sh(repo, 'add', '.');
+    sh(repo, 'commit', '-q', '-m', 'second');
+    sh(repo, 'push', '-q', 'origin', 'topic');
+    const heads = await git.remoteHeads(repo, ['main', 'topic']);
+    expect([...heads.keys()]).toEqual(['main', 'topic']);
+    expect(heads.get('topic')).toBe(sh(repo, 'rev-parse', 'topic').toString().trim());
+    await expect(git.remoteHeads(repo, ['main', 'missing'])).rejects.toBeInstanceOf(GitFailed);
+  });
+});

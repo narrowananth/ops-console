@@ -7,20 +7,16 @@ import {
   ErrorCode,
   GitHost,
   type OpenPullRequest,
-  PR_DESCRIPTION_RULE,
   PrState,
   type PullRequestDraft,
-  RunPurpose,
   SessionKind,
   type SessionPullRequest,
 } from '@ops-console/shared';
 import { and, eq, isNull } from 'drizzle-orm';
-import { z } from 'zod';
 import { ActionLogService } from '../action-log/action-log.service';
 import { type OpenPullRequestInput, type PullRequestOpener } from '../agent/pull-request-tool';
 import { AgentRuntime } from '../agent/runtime';
 import { SessionsService } from '../agent/sessions.service';
-import { parseAgentJson } from '../common/agent-json';
 import { ApiError, validationFailed } from '../common/errors';
 import { ConnectorsService } from '../connectors/connectors.service';
 import { repos } from '../db/schema';
@@ -35,8 +31,6 @@ const CONNECTORS: Partial<Record<GitHost, ConnectorId>> = {
   [GitHost.Gitlab]: ConnectorId.Gitlab,
   [GitHost.Bitbucket]: ConnectorId.Bitbucket,
 };
-
-const draftAnswerSchema = z.object({ title: z.string(), description: z.string() });
 
 export type PublishInput = {
   /** The Session whose Action Log gets the rows. */
@@ -72,7 +66,7 @@ export class PullRequestOpeningService implements PullRequestOpener {
     @Inject(ActionLogService) private readonly actionLog: ActionLogService,
     @Inject(ConnectorsService) private readonly connectors: ConnectorsService,
     @Inject(PullRequestsService) private readonly pulls: PullRequestsService,
-    @Inject(AgentRuntime) private readonly runtime: AgentRuntime,
+    @Inject(AgentRuntime) runtime: AgentRuntime,
     @Inject(WorkspaceSessionsService) private readonly workspace: WorkspaceSessionsService,
   ) {
     runtime.setPullRequestOpener(this);
@@ -98,28 +92,20 @@ export class PullRequestOpeningService implements PullRequestOpener {
     };
   }
 
-  /** The agent's title and description from the Session's diff. Nothing changes; a failed turn gives empty fields. */
+  /**
+   * A title and description from the commits the branch has beyond its base, read at once: the first commit's subject
+   * and, for a single commit, its message body; for several, one line per commit. Nothing changes.
+   */
   async draft(sessionId: string, requestedBase?: string): Promise<PullRequestDraft> {
     const found = await this.openable(sessionId, requestedBase);
     const base = requestedBase ?? found.repo.defaultBranch;
-    const prompt = `Write the pull request for branch ${found.branch} against ${base}. Read the commits and the diff with \`git log ${base}..${found.branch}\` and \`git diff ${base}...${found.branch}\`. ${PR_DESCRIPTION_RULE}
-Change nothing: no commit, no push, no pull request. The console pushes and opens it once the operator confirms. Answer with one JSON block and nothing after it.
-
-\`\`\`json
-{ "title": "short title", "description": "markdown description" }
-\`\`\``;
-    try {
-      const summary = await this.runtime.runFor(sessionId, prompt, null, { purpose: RunPurpose.OpenPullRequest })
-        .finished;
-      const parsed = summary.ok ? parseAgentJson(summary.text, draftAnswerSchema) : null;
-      return parsed
-        ? { title: parsed.title.trim(), description: parsed.description }
-        : { title: null, description: null };
-    } catch (error) {
-      // A run already going keeps the Session; the operator waits for it.
-      if (error instanceof ApiError && error.code === ErrorCode.SessionBusy) throw error;
-      return { title: null, description: null };
-    }
+    const commits = await this.git.commitsSince(found.repo.path, base, found.branch);
+    const [first] = commits;
+    if (!first) return { title: null, description: null };
+    return {
+      title: first.subject,
+      description: commits.length === 1 ? first.body : commits.map((commit) => `- ${commit.subject}`).join('\n'),
+    };
   }
 
   /** The agent may ask in a Session's own worktree, on a Git host the console can open on. */
@@ -207,52 +193,15 @@ Change nothing: no commit, no push, no pull request. The console pushes and open
     const connector = CONNECTORS[remote.host];
     if (connector) this.connectors.require(connector);
     const adapter = this.hosts.for(remote.host);
-    try {
-      await this.git.remoteHead(input.dir, input.base);
-    } catch (error) {
-      const why = error instanceof GitFailed ? error.message : '';
-      // Origin answered and has no such branch; any other failure is origin not answering.
-      if (/couldn't find remote ref|^no origin\//.test(why)) {
-        throw validationFailed(`base branch ${input.base} is not on origin`);
-      }
-      throw new ApiError(502, ErrorCode.UpstreamFailed, why || 'could not read origin');
-    }
-    await this.logged(
-      input.sessionId,
-      ActionKind.Git,
-      `${slug}#${input.branch}`,
-      `git push origin ${input.branch}`,
-      async () => {
-        try {
-          // A branch checked out in `dir` that moved on origin is rebased onto the new tip and pushed again, never forced.
-          if ((await this.git.currentBranch(input.dir)) === input.branch) {
-            await this.git.pushHeadRebasing(input.dir, input.branch);
-          } else {
-            await this.git.pushHead(input.dir, input.branch, `refs/heads/${input.branch}`);
-          }
-        } catch (error) {
-          if (error instanceof RebaseConflict) {
-            throw new ApiError(
-              409,
-              ErrorCode.BranchMoved,
-              `Conflict: ${input.branch} moved on origin and rebasing onto it conflicts. The rebase was aborted and nothing was pushed. Resolve the conflict by hand, then open the pull request again.`,
-            );
-          }
-          if (error instanceof BranchMoved) {
-            throw new ApiError(409, ErrorCode.BranchMoved, 'Branch moved on origin: nothing was pushed');
-          }
-          throw new ApiError(
-            502,
-            ErrorCode.UpstreamFailed,
-            error instanceof GitFailed && error.message ? error.message : 'git push failed',
-          );
-        }
-      },
-    );
+    // The base check and the push each take a round trip to origin, so they run side by side. A missing base is
+    // reported after the push: the branch is on origin by then, and nothing was forced.
+    const [baseError, pushError] = await Promise.all([this.checkBase(input.dir, input.base), this.push(input, slug)]);
+    if (baseError) throw baseError;
+    if (pushError) throw pushError;
     // A retry, a second browser or a Fix retry finds the pull request the first call opened.
-    const open = (await adapter.list(slug, PrState.Open)).find((pr) => pr.branch === input.branch);
-    // The header reads the kept list: forget it, so it shows the link at once.
-    if (input.repoId) this.pulls.drop(input.repoId);
+    const open = input.repoId
+      ? await this.openFor(input.repoId, input.branch)
+      : (await adapter.list(slug, PrState.Open)).find((pr) => pr.branch === input.branch);
     if (open) {
       this.remember(input.sessionId, input.branch, open);
       return { number: open.number, url: open.url, created: false };
@@ -281,9 +230,75 @@ Change nothing: no commit, no push, no pull request. The console pushes and open
         }
       },
     );
-    if (input.repoId) this.pulls.drop(input.repoId);
+    // The header reads the kept list: it gets the new pull request now, so it shows the link at once.
+    if (input.repoId) {
+      this.pulls.noteOpened(input.repoId, {
+        ...made,
+        title: input.title,
+        body: input.body,
+        branch: input.branch,
+        base: input.base,
+        head: (await this.git.branchHead(input.dir, input.branch)) ?? '',
+      });
+    }
     this.remember(input.sessionId, input.branch, made);
     return { ...made, created: true };
+  }
+
+  /** The error to report when `origin` has no `base` or cannot be read; null when it has it. */
+  private async checkBase(dir: string, base: string): Promise<ApiError | null> {
+    try {
+      await this.git.remoteHead(dir, base, true);
+      return null;
+    } catch (error) {
+      const why = error instanceof GitFailed ? error.message : '';
+      // Origin answered and has no such branch; any other failure is origin not answering.
+      if (/couldn't find remote ref|^no origin\//.test(why)) {
+        return validationFailed(`base branch ${base} is not on origin`);
+      }
+      return new ApiError(502, ErrorCode.UpstreamFailed, why || 'could not read origin');
+    }
+  }
+
+  /** Pushes the branch with an Action Log row; the error to report, or null when it is on origin. */
+  private async push(input: PublishInput, slug: string): Promise<ApiError | null> {
+    try {
+      await this.logged(
+        input.sessionId,
+        ActionKind.Git,
+        `${slug}#${input.branch}`,
+        `git push origin ${input.branch}`,
+        async () => {
+          try {
+            // A branch checked out in `dir` that moved on origin is rebased onto the new tip and pushed again, never forced.
+            if ((await this.git.currentBranch(input.dir)) === input.branch) {
+              await this.git.pushHeadRebasing(input.dir, input.branch);
+            } else {
+              await this.git.pushHead(input.dir, input.branch, `refs/heads/${input.branch}`);
+            }
+          } catch (error) {
+            if (error instanceof RebaseConflict) {
+              throw new ApiError(
+                409,
+                ErrorCode.BranchMoved,
+                `Conflict: ${input.branch} moved on origin and rebasing onto it conflicts. The rebase was aborted and nothing was pushed. Resolve the conflict by hand, then open the pull request again.`,
+              );
+            }
+            if (error instanceof BranchMoved) {
+              throw new ApiError(409, ErrorCode.BranchMoved, 'Branch moved on origin: nothing was pushed');
+            }
+            throw new ApiError(
+              502,
+              ErrorCode.UpstreamFailed,
+              error instanceof GitFailed && error.message ? error.message : 'git push failed',
+            );
+          }
+        },
+      );
+      return null;
+    } catch (error) {
+      return error instanceof ApiError ? error : new ApiError(502, ErrorCode.UpstreamFailed, 'git push failed');
+    }
   }
 
   /** The Session keeps the pull request it opened, with its branch, so its header shows this one and no other. */

@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { ErrorCode, NO_ENV, SAMPLE_LIMIT, type Sample, type ScanWindow } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
+import { mapLimit } from '../common/map-limit';
 import { maskSignature, normalizePath } from './fingerprint';
 
 const run = promisify(execFile);
@@ -102,6 +103,8 @@ const SERVICE_LIMIT = 500;
 const ENV_LIMIT = 50;
 const CODE_LIMIT = 100;
 const TEN_MINUTES = 600_000;
+/** `pup` searches a Scan runs at once. */
+const PUP_WORKERS = 4;
 const REPO_TAG = 'git.repository_url:';
 
 /** `4xx` becomes a Datadog range on the status code. */
@@ -195,18 +198,22 @@ export class PupDatadog implements DatadogReader {
       const range = rule.kind === 'status_class' ? statusRange(rule.value) : null;
       return range ? [range] : [];
     });
+    // The Services of every env are listed first, then read by a few `pup` workers at a time, in the order listed.
+    const wanted: { env: string; name: string; scope: string }[] = [];
     for (const env of request.envs) {
       request.signal?.throwIfAborted();
       const scope = [envQuery(env), failingQuery(request.codes), ...ignored].join(' ');
       const names =
         request.services ?? (await this.counts(scope, request.window, request.signal)).map((count) => count.name);
-      for (const name of names) {
-        request.signal?.throwIfAborted();
-        const query = `${scope} service:${name}`;
-        const logs = await this.search(query, request.window, request.signal);
-        out.push({ name, env, groups: groupLogs(logs, query), repoUrl: repoUrlOf(logs) });
-      }
+      for (const name of names) wanted.push({ env, name, scope });
     }
+    const read = await mapLimit(wanted, PUP_WORKERS, async ({ env, name, scope }): Promise<ServiceReading> => {
+      request.signal?.throwIfAborted();
+      const query = `${scope} service:${name}`;
+      const logs = await this.search(query, request.window, request.signal);
+      return { name, env, groups: groupLogs(logs, query), repoUrl: repoUrlOf(logs) };
+    });
+    out.push(...read);
     return out;
   }
 

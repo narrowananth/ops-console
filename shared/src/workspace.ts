@@ -203,6 +203,16 @@ export const pullRequestSchema = z.object({
 
 export type PullRequest = z.infer<typeof pullRequestSchema>;
 
+/** The latest Agent Review as the list shows it: whether one runs, what it decided and whether the head moved on. */
+export const prAgentReviewBriefSchema = prAgentReviewSchema.pick({ status: true, decision: true, stale: true });
+
+/** A pull request in a list: no description and only the brief of its latest Agent Review. */
+export const pullRequestSummarySchema = pullRequestSchema
+  .omit({ body: true, latest_agent_review: true })
+  .extend({ latest_agent_review: prAgentReviewBriefSchema.nullable() });
+
+export type PullRequestSummary = z.infer<typeof pullRequestSummarySchema>;
+
 export enum ReplyVerdict {
   Fixed = 'fixed',
   PartlyFixed = 'partly_fixed',
@@ -307,7 +317,7 @@ export const pullRequestDetailSchema = pullRequestSchema.extend({
 export type PullRequestDetail = z.infer<typeof pullRequestDetailSchema>;
 
 export const pullRequestListSchema = z.object({
-  data: z.array(pullRequestSchema),
+  data: z.array(pullRequestSummarySchema),
   meta: z.object({ synced_at: z.string().nullable(), stale: z.boolean(), next_cursor: z.null() }),
 });
 

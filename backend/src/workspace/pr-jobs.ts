@@ -41,6 +41,9 @@ export const storedThreads = (row: { threads: string }): StoredThread[] =>
 /** How long a reply in a thread waits between looks for the pull request's job to end. */
 const IDLE_POLL_MS = 1000;
 
+/** Replies, resolves and finding posts a job sends to the Git host at once. */
+export const POST_PARALLEL = 3;
+
 /** A job stops here; the message is the operator's to read. */
 export class JobFailed extends Error {
   constructor(
@@ -201,14 +204,15 @@ export class PrJobs {
     return this.runtime.busy(session) || running(prAgentReviews) || running(prReplyChecks) || running(prCommentPasses);
   }
 
-  /** A scratch copy of the Repo at the pull request's head commit, fetched from its branch on `origin`. */
-  async makeScratch(repo: RepoRow, branch: string, headSha: string, jobId: string): Promise<string> {
+  /**
+   * A scratch copy of the Repo at the pull request's head commit, fetched from its branch on `origin` unless the
+   * caller fetched it (`fetched`).
+   */
+  async makeScratch(repo: RepoRow, branch: string, headSha: string, jobId: string, fetched = false): Promise<string> {
     const dir = path.join(this.dataDir, 'pr-scratch', jobId);
     try {
       await mkdir(path.dirname(dir), { recursive: true, mode: 0o700 });
-      await this.git.fetchBranch(repo.path, branch);
-      // The production branch too, so the job compares with what runs in production and not with an old local copy.
-      await this.git.remoteHead(repo.path, repo.defaultBranch).catch(() => undefined);
+      if (!fetched) await this.git.fetchBranch(repo.path, branch);
       await this.git.addWorktree(repo.path, dir, headSha);
     } catch (error) {
       const message = error instanceof GitFailed && error.message ? error.message : 'git failed';
@@ -356,6 +360,13 @@ export class PrJobs {
         tx.update(table).set({ scratchPath: null, canRetry: false }).where(eq(table.id, row.id)).run(),
       );
     }
+  }
+
+  /** `release` after the response: the scratch copies of earlier jobs are no one's wait. Never throws. */
+  releaseLater(table: typeof prReplyChecks | typeof prCommentPasses, ids: string[]): void {
+    void this.release(table, ids).catch((error) =>
+      this.logger.warn(`scratch copies not released: ${error instanceof Error ? error.message : String(error)}`),
+    );
   }
 
   private adapter(repo: RepoRow) {

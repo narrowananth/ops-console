@@ -1,4 +1,4 @@
-import { GitHost, PrChecks, PrReviewState, PrState, type PullRequest } from '@ops-console/shared';
+import { GitHost, PrChecks, PrReviewState, PrState, type PullRequestSummary } from '@ops-console/shared';
 import { useEffect, useState } from 'react';
 import { z } from 'zod';
 import { Button } from '../components/ui/button';
@@ -68,7 +68,7 @@ const NEXT_DOT: Record<Next, string> = {
   done: 'bg-neutral-300',
 };
 
-function nextFor(pr: PullRequest): Next {
+function nextFor(pr: PullRequestSummary): Next {
   if (pr.state !== PrState.Open) return 'done';
   if (pr.review_state === PrReviewState.ChangesRequested) return 'changes';
   if (pr.checks === PrChecks.Failed) return 'failing';
@@ -89,14 +89,14 @@ function useSettled(value: string, ms: number): string {
 /** The repository's own name: `name` of `owner/name`. */
 const shortName = (slug: string) => slug.slice(slug.lastIndexOf('/') + 1);
 
-const projectKey = (pr: PullRequest) => `${pr.host}:${pr.slug.toLowerCase()}`;
+const projectKey = (pr: PullRequestSummary) => `${pr.host}:${pr.slug.toLowerCase()}`;
 
 function PullRow({
   pr,
   selected,
   onSelect,
 }: {
-  pr: PullRequest;
+  pr: PullRequestSummary;
   selected: Pull | null;
   onSelect: (pull: Pull) => void;
 }) {

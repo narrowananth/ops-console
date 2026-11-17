@@ -1,4 +1,11 @@
-import { type Alert, AlertStatus, SCAN_RANGES, ScanStatus, SEVERITIES, type Severity } from '@ops-console/shared';
+import {
+  type AlertListItem,
+  AlertStatus,
+  SCAN_RANGES,
+  ScanStatus,
+  SEVERITIES,
+  type Severity,
+} from '@ops-console/shared';
 import { useState } from 'react';
 import { z } from 'zod';
 import { StopIcon } from '../agents/stop-run';
@@ -24,7 +31,7 @@ const TIER_DOT: Record<Severity, string> = {
 };
 
 /** Open Alerts of one Service, by tier, as coloured counts. */
-function Tiers({ alerts }: { alerts: Alert[] }) {
+function Tiers({ alerts }: { alerts: AlertListItem[] }) {
   if (alerts.length === 0) return null;
   return (
     <span className="flex items-center gap-1.5">
@@ -84,7 +91,7 @@ export function ServicesPane({
   // Datadog's list first; then Services with open Alerts from earlier Scans but nothing in this range.
   const rows: Row[] = [...(listed.data ?? [])];
   // One pass over the Alerts, which run to thousands, rather than one per Service.
-  const byService = new Map<string, Alert[]>();
+  const byService = new Map<string, AlertListItem[]>();
   for (const alert of open) {
     const list = byService.get(alert.service.name);
     if (list) list.push(alert);

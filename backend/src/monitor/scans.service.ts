@@ -24,7 +24,7 @@ import {
   type StatusCodeCount,
   WINDOW_HOURS,
 } from '@ops-console/shared';
-import { and, desc, eq, inArray, isNull, max, notInArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, max } from 'drizzle-orm';
 import { redact } from '../action-log/redact';
 import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
@@ -39,6 +39,7 @@ import { type DatadogConfig, datadogConfig } from './datadog-config';
 import { fingerprint, maskSignature } from './fingerprint';
 import { HOURS, scanReads } from './freshness';
 import { type AlertRow, parseJson, type RouteRow, type ServiceRow, samplesOf } from './mappers';
+import { MonitorRetention } from './retention';
 
 type ScanRow = typeof scans.$inferSelect;
 
@@ -153,6 +154,7 @@ export class ScansService {
     @Inject(DATADOG_READER) private readonly reader: DatadogReader,
     @Inject(AlertsService) private readonly alerts: AlertsService,
     @Inject(CodeFinder) private readonly finder: CodeFinder,
+    @Inject(MonitorRetention) private readonly retention: MonitorRetention,
     @Inject(Scheduler) scheduler: Scheduler,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
@@ -359,11 +361,9 @@ export class ScansService {
         ignore: config.ignore,
       });
       read.signal.throwIfAborted();
-      this.store.write((tx, emit) => {
-        this.apply(tx, emit, scan, config, readings);
-        this.end(tx, emit, scan.id, ScanStatus.Ok, null, null);
-      });
+      await this.apply(scan, config, readings);
       this.finder.lookForUnlinked();
+      this.retention.afterScan();
     } catch (error) {
       if (read.signal.aborted) {
         this.store.write((tx, emit) => this.end(tx, emit, scan.id, ScanStatus.Cancelled, null, null));
@@ -431,55 +431,81 @@ export class ScansService {
     return scanReads(scan, target, config.default_interval as CheckInterval);
   }
 
-  private apply(tx: Tx, emit: Emit, scan: ScanRow, config: DatadogConfig, readings: ServiceReading[]): void {
+  /**
+   * Stores what the Scan read, one transaction per Service with a turn of the event loop between, so a Scan of
+   * hundreds of Services never holds the daemon's one thread for long; then the Routes and Alerts it did not see, and
+   * the Scan's end, in the last transaction. A Scan that stops part way keeps the Services stored so far and ends
+   * `failed` through the start-up recovery.
+   */
+  private async apply(scan: ScanRow, config: DatadogConfig, readings: ServiceReading[]): Promise<void> {
     const now = new Date().toISOString();
     const seenRoutes = new Set<string>();
-    const seenAlerts = new Set<string>();
     for (const reading of readings) {
-      let service = tx
-        .select()
-        .from(services)
-        .where(and(eq(services.name, reading.name), eq(services.env, reading.env)))
-        .get();
-      if (!this.applies(scan, reading.name, service, config, reading.env)) continue;
-      service ??= tx
-        .insert(services)
-        .values({ id: crypto.randomUUID(), name: reading.name, env: reading.env })
-        .returning()
-        .get();
-      // A URL from log content must look like a Git host URL, as one the operator types does.
-      if (reading.repoUrl && repoUrlSchema.safeParse(reading.repoUrl).success && service.repoUrl === null) {
-        service = tx
-          .update(services)
-          .set({ repoUrl: reading.repoUrl })
-          .where(eq(services.id, service.id))
-          .returning()
-          .get() as ServiceRow;
-      }
-      // Several kinds of failure can share a Route; its result is their sum.
-      const results = new Map<string, { errors: number; rapid: boolean }>();
-      for (const group of reading.groups) {
-        if (group.errors === 0) continue;
-        const route = this.upsertRoute(tx, service, group.method ? group : NO_ROUTE);
-        const skip =
-          route.ignored ||
-          (group.method !== '' &&
-            config.ignore.some((rule) => rule.kind === 'route' && globMatch(rule.value, route.path)));
-        if (!skip) seenAlerts.add(this.raise(tx, emit, scan, config, service, route, group, now));
-        if (!group.method) continue;
-        const result = results.get(route.id) ?? { errors: 0, rapid: false };
-        result.errors += group.errors;
-        result.rapid ||= group.peakPer10m >= config.rapid_errors_per_10m;
-        results.set(route.id, result);
-      }
-      for (const [routeId, result] of results) {
-        seenRoutes.add(routeId);
-        const state = result.rapid ? RouteState.Rapid : RouteState.Failing;
-        tx.insert(scanRouteResults)
-          .values({ scanId: scan.id, routeId, scannedAt: now, errorCount: result.errors, state })
-          .run();
-      }
+      this.store.write((tx, emit) => this.applyReading(tx, emit, scan, config, reading, now, seenRoutes));
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
+    this.store.write((tx, emit) => {
+      this.clearUnseen(tx, scan, config, now, seenRoutes);
+      this.end(tx, emit, scan.id, ScanStatus.Ok, null, null);
+    });
+  }
+
+  private applyReading(
+    tx: Tx,
+    emit: Emit,
+    scan: ScanRow,
+    config: DatadogConfig,
+    reading: ServiceReading,
+    now: string,
+    seenRoutes: Set<string>,
+  ): void {
+    let service = tx
+      .select()
+      .from(services)
+      .where(and(eq(services.name, reading.name), eq(services.env, reading.env)))
+      .get();
+    if (!this.applies(scan, reading.name, service, config, reading.env)) return;
+    service ??= tx
+      .insert(services)
+      .values({ id: crypto.randomUUID(), name: reading.name, env: reading.env })
+      .returning()
+      .get();
+    // A URL from log content must look like a Git host URL, as one the operator types does.
+    if (reading.repoUrl && repoUrlSchema.safeParse(reading.repoUrl).success && service.repoUrl === null) {
+      service = tx
+        .update(services)
+        .set({ repoUrl: reading.repoUrl })
+        .where(eq(services.id, service.id))
+        .returning()
+        .get() as ServiceRow;
+    }
+    // Several kinds of failure can share a Route; its result is their sum.
+    const results = new Map<string, { errors: number; rapid: boolean }>();
+    for (const group of reading.groups) {
+      if (group.errors === 0) continue;
+      const route = this.upsertRoute(tx, service, group.method ? group : NO_ROUTE);
+      const skip =
+        route.ignored ||
+        (group.method !== '' &&
+          config.ignore.some((rule) => rule.kind === 'route' && globMatch(rule.value, route.path)));
+      if (!skip) this.raise(tx, emit, scan, config, service, route, group, now);
+      if (!group.method) continue;
+      const result = results.get(route.id) ?? { errors: 0, rapid: false };
+      result.errors += group.errors;
+      result.rapid ||= group.peakPer10m >= config.rapid_errors_per_10m;
+      results.set(route.id, result);
+    }
+    for (const [routeId, result] of results) {
+      seenRoutes.add(routeId);
+      const state = result.rapid ? RouteState.Rapid : RouteState.Failing;
+      tx.insert(scanRouteResults)
+        .values({ scanId: scan.id, routeId, scannedAt: now, errorCount: result.errors, state })
+        .run();
+    }
+  }
+
+  /** A known Route that logged nothing this time is healthy, and so is an Alert of a covered Service that this Scan did not see. */
+  private clearUnseen(tx: Tx, scan: ScanRow, config: DatadogConfig, now: string, seenRoutes: Set<string>): void {
     const scope = tx
       .select()
       .from(services)
@@ -502,9 +528,10 @@ export class ScansService {
       const covered = tx.select({ id: routes.id }).from(routes).where(inArray(routes.serviceId, scopeIds));
       // A Scan of some codes only sees nothing of the others.
       const read = codes.length > 0 ? inArray(alerts.httpStatus, codes) : undefined;
+      // An Alert this Scan saw was written with `updated_at` of `now` or later, so an older one was not seen.
       tx.update(alerts)
         .set({ clearedAt: now })
-        .where(and(inArray(alerts.routeId, covered), notInArray(alerts.id, [...seenAlerts]), read))
+        .where(and(inArray(alerts.routeId, covered), lt(alerts.updatedAt, now), read))
         .run();
     }
   }
@@ -603,7 +630,10 @@ export class ScansService {
       return existing.id;
     }
     // A resolved Alert that has not been seen healthy since stays as it is.
-    if (existing.status === AlertStatus.Resolved) return existing.id;
+    if (existing.status === AlertStatus.Resolved) {
+      tx.update(alerts).set({ updatedAt: now }).where(eq(alerts.id, existing.id)).run();
+      return existing.id;
+    }
     const merged = mergeSamples(samplesOf(existing), fresh);
     const eventCount = existing.eventCount + read.errors;
     tx.update(alerts)

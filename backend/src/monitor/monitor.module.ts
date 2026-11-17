@@ -5,6 +5,7 @@ import { CliCodeHosts, CODE_HOSTS, CodeFinder, type CodeHosts } from './code-fin
 import { DATADOG_READER, type DatadogReader, PupDatadog } from './datadog';
 import { FixesService } from './fixes.service';
 import { MonitorController } from './monitor.controller';
+import { MonitorRetention } from './retention';
 import { ReviewsService } from './reviews.service';
 import { ScansService } from './scans.service';
 import { ServicesService } from './services.service';
@@ -22,6 +23,7 @@ export class MonitorModule {
         { provide: DATADOG_READER, useValue: config.datadog ?? new PupDatadog() },
         { provide: CODE_HOSTS, useValue: config.codeHosts ?? new CliCodeHosts() },
         CodeFinder,
+        MonitorRetention,
         AlertsService,
         ServicesService,
         AlertSessions,

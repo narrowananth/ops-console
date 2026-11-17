@@ -19,6 +19,7 @@ import { actionLog, agentComments, connectors, prAgentReviews } from '../src/db/
 import { STORE, type Store } from '../src/db/store';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { ReposModule } from '../src/repos/repos.module';
+import { ReposService } from '../src/repos/repos.service';
 import { WorkspaceModule } from '../src/workspace/workspace.module';
 import { type AgentDaemon, api, gate, listen, startAgentDaemon, stepAnswer, stepTurns, until } from './agent-fixtures';
 import type { Step } from './fakes/agent-sdk';
@@ -1005,7 +1006,7 @@ describe('pull requests', () => {
     expect(ctx.store.db.select().from(agentComments).all()).toEqual([]);
   });
 
-  it('changes nothing when the host refuses a comment, and drops the cache when it accepts', async () => {
+  it('changes nothing when the host refuses a comment, and shows an accepted one without reading the list again', async () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];
     await ctx.http.get('/pull-requests');
@@ -1017,7 +1018,7 @@ describe('pull requests', () => {
     ctx.host.failPosts = null;
     await ctx.http.post(`/repos/${ctx.repoId}/pull-requests/1/comments`, { body: 'hi' });
     const after = await ctx.http.get('/pull-requests');
-    expect(ctx.host.calls.list).toBe(2);
+    expect(ctx.host.calls.list).toBe(1);
     expect(after.body.data[0].comment_count).toBe(1);
   });
 
@@ -1115,8 +1116,9 @@ describe('pull requests', () => {
     // Reading the Repos again follows git only when git changed: the remap holds.
     expect((await ctx.http.get('/repos')).body.data[0].remote_slug).toBe('newco/orders-api');
 
-    // Once the operator repoints git, the hint goes.
+    // Once the operator repoints git, the hint goes, as soon as the background sync has read it.
     git(ctx.dir, 'remote', 'set-url', 'origin', 'git@github.com:newco/orders-api.git');
+    await ctx.daemon.app.get(ReposService).syncRemotes();
     expect((await ctx.http.get('/repos')).body.data[0]).toMatchObject({
       remote_slug: 'newco/orders-api',
       origin_slug: null,
@@ -1446,6 +1448,8 @@ describe('Agent Review', () => {
 
     const next = pushFeature(ctx, 'export const rate = 2;\n');
     ctx.host.prs = [hostPr(1, { branch: 'feature-1', head_sha: next })];
+    // A pull request read is kept 15 seconds; Refresh reads the host again.
+    await ctx.http.post('/pull-requests/refresh', { repo_id: ctx.repoId });
     const stale = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1/agent-reviews`)).body.data;
     expect(stale[0].stale).toBe(true);
 

@@ -11,6 +11,7 @@ import {
 } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
+import { hostCliPool } from '../common/spawn-pool';
 import type {
   GitHostAdapter,
   HostComment,
@@ -66,6 +67,8 @@ const nodeSchema = z.object({
 });
 
 type Node = z.infer<typeof nodeSchema>;
+
+const pageSchema = z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() });
 
 /** The detail read adds the branch's commits, under their own name: `commits` is the newest one's checks. */
 const HISTORY_FIELDS = `history: commits(first: 100) { nodes { commit {
@@ -129,20 +132,35 @@ const EVENTS: Record<PrReviewEvent, string> = {
   comment: 'COMMENT',
 };
 
+/** Pages one read follows: a bound on a runaway cursor, far above any pull request or comment count. */
+const MAX_PAGES = 40;
+/** Rows a REST list asks for per page, the most GitHub gives. */
+const PER_PAGE = 100;
+
 /** GitHub through `gh api`. Errors name the call only: output may hold tokens. */
 export class GithubHost implements GitHostAdapter {
   constructor(private readonly bin = 'gh') {}
 
   async list(slug: string, state: PrState): Promise<HostPullRequest[]> {
     const [owner, name] = splitSlug(slug);
-    const query = `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {
-      pullRequests(first: 50, states: [${STATES[state]}], orderBy: { field: UPDATED_AT, direction: DESC }) {
-        nodes { ${PR_FIELDS} } } } }`;
-    const out = await this.graphql(query, { owner, name });
-    const parsed = z
-      .object({ repository: z.object({ pullRequests: z.object({ nodes: z.array(nodeSchema) }) }) })
-      .parse(out);
-    return parsed.repository.pullRequests.nodes.map(toPullRequest);
+    const query = `query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {
+      pullRequests(first: 50, after: $after, states: [${STATES[state]}], orderBy: { field: UPDATED_AT, direction: DESC }) {
+        pageInfo { hasNextPage endCursor } nodes { ${PR_FIELDS} } } } }`;
+    const nodes: Node[] = [];
+    let after: string | null = null;
+    // Merged and closed lists are recent history: one page of them is read.
+    for (let at = 0; at < (state === PrState.Open ? MAX_PAGES : 1); at++) {
+      const out = await this.graphql(query, after === null ? { owner, name } : { owner, name, after });
+      const { pageInfo, nodes: read } = z
+        .object({
+          repository: z.object({ pullRequests: z.object({ nodes: z.array(nodeSchema), pageInfo: pageSchema }) }),
+        })
+        .parse(out).repository.pullRequests;
+      nodes.push(...read);
+      if (!pageInfo.hasNextPage || pageInfo.endCursor === null) break;
+      after = pageInfo.endCursor;
+    }
+    return nodes.map(toPullRequest);
   }
 
   async owners(): Promise<string[]> {
@@ -153,17 +171,25 @@ export class GithubHost implements GitHostAdapter {
 
   async listOwner(owner: string, state: PrState): Promise<OwnedPullRequest[]> {
     const scope = owner === (await this.login()) ? `user:${owner}` : `org:${owner}`;
-    const query = `query($q: String!) { search(query: $q, type: ISSUE, first: 100) {
-      nodes { ... on PullRequest { ${PR_FIELDS} repository { nameWithOwner } } } } }`;
-    const out = await this.graphql(query, { q: `is:pr ${SEARCH_STATES[state]} archived:false ${scope}` });
-    const nodes = z
-      .object({ search: z.object({ nodes: z.array(z.unknown()) }) })
-      .parse(out)
-      .search.nodes.flatMap((node) => {
+    const query = `query($q: String!, $after: String) { search(query: $q, type: ISSUE, first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { ${PR_FIELDS} repository { nameWithOwner } } } } }`;
+    const found: (Node & { repository: { nameWithOwner: string } })[] = [];
+    let after: string | null = null;
+    // GitHub's search returns at most 1000 results however many pages are read.
+    for (let at = 0; at < (state === PrState.Open ? 10 : 1); at++) {
+      const q = `is:pr ${SEARCH_STATES[state]} archived:false ${scope}`;
+      const out = await this.graphql(query, after === null ? { q } : { q, after });
+      const { pageInfo, nodes } = z
+        .object({ search: z.object({ nodes: z.array(z.unknown()), pageInfo: pageSchema }) })
+        .parse(out).search;
+      for (const node of nodes) {
         const parsed = nodeSchema.extend({ repository: z.object({ nameWithOwner: z.string() }) }).safeParse(node);
-        return parsed.success ? [parsed.data] : [];
-      });
-    return nodes.map((node) => ({ ...toPullRequest(node), slug: node.repository.nameWithOwner }));
+        if (parsed.success) found.push(parsed.data);
+      }
+      if (!pageInfo.hasNextPage || pageInfo.endCursor === null) break;
+      after = pageInfo.endCursor;
+    }
+    return found.map((node) => ({ ...toPullRequest(node), slug: node.repository.nameWithOwner }));
   }
 
   private loginRead: Promise<string | null> | null = null;
@@ -201,9 +227,9 @@ export class GithubHost implements GitHostAdapter {
       pullRequest(number: $number) { ${PR_FIELDS} ${HISTORY_FIELDS} } } }`;
     const [graph, files, review, issue] = await Promise.all([
       this.graphql(query, { owner, name }, { number }),
-      this.rest(`repos/${slug}/pulls/${number}/files?per_page=100`),
-      this.rest(`repos/${slug}/pulls/${number}/comments?per_page=100`),
-      this.rest(`repos/${slug}/issues/${number}/comments?per_page=100`),
+      this.restPages(`repos/${slug}/pulls/${number}/files`),
+      this.restPages(`repos/${slug}/pulls/${number}/comments`),
+      this.restPages(`repos/${slug}/issues/${number}/comments`),
     ]);
     const node = z.object({ repository: z.object({ pullRequest: nodeSchema.and(historySchema) }) }).parse(graph)
       .repository.pullRequest;
@@ -377,6 +403,17 @@ export class GithubHost implements GitHostAdapter {
     return out.data;
   }
 
+  /** Every row of a REST list, read a page at a time until one comes back short. */
+  private async restPages(path: string): Promise<unknown[]> {
+    const rows: unknown[] = [];
+    for (let at = 1; at <= MAX_PAGES; at++) {
+      const read = z.array(z.unknown()).parse(await this.rest(`${path}?per_page=${PER_PAGE}&page=${at}`));
+      rows.push(...read);
+      if (read.length < PER_PAGE) break;
+    }
+    return rows;
+  }
+
   private async rest(path: string, method = 'GET', body?: object): Promise<unknown> {
     const args = ['api', '-X', method, path];
     if (body) args.push('--input', '-');
@@ -386,9 +423,11 @@ export class GithubHost implements GitHostAdapter {
 
   private async exec(args: string[], what: string, input?: string): Promise<string> {
     try {
-      const pending = run(this.bin, args, { maxBuffer: 20 * 1024 * 1024, timeout: 60_000 });
-      pending.child.stdin?.end(input);
-      return (await pending).stdout;
+      return await hostCliPool.run(async () => {
+        const pending = run(this.bin, args, { maxBuffer: 20 * 1024 * 1024, timeout: 60_000 });
+        pending.child.stdin?.end(input);
+        return (await pending).stdout;
+      });
     } catch (error) {
       const { stderr } = error as { stderr?: unknown };
       if (typeof stderr === 'string' && /rate limit/i.test(stderr)) {

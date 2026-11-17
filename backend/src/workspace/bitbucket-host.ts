@@ -11,6 +11,7 @@ import {
 } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
+import { hostCliPool } from '../common/spawn-pool';
 import type {
   GitHostAdapter,
   HostComment,
@@ -31,8 +32,30 @@ const STATES: Record<PrState, string> = {
 
 /** A workspace's repositories read for pull requests, most recently pushed first; older ones are left out. */
 export const REPOS_PER_WORKSPACE = 300;
-/** Repositories read at once. */
-const PARALLEL = 6;
+/** Repositories read at once; `hostCliPool` caps the `bkt` processes under them. */
+const PARALLEL = 10;
+/** Pages one read follows: a bound on a runaway `next`, far above any pull request or comment count. */
+const MAX_PAGES = 40;
+/** What a list of pull requests reads: no description, none of the fields the list does not show. */
+const LIST_FIELDS = [
+  'next',
+  'values.id',
+  'values.title',
+  'values.state',
+  'values.author.display_name',
+  'values.author.nickname',
+  'values.source.branch.name',
+  'values.source.commit.hash',
+  'values.destination.branch.name',
+  'values.created_on',
+  'values.updated_on',
+  'values.comment_count',
+  'values.participants.approved',
+  'values.participants.state',
+  'values.participants.user.display_name',
+  'values.participants.user.nickname',
+  'values.links.html.href',
+].join(',');
 /**
  * A repository with no open pull request, and nothing pushed since the last read, is not read again for this long.
  * Reading all of a workspace's repositories each minute is what used up Bitbucket's quota.
@@ -197,12 +220,14 @@ export class BitbucketHost implements GitHostAdapter {
   }
 
   async list(slug: string, state: PrState): Promise<HostPullRequest[]> {
-    const out = await this.json(`/repositories/${slug}/pullrequests`, {
-      state: STATES[state],
-      pagelen: '50',
-      fields: '+values.participants',
-    });
-    return page(prSchema).parse(out).values.map(toPullRequest);
+    const values = await this.pages(
+      `/repositories/${slug}/pullrequests`,
+      { state: STATES[state], pagelen: '50', fields: LIST_FIELDS },
+      prSchema,
+      // Merged and closed lists are recent history: one page of them is read.
+      state === PrState.Open ? MAX_PAGES : 1,
+    );
+    return values.map(toPullRequest);
   }
 
   async owners(): Promise<string[]> {
@@ -280,21 +305,16 @@ export class BitbucketHost implements GitHostAdapter {
     // Six reads side by side: each `bkt` call is a process and a round trip, so in a row they add up.
     const [pr, stats, diff, comments, checks, history] = await Promise.all([
       this.json(base),
-      this.json(`${base}/diffstat`, { pagelen: '500' }),
+      this.pages(`${base}/diffstat`, { pagelen: '500' }, diffstatSchema),
       this.exec(['api', `${base}/diff`], 'bkt api diff'),
-      this.json(`${base}/comments`, { pagelen: '100' }),
-      this.json(`${base}/statuses`, { pagelen: '100' }),
-      this.json(`${base}/commits`, { pagelen: '100' }),
+      this.pages(`${base}/comments`, { pagelen: '100' }, commentSchema),
+      this.pages(`${base}/statuses`, { pagelen: '100' }, statusSchema),
+      this.pages(`${base}/commits`, { pagelen: '100' }, commitSchema),
     ]);
     const parsed = prSchema.parse(pr);
-    const files = diffFiles(diff, page(diffstatSchema).parse(stats).values);
-    const all = page(commentSchema)
-      .parse(comments)
-      .values.filter((comment) => !comment.deleted)
-      .map(toComment);
-    const statuses = page(statusSchema)
-      .parse(checks)
-      .values.map((status) => status.state);
+    const files = diffFiles(diff, stats);
+    const all = comments.filter((comment) => !comment.deleted).map(toComment);
+    const statuses = checks.map((status) => status.state);
     return {
       pr: {
         ...toPullRequest(parsed),
@@ -314,9 +334,8 @@ export class BitbucketHost implements GitHostAdapter {
       files,
       comments: all.sort((a, b) => a.created_at.localeCompare(b.created_at)),
       // Bitbucket lists the newest first.
-      commits: page(commitSchema)
-        .parse(history)
-        .values.map(
+      commits: history
+        .map(
           (commit): PrCommit => ({
             sha: commit.hash,
             message: commit.message.split('\n')[0] ?? '',
@@ -386,6 +405,22 @@ export class BitbucketHost implements GitHostAdapter {
     }
   }
 
+  /** Every value of a paged list, following `next` page by page. */
+  private async pages<T extends z.ZodType>(
+    path: string,
+    params: Record<string, string>,
+    item: T,
+    maxPages = MAX_PAGES,
+  ): Promise<z.infer<T>[]> {
+    const values: z.infer<T>[] = [];
+    for (let at = 1; at <= maxPages; at++) {
+      const read = page(item).parse(await this.json(path, at === 1 ? params : { ...params, page: String(at) }));
+      values.push(...read.values);
+      if (!read.next) break;
+    }
+    return values;
+  }
+
   private async json(
     path: string,
     params: Record<string, string> = {},
@@ -402,9 +437,11 @@ export class BitbucketHost implements GitHostAdapter {
 
   private async exec(args: string[], what: string): Promise<string> {
     try {
-      const pending = run(this.bin, args, { maxBuffer: 20 * 1024 * 1024, timeout: 60_000 });
-      pending.child.stdin?.end();
-      return (await pending).stdout;
+      return await hostCliPool.run(async () => {
+        const pending = run(this.bin, args, { maxBuffer: 20 * 1024 * 1024, timeout: 60_000 });
+        pending.child.stdin?.end();
+        return (await pending).stdout;
+      });
     } catch (error) {
       const { stderr } = error as { stderr?: unknown };
       if (typeof stderr === 'string' && /\b429\b|rate limit/i.test(stderr)) {

@@ -4,6 +4,8 @@ import { Inject, Injectable, type OnApplicationBootstrap } from '@nestjs/common'
 import { ErrorCode, RemovedRepoSessions, type Repo, SessionState } from '@ops-console/shared';
 import { and, count, eq, isNull } from 'drizzle-orm';
 import { ApiError } from '../common/errors';
+import { mapLimit } from '../common/map-limit';
+import { asBackground } from '../common/spawn-pool';
 import { repos, services, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { GIT, Git, parseRemote } from './git';
@@ -16,10 +18,23 @@ const RUNNING = [SessionState.Working, SessionState.WaitingInput, SessionState.W
 /** A Repo's origin is asked for new branches no more often than this. */
 const BRANCH_FETCH_TTL_MS = 60_000;
 
+/** A Repo's branch and changes, as git last said, are served this long. */
+const FACTS_TTL_MS = 10_000;
+
+/** The Repos' remotes are compared with the stored host and slug no more often than this, in the background. */
+const REMOTE_SYNC_TTL_MS = 60_000;
+
+/** Repos whose git facts are read at once. */
+const FACTS_PARALLEL = 8;
+
+type Facts = { branch: string | null; dirty: boolean; missing: boolean };
+
 @Injectable()
 export class ReposService implements OnApplicationBootstrap {
   /** Each Repo's last read of origin's branches, and the one going now. */
   private readonly branchReads = new Map<string, { at: number; running: Promise<void> | null }>();
+  private readonly facts = new Map<string, { at: number; path: string; value: Facts }>();
+  private syncedAt = 0;
 
   constructor(
     @Inject(STORE) private readonly store: Store,
@@ -28,14 +43,22 @@ export class ReposService implements OnApplicationBootstrap {
 
   /** The pull request list reads the stored host and slug, so they are right before anyone opens the Repos page. */
   async onApplicationBootstrap(): Promise<void> {
+    this.syncedAt = Date.now();
     await this.syncRemotes();
   }
 
+  /** The remotes are followed in the background, so a list waits for no git process beyond its own reads. */
   async list(): Promise<{ data: Repo[]; meta: { next_cursor: null } }> {
-    await this.syncRemotes();
+    this.syncInBackground();
     const rows = this.store.db.select().from(repos).where(isNull(repos.removedAt)).all();
     rows.sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
-    return { data: await Promise.all(rows.map((row) => this.view(row))), meta: { next_cursor: null } };
+    return { data: await mapLimit(rows, FACTS_PARALLEL, (row) => this.view(row)), meta: { next_cursor: null } };
+  }
+
+  private syncInBackground(): void {
+    if (Date.now() - this.syncedAt < REMOTE_SYNC_TTL_MS) return;
+    this.syncedAt = Date.now();
+    void asBackground(() => this.syncRemotes()).catch(() => undefined);
   }
 
   /** Id and folder of every Repo, for readers that only need where to look. */
@@ -44,7 +67,7 @@ export class ReposService implements OnApplicationBootstrap {
   }
 
   async get(id: string): Promise<Repo> {
-    return this.view(this.row(id));
+    return this.view(this.row(id), true);
   }
 
   /**
@@ -169,20 +192,35 @@ export class ReposService implements OnApplicationBootstrap {
   private readOrigin(id: string, dir: string): void {
     const kept = this.branchReads.get(id);
     if (kept?.running || (kept && Date.now() - kept.at < BRANCH_FETCH_TTL_MS)) return;
-    const running = (async () => {
+    const running = asBackground(async () => {
       const before = (await this.git.remoteOnlyBranches(dir)).join('\n');
       await this.git.refreshRemote(dir);
       if ((await this.git.remoteOnlyBranches(dir)).join('\n') !== before) {
         this.store.emit('repo.branches_changed', { repo_id: id });
       }
-    })()
+    })
       .catch(() => undefined)
       .finally(() => this.branchReads.set(id, { at: Date.now(), running: null }));
     this.branchReads.set(id, { at: kept?.at ?? 0, running });
   }
 
-  private async view(row: Row): Promise<Repo> {
-    const missing = (await this.git.topFolder(row.path)) === null;
+  /** Branch and changes from one `git status`, kept 10 seconds; `fresh` reads again. */
+  private async factsOf(row: Row, fresh: boolean): Promise<Facts> {
+    const kept = this.facts.get(row.id);
+    if (!fresh && kept?.path === row.path && Date.now() - kept.at < FACTS_TTL_MS) return kept.value;
+    let value: Facts;
+    try {
+      value = { ...(await this.git.status(row.path)), missing: false };
+    } catch {
+      // Git could not read it: a folder that is no repository any more is missing, any other failure shows as no facts.
+      value = { branch: null, dirty: false, missing: (await this.git.topFolder(row.path)) === null };
+    }
+    this.facts.set(row.id, { at: Date.now(), path: row.path, value });
+    return value;
+  }
+
+  private async view(row: Row, fresh = false): Promise<Repo> {
+    const { branch, dirty, missing } = await this.factsOf(row, fresh);
     return {
       id: row.id,
       name: row.name,
@@ -195,8 +233,8 @@ export class ReposService implements OnApplicationBootstrap {
           : null,
       default_branch: row.defaultBranch,
       created_at: row.createdAt,
-      branch: missing ? null : await this.git.currentBranch(row.path),
-      dirty: missing ? false : await this.git.isDirty(row.path),
+      branch,
+      dirty,
       missing,
       session_count:
         this.store.db.select({ n: count() }).from(sessions).where(eq(sessions.repoId, row.id)).get()?.n ?? 0,

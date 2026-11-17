@@ -19,7 +19,7 @@ import {
   type WsEvent,
 } from '@ops-console/shared';
 import Database from 'better-sqlite3';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
@@ -42,6 +42,7 @@ import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { fingerprint, maskSignature, normalizePath } from '../src/monitor/fingerprint';
 import { NO_TICKET_IN_PLAYBOOK } from '../src/monitor/fixes.service';
 import { MonitorModule } from '../src/monitor/monitor.module';
+import { MonitorRetention } from '../src/monitor/retention';
 import { latestSlot, nextSlot, ScansService } from '../src/monitor/scans.service';
 import { ReposModule } from '../src/repos/repos.module';
 import { WorkspaceModule } from '../src/workspace/workspace.module';
@@ -530,7 +531,7 @@ describe('Scans and Alerts', () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 6)])];
     await scan(ctx);
-    expect((await alertList(ctx))[0]).toMatchObject({ status: 'resolved', regression_count: 0 });
+    expect((await alertList(ctx, '?scope=closed'))[0]).toMatchObject({ status: 'resolved', regression_count: 0 });
     // Healthy, then failing again.
     ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 0)])];
     await scan(ctx);
@@ -557,7 +558,11 @@ describe('Scans and Alerts', () => {
     );
     ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 3)])];
     await scan(ctx);
-    expect((await alertList(ctx))[0]).toMatchObject({ status: 'dismissed', event_count: 15, regression_count: 0 });
+    expect((await alertList(ctx, '?scope=closed'))[0]).toMatchObject({
+      status: 'dismissed',
+      event_count: 15,
+      regression_count: 0,
+    });
     ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 0)])];
     await scan(ctx);
     ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 4)])];
@@ -1919,6 +1924,103 @@ describe('Playbooks migration', () => {
   });
 });
 
+describe('Alert list and retention', () => {
+  const DAY = 86_400_000;
+  const ago = (days: number) => new Date(Date.now() - days * DAY).toISOString();
+  const setAlert = (ctx: Ctx, id: string, patch: Partial<typeof alerts.$inferInsert>) =>
+    ctx.store.write((tx) => tx.update(alerts).set(patch).where(eq(alerts.id, id)).run());
+
+  it('lists no query and a short log line, and the detail keeps both', async () => {
+    const ctx = await start();
+    ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 4)])];
+    await scan(ctx);
+    const [listed] = await alertList(ctx);
+    setAlert(ctx, listed.id, { logLine: 'x'.repeat(1000) });
+    const [row] = await alertList(ctx);
+    expect(row).not.toHaveProperty('datadog_query');
+    expect(row.log_line).toHaveLength(300);
+    const full = (await ctx.http.get(`/alerts/${listed.id}`)).body.data;
+    expect(full.log_line).toHaveLength(1000);
+    expect(full.datadog_query).toContain('service:orders-api');
+  });
+
+  it('lists the Alerts not closed by default, and the closed ones a page at a time', async () => {
+    const ctx = await start();
+    ctx.datadog.readings = [
+      service('orders-api', [route('POST', '/orders', 4), route('GET', '/carts', 5), route('GET', '/items', 6)]),
+    ];
+    await scan(ctx);
+    const all = await alertList(ctx);
+    expect(all).toHaveLength(3);
+    setAlert(ctx, all[0].id, { status: AlertStatus.Resolved, lastSeenAt: ago(3) });
+    setAlert(ctx, all[1].id, { status: AlertStatus.Dismissed, lastSeenAt: ago(2) });
+    expect((await alertList(ctx)).map((alert: { id: string }) => alert.id)).toEqual([all[2].id]);
+    const first = await ctx.http.get('/alerts?scope=closed&limit=1');
+    expect(first.body.data.map((alert: { id: string }) => alert.id)).toEqual([all[1].id]);
+    const second = await ctx.http.get(`/alerts?scope=closed&limit=1&cursor=${first.body.meta.next_cursor}`);
+    expect(second.body.data.map((alert: { id: string }) => alert.id)).toEqual([all[0].id]);
+    expect(second.body.meta.next_cursor).toBeNull();
+    expect((await ctx.http.get('/alerts/summary')).body.data).toEqual({ open: 1 });
+  });
+
+  it('resolves an open Alert no Scan saw for 14 days, says so, and reopens it when it fails again', async () => {
+    const ctx = await start();
+    const stale = await failing(ctx);
+    ctx.datadog.readings = [service('orders-api', [route('GET', '/carts', 3)])];
+    await scan(ctx);
+    setAlert(ctx, stale.id, { lastSeenAt: ago(15) });
+    await ctx.daemon.app.get(MonitorRetention).run();
+    const resolved = (await alertList(ctx, '?scope=closed')).find((alert: { id: string }) => alert.id === stale.id);
+    expect(resolved).toMatchObject({ status: 'resolved' });
+    const kinds = (await ctx.http.get(`/alerts/${stale.id}/events`)).body.data.map((e: { kind: string }) => e.kind);
+    expect(kinds).toContain('auto_resolved');
+    // The Alert failing again is a Regression.
+    ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 2)])];
+    await scan(ctx);
+    expect((await ctx.http.get(`/alerts/${stale.id}`)).body.data).toMatchObject({
+      status: 'open',
+      regression_count: 1,
+    });
+  });
+
+  it('prunes old Scans and events but keeps the newest ok Scan of each Service and the Action Log', async () => {
+    const ctx = await start();
+    await failing(ctx);
+    await scan(ctx);
+    const [newest, older] = ctx.store.db.select().from(scans).orderBy(desc(scans.startedAt)).all();
+    // Both Scans are 40 days old; the later one is the newest ok Scan of the Service.
+    ctx.store.write((tx) => {
+      tx.update(scans)
+        .set({ startedAt: ago(40) })
+        .where(eq(scans.id, older?.id as string))
+        .run();
+      tx.update(scans)
+        .set({ startedAt: ago(39) })
+        .where(eq(scans.id, newest?.id as string))
+        .run();
+      tx.update(alertEvents)
+        .set({ at: ago(40) })
+        .run();
+    });
+    await ctx.daemon.app.get(MonitorRetention).run();
+    expect(
+      ctx.store.db
+        .select()
+        .from(scans)
+        .all()
+        .map((row) => row.id),
+    ).toEqual([newest?.id]);
+    expect(
+      ctx.store.db
+        .select()
+        .from(scanRouteResults)
+        .where(eq(scanRouteResults.scanId, newest?.id as string))
+        .all(),
+    ).not.toHaveLength(0);
+    expect(ctx.store.db.select().from(alertEvents).all()).toHaveLength(0);
+  });
+});
+
 describe('Prod parity check', () => {
   const HOUR = 3_600_000;
   const ago = (hours: number) => new Date(Date.now() - hours * HOUR).toISOString();
@@ -2008,7 +2110,7 @@ describe('Prod parity check', () => {
       const reads = ctx.datadog.calls.length;
       const before = ctx.daemon.sdk.calls.length;
       const report = await verify(ctx, alert.id);
-      expect(ctx.datadog.rechecks).toEqual([{ query: alert.datadog_query, window: '1h' }]);
+      expect(ctx.datadog.rechecks).toEqual([{ query: (await detail(ctx, alert.id)).datadog_query, window: '1h' }]);
       // A count only: the Recheck reads no log lines, as a Scan's read does.
       expect(ctx.datadog.calls).toHaveLength(reads);
       const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
@@ -2087,7 +2189,10 @@ describe('Prod parity check', () => {
       expect(recheckOf((await ctx.http.get(`/reports/${two.id}`)).body.data).text).toBe(
         'Datadog recheck, last hour: still failing',
       );
-      expect(ctx.datadog.rechecks.map((r) => r.query)).toEqual([first.datadog_query, second.datadog_query]);
+      expect(ctx.datadog.rechecks.map((r) => r.query)).toEqual([
+        (await detail(ctx, first.id)).datadog_query,
+        (await detail(ctx, second.id)).datadog_query,
+      ]);
     });
 
     it('rechecks again on a retry, and adds the result as a step', async () => {
