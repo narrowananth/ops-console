@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import type { Keychain } from '../keychain/keychain';
+import { HANDOVER_FLAG, waitForHandover } from '../keychain/handover';
+import { HANDOVER_LIMIT_MS, type Keychain } from '../keychain/keychain';
 
 /** The Keychain key holding a server's env vars, as one JSON object. */
 export const secretsKey = (server: string) => `mcp:${server}`;
@@ -36,15 +37,23 @@ export const FILE_PREFIX = '@file:';
 /** Stands for that folder in the server's args and env values. */
 export const FILES_DIR = '{{files}}';
 
+/** The data folder, where the daemon keeps `runtime.json`. */
+function dataDir(): string {
+  return path.resolve(
+    process.env.OPS_CONSOLE_DATA_DIR ?? path.join(homedir(), 'Library', 'Application Support', 'ops-console'),
+  );
+}
+
 /**
  * Where those files go: a folder under the data folder, which the Run sandbox denies reading (ADR 0006), not the user
- * temp folder a run's commands can list. The data folder is where the daemon keeps `runtime.json`.
+ * temp folder a run's commands can list.
  */
 export function filesBase(): string {
-  const dataDir =
-    process.env.OPS_CONSOLE_DATA_DIR ?? path.join(homedir(), 'Library', 'Application Support', 'ops-console');
-  return path.join(path.resolve(dataDir), 'mcp-files');
+  return path.join(dataDir(), 'mcp-files');
 }
+
+/** The file that exists while a start moves the Keychain items to its app. */
+export const handoverFlag = (): string => path.join(dataDir(), HANDOVER_FLAG);
 
 /** The env vars and args with the files written out and `FILES_DIR` filled in; `cleanup` removes the folder. */
 export async function materialize(
@@ -98,13 +107,20 @@ export function unwrapLauncher(
 /**
  * `ops-console mcp-exec <name> -- <command> [args]`: starts the command with the server's env vars from the
  * Keychain, so secrets reach that process and nothing else. Prints nothing: stdout belongs to the MCP protocol.
- * Resolves with the exit code.
+ * While a start moves the Keychain items it waits for that, since an item the old app still holds would ask for the
+ * password and one in between would read as missing. Resolves with the exit code.
  */
-export async function runMcpExec(argv: string[], keychain: Keychain, base: string = filesBase()): Promise<number> {
+export async function runMcpExec(
+  argv: string[],
+  keychain: Keychain,
+  base: string = filesBase(),
+  flag: string = handoverFlag(),
+): Promise<number> {
   const dash = argv.indexOf('--');
   const name = argv[0];
   const command = argv[dash + 1];
   if (!name || dash !== 1 || !command) return 2;
+  await waitForHandover(flag, HANDOVER_LIMIT_MS);
   const stored = await keychain.get(secretsKey(name));
   const ready = await materialize(stored === null ? {} : parseEnv(stored), argv.slice(dash + 2), base);
   // Every run starts every Connection's server through `npx …@latest`; asking the npm registry each time costs CPU and

@@ -109,8 +109,11 @@ describe('listing', () => {
       ),
     ).toMatchObject({ status: 'auth' });
 
+    // The second account is first read when it becomes active.
     ctx.probe.set(ctx.dirs[1] ?? '', 'sentry', { status: 'failed', error: 'spawn ENOENT' });
-    await api(ctx.daemon).post('/mcp-servers/sentry/checks');
+    expect(ctx.probe.asked).not.toContain(ctx.dirs[1]);
+    const accounts = (await api(ctx.daemon).get('/agent-accounts')).body.data as { id: string; is_active: boolean }[];
+    await api(ctx.daemon).post(`/agent-accounts/${accounts.find((account) => !account.is_active)?.id}/activate`);
     expect(
       await until(
         () => find(ctx, 'sentry'),
@@ -125,7 +128,7 @@ describe('listing', () => {
     });
   });
 
-  it('keeps a Probe for 60 seconds, and Reconnect asks again', async () => {
+  it('keeps a Probe for 5 minutes, and Reconnect reads that one server in the active account', async () => {
     const ctx = await start();
     await api(ctx.daemon).post('/mcp-servers', {
       name: 'tools',
@@ -137,12 +140,18 @@ describe('listing', () => {
     const runs = ctx.probe.runs;
     await list(ctx);
     expect(ctx.probe.runs).toBe(runs);
+    // Adding the server read it once; settle that read before counting.
+    await expect.poll(() => ctx.probe.ones).toBeGreaterThanOrEqual(1);
+    const asked = ctx.probe.asked.length;
+    const ones = ctx.probe.ones;
     await api(ctx.daemon).post('/mcp-servers/tools/checks');
-    // One Probe per account, one after another.
-    await expect.poll(() => ctx.probe.runs).toBe(runs + 2);
+    await expect.poll(() => ctx.probe.ones).toBe(ones + 1);
+    // No Probe of every server, and no other account asked.
+    expect(ctx.probe.runs).toBe(runs);
+    expect(ctx.probe.asked.slice(asked)).toEqual([ctx.dirs[0]]);
   });
 
-  it('runs one Probe at a time across accounts', async () => {
+  it('probes the active account only, one Probe at a time', async () => {
     const ctx = await start();
     ctx.probe.delayMs = 50;
     await api(ctx.daemon).post('/mcp-servers', {
@@ -151,8 +160,10 @@ describe('listing', () => {
       target: 'node a.js',
       scope: 'user',
     });
-    await expect.poll(() => ctx.probe.runs).toBeGreaterThanOrEqual(2);
-    await expect.poll(() => ctx.probe.mostAtOnce).toBe(1);
+    await expect.poll(() => ctx.probe.runs).toBeGreaterThanOrEqual(1);
+    await list(ctx);
+    expect(ctx.probe.mostAtOnce).toBe(1);
+    expect(new Set(ctx.probe.asked)).toEqual(new Set([ctx.dirs[0]]));
   });
 
   it('shows a server added or removed outside the console on the next list', async () => {
@@ -195,7 +206,7 @@ describe('listing', () => {
       scope: 'user',
     });
     expect(created.body.data).toMatchObject({ name: 'slow', status: 'checking' });
-    expect((await list(ctx)).data.find((server) => server.name === 'slow')).toMatchObject({ status: 'checking' });
+    await list(ctx);
     expect(Date.now() - started).toBeLessThan(ctx.probe.delayMs);
     await until(
       () => checked(events).filter((event) => event.id === 'slow'),
@@ -237,7 +248,7 @@ describe('listing', () => {
       target: 'node server.js',
       scope: 'user',
     });
-    ctx.probe.breakAccount(ctx.dirs[1] ?? '');
+    ctx.probe.breakAccount(ctx.dirs[0] ?? '');
     await api(ctx.daemon).post('/mcp-servers/tools/checks');
     expect(
       await until(
@@ -247,7 +258,7 @@ describe('listing', () => {
       ),
     ).toMatchObject({
       status: 'fail',
-      status_detail: 'second@example.com: Claude did not answer',
+      status_detail: 'operator@example.com: Claude did not answer',
     });
   });
 });
@@ -272,6 +283,9 @@ describe('adding', () => {
         args: ['mcp-exec', 'pg', '--', 'npx', '-y', '@example/pg-mcp'],
       });
     }
+    // `claude mcp add` runs once, in the active account; the other accounts get that entry copied.
+    const calls = (await readFile(ctx.record, 'utf8')).trim().split('\n');
+    expect(calls.filter((call) => call.startsWith('["add"'))).toHaveLength(1);
     expect(JSON.parse(ctx.keychain.values.get('mcp:pg') ?? '{}')).toEqual({ PGPASSWORD: 'hunter2-secret' });
     // Behavior 16: the check reaches the browser.
     await until(
@@ -308,9 +322,35 @@ describe('adding', () => {
     expect((await registered(ctx.dirs[0] ?? '')).api).toMatchObject({ headers: { 'X-Api-Key': 'key-value-123' } });
   });
 
+  it('copies a local scope server into the folder entry of every other account, keeping the rest of their config', async () => {
+    const ctx = await start();
+    const other = path.join(ctx.dirs[1] ?? '', '.claude.json');
+    await writeFile(
+      other,
+      JSON.stringify({ theme: 'dark', projects: { '/some/repo': { hasTrustDialogAccepted: true } } }),
+    );
+    const created = await api(ctx.daemon).post('/mcp-servers', {
+      name: 'docs',
+      transport: 'http',
+      target: 'https://mcp.example.com/docs',
+      scope: 'local',
+    });
+    expect(created.status).toBe(201);
+    const config = JSON.parse(await readFile(other, 'utf8'));
+    expect(config.theme).toBe('dark');
+    expect(config.projects['/some/repo']).toEqual({ hasTrustDialogAccepted: true });
+    const [folder] = Object.keys(config.projects).filter((key) => key !== '/some/repo');
+    expect(config.projects[folder ?? ''].mcpServers.docs).toMatchObject({
+      type: 'http',
+      url: 'https://mcp.example.com/docs',
+    });
+    expect((await list(ctx)).data.find((server) => server.name === 'docs')).toMatchObject({ scope: 'local' });
+  });
+
   it('undoes the accounts already done, and the Keychain entry, when one account fails', async () => {
     const ctx = await start();
-    await writeFile(path.join(ctx.dirs[1] ?? '', 'mcp-fail-add'), '');
+    // The active account registers first; the other account's config cannot be read, so nothing is written to it.
+    await writeFile(path.join(ctx.dirs[1] ?? '', '.claude.json'), '{"mcpServers": {');
     const created = await api(ctx.daemon).post('/mcp-servers', {
       name: 'pg',
       transport: 'stdio',
@@ -479,11 +519,10 @@ describe('authenticating and reconnecting', () => {
     });
     ctx.probe.set(active, 'sentry', { status: 'connected' });
     ctx.probe.set(other, 'sentry', { status: 'needs-auth' });
-    const runs = ctx.probe.runs;
     await api(ctx.daemon).post('/mcp-servers/sentry/checks');
-    // A check answers at once and probes every account in the background, one after another.
-    await expect.poll(() => ctx.probe.runs).toBe(runs + 2);
-    expect(await find(ctx, 'sentry')).toMatchObject({ status: 'ok' });
+    // A check reads that one server in the active account; the other account is not read.
+    await expect.poll(() => find(ctx, 'sentry').then((server) => server?.status)).toBe('ok');
+    expect(ctx.probe.asked).not.toContain(other);
 
     const accounts = (await api(ctx.daemon).get('/agent-accounts')).body.data as {
       id: string;
@@ -492,10 +531,14 @@ describe('authenticating and reconnecting', () => {
     }[];
     const second = accounts.find((account) => !account.is_active);
     await api(ctx.daemon).post(`/agent-accounts/${second?.id}/activate`);
-    expect(await find(ctx, 'sentry')).toMatchObject({
-      status: 'auth',
-      status_detail: `${second?.label}: needs authentication`,
-    });
+    // The account is read when it becomes active.
+    expect(
+      await until(
+        () => find(ctx, 'sentry'),
+        (server) => server?.status === 'auth',
+        'the Probe of the account that became active',
+      ),
+    ).toMatchObject({ status: 'auth', status_detail: `${second?.label}: needs authentication` });
 
     // Reconnect signs in the account that is active now, and only that one.
     await api(ctx.daemon).post('/mcp-servers/sentry/auth');

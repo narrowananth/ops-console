@@ -7,6 +7,8 @@ const home = homedir();
 export const LABEL = 'dev.ops-console';
 export const INSTALL_DIR = path.join(home, '.ops-console');
 /** The daemon runs as this app, so macOS lists it as Ops Console when the operator grants it access. */
+/** Node keeps compiled code here, so the daemon's 6 MB bundle is not parsed again on every start. */
+export const COMPILE_CACHE = path.join(INSTALL_DIR, 'compile-cache');
 export const CURRENT_APP = path.join(INSTALL_DIR, 'current', 'Ops Console.app', 'Contents', 'MacOS', 'Ops Console');
 export const CURRENT_DAEMON = path.join(INSTALL_DIR, 'current', 'app', 'main.js');
 export const BIN_LINK = path.join(home, '.local', 'bin', 'ops-console');

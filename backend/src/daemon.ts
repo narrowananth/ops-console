@@ -17,6 +17,7 @@ import { DaemonLogger, type WriteLog } from './common/logger';
 import { watchLoopLag } from './common/loop-lag';
 import { StartupRecovery } from './common/recovery';
 import { Session } from './common/session';
+import { timeShutdownHooks } from './common/shutdown-timing';
 import { WsHub } from './common/ws-hub';
 import { applyMigrations } from './db/migrate';
 import { openSqlite } from './db/open';
@@ -58,8 +59,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   Logger.overrideLogger(logger);
   const log = new Logger('daemon');
   const cleanups: (() => Promise<void> | void)[] = [];
+  /** Runs the cleanups newest first, logging each one that takes a noticeable time. */
   const undo = async () => {
-    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+    for (const cleanup of cleanups.splice(0).reverse()) {
+      const started = Date.now();
+      await cleanup();
+      const took = Date.now() - started;
+      if (took >= 200) log.log(`${cleanup.name || 'a cleanup'} finished in ${took} ms`);
+    }
   };
 
   try {
@@ -76,7 +83,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     const hub = new WsHub(session);
     const address = new DaemonAddress();
     const keychainWait = options.keychainWait ?? new KeychainWaitTracker();
-    cleanups.push(() => hub.close());
+    cleanups.push(function closeHub() {
+      hub.close();
+    });
     const app = await NestFactory.create(
       AppModule.forRoot({
         dataDir: options.dataDir,
@@ -93,7 +102,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       new ExpressAdapter(express()),
       { logger },
     );
-    cleanups.push(() => app.close());
+    cleanups.push(function closeApp() {
+      timeShutdownHooks(app, (text) => log.log(text));
+      return app.close();
+    });
     app.setGlobalPrefix(API_PREFIX);
     if (options.uiDir) serveUi(app, options.uiDir);
     await app.init();
@@ -108,7 +120,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 
     const scheduler = app.get(Scheduler);
     await scheduler.start();
-    cleanups.push(() => scheduler.stop());
+    cleanups.push(function stopScheduler() {
+      scheduler.stop();
+    });
     cleanups.push(watchLoopLag((message) => log.warn(message)));
 
     cleanups.push(

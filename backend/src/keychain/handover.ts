@@ -1,7 +1,8 @@
 import { execFile, spawn } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { Keychain } from './keychain';
+import type { HandoverGate } from './handover-gate';
+import { HANDOVER_LIMIT_MS, type Keychain } from './keychain';
 
 /** Runs `program` with `args` and `input` on stdin, resolving to its stdout; rejects on a non-zero exit. */
 export type RunProgram = (program: string, args: string[], input: string) => Promise<string>;
@@ -22,6 +23,17 @@ export class HandoverRefused extends Error {
 
 export const CODESIGN_LIMIT_MS = 10_000;
 
+/** Exists in the data folder while a start moves the Keychain items; it holds that process's pid. */
+export const HANDOVER_FLAG = 'keychain-handover.pending';
+
+/** The keys this app holds, as `LoginKeychain` lists them. */
+export type KeyManifest = {
+  /** `null` when no complete list exists yet. */
+  keys(): string[] | null;
+  /** The handover is done: the keys written since are every key there is. */
+  confirm(): void;
+};
+
 export type HandoverOptions = {
   /** This app's executable, which the Keychain items move to. */
   self: string;
@@ -37,6 +49,10 @@ export type HandoverOptions = {
   /** The folder holding every installed version; the previous app must sit in one of them, not in this app's. */
   versionsDir: string;
   codesign?: Codesign;
+  /** Lets a key be used as soon as its own item has moved. */
+  gate?: HandoverGate;
+  /** The keys to take; without a complete list the old app finds them by scanning the login keychain. */
+  manifest?: KeyManifest;
 };
 
 /**
@@ -45,31 +61,96 @@ export type HandoverOptions = {
  * them without asking and this one writes them back, so nobody is asked. Returns how many items moved.
  *
  * The previous app is checked first (`verifyPreviousApp`); one that fails refuses the handover with `HandoverRefused`
- * before anything is taken or written.
+ * before anything is taken or written. `HANDOVER_FLAG` marks the handover under way: a second start waits for it
+ * instead of taking the same items, and `mcp-exec` waits for it before it reads one.
  */
 export async function adoptKeychainItems(options: HandoverOptions): Promise<number> {
   const { self, ownerFile, script, service, keychain, run = runProgram, versionsDir, codesign = runCodesign } = options;
-  const recorded = readOwner(ownerFile);
-  if (recorded === self) return 0;
-  const from =
-    recorded !== null ? (existsSync(recorded) ? recorded : null) : (options.previous.find(existsSync) ?? null);
-  if (from === null) {
-    writeFileSync(ownerFile, `${JSON.stringify({ executable: self })}\n`);
-    return 0;
+  if (readOwner(ownerFile) === self) return 0;
+  const flag = path.join(path.dirname(ownerFile), HANDOVER_FLAG);
+  if (!claimFlag(flag)) {
+    // Another start is moving the items: wait for it, then take them over only if it left them.
+    await waitForHandover(flag, HANDOVER_LIMIT_MS);
+    if (!claimFlag(flag)) return 0;
   }
-
-  await verifyPreviousApp({ from, self, versionsDir, codesign });
-  const taken = await run(from, [script, 'take', service], '');
-  const secrets = JSON.parse(taken) as Record<string, string>;
   try {
-    for (const [account, secret] of Object.entries(secrets)) await keychain.set(account, secret);
-  } catch (error) {
-    // The old app took them out: it puts them back, so a failed write loses none.
-    await run(from, [script, 'put', service], taken);
-    throw error;
+    const recorded = readOwner(ownerFile);
+    if (recorded === self) return 0;
+    const from =
+      recorded !== null ? (existsSync(recorded) ? recorded : null) : (options.previous.find(existsSync) ?? null);
+    if (from === null) {
+      writeFileSync(ownerFile, `${JSON.stringify({ executable: self })}\n`);
+      options.manifest?.confirm();
+      return 0;
+    }
+
+    await verifyPreviousApp({ from, self, versionsDir, codesign });
+    const listed = options.manifest?.keys() ?? null;
+    if (listed !== null) options.gate?.expect(listed);
+    const taken = listed?.length === 0 ? '{}' : await run(from, [script, 'take', service, ...(listed ?? [])], '');
+    const secrets = JSON.parse(taken) as Record<string, string>;
+    options.gate?.expect(Object.keys(secrets));
+    const written: string[] = [];
+    try {
+      await Promise.all(
+        Object.entries(secrets).map(async ([account, secret]) => {
+          await keychain.set(account, secret);
+          written.push(account);
+          options.gate?.moved(account);
+        }),
+      );
+    } catch (error) {
+      // The old app took them out: it puts them back, so a failed write loses none.
+      await Promise.allSettled(written.map((account) => keychain.delete(account)));
+      await run(from, [script, 'put', service], taken);
+      throw error;
+    }
+    writeFileSync(ownerFile, `${JSON.stringify({ executable: self })}\n`);
+    options.manifest?.confirm();
+    return Object.keys(secrets).length;
+  } finally {
+    rmSync(flag, { force: true });
   }
-  writeFileSync(ownerFile, `${JSON.stringify({ executable: self })}\n`);
-  return Object.keys(secrets).length;
+}
+
+/** Takes the flag for this process; false while another live process holds it. A flag left by a dead one is taken over. */
+function claimFlag(flag: string): boolean {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      writeFileSync(flag, String(process.pid), { flag: 'wx' });
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (flagHolder(flag) !== null) return false;
+      rmSync(flag, { force: true });
+    }
+  }
+  return false;
+}
+
+/** The pid of the live process holding the flag, or `null` when there is no flag or its holder is gone. */
+function flagHolder(flag: string): number | null {
+  let pid: number;
+  try {
+    pid = Number.parseInt(readFileSync(flag, 'utf8'), 10);
+  } catch {
+    return null;
+  }
+  if (!Number.isInteger(pid) || pid === process.pid) return null;
+  try {
+    process.kill(pid, 0);
+    return pid;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM' ? pid : null;
+  }
+}
+
+/** Resolves once no live process holds the flag, or after `limitMs`. */
+export async function waitForHandover(flag: string, limitMs: number, pollMs = 200): Promise<void> {
+  const deadline = Date.now() + limitMs;
+  while (flagHolder(flag) !== null && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
 }
 
 /**

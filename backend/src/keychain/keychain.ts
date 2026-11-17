@@ -1,5 +1,7 @@
+import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { AsyncEntry } from '@napi-rs/keyring';
 import { ErrorCode, KEYCHAIN_WAIT_MESSAGE } from '@ops-console/shared';
+import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import type { KeychainWaitTracker } from './keychain-wait';
 
@@ -16,6 +18,11 @@ export interface Keychain {
 export const CALL_LIMIT_MS = 60_000;
 /** A call waits this long for the handover of the items to this app, then fails. */
 export const HANDOVER_LIMIT_MS = 90_000;
+/**
+ * Native calls in flight at once. Each holds a libuv thread while the Mac waits for a password, so a few prompts
+ * cannot take every thread the daemon's files, DNS and crypto share.
+ */
+export const NATIVE_CALLS = 2;
 
 /** A Keychain call the Mac did not answer in time, usually because it waits for the login password. */
 export class KeychainTimeout extends ApiError {
@@ -36,7 +43,39 @@ export type LoginKeychainOptions = {
   wait?: KeychainWaitTracker;
   callMs?: number;
   handoverMs?: number;
+  nativeCalls?: number;
+  /** Where the keys this console holds are listed, so the next handover reads them directly. Never holds a value. */
+  manifestFile?: string;
 };
+
+const manifestSchema = z.object({ keys: z.array(z.string()) });
+
+/** What a Keychain call waits on before it reaches for its item. */
+type Gate = { waitFor(key: string): Promise<unknown> };
+
+/** Runs at most `limit` jobs at once; the rest wait their turn. */
+class Slots {
+  private active = 0;
+  private readonly queue: (() => void)[] = [];
+
+  constructor(private readonly limit: number) {}
+
+  run<T>(job: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const start = () => {
+        this.active += 1;
+        job()
+          .then(resolve, reject)
+          .finally(() => {
+            this.active -= 1;
+            this.queue.shift()?.();
+          });
+      };
+      if (this.active < this.limit) start();
+      else this.queue.push(start);
+    });
+  }
+}
 
 /**
  * Fails with `KeychainTimeout` when `work` has not settled in `ms`. The native call cannot be cancelled: whatever it
@@ -59,43 +98,116 @@ function within<T>(work: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
- * `service` keeps `pnpm dev`'s items (`ops-console-dev`) apart from the installed app's (`ops-console`). Every use
- * waits for `ready`: the handover of the items to this app, which would ask for the password once per item if
- * this app reached for one first. The wait for `ready` ends after 90 seconds and each call after 60; both fail with
- * `keychain_timeout`, and the tracker shows the call from the moment it starts.
+ * `service` keeps `pnpm dev`'s items (`ops-console-dev`) apart from the installed app's (`ops-console`). A use of a key
+ * waits for the handover of that item to this app, which would ask for the password if this app reached for it
+ * first; the wait ends after 90 seconds and each call after 60, both failing with `keychain_timeout`, and the tracker
+ * shows the call from the moment it starts. A call made while the tracker already shows a wait fails at once: the
+ * Mac's prompt is up. A value read or written stays in memory, since only this app writes it.
  */
 export class LoginKeychain implements Keychain {
   private readonly entry: (service: string, key: string) => KeychainEntry;
   private readonly callMs: number;
   private readonly handoverMs: number;
+  private readonly gate: Gate;
+  private readonly slots: Slots;
+  private readonly values = new Map<string, string>();
+  /** Every key this app holds. `trusted` once a file or a finished handover says the list is complete. */
+  private readonly keys = new Set<string>();
+  private trusted = false;
 
   constructor(
     private readonly service = 'ops-console',
-    private readonly ready: Promise<unknown> = Promise.resolve(),
+    ready: Promise<unknown> | Gate = Promise.resolve(),
     private readonly options: LoginKeychainOptions = {},
   ) {
     this.entry = options.entry ?? ((name, key) => new AsyncEntry(name, key));
     this.callMs = options.callMs ?? CALL_LIMIT_MS;
     this.handoverMs = options.handoverMs ?? HANDOVER_LIMIT_MS;
+    this.slots = new Slots(options.nativeCalls ?? NATIVE_CALLS);
+    this.gate = ready instanceof Promise ? { waitFor: () => ready } : ready;
+    this.loadManifest();
   }
 
   async set(key: string, value: string): Promise<void> {
-    await this.call((entry) => entry.setPassword(value), key);
+    await this.write(key, value, true);
+  }
+
+  /** Writes an item the handover moves to this app, without waiting for the handover that is doing it. */
+  async moveIn(key: string, value: string): Promise<void> {
+    await this.write(key, value, false);
+  }
+
+  private async write(key: string, value: string, gated: boolean): Promise<void> {
+    await this.call((entry) => entry.setPassword(value), key, gated);
+    this.values.set(key, value);
+    this.remember(key, true);
   }
 
   async get(key: string): Promise<string | null> {
-    return (await this.call((entry) => entry.getPassword(), key)) ?? null;
+    const kept = this.values.get(key);
+    if (kept !== undefined) return kept;
+    const value = (await this.call((entry) => entry.getPassword(), key)) ?? null;
+    if (value !== null) this.values.set(key, value);
+    return value;
   }
 
   async delete(key: string): Promise<void> {
     await this.call((entry) => entry.deletePassword(), key);
+    this.values.delete(key);
+    this.remember(key, false);
   }
 
-  private async call<T>(use: (entry: KeychainEntry) => Promise<T>, key: string): Promise<T> {
-    const done = this.options.wait?.begin();
+  /** The keys this app holds, for a handover to read directly; `null` until a start has made the list complete. */
+  manifest(): string[] | null {
+    return this.trusted ? [...this.keys].sort() : null;
+  }
+
+  /** Says the keys seen so far, and `more`, are all there are, and keeps the list from now on. */
+  confirmManifest(more: string[] = []): void {
+    for (const key of more) this.keys.add(key);
+    this.trusted = true;
+    this.saveManifest();
+  }
+
+  private remember(key: string, held: boolean): void {
+    if (held) this.keys.add(key);
+    else this.keys.delete(key);
+    if (this.trusted) this.saveManifest();
+  }
+
+  private loadManifest(): void {
+    if (!this.options.manifestFile) return;
     try {
-      await within(this.ready, this.handoverMs);
-      return await within(use(this.entry(this.service, key)), this.callMs);
+      const { keys } = manifestSchema.parse(JSON.parse(readFileSync(this.options.manifestFile, 'utf8')));
+      for (const key of keys) this.keys.add(key);
+      this.trusted = true;
+    } catch {
+      // No list yet: the handover scans the login keychain once, and this app lists what it moved.
+    }
+  }
+
+  private saveManifest(): void {
+    const file = this.options.manifestFile;
+    if (!file) return;
+    const temp = `${file}.tmp`;
+    writeFileSync(temp, `${JSON.stringify({ keys: [...this.keys].sort() })}\n`);
+    renameSync(temp, file);
+  }
+
+  private async call<T>(use: (entry: KeychainEntry) => Promise<T>, key: string, gated = true): Promise<T> {
+    if (this.options.wait?.state().waiting) throw new KeychainTimeout();
+    const done = this.options.wait?.begin();
+    let abandoned = false;
+    try {
+      if (gated) await within(this.gate.waitFor(key), this.handoverMs);
+      // A call that gave up while it queued does not start its native call afterwards.
+      return await within(
+        this.slots.run(() => (abandoned ? Promise.reject(new KeychainTimeout()) : use(this.entry(this.service, key)))),
+        this.callMs,
+      );
+    } catch (error) {
+      abandoned = true;
+      throw error;
     } finally {
       done?.();
     }

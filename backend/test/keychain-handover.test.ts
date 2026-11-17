@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, symlink, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -6,11 +6,13 @@ import {
   adoptKeychainItems,
   type Codesign,
   CodesignUnavailable,
+  HANDOVER_FLAG,
   HandoverRefused,
   makeCodesign,
   otherVersionApps,
   type RunProgram,
 } from '../src/keychain/handover';
+import { HandoverGate } from '../src/keychain/handover-gate';
 import { FakeKeychain } from './fakes/keychain';
 
 const APP = 'Ops Console.app/Contents/MacOS/Ops Console';
@@ -162,6 +164,124 @@ describe('Keychain items after an update', () => {
     expect(moved).toBe(0);
     expect(calls).toEqual([]);
     expect(await owner(ownerFile)).toBe(app('0.1.1'));
+  });
+});
+
+describe('the handover of the keys the console lists', () => {
+  const base = async () => {
+    const { root, app } = await versions('0.1.0', '0.1.1');
+    return { root, app, ownerFile: path.join(root, 'keychain-owner.json') };
+  };
+
+  it('asks the old app for those keys only, and lets each one through as it lands', async () => {
+    const { root, app, ownerFile } = await base();
+    const keychain = new FakeKeychain();
+    const gate = new HandoverGate();
+    const seen: string[][] = [];
+    const run: RunProgram = async (_program, args) => {
+      seen.push(args.slice(2));
+      return JSON.stringify({ 'connection:a': 'pw-a', 'mcp:b': 'pw-b' });
+    };
+    let confirmed = false;
+
+    const moved = await adoptKeychainItems({
+      self: app('0.1.1'),
+      previous: [app('0.1.0')],
+      ownerFile,
+      script: 'keychain-handover.mjs',
+      service: 'ops-console',
+      keychain,
+      run,
+      gate,
+      manifest: { keys: () => ['connection:a', 'mcp:b'], confirm: () => (confirmed = true) },
+      ...checked(root),
+    });
+
+    expect(moved).toBe(2);
+    expect(seen).toEqual([['ops-console', 'connection:a', 'mcp:b']]);
+    expect(confirmed).toBe(true);
+    // Every key is free once its item is in place, and the flag is gone.
+    await gate.waitFor('connection:a');
+    await gate.waitFor('mcp:b');
+    await expect(stat(path.join(root, HANDOVER_FLAG))).rejects.toThrow();
+  });
+
+  it('holds only the listed keys while the old app still has them', async () => {
+    const { root, app, ownerFile } = await base();
+    const gate = new HandoverGate();
+    let release: () => void = () => {};
+    const run: RunProgram = () =>
+      new Promise((resolve) => {
+        release = () => resolve(JSON.stringify({ 'connection:a': 'pw-a' }));
+      });
+    const done = adoptKeychainItems({
+      self: app('0.1.1'),
+      previous: [app('0.1.0')],
+      ownerFile,
+      script: 'keychain-handover.mjs',
+      service: 'ops-console',
+      keychain: new FakeKeychain(),
+      run,
+      gate,
+      manifest: { keys: () => ['connection:a'], confirm: () => {} },
+      ...checked(root),
+    });
+    await gate.waitFor('connection:unrelated');
+    let held = true;
+    const waiting = gate.waitFor('connection:a').then(() => {
+      held = false;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(held).toBe(true);
+    release();
+    await done;
+    await waiting;
+    expect(held).toBe(false);
+  });
+
+  it('leaves a second start to wait, and takes nothing the first start moved', async () => {
+    const { root, app, ownerFile } = await base();
+    const { run, calls } = oldApp(new Map([['connection:db', 'pw-1']]));
+    // The first start is another live process: the parent of this test run.
+    const flag = path.join(root, HANDOVER_FLAG);
+    await writeFile(flag, String(process.ppid));
+    const second = adoptKeychainItems({
+      self: app('0.1.1'),
+      previous: [app('0.1.0')],
+      ownerFile,
+      script: 'keychain-handover.mjs',
+      service: 'ops-console',
+      keychain: new FakeKeychain(),
+      run,
+      ...checked(root),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(calls).toEqual([]);
+
+    // The first start finishes: it recorded this app as the holder and removed its flag.
+    await writeFile(ownerFile, JSON.stringify({ executable: app('0.1.1') }));
+    await rm(flag);
+    expect(await second).toBe(0);
+    expect(calls).toEqual([]);
+  });
+
+  it('takes over a flag left by a process that no longer runs', async () => {
+    const { root, app, ownerFile } = await base();
+    await writeFile(path.join(root, HANDOVER_FLAG), '2147483646');
+    const { run } = oldApp(new Map([['connection:db', 'pw-1']]));
+    expect(
+      await adoptKeychainItems({
+        self: app('0.1.1'),
+        previous: [app('0.1.0')],
+        ownerFile,
+        script: 'keychain-handover.mjs',
+        service: 'ops-console',
+        keychain: new FakeKeychain(),
+        run,
+        ...checked(root),
+      }),
+    ).toBe(1);
+    await expect(stat(path.join(root, HANDOVER_FLAG))).rejects.toThrow();
   });
 });
 

@@ -30,6 +30,7 @@ export function held(ms: number): string {
 export const INTERVALS: { value: HealthInterval; label: string }[] = [
   { value: HealthInterval.HalfHour, label: '30 minutes' },
   { value: HealthInterval.Hour, label: '1 hour' },
+  { value: HealthInterval.TwoHours, label: '2 hours' },
   { value: HealthInterval.SixHours, label: '6 hours' },
   { value: HealthInterval.TwelveHours, label: '12 hours' },
   { value: HealthInterval.Day, label: '24 hours' },

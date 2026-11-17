@@ -41,6 +41,8 @@ describe('ops-console start', () => {
     expect(plist).toContain(`<string>${path.join(m.installDir, 'current/app/main.js')}</string>`);
     expect(plist).toMatch(/<key>RunAtLoad<\/key>\s*<true\/>/);
     expect(plist).toMatch(/<key>KeepAlive<\/key>\s*<true\/>/);
+    // Keychain calls that wait for a password must not use up the thread pool the daemon's file reads share.
+    expect(plist).toMatch(/<key>UV_THREADPOOL_SIZE<\/key>\s*<string>16<\/string>/);
     expect(await m.calls()).toEqual(
       expect.arrayContaining([
         `enable gui/${uid}/dev.ops-console`,
@@ -165,6 +167,19 @@ describe('ops-console update', () => {
     expect(result).toMatchObject({ code: 0, stderr: '' });
     expect((await opsConsole(m, '--version')).stdout.trim()).toBe('1.1.0');
     expect((await opsConsole(m, 'status')).stdout).toMatch(/version\s+1\.1\.0/);
+  });
+
+  it('restarts through launchd once, without loading the job again', async () => {
+    const m = await installed();
+    await opsConsole(m, 'start');
+    const before = (await m.calls()).filter((call) => call.startsWith('bootstrap')).length;
+
+    m.env.OPS_CONSOLE_RELEASE_URL = `file://${nextRelease}`;
+    expect((await opsConsole(m, 'update')).code).toBe(0);
+
+    const calls = await m.calls();
+    expect(calls.filter((call) => call.startsWith('kickstart'))).toEqual([`kickstart -k gui/${uid}/dev.ops-console`]);
+    expect(calls.filter((call) => call.startsWith('bootstrap'))).toHaveLength(before);
   });
 
   it('leaves a stopped daemon stopped', async () => {

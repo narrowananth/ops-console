@@ -1,6 +1,7 @@
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { HANDOVER_FLAG } from '../src/keychain/handover';
 import { filesBase, launcherArgv, runMcpExec, unwrapLauncher } from '../src/mcp/launcher';
 import { FakeKeychain } from './fakes/keychain';
 import { tempDir } from './helpers';
@@ -82,6 +83,21 @@ writeFileSync(${JSON.stringify(out)}, JSON.stringify({ key: readFileSync(file, '
       if (was === undefined) delete process.env.OPS_CONSOLE_DATA_DIR;
       else process.env.OPS_CONSOLE_DATA_DIR = was;
     }
+  });
+
+  it('waits for a handover that is moving the Keychain items before it reads one', async () => {
+    const keychain = new FakeKeychain();
+    await keychain.set('mcp:pg', JSON.stringify({ PGPASSWORD: 'hunter2-secret' }));
+    const { command, out } = await stub();
+    // A live process holds the flag: the parent of this test run.
+    const flag = path.join(await tempDir(), HANDOVER_FLAG);
+    await writeFile(flag, String(process.ppid));
+    const running = runMcpExec(['pg', '--', process.execPath, command], keychain, await tempDir(), flag);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expect(stat(out)).rejects.toThrow();
+    await rm(flag);
+    expect(await running).toBe(0);
+    expect(JSON.parse(await readFile(out, 'utf8')).secret).toBe('hunter2-secret');
   });
 
   it('runs the command without extra env when the Keychain holds nothing', async () => {

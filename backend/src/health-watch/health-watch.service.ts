@@ -19,7 +19,7 @@ import { and, desc, eq, inArray, max } from 'drizzle-orm';
 import { ApiError } from '../common/errors';
 import { WsHub } from '../common/ws-hub';
 import { ConnectionsService } from '../connections/connections.service';
-import { ConnectorsService } from '../connectors/connectors.service';
+import { ConnectorsService, SERVER_ONLY } from '../connectors/connectors.service';
 import { connections, healthChecks } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { ConnectionServers, McpServersService } from '../mcp/mcp-servers.service';
@@ -32,12 +32,17 @@ const MINUTE = 60_000;
 export const INTERVAL_MS: Record<HealthInterval, number | null> = {
   [HealthInterval.HalfHour]: 30 * MINUTE,
   [HealthInterval.Hour]: 60 * MINUTE,
+  [HealthInterval.TwoHours]: 120 * MINUTE,
   [HealthInterval.SixHours]: 360 * MINUTE,
   [HealthInterval.TwelveHours]: 720 * MINUTE,
   [HealthInterval.Day]: 1440 * MINUTE,
   [HealthInterval.Off]: null,
 };
 
+/** Checks of one run that go at the same time. */
+const CONCURRENCY = 2;
+/** A job waits this long, then looks again, while the operator's own check or registration runs. */
+const OPERATOR_WAIT_MS = 2_000;
 /** How often the scheduler looks at whether an area is due. */
 const TICK_MS = 30_000;
 /** The first look after the daemon starts, so start-up is not slowed by it. */
@@ -58,6 +63,12 @@ const AREA_OF: Record<CheckTarget, HealthArea> = {
 };
 
 type Point = { status: HealthStatus; at: string };
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** A Connector that rides only on its MCP server reads that server in its own check. */
+const checkedWithConnector = (connector: string | null): boolean =>
+  connector !== null && SERVER_ONLY.some((id) => id === connector);
 
 /** Walks a history, newest first, for when the current run of failures began and when a recovery happened. */
 export function readHistory(
@@ -99,6 +110,7 @@ export function readHistory(
 export class HealthWatch implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger('health-watch');
   private timers: NodeJS.Timeout[] = [];
+  private stopping = false;
   private readonly lastRun = new Map<HealthArea, number>();
   private readonly running = new Map<HealthArea, { done: number; total: number }>();
 
@@ -134,6 +146,7 @@ export class HealthWatch implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
+    this.stopping = true;
     for (const timer of this.timers) clearTimeout(timer);
   }
 
@@ -152,7 +165,7 @@ export class HealthWatch implements OnApplicationBootstrap, OnModuleDestroy {
     }
   }
 
-  /** Checks everything in the area, one at a time, and settles when the last one answered. */
+  /** Checks everything in the area, a few at a time, and settles when the last one answered. */
   async run(area: HealthArea): Promise<void> {
     if (this.running.has(area)) return;
     // Marked before the list is read, so a second click or tick does not start another run.
@@ -162,14 +175,20 @@ export class HealthWatch implements OnApplicationBootstrap, OnModuleDestroy {
     const work = await this.work(area);
     state.total = work.length;
     try {
-      for (const job of work) {
-        try {
-          await job();
-        } catch (error) {
-          this.logger.debug(`a ${area} check failed to run: ${error instanceof Error ? error.message : error}`);
+      const queue = [...work];
+      const worker = async () => {
+        for (let job = queue.shift(); job && !this.stopping; job = queue.shift()) {
+          // The operator's own check or registration goes first.
+          while (this.connections.busy() && !this.stopping) await sleep(OPERATOR_WAIT_MS);
+          try {
+            await job();
+          } catch (error) {
+            this.logger.debug(`a ${area} check failed to run: ${error instanceof Error ? error.message : error}`);
+          }
+          state.done += 1;
         }
-        state.done += 1;
-      }
+      };
+      await Promise.all(Array.from({ length: CONCURRENCY }, worker));
     } finally {
       this.running.delete(area);
       this.lastRun.set(area, Date.now());
@@ -188,14 +207,17 @@ export class HealthWatch implements OnApplicationBootstrap, OnModuleDestroy {
         .from(connections)
         .all()
         .filter((row) => row.access !== 'none')
-        .map((row) => () => this.connections.check(row.id));
+        .map((row) => () => this.connections.check(row.id, { scheduled: true }));
     }
     const jobs: (() => Promise<unknown>)[] = [];
     for (const connector of (await this.connectors.list()).data) {
       if (connector.status !== HealthStatus.Off) jobs.push(() => this.connectors.check(connector.id));
     }
-    for (const server of (await this.mcp.list()).data) {
-      if (server.registered && server.enabled) jobs.push(() => this.mcp.checkOne(server.name));
+    // The kept readings name the servers; each is then read alone, never by a Probe of every server.
+    for (const server of (await this.mcp.list({ probe: false })).data) {
+      if (server.registered && server.enabled && !checkedWithConnector(server.used_by)) {
+        jobs.push(() => this.mcp.checkOne(server.name));
+      }
     }
     return jobs;
   }
@@ -363,7 +385,7 @@ export class HealthWatch implements OnApplicationBootstrap, OnModuleDestroy {
         ),
       );
     }
-    for (const server of (await this.mcp.list()).data) {
+    for (const server of (await this.mcp.list({ probe: false })).data) {
       if (!server.registered) continue;
       items.push(
         this.item(

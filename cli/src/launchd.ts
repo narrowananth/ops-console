@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { CURRENT_APP, CURRENT_DAEMON, DATA_DIR, LABEL, LOG_DIR, LOG_FILE, PLIST } from './paths';
+import { COMPILE_CACHE, CURRENT_APP, CURRENT_DAEMON, DATA_DIR, LABEL, LOG_DIR, LOG_FILE, PLIST } from './paths';
 
 const domain = `gui/${process.getuid?.() ?? 0}`;
 const service = `${domain}/${LABEL}`;
@@ -15,10 +15,16 @@ function launchctl(...args: string[]): { ok: boolean; output: string } {
 
 /**
  * launchd starts agents with a bare PATH and its own idea of HOME. The daemon gets the operator's PATH, so
- * it finds `claude`, and the data folder this CLI reads the runtime file from.
+ * it finds `claude`, and the data folder this CLI reads the runtime file from. A pool of 16 threads keeps a few
+ * Keychain calls that wait for a password from holding every thread the daemon's files and DNS share.
  */
 function daemonEnv(): Record<string, string> {
-  const env: Record<string, string> = { PATH: process.env.PATH ?? '/usr/bin:/bin', OPS_CONSOLE_DATA_DIR: DATA_DIR };
+  const env: Record<string, string> = {
+    PATH: process.env.PATH ?? '/usr/bin:/bin',
+    OPS_CONSOLE_DATA_DIR: DATA_DIR,
+    UV_THREADPOOL_SIZE: '16',
+    NODE_COMPILE_CACHE: COMPILE_CACHE,
+  };
   if (process.env.OPS_CONSOLE_PORT) env.OPS_CONSOLE_PORT = process.env.OPS_CONSOLE_PORT;
   return env;
 }
@@ -67,6 +73,18 @@ export async function load(): Promise<{ ok: boolean; output: string }> {
   await unload();
   launchctl('enable', service);
   return launchctl('bootstrap', domain, PLIST);
+}
+
+/**
+ * Starts the daemon again on `current`. Launchd stops it with SIGTERM and starts it from the same job, so one start
+ * follows one stop. A job that is not loaded, or whose plist changed, is loaded again, since launchd reads the plist
+ * only when it loads the job.
+ */
+export async function restart(): Promise<{ ok: boolean; output: string }> {
+  const loaded = launchctl('print', service).ok;
+  const current = (await readFile(PLIST, 'utf8').catch(() => null)) === plist();
+  if (!loaded || !current) return load();
+  return launchctl('kickstart', '-k', service);
 }
 
 /**
