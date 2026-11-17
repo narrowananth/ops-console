@@ -315,9 +315,18 @@ describe('Pull request opening', () => {
       }
     });
 
-    it('asks before a write, `full` included, and runs nothing on a no', async () => {
+    it('runs a write with no Approval in full access', async () => {
       const ctx = await start();
       const id = ctx.daemon.createSession({ access_mode: AccessMode.Full, repoId: ctx.repoId, branch: 'work' });
+      ctx.daemon.sdk.script(CALL('gh', ['pr', 'comment', '12', '--body', 'hi']));
+      await converse(ctx.daemon, id, 'comment on pr 12');
+      expect((await ctx.http.get('/approvals')).body.data).toEqual([]);
+      expect(ctx.daemon.sdk.ran.filter((step) => step.tool === RUN_INTEGRATION_TOOL)).toHaveLength(1);
+    });
+
+    it('asks before a write outside full access, and runs nothing on a no', async () => {
+      const ctx = await start();
+      const id = ctx.daemon.createSession({ access_mode: AccessMode.Auto, repoId: ctx.repoId, branch: 'work' });
       ctx.daemon.sdk.script(CALL('gh', ['pr', 'comment', '12', '--body', 'hi']));
       await ctx.http.post(`/sessions/${id}/messages`, { text: 'comment on pr 12' });
       const [approval] = await until(
@@ -337,7 +346,7 @@ describe('Pull request opening', () => {
 
     it('stops asking for one CLI in one Session after "don\'t ask again", and still asks in another Session', async () => {
       const ctx = await start();
-      const id = ctx.daemon.createSession({ access_mode: AccessMode.Full, repoId: ctx.repoId, branch: 'work' });
+      const id = ctx.daemon.createSession({ access_mode: AccessMode.Auto, repoId: ctx.repoId, branch: 'work' });
       const write = CALL('gh', ['pr', 'comment', '12', '--body', 'hi']);
       ctx.daemon.sdk.script(write);
       await ctx.http.post(`/sessions/${id}/messages`, { text: 'comment on pr 12' });
@@ -359,7 +368,7 @@ describe('Pull request opening', () => {
       expect((await ctx.http.get('/approvals?status=pending')).body.data).toEqual([]);
       expect(ctx.daemon.sdk.ran.filter((step) => step.tool === RUN_INTEGRATION_TOOL)).toHaveLength(2);
       // Another Session still asks.
-      const other = ctx.daemon.createSession({ access_mode: AccessMode.Full, repoId: ctx.repoId, branch: 'work' });
+      const other = ctx.daemon.createSession({ access_mode: AccessMode.Auto, repoId: ctx.repoId, branch: 'work' });
       ctx.daemon.sdk.script(write);
       await ctx.http.post(`/sessions/${other}/messages`, { text: 'comment on pr 12' });
       await until(

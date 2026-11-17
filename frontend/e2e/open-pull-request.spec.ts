@@ -44,6 +44,7 @@ const SESSION = {
   queued_message: null,
   spawned_by: null,
   spawned: [],
+  subagents: [],
 };
 
 type Status = { can_open: boolean; uncommitted_files?: number };
@@ -70,6 +71,12 @@ async function route(page: Page, status: Status) {
   });
 }
 
+/** Create PR, from the Session card's Commit, push & PR menu. */
+const createPr = async (page: Page) => {
+  await page.getByRole('button', { name: 'Commit, push and PR options' }).click();
+  await page.getByRole('menuitem', { name: 'Create PR' }).click();
+};
+
 const open = (page: Page) => page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
 
 test('the agent drafts the text, the operator edits it, and confirming has the console open the pull request', async ({
@@ -92,7 +99,7 @@ test('the agent drafts the text, the operator edits it, and confirming has the c
   });
   await open(page);
 
-  await page.getByRole('button', { name: 'Open pull request' }).click();
+  await createPr(page);
   const form = page.getByRole('form', { name: 'Open pull request' });
   await expect(form.getByLabel('Title')).toHaveValue('Guard the empty cart');
   await expect(form.getByLabel('Description')).toHaveValue('Checkout threw on an empty cart.');
@@ -117,7 +124,7 @@ test('a draft that failed leaves the fields empty to write by hand, and Open sta
   );
   await open(page);
 
-  await page.getByRole('button', { name: 'Open pull request' }).click();
+  await createPr(page);
   const form = page.getByRole('form', { name: 'Open pull request' });
   await expect(form.getByLabel('Title')).toHaveValue('');
   await expect(form.getByLabel('Title')).toBeEditable();
@@ -142,7 +149,7 @@ test('a Git host that is not connected shows why under the form and links Integr
   });
   await open(page);
 
-  await page.getByRole('button', { name: 'Open pull request' }).click();
+  await createPr(page);
   const form = page.getByRole('form', { name: 'Open pull request' });
   await form.getByRole('button', { name: 'Open pull request' }).click();
   await expect(form.getByRole('alert')).toContainText('Bitbucket is not connected');
@@ -164,7 +171,7 @@ test('a long description keeps every character, with no error', async ({ page })
   );
   await open(page);
 
-  await page.getByRole('button', { name: 'Open pull request' }).click();
+  await createPr(page);
   const form = page.getByRole('form', { name: 'Open pull request' });
   const description = form.getByLabel('Description');
   await expect(description).toBeEditable();

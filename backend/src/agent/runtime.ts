@@ -756,6 +756,7 @@ export class AgentRuntime implements OnModuleDestroy {
       sessionId: session.id,
       messageId: crypto.randomUUID(),
       accountId,
+      accessMode: session.accessMode,
       workingDir: options.cwd ?? kind.workingDir(session),
       rules: options.rules ?? null,
       skills: options.skills ?? [],
@@ -1797,7 +1798,7 @@ export class AgentRuntime implements OnModuleDestroy {
   }
 
   /**
-   * Moving into a Repo asks in every Access mode: the Session's work then happens in the operator's own checkout. A
+   * Moving into a Repo asks in every Access mode but full: the Session's work then happens in the operator's own checkout. A
    * call that matches no imported Repo is refused before it asks.
    */
   private async approveJoinRepo(run: Run, toolInput: Record<string, unknown>, stepId: string): Promise<HookJSONOutput> {
@@ -1839,7 +1840,7 @@ export class AgentRuntime implements OnModuleDestroy {
   }
 
   /**
-   * Starting Sessions in several Repos asks once for the whole list, in every Access mode: each Session then works in a
+   * Starting Sessions in several Repos asks once for the whole list, in every Access mode but full: each Session then works in a
    * Repo and may open a pull request. A list with an unknown or repeated Repo, or a blank task, is refused before it asks.
    */
   private async approveSpawnSessions(
@@ -1887,12 +1888,12 @@ export class AgentRuntime implements OnModuleDestroy {
   }
 
   /**
-   * Saving an output file outside the run's folders asks in every Access mode: the daemon, outside the sandbox, writes
+   * Saving an output file outside the run's folders asks in every Access mode but full: the daemon, outside the sandbox, writes
    * where the operator says. A call with no such file or no such folder is refused before it asks.
    */
   /**
    * `run_integration`: the daemon runs an integration CLI outside the Run sandbox (ADR 0006). The command is classified
-   * by its words first. A read runs at once. A write asks in every Access mode, `full` included, and only a chat run
+   * by its words first. A read runs at once. A write asks in every Access mode but full, and only a chat run
    * may write: a Verification or a review reads. Sign-in, tokens, merges and anything not on the lists are refused.
    */
   private async approveIntegration(
@@ -2032,7 +2033,7 @@ export class AgentRuntime implements OnModuleDestroy {
     };
   }
 
-  /** Starting a process asks in every Access mode: it runs as the operator, outside the sandbox. */
+  /** Starting a process asks in every Access mode but full: it runs as the operator, outside the sandbox. */
   private async approveStartProcess(
     run: Run,
     toolInput: Record<string, unknown>,
@@ -2072,7 +2073,7 @@ export class AgentRuntime implements OnModuleDestroy {
     );
   }
 
-  /** A script in the page asks in every Access mode: it is the one browser tool that can make a page send data out. */
+  /** A script in the page asks in every Access mode but full: it is the one browser tool that can make a page send data out. */
   private async approveEvaluate(run: Run, toolInput: Record<string, unknown>, stepId: string): Promise<HookJSONOutput> {
     const parsed = browserEvaluateInputSchema.safeParse(toolInput);
     if (!this.browserTools || !parsed.success) {
@@ -2146,6 +2147,9 @@ export class AgentRuntime implements OnModuleDestroy {
   }
 
   private async ask(run: Run, request: ApprovalRequest, stepId: string | null = null): Promise<Decision> {
+    // Full access asks about nothing but a PROD write: the console's own tools (integration writes, Repo moves, saved
+    // files, processes, page scripts, spawned Sessions) run at once. Merge, sign-in and sandbox refusals still hold.
+    if (run.accessMode === AccessMode.Full && !request.isProd) return ApprovalStatus.Approved;
     const since = Date.now();
     run.waitingSince ??= since;
     run.waits++;

@@ -1,12 +1,13 @@
 import { type ButtonHTMLAttributes, forwardRef } from 'react';
 
-type Variant = 'primary' | 'secondary' | 'ghost';
+type Variant = 'primary' | 'secondary' | 'ghost' | 'plain';
 
 const variants: Record<Variant, string> = {
   primary:
     'border-accent bg-accent text-white shadow-[0_1px_2px_rgb(236_48_19/0.25),0_2px_8px_rgb(236_48_19/0.18)] hover:bg-accent-600 active:bg-accent-700 disabled:border-neutral-300 disabled:bg-neutral-300 disabled:text-neutral-700 disabled:hover:bg-neutral-300',
   secondary: 'border-divider bg-card shadow-sm hover:bg-neutral-200',
   ghost: 'border-transparent text-accent hover:bg-accent/10',
+  plain: 'border-transparent bg-transparent text-text hover:bg-neutral-200',
 };
 
 export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; icon?: boolean };

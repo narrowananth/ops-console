@@ -33,9 +33,9 @@ or opens one itself: its commands hold no git credentials and `git push` stays d
 The agent saves a file outside its folders the same way. The sandbox keeps a run's commands from writing anywhere but its
 working folder, its Session's output folder, temp and the package-tool caches, so a file for the operator goes in the
 output folder, where the console shows it. To put one in another folder, such as `~/Downloads`, the agent calls the
-console's `save_file` tool with a file name from that folder and an absolute folder path. The tool raises an Approval in
-every Access mode that shows the file, its size and the destination, and only the operator's yes has the daemon, outside
-the sandbox, copy the file. A no is final: the agent does not retry by a command or ask the operator to run `mv`.
+console's `save_file` tool with a file name from that folder and an absolute folder path. The tool raises an Approval
+in every Access mode but full that shows the file, its size and the destination, and only the operator's yes has the
+daemon, outside the sandbox, copy the file. A Session in full access copies it at once. A no is final: the agent does not retry by a command or ask the operator to run `mv`.
 
 On any open pull request, the operator's or a teammate's, pressing Address comments is the approval
 for one Comment pass: the agent changes code in a scratch copy at the pull request's head commit, and
@@ -75,6 +75,10 @@ resolves threads, and a Reply check or Comment pass denies the agent `git push` 
   is accepted.
 - **An Approval per Spawned Session**: one click per Repo, each reading one task. It lost because the operator reads the
   whole list once, and a yes per Repo gave back most of the time the batch saves.
+- **The console's own tools ask in every Access mode, `full` included** (`save_file`, `spawn_sessions`, `join_repo`,
+  `start_process`, `browser_evaluate`, an integration write): the first design. It lost because an operator who chose
+  Full access still met a prompt on most turns, and the chip said otherwise. In full access they run at once; the PROD
+  write Approval, the merge denial, the Run sandbox and the refusals of sign-in and tokens still hold.
 - **Git host credentials inside the Run sandbox so the agent pushes itself**: `ssh` ignores the proxy, and the Bitbucket
   and GitLab CLIs keep their tokens in the Keychain, so it cannot work; where it could, a steered run would hold a
   token that writes to every repository. The daemon pushes for the agent instead.
@@ -91,6 +95,10 @@ One yes on a `spawn_sessions` list starts a chat run per Repo, and each can push
 request without a click, as any chat run can. The count is new. No run can force a push, merge or push
 another Repo, a Spawned Session cannot start others, and the tool is offered only in a chat the operator started, never
 in a job that read log or pull request text.
+
+A Session in full access can have the daemon run an integration write as the operator, start a process outside the
+sandbox, move into a Repo, start a batch of Sessions or save a file outside its folders with no click. Steered by text it
+read, it could do any of these; the operator who set Full access chose that, and a PROD write still asks.
 
 An approved `save_file` writes where the operator was shown: the daemon replaces a file of that name in the destination
 and checks nothing but that the folder exists. The operator reads the path on the card.

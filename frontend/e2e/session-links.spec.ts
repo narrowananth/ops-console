@@ -44,6 +44,7 @@ const session = (id: string, extra: Record<string, unknown> = {}) => ({
   queued_message: null,
   spawned_by: null,
   spawned: [],
+  subagents: [],
   ...extra,
 });
 

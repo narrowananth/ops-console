@@ -502,8 +502,16 @@ export class Git {
 
   /** Files with changes not committed yet: staged, unstaged and untracked. */
   async uncommittedFiles(dir: string): Promise<number> {
-    const out = await this.try(dir, ['--no-optional-locks', 'status', '--porcelain']);
-    return (out ?? '').split('\n').filter((line) => line.trim() !== '').length;
+    return (await this.uncommittedPaths(dir)).length;
+  }
+
+  /** The paths of those files, as git lists them; a rename names its new path. */
+  async uncommittedPaths(dir: string): Promise<string[]> {
+    const out = await this.try(dir, ['--no-optional-locks', 'status', '--porcelain', '--untracked-files=all']);
+    return (out ?? '')
+      .split('\n')
+      .filter((line) => line.trim() !== '')
+      .map((line) => (line.slice(3).split(' -> ').at(-1) ?? '').replace(/^"|"$/g, ''));
   }
 
   /** The commit local branch `branch` is at; null when the Repo has no such branch. */

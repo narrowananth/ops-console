@@ -1,7 +1,10 @@
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import {
   type CommentPass,
+  type CommittedSession,
   checkoutSchema,
+  commitSessionSchema,
+  openFolderSchema,
   openPullRequestSchema,
   type PrAgentReview,
   type PrComment,
@@ -56,6 +59,31 @@ export class WorkspaceSessionsController {
     const { id } = parseInput(sessionParams, params, 'params');
     const input = parseInput(checkoutSchema, body, 'body');
     return { data: await this.workspace.checkout(id, input.branch, input.create) };
+  }
+
+  /** Commits every change in the Session's worktree. */
+  @Post(':id/commit')
+  async commit(@Param() params: unknown, @Body() body: unknown): Promise<{ data: CommittedSession }> {
+    const { id } = parseInput(sessionParams, params, 'params');
+    const input = parseInput(commitSessionSchema, body ?? {}, 'body');
+    return { data: await this.workspace.commit(id, input) };
+  }
+
+  /** Pushes the Session's branch to origin, never forced. */
+  @Post(':id/push')
+  @HttpCode(200)
+  async push(@Param() params: unknown): Promise<{ data: { branch: string } }> {
+    const { id } = parseInput(sessionParams, params, 'params');
+    return { data: await this.opening.pushBranch(id) };
+  }
+
+  /** Opens the Session's worktree in the editor or the file manager of the machine the daemon runs on. */
+  @Post(':id/open-folder')
+  @HttpCode(204)
+  async openFolder(@Param() params: unknown, @Body() body: unknown): Promise<void> {
+    const { id } = parseInput(sessionParams, params, 'params');
+    const input = parseInput(openFolderSchema, body, 'body');
+    await this.workspace.openFolder(id, input.target);
   }
 
   @Get(':id/diff')

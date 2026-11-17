@@ -44,6 +44,7 @@ const SESSION = {
   queued_message: null,
   spawned_by: null,
   spawned: [],
+  subagents: [],
 };
 
 const QUESTIONS = [

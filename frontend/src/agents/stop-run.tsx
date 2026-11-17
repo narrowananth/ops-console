@@ -14,12 +14,15 @@ export function StopRun({
   title = 'Stop the agent where it is',
   className = 'px-2.5 py-1 text-xs',
   onStopped,
+  round = false,
 }: {
   sessionId: string;
   title?: string;
   className?: string;
   /** Called once the run has stopped. */
   onStopped?: () => void;
+  /** A round red button holding only the stop square, as in the composer. */
+  round?: boolean;
 }) {
   const stop = useStopSession(sessionId);
   return (
@@ -29,15 +32,28 @@ export function StopRun({
           {stop.error.message}
         </span>
       )}
-      <Button
-        title={title}
-        className={className}
-        disabled={stop.isPending}
-        onClick={() => stop.mutate(undefined, { onSuccess: onStopped })}
-      >
-        {stop.isPending ? <Spinner /> : <StopIcon />}
-        Stop
-      </Button>
+      {round ? (
+        <button
+          type="button"
+          aria-label="Stop"
+          title={title}
+          disabled={stop.isPending}
+          onClick={() => stop.mutate(undefined, { onSuccess: onStopped })}
+          className="flex size-9 flex-none cursor-pointer items-center justify-center rounded-full border-0 bg-accent text-white shadow-sm hover:bg-accent-600 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {stop.isPending ? <Spinner /> : <StopIcon />}
+        </button>
+      ) : (
+        <Button
+          title={title}
+          className={className}
+          disabled={stop.isPending}
+          onClick={() => stop.mutate(undefined, { onSuccess: onStopped })}
+        >
+          {stop.isPending ? <Spinner /> : <StopIcon />}
+          Stop
+        </Button>
+      )}
     </>
   );
 }

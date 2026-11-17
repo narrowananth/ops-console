@@ -39,6 +39,10 @@ export const OPEN_PR_RULE = `Pull requests. Never push a branch and never open a
  */
 export const INTEGRATIONS_RULE = `Integrations. The pup, gh, glab, bkt and slashdocs CLIs cannot sign in inside your sandbox: it has no Keychain and you hold no keys. Never run pup auth login, never look for tokens, never ask the operator for keys. Run these CLIs with the ${RUN_INTEGRATION_TOOL} tool: cli, then args with the command words first and one argument per entry (cli pup, args logs, search, --query, status:error). A read runs at once. A write (a comment, a create, an update, a mute) asks the operator first. Sign-in, tokens, extensions, aliases and merges are refused, and the tool will not read a file outside your folders. Datadog also has the tools of the datadog-pup MCP Server (mcp__datadog-pup__*). When neither is in your tool list, say so and stop.`;
 
+/** Work that splits into independent parts goes to subagents at once, and comes back as one answer. */
+export const SUBAGENTS_RULE =
+  'Parallel work. When a task splits into independent parts, start one subagent per part with the Agent tool, all in the same turn so they run at once. Give each a brief that stands alone and its own files or folders, so two never edit the same file. Wait for all of them, then give the operator one merged answer: what each part found or changed, and where they disagree. Do not start a subagent for work you can finish in a few steps yourself.';
+
 /**
  * Where the agent puts a file for the operator. The sandbox blocks `open` and any write outside its folders, so the
  * agent writes into the Session's output folder, where the console shows it, and asks to save a copy elsewhere. The
@@ -78,6 +82,7 @@ export function systemAppend(
     OPEN_PR_RULE,
     INTEGRATIONS_RULE,
     COMMIT_HOOKS_RULE,
+    SUBAGENTS_RULE,
   ];
   if (outputFolder !== null) parts.push(OUTPUT_FILES_RULE);
   if (repoFolders.length > 0) parts.push(REPO_FOLDERS_RULE);

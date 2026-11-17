@@ -44,6 +44,7 @@ const session = (id: string, repoId: string, title: string, state = 'idle', bran
   queued_message: null,
   spawned_by: null,
   spawned: [],
+  subagents: [],
 });
 
 const repoRoutes = async (page: Page, repos: ReturnType<typeof repo>[], sessions: ReturnType<typeof session>[]) => {
@@ -270,14 +271,14 @@ test('Stop ends a run waiting on the operator, and Delete waits until it has', a
   });
   await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
 
-  const header = page.locator('header', { hasText: 'GET /v3/products failing' });
-  await expect(header.getByRole('button', { name: 'Delete' })).toBeDisabled();
+  const card = page.getByRole('complementary', { name: 'Session' });
+  await expect(card.getByRole('button', { name: 'Delete' })).toBeDisabled();
   // The Session's row in the list stops it too, from its hover.
   await expect(page.getByRole('button', { name: 'Stop GET /v3/products failing' })).toBeAttached();
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
   await expect.poll(() => stops).toEqual(['POST']);
   await expect(page.getByRole('button', { name: /^Stop/ })).toHaveCount(0);
-  await expect(header.getByRole('button', { name: 'Delete' })).toBeEnabled();
+  await expect(card.getByRole('button', { name: 'Delete' })).toBeEnabled();
 });
 
 test('every message the operator sent copies; the last one edits, reverts the files and runs again', async ({
@@ -821,10 +822,9 @@ test("the Diff panel shows the Session's branch and its files, folds them and re
   );
   await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
 
-  const header = page.locator('header', { hasText: 'engage platform' });
-  // The header follows the branch checked out now, not the one the Session started on.
-  await expect(header).toContainText('fix/login');
-  const toggle = header.getByRole('button', { name: /^Diff/ });
+  // The Session card follows the branch checked out now, not the one the Session started on.
+  await expect(page.getByRole('complementary', { name: 'Session' })).toContainText('fix/login');
+  const toggle = page.getByRole('complementary', { name: 'Session' }).getByRole('button', { name: /^Changes/ });
   await expect(toggle).toContainText('+3 −1');
   await toggle.click();
 
@@ -880,7 +880,7 @@ test("a Session links the pull request it opened, and shows none that another Se
   );
   await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
 
-  const header = page.locator('header');
+  const header = page.getByRole('complementary', { name: 'Session' });
   // One link opens the pull request in the Workspace, the other on the Git host: the Session's own, not #99.
   await expect(header.getByRole('link', { name: /^PR #42/ })).toHaveAttribute('href', /tab=pulls&pr=r1%2F42/);
   await expect(header.getByRole('link', { name: /#42 on host/ })).toHaveAttribute(
@@ -892,7 +892,9 @@ test("a Session links the pull request it opened, and shows none that another Se
   // A new Session on the default branch shows no pull request, whatever its conversation names.
   await page.goto(`${daemon.url}/workspace?session=s2#token=${daemon.token}`);
   await expect(page.locator('header').getByRole('heading', { name: 'fresh start' })).toBeVisible();
-  await expect(page.locator('header').getByRole('link', { name: /^PR #/ })).toHaveCount(0);
+  await expect(page.getByRole('complementary', { name: 'Session' }).getByRole('link', { name: /^PR #/ })).toHaveCount(
+    0,
+  );
 });
 
 test('a Session that has edited nothing shows no Diff button or panel, even while the panel is open for another', async ({

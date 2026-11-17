@@ -15,7 +15,18 @@ export function checkoutBlock(session: Session, all: Session[]): string | null {
 }
 
 /** The composer's branch chip: the Session's branch and whether the Repo has uncommitted changes on it. */
-export function BranchSwitcher({ session, all, repo }: { session: Session; all: Session[]; repo?: Repo }) {
+export function BranchSwitcher({
+  session,
+  all,
+  repo,
+  opens = 'up',
+}: {
+  session: Session;
+  all: Session[];
+  repo?: Repo;
+  /** Which way the list opens from the chip. */
+  opens?: 'up' | 'down';
+}) {
   const repoId = session.repo_id as string;
   const branches = useBranches(repoId);
   const checkout = useCheckout(session.id, repoId);
@@ -79,7 +90,9 @@ export function BranchSwitcher({ session, all, repo }: { session: Session; all: 
         </span>
       )}
       {open && (
-        <div className={`absolute bottom-[calc(100%+6px)] left-0 z-51 w-80 ${menu}`}>
+        <div
+          className={`absolute left-0 z-51 w-80 ${opens === 'up' ? 'bottom-[calc(100%+6px)]' : 'top-[calc(100%+6px)]'} ${menu}`}
+        >
           <div className="flex items-center gap-2 px-2.5 pt-1 pb-2">
             <span className="flex-1 text-xs font-semibold">Branches in {repo?.name ?? 'this Repo'}</span>
             {repo && <span className="truncate font-mono text-xs text-neutral-700">{repo.path}</span>}

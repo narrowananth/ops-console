@@ -62,6 +62,7 @@ async function openSession(page: Page, outputs: object[]) {
             queued_message: null,
             spawned_by: null,
             spawned: [],
+            subagents: [],
           },
         ],
       },

@@ -1,14 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import {
-  type AgentRun,
-  ErrorCode,
-  type RunDetail,
-  RunHealth,
-  type RunLimit,
-  RunOutcome,
-  type Subagent,
-  subagentSchema,
-} from '@ops-console/shared';
+import { type AgentRun, ErrorCode, type RunDetail, RunHealth, type RunLimit, RunOutcome } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import { NetworkAllowlistService } from '../network/network-allowlist.service';
@@ -28,7 +19,7 @@ import { costAndTokens, runUsageOf, totalOf } from './run-usage';
 import { RunRegistry } from './runs';
 import { SessionKinds } from './session-kinds';
 import type { SessionRow } from './sessions.service';
-import { SessionsService } from './sessions.service';
+import { SessionsService, subagentsOf } from './sessions.service';
 
 /** Steps of one run the detail returns: more than a run makes in a day of work. */
 const MAX_STEPS = 500;
@@ -205,10 +196,6 @@ function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
 function limitOf(row: SessionRow): RunLimit | null {
   if (row.runLimitSince === null && row.runOutcome !== RunOutcome.RateLimited) return null;
   return { since: row.runLimitSince, resets_at: row.runLimitResetsAt };
-}
-
-function subagentsOf(row: SessionRow): Subagent[] {
-  return row.runSubagents === null ? [] : z.array(subagentSchema).parse(JSON.parse(row.runSubagents));
 }
 
 /** What the run waits on: the agent's open question, or the call an Approval holds. */

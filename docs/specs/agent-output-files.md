@@ -136,7 +136,7 @@ the viewer's error line.
 ## ADR
 
 - **Operator approves agent never merges** (0002): rewrite in place. The agent also saves a file outside its folders
-  only by asking: `save_file` raises an Approval in every Access mode, and only the operator's yes has the daemon copy it.
+  only by asking: `save_file` raises an Approval in every Access mode but full, and only the operator's yes has the daemon copy it.
   The sandbox's writes do not grow. Considered Options gains "widen the sandbox's write list", with why it lost.
 
 ## Seams

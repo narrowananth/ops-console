@@ -19,11 +19,9 @@ import { QuestionPanel, trailingQuestions } from '../agents/question-panel';
 import { SessionChips } from '../agents/session-chips';
 import { StopRun } from '../agents/stop-run';
 import { AttachmentViewer, type Viewed } from '../components/ui/attachment-viewer';
-import { Button } from '../components/ui/button';
 import { useRunQueue, useSendMessage, warmSession } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { AttachButton, filesIn, useAttachments } from './attachments';
-import { BranchSwitcher } from './branch-switcher';
 import { type ComposerCommand, useComposerMenus } from './composer-menus';
 import { ExtraRepos } from './extra-repos';
 import { sessionDraftKey } from './links';
@@ -36,9 +34,7 @@ import { type PastedText, PastedTextEditor } from './pasted-text-editor';
  */
 export function SessionComposer({
   session,
-  repo,
   repos,
-  sessions,
   lastMessage,
   commands: sessionCommands,
   reverted,
@@ -46,9 +42,7 @@ export function SessionComposer({
   onRevertedClose,
 }: {
   session: Session;
-  repo: Repo | undefined;
   repos: Repo[];
-  sessions: Session[];
   /** The conversation's last message: a question the agent ended on is answered here. */
   lastMessage: Message | undefined;
   /** What the `/` menu lists besides `skills` and `files`: the actions of the Session's view. */
@@ -145,7 +139,7 @@ export function SessionComposer({
 
   return (
     <>
-      <div className="flex flex-col gap-2 px-6 pb-4.5">
+      <div className="flex flex-col gap-2 px-6 pb-4">
         <ApprovalPrompts sessionId={id} />
         {questions.length > 0 && (
           <QuestionPanel
@@ -194,7 +188,7 @@ export function SessionComposer({
             event.preventDefault();
             addFiles(files);
           }}
-          className={`relative rounded-lg border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)] ${dropping ? 'border-dashed border-accent-400 bg-accent-100' : 'border-divider'}`}
+          className={`relative rounded-3xl border bg-card shadow-md transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)] ${dropping ? 'border-dashed border-accent-400 bg-accent-100' : 'border-divider'}`}
         >
           {composerMenus.menu}
           <MessageEditor
@@ -229,37 +223,55 @@ export function SessionComposer({
             onSubmit={submit}
             onKey={composerMenus.onKey}
           />
-          <div className="flex items-end gap-1.5 px-2.5 pt-1.5 pb-2.5">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-              <AttachButton onFiles={addFiles} />
-              <SessionChips session={session} variant="chip" />
-              <ExtraRepos session={session} repos={repos} />
-              {repo && <BranchSwitcher session={session} all={sessions} repo={repo} />}
-              {send.isError && (
-                <span role="alert" className="text-xs text-accent-700">
-                  {send.error.message}
-                </span>
+          <div className="flex items-center gap-1.5 px-3 pt-1 pb-3">
+            <AttachButton onFiles={addFiles} />
+            {send.isError && (
+              <span role="alert" className="text-xs text-accent-700">
+                {send.error.message}
+              </span>
+            )}
+            <span className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+              <SessionChips session={session} variant="chip" show={['model', 'effort']} bare />
+              <PlayRun sessionId={id} />
+              {busy && <StopRun sessionId={id} round />}
+              {(!busy || !empty) && (
+                <button
+                  type="button"
+                  aria-label={running ? 'Queue' : 'Send'}
+                  title={
+                    running
+                      ? 'The agent is working. The message waits and sends when the run ends.'
+                      : uploading
+                        ? 'Waiting for the attached files to upload'
+                        : 'Enter sends. Shift+Enter adds a new line.'
+                  }
+                  disabled={empty || queued !== null || uploading || send.isPending || queue.queue.isPending}
+                  onClick={submit}
+                  className="flex size-9 flex-none cursor-pointer items-center justify-center rounded-full border-0 bg-accent text-white shadow-sm transition-colors hover:bg-accent-600 disabled:cursor-not-allowed disabled:bg-neutral-300 disabled:text-neutral-600 disabled:shadow-none"
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <path d="M12 19V5M5 12l7-7 7 7" />
+                  </svg>
+                </button>
               )}
-            </div>
-            <span className="flex flex-none items-center gap-1.5">
-              {busy ? <StopRun sessionId={id} className="px-4 py-1.5" /> : <PlayRun sessionId={id} />}
-              <Button
-                variant="primary"
-                title={
-                  running
-                    ? 'The agent is working. The message waits and sends when the run ends.'
-                    : uploading
-                      ? 'Waiting for the attached files to upload'
-                      : 'Enter sends. Shift+Enter adds a new line.'
-                }
-                className="px-4 py-1.5"
-                disabled={empty || queued !== null || uploading || send.isPending || queue.queue.isPending}
-                onClick={submit}
-              >
-                {running ? 'Queue' : 'Send'}
-              </Button>
             </span>
           </div>
+        </div>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 px-2 text-xs text-neutral-700">
+          <ExtraRepos session={session} repos={repos} />
+          <span className="ml-auto flex-none">
+            <SessionChips session={session} variant="chip" show={['access']} />
+          </span>
         </div>
       </div>
       {viewed && <AttachmentViewer viewed={viewed} onClose={() => setViewed(null)} />}

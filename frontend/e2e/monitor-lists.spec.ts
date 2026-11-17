@@ -202,6 +202,7 @@ test('a pull request row says how long ago it opened, and a Session row how long
           queued_message: null,
           spawned_by: null,
           spawned: [],
+          subagents: [],
         },
       ]),
     ),

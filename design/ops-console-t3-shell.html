@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ops Console: Session shell (thread sidebar, surfaces panel, subagents)</title>
+<!--
+  Mockup, not shipped code. Open in a browser. Click the right-panel icons or the "Open a surface" list to switch
+  surfaces; hover "Waiting on 5 subagents"; press T to flip the theme. Tokens come from ops-console-sidebar.html.
+  Structure follows the T3 Code thread screen: thread sidebar, conversation + composer, a surfaces panel and a context card.
+-->
+<style>
+  :root {
+    --bg:#f3f2f2; --surface:#ebe9e8; --card:#fbfafa; --text:#201e1d;
+    --accent:#ec3013; --accent-100:#fff2ef; --accent-300:#ffc4b8; --accent-600:#dd2b0f; --accent-700:#ae1800;
+    --line:color-mix(in srgb,#201e1d 11%,transparent); --divider:color-mix(in srgb,#201e1d 18%,transparent);
+    --n100:#f8f4f4; --n200:#eae7e7; --n300:#d7d3d3; --n400:#bab6b6; --n500:#9b9797; --n600:#7d7979; --n700:#605d5d; --n800:#444141;
+    --ok:#2f7d3b; --warn:#b26b00; --info:#2a5db0; --add-text:#1d6b30; --del-text:#a3200d;
+    --r-sm:6px; --r:10px; --r-lg:14px; --r-xl:18px;
+    --shadow-md:0 4px 14px color-mix(in srgb,#2d2b2b 10%,transparent);
+    --shadow-lg:0 12px 32px color-mix(in srgb,#2d2b2b 22%,transparent);
+    --mono:"JetBrains Mono",ui-monospace,monospace; --sans:"Archivo",system-ui,sans-serif;
+  }
+  [data-theme="dark"] {
+    color-scheme:dark;
+    --bg:#0d0c0c; --surface:#141312; --card:#1a1918; --text:#ecebea;
+    --line:color-mix(in srgb,#ecebea 10%,transparent); --divider:color-mix(in srgb,#ecebea 16%,transparent);
+    --n100:#232120; --n200:#2d2b2a; --n300:#3b3837; --n400:#55514f; --n500:#76726f; --n600:#969290; --n700:#b4b0ae; --n800:#d1cdcb;
+    --accent-100:#3a140d; --accent-300:#7a2213; --accent-600:#ff6c55; --accent-700:#ff8c77;
+    --ok:#6cc47a; --warn:#f0a940; --info:#7aa7f0; --add-text:#8bd699; --del-text:#ff9c89;
+    --shadow-md:0 3px 10px rgba(0,0,0,.55); --shadow-lg:0 0 0 1px color-mix(in srgb,#ecebea 14%,transparent),0 12px 32px rgba(0,0,0,.6);
+  }
+  *{box-sizing:border-box} [hidden]{display:none!important}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased;height:100vh;overflow:hidden}
+  button,input{font:inherit;color:inherit;border-radius:var(--r)} button{cursor:pointer;background:none;border:0}
+  code,.mono{font-family:var(--mono)} :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+  .muted{color:var(--n600)} .tiny{font-size:12px}
+
+  /* Frame: sidebar | thread | surfaces panel, with a terminals dock under the thread. */
+  .app{display:grid;grid-template-columns:var(--side,280px) minmax(0,1fr) var(--panel,420px);height:100vh}
+  .app[data-side="closed"]{--side:0px} .app[data-panel="closed"]{--panel:0px}
+  .side{background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0;overflow:hidden}
+  .main{display:flex;flex-direction:column;min-width:0;min-height:0}
+  .panel{background:var(--surface);border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0;overflow:hidden}
+
+  /* Thread sidebar */
+  .side-top{display:flex;align-items:center;gap:6px;padding:12px 12px 8px}
+  .search{flex:1;display:flex;gap:8px;align-items:center;color:var(--n600);padding:6px 8px}
+  .ibtn{display:grid;place-items:center;width:30px;height:30px;color:var(--n600)} .ibtn:hover{background:var(--n200);color:var(--text)}
+  .ibtn[aria-pressed="true"]{background:var(--n200);color:var(--text)}
+  .groups{flex:1;overflow:auto;padding:4px 8px}
+  .group-h{display:flex;align-items:center;gap:8px;padding:8px 8px 4px;color:var(--n700);font-weight:600}
+  .group-h .badge{width:20px;height:20px;border-radius:5px;background:var(--accent-100);color:var(--accent-600);font:700 9px var(--mono);display:grid;place-items:center}
+  .group-h .when{margin-left:auto;font-weight:400;color:var(--n500);font-size:12px}
+  .thread{display:block;width:100%;text-align:left;padding:7px 10px;border-radius:var(--r);margin:1px 0}
+  .thread:hover{background:var(--n200)} .thread[aria-current="true"]{background:var(--n200)}
+  .thread .t{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .thread .meta{display:flex;align-items:center;gap:8px;margin-top:1px;color:var(--n600);font-size:12px}
+  .thread .meta .pr{margin-left:auto;display:flex;align-items:center;gap:4px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--n400);flex:none}
+  .dot.work{background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)} .dot.wait{background:var(--warn)} .dot.ok{background:var(--ok)}
+  .settled{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-top:1px solid var(--line);color:var(--n700)}
+  .side-foot{display:flex;gap:4px;padding:8px 12px;border-top:1px solid var(--line)}
+
+  /* Thread header */
+  .head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);min-height:50px}
+  .head .crumb{display:flex;align-items:center;gap:8px;min-width:0;font-weight:600}
+  .head .crumb .sep{color:var(--n500)} .head .crumb .title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .head .right{margin-left:auto;display:flex;gap:2px}
+
+  /* Conversation */
+  .scroll{flex:1;overflow:auto;min-height:0}
+  .col{max-width:760px;margin:0 auto;padding:24px 20px 12px}
+  .msg-user{margin-left:auto;max-width:80%;background:var(--n100);border:1px solid var(--line);border-radius:var(--r-lg);padding:10px 14px;margin:6px 0 14px}
+  .msg-agent p{margin:8px 0} .msg-agent code{background:var(--n100);padding:1px 6px;border-radius:5px;font-size:12.5px}
+  .tools{display:flex;align-items:center;gap:8px;color:var(--n600);padding:4px 0}
+  .card{border:1px solid var(--line);background:var(--card);border-radius:var(--r-lg);overflow:hidden;margin:10px 0}
+  .card-h{display:flex;align-items:center;gap:10px;padding:10px 14px;font-weight:600}
+  .card-h .spacer{margin-left:auto} .add{color:var(--add-text)} .del{color:var(--del-text)}
+  .row{display:flex;align-items:center;gap:10px;padding:8px 14px;border-top:1px solid var(--line)}
+  .row .name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:999px;background:var(--n200);color:var(--n800);font-size:12px}
+  .chip.run{background:var(--accent-100);color:var(--accent-700)} .chip.ok{color:var(--ok)} .chip.fail{color:var(--del-text)}
+
+  /* "Waiting on N subagents" row and its tooltip */
+  .waiting{position:relative;display:flex;align-items:center;gap:10px;margin:0 auto;max-width:720px;width:calc(100% - 40px);padding:6px 4px;color:var(--n700)}
+  .spin{width:16px;height:16px;border:2px dashed var(--n500);border-radius:50%;animation:spin 3s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .waiting .names{color:var(--n600);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .waiting .stop{padding:4px 10px;border-radius:var(--r);font-weight:600} .waiting .stop:hover{background:var(--n200)}
+  .tip{position:absolute;left:0;bottom:calc(100% + 6px);width:min(640px,100%);background:var(--card);border:1px solid var(--divider);box-shadow:var(--shadow-lg);border-radius:var(--r-lg);padding:12px 14px;display:none;z-index:5}
+  .waiting:hover .tip,.waiting:focus-within .tip{display:block}
+  .tip li{display:flex;gap:10px;align-items:center;padding:3px 0;list-style:none} .tip ul{margin:6px 0 0;padding:0}
+
+  /* Composer */
+  .composer{max-width:720px;width:calc(100% - 40px);margin:6px auto 12px;background:var(--card);border:1px solid var(--divider);border-radius:var(--r-xl);padding:12px 14px;box-shadow:var(--shadow-md)}
+  .composer .in{min-height:44px;color:var(--n500)}
+  .composer .bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:var(--r);color:var(--n700)} .pill:hover{background:var(--n200)}
+  .pill b{color:var(--text);font-weight:600}
+  .send{margin-left:auto;width:34px;height:34px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center}
+  .send.stop{background:#e5484d}
+  .below{display:flex;gap:12px;max-width:720px;width:calc(100% - 40px);margin:0 auto 10px;color:var(--n600);font-size:12.5px}
+
+  /* Terminals dock */
+  .dock{border-top:1px solid var(--line);background:#000;color:#d1cdcb;font:13px/1.6 var(--mono);padding:10px 14px;height:132px;overflow:auto;position:relative}
+  .dock .tools-r{position:absolute;right:8px;top:6px;display:flex;gap:2px;color:var(--n600)}
+  .dock .repo{color:#4cc2c9;font-weight:700} .dock .br{color:#c678dd;font-weight:700} .dock .nv{color:#4cc38a;font-weight:700}
+
+  /* Surfaces panel */
+  .tabs{display:flex;align-items:center;gap:2px;padding:8px 10px;border-bottom:1px solid var(--line)}
+  .tab{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:var(--r);color:var(--n700);max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tab[aria-selected="true"]{background:var(--n200);color:var(--text)} .tabs .right{margin-left:auto;display:flex}
+  .surface{flex:1;min-height:0;overflow:auto;padding:14px}
+  .open-list{margin:80px auto 0;width:min(300px,100%)} .open-list h4{text-align:center;font-weight:600;margin:0 0 14px}
+  .open-list button{display:flex;align-items:center;gap:12px;width:100%;padding:8px 10px;color:var(--text)} .open-list button:hover{background:var(--n200)}
+  .open-list kbd{margin-left:auto;font:12px var(--mono);color:var(--n500)} .open-list button[disabled]{color:var(--n500);cursor:default}
+  .open-list button[disabled]:hover{background:none}
+
+  /* Context card (floats over the panel's top: machine, branch, PR, servers, lineage) */
+  .ctx{border:1px solid var(--line);background:var(--card);border-radius:var(--r-xl);box-shadow:var(--shadow-md);overflow:hidden}
+  .ctx .sec{padding:6px 0;border-top:1px solid var(--line)} .ctx .sec:first-child{border-top:0}
+  .ctx .item{display:flex;align-items:center;gap:12px;padding:8px 16px;width:100%;text-align:left;border-radius:0}
+  .ctx .item:hover{background:var(--n200)} .ctx .item .end{margin-left:auto;color:var(--n600)}
+  .ctx .label{padding:8px 16px 2px;color:var(--n600);font-size:12.5px}
+  .ctx .sub{display:block;color:var(--n600);font-size:12px}
+  .stopsq{width:14px;height:14px;border-radius:3px;background:#e5484d}
+  .brn{display:flex;gap:12px;padding:8px 16px} .brn .txt{min-width:0}
+
+  .hint{position:fixed;right:14px;bottom:10px;color:var(--n500);font-size:12px}
+  @media (max-width:1100px){.app{--panel:0px}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+  <symbol id="i-side" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/></symbol>
+  <symbol id="i-new" viewBox="0 0 24 24"><path d="M12 20h8M16 4l4 4-11 11H5v-4z"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2L10 21h4l.6-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"/></symbol>
+  <symbol id="i-pr" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V10a3 3 0 0 0-3-3h-3"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></symbol>
+  <symbol id="i-term" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m8 10 3 2-3 2M13 15h3"/></symbol>
+  <symbol id="i-files" viewBox="0 0 24 24"><path d="M8 4h8l4 4v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M4 8v10"/></symbol>
+  <symbol id="i-diff" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 9h6M9 14h6M12 11v6" /></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 18h2"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="m20 11-8.5 8.5a5 5 0 0 1-7-7L13 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L14 7"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-max" viewBox="0 0 24 24"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 4v4M9 13h.01M15 13h.01"/></symbol>
+  <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="10" rx="2"/><path d="M3 19h18"/></symbol>
+  <symbol id="i-push" viewBox="0 0 24 24"><path d="M12 15V5M7 9l5-5 5 5M5 19h14"/></symbol>
+</defs></svg>
+
+<div class="app" id="app" data-side="open" data-panel="open">
+
+  <!-- Thread sidebar: Repos with their Sessions, newest first; finished Sessions fold into Settled -->
+  <aside class="side" aria-label="Sessions">
+    <div class="side-top">
+      <button class="ibtn" aria-label="Hide sidebar" data-toggle="side"><svg><use href="#i-side"/></svg></button>
+      <button class="search pill" aria-label="Search sessions"><svg><use href="#i-search"/></svg><span>Search</span></button>
+      <button class="ibtn" aria-label="Sort and filter"><svg><use href="#i-filter"/></svg></button>
+      <button class="ibtn" aria-label="Import a Repo"><svg><use href="#i-folder"/></svg></button>
+      <button class="ibtn" aria-label="New Session"><svg><use href="#i-new"/></svg></button>
+    </div>
+    <div class="groups">
+      <div class="group-h"><span class="badge">OC</span>ops-console<span class="when">19m</span></div>
+      <button class="thread" aria-current="true"><span class="t">Agent runtime perf: 5 subagents</span>
+        <span class="meta"><span class="dot work"></span><svg><use href="#i-pr"/></svg>perf/integrated<span class="pr">#106</span></span></button>
+      <button class="thread"><span class="t">Browser: send every input in order</span>
+        <span class="meta"><span class="dot wait"></span><svg><use href="#i-pr"/></svg>fix/browser-input-order<span class="pr">#105</span></span></button>
+      <button class="thread"><span class="t">Fix flaky title poll</span>
+        <span class="meta"><span class="dot ok"></span><svg><use href="#i-pr"/></svg>fix/browser-title-flake<span class="pr">#104</span></span></button>
+      <div class="group-h"><span class="badge">AP</span>apis<span class="when">3d</span></div>
+      <button class="thread"><span class="t">Live sale null child nodes</span>
+        <span class="meta"><span class="dot"></span><svg><use href="#i-pr"/></svg>fix/data-node-live-sale<span class="pr">#4542</span></span></button>
+    </div>
+    <div class="settled"><span>Settled</span><span class="muted">76 <svg style="width:12px;height:12px;vertical-align:-2px"><use href="#i-right"/></svg></span></div>
+    <div class="side-foot">
+      <button class="ibtn" aria-label="Settings"><svg><use href="#i-gear"/></svg></button>
+      <button class="ibtn" aria-label="Pull requests"><svg><use href="#i-pr"/></svg></button>
+      <button class="ibtn" aria-label="Usage"><svg><use href="#i-chart"/></svg></button>
+    </div>
+  </aside>
+
+  <!-- Thread -->
+  <section class="main">
+    <header class="head">
+      <button class="ibtn" aria-label="Show sidebar" data-toggle="side"><svg><use href="#i-side"/></svg></button>
+      <div class="crumb"><span class="badge chip" style="padding:1px 6px">OC</span><span>ops-console</span><span class="sep">/</span><span class="title">Agent runtime perf: 5 subagents</span></div>
+      <div class="right">
+        <button class="ibtn" aria-label="Summary"><svg><use href="#i-files"/></svg></button>
+        <button class="ibtn" aria-label="Terminals dock" aria-pressed="true"><svg><use href="#i-term"/></svg></button>
+        <button class="ibtn" aria-label="Surfaces panel" aria-pressed="true" data-toggle="panel"><svg><use href="#i-side" style="transform:scaleX(-1);transform-origin:center"/></svg></button>
+      </div>
+    </header>
+
+    <div class="scroll"><div class="col">
+      <div class="msg-user">Split the perf audit across five engineers and give me one merged answer.</div>
+      <div class="msg-agent">
+        <p>I read the audit and grouped its items by area. One subagent per area, each in its own worktree. I merge their answers when all five report.</p>
+        <div class="tools"><svg><use href="#i-term"/></svg>Ran 4 commands</div>
+        <div class="card">
+          <div class="card-h"><svg><use href="#i-bot"/></svg>5 subagents <span class="spacer muted tiny">2 done · 3 working</span></div>
+          <div class="row"><span class="dot ok"></span><span class="name">Agent runtime perf (O4 O5 O12 O13 O14 O23 O24 O28 O32)</span><span class="chip ok">done · 8m</span></div>
+          <div class="row"><span class="dot ok"></span><span class="name">Git/PR/monitor perf + migrations (O6 O7 O8 O9 O11)</span><span class="chip ok">done · 11m</span></div>
+          <div class="row"><span class="dot work"></span><span class="name">Integrations perf (O1 O2 O3 O19 O20 O21 O22)</span><span class="chip run">working · 6m</span></div>
+          <div class="row"><span class="dot work"></span><span class="name">Browser/terminals/processes perf (O10 O17 O18)</span><span class="chip run">working · 6m</span></div>
+          <div class="row"><span class="dot wait"></span><span class="name">Frontend perf + guardrails (O15 O16)</span><span class="chip">asks: Run <code>pnpm check</code></span></div>
+        </div>
+        <p><b>Open points:</b> merge order, and which engineer owns <code>queries.ts</code>. Each report arrives here and wakes this Session.</p>
+      </div>
+    </div></div>
+
+    <!-- Parent run waits on its subagents; Stop ends all of them -->
+    <div class="waiting" tabindex="0">
+      <span class="spin"></span><span>Waiting on 5 subagents</span>
+      <span class="names">Agent runtime perf (O4 O5 O12 …), Git/PR/monitor perf + mi…</span>
+      <button class="ibtn" aria-label="Details"><svg><use href="#i-pr"/></svg></button><button class="stop">Stop</button>
+      <div class="tip" role="tooltip"><b>Waiting on 5 subagents</b>
+        <ul>
+          <li><span class="dot work"></span>Agent runtime perf (O4 O5 O12 O13 O14 O23 O24 O28 O32)</li>
+          <li><span class="dot work"></span>Git/PR/monitor perf + migrations (O6 O7 O8 O9 O11 O25 O26 O27)</li>
+          <li><span class="dot work"></span>Integrations perf (O1 O2 O3 O19 O20 O21 O22 O33 O35)</li>
+          <li><span class="dot work"></span>Browser/terminals/processes perf (O10 O17 O18 + prodIn)</li>
+          <li><span class="dot wait"></span>Frontend perf + guardrails (O15 O16 + never again)</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="in">Ask anything. @ files, $ skills, / commands</div>
+      <div class="bar">
+        <button class="ibtn" aria-label="Attach"><svg><use href="#i-clip"/></svg></button>
+        <button class="pill">Model <b>Sonnet 5.5</b><svg style="width:12px"><use href="#i-chev"/></svg></button>
+        <button class="pill">Effort <b>High</b><svg style="width:12px"><use href="#i-chev"/></svg></button>
+        <button class="pill">Access <b>Full access</b><svg style="width:12px"><use href="#i-chev"/></svg></button>
+        <button class="pill" aria-label="Context used">Compact <b>347k</b></button>
+        <button class="send stop" aria-label="Stop run"><svg style="fill:#fff;stroke:none;width:12px;height:12px"><rect x="2" y="2" width="12" height="12" rx="2" style="fill:#fff"/></svg></button>
+      </div>
+    </div>
+    <div class="below"><span><svg style="vertical-align:-3px"><use href="#i-folder"/></svg> Session worktree</span><span style="margin-left:auto"><svg style="vertical-align:-3px"><use href="#i-pr"/></svg> perf/integrated</span><span>Repos: this one</span></div>
+
+    <div class="dock"><div class="tools-r"><svg><use href="#i-term"/></svg><svg><use href="#i-plus"/></svg></div>
+      <span class="repo">ops-console</span> on <span class="br">⎇ perf/integrated</span> via <span class="nv">⬢ v24.19.0</span><br>❯ <span style="background:#d1cdcb;color:#000">&nbsp;</span></div>
+  </section>
+
+  <!-- Surfaces panel -->
+  <aside class="panel" id="panel" aria-label="Surfaces">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="false" data-surface="ctx"><svg><use href="#i-laptop"/></svg>Session</button>
+      <button class="tab" role="tab" aria-selected="false" data-surface="pr"><svg><use href="#i-pr"/></svg>#106</button>
+      <button class="tab" role="tab" aria-selected="true" data-surface="open"><svg><use href="#i-plus"/></svg></button>
+      <span class="right"><button class="ibtn" aria-label="Expand panel"><svg><use href="#i-max"/></svg></button></span>
+    </div>
+
+    <div class="surface" data-for="open">
+      <div class="open-list"><h4>Open a surface</h4>
+        <button data-surface="browser"><svg><use href="#i-globe"/></svg>Browser<kbd>B</kbd></button>
+        <button data-surface="terminal"><svg><use href="#i-term"/></svg>Terminal<kbd>T</kbd></button>
+        <button data-surface="files"><svg><use href="#i-files"/></svg>Files<kbd>F</kbd></button>
+        <button data-surface="diff"><svg><use href="#i-diff"/></svg>Diff<kbd>D</kbd></button>
+        <button data-surface="pr"><svg><use href="#i-pr"/></svg>Pull request<kbd>P</kbd></button>
+        <button data-surface="linked"><svg><use href="#i-link"/></svg>Linked pull requests<kbd>L</kbd></button>
+        <button data-surface="device" disabled><svg><use href="#i-phone"/></svg>Device<kbd>M</kbd></button>
+        <button data-surface="side"><svg><use href="#i-chat"/></svg>Side chat<kbd>S</kbd></button>
+      </div>
+    </div>
+
+    <div class="surface" data-for="ctx" hidden>
+      <div class="ctx">
+        <div class="sec">
+          <button class="item"><svg><use href="#i-laptop"/></svg>This machine<span class="end"><svg><use href="#i-folder"/></svg></span></button>
+          <button class="item"><svg><use href="#i-files"/></svg>Open in VS Code<span class="end"><svg><use href="#i-chev"/></svg></span></button>
+          <button class="item muted"><svg><use href="#i-plus"/></svg>Add project script</button>
+        </div>
+        <div class="sec">
+          <button class="item"><svg><use href="#i-pr"/></svg>perf/integrated<span class="end"><svg><use href="#i-chev"/></svg></span></button>
+          <div class="brn"><svg style="color:var(--ok)"><use href="#i-pr"/></svg><div class="txt"><div>Performance: agent, Keychain, git, frontend…</div><span class="sub">#106 · <span class="chip ok">1/1 checks</span></span></div></div>
+          <button class="item"><svg><use href="#i-push"/></svg>Commit &amp; push<span class="end"><svg><use href="#i-chev"/></svg></span></button>
+          <button class="item"><svg><use href="#i-diff"/></svg>Changes<span class="end"><span class="add">+55</span> <span class="del">−44</span></span></button>
+        </div>
+        <div class="sec"><div class="label">Servers</div>
+          <button class="item"><svg><use href="#i-globe"/></svg><span>localhost:60449<span class="sub">Agent · node</span></span><span class="end"><span class="stopsq"></span></span></button>
+          <button class="item"><svg><use href="#i-globe"/></svg><span>localhost:61100<span class="sub">Agent · node</span></span></button>
+        </div>
+        <div class="sec"><div class="label">Lineage</div>
+          <button class="item"><svg><use href="#i-bot"/></svg>Subagents<span class="end">5 <svg style="width:12px"><use href="#i-chev"/></svg></span></button>
+          <button class="item"><svg><use href="#i-bot"/></svg><span>Frontend perf + guardrails<span class="sub">asks: Run pnpm check</span></span><span class="end">now</span></button>
+          <button class="item"><svg><use href="#i-bot"/></svg><span>Browser/terminals/processes…<span class="sub">working</span></span><span class="end">6m</span></button>
+          <button class="item"><svg><use href="#i-bot"/></svg><span>Integrations perf (O1 O2 …)<span class="sub">working</span></span><span class="end">6m</span></button>
+        </div>
+      </div>
+    </div>
+
+    <div class="surface" data-for="pr" hidden>
+      <h3 style="margin:0 0 6px">Performance: agent, Keychain, git, frontend and browser fixes</h3>
+      <p class="muted tiny" style="margin:0 0 12px">#106 · main ← perf/integrated · 184 files <span class="add">+11,517</span> <span class="del">−2,079</span> · <span class="chip ok">All checks passed</span></p>
+      <div class="card"><div class="card-h">Summary</div><div class="row">Replaces five PRs that no longer merge cleanly. One commit per area.</div></div>
+    </div>
+
+    <div class="surface" data-for="stub" hidden><p class="muted" id="stub-name"></p></div>
+  </aside>
+</div>
+
+<div class="hint">T flips theme · click the right-panel tabs and the “Open a surface” list</div>
+
+<script>
+  const app = document.getElementById('app');
+  document.querySelectorAll('[data-toggle]').forEach((b) => b.addEventListener('click', () => {
+    const k = b.dataset.toggle; app.dataset[k] = app.dataset[k] === 'open' ? 'closed' : 'open';
+  }));
+  const show = (name) => {
+    const target = ['open', 'ctx', 'pr'].includes(name) ? name : 'stub';
+    document.querySelectorAll('.surface').forEach((s) => (s.hidden = s.dataset.for !== target));
+    document.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.surface === name)));
+    document.getElementById('stub-name').textContent = target === 'stub' ? name + ' opens here' : '';
+  };
+  document.querySelectorAll('[data-surface]').forEach((b) => b.addEventListener('click', () => !b.disabled && show(b.dataset.surface)));
+  addEventListener('keydown', (e) => {
+    if (e.target.closest('input,textarea') || e.metaKey || e.ctrlKey) return;
+    if (e.key === 't') document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  });
+  show('ctx');
+</script>
+</body>
+</html>

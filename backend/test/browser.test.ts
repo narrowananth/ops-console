@@ -481,6 +481,45 @@ describe.skipIf(!chromePath)('Session browser in a real Chrome', () => {
       );
     });
 
+    it('scrolls at once under a swipe of 150 wheel events, and a click after them still lands', async () => {
+      const created = await openTab(h, session, dev.url);
+      await settled(h, session, created.id);
+      const viewer = await watch(h.daemon, created.id);
+      viewer.send({ type: 'resize', width: 900, height: 700 });
+      await until(
+        () => read<number[]>(h, session, created.id, '[innerWidth, innerHeight]'),
+        (size) => size[0] === 900 && size[1] === 700,
+        'the page to take the viewer size',
+      );
+      const point = { x: 450, y: 300 };
+      const started = Date.now();
+      for (let i = 0; i < 150; i++) {
+        viewer.send({ type: 'mouse', action: 'wheel', ...point, delta_x: 0, delta_y: 10 });
+      }
+      // The swipe adds up to 1,500 px. Each wheel waiting for a frame took about 17 ms, so this took over 2.5 s.
+      await until(
+        () => read<number>(h, session, created.id, 'Math.round(scrollY)'),
+        (y) => y >= 1500,
+        'the page to scroll to the end of the swipe',
+      );
+      expect(Date.now() - started).toBeLessThan(2000);
+      // The press and release are sent after the wheel events and wait for each other.
+      const box = await read<{ x: number; y: number; width: number; height: number }>(
+        h,
+        session,
+        created.id,
+        `(() => { window.scrollTo(0, 0); return document.getElementById('btn').getBoundingClientRect().toJSON(); })()`,
+      );
+      const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      viewer.send({ type: 'mouse', action: 'down', button: 'left', click_count: 1, ...at });
+      viewer.send({ type: 'mouse', action: 'up', button: 'left', click_count: 1, ...at });
+      await until(
+        () => read<string>(h, session, created.id, `document.getElementById('out').textContent`),
+        (text) => text === 'clicked',
+        'the click to reach the button',
+      );
+    });
+
     it('closes the stream when the tab closes, and refuses an unknown tab', async () => {
       const created = await openTab(h, session, dev.url);
       await settled(h, session, created.id);

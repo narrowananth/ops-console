@@ -28,7 +28,7 @@ import { LOCAL_SERVER_SCANNER, type LocalServerScanner } from './local-servers';
 import { baseEnv, type Env, LoginEnv } from './login-env';
 import { descendantsOf, familyOf, isAlive, processTable, signal } from './process-tree';
 import { prodConnectionsNamedIn } from './prod-env';
-import { readScripts, shellWord } from './scripts';
+import { readScripts } from './scripts';
 
 const REPLAY_CHARS = 256 * 1024;
 const STOP_GRACE_MS = 1500;
@@ -260,7 +260,7 @@ export class ProcessesService implements OnModuleInit, OnModuleDestroy {
     if (live?.state === ProcessState.Running) live.pty.resize(cols, rows);
   }
 
-  /** The folder's `package.json` scripts: the Session's working folder, or an Opened Repo's. */
+  /** What the folder can run: the Session's working folder, or an Opened Repo's. */
   async scripts(sessionId: string, folder?: string): Promise<Scripts> {
     const session = this.supported(sessionId);
     const dir = this.folderFor(session, await this.workingDir(session), folder);
@@ -505,10 +505,11 @@ export class ProcessesService implements OnModuleInit, OnModuleDestroy {
     return Promise.all(roots.map((root) => realpath(root).catch(() => root)));
   }
 
+  /** The command line of a script the folder lists, by its id (`package.json:dev`); the client never sends the line. */
   private async scriptCommand(folder: string, script: string): Promise<string> {
-    const { runner, scripts } = await readScripts(folder);
-    if (!scripts.some((entry) => entry.name === script)) throw invalid(`package.json has no script named ${script}`);
-    return `${runner} run ${shellWord(script)}`;
+    const found = (await readScripts(folder)).scripts.find((entry) => entry.id === script);
+    if (!found) throw invalid(`The folder has no script ${script}`);
+    return found.run;
   }
 
   private async spawn(row: ProcessRow): Promise<void> {

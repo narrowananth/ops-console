@@ -134,8 +134,18 @@ describe('spawn parallel Sessions', () => {
     expect((await ctx.http.get('/sessions')).body.data).toHaveLength(1);
   });
 
-  it('asks once for the whole list in every Access mode, and a yes starts a Session per Repo at once (4, 6, 7)', async () => {
-    for (const mode of Object.values(AccessMode)) {
+  it('lets the call through with no Approval in full access', async () => {
+    const ctx = await start();
+    const parent = await ctx.anonymous(AccessMode.Full);
+    const hold = await ctx.ask(parent, batch(ctx));
+    hold.open();
+    await ctx.idle(parent);
+    expect((await ctx.http.get('/approvals')).body.data).toEqual([]);
+    expect(ctx.daemon.sdk.ran.map((call) => call.tool)).toEqual([SPAWN_SESSIONS_TOOL]);
+  });
+
+  it('asks once for the whole list in every Access mode but full, and a yes starts a Session per Repo at once (4, 6, 7)', async () => {
+    for (const mode of Object.values(AccessMode).filter((value) => value !== AccessMode.Full)) {
       const ctx = await start();
       const parent = await ctx.anonymous(mode);
       await ctx.http.patch(`/sessions/${parent}`, { model: Model.Haiku, effort: Effort.Low });
