@@ -1957,11 +1957,6 @@ const browserStateQuery = (sessionId: string) => ({
   queryFn: () => apiGet(`/sessions/${sessionId}/browser`, z.object({ data: browserStateSchema })).then((b) => b.data),
 });
 
-const browserStateQuery = (sessionId: string) => ({
-  queryKey: queryKeys.browser(sessionId),
-  queryFn: () => apiGet(`/sessions/${sessionId}/browser`, z.object({ data: browserStateSchema })).then((b) => b.data),
-});
-
 /** The Session's tabs and whether Chrome is there. `browser.tabs_changed` refetches it. */
 export function useBrowserState(sessionId: string, enabled: boolean) {
   return useQuery({ ...browserStateQuery(sessionId), enabled });
