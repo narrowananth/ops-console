@@ -217,6 +217,8 @@ export const runSteps = sqliteTable(
     index('run_steps_session_idx').on(table.sessionId, table.startedAt),
     // Retention deletes the oldest steps first, in small batches.
     index('run_steps_started_idx').on(table.startedAt),
+    // The command history reads finished `Bash` steps, newest first.
+    index('run_steps_tool_idx').on(table.tool, table.startedAt),
   ],
 );
 

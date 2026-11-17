@@ -8,7 +8,11 @@ export class FakeUsageSource implements UsageSource {
     this.readings.set(configDir, reading);
   }
 
+  /** The config dirs asked for, in order. */
+  readonly asked: string[] = [];
+
   async read(configDir: string): Promise<UsageReading | null> {
+    this.asked.push(configDir);
     const reading = this.readings.get(configDir);
     if (reading instanceof Error) throw reading;
     return reading ?? null;

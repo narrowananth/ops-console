@@ -162,6 +162,16 @@ export class SessionsController {
     return { data: await this.runtime.edit(id, message_id, parseInput(sendMessageSchema, body, 'body').text) };
   }
 
+  /**
+   * Starts a Claude Code process for the Session's next message, which the operator is about to send. Answers 204 at
+   * once; the process is ready later and is closed after a minute unused. 409 `session_busy` while a run goes.
+   */
+  @Post(':id/warm')
+  @HttpCode(204)
+  warm(@Param() params: unknown): void {
+    this.runtime.warm(parseInput(idParams, params, 'params').id);
+  }
+
   /** Ends the Session's run; 409 `invalid_state` when none is going. */
   @Post(':id/stop')
   @HttpCode(204)

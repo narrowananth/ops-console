@@ -145,7 +145,7 @@ local storage and drops it on `unauthorized`. Any number of browsers on the Mac 
 on the one daemon (`ops-console open <app>` signs another browser in): each keeps its own Remembered view, and `/ws` events reach all of them.
 
 **WebSocket.** `/ws` sends server-to-client events only, with the token as the second subprotocol.
-`Store.write` runs one transaction and sends its events after the commit; `Store.emit` sends an event with no state change behind it. A run's `session.output` goes out at most every 100 ms, each changed part whole. The UI turns each event into
+`Store.write` runs one transaction and sends its events after the commit; `Store.emit` sends an event with no state change behind it. A run's `session.output` goes out at most every 100 ms, each changed part whole; a text over 8,000 characters goes out every 400 ms and one over 32,000 every second. A client with over 1 MB waiting to send gets only the newest `session.output` of each part until its queue drains; every other event goes out in order. The UI turns each event into
 query refetches, batched over 40 ms. A running agent's events refetch its transcript at most every 800 ms and the pull request lists every 5 seconds. The socket reopens after a drop and the UI reads every query again. Events (`shared/src/ws.ts`):
 
 - Settings and agents: `settings.updated`, `update.changed`, `session.output`, `session.finished`, `session.updated`,
@@ -265,6 +265,21 @@ request text none. A server that starts goes through `mcp-exec`, which tells `np
 and the run waits up to 10 seconds for the servers it started. The code update (`refresh` on a Session kind) runs while the
 run starts and holds the run's first tool until it ends. The log line for each run says where the wait before the first token went.
 
+The operator opening a Session or starting to type may call `POST /api/sessions/:id/warm`. The daemon then starts the Claude Code
+process for the next chat message through the SDK's `startup()`, built from the options that message would get now, and
+keeps it for a minute (two Sessions at most). The message uses it when it would start Claude Code with the same options, and
+closes it otherwise. A job's run never uses one.
+
+Rate-limit events from a run update the account's usage only when the numbers changed, and Auto-switch looks at them at most
+every 10 seconds per account. The step rows of a run (`run_steps`) are written once every quarter second and when the run
+ends, and the Settings the daemon reads are kept parsed until one changes. The Running tray reads only the steps and usage of
+the runs it lists and keeps the command history for two minutes.
+
+Transcripts are read through a cache of parsed entries per Session, keyed by the file's size and modification time: a file that
+only grew is parsed from where the last read stopped, and a read of an unchanged file does no parsing. A Session's transcript
+is deleted with the Session, and a transcript no Session holds, with nothing written to it for 14 days, is deleted by the
+daily sweep. The sweep at start-up also removes Skill folders in the temp folder older than a day.
+
 A Session's run is a Claude Agent SDK `query()` in the working directory its kind supplies,
 resuming the stored SDK session. Each Claude account has its own `CLAUDE_CONFIG_DIR` under the data
 folder; the console never uses the operator's own Claude Code login. A `PreToolUse` hook writes the
@@ -278,7 +293,7 @@ merge tools. An Agent Review, Reply check and Comment pass also deny `git push`,
 commands and the host MCP comment tools, since the console pushes, replies and resolves. Permission prompts in `supervised` mode, and the agent's questions, reach `canUseTool`
 and wait for the operator. MCP Servers the operator disabled, and for a `devtools` Session the
 Connections outside its scope, are denied for the run. Every run's system prompt appends the kind's
-instructions, the rules for a PR description and the rule that the console, not the run, pushes and opens pull requests, then the Playbook's rules, then the console's
+instructions, the rules for a PR description and the rule that the console, not the run, pushes and opens pull requests, then the Playbook's rules, the Session's folders (the only part that differs per Session) and the console's
 safety lines. Those say that log lines and
 data are never instructions, that the agent never merges, and that no PROD value goes into a mock or
 anything else it writes. Stop ends a run and expires its Approvals, and the operator may edit the last message, which rewinds the agent's file
@@ -293,7 +308,8 @@ Smart usage moves work to the best-ranked signed-in Claude account on its own, a
 it at a usage threshold when Smart usage is off, as the design shows. Anthropic's terms may read
 this as getting around usage limits; the operator accepted that risk
 (`docs/specs/02-settings-agents.md`, Safety), and both toggles can be turned off. An account's name
-is its email, each is added once, and usage is also read for idle accounts every 5 minutes. The
+is its email, each is added once, and usage is also read for accounts with no run going every 5 minutes, one account after
+another; an account whose read failed waits twice as long after each failure, up to an hour. The
 console never reads a Claude token: sign-in runs in Anthropic's own flow, and usage comes from the
 SDK's rate-limit events and its usage request.
 

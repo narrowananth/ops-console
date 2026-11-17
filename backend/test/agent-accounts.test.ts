@@ -425,6 +425,33 @@ describe('usage read from Anthropic', () => {
     expect((await accounts(daemon)).data.find((row) => row.id === out.id)).toMatchObject({ five_hour_pct: null });
   });
 
+  it('leaves an account alone while its run goes, and an account that failed until its wait is over', async () => {
+    const daemon = await start();
+    const [primary] = (await accounts(daemon)).data;
+    const configDir = path.join(daemon.dataDir, 'accounts', String(primary?.id));
+    const hold = gate();
+    const id = daemon.createSession();
+    daemon.sdk.script({ wait: hold.promise });
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'long job' });
+    const asked = () => daemon.usage.asked.filter((dir) => dir === configDir).length;
+    const before = asked();
+    await daemon.app.get(AccountsService).pollUsage();
+    expect(asked()).toBe(before);
+    hold.open();
+    await until(
+      async () => (await api(daemon).get(`/sessions/${id}`)).body.data.state,
+      (state) => state === 'idle',
+    );
+
+    daemon.usage.set(configDir, new Error('usage request failed (429)'));
+    await daemon.app.get(AccountsService).pollUsage(true);
+    await daemon.app.get(AccountsService).pollUsage(true);
+    expect(asked()).toBe(before + 1);
+    // A poll made on a sign-in, not by the timer, does not wait.
+    await daemon.app.get(AccountsService).pollUsage();
+    expect(asked()).toBe(before + 2);
+  });
+
   it('auto-switches when the polled usage of the active account reaches the threshold', async () => {
     const daemon = await start();
     const [primary] = (await accounts(daemon)).data;

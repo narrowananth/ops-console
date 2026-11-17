@@ -13,7 +13,21 @@ export class SettingsService {
     @Inject(SettingsRegistry) private readonly registry: SettingsRegistry,
   ) {}
 
+  /** The parsed values, kept until a write or a newly registered key. */
+  private cached: { values: Settings; keys: number } | null = null;
+
+  private values(): Settings {
+    if (this.cached === null || this.cached.keys !== this.registry.size) {
+      this.cached = { values: this.load(), keys: this.registry.size };
+    }
+    return this.cached.values;
+  }
+
   read(): Settings {
+    return structuredClone(this.values());
+  }
+
+  private load(): Settings {
     const stored = new Map(
       this.store.db
         .select()
@@ -39,17 +53,19 @@ export class SettingsService {
       if (!parsed.success) throw validationFailed(`invalid value for setting: ${key}`);
       values.push({ key, value: JSON.stringify(parsed.data) });
     }
+    this.cached = null;
     this.store.write((tx, emit) => {
       for (const { key, value } of values) writeSetting(tx, key, value);
       emit('settings.updated', { keys: values.map((value) => value.key) });
     });
+    this.cached = null;
     for (const { key } of values) this.registry.get(key)?.onChange?.();
     return this.read();
   }
 
   /** One key's value, stored or default, typed by the schema its owner registered. */
   get<T>(key: string, schema: z.ZodType<T>): T {
-    return schema.parse(this.read()[key]);
+    return schema.parse(this.values()[key]);
   }
 
   /** Writes one key inside a caller's transaction; the caller emits `settings.updated`. */
@@ -57,6 +73,7 @@ export class SettingsService {
     const definition = this.registry.get(key);
     if (!definition) throw new Error(`setting ${key} is not registered`);
     writeSetting(tx, key, JSON.stringify(definition.schema.parse(value)));
+    this.cached = null;
   }
 }
 

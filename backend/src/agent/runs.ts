@@ -1,3 +1,4 @@
+import type { WarmQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { Part, RunPurpose, SkillCopy, Subagent, TokenCounts } from '@ops-console/shared';
 
 /** A run in progress. It lives in memory only: a daemon restart ends it (Behavior 18). */
@@ -87,6 +88,8 @@ export type Run = {
   autoTitle: string | null;
   /** The code update that runs while the run starts; no tool starts before it ends. Null when there is none. */
   fetching: Promise<void> | null;
+  /** A spare Claude Code process `warm` started for this run; used once, by the first `query`. */
+  warm: { query: WarmQuery; key: string } | null;
 };
 
 /** How a run ended, for the code that started it. `stopped` is set when the operator stopped it. */
