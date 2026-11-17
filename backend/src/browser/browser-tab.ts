@@ -137,6 +137,7 @@ export class BrowserTab {
   private readonly viewerSizes = new Map<WebSocket, { width: number; height: number }>();
   private screencasting = false;
   private reading: NodeJS.Timeout | undefined;
+  private buttonsQueue: Promise<void> = Promise.resolve();
   /** The newest mouse move not yet sent: moves arriving while one is in flight replace each other. */
   private nextMove: MouseMessage | null = null;
   private moving = false;
@@ -275,16 +276,22 @@ export class BrowserTab {
 
   private async read(): Promise<void> {
     clearTimeout(this.reading);
-    const [history, title, favicon] = await Promise.all([
+    // Each read stands alone: a page that navigates under one of them must not lose the title.
+    const [history, title, favicon] = await Promise.allSettled([
       this.cdp.send('Page.getNavigationHistory'),
       this.page.title(),
       this.page.evaluate<string | null>("document.querySelector('link[rel~=icon]')?.href ?? null"),
     ]);
     const failed = this.page.url().startsWith('chrome-error:');
     this.set({
-      can_back: history.entries.slice(0, history.currentIndex).some(isPage),
-      can_forward: history.currentIndex < history.entries.length - 1,
-      ...(failed ? {} : { title, favicon }),
+      ...(history.status === 'fulfilled'
+        ? {
+            can_back: history.value.entries.slice(0, history.value.currentIndex).some(isPage),
+            can_forward: history.value.currentIndex < history.value.entries.length - 1,
+          }
+        : {}),
+      ...(failed || title.status !== 'fulfilled' ? {} : { title: title.value }),
+      ...(failed || favicon.status !== 'fulfilled' ? {} : { favicon: favicon.value }),
     });
   }
 
@@ -555,13 +562,17 @@ export class BrowserTab {
       }
       return;
     }
-    // A press goes after the move that led to it.
-    if (this.nextMove) {
-      const move = this.nextMove;
-      this.nextMove = null;
-      await this.dispatchMouse(move);
-    }
-    await this.dispatchMouse(message);
+    // A press goes after the move that led to it, and a release after the press: one at a time, in the order they came.
+    const turn = this.buttonsQueue.then(async () => {
+      if (this.nextMove) {
+        const move = this.nextMove;
+        this.nextMove = null;
+        await this.dispatchMouse(move);
+      }
+      await this.dispatchMouse(message);
+    });
+    this.buttonsQueue = turn.catch(() => {});
+    await turn;
   }
 
   private async dispatchMouse(message: MouseMessage): Promise<void> {
