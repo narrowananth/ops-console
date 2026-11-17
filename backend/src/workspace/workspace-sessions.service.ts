@@ -48,8 +48,8 @@ export class WorkspaceSessionsService {
       create: (body) => this.create(parseInput(createRepoSessionSchema, body, 'body')),
       prepare: async (session) => {
         await this.ensure(session);
-        await this.refreshDefault(session);
       },
+      refresh: (session) => this.refreshDefault(session).catch(() => undefined),
       // A run that worked elsewhere, such as a Verification in its scratch copy, says nothing about the Session's branch.
       afterRun: async (session, run) => {
         if (run.workingDir === this.worktreeDir(session.id)) await this.followBranch(session.id);
@@ -102,13 +102,15 @@ export class WorkspaceSessionsService {
       effort: input.effort,
       access_mode: input.access_mode,
     });
-    // The newest code first: the Session starts from the fetched default branch, not from what the folder had.
+    // The worktree starts from the default branch as last fetched, so the Session opens at once; the newest commits
+    // follow in the background and, at the latest, before the first run's first tool (`refreshDefault`).
     try {
-      await this.ensure(row);
+      await this.ensure(row, false);
     } catch (error) {
       this.sessions.remove(row.id);
       throw error;
     }
+    void this.followOrigin(row);
     return toSession(row);
   }
 
@@ -117,12 +119,12 @@ export class WorkspaceSessionsService {
    * Session on that branch starts at its newest commit on a detached HEAD, since the Repo's own folder may hold the
    * branch. A Session on another branch checks that branch out, moved forward to origin when it is behind.
    */
-  async ensure(session: SessionRow): Promise<string> {
+  async ensure(session: SessionRow, fetch = true): Promise<string> {
     const dir = this.worktreeDir(session.id);
     if (await isWorktree(dir)) return dir;
     const running = this.making.get(session.id);
     if (running) return running;
-    const work = this.make(session, dir).finally(() => this.making.delete(session.id));
+    const work = this.make(session, dir, fetch).finally(() => this.making.delete(session.id));
     this.making.set(session.id, work);
     return work;
   }
@@ -143,16 +145,18 @@ export class WorkspaceSessionsService {
     return (await isWorktree(dir)) ? dir : null;
   }
 
-  private async make(session: SessionRow, dir: string): Promise<string> {
+  private async make(session: SessionRow, dir: string, fetch: boolean): Promise<string> {
     const repo = this.repo(session.repoId);
     const branch = session.branch ?? repo.defaultBranch;
     const onDefault = branch === repo.defaultBranch;
     await this.logged(
       session.id,
       repo.path,
-      `git fetch origin ${repo.defaultBranch} && git worktree add ${onDefault ? '--detach ' : ''}${dir}${onDefault ? '' : ` ${branch}`}`,
+      `${fetch ? `git fetch origin ${repo.defaultBranch} && ` : ''}git worktree add ${onDefault ? '--detach ' : ''}${dir}${onDefault ? '' : ` ${branch}`}`,
       async () => {
-        const base = await this.git.codeBase(repo.path, [repo.defaultBranch]);
+        const base = fetch
+          ? await this.git.codeBase(repo.path, [repo.defaultBranch])
+          : await this.git.codeBaseKept(repo.path, [repo.defaultBranch]);
         const holder = onDefault ? null : await this.holder(repo.path, branch);
         if (onDefault) {
           await this.git.addSessionWorktree(repo.path, dir, null, base.ref);
@@ -160,14 +164,20 @@ export class WorkspaceSessionsService {
           // The operator's folder keeps the branch: the Session starts at its commit on a detached HEAD, moved forward
           // to origin when it is behind.
           await this.git.addSessionWorktree(repo.path, dir, null, branch);
-          await this.git.pull(dir, branch);
+          if (fetch) await this.git.pull(dir, branch);
         } else {
           await this.git.addSessionWorktree(repo.path, dir, branch, base.ref, holder === 'worktree');
-          await this.git.pull(dir, branch);
+          if (fetch) await this.git.pull(dir, branch);
         }
       },
     );
     return dir;
+  }
+
+  /** Moves a new Session's worktree forward to its branch on origin once the Session is open. Never throws. */
+  private async followOrigin(session: SessionRow): Promise<void> {
+    const repo = this.repo(session.repoId);
+    await this.git.pull(this.worktreeDir(session.id), session.branch ?? repo.defaultBranch).catch(() => undefined);
   }
 
   /**

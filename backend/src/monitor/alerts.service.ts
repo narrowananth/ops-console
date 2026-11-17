@@ -6,13 +6,29 @@ import {
   type AlertEvent,
   AlertEventKind,
   AlertStatus,
+  type AlertSummary,
   alertsQuerySchema,
   type CheckInterval,
   ErrorCode,
   type Report,
   ScanStatus,
 } from '@ops-console/shared';
-import { and, asc, desc, eq, inArray, isNull, type SQL, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  getTableColumns,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  notInArray,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import type { z } from 'zod';
 import { ApiError } from '../common/errors';
 import { alertEvents, alerts, fixes, reports, reviews, routes, scans, services, sessions } from '../db/schema';
@@ -20,7 +36,17 @@ import { STORE, type Store, type Tx } from '../db/store';
 import { jobPlaybook } from '../playbooks/job-steps';
 import { datadogConfig } from './datadog-config';
 import { awaitingProdCheck, freshnessOf } from './freshness';
-import { type AlertRow, type ServiceRow, samplesOf, toAlert, toAlertEvent, toFix, toReport, toReview } from './mappers';
+import {
+  type AlertListRow,
+  type AlertRow,
+  type ServiceRow,
+  samplesOf,
+  toAlert,
+  toAlertEvent,
+  toFix,
+  toReport,
+  toReview,
+} from './mappers';
 
 const SEQ = sql`"alert_events"."rowid"`;
 
@@ -45,8 +71,9 @@ export class AlertsService {
       query.severity === undefined ? undefined : eq(alerts.severity, query.severity),
       query.service_id === undefined ? undefined : eq(services.id, query.service_id),
     ];
+    const { samples: _samples, ...columns } = getTableColumns(alerts);
     const rows = this.store.db
-      .select({ alert: alerts, route: routes, service: services })
+      .select({ alert: columns, route: routes, service: services })
       .from(alerts)
       .innerJoin(routes, eq(routes.id, alerts.routeId))
       .innerJoin(services, eq(services.id, routes.serviceId))
@@ -54,7 +81,28 @@ export class AlertsService {
       .orderBy(desc(alerts.lastSeenAt), desc(alerts.id))
       .all();
     const read = this.scanRead();
-    return rows.map(({ alert, route, service }) => toAlert(alert, route, service, this.extra(alert, service, read)));
+    const sessionOf = this.sessionsByAlert();
+    return rows.map(({ alert, route, service }) =>
+      toAlert(alert, route, service, this.extra(alert, service, read, sessionOf)),
+    );
+  }
+
+  /**
+   * The Alerts not yet resolved or dismissed that the Monitor lists with no status code picked: one from before Scans
+   * read codes lists only while the operator works on it.
+   */
+  summary(): AlertSummary {
+    const row = this.store.db
+      .select({ open: count() })
+      .from(alerts)
+      .where(
+        and(
+          notInArray(alerts.status, [AlertStatus.Resolved, AlertStatus.Dismissed]),
+          or(isNotNull(alerts.httpStatus), ne(alerts.status, AlertStatus.Open)),
+        ),
+      )
+      .get();
+    return { open: row?.open ?? 0 };
   }
 
   view(id: string): Alert {
@@ -176,7 +224,19 @@ export class AlertsService {
     return { scans: ok, interval: datadogConfig(this.store.db).default_interval as CheckInterval };
   }
 
-  private extra(alert: AlertRow, service: ServiceRow, read: ScanRead) {
+  /** The Session of each Alert that has one, read once for a list. */
+  private sessionsByAlert(): Map<string, string> {
+    const rows = this.store.db
+      .select({ id: sessions.id, alertId: sessions.alertId })
+      .from(sessions)
+      .where(isNotNull(sessions.alertId))
+      .all();
+    const found = new Map<string, string>();
+    for (const row of rows) if (row.alertId !== null && !found.has(row.alertId)) found.set(row.alertId, row.id);
+    return found;
+  }
+
+  private extra(alert: AlertListRow, service: ServiceRow, read: ScanRead, sessionOf?: Map<string, string>) {
     const waiting =
       alert.status === AlertStatus.Verified
         ? this.store.db
@@ -186,15 +246,16 @@ export class AlertsService {
             .orderBy(desc(alertEvents.at), desc(SEQ))
             .get()?.at
         : undefined;
-    const session = this.store.db
-      .select({ id: sessions.id })
-      .from(sessions)
-      .where(eq(sessions.alertId, alert.id))
-      .get();
+    const sessionId =
+      sessionOf?.get(alert.id) ??
+      (sessionOf
+        ? null
+        : (this.store.db.select({ id: sessions.id }).from(sessions).where(eq(sessions.alertId, alert.id)).get()?.id ??
+          null));
     const fresh = freshnessOf(read.scans, alert, service, read.interval);
     return {
       waitingSince: waiting ?? null,
-      sessionId: session?.id ?? null,
+      sessionId,
       lastScannedAt: fresh.lastScannedAt,
       scanOverdue: fresh.overdue,
       awaitingProdCheck: awaitingProdCheck(alert),

@@ -1,6 +1,6 @@
 import { AlertStatus, CheckInterval, ScanStatus, ScanTrigger } from '@ops-console/shared';
 import type { scans } from '../db/schema';
-import { type AlertRow, parseJson, type ServiceRow } from './mappers';
+import { type AlertListRow, parseJson, type ServiceRow } from './mappers';
 
 type ScanRow = typeof scans.$inferSelect;
 
@@ -30,7 +30,7 @@ export function scanReads(scan: ScanRow, target: ScanTarget, defaultInterval: Ch
 }
 
 /** An `ok` Scan that read the Alert's Service and, when it read only some status codes, the Alert's. */
-function covers(scan: ScanRow, alert: AlertRow, service: ServiceRow, defaultInterval: CheckInterval): boolean {
+function covers(scan: ScanRow, alert: AlertListRow, service: ServiceRow, defaultInterval: CheckInterval): boolean {
   if (scan.status !== ScanStatus.Ok || !scan.finishedAt) return false;
   const codes = parseJson<number[]>(scan.statusCodes, []);
   if (codes.length > 0 && (alert.httpStatus === null || !codes.includes(alert.httpStatus))) return false;
@@ -40,7 +40,7 @@ function covers(scan: ScanRow, alert: AlertRow, service: ServiceRow, defaultInte
 /** `okScans` are the `ok` Scans, newest end first. */
 export function freshnessOf(
   okScans: ScanRow[],
-  alert: AlertRow,
+  alert: AlertListRow,
   service: ServiceRow,
   defaultInterval: CheckInterval,
 ): { lastScannedAt: string | null; overdue: boolean } {
@@ -52,7 +52,7 @@ export function freshnessOf(
 }
 
 /** Resolved, and no Scan has read the Service without seeing the Alert since it was resolved. */
-export function awaitingProdCheck(alert: AlertRow): boolean {
+export function awaitingProdCheck(alert: AlertListRow): boolean {
   if (alert.status !== AlertStatus.Resolved) return false;
   const seenHealthy = alert.clearedAt !== null && alert.clearedAt > (alert.resolvedAt ?? '');
   return !seenHealthy;

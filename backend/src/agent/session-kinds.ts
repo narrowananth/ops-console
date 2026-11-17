@@ -8,6 +8,12 @@ export type SessionKindHandler = {
   ownWorktree?: boolean;
   /** Makes ready what the Session's own runs need, such as its worktree, before each run; a throw fails the run. */
   prepare?: (session: SessionRow) => Promise<void>;
+  /**
+   * Brings the Session's code up to date from its Git host. It runs while the run starts, and no tool of the run
+   * starts before it ends, so the agent reads the newest code and a reply that needs no tool does not wait for it.
+   * Never rejects.
+   */
+  refresh?: (session: SessionRow) => Promise<void>;
   /** Runs after the Session is deleted, to take away what it kept. Its errors are ignored. */
   removed?: (session: SessionRow) => Promise<void>;
   /** `pr_review` Sessions take no messages from the operator. */

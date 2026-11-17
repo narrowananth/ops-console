@@ -16,6 +16,16 @@ export type ComposerCommand = { name: string; description: string; run: () => vo
 
 type Mode = 'skills' | 'commands' | 'files';
 
+/** `value` after it has held still for `ms`: a menu asks the daemon once the typing pauses, not at each key. */
+function useSettled(value: string, ms: number): string {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(timer);
+  }, [value, ms]);
+  return settled;
+}
+
 /** A row of whichever menu is open: how it looks and what picking it does. */
 type Entry = { key: string; row: ReactNode; pick: () => void };
 
@@ -63,8 +73,9 @@ export function useComposerMenus({
   const [active, setActive] = useState(0);
   const mode = enabled && dismissed !== text ? modeOf(text) : null;
   const q = mode === 'files' ? (FILE.exec(text)?.[1] ?? '') : text.slice(1);
-  const skills = useSkillMenu(sessionId, q, mode === 'skills');
-  const files = useFileMenu(sessionId, q, mode === 'files');
+  const asked = useSettled(q, 120);
+  const skills = useSkillMenu(sessionId, asked, mode === 'skills');
+  const files = useFileMenu(sessionId, asked, mode === 'files');
 
   const entries: Entry[] =
     mode === 'skills'

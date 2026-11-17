@@ -13,6 +13,9 @@ export interface ConnectionTester {
 
 const TIMEOUT_MS = 30_000;
 
+/** `npx …@latest` asks the npm registry first; a check uses the cache, as the launcher does for a run. */
+const QUIET_NPM = { npm_config_prefer_offline: 'true', npm_config_update_notifier: 'false', npm_config_fund: 'false' };
+
 export class McpConnectionTester implements ConnectionTester {
   constructor(private readonly version: string) {}
 
@@ -27,7 +30,7 @@ export class McpConnectionTester implements ConnectionTester {
     const transport = new StdioClientTransport({
       command,
       args: ready.args,
-      env: { ...getDefaultEnvironment(), ...ready.env },
+      env: { ...getDefaultEnvironment(), ...QUIET_NPM, ...ready.env },
       stderr: 'pipe',
     });
     let stderr = '';

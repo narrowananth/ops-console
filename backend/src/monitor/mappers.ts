@@ -11,6 +11,8 @@ import {
 import { alertEvents, alerts, fixes, reports, reviews, routes, services } from '../db/schema';
 
 export type AlertRow = typeof alerts.$inferSelect;
+/** An Alert without its Samples: what a list reads, since each Alert's Samples are some 9 KB. */
+export type AlertListRow = Omit<AlertRow, 'samples'>;
 export type ReportRow = typeof reports.$inferSelect;
 export type ReviewRow = typeof reviews.$inferSelect;
 export type FixRow = typeof fixes.$inferSelect;
@@ -86,7 +88,7 @@ export function toAlertEvent(row: typeof alertEvents.$inferSelect): AlertEvent {
 }
 
 export function toAlert(
-  row: AlertRow,
+  row: AlertListRow,
   route: RouteRow,
   service: ServiceRow,
   extra: {

@@ -248,6 +248,19 @@ export class Git {
     throw new GitFailed(`none of ${names.join(', ')} is on origin or in the Repo${error ? ` (${error})` : ''}`);
   }
 
+  /** Like `codeBase`, without asking origin: the first of `names` as last fetched, else the Repo's own branch. */
+  async codeBaseKept(dir: string, names: string[]): Promise<CodeBase> {
+    for (const branch of names) {
+      const sha = await this.commitOf(dir, `refs/remotes/origin/${branch}`);
+      if (sha) return { branch, ref: `origin/${branch}`, sha, fetched: false, error: null };
+    }
+    for (const branch of names) {
+      const sha = await this.commitOf(dir, `refs/heads/${branch}`);
+      if (sha) return { branch, ref: branch, sha, fetched: false, error: null };
+    }
+    throw new GitFailed(`none of ${names.join(', ')} is on origin or in the Repo`);
+  }
+
   private async commitOf(dir: string, ref: string): Promise<string | null> {
     return (await this.try(dir, ['rev-parse', '--verify', '-q', `${ref}^{commit}`]))?.trim() || null;
   }

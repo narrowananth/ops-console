@@ -25,6 +25,7 @@ const event = <E extends string, D extends z.ZodType>(name: E, data: D) =>
   z.object({ event: z.literal(name), at: z.string(), data });
 
 export const wsEventSchema = z.discriminatedUnion('event', [
+  event('repo.branches_changed', z.object({ repo_id: z.string() })),
   event('browser.tabs_changed', z.object({ session_id: z.string() })),
   event('browser.servers_changed', z.object({ session_id: z.string() })),
   event('process.changed', z.object({ session_id: z.string(), process: sessionProcessSchema })),

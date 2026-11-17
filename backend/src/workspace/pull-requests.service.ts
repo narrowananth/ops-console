@@ -62,6 +62,9 @@ export const LIST_TTL_MS = 30 * 60_000;
 /** A read that failed is tried again after this, or after the list's own TTL when that is shorter. */
 const FAILED_RETRY_MS = 5 * 60_000;
 
+/** Repos a refresh reads at once. */
+const REFRESH_PARALLEL = 6;
+
 /** A pull request found by number on a host is kept this long, so typing or a refetch does not ask again. */
 const LOOKUP_TTL_MS = 60_000;
 
@@ -473,7 +476,7 @@ export class PullRequestsService implements OpenPrBranches {
     const adapter = this.adapter(repo);
     const slug = repo.remoteSlug as string;
     // An inline comment attaches to the commit the pull request is at now.
-    const headSha = input.file_path ? (await adapter.get(slug, number)).pr.head_sha : '';
+    const headSha = input.file_path ? (await this.detail(repo, number)).pr.head_sha : '';
     const posted = await adapter.postComment(slug, number, { ...input, head_sha: headSha });
     this.drop(repo.id);
     return this.markComments(repo.id, number, [posted])[0] as PrComment;
@@ -483,7 +486,10 @@ export class PullRequestsService implements OpenPrBranches {
     const repo = this.hosted(repoId);
     const adapter = this.adapter(repo);
     const slug = repo.remoteSlug as string;
-    const found = (await adapter.get(slug, number)).comments.find((comment) => comment.id === commentId);
+    // The kept read is what the operator clicked on; the host is asked again only for a comment it has not seen.
+    const found =
+      (await this.detail(repo, number)).comments.find((comment) => comment.id === commentId) ??
+      (await adapter.get(slug, number)).comments.find((comment) => comment.id === commentId);
     if (!found) throw new ApiError(404, ErrorCode.NotFound, 'no such comment');
     if (found.parent_id !== null) throw new ApiError(409, ErrorCode.InvalidState, 'only a thread can be resolved');
     await adapter.setResolved(slug, number, commentId, resolved);
@@ -529,7 +535,7 @@ export class PullRequestsService implements OpenPrBranches {
     const adapter = this.adapter(repo);
     const slug = repo.remoteSlug as string;
     if (event !== PrReviewEvent.Comment) {
-      const { pr } = await adapter.get(slug, number);
+      const { pr } = await this.detail(repo, number);
       const login = this.login(repo.host);
       if (login !== null && pr.author === login) {
         throw new ApiError(409, ErrorCode.InvalidState, 'You cannot review your own pull request');
@@ -798,18 +804,26 @@ export class PullRequestsService implements OpenPrBranches {
   private async refreshAll(wanted: RepoRow[], before: Map<string, Entry | undefined>, repoId: string | null) {
     let status: 'ok' | 'rate_limited' | 'failed' = 'ok';
     const changed: { repo_id: string; number: number }[] = [];
-    for (const repo of wanted) {
-      try {
-        const now = await this.read(repo, PrState.Open);
-        const old = new Map((before.get(repo.id)?.prs ?? []).map((pr) => [pr.number, signature(pr)]));
-        for (const pr of now.prs) {
-          if (old.get(pr.number) !== signature(pr)) changed.push({ repo_id: repo.id, number: pr.number });
+    const queue = [...wanted];
+    // Each Repo is a host call of about a second: a few at a time, not one after another.
+    await Promise.all(
+      Array.from({ length: Math.min(REFRESH_PARALLEL, queue.length) }, async () => {
+        for (let repo = queue.shift(); repo; repo = queue.shift()) {
+          try {
+            const now = await this.read(repo, PrState.Open);
+            const old = new Map((before.get(repo.id)?.prs ?? []).map((pr) => [pr.number, signature(pr)]));
+            for (const pr of now.prs) {
+              if (old.get(pr.number) !== signature(pr)) changed.push({ repo_id: repo.id, number: pr.number });
+            }
+          } catch (error) {
+            this.logger.warn(
+              `refresh of ${repo.name} failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+            status = error instanceof ApiError && error.code === ErrorCode.RateLimited ? 'rate_limited' : 'failed';
+          }
         }
-      } catch (error) {
-        this.logger.warn(`refresh of ${repo.name} failed: ${error instanceof Error ? error.message : String(error)}`);
-        status = error instanceof ApiError && error.code === ErrorCode.RateLimited ? 'rate_limited' : 'failed';
-      }
-    }
+      }),
+    );
     if (status === 'ok' && wanted.some((repo) => this.cooling(repo.host))) status = 'rate_limited';
     this.store.write((_tx, emit) => emit('pull_request.refreshed', { repo_id: repoId, status, changed }));
     for (const listener of this.refreshListeners) listener();

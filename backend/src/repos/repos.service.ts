@@ -13,8 +13,14 @@ type Row = typeof repos.$inferSelect;
 /** A Session in one of these has a run going; a daemon restart fails it (`02-settings-agents` Behavior 18). */
 const RUNNING = [SessionState.Working, SessionState.WaitingInput, SessionState.WaitingApproval];
 
+/** A Repo's origin is asked for new branches no more often than this. */
+const BRANCH_FETCH_TTL_MS = 60_000;
+
 @Injectable()
 export class ReposService implements OnApplicationBootstrap {
+  /** Each Repo's last read of origin's branches, and the one going now. */
+  private readonly branchReads = new Map<string, { at: number; running: Promise<void> | null }>();
+
   constructor(
     @Inject(STORE) private readonly store: Store,
     @Inject(GIT) private readonly git: Git,
@@ -141,13 +147,16 @@ export class ReposService implements OnApplicationBootstrap {
     });
   }
 
-  /** The Repo's local branches, then the ones only origin has, fetched now. */
+  /**
+   * The Repo's local branches, then the ones only origin has as last fetched. Asking origin takes seconds, so it runs
+   * after the answer; `repo.branches_changed` says when a branch came or went.
+   */
   async branches(id: string): Promise<{ name: string; current: boolean; remote: boolean }[]> {
     const row = this.row(id);
     if ((await this.git.topFolder(row.path)) === null) {
       throw new ApiError(404, ErrorCode.NotFound, `${row.name} is not on this machine any more`);
     }
-    await this.git.refreshRemote(row.path);
+    this.readOrigin(id, row.path);
     const local = (await this.git.branches(row.path)).map((branch) => ({ ...branch, remote: false }));
     const remote = (await this.git.remoteOnlyBranches(row.path)).map((name) => ({
       name,
@@ -155,6 +164,21 @@ export class ReposService implements OnApplicationBootstrap {
       remote: true,
     }));
     return [...local, ...remote];
+  }
+
+  private readOrigin(id: string, dir: string): void {
+    const kept = this.branchReads.get(id);
+    if (kept?.running || (kept && Date.now() - kept.at < BRANCH_FETCH_TTL_MS)) return;
+    const running = (async () => {
+      const before = (await this.git.remoteOnlyBranches(dir)).join('\n');
+      await this.git.refreshRemote(dir);
+      if ((await this.git.remoteOnlyBranches(dir)).join('\n') !== before) {
+        this.store.emit('repo.branches_changed', { repo_id: id });
+      }
+    })()
+      .catch(() => undefined)
+      .finally(() => this.branchReads.set(id, { at: Date.now(), running: null }));
+    this.branchReads.set(id, { at: kept?.at ?? 0, running });
   }
 
   private async view(row: Row): Promise<Repo> {
