@@ -57,6 +57,8 @@ test('the build writes every page, with the links Google asks of a home page', a
     assert.match(html, /<title>[^<]+<\/title>/, page);
     assert.match(html, /href="\/privacy\/"/, `${page} links the privacy policy`);
     assert.match(html, /href="\/terms\/"/, `${page} links the terms`);
+    assert.match(html, /<script src="\/assets\/theme\.js"><\/script>/, `${page} sets the theme before it paints`);
+    assert.match(html, /data-theme-toggle/, `${page} has the theme button`);
   }
   const privacy = await readFile(path.join(dist, 'privacy', 'index.html'), 'utf8');
   assert.match(privacy, /<h1 id="privacy-policy">Privacy policy<\/h1>/);

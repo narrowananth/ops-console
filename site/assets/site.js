@@ -1,4 +1,14 @@
-// Two small jobs: the copy button on the install command, and the release list on /releases/.
+// Three small jobs: the theme button, the copy button on the install command, and the release list on /releases/.
+const toggle = document.querySelector('[data-theme-toggle]');
+toggle?.addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  if (next === 'dark') document.documentElement.dataset.theme = 'dark';
+  else delete document.documentElement.dataset.theme;
+  try {
+    localStorage.setItem('theme', next);
+  } catch {}
+});
+
 for (const button of document.querySelectorAll('[data-copy]')) {
   button.addEventListener('click', async () => {
     try {
