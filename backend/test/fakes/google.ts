@@ -2,12 +2,13 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { GoogleClient, GoogleEndpoints } from '../../src/connectors/google-auth';
+import type { GoogleHosts } from '../../src/mcp/google-tools';
 
 type Grant = { challenge: string; redirect: string };
 
 /**
- * A stand-in for Google on loopback: the account chooser (a redirect), the token and revoke endpoints, and an MCP
- * server that takes a bearer token. It records what it was asked.
+ * A stand-in for Google on loopback: the account chooser (a redirect), the token and revoke endpoints, and the Docs,
+ * Sheets and Drive REST APIs, which take a bearer token and answer what a test scripted. It records what it was asked.
  */
 export class FakeGoogle {
   readonly client: GoogleClient = { clientId: 'test-client.apps.example.com', clientSecret: 'test-client-secret' };
@@ -15,15 +16,20 @@ export class FakeGoogle {
   email = 'operator@example.com';
   /** The operator declines on the consent screen. */
   deny = false;
-  /** Answer MCP calls as an event stream. */
-  sse = false;
   readonly scopes: string[][] = [];
   readonly tokenCalls: Record<string, string>[] = [];
-  readonly mcpCalls: { auth: string | undefined; session: string | undefined; body: unknown }[] = [];
+  readonly apiCalls: {
+    method: string;
+    path: string;
+    query: URLSearchParams;
+    auth: string | undefined;
+    body: unknown;
+  }[] = [];
   readonly revoked = new Set<string>();
   private readonly grants = new Map<string, Grant>();
   private readonly refreshTokens = new Set<string>();
   private accessTokens = new Set<string>();
+  private readonly answers = new Map<string, { status: number; body: unknown }>();
   private issued = 0;
   private server!: Server;
   private origin = '';
@@ -40,8 +46,16 @@ export class FakeGoogle {
     return { auth: `${this.origin}/auth`, token: `${this.origin}/token`, revoke: `${this.origin}/revoke` };
   }
 
-  get mcpUrl(): string {
-    return `${this.origin}/mcp/v1`;
+  get hosts(): GoogleHosts {
+    return { docs: `${this.origin}/docs`, sheets: `${this.origin}/sheets`, drive: `${this.origin}/drive` };
+  }
+
+  /**
+   * What the REST API answers for `method` and `path` (the path under the product's host, decoded; `?alt=media` ends a
+   * file download's). A string body is text.
+   */
+  answer(method: string, path: string, body: unknown, status = 200): void {
+    this.answers.set(`${method} ${path}`, { status, body });
   }
 
   /** The operator in the browser: opens the sign-in page, which sends the code back to the console's loopback page. */
@@ -86,7 +100,7 @@ export class FakeGoogle {
       response.writeHead(200).end();
       return;
     }
-    if (url.pathname === '/mcp/v1') return this.mcp(request, body, response);
+    if (/^\/(docs|sheets|drive)\//.test(url.pathname)) return this.rest(request, url, body, response);
     response.writeHead(404).end();
   }
 
@@ -146,33 +160,25 @@ export class FakeGoogle {
     reply(200, { access_token: access, expires_in: 3600 });
   }
 
-  private mcp(request: IncomingMessage, body: string, response: ServerResponse): void {
+  private rest(request: IncomingMessage, url: URL, body: string, response: ServerResponse): void {
+    const method = request.method ?? 'GET';
+    const path = decodeURIComponent(url.pathname);
     const auth = request.headers.authorization;
-    const message = JSON.parse(body || 'null') as { id?: number; method?: string; params?: { name?: string } } | null;
-    this.mcpCalls.push({ auth, session: request.headers['mcp-session-id'] as string | undefined, body: message });
+    this.apiCalls.push({ method, path, query: url.searchParams, auth, body: body === '' ? null : JSON.parse(body) });
     if (!auth?.startsWith('Bearer ') || !this.accessTokens.has(auth.slice(7))) {
       response.writeHead(401).end('unauthorized');
       return;
     }
-    if (message?.id === undefined) {
-      response.writeHead(202).end();
+    const media = url.searchParams.get('alt') === 'media' ? '?alt=media' : '';
+    const answer = this.answers.get(`${method} ${path}${media}`);
+    if (!answer) {
+      response.writeHead(404).end(`nothing scripted for ${method} ${path}`);
       return;
     }
-    const result =
-      message.method === 'initialize'
-        ? {
-            protocolVersion: '2025-06-18',
-            capabilities: { tools: {} },
-            serverInfo: { name: 'fake-google', version: '1' },
-          }
-        : message.method === 'tools/list'
-          ? { tools: [{ name: 'read_doc', inputSchema: { type: 'object' } }] }
-          : { content: [{ type: 'text', text: `read ${message.params?.name ?? ''} as ${this.email}` }] };
-    const reply = JSON.stringify({ jsonrpc: '2.0', id: message.id, result });
-    const headers: Record<string, string> = {
-      'content-type': this.sse ? 'text/event-stream' : 'application/json',
-      ...(message.method === 'initialize' ? { 'mcp-session-id': 'session-1' } : {}),
-    };
-    response.writeHead(200, headers).end(this.sse ? `event: message\ndata: ${reply}\n\n` : reply);
+    if (typeof answer.body === 'string') {
+      response.writeHead(answer.status, { 'content-type': 'text/plain' }).end(answer.body);
+      return;
+    }
+    response.writeHead(answer.status, { 'content-type': 'application/json' }).end(JSON.stringify(answer.body));
   }
 }

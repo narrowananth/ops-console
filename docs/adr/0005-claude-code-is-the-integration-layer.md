@@ -17,11 +17,11 @@ The same limit reaches the agent's own use of those CLIs: a chat run asks the co
 The console depends on each MCP server's tools and on the `claude` CLI's output format. A server
 Claude Code cannot run is a server the console cannot use.
 
-Google Docs, Sheets and Drive are reached through Google's own remote MCP servers, by a small bridge the console ships and
-registers with Claude Code in every Claude account. The console runs Google's sign-in with a client the build ships and keeps
-the refresh token in the Keychain; the bridge mints each call's access token from it. So one Google sign-in serves every
-Claude account and CLIProxy, and no Claude config holds a Google token. The cost is a client the project owns: the app runs
-unverified, with Google's warning screen and a 100-user cap.
+Google Docs, Sheets and Drive are reached through a small MCP server the console ships and registers with Claude Code in
+every Claude account: its tools call the products' REST APIs. The console runs Google's sign-in with a client the build ships
+and keeps the refresh token in the Keychain; the server mints each call's access token from it. So one Google sign-in serves
+every Claude account and CLIProxy, and no Claude config holds a Google token. The cost is a client the project owns, which runs
+unverified, with Google's warning screen and a 100-user cap, and tools the console writes and maintains.
 
 A service with no browser sign-in that gives the console a token of its own is reached through
 Claude Code only. Bitbucket has two: Atlassian's MCP server for the agent, and `bkt` for the
@@ -45,3 +45,6 @@ console shows.
   another account loses the tools, and Claude Code turns them off whenever CLIProxy sends a token.
 - **Claude Code's own OAuth for Google's servers, with the shipped client**: the sign-in is kept per Claude account, so each
   account signs in again.
+- **Google's remote MCP servers for Docs, Sheets and Drive, behind the console's bridge**: Google maintains the tools, but the
+  servers are in Developer Preview and Google asks a billing account on the Cloud project before the API can be enabled, which
+  an open-source project cannot ask of everyone who runs it.

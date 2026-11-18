@@ -29,32 +29,13 @@ export const GOOGLE_CONNECTORS: ConnectorId[] = [
 export const isGoogleConnector = (id: ConnectorId): boolean => GOOGLE_CONNECTORS.includes(id);
 
 /**
- * The scopes each Google Connector asks for: what Google's MCP server for the product needs (its configure-MCP-server
- * guide), and `openid email` to show which Google account signed in.
+ * The scopes each Google Connector asks for: the one its tools need (Docs and Sheets read and write, Drive only reads),
+ * and `openid email` to show which Google account signed in.
  */
 export const GOOGLE_SCOPES: Record<string, string[]> = {
-  [ConnectorId.GoogleDocs]: [
-    'openid',
-    'email',
-    'https://www.googleapis.com/auth/drive.readonly',
-    'https://www.googleapis.com/auth/drive.file',
-    'https://www.googleapis.com/auth/documents.readonly',
-    'https://www.googleapis.com/auth/documents',
-  ],
-  [ConnectorId.GoogleSheets]: [
-    'openid',
-    'email',
-    'https://www.googleapis.com/auth/drive.readonly',
-    'https://www.googleapis.com/auth/drive.file',
-    'https://www.googleapis.com/auth/spreadsheets.readonly',
-    'https://www.googleapis.com/auth/spreadsheets',
-  ],
-  [ConnectorId.GoogleDrive]: [
-    'openid',
-    'email',
-    'https://www.googleapis.com/auth/drive.readonly',
-    'https://www.googleapis.com/auth/drive.file',
-  ],
+  [ConnectorId.GoogleDocs]: ['openid', 'email', 'https://www.googleapis.com/auth/documents'],
+  [ConnectorId.GoogleSheets]: ['openid', 'email', 'https://www.googleapis.com/auth/spreadsheets'],
+  [ConnectorId.GoogleDrive]: ['openid', 'email', 'https://www.googleapis.com/auth/drive.readonly'],
 };
 
 export const CONNECTOR_NAMES: Record<ConnectorId, string> = {
@@ -83,9 +64,9 @@ export const CONNECTOR_VIA: Record<ConnectorId, string> = {
   [ConnectorId.Sentry]: 'Sentry MCP',
   [ConnectorId.Shopify]: 'Shopify Dev MCP',
   [ConnectorId.Slashdocs]: 'slashdocs CLI',
-  [ConnectorId.GoogleDocs]: 'Google Docs MCP',
-  [ConnectorId.GoogleSheets]: 'Google Sheets MCP',
-  [ConnectorId.GoogleDrive]: 'Google Drive MCP',
+  [ConnectorId.GoogleDocs]: 'Google Docs API',
+  [ConnectorId.GoogleSheets]: 'Google Sheets API',
+  [ConnectorId.GoogleDrive]: 'Google Drive API',
 };
 
 /**
@@ -118,21 +99,21 @@ export const CONNECTOR_SERVERS: Partial<
   },
   [ConnectorId.Sentry]: { name: 'sentry', transport: McpTransport.Http, target: 'https://mcp.sentry.dev/mcp' },
   [ConnectorId.Shopify]: { name: 'shopify', transport: McpTransport.Stdio, target: 'npx -y @shopify/dev-mcp@latest' },
-  // The Google bridge (`ops-console google-mcp <url>`): it reads the sign-in from the Keychain and calls Google's server.
+  // The Google bridge (`ops-console google-mcp <product>`): it reads the sign-in from the Keychain and calls the product's REST API.
   [ConnectorId.GoogleDocs]: {
     name: 'google-docs',
     transport: McpTransport.Stdio,
-    target: 'ops-console google-mcp https://docsmcp.googleapis.com/mcp/v1',
+    target: 'ops-console google-mcp docs',
   },
   [ConnectorId.GoogleSheets]: {
     name: 'google-sheets',
     transport: McpTransport.Stdio,
-    target: 'ops-console google-mcp https://sheetsmcp.googleapis.com/mcp/v1',
+    target: 'ops-console google-mcp sheets',
   },
   [ConnectorId.GoogleDrive]: {
     name: 'google-drive',
     transport: McpTransport.Stdio,
-    target: 'ops-console google-mcp https://drivemcp.googleapis.com/mcp/v1',
+    target: 'ops-console google-mcp drive',
   },
 };
 

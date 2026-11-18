@@ -762,9 +762,9 @@ describe('Google Connectors', () => {
     const rows = await list(ctx);
     expect(rows).toHaveLength(12);
     expect(rows.slice(-3).map((row) => [row.id, row.name, row.via, row.status, row.config])).toEqual([
-      ['google_docs', 'Google Docs', 'Google Docs MCP', 'off', {}],
-      ['google_sheets', 'Google Sheets', 'Google Sheets MCP', 'off', {}],
-      ['google_drive', 'Google Drive', 'Google Drive MCP', 'off', {}],
+      ['google_docs', 'Google Docs', 'Google Docs API', 'off', {}],
+      ['google_sheets', 'Google Sheets', 'Google Sheets API', 'off', {}],
+      ['google_drive', 'Google Drive', 'Google Drive API', 'off', {}],
     ]);
     expect(rows.map((row) => row.id).slice(-4)).toEqual(['slashdocs', ...GOOGLE]);
     // Nothing is typed in the pane.
@@ -801,14 +801,7 @@ describe('Google Connectors', () => {
     ).toMatchObject({ status: 'ok' });
     // Docs' scopes only, and the account chooser.
     const asked = new URL(url).searchParams;
-    expect(google.scopes[0]).toEqual([
-      'openid',
-      'email',
-      'https://www.googleapis.com/auth/drive.readonly',
-      'https://www.googleapis.com/auth/drive.file',
-      'https://www.googleapis.com/auth/documents.readonly',
-      'https://www.googleapis.com/auth/documents',
-    ]);
+    expect(google.scopes[0]).toEqual(['openid', 'email', 'https://www.googleapis.com/auth/documents']);
     expect(asked.get('prompt')).toContain('select_account');
     expect(asked.get('code_challenge_method')).toBe('S256');
 
@@ -816,14 +809,7 @@ describe('Google Connectors', () => {
     for (const entry of registered(ctx, 'google-docs')) {
       expect(entry).toMatchObject({
         command: '/opt/ops-console',
-        args: [
-          'mcp-exec',
-          'google-docs',
-          '--',
-          '/opt/ops-console',
-          'google-mcp',
-          'https://docsmcp.googleapis.com/mcp/v1',
-        ],
+        args: ['mcp-exec', 'google-docs', '--', '/opt/ops-console', 'google-mcp', 'docs'],
       });
     }
     const env = JSON.parse((await ctx.keychain.get('mcp:google-docs')) as string);
@@ -847,9 +833,10 @@ describe('Google Connectors', () => {
     expect(await one(ctx, 'google_drive')).toMatchObject({ login: 'drive@example.com' });
     expect((await one(ctx, 'google_docs')).status).toBe('off');
     expect(registered(ctx, 'google-docs').every((entry) => entry === undefined)).toBe(true);
-    expect(
-      (ctx.google as FakeGoogle).scopes.map((scopes) => scopes.includes('https://www.googleapis.com/auth/drive.file')),
-    ).toEqual([true, true]);
+    expect((ctx.google as FakeGoogle).scopes.map((scopes) => scopes[2])).toEqual([
+      'https://www.googleapis.com/auth/drive.readonly',
+      'https://www.googleapis.com/auth/spreadsheets',
+    ]);
   });
 
   it('Cancel stops one wait and keeps the status the Connector had', async () => {

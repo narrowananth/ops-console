@@ -8,7 +8,7 @@ const PAGE = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=example';
 const google = (id: string, name: string) => ({
   id,
   name,
-  via: `${name} MCP`,
+  via: `${name} API`,
   status: 'off',
   status_detail: null as string | null,
   account_label: null,
@@ -49,7 +49,7 @@ test("a Google Connector opens Google's sign-in, waits, and Cancel stops the wai
     .getByRole('button', { name: 'Connect', exact: true })
     .click();
   await expect(main.getByText('Connect Google Drive to Ops Console')).toBeVisible();
-  await expect(main.getByText('Reached through Google Drive MCP.')).toBeVisible();
+  await expect(main.getByText('Reached through Google Drive API.')).toBeVisible();
   await expect(main.getByRole('textbox')).toHaveCount(0);
   const step = main.getByRole('region', { name: 'Sign in' });
   await expect(step).toContainText(

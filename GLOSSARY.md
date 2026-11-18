@@ -368,7 +368,7 @@ stops before the model runs.
 An outside service the operator signs in to: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets, Google Drive. It holds the sign-in and registers the service's MCP Server when it has one. Each is reached through a CLI or an MCP Server and is connected, checked and disconnected in Integrations, the one place a service is connected.
 
 **Google bridge**:
-The stdio MCP Server the console registers for a Google Connector. It keeps nothing on disk: the launcher hands it the Connector's refresh token from the Keychain, and it mints access tokens and forwards each call to Google's own MCP server. One Google sign-in serves every Claude account and CLIProxy.
+The stdio MCP Server the console registers for a Google Connector. It keeps nothing on disk: the launcher hands it the Connector's refresh token from the Keychain, and it mints access tokens and answers each tool call from the product's REST API. One Google sign-in serves every Claude account and CLIProxy.
 
 **Setup agent**:
 Claude in a terminal in Setup agent that adds Connections, remote MCP Servers and Connectors
