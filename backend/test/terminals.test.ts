@@ -281,7 +281,7 @@ describe('the setup terminal', () => {
     );
   });
 
-  it('starts a Google sign-in, which ends auth with no client saved, and has no tool for the client or its secret', async () => {
+  it('starts a Google Connect, which waits for claude.ai, through the same code as the endpoint', async () => {
     const ctx = await start();
     await waitFor(ctx, 'setup agent ready');
     send(ctx, { type: 'line', text: 'tool connect_connector {"id":"google_sheets"}' });
@@ -289,19 +289,12 @@ describe('the setup terminal', () => {
       () => api(ctx.daemon).get('/connectors'),
       (res) =>
         res.body.data.some(
-          (row: { id: string; status: string; status_detail: string }) =>
-            row.id === 'google_sheets' &&
-            row.status === 'auth' &&
-            row.status_detail === 'enter the Google OAuth client in the pane first',
+          (row: { id: string; sign_in: { url: string } | null }) =>
+            row.id === 'google_sheets' && row.sign_in?.url === 'https://claude.ai/new#customize/connectors',
         ),
-      'the refusal',
+      'the sign-in waiting on claude.ai',
     );
-    send(ctx, { type: 'line', text: 'tool save_google_client {"client_id":"a","client_secret":"b"}' });
-    await waitFor(ctx, 'invalid params: tool save_google_client');
-    expect(
-      (await api(ctx.daemon).get('/connectors')).body.data.find((row: { id: string }) => row.id === 'google_sheets')
-        .config,
-    ).toEqual({ client_id: '' });
+    await api(ctx.daemon).delete('/connectors/google_sheets/sign-in');
   });
 
   it('reads any local file and folder with their secrets swapped, and a test still gets the real secret', async () => {

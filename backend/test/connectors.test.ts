@@ -708,268 +708,120 @@ describe('secrets', () => {
 
 describe('Google Connectors', () => {
   const GOOGLE = ['google_docs', 'google_sheets', 'google_drive'];
-  const client = { client_id: 'client-1.apps.example.com', client_secret: 'GOCSPX-example-secret' };
-  const save = (ctx: Ctx, body: Record<string, unknown> = client) =>
-    api(ctx.daemon).put('/connectors/google/client', body);
-  const secretFile = (dir: string, server: string) => path.join(dir, `fake-mcp-secret-${server}.txt`);
+  const PAGE = 'https://claude.ai/new#customize/connectors';
+  /** What the active account has on claude.ai: a name maps to `connected` or `needs-auth`; one left out was never added. */
+  const claudeAi = (ctx: Ctx, connectors: Record<string, string>) =>
+    writeFile(path.join(ctx.dirs[0] as string, 'fake-claudeai.json'), JSON.stringify(connectors));
+  const status = (ctx: Ctx, id: string, want: string) =>
+    until(
+      () => one(ctx, id),
+      (row) => row.status === want && row.sign_in === null,
+      `${id} ${want}`,
+    );
 
-  it('lists the three after slashdocs, off, with no client', async () => {
+  it('lists the three after slashdocs, off, with an empty config', async () => {
     const ctx = await start();
     const rows = await list(ctx);
     expect(rows).toHaveLength(12);
     expect(rows.slice(-3).map((row) => [row.id, row.name, row.via, row.status, row.config])).toEqual([
-      ['google_docs', 'Google Docs', 'Google Docs MCP', 'off', { client_id: '' }],
-      ['google_sheets', 'Google Sheets', 'Google Sheets MCP', 'off', { client_id: '' }],
-      ['google_drive', 'Google Drive', 'Google Drive MCP', 'off', { client_id: '' }],
+      ['google_docs', 'Google Docs', 'claude.ai Google Docs', 'off', {}],
+      ['google_sheets', 'Google Sheets', 'claude.ai Google Sheets', 'off', {}],
+      ['google_drive', 'Google Drive', 'claude.ai Google Drive', 'off', {}],
     ]);
     expect(rows.map((row) => row.id).slice(-4)).toEqual(['slashdocs', ...GOOGLE]);
+    // Nothing is registered or typed: the connector lives on claude.ai.
+    expect((await api(ctx.daemon).patch('/connectors/google_docs', { config: { client_id: 'x' } })).status).toBe(400);
   });
 
-  it('saves one client for all three: the ID in each config, the secret in the Keychain only', async () => {
+  it('connects at once, opening nothing, when claude.ai already has the connector', async () => {
     const ctx = await start();
-    const { events, close } = await listen(ctx.daemon);
-    const saved = await save(ctx);
-    close();
-    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
-    expect(saved.body.data.map((row: Row) => [row.id, row.config])).toEqual(
-      GOOGLE.map((id) => [id, { client_id: client.client_id }]),
-    );
-    expect(ctx.keychain.values.get('google-oauth-client')).toBe(client.client_secret);
-    expect(JSON.stringify([saved.body, await list(ctx), events, ctx.daemon.log])).not.toContain(client.client_secret);
-  });
-
-  it('names the blank fields and saves nothing', async () => {
-    const ctx = await start();
-    const bad = await save(ctx, { client_id: ' ', client_secret: '' });
-    expect(bad.status).toBe(400);
-    expect(bad.body.error.code).toBe('validation_failed');
-    expect(bad.body.error.message).toContain('client_id');
-    expect(bad.body.error.message).toContain('client_secret');
-    expect(ctx.keychain.values.size).toBe(0);
-    expect((await one(ctx, 'google_docs')).config).toEqual({ client_id: '' });
-    // The ID is set only through the client endpoint.
-    const patched = await api(ctx.daemon).patch('/connectors/google_docs', { config: { client_id: 'x' } });
-    expect(patched.status).toBe(400);
-  });
-
-  it('ends auth, registering nothing and opening no sign-in, when no client is saved', async () => {
-    const ctx = await start();
-    await api(ctx.daemon).post('/connectors/google_docs/connect', {});
-    const row = await until(
-      () => one(ctx, 'google_docs'),
-      (found) => found.status === 'auth' && found.sign_in === null,
-      'the refusal',
-    );
-    expect(row.status_detail).toBe('enter the Google OAuth client in the pane first');
-    expect((await mcpServer(ctx, 'google-docs'))?.registered).toBeFalsy();
-  });
-
-  it("registers the server with the saved client in every account, the secret in each account's own store only", async () => {
-    const ctx = await start();
-    await save(ctx);
-    const { events, close } = await listen(ctx.daemon);
+    await claudeAi(ctx, { 'claude.ai Google Sheets': 'connected' });
     expect((await api(ctx.daemon).post('/connectors/google_sheets/connect', {})).status).toBe(202);
-    await until(
-      () => one(ctx, 'google_sheets'),
-      (row) => row.status === 'ok' && row.sign_in === null,
-      'the sign-in',
+    await status(ctx, 'google_sheets', 'ok');
+    expect(ctx.tools.opened).toEqual([]);
+    expect(await one(ctx, 'google_sheets')).toMatchObject({ login: null, account_label: null });
+    expect((await mcpServer(ctx, 'claude.ai Google Sheets'))?.registered).toBeFalsy();
+  });
+
+  it('opens claude.ai, shows its page while it waits, and connects once the operator has added the connector', async () => {
+    const ctx = await start();
+    const { events, close } = await listen(ctx.daemon);
+    await api(ctx.daemon).post('/connectors/google_drive/connect', {});
+    const waiting = await until(
+      () => one(ctx, 'google_drive'),
+      (row) => (row.sign_in as { url: string | null } | null)?.url != null,
+      'the waiting sign-in',
     );
+    expect(waiting.sign_in).toEqual({ code: null, url: PAGE });
+    expect(ctx.tools.opened).toEqual([PAGE]);
+
+    await claudeAi(ctx, { 'claude.ai Google Drive': 'connected' });
+    await status(ctx, 'google_drive', 'ok');
     close();
     expect(
       checks(events)
-        .filter((event) => event.id === 'google_sheets')
+        .filter((event) => event.id === 'google_drive')
         .at(-1),
     ).toMatchObject({ status: 'ok' });
-    for (const dir of ctx.dirs) {
-      const raw = await readFile(path.join(dir, '.claude.json'), 'utf8');
-      expect(JSON.parse(raw).mcpServers['google-sheets']).toMatchObject({
-        type: 'http',
-        url: 'https://sheetsmcp.googleapis.com/mcp/v1',
-        oauth: { clientId: client.client_id, callbackPort: 3119 },
-      });
-      // Never in Claude Code's config file; handed over in the environment instead.
-      expect(raw).not.toContain(client.client_secret);
-      expect(await readFile(secretFile(dir, 'google-sheets'), 'utf8')).toBe(client.client_secret);
-    }
-    // The server gives no account.
-    expect(await one(ctx, 'google_sheets')).toMatchObject({ login: null, account_label: null });
   });
 
-  it('registers the server again on each Connect, so a corrected secret takes its place', async () => {
+  it('lets two Google Connectors wait at once, and Cancel stops one and keeps its status', async () => {
     const ctx = await start();
-    await save(ctx);
-    process.env.FAKE_MCP_LOGIN = 'fail';
-    try {
-      for (const dir of ctx.dirs) ctx.probe.set(dir, 'google-docs', { status: 'needs-auth' });
-      await api(ctx.daemon).post('/connectors/google_docs/connect', {});
-      await until(
-        () => one(ctx, 'google_docs'),
-        (row) => row.status === 'auth' && row.sign_in === null,
-        'the failure',
-      );
-    } finally {
-      delete process.env.FAKE_MCP_LOGIN;
-    }
-    expect(await readFile(secretFile(ctx.dirs[0] as string, 'google-docs'), 'utf8')).toBe(client.client_secret);
-    // The Connector reads auth, so the client can be fixed, and the next Connect hands the new secret over.
-    expect((await save(ctx, { ...client, client_secret: 'GOCSPX-corrected' })).status).toBe(200);
     await api(ctx.daemon).post('/connectors/google_docs/connect', {});
-    await until(
-      () => one(ctx, 'google_docs'),
-      (row) => row.status === 'ok' && row.sign_in === null,
-      'the sign-in',
-    );
-    for (const dir of ctx.dirs) expect(await readFile(secretFile(dir, 'google-docs'), 'utf8')).toBe('GOCSPX-corrected');
-  });
-
-  it('refuses a new client while a Google Connector reads ok, and allows it after auth', async () => {
-    const ctx = await start();
-    await save(ctx);
-    await api(ctx.daemon).post('/connectors/google_docs/connect', {});
-    await until(
-      () => one(ctx, 'google_docs'),
-      (row) => row.status === 'ok' && row.sign_in === null,
-      'the sign-in',
-    );
-    const refused = await save(ctx, { ...client, client_id: 'other.apps.example.com' });
-    expect(refused.status).toBe(409);
-    expect(refused.body.error.code).toBe('google_client_in_use');
-    expect((await one(ctx, 'google_docs')).config).toEqual({ client_id: client.client_id });
-
-    // A client that failed to connect can be fixed.
-    ctx.tools.down = false;
-    process.env.FAKE_MCP_LOGIN = 'fail';
-    try {
-      await api(ctx.daemon).delete('/connectors/google_docs/credentials');
-      await save(ctx);
-      for (const dir of ctx.dirs) ctx.probe.set(dir, 'google-sheets', { status: 'needs-auth' });
-      await api(ctx.daemon).post('/connectors/google_sheets/connect', {});
-      await until(
-        () => one(ctx, 'google_sheets'),
-        (row) => row.status === 'auth' && row.sign_in === null,
-        'the failure',
-      );
-    } finally {
-      delete process.env.FAKE_MCP_LOGIN;
-    }
-    expect((await save(ctx, { ...client, client_id: 'fixed.apps.example.com' })).status).toBe(200);
-  });
-
-  it('waits for one Google sign-in at a time, and a second Connector on the same one restarts it', async () => {
-    const ctx = await start();
-    await save(ctx);
-    process.env.FAKE_MCP_LOGIN = 'hang';
-    try {
-      await api(ctx.daemon).post('/connectors/google_docs/connect', {});
-      await until(
-        () => logins(ctx, 'google-docs'),
-        (count) => count === 1,
-        'claude mcp login',
-      );
-      const second = await api(ctx.daemon).post('/connectors/google_drive/connect', {});
-      expect(second.status).toBe(409);
-      expect(second.body.error.code).toBe('sign_in_in_progress');
-      expect(second.body.error.message).toContain('Google Docs');
-      expect((await mcpServer(ctx, 'google-drive'))?.registered).toBeFalsy();
-      // Another Connector is not held back, and the same one starts over.
-      expect((await api(ctx.daemon).post('/connectors/google_docs/connect', {})).status).toBe(202);
-      await api(ctx.daemon).delete('/connectors/google_docs/credentials');
-      await until(
-        () => logins(ctx, 'google-docs'),
-        (count) => count === 0,
-        'the login to stop',
-      );
-    } finally {
-      delete process.env.FAKE_MCP_LOGIN;
-    }
-  });
-
-  it("leaves auth with Google's reason when its server refuses the sign-in", async () => {
-    const ctx = await start();
-    await save(ctx);
-    process.env.FAKE_MCP_LOGIN = 'fail';
-    try {
-      for (const dir of ctx.dirs) ctx.probe.set(dir, 'google-drive', { status: 'needs-auth' });
-      await api(ctx.daemon).post('/connectors/google_drive/connect', {});
-      const row = await until(
-        () => one(ctx, 'google_drive'),
-        (found) => found.status === 'auth' && found.sign_in === null,
-        'the refusal',
-      );
-      expect(row.status_detail).toContain('Incompatible auth server');
-    } finally {
-      delete process.env.FAKE_MCP_LOGIN;
-    }
-  });
-
-  it('turns a server back on that was turned off in MCP servers', async () => {
-    const ctx = await start();
-    await save(ctx);
-    await api(ctx.daemon).post('/connectors/google_docs/connect', {});
-    await until(
-      () => one(ctx, 'google_docs'),
-      (row) => row.status === 'ok' && row.sign_in === null,
-      'the sign-in',
-    );
-    await api(ctx.daemon).patch('/mcp-servers/google-docs', { enabled: false });
-    await api(ctx.daemon).post('/connectors/google_docs/connect', {});
-    await until(
-      () => one(ctx, 'google_docs'),
-      (row) => row.status === 'ok' && row.sign_in === null,
-      'the second sign-in',
-    );
-    expect(await mcpServer(ctx, 'google-docs')).toMatchObject({ enabled: true });
-  });
-
-  it('reads fail when its server is turned off, and auth when it is not registered', async () => {
-    const ctx = await start();
-    await save(ctx);
-    await api(ctx.daemon).post('/connectors/google_docs/connect', {});
-    await until(
-      () => one(ctx, 'google_docs'),
-      (row) => row.status === 'ok' && row.sign_in === null,
-      'the sign-in',
-    );
-    await api(ctx.daemon).patch('/mcp-servers/google-docs', { enabled: false });
-    const off = await api(ctx.daemon).post('/connectors/google_docs/checks');
-    expect(off.body.data).toMatchObject({ status: 'fail', status_detail: 'google-docs is turned off in MCP servers' });
-    await api(ctx.daemon).patch('/mcp-servers/google-docs', { enabled: true });
-    for (const dir of ctx.dirs) {
-      const file = path.join(dir, '.claude.json');
-      const config = JSON.parse(await readFile(file, 'utf8'));
-      delete config.mcpServers['google-docs'];
-      await writeFile(file, JSON.stringify(config));
-    }
-    const gone = await api(ctx.daemon).post('/connectors/google_docs/checks');
-    expect(gone.body.data).toMatchObject({ status: 'auth', status_detail: 'google-docs is not registered' });
-  });
-
-  it('disconnects one Connector alone, and the last one takes the client with it', async () => {
-    const ctx = await start();
-    await save(ctx);
-    for (const id of ['google_docs', 'google_sheets']) {
-      await api(ctx.daemon).post(`/connectors/${id}/connect`, {});
+    await api(ctx.daemon).post('/connectors/google_drive/connect', {});
+    for (const id of ['google_docs', 'google_drive']) {
       await until(
         () => one(ctx, id),
-        (row) => row.status === 'ok' && row.sign_in === null,
-        'the sign-in',
+        (row) => (row.sign_in as { url: string | null } | null)?.url != null,
+        `${id} waiting`,
       );
+    }
+    const cancelled = await api(ctx.daemon).delete('/connectors/google_docs/sign-in');
+    expect(cancelled.body.data).toMatchObject({ status: 'off', sign_in: null });
+    expect((await one(ctx, 'google_drive')).sign_in).not.toBeNull();
+    await api(ctx.daemon).delete('/connectors/google_drive/sign-in');
+  });
+
+  it('reads the connector as claude.ai has it: connected, needing sign-in, or never added', async () => {
+    const ctx = await start();
+    await claudeAi(ctx, { 'claude.ai Google Docs': 'connected' });
+    await api(ctx.daemon).post('/connectors/google_docs/connect', {});
+    await status(ctx, 'google_docs', 'ok');
+
+    await claudeAi(ctx, { 'claude.ai Google Docs': 'needs-auth' });
+    expect((await api(ctx.daemon).post('/connectors/google_docs/checks')).body.data).toMatchObject({
+      status: 'auth',
+      status_detail: 'Google Docs needs signing in again on claude.ai',
+    });
+
+    await claudeAi(ctx, {});
+    expect((await api(ctx.daemon).post('/connectors/google_docs/checks')).body.data).toMatchObject({
+      status: 'auth',
+      status_detail: expect.stringContaining('is not added on claude.ai'),
+    });
+
+    await claudeAi(ctx, { 'claude.ai Google Docs': 'connected' });
+    expect((await api(ctx.daemon).post('/connectors/google_docs/checks')).body.data).toMatchObject({ status: 'ok' });
+  });
+
+  it('disconnects one Connector, leaves the others, and leaves claude.ai as it is', async () => {
+    const ctx = await start();
+    const connectors = { 'claude.ai Google Docs': 'connected', 'claude.ai Google Sheets': 'connected' };
+    await claudeAi(ctx, connectors);
+    for (const id of ['google_docs', 'google_sheets']) {
+      await api(ctx.daemon).post(`/connectors/${id}/connect`, {});
+      await status(ctx, id, 'ok');
     }
     const first = await api(ctx.daemon).delete('/connectors/google_docs/credentials');
     expect(first.body.data).toMatchObject({ status: 'off', status_detail: null });
-    expect(await mcpServer(ctx, 'google-docs')).toMatchObject({ registered: false });
-    expect(await mcpServer(ctx, 'google-sheets')).toMatchObject({ registered: true });
-    expect((await one(ctx, 'google_sheets')).config).toEqual({ client_id: client.client_id });
-    expect(ctx.keychain.values.get('google-oauth-client')).toBe(client.client_secret);
-
-    await api(ctx.daemon).delete('/connectors/google_sheets/credentials');
-    expect(ctx.keychain.values.has('google-oauth-client')).toBe(false);
-    for (const id of GOOGLE) expect((await one(ctx, id)).config).toEqual({ client_id: '' });
+    expect(await one(ctx, 'google_sheets')).toMatchObject({ status: 'ok' });
+    expect(JSON.parse(await readFile(path.join(ctx.dirs[0] as string, 'fake-claudeai.json'), 'utf8'))).toEqual(
+      connectors,
+    );
   });
 
-  it("leaves the other Connectors and Slack's sign-in as they were", async () => {
+  it("leaves Slack's sign-in as it was", async () => {
     const ctx = await start();
-    await save(ctx);
     await api(ctx.daemon).post('/connectors/slack/connect', {});
     await until(
       () => one(ctx, 'slack'),
@@ -978,6 +830,5 @@ describe('Google Connectors', () => {
     );
     const servers = JSON.parse(await readFile(path.join(ctx.dirs[0] as string, '.claude.json'), 'utf8')).mcpServers;
     expect(servers.slack.oauth).toEqual({ clientId: '1601185624273.8899143856786', callbackPort: 3118 });
-    expect(existsSync(secretFile(ctx.dirs[0] as string, 'slack'))).toBe(false);
   });
 });

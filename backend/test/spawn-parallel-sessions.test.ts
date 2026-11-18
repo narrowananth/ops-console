@@ -274,6 +274,8 @@ describe('spawn parallel Sessions', () => {
     // The child is an ordinary Session: it sits in the Repo's list and stops or deletes alone.
     const listed = (await ctx.http.get('/sessions')).body.data as { id: string; repo_id: string | null }[];
     expect(listed.find((one) => one.id === child)?.repo_id).toBe(ctx.repos.web.id);
+    // A Session whose run is still going cannot be deleted (409), so the second child finishes first.
+    await ctx.idle(spawned[1].id as string);
     expect((await ctx.http.delete(`/sessions/${spawned[1].id}`)).status).toBe(204);
     expect((await ctx.session(parent)).spawned).toHaveLength(1);
 
