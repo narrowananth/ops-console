@@ -22,6 +22,11 @@ case ${1:-} in
     shift
     exec "$root/node/bin/node" "$root/app/mcp-exec.js" "$@"
     ;;
+  # The Google bridge: MCP tools over Google's REST APIs, with no daemon and no Keychain of its own.
+  google-mcp)
+    shift
+    exec "$root/node/bin/node" "$root/app/google-mcp.js" "$@"
+    ;;
   mcp-setup) exec "$root/node/bin/node" "$root/app/main.js" "$@" ;;
 esac
 exec "$root/node/bin/node" "$root/cli/ops-console.js" "$@"

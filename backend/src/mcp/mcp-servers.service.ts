@@ -270,12 +270,6 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     return active ? [active] : [];
   }
 
-  /** One claude.ai connector as the active account reads it; `missing` when it was never added on claude.ai. */
-  async claudeAiHealth(name: string): Promise<'connected' | 'needs-auth' | 'missing' | 'failed' | 'no-account'> {
-    const [account] = this.activeAccounts();
-    return account ? this.claude.mcpHealth(name, account.configDir) : 'no-account';
-  }
-
   /** Reads one server alone in the active account and sends `connection.checked`: a second or two. */
   async checkOne(name: string): Promise<McpServer> {
     const started = Date.now();
@@ -627,8 +621,10 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     oauth: McpOAuthClient | null = null,
   ): Promise<McpServerToAdd> {
     if (transport === McpTransport.Stdio) {
-      const [command, ...args] = splitCommand(target);
-      if (!command) throw new ApiError(400, ErrorCode.ValidationFailed, 'a stdio server needs a command');
+      const [first, ...args] = splitCommand(target);
+      if (!first) throw new ApiError(400, ErrorCode.ValidationFailed, 'a stdio server needs a command');
+      // The console's own command, by the path of the launcher that runs it.
+      const command = first === 'ops-console' ? this.config.launcher : first;
       if (Object.keys(env).length === 0) return { name, scope, transport: 'stdio', command, args };
       const [launcher, launcherArgs] = launcherArgv(this.config.launcher, name, command, args);
       return { name, scope, transport: 'stdio', command: launcher, args: launcherArgs };
@@ -653,6 +649,11 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   private async dropEnv(name: string): Promise<void> {
     await this.keychain.delete(secretsKey(name));
     this.envs.set(name, {});
+  }
+
+  /** The env vars the console holds for a server: a Connector reads its sign-in back from them. */
+  envOf(name: string): Promise<Record<string, string>> {
+    return this.storedEnv(name);
   }
 
   /** Read once from the Keychain, then from memory: every write to `mcp:<name>` goes through this service. */

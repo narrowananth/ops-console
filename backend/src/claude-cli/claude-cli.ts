@@ -118,27 +118,6 @@ export class ClaudeCli {
     );
   }
 
-  /**
-   * One server's health from `claude mcp get`, which connects only that server: a second or two. A claude.ai connector
-   * the account has not added answers "No MCP server named", which reads `missing`.
-   */
-  async mcpHealth(name: string, configDir: ConfigDir): Promise<'connected' | 'needs-auth' | 'missing' | 'failed'> {
-    let output: string;
-    try {
-      output = await this.exec(['mcp', 'get', name], 'mcp get', { configDir }, [0, 1]);
-    } catch {
-      return 'failed';
-    }
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
-    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
-    const status = /^\s*Status:\s*(.+)$/m.exec(plain)?.[1];
-    // A server the account does not have exits 1 with its reason on stderr and nothing on stdout.
-    if (status === undefined) return 'missing';
-    if (/connected/i.test(status) && !/not connected|disconnected/i.test(status)) return 'connected';
-    if (/needs authentication/i.test(status)) return 'needs-auth';
-    return 'failed';
-  }
-
   async mcpAdd(server: McpServerToAdd, target: McpTarget): Promise<void> {
     const args =
       server.transport === 'stdio'

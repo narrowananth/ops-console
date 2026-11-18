@@ -365,10 +365,10 @@ A short Agent SDK session that reads which MCP Servers connect and which tools t
 stops before the model runs.
 
 **Connector**:
-An outside service the operator signs in to: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets, Google Drive. It holds the sign-in and registers the service's MCP Server when it has one. Each is reached through a CLI, an MCP Server or a claude.ai connector and is connected, checked and disconnected in Integrations, the one place a service is connected.
+An outside service the operator signs in to: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets, Google Drive. It holds the sign-in and registers the service's MCP Server when it has one. Each is reached through a CLI or an MCP Server and is connected, checked and disconnected in Integrations, the one place a service is connected.
 
-**claude.ai connector**:
-A service the operator adds on claude.ai that Claude Code loads in a Claude account signed in with claude.ai, under the name `claude.ai <Service>`. Google Docs, Google Sheets and Google Drive ride them. The console reads whether one is connected and never holds its sign-in.
+**Google bridge**:
+The stdio MCP Server the console registers for a Google Connector. It keeps nothing on disk: the launcher hands it the Connector's refresh token from the Keychain, and it mints access tokens and answers each tool call from the product's REST API. One Google sign-in serves every Claude account and CLIProxy.
 
 **Setup agent**:
 Claude in a terminal in Setup agent that adds Connections, remote MCP Servers and Connectors

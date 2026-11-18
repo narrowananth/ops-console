@@ -19,7 +19,7 @@ export enum ConnectorId {
 
 export const CONNECTOR_ORDER: ConnectorId[] = Object.values(ConnectorId);
 
-/** The Connectors that share one Google OAuth client. */
+/** The Connectors that sign in to Google with the client the build ships. */
 export const GOOGLE_CONNECTORS: ConnectorId[] = [
   ConnectorId.GoogleDocs,
   ConnectorId.GoogleSheets,
@@ -29,18 +29,14 @@ export const GOOGLE_CONNECTORS: ConnectorId[] = [
 export const isGoogleConnector = (id: ConnectorId): boolean => GOOGLE_CONNECTORS.includes(id);
 
 /**
- * Google's Connectors ride claude.ai's own Google connectors, which Claude Code loads under these names in a Claude
- * account signed in with claude.ai. The operator adds each one on claude.ai, where Google's account chooser and consent
- * screen run; the console only reads whether it is connected.
+ * The scopes each Google Connector asks for: the one its tools need (Docs and Sheets read and write, Drive only reads),
+ * and `openid email` to show which Google account signed in.
  */
-export const GOOGLE_CLAUDE_AI_SERVERS: Record<string, string> = {
-  [ConnectorId.GoogleDocs]: 'claude.ai Google Docs',
-  [ConnectorId.GoogleSheets]: 'claude.ai Google Sheets',
-  [ConnectorId.GoogleDrive]: 'claude.ai Google Drive',
+export const GOOGLE_SCOPES: Record<string, string[]> = {
+  [ConnectorId.GoogleDocs]: ['openid', 'email', 'https://www.googleapis.com/auth/documents'],
+  [ConnectorId.GoogleSheets]: ['openid', 'email', 'https://www.googleapis.com/auth/spreadsheets'],
+  [ConnectorId.GoogleDrive]: ['openid', 'email', 'https://www.googleapis.com/auth/drive.readonly'],
 };
-
-/** Where the operator adds a claude.ai connector. */
-export const CLAUDE_AI_CONNECTORS_URL = 'https://claude.ai/new#customize/connectors';
 
 export const CONNECTOR_NAMES: Record<ConnectorId, string> = {
   [ConnectorId.Datadog]: 'Datadog',
@@ -68,9 +64,9 @@ export const CONNECTOR_VIA: Record<ConnectorId, string> = {
   [ConnectorId.Sentry]: 'Sentry MCP',
   [ConnectorId.Shopify]: 'Shopify Dev MCP',
   [ConnectorId.Slashdocs]: 'slashdocs CLI',
-  [ConnectorId.GoogleDocs]: 'claude.ai Google Docs',
-  [ConnectorId.GoogleSheets]: 'claude.ai Google Sheets',
-  [ConnectorId.GoogleDrive]: 'claude.ai Google Drive',
+  [ConnectorId.GoogleDocs]: 'Google Docs API',
+  [ConnectorId.GoogleSheets]: 'Google Sheets API',
+  [ConnectorId.GoogleDrive]: 'Google Drive API',
 };
 
 /**
@@ -103,6 +99,22 @@ export const CONNECTOR_SERVERS: Partial<
   },
   [ConnectorId.Sentry]: { name: 'sentry', transport: McpTransport.Http, target: 'https://mcp.sentry.dev/mcp' },
   [ConnectorId.Shopify]: { name: 'shopify', transport: McpTransport.Stdio, target: 'npx -y @shopify/dev-mcp@latest' },
+  // The Google bridge (`ops-console google-mcp <product>`): it reads the sign-in from the Keychain and calls the product's REST API.
+  [ConnectorId.GoogleDocs]: {
+    name: 'google-docs',
+    transport: McpTransport.Stdio,
+    target: 'ops-console google-mcp docs',
+  },
+  [ConnectorId.GoogleSheets]: {
+    name: 'google-sheets',
+    transport: McpTransport.Stdio,
+    target: 'ops-console google-mcp sheets',
+  },
+  [ConnectorId.GoogleDrive]: {
+    name: 'google-drive',
+    transport: McpTransport.Stdio,
+    target: 'ops-console google-mcp drive',
+  },
 };
 
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:MM');

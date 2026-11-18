@@ -1,107 +1,111 @@
 # Google Workspace Connectors
 
-**Status:** ready
+**Status:** shipped
 **Design:** the Integrations page's Connector pane in `design/ops-console.html`, unchanged: one sign-in step.
 
 ## Problem
 
-The operator keeps notes, runbooks and figures in Google Docs, Sheets and Drive, and the agent cannot read or edit them. Each of the three needs its own Connector, so the operator can connect Sheets without giving the agent Drive. Connecting must work the way it does on claude.ai: Connect, then Google's account chooser and consent screen, with nothing created or entered in Ops Console.
+The operator keeps notes, runbooks and figures in Google Docs, Sheets and Drive, and the agent cannot read or edit them. Each of the three needs its own Connector, so the operator can connect Sheets without giving the agent Drive. Connecting is one click and one Google account, once. After that every Claude account the console uses, and CLIProxy, reaches the same Google data: the Google sign-in belongs to the console, not to a Claude account.
 
 ## Behavior
 
 1. Listing Connectors returns twelve in the fixed order. The last three are `google_docs`, `google_sheets` and `google_drive`. The migration seeds each with status `off` and the config `{}`.
-2. A Google Connector rides claude.ai's own Google connector, which Claude Code loads in a Claude account signed in with claude.ai, as `claude.ai Google Docs`, `claude.ai Google Sheets` or `claude.ai Google Drive`. The console registers no MCP Server, holds no OAuth client and no secret, and reads no Google account. Google's account chooser and consent screen run on claude.ai.
-3. Connect takes no body and answers 202. When the active account already has the connector connected, the Connector reads `ok` at once and nothing opens. Otherwise `sign_in` holds the page `https://claude.ai/new#customize/connectors`, the console opens it in the operator's browser, and each change sends `connection.checked`. The pane keeps an "Open Google Drive ↗" link to the same page.
-4. While it waits, the console asks the active account every 3 seconds whether the connector now reads connected. When it does, `sign_in` is `null` and the Connector reads `ok`. Cancel stops the wait and keeps the status the Connector had. A wait that is not over after 5 minutes ends `auth`: "<name> was not connected on claude.ai within 5 minutes".
-5. The pane is the single sign-in step the other Connectors have: Connect, Waiting with Cancel, Reconnect and Disconnect. It asks for nothing. Its text says Connect opens claude.ai and that the status updates on its own.
-6. A check reads that one connector in the active account, in a second or two. Connected reads `ok`. A connector that needs signing in again reads `auth`, "<name> needs signing in again on claude.ai". A connector the account never added reads `auth`, "<name> is not added on claude.ai. Add it there, with an account signed in through claude.ai". One that does not answer reads `fail`. With no signed-in Claude account it reads `fail`, "no signed-in Claude account".
-7. A connected Google Connector is checked again in the background when its last check is older than 10 minutes (`04-settings-connectors` Behavior 12).
-8. Two Google Connectors may wait at once; Connect on the same one starts its wait again.
-9. Disconnect sets the Connector `off`, clears `status_detail`, and stops a wait. The connector stays added on claude.ai: removing it there is the operator's. The other Google Connectors are untouched.
-10. The Setup agent can start a Google Connect through the same code as the endpoint. It cannot add the connector on claude.ai.
-11. A chat Session gets the tools of each Google connector that is connected on claude.ai. A Job (a Verification, Fix, Agent Review, Reply check or Comment pass) gets none of them, whatever the Playbook holds.
+2. A Google Connector reaches its product's REST API (Docs, Sheets or Drive) through a small bridge the console ships: a stdio MCP server with tools of the console's own. The console registers the bridge as an MCP Server named `google-docs`, `google-sheets` or `google-drive` in every Claude account's config, signed in or not. The launcher (`mcp-exec`) hands the bridge the Connector's sign-in from the Keychain as environment variables; the bridge mints an access token and makes each tool's calls to Google. No token is written to a Claude config or a transcript.
+3. Connect takes no body and answers 202. The console runs Google's sign-in itself: the authorization code flow with PKCE, a loopback redirect on a port the console picks, Google's account chooser and consent screen in the operator's browser. `sign_in` holds `{ "code": null, "url": <Google's page> }` and each change sends `connection.checked`. When Google returns, the console keeps the refresh token in the Keychain, registers the server in every account, and the Connector reads `ok`. `account_label` shows the Google account's email.
+4. The client the sign-in uses is the one the build ships: its id and secret come from the build, never from git and never typed by the operator. A build with no client ends a Google Connect at `auth`: "Google sign-in is not set up in this build".
+5. Each Connector signs in on its own and may use a different Google account. A Connector's scopes are its product's only (Settled).
+6. A Connect not finished after 5 minutes ends `auth`: "<name> sign-in did not finish within 5 minutes". Cancel stops the wait and keeps the status the Connector had. Google reporting an error (the operator declined) ends `auth` with Google's reason. Connect on a Connector that is already waiting starts its wait again. Several Google Connectors may wait at once.
+7. A check reads the refresh token from that Keychain entry and mints an access token from it. It succeeds: `ok`. Google answers `invalid_grant` (revoked, expired, password changed): `auth`, "<name> needs signing in again". Google does not answer: `fail`. A check does not start the server.
+8. A connected Google Connector is checked again in the background when its last check is older than 10 minutes (`04-settings-connectors` Behavior 12).
+9. Disconnect revokes the token at Google unless another connected Google Connector signed in with the same Google account (Google ties the grant to the account, so revoking would sign that one out too); a failure to reach Google does not stop it. It deletes the Keychain entry, unregisters the server from every account, sets the Connector `off`, clears `status_detail`, and stops a wait. The other Google Connectors are untouched.
+10. The Setup agent can start a Google Connect through the same code as the endpoint. The sign-in page opens for the operator: the agent never sees a code or a token.
+11. A chat Session gets the tools of each connected Google Connector, whichever Claude account the run uses and whether or not CLIProxy is on. A Job (a Verification, Fix, Agent Review, Reply check or Comment pass) gets none of them, whatever the Playbook holds.
 12. In a chat Session, a Google tool call follows the Session's Access mode exactly as a Slack or Atlassian call does. The console adds no read or write rule of its own beyond Behavior 13.
-13. Whatever claude.ai's Google Drive connector offers for deleting a file or changing who may open it is denied in every Access mode, `full` included. The agent gets the denial as the tool's result.
-14. A `client_id` that 0.1.58 saved is dropped from the three configs by the migration.
+13. Drive's tools only read: the bridge has no tool that deletes a file, empties the trash or changes who may open one, so no Access mode, `full` included, can do either.
+14. When Google answers a call with `401`, the bridge mints a new access token and sends that call once more. If Google still refuses, the tool gets Google's error as its result. A call Google refuses or a tool given arguments it cannot use ends as a tool error the agent reads, never as a crash of the bridge.
 15. The nine earlier Connectors, Slack's sign-in and their checks, Disconnects and the agent's reach through them do not change.
 
 ## Settled
 
-- **Reach** (ADR 0005, through a tool Claude also uses): claude.ai's Google connectors, as Claude Code loads them. No MCP Server is registered, no CLI, no `run_integration` entry.
+- **Reach** (ADR 0005, through a server registered with Claude Code): the bridge, one stdio MCP Server per Connector, calling the product's REST API. Not claude.ai's connectors, not Google's MCP servers, not a CLI, no `run_integration` entry.
 
-  | Connector | claude.ai connector |
-  | --------- | ------------------- |
-  | `google_docs` | `claude.ai Google Docs` |
-  | `google_sheets` | `claude.ai Google Sheets` |
-  | `google_drive` | `claude.ai Google Drive` |
+  | Connector | REST API | Scope | Tools |
+  | --------- | -------- | ----- | ----- |
+  | `google_docs` | `docs.googleapis.com` | `documents` | `get_document`, `create_document`, `append_text`, `replace_text` |
+  | `google_sheets` | `sheets.googleapis.com` | `spreadsheets` | `get_spreadsheet`, `get_values`, `update_values`, `append_values`, `create_spreadsheet` |
+  | `google_drive` | `drive.googleapis.com` | `drive.readonly` | `search_files`, `get_file`, `read_file` |
 
-- **Names and order**: "Google Docs", "Google Sheets", "Google Drive", appended after slashdocs in the fixed order. The Integrations list stays A→Z. `via` reads "claude.ai Google Docs" and so on.
-- **Read**: `claude mcp get "<claude.ai name>"` in the active account, which connects that one connector. A connector the account never added exits 1 with nothing on stdout.
-- **Page**: `https://claude.ai/new#customize/connectors`, the connectors list. The console opens it with the macOS `open` command and keeps a link in the pane.
-- **Scopes**: whatever claude.ai's connector asks for. There is no read-only sign-in here; what the agent may write is the Access mode.
-- **Drive denial**: by tool name, the verbs for deleting and sharing and for changing permissions, on Claude Code's tool names `mcp__claude_ai_Google_Drive__<tool>`. The test pins the rule list.
-- **Jobs**: the console leaves the three connectors out of a Job's MCP set by their `claude.ai ...` names. A Playbook cannot add them.
-- **Seeded config**: `{}`. A Keychain entry 0.1.58 made for a client the operator typed is left where it is, unused.
-- **Concurrency**: several Google waits at once; several Sessions may use connected Google connectors at once.
+  Each also asks `openid` and `email`, to show the account. Each scope is the one its tools need and no wider; the list is pinned in `shared` and a test holds it. A tool takes a link or an id. `get_document` returns the title and text, and `read_file` a Google Doc as text, a Google Sheet's first sheet as CSV and a text file as it is, each cut at 100,000 characters; a binary file or one over 1 MB is refused. Drive's Connector reads every file the account can open; Docs and Sheets reach the files the operator gives them, by link or id.
+- **Names and order**: "Google Docs", "Google Sheets", "Google Drive", appended after slashdocs in the fixed order. The Integrations list stays A→Z. `via` reads "Google Docs API" and so on.
+- **Client**: one Google OAuth client of type Desktop app, shipped in the build. Packaging writes `google-client.json` from the repo secrets `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`; `pnpm dev` reads `OPS_CONSOLE_GOOGLE_CLIENT_ID` and `OPS_CONSOLE_GOOGLE_CLIENT_SECRET`. A desktop client's secret is not confidential to Google. The project publishes the consent screen "In production": an unverified app shows Google's warning screen once and is capped at 100 users. In "Testing" status Google ends a refresh token after 7 days, which this design does not accept. The Cloud project enables the Docs, Sheets and Drive APIs, and needs no billing account.
+- **Redirect**: `http://127.0.0.1:<port>/`, the port picked at Connect, closed when the sign-in ends. A Desktop client takes any loopback port, so two sign-ins can run at once.
+- **Keychain** (ADR 0004): the launcher's entry for the server, `mcp:google-docs` and so on, holding the client id, the client secret and the refresh token. Nothing else is stored.
+- **Drive stays read-only**: the bridge does not offer the calls, so there is no rule to pin. A test holds the Drive tool list to the three reads.
+- **Tool annotations**: each tool says whether it only reads (`readOnlyHint`), so Claude Code can tell a read from a write.
+- **Jobs**: the console leaves the three servers out of a Job's MCP set by name. A Playbook cannot add them.
+- **Seeded config**: `{}`.
+- **Concurrency**: several Google sign-ins at once; several Sessions may use connected Google servers at once.
 
 ## Not required
 
-- **Console accounts only**: claude.ai connectors load only in a Claude account signed in with claude.ai. With CLIProxy as the Claude account hub, or an API key in the environment, Claude Code turns them off and the Connector reads `auth`, "not added on claude.ai".
-- **Account shown**: the pane says "connected", not whose Google account.
-- **Disconnecting on claude.ai**: the console leaves the connector added there.
-- **Several Claude accounts**: only the active account is read. Another account needs the connector added on its own claude.ai login.
-- **Google tools in Jobs**: Monitor, Verify and Fix use Datadog, GitHub and the rest, not Google. A later spec may add one.
+- **Workspace admin approval**: a Superfans-style Workspace may block third-party apps until its admin allows the client id. The sign-in then ends `auth` with Google's reason.
+- **Google verification**: the app runs unverified (Settled). A later step may put the client through Google's review to drop the warning and the cap. `drive.readonly` is a restricted scope, so that review is a security assessment.
+- **More tools**: Docs formatting, tables and comments, Sheets formatting and charts, and Drive writes (uploads, moves, sharing). Each is a later change.
+- **Calendar and Gmail**: each is its own Connector on the same bridge, in a later spec.
+- **Google tools in Jobs**: Monitor, Verify and Fix use Datadog, GitHub and the rest, not Google.
 
 ## Safety
 
-The agent gets up to three more tool sets in chat Sessions, and its write rights on them are the Access mode's. It cannot connect a Connector or add a connector on claude.ai. The console holds no Google credential. Drive delete and share are denied in every mode. Jobs gain nothing. PROD connections are unaffected: the Google connectors are not Connections.
+The agent gets up to three more tool sets in chat Sessions, and its write rights on them are the Access mode's. It cannot connect a Connector. The refresh token stays in the Keychain, and the bridge, a process Claude Code starts outside the Run sandbox, is the only reader besides the console. The agent never holds a token: the bridge keeps an access token in memory while it runs, for an hour at most. Drive can only be read. Jobs gain nothing. PROD connections are unaffected: the Google servers are not Connections.
 
 ## Database
 
 ```sql
--- No new table. The connectors table gained three rows (0040); the config is now empty.
-UPDATE connectors SET config = '{}' WHERE id IN ('google_docs', 'google_sheets', 'google_drive');
+-- No new table. The connectors table gained three rows (0040); the config is empty (0041).
 ```
 
-`ConnectorId` has `google_docs`, `google_sheets`, `google_drive`. Migration of existing rows: a `client_id` saved by 0.1.58 is dropped from the three configs.
+`ConnectorId` has `google_docs`, `google_sheets`, `google_drive`. A Keychain entry an earlier build made for a client the operator typed is left where it is, unused. A `google-docs` server an earlier build registered in a Claude config is replaced by the bridge at the next registration.
 
 ## API
 
-No endpoint is added. `POST /connectors/:id/connect`, `POST /connectors/:id/checks`, `DELETE /connectors/:id/sign-in` and `DELETE /connectors/:id/credentials` work as in `04-settings-connectors`. A Google Connector's `sign_in` is `{ "code": null, "url": "https://claude.ai/new#customize/connectors" }` while it waits.
+No endpoint is added. `POST /connectors/:id/connect`, `POST /connectors/:id/checks`, `DELETE /connectors/:id/sign-in` and `DELETE /connectors/:id/credentials` work as in `04-settings-connectors`. A Google Connector's `sign_in` is `{ "code": null, "url": "https://accounts.google.com/..." }` while it waits.
 
 ## UI
 
-Integrations, the three rows follow the others: name, `Connector` label, `via`, status pill and one action. The pane is the one numbered step of `04-settings-connectors`, "1 Sign in to Google Drive" and so on. Its text reads "Opens claude.ai in your browser. Add Google Drive there, with Connect. This updates on its own." While waiting it shows the "Open Google Drive ↗" link and Cancel. Disconnect reads "Stops the console using it. It stays added on claude.ai: remove it there to take it away from Claude too." Nothing is entered. `status_detail` shows under the step.
+Integrations, the three rows follow the others: name, `Connector` label, `via`, status pill and one action. The pane is the one numbered step of `04-settings-connectors`, "1 Sign in to Google Drive" and so on. Its text reads "Opens Google in your browser. Pick the Google account to use; every Claude account uses it." While waiting it shows the "Open Google ↗" link and Cancel. Connected, the row shows the Google email. Disconnect reads "Stops the console using it and takes its access back at Google. Every Claude account loses it." Nothing is entered. `status_detail` shows under the step.
 
 - Loading, empty and error follow `04-settings-connectors`.
 - The Connector row never shows PROD.
 
 ## Rejected
 
-- **A client the build ships** (the first form of this change): needs a Google Cloud project, a verified consent screen and secrets in the release, and its secret ships in the public tarball. claude.ai already runs Google's consent flow on its own verified client.
-- **The operator brings their own client, entered in the pane** (0.1.58): four steps and a Google Cloud project before the first Connect.
+- **Google's remote MCP servers** (`docsmcp`, `sheetsmcp`, `drivemcp.googleapis.com`), relayed by the bridge: Developer Preview, and Google asks a billing account on the Cloud project before the API can be enabled. The console is open source, and nobody who runs it should need a billing account.
+- **claude.ai's Google connectors**: tied to one Claude account, so Auto-switch to another account loses the tools; off whenever CLIProxy sends a token; the status said "connected" for runs that had no tools.
+- **Claude Code's own OAuth for the Google servers**, with the shipped client: the sign-in is kept per Claude account, so each account signs in again.
+- **The operator brings their own client, entered in the pane**: four steps and a Google Cloud project before the first Connect.
 - **`gws`, Google's Workspace CLI**: the operator would still bring a Cloud project and `gcloud`, the console would need a `run_integration` allowlist, and the three could not be connected apart.
+- **A sub-run on the claude.ai account that does the Google calls for the others**: an extra Claude call and a summarised answer for each request.
 - **One "Google" Connector**: the operator asked for three standalone ones.
-- **Polling with a full Probe**: it starts every server in the account. `claude mcp get` reads the one connector.
 
 ## Glossary
 
-- **claude.ai connector**: a service the operator adds on claude.ai that Claude Code loads in a Claude account signed in with claude.ai, under the name `claude.ai <Service>`. Google Docs, Google Sheets and Google Drive ride them. The console reads whether one is connected and never holds its sign-in.
 - **Connector**: the list gains Google Docs, Google Sheets and Google Drive.
+- **Google bridge**: the stdio MCP Server the console registers for a Google Connector. It keeps nothing on disk: the launcher hands it the refresh token from the Keychain, and it mints access tokens and answers each tool call from the product's REST API.
 
 ## ADR
 
-- **0005 rewrite, in place**: Google's Connectors are reached through claude.ai's connectors, which Claude Code already loads, so no sign-in or client is the console's. The shipped client, the typed client and `gws` join Considered Options, with why they lost (Rejected). No new ADR.
+- **0005 rewrite, in place**: Google's Connectors are reached through the console's bridge, an MCP server over Google's REST APIs, with the console owning the sign-in, so no Claude account holds it. claude.ai's connectors, Google's remote MCP servers, Claude Code's own OAuth, the typed client and `gws` join Considered Options, with why they lost (Rejected). No new ADR.
 
 ## Seams
 
-- **Backend + SQLite, over HTTP** (the scripted `ConnectorTools` fake, the `claude` CLI fake with a `claude.ai` file per account): 1 to 10, 14, 15.
-- **Backend + SQLite, over WebSocket**: 3, 4.
-- **Agent guards** (`agent-guards.test.ts`): 11, 12, 13.
-- **Browser** (Playwright, the Connectors answered by the test): 5, 9.
+- **Backend + SQLite, over HTTP** (the scripted `ConnectorTools` fake, a fake Google: authorization page, token endpoint and revoke on loopback): 1 to 10, 15.
+- **Backend + SQLite, over WebSocket**: 3, 6.
+- **Bridge** (`google-bridge.test.ts`: the bridge over stdio against the fake Google's token endpoint and REST APIs): 2, 13, 14.
+- **Agent guards** (`agent-guards.test.ts`): 11, 12.
+- **Browser** (Playwright, the Connectors answered by the test): UI.
 
 ## Out of scope
 
-- Google tools in Jobs and Playbooks: a later spec.
-- Gmail, Calendar and other Workspace products: each would be its own Connector in a later spec.
-- Showing which Google account signed in.
+- Calendar, Gmail and other Workspace products.
+- Google tools in Jobs and Playbooks.
+- Google's app verification.

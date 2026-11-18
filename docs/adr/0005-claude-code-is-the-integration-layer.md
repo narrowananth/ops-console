@@ -17,10 +17,11 @@ The same limit reaches the agent's own use of those CLIs: a chat run asks the co
 The console depends on each MCP server's tools and on the `claude` CLI's output format. A server
 Claude Code cannot run is a server the console cannot use.
 
-Google Docs, Sheets and Drive are reached through claude.ai's own Google connectors, which Claude Code loads in an account
-signed in with claude.ai. The operator adds each one on claude.ai, where Google's sign-in runs on Anthropic's client; the
-console reads whether it is connected and holds no client, secret or token. Claude Code turns claude.ai connectors off when an
-API key or CLIProxy sets the credentials, so there a Google Connector reads `auth`.
+Google Docs, Sheets and Drive are reached through a small MCP server the console ships and registers with Claude Code in
+every Claude account: its tools call the products' REST APIs. The console runs Google's sign-in with a client the build ships
+and keeps the refresh token in the Keychain; the server mints each call's access token from it. So one Google sign-in serves
+every Claude account and CLIProxy, and no Claude config holds a Google token. The cost is a client the project owns, which runs
+unverified, with Google's warning screen and a 100-user cap, and tools the console writes and maintains.
 
 A service with no browser sign-in that gives the console a token of its own is reached through
 Claude Code only. Bitbucket has two: Atlassian's MCP server for the agent, and `bkt` for the
@@ -40,5 +41,10 @@ console shows.
   still bring a Cloud project and `gcloud`, the console would need a `run_integration` entry, and the three could not be
   connected apart.
 - **The operator brings their own Google OAuth client**: a Cloud project, two APIs and a form before the first Connect.
-- **A Google OAuth client the build ships**: it needs the repo owner's Google Cloud project and consent-screen verification,
-  and its secret would ship in the public tarball. claude.ai's connectors run Google's sign-in on Anthropic's verified client.
+- **claude.ai's Google connectors**: no client for the project to own, but each belongs to one Claude account, so Auto-switch to
+  another account loses the tools, and Claude Code turns them off whenever CLIProxy sends a token.
+- **Claude Code's own OAuth for Google's servers, with the shipped client**: the sign-in is kept per Claude account, so each
+  account signs in again.
+- **Google's remote MCP servers for Docs, Sheets and Drive, behind the console's bridge**: Google maintains the tools, but the
+  servers are in Developer Preview and Google asks a billing account on the Cloud project before the API can be enabled, which
+  an open-source project cannot ask of everyone who runs it.

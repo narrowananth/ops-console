@@ -182,24 +182,6 @@ export const MERGE_DENIALS = [
 ];
 
 /**
- * Whatever claude.ai's Google Drive connector offers for deleting a file or changing who may open it stays denied in
- * every Access mode, `full` included: that is the operator's to do in Drive. Claude Code names its tools
- * `mcp__claude_ai_Google_Drive__<tool>`.
- */
-export const DRIVE_DENIALS = [
-  'delete',
-  'trash',
-  'untrash',
-  'empty_trash',
-  'share',
-  'unshare',
-  'create_permission',
-  'update_permission',
-  'delete_permission',
-  'remove_permission',
-].map((tool) => `mcp__claude_ai_Google_Drive__${tool}*`);
-
-/**
  * The Run sandbox filters a run's commands (ADR 0006), not the agent's own web tools, so a steered run could send out
  * what it reads through them.
  */
@@ -1322,7 +1304,6 @@ export class AgentRuntime implements OnModuleDestroy {
       })(),
       disallowedTools: [
         ...MERGE_DENIALS,
-        ...DRIVE_DENIALS,
         ...WEB_DENIALS,
         ...fileToolDenials(this.dataDir, run.workingDir, undefined, repoFolders),
         ...(run.readOnly ? READ_ONLY_DENIALS : []),

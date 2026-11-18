@@ -380,7 +380,7 @@ describe("the agent's questions", () => {
 });
 
 describe('Google Connectors', () => {
-  const GOOGLE = ['claude.ai Google Docs', 'claude.ai Google Sheets', 'claude.ai Google Drive'];
+  const GOOGLE = ['google-docs', 'google-sheets', 'google-drive'];
   const denied = (daemon: AgentDaemon) =>
     (
       daemon.sdk.calls.at(-1)?.options.settings as { deniedMcpServers?: { serverName: string }[] } | undefined
@@ -407,31 +407,13 @@ describe('Google Connectors', () => {
   it('asks before a Google call in supervised mode as for any MCP server, and runs it in full', async () => {
     const daemon = await start();
     const write: Step = {
-      tool: 'mcp__claude_ai_Google_Sheets__update_values',
-      input: { spreadsheetId: 'abc', values: [[1]] },
+      tool: 'mcp__google-sheets__update_values',
+      input: { spreadsheet: 'abc', range: 'A1', values: [[1]] },
     };
     const asked = await runTool(daemon, AccessMode.Supervised, write, 'approved');
     expect(asked.approvals).toHaveLength(1);
     const full = await runTool(daemon, AccessMode.Full, write);
     expect(full.approvals).toEqual([asked.approvals[0]]);
     expect(daemon.sdk.ran.map((call) => call.tool)).toEqual([write.tool, write.tool]);
-  });
-
-  it('denies Drive delete and share in every Access mode, full included, and still reads permissions', async () => {
-    const daemon = await start();
-    const steps: Step[] = [
-      { tool: 'mcp__claude_ai_Google_Drive__delete_file', input: { fileId: 'abc' } },
-      { tool: 'mcp__claude_ai_Google_Drive__share_file', input: { fileId: 'abc', role: 'reader' } },
-      { tool: 'mcp__claude_ai_Google_Drive__update_permission', input: { fileId: 'abc' } },
-    ];
-    for (const mode of Object.values(AccessMode)) {
-      const id = daemon.createSession({ access_mode: mode });
-      daemon.sdk.script(...steps);
-      await converse(daemon, id, 'tidy my drive');
-    }
-    expect(daemon.sdk.ran).toEqual([]);
-    const read: Step = { tool: 'mcp__claude_ai_Google_Drive__get_file_permissions', input: { fileId: 'abc' } };
-    await runTool(daemon, AccessMode.Full, read);
-    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual([read.tool]);
   });
 });
