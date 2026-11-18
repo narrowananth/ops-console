@@ -17,7 +17,7 @@ flows come from `design/ops-console.html`; the layout (left sidebar, rounded con
 - `cli/`: `ops-console` command (start, stop, status, open, logs, update, uninstall).
 - `shared/`: TypeScript types both sides import: REST bodies, WebSocket events.
 - `install.sh`: `curl … | sh` installer. Release tarballs from `.github/workflows/release.yml`.
-- `site/`: opsconsole.org: static docs site, built by `node site/build.mjs` into `site/dist`; Privacy and Terms come from the root `PRIVACY.md` and `TERMS.md`.
+- `site/`: opsconsole.org: static docs site, built by `node site/build.mjs` into `site/dist`; Privacy and Terms come from the root `PRIVACY.md` and `TERMS.md`. Cloudflare Workers Builds deploys it from `main` using `wrangler.jsonc`.
 - `design/`: Claude Design export. Source of truth for screens; open the HTML in a browser.
 - `docs/specs/`: one spec per change, written by `/spec`, built by `/ship`.
 - `docs/adr/`, `docs/architecture.md`, `GLOSSARY.md`: domain docs.
