@@ -7,7 +7,7 @@ does the agent fix the code and open a PR.
 
 The screens come from [design/ops-console.html](design/ops-console.html) and the layout from
 [design/ops-console-sidebar.html](design/ops-console-sidebar.html) (open them in a browser).
-Stack and modules: [docs/architecture.md](docs/architecture.md). Terms: [GLOSSARY.md](GLOSSARY.md).
+Website and user docs: [opsconsole.org](https://opsconsole.org), built from `site/`. Stack and modules: [docs/architecture.md](docs/architecture.md). Terms: [GLOSSARY.md](GLOSSARY.md).
 
 ## Install
 
