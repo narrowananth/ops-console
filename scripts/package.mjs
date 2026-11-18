@@ -32,19 +32,6 @@ await writeFile(path.join(stage, 'cli/package.json'), '{ "type": "module" }\n');
 await cp(path.join(repo, 'backend/dist'), path.join(stage, 'app'), { recursive: true });
 await cp(path.join(repo, 'frontend/dist'), path.join(stage, 'app/public'), { recursive: true });
 
-// The Google OAuth client Ops Console ships, from the release's secrets. A desktop app's client secret is not
-// confidential to Google, but it stays out of git: it exists only in the tarball. No client, no file, and a Google
-// Connect says so.
-const googleId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim();
-const googleSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim();
-if (googleId && googleSecret) {
-  await writeFile(
-    path.join(stage, 'app/google-client.json'),
-    `${JSON.stringify({ client_id: googleId, client_secret: googleSecret }, null, 2)}\n`,
-    { mode: 0o600 },
-  );
-}
-
 // Native modules and the Agent SDK with its platform binary, at the versions the backend was tested with.
 const nativeVersion = async (pkg) =>
   JSON.parse(await readFile(path.join(repo, 'backend/node_modules', pkg, 'package.json'), 'utf8')).version;

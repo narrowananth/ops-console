@@ -36,8 +36,6 @@ export type McpServerToAdd = (
       url: string;
       headers: Record<string, string>;
       oauth?: McpOAuthClient | null;
-      /** The OAuth client's secret: handed over in the environment, which Claude Code keeps in its own credential store. */
-      clientSecret?: string | null;
     }
 ) & { scope: McpScope };
 
@@ -120,6 +118,27 @@ export class ClaudeCli {
     );
   }
 
+  /**
+   * One server's health from `claude mcp get`, which connects only that server: a second or two. A claude.ai connector
+   * the account has not added answers "No MCP server named", which reads `missing`.
+   */
+  async mcpHealth(name: string, configDir: ConfigDir): Promise<'connected' | 'needs-auth' | 'missing' | 'failed'> {
+    let output: string;
+    try {
+      output = await this.exec(['mcp', 'get', name], 'mcp get', { configDir }, [0, 1]);
+    } catch {
+      return 'failed';
+    }
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    const status = /^\s*Status:\s*(.+)$/m.exec(plain)?.[1];
+    // A server the account does not have exits 1 with its reason on stderr and nothing on stdout.
+    if (status === undefined) return 'missing';
+    if (/connected/i.test(status) && !/not connected|disconnected/i.test(status)) return 'connected';
+    if (/needs authentication/i.test(status)) return 'needs-auth';
+    return 'failed';
+  }
+
   async mcpAdd(server: McpServerToAdd, target: McpTarget): Promise<void> {
     const args =
       server.transport === 'stdio'
@@ -134,14 +153,7 @@ export class ClaudeCli {
             server.name,
             server.url,
           ];
-    const secret = server.transport === 'stdio' ? null : (server.clientSecret ?? null);
-    await this.exec(
-      ['mcp', 'add', '--scope', server.scope, ...args],
-      'mcp add',
-      target,
-      [0],
-      secret === null ? undefined : { MCP_CLIENT_SECRET: secret },
-    );
+    await this.exec(['mcp', 'add', '--scope', server.scope, ...args], 'mcp add', target);
   }
 
   async mcpRemove(name: string, scope: McpScope, target: McpTarget): Promise<void> {
@@ -239,12 +251,11 @@ export class ClaudeCli {
     subcommand: string,
     { configDir, cwd }: McpTarget,
     exitCodes = [0],
-    extraEnv?: Record<string, string>,
   ): Promise<string> {
     try {
       const { stdout } = await run(this.bin, args, {
         maxBuffer: 10 * 1024 * 1024,
-        env: extraEnv ? { ...claudeEnv(configDir), ...extraEnv } : claudeEnv(configDir),
+        env: claudeEnv(configDir),
         cwd,
         signal: this.stopping.signal,
       });

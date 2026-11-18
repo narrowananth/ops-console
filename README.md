@@ -87,10 +87,6 @@ ops-console stop && ops-console start
 Pushing a `v*` tag builds both tarballs on macOS runners, installs and runs each, then attaches them
 to the GitHub Release.
 
-Google Docs, Sheets and Drive sign in with a Google OAuth client the build ships. The release reads it from the repo
-secrets `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`; `pnpm dev` reads `OPS_CONSOLE_GOOGLE_CLIENT_ID` and
-`OPS_CONSOLE_GOOGLE_CLIENT_SECRET`. A build with neither cannot connect them.
-
 ## Making a change
 
 1. `/spec <what you want>` in Claude Code writes `docs/specs/<slug>.md`.

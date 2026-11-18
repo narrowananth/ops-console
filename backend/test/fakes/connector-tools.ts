@@ -20,6 +20,8 @@ export class FakeConnectorTools implements ConnectorTools {
   /** Commands not on the PATH; `brew install` puts one there. */
   missing = new Set<string>();
   readonly brewed: string[] = [];
+  /** Pages opened in the operator's browser. */
+  readonly opened: string[] = [];
 
   private async login(signal?: AbortSignal): Promise<void> {
     if (this.next === 'fail') throw new ApiError(502, ErrorCode.UpstreamFailed, '`login` failed');
@@ -91,6 +93,10 @@ export class FakeConnectorTools implements ConnectorTools {
     this.gitlabLogins.push(host);
     await this.login(signal);
     this.gitlab = 'gl-operator';
+  }
+
+  async openPage(url: string): Promise<void> {
+    this.opened.push(url);
   }
 
   async installed(command: string): Promise<boolean> {

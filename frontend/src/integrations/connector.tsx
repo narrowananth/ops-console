@@ -1,4 +1,11 @@
-import { CONNECTOR_NAMES, type Connector, ConnectorId, type HealthItem, HealthStatus } from '@ops-console/shared';
+import {
+  CONNECTOR_NAMES,
+  type Connector,
+  ConnectorId,
+  GOOGLE_CLAUDE_AI_SERVERS,
+  type HealthItem,
+  HealthStatus,
+} from '@ops-console/shared';
 import { useState } from 'react';
 import { BrandIcon, CONNECTOR_BRAND } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
@@ -97,8 +104,9 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
           <div className="mx-5 mb-4 flex flex-col gap-2.5 rounded-lg bg-accent-100 px-4 py-3.5">
             <div className="font-semibold text-accent-900">Disconnect {connector.name}?</div>
             <div className="text-xs text-accent-900">
-              Signs out and stops Claude from using it. Monitor and tasks that rely on it pause. Your own terminal stays
-              signed in to the CLI.
+              {connector.id in GOOGLE_CLAUDE_AI_SERVERS
+                ? 'Stops the console using it. It stays added on claude.ai: remove it there to take it away from Claude too.'
+                : 'Signs out and stops Claude from using it. Monitor and tasks that rely on it pause. Your own terminal stays signed in to the CLI.'}
             </div>
             <div className="flex gap-2">
               <Button
@@ -139,6 +147,7 @@ function SignInStep(props: {
   const signIn = connector.sign_in;
   const connected = connector.status === HealthStatus.Ok;
   const noSignIn = NO_SIGN_IN.includes(connector.id);
+  const viaClaudeAi = connector.id in GOOGLE_CLAUDE_AI_SERVERS;
   const detail = signIn
     ? 'Finish in the browser tab that opened. This updates on its own.'
     : connected && connector.login
@@ -147,7 +156,9 @@ function SignInStep(props: {
         ? `Signed in to ${connector.account_label}.`
         : noSignIn
           ? 'Adds its MCP server. No sign-in needed.'
-          : `Opens ${connector.name}'s sign-in page in your browser. Nothing to fill in here.`;
+          : viaClaudeAi
+            ? `Opens claude.ai in your browser. Add ${connector.name} there, with Connect. This updates on its own.`
+            : `Opens ${connector.name}'s sign-in page in your browser. Nothing to fill in here.`;
   return (
     <section
       aria-label="Sign in"

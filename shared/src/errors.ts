@@ -11,7 +11,6 @@ export enum ErrorCode {
   Internal = 'internal',
   SessionBusy = 'session_busy',
   ConnectorNotConnected = 'connector_not_connected',
-  SignInInProgress = 'sign_in_in_progress',
   NotARepo = 'not_a_repo',
   RepoHasSessions = 'repo_has_sessions',
   ServiceUnlinked = 'service_unlinked',

@@ -22,11 +22,6 @@ const SIGN_IN_URL = /https:\/\/[^\s"'<>]+/;
 
 export const CONNECTOR_TOOLS = Symbol('CONNECTOR_TOOLS');
 
-export const GOOGLE_CLIENT = Symbol('GOOGLE_CLIENT');
-
-/** The Google OAuth client this build ships, shared by the three Google Connectors. */
-export type GoogleClient = { clientId: string; clientSecret: string };
-
 /** The outside tools Connectors ride on. Tests replace them with a scripted fake. Every method throws when the tool fails. */
 export interface ConnectorTools {
   datadogStatus(): Promise<{ signedIn: boolean; org: string | null }>;
@@ -51,6 +46,8 @@ export interface ConnectorTools {
   slashdocsUser(): Promise<{ email: string; name: string | null } | null>;
   /** `slashdocs auth login`, to `server` or, when `null`, the CLI's active one. */
   slashdocsLogin(server: string | null, signal: AbortSignal, onPrompt: (prompt: SignInPrompt) => void): Promise<void>;
+  /** Opens a page in the operator's browser. */
+  openPage(url: string): Promise<void>;
   /** Whether a command is on the PATH. */
   installed(command: string): Promise<boolean>;
   /** One `brew install <formula…>`. */
@@ -209,6 +206,10 @@ export class CliConnectorTools implements ConnectorTools {
       [0],
       { signal, login: true, onPrompt },
     );
+  }
+
+  async openPage(url: string): Promise<void> {
+    await run('open', [url]);
   }
 
   async installed(command: string): Promise<boolean> {

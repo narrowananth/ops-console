@@ -119,6 +119,19 @@ fake-stdio:
 
 To remove this server, run: claude mcp remove "fake-stdio" -s user
 `);
+} else if (command === 'get' && rest[0]?.startsWith('claude.ai ')) {
+  // A claude.ai connector, as the account has it: `fake-claudeai.json` in the config dir maps name to a state
+  // (`connected` or `needs-auth`). One it does not list was never added.
+  const file = path.join(process.env.CLAUDE_CONFIG_DIR ?? process.env.FAKE_CLAUDE_HOME, 'fake-claudeai.json');
+  const state = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8'))[rest[0]] : undefined;
+  if (!state) {
+    console.error(`No MCP server named "${rest[0]}". Configured servers: none`);
+    process.exit(1);
+  }
+  console.log(`${rest[0]}:
+  Scope: claude.ai config
+  Status: ${state === 'connected' ? '✔ Connected' : '! Needs authentication'}
+`);
 } else if (command === 'get' && rest[0] === 'sentry') {
   console.log(`sentry:
   Scope: Local config (private to you in this project)
@@ -173,9 +186,6 @@ To remove this server, run: claude mcp remove "sentry" -s local
           !['--scope', '--transport', '--header', '--client-id', '--callback-port'].includes(options[at - 1]),
       );
       const name = positional[0];
-      // The OAuth client secret arrives in the environment and is kept outside `.claude.json`, as Claude Code does.
-      if (process.env.MCP_CLIENT_SECRET)
-        writeFileSync(path.join(dir, `fake-mcp-secret-${name}.txt`), process.env.MCP_CLIENT_SECRET);
       // As Claude Code keeps a pre-registered OAuth app.
       const oauth = flag('--client-id')
         ? { oauth: { clientId: flag('--client-id'), callbackPort: Number(flag('--callback-port')) } }

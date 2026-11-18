@@ -26,9 +26,6 @@ jobs:
           node-version: 24
       - run: pnpm install --frozen-lockfile
       - name: Package
-        env:
-          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
-          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
         run: node scripts/package.mjs "${GITHUB_REF_NAME#v}"
       - name: Install the built tarball and run it under launchd
         run: |

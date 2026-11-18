@@ -1,4 +1,4 @@
-import { CONNECTOR_SERVERS, RunPurpose, SessionKind } from '@ops-console/shared';
+import { CONNECTOR_SERVERS, GOOGLE_CLAUDE_AI_SERVERS, RunPurpose, SessionKind } from '@ops-console/shared';
 
 /**
  * Every MCP server a run starts costs start-up time and tool definitions in the prompt: all sixteen of a full setup
@@ -15,9 +15,13 @@ export type McpScope = {
 };
 
 const connectorServers = (...keep: string[]): string[] =>
-  [...new Set(Object.values(CONNECTOR_SERVERS).map((server) => server?.name ?? ''))].filter(
-    (name) => name !== '' && !keep.includes(name),
-  );
+  [
+    ...new Set([
+      ...Object.values(CONNECTOR_SERVERS).map((server) => server?.name ?? ''),
+      // claude.ai's Google connectors never reach a Job.
+      ...Object.values(GOOGLE_CLAUDE_AI_SERVERS),
+    ]),
+  ].filter((name) => name !== '' && !keep.includes(name));
 
 /** What a pull request job reads: the Git host's server and the ticket in Atlassian. */
 const PR_JOB_KEEPS = ['github', 'atlassian'];
