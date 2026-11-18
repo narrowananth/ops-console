@@ -122,3 +122,43 @@ export function opsConsole(m: Machine, ...args: string[]): Promise<Result> {
 export async function cleanup(m: Machine): Promise<void> {
   await run('launchctl', ['bootout', `gui/${process.getuid?.()}/dev.ops-console`], m.env);
 }
+
+/** A fresh HOME whose only source of releases is the formula's folder, never a release URL. */
+export async function bareMachine(port: number): Promise<Machine> {
+  const m = await machine('/nonexistent', port);
+  delete m.env.OPS_CONSOLE_RELEASE_URL;
+  return m;
+}
+
+export type Cellar = { prefix: string; entry: string };
+
+/**
+ * What the Homebrew formula stages: the entry command in `bin`, and in `libexec` the formula's version, the
+ * release tarball with its `checksums.txt` and the tarball's own install script.
+ */
+export async function makeCellar(release: string, version: string, installScript?: string): Promise<Cellar> {
+  const prefix = await tempDir('cellar-');
+  await mkdir(path.join(prefix, 'bin'));
+  await cp(path.join(REPO, 'scripts/homebrew/entry.sh'), path.join(prefix, 'bin/ops-console'));
+  const libexec = path.join(prefix, 'libexec');
+  await cp(release, path.join(libexec, 'release'), { recursive: true });
+  await writeFile(path.join(libexec, 'VERSION'), `${version}\n`);
+  await cp(installScript ?? path.join(REPO, 'install.sh'), path.join(libexec, 'release/install.sh'));
+  return { prefix, entry: path.join(prefix, 'bin/ops-console') };
+}
+
+export function brewEntry(cellar: Cellar, m: Machine, args: string[], env: NodeJS.ProcessEnv = {}, input?: string) {
+  return new Promise<Result>((resolve) => {
+    const child = spawn('sh', [cellar.entry, ...args], { env: { ...m.env, ...env } });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('exit', (code) => resolve({ code, stdout, stderr }));
+    child.stdin.end(input ?? '');
+  });
+}

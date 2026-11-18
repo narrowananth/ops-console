@@ -3,6 +3,7 @@
 #
 # OPS_CONSOLE_VERSION       install this version instead of the latest release
 # OPS_CONSOLE_RELEASE_URL   fetch the release files from this folder instead of GitHub
+# OPS_CONSOLE_NO_LINK       make no link in ~/.local/bin and print no PATH hint
 #
 # Needs no sudo and writes only under $HOME.
 set -eu
@@ -76,8 +77,10 @@ rm -rf "$install_dir/versions/$version"
 mv "$work/unpacked" "$install_dir/versions/$version"
 ln -sfn "versions/$version" "$install_dir/current"
 
-mkdir -p "$bin_dir"
-ln -sfn "$install_dir/current/bin/ops-console" "$bin_dir/ops-console"
+if [ -z "${OPS_CONSOLE_NO_LINK:-}" ]; then
+  mkdir -p "$bin_dir"
+  ln -sfn "$install_dir/current/bin/ops-console" "$bin_dir/ops-console"
+fi
 
 # Compiled code is keyed by file content; entries for versions that are gone would only pile up.
 rm -rf "$install_dir/compile-cache"
@@ -93,11 +96,13 @@ if [ "$previous" != "$version" ]; then
 fi
 
 echo "Installed ops-console $version"
-case ":$PATH:" in
-  *":$bin_dir:"*) ;;
-  *)
-    echo "$bin_dir is not on your PATH. Add this line to your shell profile:"
-    echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
-    ;;
-esac
+if [ -z "${OPS_CONSOLE_NO_LINK:-}" ]; then
+  case ":$PATH:" in
+    *":$bin_dir:"*) ;;
+    *)
+      echo "$bin_dir is not on your PATH. Add this line to your shell profile:"
+      echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+      ;;
+  esac
+fi
 echo "Run: ops-console start && ops-console open"

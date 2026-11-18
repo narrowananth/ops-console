@@ -38,6 +38,22 @@ describe('install.sh', () => {
     expect(result.stdout).not.toContain('export PATH');
   });
 
+  it('makes no link and prints no PATH hint when OPS_CONSOLE_NO_LINK is set, and leaves an existing link alone', async () => {
+    const m = await machine(release100, 0);
+    const link = path.join(m.home, '.local/bin/ops-console');
+    const result = await install(m, { OPS_CONSOLE_NO_LINK: '1' });
+
+    expect(result.code).toBe(0);
+    expect(await readlink(path.join(m.installDir, 'current'))).toBe('versions/1.0.0');
+    await expect(readlink(link)).rejects.toThrow();
+    expect(result.stdout).not.toContain('export PATH');
+
+    await install(m);
+    const target = await readlink(link);
+    await install(m, { OPS_CONSOLE_NO_LINK: '1', ...fileUrl(release110) });
+    expect(await readlink(link)).toBe(target);
+  });
+
   it('installs the x64 tarball on an Intel Mac', async () => {
     const intel = await makeRelease('1.0.0', 'x64');
     const m = await machine(intel, 0);

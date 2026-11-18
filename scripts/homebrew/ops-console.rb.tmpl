@@ -1,0 +1,49 @@
+class OpsConsole < Formula
+  desc "Local web console for production ops on top of Claude Code"
+  homepage "https://opsconsole.org"
+  license "MIT"
+
+  depends_on :macos
+
+  on_macos do
+    on_arm do
+      url "https://github.com/narrowananth/ops-console/releases/download/v{{version}}/ops-console-darwin-arm64.tar.gz",
+          using: :nounzip
+      sha256 "{{sha256Arm64}}"
+    end
+
+    on_intel do
+      url "https://github.com/narrowananth/ops-console/releases/download/v{{version}}/ops-console-darwin-x64.tar.gz",
+          using: :nounzip
+      sha256 "{{sha256X64}}"
+    end
+  end
+
+  def install
+    tarball = Dir["ops-console-darwin-*.tar.gz"].first
+    release = libexec/"release"
+    release.install tarball
+    # install.sh reads the release folder: the tarball, its checksum line and the script itself.
+    system "tar", "-xzf", release/tarball, "-C", release, "./install.sh"
+    (release/"checksums.txt").write "#{Digest::SHA256.file(release/tarball).hexdigest}  #{tarball}\n"
+    (libexec/"VERSION").write "#{version}\n"
+    (bin/"ops-console").write <<~'ENTRY'
+{{entry}}
+    ENTRY
+    chmod 0755, bin/"ops-console"
+  end
+
+  def caveats
+    <<~EOS
+      Start the console:
+        ops-console start && ops-console open
+
+      The first ops-console command installs the app into ~/.ops-console. To remove the app,
+      run `ops-console uninstall` before `brew uninstall ops-console`. Your data and logs stay.
+    EOS
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/ops-console --version")
+  end
+end

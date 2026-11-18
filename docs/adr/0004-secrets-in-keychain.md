@@ -6,13 +6,18 @@ Connector's `gh` token included; the CLIProxy API key is `cliproxy:api-key`. `st
 Connection's non-secret fields. Secrets are read at the moment of use and never reach the database,
 logs, WebSocket payloads or the browser.
 
-Each release is a new signed app, and macOS asks for the login password once per Keychain item an app did not
+Each ad hoc release is a new app, and macOS asks for the login password once per Keychain item an app did not
 create. The previous version's app hands its items over when a new version first starts, and the daemon's reads wait
 for that; `keychain-owner.json` in the data folder names the app that holds them. The daemon checks that app before it
 runs it: a real path inside another version folder, a bundle that passes `codesign --verify --strict`, and the same
-bundle identifier as its own. A failed check refuses the handover and the items stay where they are. The check keeps a
-planted or damaged bundle from handing the new app items of its own choosing. It does not stop someone who can already
-replace the installed app, and it pins no `cdhash`, which changes with every Node.
+bundle identifier as its own. From the first signed version on, the previous app must also be signed by the same team
+as this app. Below that version an ad hoc previous app still passes, so the first signed release can take its items
+from the last ad hoc one. A previous app of the same team needs no handover: macOS trusts both apps for the same
+items, so the console records this app as the owner and moves nothing. A failed check refuses the handover and the
+items stay where they are. The check keeps a planted or damaged bundle from handing the new app items of its own
+choosing. It does not stop someone who can already replace the installed app. It pins the team and never a `cdhash`,
+which changes with every Node. The previous app's version is its folder's name, as trustworthy as whoever can write
+there.
 
 The exception is the headers of an http or sse MCP Server. Claude Code sends them itself, so it
 keeps them in its own config file in plain text. The console cannot hold them while Claude Code
@@ -33,3 +38,8 @@ clean up leaves the folder for macOS to clear from the temp directory.
   reached through servers set up by hand outside the console.
 - **Refusing secret headers on MCP Servers**: keeps every secret in the Keychain, but blocks servers
   that only take an API key header.
+- **A handover check with no team**, bundle identifier and `codesign --verify --strict` only: it fit an ad hoc app,
+  which has no authority to name. Once builds carry a Developer ID, any validly signed bundle with the same
+  identifier could hand over items, so the team rule replaced it.
+- **Re-entering every secret at the first signed release**: no handover code to change, but a worse upgrade than a
+  handover that already works.
