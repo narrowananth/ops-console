@@ -1,7 +1,6 @@
 import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import {
   CheckTarget,
-  CLAUDE_AI_CONNECTORS_URL,
   CONNECTOR_NAMES,
   CONNECTOR_ORDER,
   CONNECTOR_SERVERS,
@@ -11,19 +10,21 @@ import {
   ConnectorId,
   connectorConfigSchemas,
   ErrorCode,
-  GOOGLE_CLAUDE_AI_SERVERS,
+  GOOGLE_SCOPES,
   HealthStatus,
+  isGoogleConnector,
   type McpServer,
 } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
-import { LOGIN_TIMEOUT_MS } from '../claude-cli/claude-cli';
 import { bounded } from '../common/bounded';
 import { ApiError, validationFailed } from '../common/errors';
 import { mergeConfig } from '../common/merge-config';
 import { connectors } from '../db/schema';
 import { STORE, type Store } from '../db/store';
+import { GOOGLE_ENV } from '../mcp/google-bridge';
 import { McpServersService } from '../mcp/mcp-servers.service';
 import { CONNECTOR_TOOLS, type ConnectorTools, type SignInPrompt } from './connector-tools';
+import { GOOGLE_AUTH, type GoogleAuth, GoogleSignInError } from './google-auth';
 
 type Row = typeof connectors.$inferSelect;
 
@@ -49,6 +50,7 @@ export class ConnectorsService implements OnModuleDestroy {
   constructor(
     @Inject(STORE) private readonly store: Store,
     @Inject(CONNECTOR_TOOLS) private readonly tools: ConnectorTools,
+    @Inject(GOOGLE_AUTH) private readonly google: GoogleAuth,
     @Inject(McpServersService) private readonly mcp: McpServersService,
   ) {}
 
@@ -163,6 +165,13 @@ export class ConnectorsService implements OnModuleDestroy {
     this.signIns.delete(id);
     this.prompts.delete(id);
     const server = CONNECTOR_SERVERS[id];
+    // Google takes its access back first; a Google that does not answer does not keep the operator from disconnecting.
+    // Google ties the grant to the account and the client, so while another Google Connector uses the same account,
+    // revoking would sign that one out too.
+    if (server && isGoogleConnector(id) && !this.accountInUseElsewhere(id)) {
+      const token = (await this.mcp.envOf(server.name))[GOOGLE_ENV.refreshToken];
+      if (token) await this.google.revoke(token).catch(() => {});
+    }
     if (server && !this.sharedServer(id, server.name)) {
       const found = await this.mcp.find(server.name);
       // A read of the list that no longer holds the server means it is already gone: Disconnect goes on.
@@ -175,6 +184,16 @@ export class ConnectorsService implements OnModuleDestroy {
         .run();
     });
     return this.get(id);
+  }
+
+  private accountInUseElsewhere(id: ConnectorId): boolean {
+    const login = this.row(id).login;
+    return (
+      login !== null &&
+      this.rows().some(
+        (row) => row.id !== id && isGoogleConnector(row.id) && row.status !== HealthStatus.Off && row.login === login,
+      )
+    );
   }
 
   private async signIn(id: ConnectorId, signal: AbortSignal): Promise<void> {
@@ -273,29 +292,39 @@ export class ConnectorsService implements OnModuleDestroy {
       case ConnectorId.GoogleDocs:
       case ConnectorId.GoogleSheets:
       case ConnectorId.GoogleDrive: {
-        const server = GOOGLE_CLAUDE_AI_SERVERS[id] as string;
-        const connected: Reading = { status: HealthStatus.Ok, detail: null, accountLabel: null, login: null };
-        // Added on claude.ai already: nothing to open.
-        if ((await this.mcp.claudeAiHealth(server)) === 'connected') return this.landed(id, signal, connected);
-        // Google's account chooser and consent screen run on claude.ai. This waits for the connector to appear.
-        onPrompt({ code: null, url: CLAUDE_AI_CONNECTORS_URL });
-        await this.tools.openPage(CLAUDE_AI_CONNECTORS_URL).catch(() => {
-          // The page link stays in the pane.
-        });
-        const deadline = Date.now() + LOGIN_TIMEOUT_MS;
-        while (!signal.aborted) {
-          await pause(CLAUDE_AI_POLL_MS, signal);
-          if (signal.aborted) return;
-          if ((await this.mcp.claudeAiHealth(server)) === 'connected') return this.landed(id, signal, connected);
-          if (Date.now() > deadline) {
+        const client = this.google.client();
+        if (client === null) {
+          throw new ApiError(409, ErrorCode.InvalidState, 'Google sign-in is not set up in this build');
+        }
+        // Google's account chooser and consent screen, in the operator's browser; the code comes back to this Mac.
+        const signedIn = await this.google
+          .signIn(GOOGLE_SCOPES[id] as string[], signal, (url) => {
+            onPrompt({ code: null, url });
+            void this.tools.openPage(url).catch(() => {
+              // The page link stays in the pane.
+            });
+          })
+          .catch((error) => {
+            if (!(error instanceof GoogleSignInError)) throw error;
             throw new ApiError(
               409,
               ErrorCode.InvalidState,
-              `${CONNECTOR_NAMES[id]} was not connected on claude.ai within 5 minutes`,
+              error.kind === 'timeout' ? `${CONNECTOR_NAMES[id]} ${error.message}` : error.message,
             );
-          }
-        }
-        return;
+          });
+        if (signal.aborted) return;
+        // The token reaches the bridge through the Keychain and the launcher, never a Claude config.
+        await this.mcp.ensureRegistered(CONNECTOR_SERVERS[id] as McpSpec, {
+          [GOOGLE_ENV.clientId]: client.clientId,
+          [GOOGLE_ENV.clientSecret]: client.clientSecret,
+          [GOOGLE_ENV.refreshToken]: signedIn.refreshToken,
+        });
+        return this.landed(id, signal, {
+          status: HealthStatus.Ok,
+          detail: null,
+          accountLabel: signedIn.email,
+          login: signedIn.email,
+        });
       }
       default: {
         const server = CONNECTOR_SERVERS[id] as McpSpec;
@@ -385,8 +414,14 @@ export class ConnectorsService implements OnModuleDestroy {
       }
       case ConnectorId.GoogleDocs:
       case ConnectorId.GoogleSheets:
-      case ConnectorId.GoogleDrive:
-        return googleReading(id, await this.mcp.claudeAiHealth(GOOGLE_CLAUDE_AI_SERVERS[id] as string));
+      case ConnectorId.GoogleDrive: {
+        const token = (await this.mcp.envOf((CONNECTOR_SERVERS[id] as McpSpec).name))[GOOGLE_ENV.refreshToken];
+        if (!token) return signedOut(`${CONNECTOR_NAMES[id]} needs signing in`);
+        // Only a token Google refuses reads `auth`; a Google that does not answer reads `fail` (the caller's catch).
+        return (await this.google.check(token))
+          ? { status: HealthStatus.Ok, detail: null, accountLabel: row.accountLabel, login: row.login }
+          : signedOut(`${CONNECTOR_NAMES[id]} needs signing in again`);
+      }
       default: {
         const server = CONNECTOR_SERVERS[id] as McpSpec;
         const found = await this.mcp.checkOne(server.name).catch(() => null);
@@ -540,47 +575,6 @@ function serverReading(found: McpServer, config: Record<string, string | null>):
     accountLabel: config.workspace || config.org || config.site || null,
     login: null,
   };
-}
-
-/** How often a Google Connect asks whether the connector now shows on claude.ai. */
-export const CLAUDE_AI_POLL_MS = 3_000;
-
-function pause(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(done, ms);
-    signal.addEventListener('abort', done, { once: true });
-    function done() {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', done);
-      resolve();
-    }
-  });
-}
-
-/** A Google Connector reads as its claude.ai connector does in the active Claude account. */
-function googleReading(id: ConnectorId, health: Awaited<ReturnType<McpServersService['claudeAiHealth']>>): Reading {
-  const name = CONNECTOR_NAMES[id];
-  const reading = (status: HealthStatus, detail: string | null): Reading => ({
-    status,
-    detail,
-    accountLabel: null,
-    login: null,
-  });
-  switch (health) {
-    case 'connected':
-      return reading(HealthStatus.Ok, null);
-    case 'needs-auth':
-      return reading(HealthStatus.Auth, `${name} needs signing in again on claude.ai`);
-    case 'missing':
-      return reading(
-        HealthStatus.Auth,
-        `${name} is not added on claude.ai. Add it there, with an account signed in through claude.ai`,
-      );
-    case 'no-account':
-      return reading(HealthStatus.Fail, 'no signed-in Claude account');
-    case 'failed':
-      return reading(HealthStatus.Fail, `claude.ai's ${name} did not answer`);
-  }
 }
 
 function ignoreMissing(error: unknown): void {

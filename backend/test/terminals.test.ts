@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { ConnectionsModule } from '../src/connections/connections.module';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
+import { LoopbackGoogleAuth } from '../src/connectors/google-auth';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import type { DiskAccessGate } from '../src/terminals/disk-access';
 import type { KeychainItem, LocalKeychain } from '../src/terminals/local-sources';
@@ -17,6 +18,7 @@ import { TerminalsService } from '../src/terminals/terminals.service';
 import { type AgentDaemon, api, startAgentDaemon, until } from './agent-fixtures';
 import { FakeConnectionTester } from './fakes/connection-tester';
 import { FakeConnectorTools } from './fakes/connector-tools';
+import { FakeGoogle } from './fakes/google';
 import { FakeProbe } from './fakes/probe';
 
 /** Other apps' Keychain items; tests never touch the login Keychain. */
@@ -52,13 +54,16 @@ type Ctx = { daemon: AgentDaemon; tester: FakeConnectionTester; id: string; sock
 
 const PG = { type: 'postgres', config: { host: 'db.example.com', port: 5432, database: 'orders', user: 'reader' } };
 
-async function start(options: Parameters<typeof TerminalsModule.forRoot>[0] = {}): Promise<Ctx> {
+async function start(
+  options: Parameters<typeof TerminalsModule.forRoot>[0] = {},
+  google?: LoopbackGoogleAuth,
+): Promise<Ctx> {
   const tester = new FakeConnectionTester();
   const daemon = await startAgentDaemon({
     modules: [
       McpServersModule.forRoot({ probe: new FakeProbe(), launcher: '/opt/ops-console/bin/ops-console' }),
       ConnectionsModule.forRoot({ tester, launchDir: '/opt/ops-console/app/launch' }),
-      ConnectorsModule.forRoot({ tools: new FakeConnectorTools() }),
+      ConnectorsModule.forRoot({ tools: new FakeConnectorTools(), google }),
       TerminalsModule.forRoot(options),
     ],
   });
@@ -281,20 +286,25 @@ describe('the setup terminal', () => {
     );
   });
 
-  it('starts a Google Connect, which waits for claude.ai, through the same code as the endpoint', async () => {
-    const ctx = await start();
-    await waitFor(ctx, 'setup agent ready');
-    send(ctx, { type: 'line', text: 'tool connect_connector {"id":"google_sheets"}' });
-    await until(
-      () => api(ctx.daemon).get('/connectors'),
-      (res) =>
-        res.body.data.some(
-          (row: { id: string; sign_in: { url: string } | null }) =>
-            row.id === 'google_sheets' && row.sign_in?.url === 'https://claude.ai/new#customize/connectors',
-        ),
-      'the sign-in waiting on claude.ai',
-    );
-    await api(ctx.daemon).delete('/connectors/google_sheets/sign-in');
+  it("starts a Google Connect, which waits on Google's sign-in, through the same code as the endpoint", async () => {
+    const google = await FakeGoogle.start();
+    try {
+      const ctx = await start({}, new LoopbackGoogleAuth(google.client, google.endpoints));
+      await waitFor(ctx, 'setup agent ready');
+      send(ctx, { type: 'line', text: 'tool connect_connector {"id":"google_sheets"}' });
+      await until(
+        () => api(ctx.daemon).get('/connectors'),
+        (res) =>
+          res.body.data.some(
+            (row: { id: string; sign_in: { url: string } | null }) =>
+              row.id === 'google_sheets' && row.sign_in?.url.startsWith(google.endpoints.auth),
+          ),
+        "the sign-in waiting on Google's page",
+      );
+      await api(ctx.daemon).delete('/connectors/google_sheets/sign-in');
+    } finally {
+      await google.close();
+    }
   });
 
   it('reads any local file and folder with their secrets swapped, and a test still gets the real secret', async () => {

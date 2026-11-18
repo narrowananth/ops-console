@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { AccessMode, RunPurpose, type WsEvent } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AgentRuntime } from '../src/agent/runtime';
+import { AgentRuntime, DRIVE_DENIALS } from '../src/agent/runtime';
 import { type AgentDaemon, api, converse, listen, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
 import type { Step } from './fakes/agent-sdk';
 
@@ -380,7 +380,7 @@ describe("the agent's questions", () => {
 });
 
 describe('Google Connectors', () => {
-  const GOOGLE = ['claude.ai Google Docs', 'claude.ai Google Sheets', 'claude.ai Google Drive'];
+  const GOOGLE = ['google-docs', 'google-sheets', 'google-drive'];
   const denied = (daemon: AgentDaemon) =>
     (
       daemon.sdk.calls.at(-1)?.options.settings as { deniedMcpServers?: { serverName: string }[] } | undefined
@@ -407,7 +407,7 @@ describe('Google Connectors', () => {
   it('asks before a Google call in supervised mode as for any MCP server, and runs it in full', async () => {
     const daemon = await start();
     const write: Step = {
-      tool: 'mcp__claude_ai_Google_Sheets__update_values',
+      tool: 'mcp__google-sheets__update_values',
       input: { spreadsheetId: 'abc', values: [[1]] },
     };
     const asked = await runTool(daemon, AccessMode.Supervised, write, 'approved');
@@ -417,12 +417,35 @@ describe('Google Connectors', () => {
     expect(daemon.sdk.ran.map((call) => call.tool)).toEqual([write.tool, write.tool]);
   });
 
+  it("pins the Drive denial to the tools Google's Drive server lists: trash and share go, every read and write stays", () => {
+    // `tools/list` of drivemcp.googleapis.com, as Claude Code showed it.
+    const listed = [
+      'copy_file',
+      'create_file',
+      'download_file_content',
+      'get_file_metadata',
+      'get_file_permissions',
+      'get_shared_drive_metadata',
+      'list_file_revisions',
+      'list_recent_files',
+      'list_shared_drives',
+      'read_file_content',
+      'search_files',
+      'share_file',
+      'trash_file',
+      'update_file',
+    ];
+    const denied = listed.filter((tool) =>
+      DRIVE_DENIALS.some((rule) => `mcp__google-drive__${tool}`.startsWith(rule.slice(0, -1))),
+    );
+    expect(denied).toEqual(['share_file', 'trash_file']);
+  });
+
   it('denies Drive delete and share in every Access mode, full included, and still reads permissions', async () => {
     const daemon = await start();
     const steps: Step[] = [
-      { tool: 'mcp__claude_ai_Google_Drive__delete_file', input: { fileId: 'abc' } },
-      { tool: 'mcp__claude_ai_Google_Drive__share_file', input: { fileId: 'abc', role: 'reader' } },
-      { tool: 'mcp__claude_ai_Google_Drive__update_permission', input: { fileId: 'abc' } },
+      { tool: 'mcp__google-drive__trash_file', input: { fileId: 'abc' } },
+      { tool: 'mcp__google-drive__share_file', input: { fileId: 'abc', role: 'reader' } },
     ];
     for (const mode of Object.values(AccessMode)) {
       const id = daemon.createSession({ access_mode: mode });
@@ -430,7 +453,7 @@ describe('Google Connectors', () => {
       await converse(daemon, id, 'tidy my drive');
     }
     expect(daemon.sdk.ran).toEqual([]);
-    const read: Step = { tool: 'mcp__claude_ai_Google_Drive__get_file_permissions', input: { fileId: 'abc' } };
+    const read: Step = { tool: 'mcp__google-drive__get_file_permissions', input: { fileId: 'abc' } };
     await runTool(daemon, AccessMode.Full, read);
     expect(daemon.sdk.ran.map((call) => call.tool)).toEqual([read.tool]);
   });

@@ -3,12 +3,12 @@ import { expect, test } from '@playwright/test';
 import { DAEMON_FILE } from './global-setup';
 
 const daemon: { url: string; token: string } = JSON.parse(readFileSync(DAEMON_FILE, 'utf8'));
-const PAGE = 'https://claude.ai/new#customize/connectors';
+const PAGE = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=example';
 
 const google = (id: string, name: string) => ({
   id,
   name,
-  via: `claude.ai ${name}`,
+  via: `${name} MCP`,
   status: 'off',
   status_detail: null as string | null,
   account_label: null,
@@ -18,9 +18,7 @@ const google = (id: string, name: string) => ({
   sign_in: null as { code: string | null; url: string | null } | null,
 });
 
-test('a Google Connector sends the operator to claude.ai, waits, and connects when the connector is added', async ({
-  page,
-}) => {
+test("a Google Connector opens Google's sign-in, waits, and Cancel stops the wait", async ({ page }) => {
   const drive = google('google_drive', 'Google Drive');
   await page.route('**/api/connectors', (route) =>
     route.fulfill({
@@ -51,37 +49,48 @@ test('a Google Connector sends the operator to claude.ai, waits, and connects wh
     .getByRole('button', { name: 'Connect', exact: true })
     .click();
   await expect(main.getByText('Connect Google Drive to Ops Console')).toBeVisible();
-  await expect(main.getByText('Reached through claude.ai Google Drive.')).toBeVisible();
+  await expect(main.getByText('Reached through Google Drive MCP.')).toBeVisible();
   await expect(main.getByRole('textbox')).toHaveCount(0);
   const step = main.getByRole('region', { name: 'Sign in' });
-  await expect(step).toContainText('Opens claude.ai in your browser. Add Google Drive there, with Connect.');
+  await expect(step).toContainText(
+    'Opens Google in your browser. Pick the Google account to use; every Claude account uses it.',
+  );
   await step.getByRole('button', { name: 'Connect', exact: true }).click();
 
   await expect(step).toContainText('Finish in the browser tab that opened.');
-  await expect(step.getByRole('link', { name: 'Open Google Drive ↗' })).toHaveAttribute('href', PAGE);
+  await expect(step.getByRole('link', { name: 'Open Google ↗' })).toHaveAttribute('href', PAGE);
   await expect(step.getByRole('button', { name: 'Waiting…' })).toBeDisabled();
   await step.getByRole('button', { name: 'Cancel' }).click();
   await expect(step.getByRole('button', { name: 'Connect', exact: true })).toBeEnabled();
 });
 
-test('a Google Connector not added on claude.ai says so under the step, and Disconnect says it stays there', async ({
+test('a connected Google Connector shows the Google account, and one that needs signing in again says so', async ({
   page,
 }) => {
   const docs = {
     ...google('google_docs', 'Google Docs'),
+    status: 'ok',
+    account_label: 'ops@example.com',
+    login: 'ops@example.com',
+  };
+  const sheets = {
+    ...google('google_sheets', 'Google Sheets'),
     status: 'auth',
-    status_detail: 'Google Docs is not added on claude.ai. Add it there, with an account signed in through claude.ai',
+    status_detail: 'Google Sheets needs signing in again',
   };
   await page.route('**/api/connectors', (route) =>
-    route.fulfill({ json: { data: [docs], meta: { next_cursor: null } } }),
+    route.fulfill({ json: { data: [docs, sheets], meta: { next_cursor: null } } }),
   );
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
   await page.getByRole('navigation').getByRole('link', { name: 'Integrations' }).click();
   const main = page.getByRole('main');
-  await main.getByRole('listitem', { name: 'Google Docs' }).getByRole('button', { name: 'Sign in' }).click();
-  await expect(main.getByRole('region', { name: 'Sign in' }).getByRole('alert')).toContainText(
-    'is not added on claude.ai',
-  );
+  await main.getByRole('listitem', { name: 'Google Docs' }).getByRole('button', { name: 'Manage' }).click();
+  await expect(main.getByRole('region', { name: 'Sign in' })).toContainText('Signed in as ops@example.com');
   await main.getByRole('button', { name: 'Disconnect…' }).click();
-  await expect(main.getByText('It stays added on claude.ai')).toBeVisible();
+  await expect(main.getByText('takes its access back at Google')).toBeVisible();
+
+  await main.getByRole('listitem', { name: 'Google Sheets' }).getByRole('button', { name: 'Sign in' }).click();
+  await expect(main.getByRole('region', { name: 'Sign in' }).getByRole('alert')).toContainText(
+    'needs signing in again',
+  );
 });

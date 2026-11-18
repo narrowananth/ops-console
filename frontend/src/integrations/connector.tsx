@@ -2,9 +2,9 @@ import {
   CONNECTOR_NAMES,
   type Connector,
   ConnectorId,
-  GOOGLE_CLAUDE_AI_SERVERS,
   type HealthItem,
   HealthStatus,
+  isGoogleConnector,
 } from '@ops-console/shared';
 import { useState } from 'react';
 import { BrandIcon, CONNECTOR_BRAND } from '../components/ui/brand-icon';
@@ -104,8 +104,8 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
           <div className="mx-5 mb-4 flex flex-col gap-2.5 rounded-lg bg-accent-100 px-4 py-3.5">
             <div className="font-semibold text-accent-900">Disconnect {connector.name}?</div>
             <div className="text-xs text-accent-900">
-              {connector.id in GOOGLE_CLAUDE_AI_SERVERS
-                ? 'Stops the console using it. It stays added on claude.ai: remove it there to take it away from Claude too.'
+              {isGoogleConnector(connector.id)
+                ? 'Stops the console using it and takes its access back at Google. Every Claude account loses it.'
                 : 'Signs out and stops Claude from using it. Monitor and tasks that rely on it pause. Your own terminal stays signed in to the CLI.'}
             </div>
             <div className="flex gap-2">
@@ -147,7 +147,7 @@ function SignInStep(props: {
   const signIn = connector.sign_in;
   const connected = connector.status === HealthStatus.Ok;
   const noSignIn = NO_SIGN_IN.includes(connector.id);
-  const viaClaudeAi = connector.id in GOOGLE_CLAUDE_AI_SERVERS;
+  const viaGoogle = isGoogleConnector(connector.id);
   const detail = signIn
     ? 'Finish in the browser tab that opened. This updates on its own.'
     : connected && connector.login
@@ -156,8 +156,8 @@ function SignInStep(props: {
         ? `Signed in to ${connector.account_label}.`
         : noSignIn
           ? 'Adds its MCP server. No sign-in needed.'
-          : viaClaudeAi
-            ? `Opens claude.ai in your browser. Add ${connector.name} there, with Connect. This updates on its own.`
+          : viaGoogle
+            ? 'Opens Google in your browser. Pick the Google account to use; every Claude account uses it.'
             : `Opens ${connector.name}'s sign-in page in your browser. Nothing to fill in here.`;
   return (
     <section
@@ -220,7 +220,7 @@ function SignInStep(props: {
               rel="noreferrer"
               className="ml-auto inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 font-heading text-sm font-semibold text-white no-underline shadow-sm hover:bg-accent-600 hover:text-white"
             >
-              Open {connector.name} ↗
+              Open {viaGoogle ? 'Google' : connector.name} ↗
             </a>
           )}
         </div>
