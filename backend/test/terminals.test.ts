@@ -281,7 +281,7 @@ describe('the setup terminal', () => {
     );
   });
 
-  it('starts a Google sign-in, which ends auth with no client saved, and has no tool for the client or its secret', async () => {
+  it('starts a Google sign-in, which ends auth in a build with no client, and has no tool for the client', async () => {
     const ctx = await start();
     await waitFor(ctx, 'setup agent ready');
     send(ctx, { type: 'line', text: 'tool connect_connector {"id":"google_sheets"}' });
@@ -292,16 +292,12 @@ describe('the setup terminal', () => {
           (row: { id: string; status: string; status_detail: string }) =>
             row.id === 'google_sheets' &&
             row.status === 'auth' &&
-            row.status_detail === 'enter the Google OAuth client in the pane first',
+            row.status_detail === 'Google sign-in is not set up in this build',
         ),
       'the refusal',
     );
     send(ctx, { type: 'line', text: 'tool save_google_client {"client_id":"a","client_secret":"b"}' });
     await waitFor(ctx, 'invalid params: tool save_google_client');
-    expect(
-      (await api(ctx.daemon).get('/connectors')).body.data.find((row: { id: string }) => row.id === 'google_sheets')
-        .config,
-    ).toEqual({ client_id: '' });
   });
 
   it('reads any local file and folder with their secrets swapped, and a test still gets the real secret', async () => {

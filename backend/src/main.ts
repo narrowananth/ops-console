@@ -12,6 +12,7 @@ import { McpConnectionTester } from './connections/connection-tester';
 import { ConnectionsModule } from './connections/connections.module';
 import { CliConnectorTools } from './connectors/connector-tools';
 import { ConnectorsModule } from './connectors/connectors.module';
+import { readGoogleClient } from './connectors/google-client';
 import { startDaemon } from './daemon';
 import { DevtoolsModule } from './devtools/devtools.module';
 import { HealthWatchModule } from './health-watch/health-watch.module';
@@ -48,12 +49,15 @@ const env = z
     OPS_CONSOLE_APP_DIR: z.string().optional(),
     OPS_CONSOLE_DATA_DIR: z.string().optional(),
     OPS_CONSOLE_LAUNCHER: z.string().optional(),
+    OPS_CONSOLE_GOOGLE_CLIENT_ID: z.string().optional(),
+    OPS_CONSOLE_GOOGLE_CLIENT_SECRET: z.string().optional(),
     OPS_CONSOLE_PORT: z.coerce.number().int().min(0).max(65535).default(4545),
   })
   .parse(process.env);
 const appDir = path.resolve(env.OPS_CONSOLE_APP_DIR ?? path.dirname(process.argv[1] ?? '.'));
 const versionFile = path.join(appDir, '..', 'VERSION');
 const uiDir = path.join(appDir, 'public');
+const googleClient = readGoogleClient(env, path.join(appDir, 'google-client.json'));
 const version = existsSync(versionFile) ? readFileSync(versionFile, 'utf8').trim() : 'dev';
 const dataDir = path.resolve(
   env.OPS_CONSOLE_DATA_DIR ?? path.join(homedir(), 'Library', 'Application Support', 'ops-console'),
@@ -155,7 +159,7 @@ const daemon = await startDaemon({
     BrowserModule.forRoot(),
     ProcessesModule.forRoot(),
     ConnectionsModule.forRoot({ tester: new McpConnectionTester(version), launchDir: path.join(appDir, 'launch') }),
-    ConnectorsModule.forRoot({ tools: new CliConnectorTools() }),
+    ConnectorsModule.forRoot({ tools: new CliConnectorTools(), googleClient }),
     UpdatesModule.forRoot({ releases: new GithubReleases(), installer: new ScriptInstaller(path.join(appDir, '..')) }),
     HealthWatchModule.forRoot(),
     McpServersModule.forRoot({

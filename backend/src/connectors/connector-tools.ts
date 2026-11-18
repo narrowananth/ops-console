@@ -22,6 +22,11 @@ const SIGN_IN_URL = /https:\/\/[^\s"'<>]+/;
 
 export const CONNECTOR_TOOLS = Symbol('CONNECTOR_TOOLS');
 
+export const GOOGLE_CLIENT = Symbol('GOOGLE_CLIENT');
+
+/** The Google OAuth client this build ships, shared by the three Google Connectors. */
+export type GoogleClient = { clientId: string; clientSecret: string };
+
 /** The outside tools Connectors ride on. Tests replace them with a scripted fake. Every method throws when the tool fails. */
 export interface ConnectorTools {
   datadogStatus(): Promise<{ signedIn: boolean; org: string | null }>;

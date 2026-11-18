@@ -12,7 +12,6 @@ import {
   ErrorCode,
   GOOGLE_CALLBACK_PORT,
   GOOGLE_CONNECTORS,
-  type GoogleClientInput,
   HealthStatus,
   isGoogleConnector,
   type McpServer,
@@ -23,9 +22,14 @@ import { ApiError, validationFailed } from '../common/errors';
 import { mergeConfig } from '../common/merge-config';
 import { connectors } from '../db/schema';
 import { STORE, type Store } from '../db/store';
-import { KEYCHAIN, type Keychain } from '../keychain/keychain';
 import { McpServersService } from '../mcp/mcp-servers.service';
-import { CONNECTOR_TOOLS, type ConnectorTools, type SignInPrompt } from './connector-tools';
+import {
+  CONNECTOR_TOOLS,
+  type ConnectorTools,
+  GOOGLE_CLIENT,
+  type GoogleClient,
+  type SignInPrompt,
+} from './connector-tools';
 
 type Row = typeof connectors.$inferSelect;
 
@@ -34,9 +38,6 @@ const STOP_WAIT_MS = 5_000;
 
 /** A connected Connector is checked again on a list read when its last check is older than this. */
 export const RECHECK_AFTER_MS = 10 * 60_000;
-
-/** The Keychain entry of the Google OAuth client's secret, shared by the three Google Connectors. */
-export const GOOGLE_SECRET_KEY = 'google-oauth-client';
 
 type Reading = { status: HealthStatus; detail: string | null; accountLabel: string | null; login: string | null };
 
@@ -55,7 +56,7 @@ export class ConnectorsService implements OnModuleDestroy {
     @Inject(STORE) private readonly store: Store,
     @Inject(CONNECTOR_TOOLS) private readonly tools: ConnectorTools,
     @Inject(McpServersService) private readonly mcp: McpServersService,
-    @Inject(KEYCHAIN) private readonly keychain: Keychain,
+    @Inject(GOOGLE_CLIENT) private readonly googleClient: GoogleClient | null,
   ) {}
 
   async onModuleDestroy(): Promise<void> {
@@ -91,7 +92,6 @@ export class ConnectorsService implements OnModuleDestroy {
   /** Blank fields keep their value; a bad value names the fields and saves nothing. */
   async update(id: ConnectorId, changes: Record<string, unknown>): Promise<Connector> {
     const row = this.row(id);
-    if (isGoogleConnector(id) && 'client_id' in changes) throw validationFailed('invalid config: client_id');
     const merged = mergeConfig(JSON.parse(row.config) as Record<string, unknown>, changes);
     const parsed = connectorConfigSchemas[id].safeParse(merged);
     if (!parsed.success) {
@@ -192,58 +192,7 @@ export class ConnectorsService implements OnModuleDestroy {
         .where(eq(connectors.id, id))
         .run();
     });
-    if (isGoogleConnector(id) && this.googleRows().every((row) => row.status === HealthStatus.Off)) {
-      await this.clearGoogleClient();
-    }
     return this.get(id);
-  }
-
-  async saveGoogleClient(input: GoogleClientInput): Promise<{ data: Connector[]; meta: { next_cursor: null } }> {
-    this.refuseWhileGoogleIsOk();
-    await this.keychain.set(GOOGLE_SECRET_KEY, input.client_secret);
-    this.writeGoogleClientId(input.client_id);
-    return this.googleList();
-  }
-
-  async removeGoogleClient(): Promise<{ data: Connector[]; meta: { next_cursor: null } }> {
-    this.refuseWhileGoogleIsOk();
-    await this.clearGoogleClient();
-    return this.googleList();
-  }
-
-  private async googleList(): Promise<{ data: Connector[]; meta: { next_cursor: null } }> {
-    return { data: await Promise.all(this.googleRows().map((row) => this.view(row))), meta: { next_cursor: null } };
-  }
-
-  private refuseWhileGoogleIsOk(): void {
-    const connected = this.googleRows().find((row) => row.status === HealthStatus.Ok);
-    if (connected) {
-      throw new ApiError(
-        409,
-        ErrorCode.GoogleClientInUse,
-        `${CONNECTOR_NAMES[connected.id]} is connected: Disconnect the Google Connectors first`,
-      );
-    }
-  }
-
-  private async clearGoogleClient(): Promise<void> {
-    await this.keychain.delete(GOOGLE_SECRET_KEY);
-    this.writeGoogleClientId('');
-  }
-
-  private writeGoogleClientId(clientId: string): void {
-    this.store.write((tx) => {
-      for (const id of GOOGLE_CONNECTORS) {
-        tx.update(connectors)
-          .set({ config: JSON.stringify({ client_id: clientId }) })
-          .where(eq(connectors.id, id))
-          .run();
-      }
-    });
-  }
-
-  private googleRows(): Row[] {
-    return this.rows().filter((row) => isGoogleConnector(row.id));
   }
 
   private async signIn(id: ConnectorId, signal: AbortSignal): Promise<void> {
@@ -342,17 +291,16 @@ export class ConnectorsService implements OnModuleDestroy {
       case ConnectorId.GoogleDocs:
       case ConnectorId.GoogleSheets:
       case ConnectorId.GoogleDrive: {
-        const clientId = config.client_id?.trim();
-        const secret = await this.keychain.get(GOOGLE_SECRET_KEY);
-        if (!clientId || !secret) {
-          throw new ApiError(409, ErrorCode.InvalidState, 'enter the Google OAuth client in the pane first');
+        if (!this.googleClient) {
+          throw new ApiError(409, ErrorCode.InvalidState, 'Google sign-in is not set up in this build');
         }
+        const { clientId, clientSecret } = this.googleClient;
         const spec = {
           ...(CONNECTOR_SERVERS[id] as McpSpec),
           oauth: { client_id: clientId, callback_port: GOOGLE_CALLBACK_PORT },
         };
-        // Registered again each time: Claude Code's config holds the ID but not the secret, which may have changed.
-        const added = await this.mcp.ensureRegistered(spec, undefined, secret);
+        // Registered again each time: Claude Code's config holds the ID but not the secret.
+        const added = await this.mcp.ensureRegistered(spec, undefined, clientSecret);
         const found = await this.mcp.authenticateAndCheck(spec.name, { signal, added });
         if (!signal.aborted) this.record(id, serverReading(found, config));
         return;

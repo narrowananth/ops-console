@@ -17,10 +17,11 @@ The same limit reaches the agent's own use of those CLIs: a chat run asks the co
 The console depends on each MCP server's tools and on the `claude` CLI's output format. A server
 Claude Code cannot run is a server the console cannot use.
 
-Google is the one provider that needs a form first. Its Docs, Sheets and Drive MCP Servers sign in only with an OAuth
-client the operator creates in their own Google Cloud project, and a secret cannot ship in this public repo. The operator
-enters the client ID and secret once, shared by the three Google Connectors; the secret goes to the Keychain and reaches
-`claude mcp add` through the environment. Slack's fixed client ID ships because it carries no secret.
+Google's Docs, Sheets and Drive MCP Servers sign in only with an OAuth client. Ops Console ships one, shared by the three
+Google Connectors, so Connect is one click. Its ID and secret never enter git: the release workflow injects them from the
+repo's secrets into the tarball, and `pnpm dev` reads them from the environment. Google treats a desktop app's secret as
+non-confidential, and anyone can read it from the public tarball. Until a build holds a client, a Google Connect ends
+`auth` and says so.
 
 A service with no browser sign-in that gives the console a token of its own is reached through
 Claude Code only. Bitbucket has two: Atlassian's MCP server for the agent, and `bkt` for the
@@ -39,3 +40,5 @@ console shows.
 - **`gws`, Google's Workspace CLI, for Docs, Sheets and Drive**: one CLI and one sign-in for all three. The operator would
   still bring a Cloud project and `gcloud`, the console would need a `run_integration` entry, and the three could not be
   connected apart.
+- **The operator brings their own Google OAuth client**: a Cloud project, two APIs and a form before the first Connect.
+  It lost to a shipped client, since every other Connector connects in one click.

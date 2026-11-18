@@ -1,11 +1,5 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Put } from '@nestjs/common';
-import {
-  type Connector,
-  type ConnectorCheck,
-  ConnectorId,
-  googleClientSchema,
-  updateConnectorSchema,
-} from '@ops-console/shared';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post } from '@nestjs/common';
+import { type Connector, type ConnectorCheck, ConnectorId, updateConnectorSchema } from '@ops-console/shared';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
 import { ConnectorsService } from './connectors.service';
@@ -19,17 +13,6 @@ export class ConnectorsController {
   @Get()
   list() {
     return this.connectors.list();
-  }
-
-  /** The Google OAuth client the three Google Connectors share. The secret goes to the Keychain and is never returned. */
-  @Put('google/client')
-  saveGoogleClient(@Body() body: unknown) {
-    return this.connectors.saveGoogleClient(parseInput(googleClientSchema, body, 'body'));
-  }
-
-  @Delete('google/client')
-  removeGoogleClient() {
-    return this.connectors.removeGoogleClient();
   }
 
   @Patch(':id')
