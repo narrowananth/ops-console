@@ -10,6 +10,10 @@ The project publishes the code and the release downloads. It runs no server that
 
 The console's own server listens on `127.0.0.1` only, and every request carries a session token made at startup. Other devices on your network cannot reach it.
 
+## This website
+
+opsconsole.org is a static site on Cloudflare. It sets no cookies, runs no analytics or trackers, and loads no fonts or scripts from other sites. Cloudflare, like any host, sees your IP address and browser details in its request logs. The release notes page asks GitHub's API for the list of releases from your browser, so GitHub sees that request. The app itself never calls the site.
+
 ## What stays on your Mac
 
 The data folder, `~/Library/Application Support/ops-console`, holds:
