@@ -10,6 +10,8 @@ Owner decision. Each waits for the thing named, then moves back into the order b
 
 - Sign the binaries with an Apple Developer ID and notarize them, so Gatekeeper accepts a cask or browser download. Releases are ad hoc signed today. Spec: [sign-and-notarize-release](specs/sign-and-notarize-release.md). Waits for an Apple Developer Program membership.
 - Finish Google OAuth verification for the Google Docs, Sheets and Drive Connectors. Until it passes, users see the unverified-app screen. `documents` and `spreadsheets` are sensitive scopes. `drive.readonly` is restricted and needs a paid third-party security assessment. No spec yet. Waits for the owner to restart it, and the current status in the Google Cloud console is not known.
+- A sample repo with a failing route and mock Datadog alerts, so a new user can try the verify, review, fix and PR flow without production data. Spec: [sample-repo](specs/sample-repo.md). Low priority: it helps adoption and leaves the core flow as it is. Waits until onboarding outranks work on the core flow.
+- A webhook receiver, so a monitoring tool can push an Alert to the console the moment it fires. A push needs a way in to a daemon that listens on 127.0.0.1 only, and every route in (a tunnel, a relay server, a second listener) conflicts with [ADR 0003](adr/0003-local-only-server.md). Scans and the OpenTelemetry Log folder already cover detection. No spec yet. Waits until a source cannot be read by Scan or Log folder, and an ADR 0003 design is approved.
 
 ## 1. Trust and install on macOS
 
@@ -22,20 +24,17 @@ Small items for first-run friction. None conflicts with an ADR.
 
 A user in any timezone should get from install to a first verified alert without asking anyone.
 
-- A sample repo with a failing route and mock Datadog alerts, so a new user can try the verify, review, fix and PR flow without production data.
 - A troubleshooting guide on the docs site, covering the install, Keychain and sandbox failures people hit. Spec: [troubleshooting-guide](specs/troubleshooting-guide.md).
-- A short video walkthrough of the same flow.
+- A short video walkthrough of the same flow. It needs data safe to show on camera, so it waits for the sample repo.
 
 ## 3. More monitoring sources
 
 Datadog covers one slice of teams. Order by reach per integration:
 
-1. Generic OpenTelemetry logs and a webhook receiver, which cover most other tools without a vendor-specific Connector. Spec: [otel-log-source](specs/otel-log-source.md).
+1. Generic OpenTelemetry logs, which cover most other tools without a vendor-specific Connector. Spec: [otel-log-source](specs/otel-log-source.md).
 2. AWS CloudWatch.
 3. Grafana Loki.
 4. New Relic.
-
-The webhook receiver must respect [ADR 0003](adr/0003-local-only-server.md) (local-only server). Settle the design there before writing the spec.
 
 ## 4. Linux
 
@@ -60,8 +59,8 @@ Translate the docs site first, then the UI. Do the UI after the screens settle, 
 | Step | Work | Needs ADR change |
 | --- | --- | --- |
 | 1 | Data-flow docs. Homebrew shipped. Signing and Google verification on hold | No |
-| 2 | Onboarding: sample repo, troubleshooting, video | No |
-| 3 | OTel and webhook source, then CloudWatch, Loki, New Relic | Possibly 0003 |
+| 2 | Onboarding: troubleshooting. Sample repo on hold, video waits for it | No |
+| 3 | OTel source shipped. CloudWatch, Loki, New Relic. Webhook receiver on hold | No |
 | 4 | Linux | 0004, 0006 |
 | 5 | Windows via WSL2 | Inherits Linux |
 | 6 | Localization | No |
