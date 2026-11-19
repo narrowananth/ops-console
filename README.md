@@ -24,7 +24,8 @@ ops-console open
 With Homebrew instead:
 
 ```
-brew install narrowananth/ops-console/ops-console
+brew tap narrowananth/ops-console https://github.com/narrowananth/ops-console
+brew install ops-console
 ops-console start
 ops-console open
 ```

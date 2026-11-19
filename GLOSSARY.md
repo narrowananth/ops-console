@@ -410,7 +410,7 @@ The `ops-console` command Homebrew installs. It installs the matching app into t
 an upgrade, then runs the command typed.
 
 **Tap**:
-The repository that holds the console's Homebrew formula.
+This repository's `Formula` folder, which holds the console's Homebrew formula and which `brew tap` adds by URL.
 
 **Tip**:
 The words a control, status or label shows on hover or keyboard focus: what it means, what pressing it makes the

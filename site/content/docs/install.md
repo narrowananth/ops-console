@@ -21,7 +21,8 @@ A shell running under Rosetta on an Apple silicon Mac installs the Apple silicon
 ### With Homebrew
 
 ```
-brew install narrowananth/ops-console/ops-console
+brew tap narrowananth/ops-console https://github.com/narrowananth/ops-console
+brew install ops-console
 ops-console start
 ops-console open
 ```

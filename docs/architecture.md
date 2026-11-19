@@ -57,8 +57,8 @@ Dev tools Sessions (`devtools/`), terminals (`terminals/`) and local MCP Server 
 Homebrew installs only the Brew entry command (`scripts/homebrew/entry.sh`, [ADR 0008](adr/0008-homebrew-installs-an-entry-command.md)):
 the formula keeps the release tarball, its checksum and `install.sh` in its Cellar, and the first command, or the first
 after `brew upgrade` brings a newer formula, runs that `install.sh` with `OPS_CONSOLE_NO_LINK` into `~/.ops-console`. The
-`tap` job of `release.yml` renders the formula (`scripts/homebrew/render.mjs`), checks it from a local tap and pushes it
-to `narrowananth/homebrew-ops-console`.
+`tap` job of `release.yml` renders the formula (`scripts/homebrew/render.mjs`), checks it from a local tap and commits it
+to `Formula/ops-console.rb` on `main`, which is the tap.
 
 To try an install before a release, `pnpm build`, `pnpm package` and a `checksums.txt` beside the tarball in `out/`,
 then `OPS_CONSOLE_RELEASE_URL=file://<repo>/out sh install.sh`. It replaces the installed app, since both use
