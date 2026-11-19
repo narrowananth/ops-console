@@ -8,6 +8,7 @@ const ago = (hours: number) => new Date(Date.now() - hours * HOUR).toISOString()
 
 const SERVICE = {
   id: 'sv1',
+  connector: 'datadog',
   name: 'orders-api',
   env: 'prod',
   repo_id: null,
@@ -23,6 +24,7 @@ const alertOf = (extra: Record<string, unknown> = {}) => ({
   id: 'a1',
   route: { id: 'r1', method: 'POST', path: '/orders' },
   service: { id: 'sv1', name: 'orders-api', env: 'prod', repo_id: null, repo_url: 'github.com/example/orders-api' },
+  connector: 'datadog',
   fingerprint: 'fp1',
   http_status: 500,
   source: 'scan',
@@ -36,7 +38,7 @@ const alertOf = (extra: Record<string, unknown> = {}) => ({
   resolved_at: null,
   regression_count: 0,
   waiting_since: null,
-  datadog_query: 'env:prod service:orders-api',
+  source_query: 'env:prod service:orders-api',
   session_id: null,
   last_scanned_at: ago(9),
   scan_overdue: false,

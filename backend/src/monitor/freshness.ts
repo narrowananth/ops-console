@@ -1,4 +1,4 @@
-import { AlertStatus, CheckInterval, ScanStatus, ScanTrigger } from '@ops-console/shared';
+import { AlertStatus, CheckInterval, type LogSource, ScanStatus, ScanTrigger } from '@ops-console/shared';
 import type { scans } from '../db/schema';
 import { type AlertListRow, parseJson, type ServiceRow } from './mappers';
 
@@ -14,13 +14,20 @@ export const HOURS: Record<CheckInterval, number> = {
 const OVERDUE_INTERVALS = 2;
 
 /** The Service a Scan may have read; `id` is unset for one the console has not stored yet. */
-export type ScanTarget = { id: string | undefined; name: string; env: string; checkInterval: CheckInterval | null };
+export type ScanTarget = {
+  id: string | undefined;
+  connector: LogSource;
+  name: string;
+  env: string;
+  checkInterval: CheckInterval | null;
+};
 
 /**
- * Whether the Scan covers the Service: its env was read, and it is the one asked for, among the names asked for, or on
- * this schedule.
+ * Whether the Scan covers the Service: it read the Service's source and env, and it is the one asked for, among the
+ * names asked for, or on this schedule.
  */
 export function scanReads(scan: ScanRow, target: ScanTarget, defaultInterval: CheckInterval): boolean {
+  if (scan.connector !== target.connector) return false;
   if (!parseJson<string[]>(scan.envs, []).includes(target.env)) return false;
   if (scan.serviceId) return target.id === scan.serviceId;
   const names = parseJson<string[] | null>(scan.services, null);

@@ -1393,6 +1393,7 @@ const alert = (id: string, status: string, latestReport: ReturnType<typeof repor
   id,
   route: { id: 'rt1', method: 'POST', path: '/v1/orders' },
   service: { id: 'sv1', name: 'checkout-api', env: 'prod', repo_id: 'r1', repo_url: null },
+  connector: 'datadog',
   fingerprint: id,
   http_status: 500,
   source: 'scan',
@@ -1406,7 +1407,7 @@ const alert = (id: string, status: string, latestReport: ReturnType<typeof repor
   resolved_at: null,
   regression_count: 0,
   waiting_since: null,
-  datadog_query: 'service:checkout-api env:prod',
+  source_query: 'service:checkout-api env:prod',
   session_id: null as string | null,
   last_scanned_at: NOW as string | null,
   scan_overdue: false,
@@ -1476,6 +1477,7 @@ async function routeAlerts(page: Page, all: ReturnType<typeof alert>[]) {
         data: [
           {
             id: 'sv1',
+            connector: 'datadog',
             name: 'checkout-api',
             env: 'prod',
             repo_id: 'r1',

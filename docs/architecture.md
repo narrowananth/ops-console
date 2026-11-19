@@ -8,7 +8,7 @@ browser (127.0.0.1:4545)                 operator's Mac
 │ frontend/  React 18    │ ───────────▶ │ daemon: backend/ NestJS (127.0.0.1:4545)      │
 │ Monitor · Workspace ·  │ ◀─────────── │  serves the built UI, /api, /ws, /terminals   │
 │ Dev tools · Connect ·  │              │  agent ──▶ Claude Agent SDK ──▶ MCP servers   │
-│ Accounts & Usage      │              │  monitor ──▶ pup (Datadog)                    │
+│ Accounts & Usage      │              │  monitor ──▶ pup (Datadog) · Log folder       │
 └────────────────────────┘              │  workspace ──▶ gh · glab · bkt (Git hosts)    │
                                         │  terminals ──▶ node-pty (Setup agent claude)  │
                                         │  claude-cli ──▶ claude mcp add/list/get       │
@@ -113,7 +113,7 @@ agent Session.
 | `keychain` | `set`, `get`, `delete` in the login Keychain, each bounded at 60 seconds and failing `keychain_timeout`, two native calls at a time, values kept in memory; the handover of items from the previous version's app, per key, which a read waits for (at most 90 seconds) and which refuses an app that fails its check (`codesign`, real path, bundle identifier); the Keychain wait shown after 10, and a call made while it shows fails at once |
 | `claude-cli` | `claude mcp add`, `remove`, `list`, `get`, `login`, and Claude account sign-in in this browser or by link and code, parsed with Zod |
 | `mcp` | Servers registered in every Claude account (`.claude.json`: `claude mcp` in the active account, the entry copied into the others) and a Repo's `.mcp.json`; Probe of the active account, kept 5 minutes (another account's when it becomes active, or after 10), after the Keychain handover; add, edit, reconnect (one server alone), disable, remove; the `mcp-exec` launcher |
-| `connectors` | The twelve Connectors: browser sign-in through `pup`, `gh`, `glab`, `bkt`, `slashdocs` or an MCP Server (Google Docs, Sheets and Drive: the console's own Google sign-in and a bridge whose tools call Google's REST APIs); cancel a sign-in; the MCP Server each registers; Homebrew install of a missing CLI; checks; config |
+| `connectors` | The thirteen Connectors: browser sign-in through `pup`, `gh`, `glab`, `bkt`, `slashdocs` or an MCP Server (Google Docs, Sheets and Drive: the console's own Google sign-in and a bridge whose tools call Google's REST APIs); cancel a sign-in; the MCP Server each registers; Homebrew install of a missing CLI; checks; config; OpenTelemetry logs has a Log folder in place of a sign-in |
 | `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks, through one kept server per Connection for 5 minutes; secrets via Keychain, `secret_stored` from memory |
 | `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash, worktrees and checkout; a branch list answers from the last fetch and asks origin after, once a minute at most, then sends `repo.branches_changed` when a branch came or went; each Repo's host and `owner/name` read again from `origin` at start and in the background after a list (at most every 10 seconds), and mapped to the Git host's new owner when the host renames one (`origin` is never edited); a Repo's branch and changes come from one `git status`, kept 10 seconds, eight Repos at a time |
 | `network` | The Network allowlist an agent run starts with: built-in hosts, the host of each Repo's `origin`, and the operator's own domains in `network_domains`; read, add and remove (`/network-allowlist`), registered by `agent` |
@@ -181,13 +181,13 @@ query refetches, batched over 40 ms. A `session.output` event puts its part into
 fails (`interrupted` for all but the Agent Review); a failed Report, Reply check or Comment pass keeps its scratch copy, and a Reply check or
 Comment pass with one can retry.
 
-**Scheduler.** `monitor-scan` runs on a 6-hour grid from the Datadog Connector's daily scan time and
-starts a Scan of every Service for each Check interval whose slot came due. `monitor-pr-watch` reads
+**Scheduler.** `monitor-scan` runs on a 6-hour grid from each log source Connector's daily scan time and
+starts a Scan of every Service of that source for each Check interval whose slot came due. `monitor-pr-watch` reads
 the PR of every `pr_open` Fix every 5 minutes and after each pull request list refresh: merged resolves the Alert,
 closed abandons the Fix. Claude account usage is read at start and every 5 minutes on its own timer, and the update
 check runs on its own timer too (`UpdatesModule`). `monitor-retention` runs daily and after a Scan, at most hourly (see Monitor).
 
-**Monitor.** A Scan reads failing logs through `pup`, groups them by Fingerprint into Alerts with up
+**Monitor.** A Scan reads failing logs through `pup`, or from the OpenTelemetry Log folder's OTLP JSON files (read only, 100 MB per Scan, newest first), groups them by Fingerprint into Alerts with up
 to 25 redacted Samples, and records each Route's state. The Scan is stored one Service at a time, with a turn of the event loop between, so a large Scan never holds the daemon. After a Scan the code finder looks, two Services at a time, for
 each Service with no code it did not look for in the last week (`services.code_looked_at`): an imported Repo of the same name, a git folder of that name next to one,
 then a repository of that name on a connected Git host, read from one list of the Bitbucket workspace's repositories rather than one `git ls-remote` each. The operator starts a Verification; it runs in
@@ -195,12 +195,12 @@ the Alert's Session, a `repo` Session in the Service's Repo or an `anonymous` Se
 clone of its Git URL. Its runs work in a scratch copy: a git worktree of that code at the newest
 commit of the Verify Playbook's branch (the default branch when blank), fetched from origin first,
 under `scratch/` in the data directory, removed once the Report is ready. The Report also
-goes to a Markdown file in the Datadog Connector's reports folder. Confirming the Report starts the
+goes to a Markdown file in the log source Connector's reports folder. Confirming the Report starts the
 Fix in the same Session, in its worktree and in a new conversation, stage by stage (ticket, branch,
 steps, PR), each agent run ending with JSON. The ticket stage runs only when the Fix Playbook's Jira ticket switch is
 on and Jira is connected; otherwise the branch is `fix/<name>`.
 
-**Alert list and retention.** `GET /alerts` lists the Alerts not resolved or dismissed, without `datadog_query` and with `log_line` cut to 300 characters; the detail keeps both whole. `scope=closed` lists the resolved and dismissed ones a page at a time (`limit`, `cursor`), and the Monitor reads them only once the operator ticks Closed. `GET /alerts/summary` counts the open ones. An open Alert that no Scan has seen for 14 days is resolved with an `auto_resolved` Alert event; a failing Scan later reopens it as a Regression. Scans, their Route results and Alert events older than 30 days are deleted in small batches, except the newest `ok` Scan that read each Service and the events of an Alert a Verification or Fix is working on. The Action Log is never pruned.
+**Alert list and retention.** `GET /alerts` lists the Alerts not resolved or dismissed, without the Alert's source query and with `log_line` cut to 300 characters; the detail keeps both whole. `scope=closed` lists the resolved and dismissed ones a page at a time (`limit`, `cursor`), and the Monitor reads them only once the operator ticks Closed. `GET /alerts/summary` counts the open ones. An open Alert that no Scan has seen for 14 days is resolved with an `auto_resolved` Alert event; a failing Scan later reopens it as a Regression. Scans, their Route results and Alert events older than 30 days are deleted in small batches, except the newest `ok` Scan that read each Service and the events of an Alert a Verification or Fix is working on. The Action Log is never pruned.
 
 **Prod parity.** The Alert read carries Freshness (`last_scanned_at`, `scan_overdue`) and `awaiting_prod_check`, all
 derived from `scans` and the Alert's own `resolved_at` and `cleared_at`. A Verification and a Fix each start with a

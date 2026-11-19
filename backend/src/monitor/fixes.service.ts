@@ -39,7 +39,8 @@ import { PullRequestsService } from '../workspace/pull-requests.service';
 import { WorkspaceSessionsService } from '../workspace/workspace-sessions.service';
 import { AlertSessions } from './alert-sessions';
 import { AlertsService } from './alerts.service';
-import { DATADOG_READER, type DatadogReader } from './datadog';
+import { LOG_READERS, type LogReaders } from './log-reader';
+import { logSourceRule } from './log-source-brief';
 import { type AlertRow, type FixRow, type ReportRow, type ReviewRow, type ServiceRow, toFix } from './mappers';
 import { PROD_PARITY_ASK, recheck } from './prod-parity';
 
@@ -90,7 +91,7 @@ export class FixesService {
     @Inject(GIT) private readonly git: Git,
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
     @Inject(JobSteps) private readonly steps: JobSteps,
-    @Inject(DATADOG_READER) private readonly datadog: DatadogReader,
+    @Inject(LOG_READERS) private readonly readers: LogReaders,
     @Inject(Scheduler) scheduler: Scheduler,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
@@ -344,7 +345,8 @@ export class FixesService {
     if (found.fix.sessionId !== sessionId) {
       this.store.write((tx) => tx.update(fixes).set({ sessionId }).where(eq(fixes.id, fixId)).run());
     }
-    const checked = await recheck(this.datadog, found.alert.datadogQuery);
+    const { connector, sourceQuery } = found.alert;
+    const checked = await recheck(this.readers[connector], connector, sourceQuery);
     return { ...found, sessionId, slug: found.report.slug ?? 'fix', recheckLine: checked.line, fresh };
   }
 
@@ -369,9 +371,10 @@ export class FixesService {
 
   private brief(context: Context): string {
     const jira = context.fix.jiraKey ? `Jira: ${context.fix.jiraKey}. ` : '';
+    const rule = logSourceRule(context.alert.connector);
     return `Fix for Alert "${context.alert.title}" on ${context.service.name}.
 ${jira}Root cause: ${context.report.rootCause}. Proposed fix: ${context.report.proposedFix}.
-${context.recheckLine}`;
+${context.recheckLine}${rule ? `\n${rule}` : ''}`;
   }
 
   /** Jira is optional: with it the Fix makes a ticket and names the branch after its key. */

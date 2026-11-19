@@ -1,4 +1,4 @@
-import { CONNECTOR_SERVERS, RunPurpose, SessionKind } from '@ops-console/shared';
+import { CONNECTOR_SERVERS, ConnectorId, type LogSource, RunPurpose, SessionKind } from '@ops-console/shared';
 
 /**
  * Every MCP server a run starts costs start-up time and tool definitions in the prompt: all sixteen of a full setup
@@ -22,7 +22,12 @@ const connectorServers = (...keep: string[]): string[] =>
 /** What a pull request job reads: the Git host's server and the ticket in Atlassian. */
 const PR_JOB_KEEPS = ['github', 'atlassian'];
 
-export function mcpScope(purpose: RunPurpose, kind: SessionKind): McpScope {
+/**
+ * `logSource` is the log source of the Alert the run works on, when it has one: only a Datadog Alert starts the Datadog
+ * server.
+ */
+export function mcpScope(purpose: RunPurpose, kind: SessionKind, logSource: LogSource | null = null): McpScope {
+  const datadog = logSource === null || logSource === ConnectorId.Datadog ? ['datadog-pup'] : [];
   switch (purpose) {
     case RunPurpose.OpenPullRequest:
       return { none: true, withoutConnections: true, withoutConnectors: [] };
@@ -34,11 +39,11 @@ export function mcpScope(purpose: RunPurpose, kind: SessionKind): McpScope {
       return {
         none: false,
         withoutConnections: true,
-        withoutConnectors: connectorServers(...PR_JOB_KEEPS, 'datadog-pup'),
+        withoutConnectors: connectorServers(...PR_JOB_KEEPS, ...datadog),
       };
     case RunPurpose.Verify:
-      // Datadog and the read-only Connections it cross-checks.
-      return { none: false, withoutConnections: false, withoutConnectors: connectorServers('datadog-pup') };
+      // The Alert's log source, if Datadog, and the read-only Connections it cross-checks.
+      return { none: false, withoutConnections: false, withoutConnectors: connectorServers(...datadog) };
     case RunPurpose.Chat:
       // A Dev tools Session is scoped to its own Connections elsewhere; any other chat starts none of them.
       return { none: false, withoutConnections: kind !== SessionKind.Devtools, withoutConnectors: [] };

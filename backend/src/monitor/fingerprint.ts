@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { ConnectorId, type LogSource } from '@ops-console/shared';
 
 const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 const IPV4 = /\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b/g;
@@ -34,16 +35,22 @@ export function normalizePath(path: string): string {
     .join('/');
 }
 
-/** The identity of an Alert: Service, Route, HTTP status code and the error signature (Glossary: Fingerprint). */
+/**
+ * The identity of an Alert: Service, Route, HTTP status code and the error signature, and the log source when it is not
+ * Datadog (Glossary: Fingerprint).
+ */
 export function fingerprint(
   serviceId: string,
   method: string,
   path: string,
   message: string,
   statusCode: number | null = null,
+  connector: LogSource = ConnectorId.Datadog,
 ): string {
   const parts = [serviceId, method.toUpperCase(), path, maskSignature(message)];
   // An Alert from before codes were read keeps its Fingerprint.
   if (statusCode !== null) parts.push(String(statusCode));
+  // Datadog Alerts keep the Fingerprints they were stored with.
+  if (connector !== ConnectorId.Datadog) parts.push(connector);
   return createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 32);
 }

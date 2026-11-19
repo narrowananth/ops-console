@@ -4,7 +4,7 @@ Monitor is where the agent starts from a failure and ends at a pull request, wit
 
 ## From log line to pull request
 
-1. **Scan.** The console scans each Service's logs through Datadog on a check interval and raises an Alert for each kind of failure. An Alert has a fingerprint, a severity and a route.
+1. **Scan.** The console scans each Service's logs on a check interval, through Datadog or from an OpenTelemetry [Log folder](/docs/connectors/#opentelemetry-logs), and raises an Alert for each kind of failure. An Alert has a fingerprint, a severity and a route.
 2. **Verification.** You start one. The agent tries to explain the Alert from the code, in a scratch copy: it follows the log through the code, replays the request, tests with mock data when it can, and cross-checks your Connections.
 3. **Report.** The Verification ends in a Report: the steps, the replayed request and its result, the root cause and the proposed fix.
 4. **Review.** You confirm the Report as a bug or an improvement, or dismiss it. A dismissal can be undone.

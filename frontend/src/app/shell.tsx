@@ -67,7 +67,7 @@ export function Shell() {
             <Route
               path="/monitor"
               element={
-                <Page title="Monitor" sub="Datadog health of your services, their Alerts and fixes">
+                <Page title="Monitor" sub="Log health of your services, their Alerts and fixes">
                   <Loading>
                     <MonitorView />
                   </Loading>

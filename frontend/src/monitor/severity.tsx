@@ -6,7 +6,7 @@ export const SEVERITY_LABEL: Record<Severity, string> = {
   [Severity.Low]: 'Low',
 };
 
-/** What each tier means, shown on hover. The thresholds are the Datadog Connector's settings. */
+/** What each tier means, shown on hover. The thresholds are the log source Connector's settings. */
 export const SEVERITY_TIP: Record<Severity, string> = {
   [Severity.High]: 'High: in one 10-minute stretch the errors reached the rapid threshold. Look at these first.',
   [Severity.Medium]:

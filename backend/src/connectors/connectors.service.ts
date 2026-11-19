@@ -1,3 +1,5 @@
+import { opendir, stat } from 'node:fs/promises';
+import path from 'node:path';
 import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import {
   CheckTarget,
@@ -23,6 +25,7 @@ import { connectors } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { GOOGLE_ENV } from '../mcp/google-bridge';
 import { McpServersService } from '../mcp/mcp-servers.service';
+import { otelLogsConfig } from '../monitor/log-source-config';
 import { CONNECTOR_TOOLS, type ConnectorTools, type SignInPrompt } from './connector-tools';
 import { GOOGLE_AUTH, type GoogleAuth, GoogleSignInError } from './google-auth';
 
@@ -106,7 +109,9 @@ export class ConnectorsService implements OnModuleDestroy {
    * Starts the provider's own browser sign-in and answers at once. `sign_in` holds what the browser step needs until it
    * ends; `connection.checked` reports each change and the result.
    */
-  async connect(id: ConnectorId): Promise<void> {
+  async connect(id: ConnectorId, input: { folder?: string } = {}): Promise<void> {
+    // The Log folder has no sign-in: choosing it connects, or is refused, before this answers.
+    if (id === ConnectorId.OtelLogs) return this.chooseFolder(input.folder);
     this.signIns.get(id)?.abort();
     const abort = new AbortController();
     this.signIns.set(id, abort);
@@ -184,6 +189,19 @@ export class ConnectorsService implements OnModuleDestroy {
         .run();
     });
     return this.get(id);
+  }
+
+  /** Connects the Log folder: `folder`, or the one kept from before. Refused with `folder_not_found`, nothing stored. */
+  private async chooseFolder(chosen: string | undefined): Promise<void> {
+    const folder = (chosen ?? otelLogsConfig(this.store.db).folder).trim();
+    if (folder === '') throw validationFailed('a Log folder is required');
+    if (!path.isAbsolute(folder)) throw validationFailed('the Log folder must be an absolute path');
+    const reading = await folderReading(folder);
+    if (reading.status !== HealthStatus.Ok) {
+      throw new ApiError(422, ErrorCode.FolderNotFound, reading.detail ?? 'Folder not found');
+    }
+    await this.update(ConnectorId.OtelLogs, { folder });
+    this.record(ConnectorId.OtelLogs, reading);
   }
 
   private accountInUseElsewhere(id: ConnectorId): boolean {
@@ -388,6 +406,8 @@ export class ConnectorsService implements OnModuleDestroy {
           ? { status: HealthStatus.Ok, detail: null, accountLabel: status.org ?? config.site ?? null, login: null }
           : signedOut('pup is not signed in');
       }
+      case ConnectorId.OtelLogs:
+        return folderReading(config.folder ?? '');
       case ConnectorId.Github: {
         const login = await this.tools.githubUser();
         return login === null
@@ -559,6 +579,21 @@ type McpSpec = NonNullable<(typeof CONNECTOR_SERVERS)[ConnectorId]>;
 
 function isStale(lastCheckedAt: string | null): boolean {
   return lastCheckedAt === null || Date.now() - Date.parse(lastCheckedAt) > RECHECK_AFTER_MS;
+}
+
+/** A Log folder reads connected when it is a folder the daemon can list; an empty one is fine. */
+async function folderReading(folder: string): Promise<Reading> {
+  const down = (detail: string): Reading => ({ status: HealthStatus.Fail, detail, accountLabel: null, login: null });
+  if (folder === '') return down('No Log folder chosen');
+  const found = await stat(folder).catch(() => null);
+  if (found === null || !found.isDirectory()) return down('Folder not found');
+  const listed = await opendir(folder).then(
+    (handle) => handle.close().then(() => true),
+    () => false,
+  );
+  return listed
+    ? { status: HealthStatus.Ok, detail: null, accountLabel: folder, login: null }
+    : down('Folder not readable');
 }
 
 function unreachable(error: unknown): Reading {

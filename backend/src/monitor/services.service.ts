@@ -40,7 +40,7 @@ export class ServicesService {
       .select()
       .from(services)
       .where(env === undefined ? undefined : eq(services.env, env))
-      .orderBy(asc(services.name), asc(services.env))
+      .orderBy(asc(services.name), asc(services.env), asc(services.connector))
       .all();
     return this.views(rows, env === undefined ? undefined : eq(services.env, env));
   }
@@ -155,6 +155,7 @@ export class ServicesService {
     for (const route of routeRows) byService.set(route.serviceId, [...(byService.get(route.serviceId) ?? []), route]);
     return rows.map((row) => ({
       id: row.id,
+      connector: row.connector,
       name: row.name,
       env: row.env,
       repo_id: row.repoId,

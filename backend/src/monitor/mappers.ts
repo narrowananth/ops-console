@@ -111,6 +111,7 @@ export function toAlert(
       repo_id: service.repoId,
       repo_url: service.repoUrl,
     },
+    connector: row.connector,
     fingerprint: row.fingerprint,
     http_status: row.httpStatus,
     source: row.source,
@@ -124,7 +125,7 @@ export function toAlert(
     resolved_at: row.resolvedAt,
     regression_count: row.regressionCount,
     waiting_since: row.status === AlertStatus.Verified ? extra.waitingSince : null,
-    datadog_query: row.datadogQuery,
+    source_query: row.sourceQuery,
     session_id: extra.sessionId,
     last_scanned_at: extra.lastScannedAt,
     scan_overdue: extra.scanOverdue,
@@ -132,14 +133,14 @@ export function toAlert(
   };
 }
 
-/** An Alert for a list: no Datadog query, and the log line cut to what a row shows. */
+/** An Alert for a list: no source query, and the log line cut to what a row shows. */
 export function toAlertListItem(
   row: AlertListRow,
   route: RouteRow,
   service: ServiceRow,
   extra: Parameters<typeof toAlert>[3],
 ): AlertListItem {
-  const { datadog_query: _query, ...alert } = toAlert(row, route, service, extra);
+  const { source_query: _query, ...alert } = toAlert(row, route, service, extra);
   return { ...alert, log_line: alert.log_line.slice(0, LIST_LOG_LINE_MAX) };
 }
 

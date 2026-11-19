@@ -60,8 +60,8 @@ export function StatusBadge({ code }: { code: number }) {
   );
 }
 
-/** The HTTP status codes to read, as one field that opens the codes Datadog has, by class, with counts. */
-export function StatusPicker({ known, scope }: { known: StatusCodeCount[]; scope: ScanScope }) {
+/** The HTTP status codes to read, as one field that opens the codes the log source has, by class, with counts. */
+export function StatusPicker({ known, scope, from }: { known: StatusCodeCount[]; scope: ScanScope; from: string }) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) return;
@@ -108,7 +108,7 @@ export function StatusPicker({ known, scope }: { known: StatusCodeCount[]; scope
           title={
             every
               ? undefined
-              : `${scope.codes.length} of the ${known.length} codes Datadog has in this range are picked`
+              : `${scope.codes.length} of the ${known.length} codes in this range from ${from} are picked`
           }
           className="min-w-0 truncate font-mono font-semibold"
         >

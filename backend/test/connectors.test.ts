@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { CONNECTOR_ORDER, ConnectorId, ErrorCode, type WsEvent } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
@@ -760,13 +761,13 @@ describe('Google Connectors', () => {
   it('lists the three after slashdocs, off, with an empty config', async () => {
     const ctx = await start({ google: 'shipped' });
     const rows = await list(ctx);
-    expect(rows).toHaveLength(12);
-    expect(rows.slice(-3).map((row) => [row.id, row.name, row.via, row.status, row.config])).toEqual([
+    expect(rows).toHaveLength(13);
+    expect(rows.slice(-4, -1).map((row) => [row.id, row.name, row.via, row.status, row.config])).toEqual([
       ['google_docs', 'Google Docs', 'Google Docs API', 'off', {}],
       ['google_sheets', 'Google Sheets', 'Google Sheets API', 'off', {}],
       ['google_drive', 'Google Drive', 'Google Drive API', 'off', {}],
     ]);
-    expect(rows.map((row) => row.id).slice(-4)).toEqual(['slashdocs', ...GOOGLE]);
+    expect(rows.map((row) => row.id).slice(-5)).toEqual(['slashdocs', ...GOOGLE, 'otel_logs']);
     // Nothing is typed in the pane.
     expect((await api(ctx.daemon).patch('/connectors/google_docs', { config: { client_id: 'x' } })).status).toBe(400);
   });
@@ -986,5 +987,81 @@ describe('Google Connectors', () => {
     );
     const servers = JSON.parse(await readFile(path.join(ctx.dirs[0] as string, '.claude.json'), 'utf8')).mcpServers;
     expect(servers.slack.oauth).toEqual({ clientId: '1601185624273.8899143856786', callbackPort: 3118 });
+  });
+});
+
+describe('OpenTelemetry logs Connector', () => {
+  const folder = async () => mkdtemp(path.join(os.tmpdir(), 'ops-console-logs-'));
+  const connect = (ctx: Ctx, body: Record<string, unknown>) =>
+    api(ctx.daemon).post('/connectors/otel_logs/connect', body);
+
+  it('is listed last, off, with an empty Log folder and no CLI or MCP server', async () => {
+    const ctx = await start();
+    expect(await one(ctx, 'otel_logs')).toMatchObject({
+      name: 'OpenTelemetry logs',
+      status: 'off',
+      sign_in: null,
+      config: { folder: '', environments: ['prod'], daily_scan_time: '09:00', default_interval: '24h' },
+    });
+    expect((await list(ctx)).at(-1)?.id).toBe('otel_logs');
+  });
+
+  it('connects at once to a folder that exists and can be read, with no sign-in, empty or not', async () => {
+    const ctx = await start();
+    const logs = await folder();
+    expect((await connect(ctx, { folder: logs })).status).toBe(202);
+    expect(await one(ctx, 'otel_logs')).toMatchObject({
+      status: 'ok',
+      status_detail: null,
+      sign_in: null,
+      config: { folder: logs },
+    });
+    expect((await api(ctx.daemon).get('/mcp-servers')).body.data.map((s: Row) => s.name)).not.toContain('otel_logs');
+  });
+
+  it('refuses a folder that does not exist, and changes nothing', async () => {
+    const ctx = await start();
+    const missing = path.join(await folder(), 'nope');
+    const refused = await connect(ctx, { folder: missing });
+    expect([refused.status, refused.body.error.code]).toEqual([422, ErrorCode.FolderNotFound]);
+    expect(await one(ctx, 'otel_logs')).toMatchObject({ status: 'off', config: { folder: '' } });
+    const none = await connect(ctx, {});
+    expect(none.status).toBe(400);
+  });
+
+  it('reads down with the reason when the folder goes missing or cannot be read, and connected again when it is back', async () => {
+    const ctx = await start();
+    const logs = await folder();
+    await connect(ctx, { folder: logs });
+    await rm(logs, { recursive: true });
+    expect((await api(ctx.daemon).post('/connectors/otel_logs/checks')).body.data).toMatchObject({
+      status: 'fail',
+      status_detail: 'Folder not found',
+    });
+    await mkdir(logs);
+    await chmod(logs, 0o000);
+    try {
+      expect((await api(ctx.daemon).post('/connectors/otel_logs/checks')).body.data).toMatchObject({
+        status: 'fail',
+        status_detail: 'Folder not readable',
+      });
+    } finally {
+      await chmod(logs, 0o755);
+    }
+    expect((await api(ctx.daemon).post('/connectors/otel_logs/checks')).body.data).toMatchObject({
+      status: 'ok',
+      status_detail: null,
+    });
+  });
+
+  it('leaves the folder and its files alone when it is disconnected', async () => {
+    const ctx = await start();
+    const logs = await folder();
+    const file = path.join(logs, 'logs.jsonl');
+    await writeFile(file, '{}\n');
+    await connect(ctx, { folder: logs });
+    const off = await api(ctx.daemon).delete('/connectors/otel_logs/credentials');
+    expect(off.body.data).toMatchObject({ status: 'off' });
+    expect(await readFile(file, 'utf8')).toBe('{}\n');
   });
 });

@@ -1,12 +1,13 @@
-import { ConnectorId, ErrorCode, HealthStatus } from '@ops-console/shared';
+import { ConnectorId, ErrorCode } from '@ops-console/shared';
 import { z } from 'zod';
-import { BrandIcon } from '../components/ui/brand-icon';
+import { BrandIcon, CONNECTOR_BRAND } from '../components/ui/brand-icon';
 import { Empty } from '../components/ui/empty';
 import { PanelRail, PanelToggle, RAIL_BUTTON } from '../components/ui/side-panel';
 import { ApiError } from '../lib/api';
 import { useAlert, useConnectors, useServices } from '../lib/queries';
 import { useAddress, useStored } from '../lib/remember';
 import { AlertView } from './alert-view';
+import { connectedSources, downSources, useSourceFilter } from './log-source';
 import { LogsPane } from './logs-pane';
 import { useScanScope } from './scan-scope';
 import { ServicesPane } from './services-pane';
@@ -21,18 +22,20 @@ export function MonitorView() {
     alert !== null && picked.error instanceof ApiError && picked.error.code === ErrorCode.NotFound ? null : alert;
   const connectors = useConnectors();
   const services = useServices();
-  const datadog = connectors.data?.data.find((connector) => connector.id === ConnectorId.Datadog);
-  const connected = datadog?.status === HealthStatus.Ok;
+  const sources = connectedSources(connectors.data?.data ?? []);
+  const down = downSources(connectors.data?.data ?? []);
+  const [source, pickSource] = useSourceFilter();
   const scope = useScanScope();
   const [collapsed, setCollapsed] = useStored('monitor.services-collapsed', z.boolean(), false);
 
   if (connectors.isPending || services.isPending) return <Empty>Reading the Monitor…</Empty>;
-  if (!connected && (services.data?.length ?? 0) === 0) {
+  if (sources.length === 0 && (services.data?.length ?? 0) === 0) {
     return (
       <Empty>
         <span className="flex items-center gap-2.5">
-          <BrandIcon brand="datadog" size="sm" />
-          Connect Datadog in Integrations.
+          <BrandIcon brand={CONNECTOR_BRAND[ConnectorId.Datadog]} size="sm" />
+          <BrandIcon brand={CONNECTOR_BRAND[ConnectorId.OtelLogs]} size="sm" />
+          Connect Datadog or OpenTelemetry logs in Integrations.
         </span>
       </Empty>
     );
@@ -56,7 +59,8 @@ export function MonitorView() {
       ) : (
         <aside className="flex w-68 flex-none flex-col border-r border-line">
           <ServicesPane
-            connected={connected}
+            connected={sources}
+            source={source}
             scope={scope}
             selected={service}
             onSelect={(name) => setAddress({ service: name, alert: null })}
@@ -71,6 +75,10 @@ export function MonitorView() {
           range={scope.range}
           selected={alertId}
           onSelect={(id) => setAddress({ alert: id })}
+          sources={sources}
+          down={down}
+          source={source}
+          onSource={pickSource}
         />
       </aside>
       <section className="min-w-0 flex-1 overflow-y-auto">

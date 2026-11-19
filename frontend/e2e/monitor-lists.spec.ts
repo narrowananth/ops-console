@@ -13,6 +13,7 @@ const alertOf = (id: string, severity: string, path: string, extra: Record<strin
   id,
   route: { id: `r-${id}`, method: 'POST', path },
   service: { id: 'sv1', name: 'apis', env: 'prod', repo_id: null, repo_url: null },
+  connector: 'datadog',
   fingerprint: id,
   http_status: 500,
   source: 'scan',
@@ -26,7 +27,7 @@ const alertOf = (id: string, severity: string, path: string, extra: Record<strin
   resolved_at: null,
   regression_count: 0,
   waiting_since: null,
-  datadog_query: 'service:apis',
+  source_query: 'service:apis',
   session_id: null,
   last_scanned_at: ago(1),
   scan_overdue: false,
@@ -54,6 +55,7 @@ async function routeMonitor(page: Page) {
       list([
         {
           id: 's1',
+          connector: 'datadog',
           triggered_by: 'operator',
           service_id: null,
           window_size: '1h',
@@ -63,6 +65,7 @@ async function routeMonitor(page: Page) {
           status: 'ok',
           error_code: null,
           error_message: null,
+          notes: [],
           started_at: ago(0.3),
           finished_at: ago(0.2),
         },
@@ -79,7 +82,7 @@ async function routeMonitor(page: Page) {
       ]),
     ),
   );
-  await page.route(/\/api\/monitor\/datadog-services/, (route) =>
+  await page.route(/\/api\/monitor\/log-services/, (route) =>
     route.fulfill(list(NAMES.map((name, index) => ({ name, envs: ['prod'], errors: (index + 1) * 100 })))),
   );
   await page.route(/\/api\/monitor\/status-codes/, (route) =>
@@ -258,6 +261,7 @@ test('a running Scan shows Scanning… with a Stop button that cancels it', asyn
       list([
         {
           id: 's9',
+          connector: 'datadog',
           triggered_by: 'operator',
           service_id: null,
           window_size: '1h',
@@ -267,6 +271,7 @@ test('a running Scan shows Scanning… with a Stop button that cancels it', asyn
           status: 'running',
           error_code: null,
           error_message: null,
+          notes: [],
           started_at: ago(0.1),
           finished_at: null,
         },
@@ -282,4 +287,172 @@ test('a running Scan shows Scanning… with a Stop button that cancels it', asyn
   await expect(page.getByRole('button', { name: 'Scanning…' })).toBeDisabled();
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
   await cancelled;
+});
+
+// Two log sources: Datadog (service apis) and OpenTelemetry logs (service api).
+const connectorOf = (id: string, name: string, status: string, detail: string | null = null) => ({
+  id,
+  name,
+  via: id === 'otel_logs' ? 'a local folder' : 'pup',
+  status,
+  status_detail: detail,
+  account_label: null,
+  login: null,
+  config: {},
+  last_checked_at: ago(1),
+  sign_in: null,
+});
+
+const OTEL_SERVICE = { id: 'sv2', name: 'api', env: 'prod', repo_id: null, repo_url: null };
+const OTEL_FILTER = { service: 'api', env: 'prod', status: 500, method: 'POST', path: '/orders' };
+const DATADOG_ALERT = alertOf('a1', 'high', '/v1/orders');
+const OTEL_ALERT = alertOf('o1', 'high', '/orders', {
+  connector: 'otel_logs',
+  service: OTEL_SERVICE,
+  source_query: JSON.stringify(OTEL_FILTER),
+});
+
+const scanOf = (connector: string, notes: string[] = []) => ({
+  id: `scan-${connector}`,
+  connector,
+  triggered_by: 'operator',
+  service_id: null,
+  window_size: '24h',
+  envs: ['prod'],
+  services: null,
+  status_codes: [],
+  status: 'ok',
+  error_code: null,
+  error_message: null,
+  notes,
+  started_at: ago(0.3),
+  finished_at: ago(0.2),
+});
+
+type Sources = { datadog?: [string, string | null]; otel?: [string, string | null]; scans?: unknown[] };
+
+async function routeSources(page: Page, { datadog = ['ok', null], otel = ['ok', null], scans = [] }: Sources = {}) {
+  const read = { datadog: 0 };
+  await page.route('**/api/connectors', (route) =>
+    route.fulfill(
+      list([connectorOf('datadog', 'Datadog', ...datadog), connectorOf('otel_logs', 'OpenTelemetry logs', ...otel)]),
+    ),
+  );
+  await page.route('**/api/services', (route) => route.fulfill(list([])));
+  await page.route(/\/api\/scans(\?.*)?$/, (route) => route.fulfill(list(scans)));
+  await page.route(/\/api\/alerts(\?.*)?$/, (route) => route.fulfill(list([DATADOG_ALERT, OTEL_ALERT])));
+  for (const alert of [DATADOG_ALERT, OTEL_ALERT]) {
+    await page.route(`**/api/alerts/${alert.id}`, (route) =>
+      route.fulfill({ json: { data: { ...alert, samples: [], latest_report: null, review: null, fix: null } } }),
+    );
+    await page.route(`**/api/alerts/${alert.id}/events`, (route) => route.fulfill(list([])));
+    await page.route(`**/api/alerts/${alert.id}/reports`, (route) => route.fulfill(list([])));
+  }
+  await page.route('**/api/playbooks', (route) => route.fulfill({ json: { data: { items: [], blocks: [] } } }));
+  await page.route(/\/api\/monitor\/log-services/, (route) => {
+    const connector = new URL(route.request().url()).searchParams.get('connector');
+    if (connector === 'datadog') read.datadog++;
+    return route.fulfill(list([{ name: connector === 'otel_logs' ? 'api' : 'apis', envs: ['prod'], errors: 120 }]));
+  });
+  await page.route(/\/api\/monitor\/status-codes/, (route) => route.fulfill(list([{ code: 500, count: 20 }])));
+  return read;
+}
+
+test('each Alert and Service names its source, and the source filter keeps one source and survives a reload', async ({
+  page,
+}) => {
+  await routeSources(page);
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  const logs = page.getByRole('list', { name: 'Logs' });
+  const services = page.getByRole('list', { name: 'Services' });
+  await expect(logs.getByRole('button', { name: /\/v1\/orders/ })).toContainText('Datadog');
+  await expect(logs.getByRole('button', { name: /POST \/orders/ })).toContainText('OpenTelemetry');
+  await expect(services.getByRole('listitem').filter({ hasText: 'Datadog' })).toHaveCount(1);
+  await expect(services.getByRole('listitem').filter({ hasText: 'OpenTelemetry' })).toHaveCount(1);
+
+  await page.getByRole('tab', { name: 'OpenTelemetry' }).click();
+  await expect(logs.getByRole('button')).toHaveCount(1);
+  await expect(logs.getByRole('button')).toContainText('/orders');
+  await expect(services.getByRole('listitem')).toHaveCount(1);
+  await expect(services.getByRole('listitem')).toContainText('OpenTelemetry');
+
+  await page.reload();
+  await expect(page.getByRole('tab', { name: 'OpenTelemetry' })).toHaveAttribute('aria-selected', 'true');
+  await expect(logs.getByRole('button')).toHaveCount(1);
+  await page.getByRole('tab', { name: 'All sources' }).click();
+  await expect(logs.getByRole('button')).toHaveCount(2);
+});
+
+test('a source that is down shows a notice naming it, and the other source keeps its Alerts', async ({ page }) => {
+  await routeSources(page, { otel: ['fail', 'Folder not found'] });
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  const notice = page.getByRole('status').filter({ hasText: 'OpenTelemetry' });
+  await expect(notice).toContainText('is down: Folder not found');
+  await expect(page.getByRole('list', { name: 'Logs' }).getByRole('button', { name: /\/v1\/orders/ })).toBeVisible();
+});
+
+test('no notice shows while both sources are connected', async ({ page }) => {
+  await routeSources(page);
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  await expect(page.getByRole('list', { name: 'Logs' }).getByRole('button')).toHaveCount(2);
+  await expect(page.getByText('is down')).toHaveCount(0);
+});
+
+test('a Scan that skipped lines or hit the read cap lists its notes under the last Scan', async ({ page }) => {
+  await routeSources(page, {
+    scans: [
+      scanOf('otel_logs', ['Read the newest 100 MB only', '3 lines were not log records and were skipped']),
+      scanOf('datadog'),
+    ],
+  });
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  const notes = page.getByRole('list', { name: 'Scan notes' });
+  await expect(notes.getByRole('listitem')).toHaveText([
+    'Read the newest 100 MB only',
+    '3 lines were not log records and were skipped',
+  ]);
+  await expect(page.getByText(/^OpenTelemetry · Last Scan \d+m ago$/)).toBeVisible();
+  await expect(page.getByText(/^Datadog · Last Scan \d+m ago$/)).toBeVisible();
+});
+
+test('Scan works with only OpenTelemetry connected and asks no Datadog read', async ({ page }) => {
+  const read = await routeSources(page, { datadog: ['off', null] });
+  const started = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/scans'));
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  await expect(page.getByText('Failing requests in OpenTelemetry logs, every env')).toBeVisible();
+  const scan = page.getByRole('button', { name: /^Scan 1 Services/ });
+  await expect(scan).toBeEnabled();
+  await scan.click();
+  expect((await started).postDataJSON().connector).toBeUndefined();
+  expect(read.datadog).toBe(0);
+});
+
+test('Scan reads every connected source, or only the one the source filter picks', async ({ page }) => {
+  await routeSources(page);
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  const scan = page.getByRole('button', { name: /^Scan 2 Services/ });
+  let started = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/scans'));
+  await scan.click();
+  expect((await started).postDataJSON().connector).toBeUndefined();
+
+  await page.getByRole('tab', { name: 'OpenTelemetry' }).click();
+  started = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/scans'));
+  await page.getByRole('button', { name: /^Scan 1 Services/ }).click();
+  expect((await started).postDataJSON().connector).toBe('otel_logs');
+});
+
+test('an OpenTelemetry Alert shows its filter as a line and never names Datadog; a Datadog Alert shows its query', async ({
+  page,
+}) => {
+  await routeSources(page);
+  await page.goto(`${daemon.url}/monitor?alert=o1#token=${daemon.token}`);
+  const detail = page.locator('article');
+  await expect(detail).toContainText('OpenTelemetry');
+  await expect(detail).toContainText('service api, env prod, 500 POST /orders');
+  await expect(detail).not.toContainText('Datadog');
+  await expect(detail.locator('[title*="Datadog"]')).toHaveCount(0);
+
+  await page.goto(`${daemon.url}/monitor?alert=a1#token=${daemon.token}`);
+  await expect(detail).toContainText('service:apis');
+  await expect(detail).toContainText('Datadog');
 });

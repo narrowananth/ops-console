@@ -1,5 +1,5 @@
-import { type ReportStep, type Sample, ScanWindow } from '@ops-console/shared';
-import type { DatadogReader } from './datadog';
+import { CONNECTOR_NAMES, type LogSource, type ReportStep, type Sample, ScanWindow } from '@ops-console/shared';
+import type { LogReader } from './log-reader';
 
 /** The Recheck's window: the last hour, whatever the Alert's Check interval. */
 const RECHECK_WINDOW = ScanWindow.Hour;
@@ -7,18 +7,19 @@ const RECHECK_WINDOW = ScanWindow.Hour;
 export type Recheck = { line: string; step: ReportStep };
 
 /**
- * One read of Datadog for the Alert's query over the last hour (no model turn). It never throws: a Recheck that fails
- * says why and the run goes on.
+ * One read of the Alert's log source for its query over the last hour (no model turn). It never throws: a Recheck that
+ * fails says why and the run goes on.
  */
-export async function recheck(reader: DatadogReader, query: string): Promise<Recheck> {
+export async function recheck(reader: LogReader, connector: LogSource, query: string): Promise<Recheck> {
+  const source = CONNECTOR_NAMES[connector];
   try {
     const found = await reader.countLogs(query, RECHECK_WINDOW);
-    const line = `Datadog recheck, last hour: ${found > 0 ? 'still failing' : 'not seen'}`;
+    const line = `${source} recheck, last hour: ${found > 0 ? 'still failing' : 'not seen'}`;
     return { line, step: { kind: 'result', text: line } };
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'unknown error';
     const text = `Recheck failed: ${reason}`;
-    return { line: `Datadog recheck, last hour: could not be read (${reason})`, step: { kind: 'warning', text } };
+    return { line: `${source} recheck, last hour: could not be read (${reason})`, step: { kind: 'warning', text } };
   }
 }
 

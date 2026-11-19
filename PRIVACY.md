@@ -35,6 +35,7 @@ Three parties handle your data: your Mac, Anthropic's API and the services you c
 
 - **Your Mac** holds the console, its database, your Session history and your secrets. The console's own checks and lists, such as a Scan, a Health check or a pull request list, go from your Mac to the service and back. No model reads them, and the results stay on your Mac.
 - **Anthropic's API**, the AI provider behind your Claude account, receives what the agent works with: your prompts, the files it reads and what each tool it calls returns. That includes a Connector's answer to an agent request and rows from a Connection. With CLIProxy, the same data goes to a CLIProxy server on your Mac and from there to the providers you configured.
+- **A Log folder** is read on your Mac. No service is involved, and its records reach Anthropic's API only as Samples in a prompt.
 - **A Connector** receives the requests you or the agent make with your sign-in, and answers them. An answer to one of the console's own checks stays on your Mac. An answer to the agent goes on to Anthropic's API.
 
 None of this reaches an Ops Console server. The only requests tied to the project go to GitHub: the update check asks for the latest release, and an update downloads from it. The app never calls opsconsole.org. Claude Code, which the console runs, has its own traffic to Anthropic under Anthropic's terms and your Claude Code settings. The console does not change it.

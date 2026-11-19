@@ -15,6 +15,8 @@ export enum ConnectorId {
   GoogleDocs = 'google_docs',
   GoogleSheets = 'google_sheets',
   GoogleDrive = 'google_drive',
+  /** Logs a Collector's file exporter writes to a folder on this Mac. */
+  OtelLogs = 'otel_logs',
 }
 
 export const CONNECTOR_ORDER: ConnectorId[] = Object.values(ConnectorId);
@@ -51,6 +53,7 @@ export const CONNECTOR_NAMES: Record<ConnectorId, string> = {
   [ConnectorId.GoogleDocs]: 'Google Docs',
   [ConnectorId.GoogleSheets]: 'Google Sheets',
   [ConnectorId.GoogleDrive]: 'Google Drive',
+  [ConnectorId.OtelLogs]: 'OpenTelemetry logs',
 };
 
 /** How the console reaches the service (ADR 0005). */
@@ -67,6 +70,7 @@ export const CONNECTOR_VIA: Record<ConnectorId, string> = {
   [ConnectorId.GoogleDocs]: 'Google Docs API',
   [ConnectorId.GoogleSheets]: 'Google Sheets API',
   [ConnectorId.GoogleDrive]: 'Google Drive API',
+  [ConnectorId.OtelLogs]: 'a local folder',
 };
 
 /**
@@ -153,6 +157,17 @@ export const connectorConfigSchemas = {
   [ConnectorId.GoogleDocs]: z.strictObject({}),
   [ConnectorId.GoogleSheets]: z.strictObject({}),
   [ConnectorId.GoogleDrive]: z.strictObject({}),
+  /** `folder`: the absolute path of the Log folder; empty until chosen. */
+  [ConnectorId.OtelLogs]: z.strictObject({
+    folder: z.string(),
+    environments: z.array(z.string().min(1)),
+    daily_scan_time: time,
+    default_interval: z.enum(['24h', '12h', '6h']),
+    rapid_errors_per_10m: count,
+    failing_errors_per_hour: count,
+    ignore: z.array(z.strictObject({ kind: z.enum(['status_class', 'route']), value: z.string().min(1) })),
+    reports_folder: z.string().min(1),
+  }),
 } satisfies Record<ConnectorId, z.ZodType>;
 
 export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknown>> = {
@@ -183,6 +198,16 @@ export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknow
   [ConnectorId.GoogleDocs]: {},
   [ConnectorId.GoogleSheets]: {},
   [ConnectorId.GoogleDrive]: {},
+  [ConnectorId.OtelLogs]: {
+    folder: '',
+    environments: ['prod'],
+    daily_scan_time: '09:00',
+    default_interval: '24h',
+    rapid_errors_per_10m: 100,
+    failing_errors_per_hour: 5,
+    ignore: [],
+    reports_folder: 'reports',
+  },
 };
 
 export const connectorSchema = z.object({

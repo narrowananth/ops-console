@@ -23,6 +23,7 @@ export enum ErrorCode {
   UrlNotAllowed = 'url_not_allowed',
   ChromeMissing = 'chrome_missing',
   NothingLoaded = 'nothing_loaded',
+  FolderNotFound = 'folder_not_found',
 }
 
 export const errorBodySchema = z.object({

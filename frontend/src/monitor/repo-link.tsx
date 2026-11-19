@@ -1,3 +1,4 @@
+import { ConnectorId, type LogSource } from '@ops-console/shared';
 import { useEffect, useState } from 'react';
 import { Button } from '../components/ui/button';
 import { Dropdown } from '../components/ui/dropdown';
@@ -13,9 +14,10 @@ type ServiceRef = { id: string; name: string; repo_id: string | null; repo_url: 
 
 /**
  * Where a Service's code is, for Verify and Fix: a local Repo, else the Git URL on GitHub, GitLab or Bitbucket that
- * the agent clones into an anonymous Session. Datadog fills the URL when its logs carry `git.repository_url`.
+ * the agent clones into an anonymous Session. Datadog fills the URL when its logs carry `git.repository_url`;
+ * OpenTelemetry logs carry none, so the Repo is found by the Service's name or linked by hand.
  */
-export function CodeSource({ service }: { service: ServiceRef }) {
+export function CodeSource({ service, source }: { service: ServiceRef; source: LogSource }) {
   const repos = useRepos();
   const patch = usePatchService();
   const find = useFindCode();
@@ -94,9 +96,12 @@ export function CodeSource({ service }: { service: ServiceRef }) {
               <li key={place}>{place}</li>
             ))}
           </ul>
-          <p className="m-0 mt-1">
-            Datadog fills it by itself when the logs carry a <code className="font-mono">git.repository_url</code> tag.
-          </p>
+          {source === ConnectorId.Datadog && (
+            <p className="m-0 mt-1">
+              Datadog fills it by itself when the logs carry a <code className="font-mono">git.repository_url</code>{' '}
+              tag.
+            </p>
+          )}
         </details>
       )}
       {unlinked && !find.isPending && (

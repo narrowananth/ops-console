@@ -148,8 +148,7 @@ beforeAll(async () => {
           firstSeenAt: '2026-10-01T10:00:00.000Z',
           lastSeenAt: '2026-10-02T10:00:00.000Z',
           samples: SAMPLES,
-          datadogQuery:
-            'env:prod service:orders-api @http.method:GET @http.url_details.path:/v1/items/:id status:error',
+          sourceQuery: 'env:prod service:orders-api @http.method:GET @http.url_details.path:/v1/items/:id status:error',
         })
         .run();
     }

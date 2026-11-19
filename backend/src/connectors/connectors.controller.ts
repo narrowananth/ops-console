@@ -5,6 +5,8 @@ import { parseInput } from '../common/errors';
 import { ConnectorsService } from './connectors.service';
 
 const idParams = z.object({ id: z.enum(ConnectorId) });
+/** Only the Log folder Connector takes anything: the folder it reads. */
+const connectBody = z.object({ folder: z.string().optional() });
 
 @Controller('connectors')
 export class ConnectorsController {
@@ -23,8 +25,11 @@ export class ConnectorsController {
 
   @Post(':id/connect')
   @HttpCode(202)
-  async connect(@Param() params: unknown): Promise<void> {
-    await this.connectors.connect(parseInput(idParams, params, 'params').id);
+  async connect(@Param() params: unknown, @Body() body: unknown): Promise<void> {
+    await this.connectors.connect(
+      parseInput(idParams, params, 'params').id,
+      parseInput(connectBody, body ?? {}, 'body'),
+    );
   }
 
   @Post(':id/checks')
