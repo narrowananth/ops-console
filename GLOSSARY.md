@@ -405,6 +405,13 @@ login password once per item.
 The console declining a Keychain handover because the previous app failed its check. It shows on the Permissions page
 until the next start.
 
+**Brew entry command**:
+The `ops-console` command Homebrew installs. It installs the matching app into the home folder on first run and after
+an upgrade, then runs the command typed.
+
+**Tap**:
+The repository that holds the console's Homebrew formula.
+
 **Tip**:
 The words a control, status or label shows on hover or keyboard focus: what it means, what pressing it makes the
 agent do, or why it is off.

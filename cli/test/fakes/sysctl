@@ -1,3 +1,7 @@
 #!/bin/sh
-# `sysctl -n sysctl.proc_translated`: 1 in a shell under Rosetta. The real answer depends on the machine running the tests.
-echo "${FAKE_SYSCTL_TRANSLATED:-0}"
+# `sysctl -n sysctl.proc_translated`: 1 in a shell under Rosetta. `sysctl -n hw.optional.arm64`: 1 on Apple silicon.
+# The real answers depend on the machine running the tests.
+case "$*" in
+  *hw.optional.arm64*) echo "${FAKE_SYSCTL_ARM64:-1}" ;;
+  *) echo "${FAKE_SYSCTL_TRANSLATED:-0}" ;;
+esac

@@ -21,6 +21,18 @@ ops-console open
 
 `OPS_CONSOLE_VERSION=<version>` installs a given release instead of the latest.
 
+With Homebrew instead:
+
+```
+brew install narrowananth/ops-console/ops-console
+ops-console start
+ops-console open
+```
+
+Homebrew installs the `ops-console` command. The first command you run installs the app into `~/.ops-console`, and
+`brew upgrade` brings the app up to the formula's version on the next command. `ops-console update` still installs the
+newest release. `brew uninstall` removes only the command: run `ops-console uninstall` first to remove the app.
+
 launchd starts the console at login and again if it stops. macOS lists it as Ops Console under System Settings ›
 General › Login Items & Extensions › App Background Activity; keep it switched on there. Several browsers can use
 it at once: `ops-console open "Google Chrome"` signs in a browser other than the default.

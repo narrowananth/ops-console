@@ -18,6 +18,16 @@ curl -fsSL https://raw.githubusercontent.com/narrowananth/ops-console/main/insta
 
 A shell running under Rosetta on an Apple silicon Mac installs the Apple silicon build.
 
+### With Homebrew
+
+```
+brew install narrowananth/ops-console/ops-console
+ops-console start
+ops-console open
+```
+
+Homebrew installs only the `ops-console` command. The first command you run installs the app into `~/.ops-console`, from the release Homebrew already downloaded and checked. After `brew upgrade`, the next command installs the new version when yours is older, and restarts a running console. It never installs an older version over a newer one, so `ops-console update` and the console's own update keep working. Homebrew needs to be the native one for your Mac: on Apple silicon that is the one in `/opt/homebrew`.
+
 ## Start at login
 
 `ops-console start` registers a launchd job that starts the console at login and again if it stops. macOS lists it as Ops Console under System Settings › General › Login Items & Extensions › App Background Activity. Keep it switched on there, or it won't start at login.
@@ -52,4 +62,4 @@ Run `ops-console update`. It installs the latest release and restarts a running 
 
 ## Uninstall
 
-`ops-console uninstall` removes the install and leaves your data and logs. To remove everything, delete the data folder and the log folder yourself, and the Keychain items named `ops-console` in Keychain Access. Disconnect your Connectors first, so each one revokes its access at the service.
+`ops-console uninstall` removes the install and leaves your data and logs. If you installed with Homebrew, run it before `brew uninstall ops-console`, which removes only the command. To remove everything, delete the data folder and the log folder yourself, and the Keychain items named `ops-console` in Keychain Access. Disconnect your Connectors first, so each one revokes its access at the service.
