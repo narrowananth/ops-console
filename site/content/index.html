@@ -71,7 +71,7 @@
         <li>Every run's commands go through the macOS sandbox, which has no switch to turn it off.</li>
         <li>PROD Connections are read-only for the agent, and a write to PROD asks for your approval in every Access mode.</li>
         <li>Log text is data, never an instruction.</li>
-        <li>The server listens on 127.0.0.1 only, and secrets stay in the Keychain.</li>
+        <li>The server listens on 127.0.0.1 only, and secrets stay in the Keychain. Nothing goes to a server the project runs: see the <a href="/docs/data-flow/">data flow</a>.</li>
       </ul>
       <p class="note"><a href="/docs/safety/">Read how each rule works</a></p>
     </div>

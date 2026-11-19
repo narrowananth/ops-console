@@ -17,6 +17,7 @@ export const DOCS = [
   { slug: 'connectors', title: 'Connectors' },
   { slug: 'google', title: 'Google Docs, Sheets and Drive' },
   { slug: 'claude-accounts', title: 'Claude accounts and CLIProxy' },
+  { slug: 'data-flow', title: 'Data flow' },
   { slug: 'safety', title: 'Safety' },
   { slug: 'develop', title: 'Run from source' },
 ];

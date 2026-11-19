@@ -16,7 +16,7 @@ Owner decision. Each waits for the thing named, then moves back into the order b
 Small items for first-run friction. None conflicts with an ADR.
 
 - Homebrew tap, shipped in 0.1.61: `brew tap narrowananth/ops-console https://github.com/narrowananth/ops-console`, then `brew install ops-console`. Spec: [homebrew-tap](specs/homebrew-tap.md).
-- Add a data-flow section to `PRIVACY.md` and the site: what moves between the operator's machine, Anthropic's API and each Connector, and that none of it reaches an Ops Console server. [ADR 0003](adr/0003-local-only-server.md) already guarantees this, so the work is documentation.
+- Add a data-flow section to `PRIVACY.md` and the site: what moves between the operator's machine, Anthropic's API and each Connector, and that none of it reaches an Ops Console server. [ADR 0003](adr/0003-local-only-server.md) already guarantees this, so the work is documentation. Spec: [data-flow-docs](specs/data-flow-docs.md).
 
 ## 2. Self-serve onboarding
 

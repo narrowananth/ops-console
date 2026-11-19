@@ -1,6 +1,6 @@
 # Privacy policy
 
-Effective 18 November 2026.
+Effective 19 November 2026.
 
 Ops Console is open-source software that runs on your own Mac. This page says what it stores, what leaves your Mac and where it goes, and how to remove it.
 
@@ -28,6 +28,18 @@ The daemon log is `~/Library/Logs/ops-console/daemon.log`.
 Secrets are kept in your macOS Keychain, not in the database, the log or the browser: Connection passwords, service tokens, the CLIProxy API key, an MCP Server's environment variables and the Google refresh token. One exception is the headers of an HTTP or SSE MCP Server, which Claude Code sends itself and keeps in its own configuration file in plain text. The form that adds one says so.
 
 Text the agent reads or writes, including what a tool returned from a database or a service, is saved in your Session history on your Mac until you delete it.
+
+## Data flow
+
+Three parties handle your data: your Mac, Anthropic's API and the services you connect (Connectors). The project's own servers are not one of them.
+
+- **Your Mac** holds the console, its database, your Session history and your secrets. The console's own checks and lists, such as a Scan, a Health check or a pull request list, go from your Mac to the service and back. No model reads them, and the results stay on your Mac.
+- **Anthropic's API**, the AI provider behind your Claude account, receives what the agent works with: your prompts, the files it reads and what each tool it calls returns. That includes a Connector's answer to an agent request and rows from a Connection. With CLIProxy, the same data goes to a CLIProxy server on your Mac and from there to the providers you configured.
+- **A Connector** receives the requests you or the agent make with your sign-in, and answers them. An answer to one of the console's own checks stays on your Mac. An answer to the agent goes on to Anthropic's API.
+
+None of this reaches an Ops Console server. The only requests tied to the project go to GitHub: the update check asks for the latest release, and an update downloads from it. The app never calls opsconsole.org. Claude Code, which the console runs, has its own traffic to Anthropic under Anthropic's terms and your Claude Code settings. The console does not change it.
+
+The [data-flow page](https://opsconsole.org/docs/data-flow/) lists each route.
 
 ## What leaves your Mac
 
