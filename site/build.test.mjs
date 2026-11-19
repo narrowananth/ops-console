@@ -138,3 +138,24 @@ test('the data-flow docs page sits between Claude accounts and Safety, and the s
   const home = await readFile(path.join(dist, 'index.html'), 'utf8');
   assert.match(home, /href="\/docs\/data-flow\/"/);
 });
+
+test('the Connectors page lists thirteen Connectors and has an OpenTelemetry logs section', async () => {
+  await build();
+  const page = await readFile(path.join(dist, 'docs', 'connectors', 'index.html'), 'utf8');
+  assert.match(page, /<h2 id="[^"]+">The thirteen Connectors<\/h2>/);
+  const [table] = page.match(/<table>[\s\S]*?<\/table>/) ?? [];
+  assert.ok(table, 'the page has the Connector table');
+  assert.equal(table.match(/<tr><td>/g)?.length, 13, 'one row per Connector');
+  assert.match(table, /<td>OpenTelemetry logs<\/td>/);
+  assert.match(page, /<h2 id="opentelemetry-logs">OpenTelemetry logs<\/h2>/);
+  assert.match(page, /<pre><code>[\s\S]*exporters:[\s\S]*<\/code><\/pre>/, 'the section shows a Collector config');
+});
+
+test('the data-flow page puts the Log folder on the Mac and its records in a prompt only as Samples', async () => {
+  await build();
+  const page = await readFile(path.join(dist, 'docs', 'data-flow', 'index.html'), 'utf8');
+  const [row] = page.match(/<tr><td>Log folder<\/td>[\s\S]*?<\/tr>/) ?? [];
+  assert.ok(row, 'the By route table has a Log folder row');
+  assert.match(row, /on your Mac/);
+  assert.match(row, /only as Samples/);
+});

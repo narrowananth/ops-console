@@ -5,8 +5,8 @@ import { and, eq, inArray, lt, notInArray, sql } from 'drizzle-orm';
 import { alertEvents, alerts, scans, services } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { everyMinutes, Scheduler } from '../scheduler/scheduler';
-import { datadogConfig } from './datadog-config';
 import { scanReads } from './freshness';
+import { logSourceConfig } from './log-source-config';
 
 /** An open Alert no Scan has seen for this long is resolved. */
 export const AUTO_RESOLVE_DAYS = 14;
@@ -114,9 +114,9 @@ export class MonitorRetention {
       .where(eq(scans.status, ScanStatus.Ok))
       .orderBy(sql`${scans.finishedAt} desc`)
       .all();
-    const interval = datadogConfig(this.store.db).default_interval as CheckInterval;
     const kept = new Set<string>();
     for (const service of this.store.db.select().from(services).all()) {
+      const interval = logSourceConfig(this.store.db, service.connector).default_interval as CheckInterval;
       const reads = ok.filter((scan) => scanReads(scan, service, interval));
       const newest = reads[0];
       const allCodes = reads.find((scan) => scan.statusCodes === '[]');

@@ -30,7 +30,7 @@ A user in any timezone should get from install to a first verified alert without
 
 Datadog covers one slice of teams. Order by reach per integration:
 
-1. Generic OpenTelemetry logs and a webhook receiver, which cover most other tools without a vendor-specific Connector.
+1. Generic OpenTelemetry logs and a webhook receiver, which cover most other tools without a vendor-specific Connector. Spec: [otel-log-source](specs/otel-log-source.md).
 2. AWS CloudWatch.
 3. Grafana Loki.
 4. New Relic.

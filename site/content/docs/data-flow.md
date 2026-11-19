@@ -7,7 +7,7 @@ This page says what moves between your Mac, Anthropic's API and each Connector, 
 - **The console's own calls.** A Scan, a Health check, a Recheck, a pull request list and a Pull request opening go from the daemon on your Mac to the service. No model turn is involved. What comes back stays on your Mac.
 - **The agent's calls.** An MCP Server tool, the output of a `run_integration` command and a file the agent reads each return their result to the agent, and that result goes on to Anthropic's API as part of the run.
 
-Samples and Reports the console stores reach Anthropic only when a Verification or a Fix puts them in a prompt.
+Samples and Reports the console stores reach Anthropic only when a Verification or a Fix puts them in a prompt. This holds for the records of a Log folder too: the daemon reads the folder on your Mac, and the agent never does.
 
 ## By route
 
@@ -15,6 +15,7 @@ Samples and Reports the console stores reach Anthropic only when a Verification 
 | ----- | ---------- | --------------------- | --------------------- |
 | CLI the daemon calls | Datadog (`pup`), GitHub (`gh`), GitLab (`glab`), Bitbucket (`bkt`), slashdocs | The daemon, for the console's own reads. For the agent, the daemon runs the command it asks for through `run_integration`: a read at once, a write after your Approval unless the Session is in full mode or you chose not to be asked again. | A console read stays on your Mac. A command the agent asked for returns its output to the agent, so it goes to Anthropic's API. |
 | MCP Server Claude Code calls | Jira, Slack, Sentry, Shopify, GitHub, Datadog, and Bitbucket through Atlassian | Claude Code, from your Mac, with the sign-in the Connector holds | The agent, then Anthropic's API |
+| Log folder | OpenTelemetry logs | The daemon, which reads the folder on your Mac as you, read only. No service is called. | A console read stays on your Mac. The records reach Anthropic's API only as Samples in a prompt. The agent never reads the folder. |
 | Google bridge | Google Docs, Google Sheets, Google Drive | The bridge the console ships, which calls the product's REST API when the agent calls a Google tool | The agent, then Anthropic's API. The agent never sees the refresh token, which stays in your Keychain. |
 
 Secrets stay in your Keychain and are read at the moment of use.

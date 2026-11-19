@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -52,6 +52,7 @@ import { FakeCodeHosts } from './fakes/code-hosts';
 import { FakeConnectorTools } from './fakes/connector-tools';
 import { FakeDatadog, route, samples, service } from './fakes/datadog';
 import { FakeGitHost, hostPr } from './fakes/git-host';
+import { type OtelRecord, otlpLine, writeLogFile } from './fakes/otlp';
 import { FakeProbe } from './fakes/probe';
 import { MIGRATIONS_DIR, startTestDaemon, tempDir } from './helpers';
 
@@ -98,6 +99,8 @@ type Ctx = {
   http: ReturnType<typeof api>;
   dir: string;
   codeHosts: FakeCodeHosts;
+  /** The Log folder the OpenTelemetry source is pointed at. */
+  logs: string;
 };
 
 /** Where a Session's agent works: its own worktree of the Repo. */
@@ -107,7 +110,9 @@ function setConnector(store: Store, id: ConnectorId, patch: Partial<typeof conne
   store.write((tx) => tx.update(connectors).set(patch).where(eq(connectors.id, id)).run());
 }
 
-async function start(options: { dataDir?: string; datadog?: FakeDatadog; connected?: boolean } = {}): Promise<Ctx> {
+async function start(
+  options: { dataDir?: string; datadog?: FakeDatadog; connected?: boolean; otelReadLimit?: number } = {},
+): Promise<Ctx> {
   const datadog = options.datadog ?? new FakeDatadog();
   const host = new FakeGitHost();
   const codeHosts = new FakeCodeHosts();
@@ -119,7 +124,7 @@ async function start(options: { dataDir?: string; datadog?: FakeDatadog; connect
       ConnectorsModule.forRoot({ tools: new FakeConnectorTools() }),
       ReposModule.forRoot(),
       WorkspaceModule.forRoot({ hosts: host }),
-      MonitorModule.forRoot({ datadog, codeHosts }),
+      MonitorModule.forRoot({ datadog, codeHosts, otelReadLimit: options.otelReadLimit }),
     ],
   });
   running.push(daemon);
@@ -129,11 +134,12 @@ async function start(options: { dataDir?: string; datadog?: FakeDatadog; connect
     setConnector(store, ConnectorId.Jira, { status: HealthStatus.Ok });
     setConnector(store, ConnectorId.Github, { status: HealthStatus.Ok, login: 'octo-operator' });
   }
-  return { daemon, datadog, host, store, http: api(daemon), dir: '', codeHosts };
+  const logs = await tempDir('ops-console-logs-');
+  return { daemon, datadog, host, store, http: api(daemon), dir: '', codeHosts, logs };
 }
 
 async function scan(ctx: Ctx, serviceId: string | null = null): Promise<{ id: string; status: string }> {
-  const started = await ctx.http.post('/scans', { service_id: serviceId });
+  const started = await ctx.http.post('/scans', { service_id: serviceId, connector: 'datadog' });
   expect(started.status).toBe(202);
   return until(
     () => ctx.http.get(`/scans/${started.body.data.id}`).then((res) => res.body.data),
@@ -211,6 +217,21 @@ describe('Fingerprint', () => {
     expect(fingerprint('s1', 'POST', '/orders', 'Timeout talking to payments')).not.toBe(base);
   });
 
+  it('keeps the value Datadog Alerts were stored with', () => {
+    expect(fingerprint('svc-1', 'POST', '/orders/:id', 'Null pointer in OrderService', 500)).toBe(
+      '11c180639173c6ab452ed1ae9bcd02e9',
+    );
+    expect(fingerprint('svc-1', 'POST', '/orders/:id', 'Null pointer in OrderService')).toBe(
+      'f674f78667046125afc1cd94a337268d',
+    );
+  });
+
+  it('includes the source for OpenTelemetry logs', () => {
+    const datadog = fingerprint('svc-1', 'POST', '/orders', 'Order 1 not found', 500);
+    expect(fingerprint('svc-1', 'POST', '/orders', 'Order 1 not found', 500, ConnectorId.Datadog)).toBe(datadog);
+    expect(fingerprint('svc-1', 'POST', '/orders', 'Order 1 not found', 500, ConnectorId.OtelLogs)).not.toBe(datadog);
+  });
+
   it('folds ids in paths into one Route', () => {
     expect(normalizePath('/orders/1042/items/9f3a1c2e-1111-2222-3333-444455556666')).toBe('/orders/:id/items/:id');
     expect(normalizePath('/health?x=1')).toBe('/health');
@@ -285,12 +306,12 @@ describe('Scans and Alerts', () => {
       service('webhook', [route('POST', '/hooks', 30)], 'no env'),
       service('quiet', [route('GET', '/ping', 0)], 'prod'),
     ];
-    const listed = await ctx.http.get('/monitor/datadog-services?window=24h&envs=prod,staging,no%20env');
+    const listed = await ctx.http.get('/monitor/log-services?window=24h&envs=prod,staging,no%20env');
     expect(listed.body.data).toEqual([
       { name: 'webhook', envs: ['no env'], errors: 30 },
       { name: 'orders-api', envs: ['staging', 'prod'], errors: 13 },
     ]);
-    const bad = await ctx.http.get('/monitor/datadog-services?window=3d&envs=prod');
+    const bad = await ctx.http.get('/monitor/log-services?window=3d&envs=prod');
     expect(bad.body.error.code).toBe('validation_failed');
   });
 
@@ -327,7 +348,7 @@ describe('Scans and Alerts', () => {
       'orders-api',
       'webhook',
     ]);
-    const listed = await ctx.http.get('/monitor/datadog-services?window=24h');
+    const listed = await ctx.http.get('/monitor/log-services?window=24h');
     expect(listed.body.data.map((row: { name: string }) => row.name)).toEqual(['orders-api', 'webhook']);
   });
 
@@ -373,9 +394,9 @@ describe('Scans and Alerts', () => {
       { code: 404, count: 5 },
       { code: 500, count: 2 },
     ]);
-    const picked = await ctx.http.get('/monitor/datadog-services?window=24h&codes=401,500');
+    const picked = await ctx.http.get('/monitor/log-services?window=24h&codes=401,500');
     expect(picked.body.data).toEqual([{ name: 'orders-api', envs: ['prod'], errors: 9 }]);
-    expect((await ctx.http.get('/monitor/datadog-services?window=24h&codes=200')).body.error.code).toBe(
+    expect((await ctx.http.get('/monitor/log-services?window=24h&codes=200')).body.error.code).toBe(
       'validation_failed',
     );
   });
@@ -432,6 +453,8 @@ describe('Scans and Alerts', () => {
           samples: samples(5, 'db down', 'emergency'),
         }),
         route('GET', '/server', 240, { statusCode: 502, peakPer10m: 20, samples: samples(5, 'bad gateway', 'warn') }),
+        // `fatal` is OpenTelemetry's word; a Datadog Sample with it rates as before.
+        route('GET', '/fatal', 240, { statusCode: 401, peakPer10m: 20, samples: samples(5, 'crashed', 'fatal') }),
       ]),
     ];
     await scan(ctx);
@@ -445,6 +468,7 @@ describe('Scans and Alerts', () => {
       '/warnonly': 'low',
       '/emergency': 'medium',
       '/server': 'medium',
+      '/fatal': 'low',
     });
   });
 
@@ -1937,11 +1961,11 @@ describe('Alert list and retention', () => {
     const [listed] = await alertList(ctx);
     setAlert(ctx, listed.id, { logLine: 'x'.repeat(1000) });
     const [row] = await alertList(ctx);
-    expect(row).not.toHaveProperty('datadog_query');
+    expect(row).not.toHaveProperty('source_query');
     expect(row.log_line).toHaveLength(300);
     const full = (await ctx.http.get(`/alerts/${listed.id}`)).body.data;
     expect(full.log_line).toHaveLength(1000);
-    expect(full.datadog_query).toContain('service:orders-api');
+    expect(full.source_query).toContain('service:orders-api');
   });
 
   it('lists the Alerts not closed by default, and the closed ones a page at a time', async () => {
@@ -2110,7 +2134,7 @@ describe('Prod parity check', () => {
       const reads = ctx.datadog.calls.length;
       const before = ctx.daemon.sdk.calls.length;
       const report = await verify(ctx, alert.id);
-      expect(ctx.datadog.rechecks).toEqual([{ query: (await detail(ctx, alert.id)).datadog_query, window: '1h' }]);
+      expect(ctx.datadog.rechecks).toEqual([{ query: (await detail(ctx, alert.id)).source_query, window: '1h' }]);
       // A count only: the Recheck reads no log lines, as a Scan's read does.
       expect(ctx.datadog.calls).toHaveLength(reads);
       const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
@@ -2190,8 +2214,8 @@ describe('Prod parity check', () => {
         'Datadog recheck, last hour: still failing',
       );
       expect(ctx.datadog.rechecks.map((r) => r.query)).toEqual([
-        (await detail(ctx, first.id)).datadog_query,
-        (await detail(ctx, second.id)).datadog_query,
+        (await detail(ctx, first.id)).source_query,
+        (await detail(ctx, second.id)).source_query,
       ]);
     });
 
@@ -2313,6 +2337,570 @@ describe('Prod parity check', () => {
       await linkRepo(ctx, alert.service.id);
       const report = await verify(ctx, alert.id, [json({ ...REPORT, markdown: '# No parity here' })]);
       expect((await ctx.http.get(`/reports/${report.id}`)).body.data).toMatchObject({ status: 'ready' });
+    });
+  });
+});
+
+describe('OpenTelemetry logs', () => {
+  const MINUTE = 60_000;
+  const minutesAgo = (minutes: number) => Date.now() - minutes * MINUTE;
+  const failure = (minutes: number, extra: Partial<OtelRecord> = {}): OtelRecord => ({
+    at: minutesAgo(minutes),
+    service: 'orders-api',
+    resource: { 'deployment.environment.name': 'prod' },
+    severity: 17,
+    body: 'NullPointerException in OrderService',
+    attributes: { 'http.response.status_code': 500, 'http.request.method': 'POST', 'http.route': '/orders' },
+    ...extra,
+  });
+  const lines = (records: OtelRecord[]) => records.map((record) => otlpLine(record));
+
+  /** Points the OpenTelemetry source at the Log folder, as the operator does in Integrations. */
+  async function connectLogs(ctx: Ctx) {
+    const connected = await ctx.http.post('/connectors/otel_logs/connect', { folder: ctx.logs });
+    expect(connected.status).toBe(202);
+  }
+
+  /** A Scan of the OpenTelemetry source, ended. */
+  async function scanLogs(ctx: Ctx, body: Record<string, unknown> = {}) {
+    const started = await ctx.http.post('/scans', { service_id: null, connector: 'otel_logs', ...body });
+    expect(started.status).toBe(202);
+    return until(
+      () => ctx.http.get(`/scans/${started.body.data.id}`).then((res) => res.body.data),
+      (found) => found.status !== 'running',
+      'the Scan to end',
+    );
+  }
+
+  /** A Log folder holding one file of `records`, connected and scanned. */
+  async function scanned(records: OtelRecord[], options: { limit?: number; body?: Record<string, unknown> } = {}) {
+    const ctx = await start({ otelReadLimit: options.limit });
+    await writeLogFile(ctx.logs, 'logs.jsonl', lines(records));
+    await connectLogs(ctx);
+    const ended = await scanLogs(ctx, options.body);
+    return { ctx, ended };
+  }
+
+  const titles = (ctx: Ctx) =>
+    alertList(ctx).then((list: { title: string }[]) => list.map((alert) => alert.title).sort());
+
+  describe('the read', () => {
+    it('maps a record to its Service, env, Route, status code, message, time and version', async () => {
+      const { ctx, ended } = await scanned([
+        failure(5, { resource: { 'deployment.environment.name': 'prod', 'service.version': '1.4.2' } }),
+        // The older attribute names, and the Route taken from the path.
+        failure(6, {
+          service: 'billing-api',
+          resource: { 'deployment.environment': 'staging' },
+          attributes: { 'http.status_code': 502, 'http.method': 'get', 'url.path': '/invoices/1042?page=2' },
+          body: 'upstream refused',
+        }),
+        // `http.route` wins over the path, and a record with no env reads as no env.
+        failure(7, {
+          service: 'worker',
+          resource: {},
+          attributes: {
+            'http.response.status_code': 503,
+            'http.request.method': 'PUT',
+            'http.route': '/jobs/{id}',
+            'url.path': '/jobs/9',
+          },
+          body: 'queue full',
+        }),
+      ]);
+      expect(ended).toMatchObject({ status: 'ok', connector: 'otel_logs', notes: [] });
+      const found = (await ctx.http.get('/services')).body.data.map(
+        (svc: { name: string; env: string; connector: string }) => [svc.name, svc.env, svc.connector],
+      );
+      expect(found.sort()).toEqual([
+        ['billing-api', 'staging', 'otel_logs'],
+        ['orders-api', 'prod', 'otel_logs'],
+        ['worker', 'no env', 'otel_logs'],
+      ]);
+      const list = await alertList(ctx);
+      const by = (name: string) => list.find((alert: { service: { name: string } }) => alert.service.name === name);
+      expect(by('orders-api')).toMatchObject({
+        connector: 'otel_logs',
+        http_status: 500,
+        route: { method: 'POST', path: '/orders' },
+        title: '500 POST /orders failing on orders-api',
+        log_line: 'NullPointerException in OrderService',
+        service: { repo_url: null },
+      });
+      expect(by('billing-api')).toMatchObject({ http_status: 502, route: { method: 'GET', path: '/invoices/:id' } });
+      expect(by('worker')).toMatchObject({ http_status: 503, route: { method: 'PUT', path: '/jobs/{id}' } });
+      const detail = (await ctx.http.get(`/alerts/${by('orders-api').id}`)).body.data;
+      expect(JSON.parse(detail.source_query)).toEqual({
+        service: 'orders-api',
+        env: 'prod',
+        status: 500,
+        method: 'POST',
+        path: '/orders',
+      });
+      expect(detail.samples[0]).toMatchObject({
+        message: 'NullPointerException in OrderService',
+        status: 'error',
+        tags: expect.arrayContaining(['version:1.4.2']),
+      });
+      expect(Math.abs(Date.parse(detail.samples[0].timestamp) - minutesAgo(5))).toBeLessThan(MINUTE);
+    });
+
+    it('counts a record as failing by a status code of 400 or more, or by a severity number of 17 or more', async () => {
+      const plain = { service: 'orders-api', resource: { 'deployment.environment.name': 'prod' }, at: minutesAgo(5) };
+      const code = (status: number) => ({ 'http.response.status_code': status });
+      const { ctx } = await scanned([
+        // Failing by severity alone: a 200 that logged an error.
+        { ...plain, severity: 17, body: 'handler threw', attributes: code(200) },
+        // Failing by status alone: a 404 logged as info.
+        { ...plain, severity: 9, body: 'no such cart', attributes: code(404) },
+        // Failing by severity, with no request at all.
+        { ...plain, severity: 21, body: 'worker crashed' },
+        // Neither.
+        { ...plain, severity: 9, body: 'all fine', attributes: code(200) },
+        { ...plain, severity: 16, body: 'slow call' },
+      ]);
+      expect(await titles(ctx)).toEqual([
+        'orders-api: handler threw',
+        'orders-api: no such cart',
+        'orders-api: worker crashed',
+      ]);
+    });
+
+    it('reads only the records inside the Scan window', async () => {
+      const { ctx } = await scanned([failure(30, { body: 'inside' }), failure(150, { body: 'outside' })], {
+        body: { window: '1h' },
+      });
+      const [alert] = await alertList(ctx);
+      expect(alert).toMatchObject({ event_count: 1, log_line: 'inside' });
+    });
+
+    it('reads the .json and .jsonl files in the folder, newest first, and no other file or folder', async () => {
+      const ctx = await start();
+      await writeLogFile(ctx.logs, 'a.json', lines([failure(5)]));
+      await writeLogFile(ctx.logs, 'b.jsonl', lines([failure(6)]));
+      await writeLogFile(ctx.logs, 'c.json.gz', lines([failure(5, { body: 'zipped' })]));
+      await writeLogFile(ctx.logs, 'd.pb', lines([failure(5, { body: 'protobuf' })]));
+      await writeLogFile(ctx.logs, 'rotated/e.jsonl', lines([failure(5, { body: 'in a subfolder' })]));
+      await connectLogs(ctx);
+      const ended = await scanLogs(ctx);
+      expect(ended.notes).toEqual([]);
+      expect(await titles(ctx)).toEqual(['500 POST /orders failing on orders-api']);
+      const [alert] = await alertList(ctx);
+      expect(alert.event_count).toBe(2);
+    });
+
+    it('says an empty folder has nothing to read, and finds nothing', async () => {
+      const ctx = await start();
+      await connectLogs(ctx);
+      const ended = await scanLogs(ctx);
+      expect(ended).toMatchObject({ status: 'ok', notes: ['The Log folder has no .json or .jsonl files'] });
+      expect(await alertList(ctx)).toEqual([]);
+    });
+
+    it('stops at the read cap, newest files first, and says it read the newest only', async () => {
+      const fresh = lines([failure(5, { body: 'in the new file' })]);
+      // The cap leaves room for the newest file and a part of the next.
+      const ctx = await start({ otelReadLimit: Buffer.byteLength(`${fresh.join('\n')}\n`) + 10 });
+      await writeLogFile(ctx.logs, 'new.jsonl', fresh, Date.now());
+      await writeLogFile(ctx.logs, 'old.jsonl', lines([failure(5, { body: 'in the old file' })]), minutesAgo(30));
+      await connectLogs(ctx);
+      const ended = await scanLogs(ctx);
+      expect(ended.status).toBe('ok');
+      expect(ended.notes).toEqual([expect.stringMatching(/^Read the newest .* only$/)]);
+      const [alert] = await alertList(ctx);
+      expect(alert).toMatchObject({ event_count: 1, log_line: 'in the new file' });
+      expect(await alertList(ctx)).toHaveLength(1);
+    });
+
+    it('keeps the newest records of one file larger than the read cap, and says so', async () => {
+      // A growing file: oldest records first. The cap holds the last two lines and a part of the one before.
+      const older = lines([failure(50, { body: 'oldest' }), failure(40, { body: 'older' })]);
+      const newest = lines([failure(3, { body: 'newer' }), failure(2, { body: 'newest' })]);
+      const ctx = await start({ otelReadLimit: Buffer.byteLength(`${newest.join('\n')}\n`) + 20 });
+      await writeLogFile(ctx.logs, 'growing.jsonl', [...older, ...newest]);
+      await connectLogs(ctx);
+      const ended = await scanLogs(ctx);
+      expect(ended.status).toBe('ok');
+      expect(ended.notes).toEqual([expect.stringMatching(/^Read the newest .* only$/)]);
+      const logLines = (await alertList(ctx)).map((alert: { log_line: string }) => alert.log_line).sort();
+      expect(logLines).toEqual(['newer', 'newest']);
+    });
+
+    it('skips a line that is not a log record, finishes the Scan, and says how many it skipped', async () => {
+      const ctx = await start();
+      await writeLogFile(ctx.logs, 'logs.jsonl', [
+        otlpLine(failure(5)),
+        '{"resourceLogs": "not a list"',
+        '{"resourceLogs": 7}',
+        'plain text, not JSON',
+        otlpLine(failure(4)),
+      ]);
+      await connectLogs(ctx);
+      const ended = await scanLogs(ctx);
+      expect(ended).toMatchObject({ status: 'ok', notes: ['Skipped 3 lines that were not valid log records'] });
+      expect((await alertList(ctx))[0].event_count).toBe(2);
+    });
+
+    it('keeps secret values and request body values out of the Samples', async () => {
+      const { ctx } = await scanned([
+        failure(5, {
+          body: 'login failed password=hunter2hunter2 for u-1',
+          attributes: {
+            'http.response.status_code': 500,
+            'http.request.method': 'POST',
+            'http.route': '/login',
+            'http.request.body': '{"card":"4111111111111111"}',
+            'http.request.header.authorization': 'Bearer abcdefghij123456',
+            'user.id': 'u-1',
+          },
+        }),
+      ]);
+      const [listed] = await alertList(ctx);
+      const [sample] = (await ctx.http.get(`/alerts/${listed.id}`)).body.data.samples;
+      expect(sample.message).toBe('login failed password=[redacted] for u-1');
+      expect(sample.attributes).toMatchObject({
+        'http.request.body': '[redacted]',
+        'http.request.header.authorization': '[redacted]',
+        'user.id': 'u-1',
+      });
+    });
+  });
+
+  describe('Alerts', () => {
+    it('sets Severity from the same rules as Datadog: rapid is high, steady errors are medium, a few are low', async () => {
+      const bucket = Math.floor(minutesAgo(60) / (10 * MINUTE)) * 10 * MINUTE;
+      const rapid = Array.from({ length: 100 }, (_, i) =>
+        failure(0, { at: bucket + i * 1000, attributes: { ...failure(0).attributes, 'http.route': '/rapid' } }),
+      );
+      const steady = Array.from({ length: 120 }, (_, i) =>
+        failure(0, { at: minutesAgo(i + 1), attributes: { ...failure(0).attributes, 'http.route': '/steady' } }),
+      );
+      const few = [1, 2, 3].map((i) => failure(i, { attributes: { ...failure(0).attributes, 'http.route': '/few' } }));
+      // Severity 21 and above is fatal: error level whatever the status code.
+      const fatal = Array.from({ length: 120 }, (_, i) =>
+        failure(0, {
+          at: minutesAgo(i + 1),
+          severity: 21,
+          attributes: { ...failure(0).attributes, 'http.response.status_code': 401, 'http.route': '/fatal' },
+        }),
+      );
+      const { ctx } = await scanned([...rapid, ...steady, ...few, ...fatal]);
+      const severities = Object.fromEntries(
+        (await alertList(ctx)).map((alert: { route: { path: string }; severity: string }) => [
+          alert.route.path,
+          alert.severity,
+        ]),
+      );
+      expect(severities).toEqual({ '/rapid': 'high', '/steady': 'medium', '/few': 'low', '/fatal': 'medium' });
+    });
+
+    it('keeps one Service name and env in two sources as two Services and two Alerts', async () => {
+      const ctx = await start();
+      ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 4)])];
+      await writeLogFile(ctx.logs, 'logs.jsonl', lines([failure(5)]));
+      await connectLogs(ctx);
+      const started = await ctx.http.post('/scans', { service_id: null });
+      expect(started.status).toBe(202);
+      await until(
+        () => ctx.http.get('/scans').then((res) => res.body.data),
+        (all: { status: string }[]) => all.length === 2 && all.every((one) => one.status === 'ok'),
+        'both Scans',
+      );
+      const rows = ctx.store.db.select().from(services).all();
+      expect(rows.map((row) => [row.connector, row.name, row.env]).sort()).toEqual([
+        ['datadog', 'orders-api', 'prod'],
+        ['otel_logs', 'orders-api', 'prod'],
+      ]);
+      const list = await alertList(ctx);
+      expect(list.map((alert: { connector: string }) => alert.connector).sort()).toEqual(['datadog', 'otel_logs']);
+      expect(new Set(list.map((alert: { fingerprint: string }) => alert.fingerprint)).size).toBe(2);
+      expect(
+        (await alertList(ctx, '?connector=otel_logs')).map((alert: { connector: string }) => alert.connector),
+      ).toEqual(['otel_logs']);
+    });
+
+    it('does not clear the other source Alerts when one source has nothing to report', async () => {
+      const ctx = await start();
+      await writeLogFile(ctx.logs, 'logs.jsonl', lines([failure(5)]));
+      await connectLogs(ctx);
+      await scanLogs(ctx);
+      ctx.datadog.readings = [];
+      await scan(ctx);
+      const [row] = ctx.store.db.select().from(alerts).all();
+      expect(row).toMatchObject({ connector: 'otel_logs', clearedAt: null });
+    });
+  });
+
+  describe('Scans of two sources', () => {
+    it('reads every connected source when none is named, and one source down does not stop the other', async () => {
+      const ctx = await start();
+      ctx.datadog.down = 'failed';
+      await writeLogFile(ctx.logs, 'logs.jsonl', lines([failure(5)]));
+      await connectLogs(ctx);
+      expect((await ctx.http.post('/scans', { service_id: null })).status).toBe(202);
+      type Ended = { connector: string; status: string };
+      const ended = await until(
+        (): Promise<Ended[]> => ctx.http.get('/scans').then((res) => res.body.data),
+        (all) => all.length === 2 && all.every((one) => one.status !== 'running'),
+        'both Scans',
+      );
+      const byConnector = Object.fromEntries(ended.map((one) => [one.connector, one]));
+      expect(byConnector.datadog).toMatchObject({ status: 'failed', error_code: 'upstream_failed' });
+      expect(byConnector.otel_logs).toMatchObject({ status: 'ok' });
+      expect(await titles(ctx)).toEqual(['500 POST /orders failing on orders-api']);
+    });
+
+    it('reads only the source it is asked for', async () => {
+      const ctx = await start();
+      await writeLogFile(ctx.logs, 'logs.jsonl', lines([failure(5)]));
+      await connectLogs(ctx);
+      await scanLogs(ctx);
+      expect(ctx.datadog.calls).toHaveLength(0);
+      expect((await ctx.http.get('/scans')).body.data.map((one: { connector: string }) => one.connector)).toEqual([
+        'otel_logs',
+      ]);
+    });
+
+    it('refuses a Scan or a Service list of a source that is not connected', async () => {
+      const ctx = await start();
+      const scanRefused = await ctx.http.post('/scans', { service_id: null, connector: 'otel_logs' });
+      expect([scanRefused.status, scanRefused.body.error.code]).toEqual([409, 'connector_not_connected']);
+      const listed = await ctx.http.get('/monitor/log-services?connector=otel_logs&window=24h');
+      expect([listed.status, listed.body.error.code]).toEqual([409, 'connector_not_connected']);
+    });
+
+    it('lists the Services of the OpenTelemetry source with errors in the range', async () => {
+      const ctx = await start();
+      await writeLogFile(
+        ctx.logs,
+        'logs.jsonl',
+        lines([failure(5), failure(6), failure(7, { service: 'billing-api', resource: {} })]),
+      );
+      await connectLogs(ctx);
+      const listed = await ctx.http.get('/monitor/log-services?connector=otel_logs&window=24h');
+      expect(listed.body.data).toEqual([
+        { name: 'orders-api', envs: ['prod'], errors: 2 },
+        { name: 'billing-api', envs: ['no env'], errors: 1 },
+      ]);
+      const envs = await ctx.http.get('/monitor/envs?connector=otel_logs');
+      expect(envs.body.data).toEqual([
+        { name: 'prod', configured: true },
+        { name: 'no env', configured: false },
+      ]);
+    });
+
+    it('runs each source on its own interval, and skips a source that is not connected', async () => {
+      const ctx = await start();
+      await writeLogFile(ctx.logs, 'logs.jsonl', lines([failure(5)]));
+      await connectLogs(ctx);
+      await ctx.http.patch('/connectors/otel_logs', { config: { default_interval: '12h' } });
+      const monitor = ctx.daemon.app.get(ScansService);
+      const scheduled = () =>
+        ctx.store.db
+          .select()
+          .from(scans)
+          .where(eq(scans.triggeredBy, ScanTrigger.Schedule))
+          .all()
+          .map((one) => [one.connector, one.windowSize])
+          .sort();
+      await monitor.runDue(new Date(2026, 9, 5, 9, 1));
+      expect(scheduled()).toEqual([
+        ['datadog', '24h'],
+        ['otel_logs', '12h'],
+      ]);
+      // The Log folder now reads down: only Datadog runs.
+      setConnector(ctx.store, ConnectorId.OtelLogs, { status: HealthStatus.Fail });
+      await monitor.runDue(new Date(Date.now() + 2 * 86_400_000));
+      expect(scheduled()).toEqual([
+        ['datadog', '24h'],
+        ['datadog', '24h'],
+        ['otel_logs', '12h'],
+      ]);
+    });
+
+    it('keeps each source Scans through retention, per Service', async () => {
+      const ctx = await start();
+      ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 4)])];
+      await writeLogFile(ctx.logs, 'logs.jsonl', lines([failure(5)]));
+      await connectLogs(ctx);
+      for (let round = 0; round < 2; round++) {
+        await scan(ctx);
+        await scanLogs(ctx);
+      }
+      const long = new Date(Date.now() - 40 * 86_400_000).toISOString();
+      ctx.store.write((tx) => tx.update(scans).set({ startedAt: long }).run());
+      await ctx.daemon.app.get(MonitorRetention).run();
+      const kept = ctx.store.db.select().from(scans).all();
+      expect(kept.map((one) => one.connector).sort()).toEqual(['datadog', 'otel_logs']);
+    });
+  });
+
+  describe('Recheck, Verification and Fix', () => {
+    const recheckOf = (report: { steps: { kind: string; text: string }[] }) =>
+      report.steps[0] as { kind: string; text: string };
+    const promptsSince = (ctx: Ctx, from: number) => ctx.daemon.sdk.calls.slice(from).map((call) => call.prompt);
+
+    /** The MCP servers the runs since `from` kept out. */
+    const deniedSince = (ctx: Ctx, from: number) =>
+      ctx.daemon.sdk.calls.slice(from).flatMap((call) => {
+        const settings = call.options.settings as { deniedMcpServers?: { serverName: string }[] } | undefined;
+        return (settings?.deniedMcpServers ?? []).map((server) => server.serverName);
+      });
+
+    async function failingLogs(ctx: Ctx, records: OtelRecord[] = [failure(5), failure(8)]) {
+      await writeLogFile(ctx.logs, 'logs.jsonl', lines(records));
+      await connectLogs(ctx);
+      await scanLogs(ctx);
+      const [alert] = await alertList(ctx);
+      await linkRepo(ctx, alert.service.id);
+      return alert;
+    }
+
+    it('reads the Log folder for the last hour through the Alert filter, before the agent starts', async () => {
+      const ctx = await start();
+      const alert = await failingLogs(ctx);
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(recheckOf(stored)).toEqual({
+        kind: 'result',
+        text: 'OpenTelemetry logs recheck, last hour: still failing',
+      });
+      expect(ctx.datadog.rechecks).toEqual([]);
+      expect(stored.status).toBe('ready');
+    });
+
+    it('says not seen when the last hour of the folder holds none of them', async () => {
+      const ctx = await start();
+      const alert = await failingLogs(ctx, [failure(5)]);
+      await writeLogFile(ctx.logs, 'logs.jsonl', lines([failure(100)]));
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(recheckOf(stored).text).toBe('OpenTelemetry logs recheck, last hour: not seen');
+      expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.status).toBe('verified');
+    });
+
+    it('says why a Recheck could not read the folder, and goes on', async () => {
+      const ctx = await start();
+      const alert = await failingLogs(ctx);
+      await rm(ctx.logs, { recursive: true });
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(recheckOf(stored)).toMatchObject({ kind: 'warning' });
+      expect(recheckOf(stored).text).toMatch(/^Recheck failed: /);
+      expect(stored.status).toBe('ready');
+    });
+
+    it('briefs the agent with the source, the Samples and the filter, and tells it to use no pup and no Datadog server', async () => {
+      const ctx = await start();
+      const alert = await failingLogs(ctx, [
+        failure(5, { resource: { 'deployment.environment.name': 'prod', 'service.version': '1.4.2' } }),
+      ]);
+      const before = ctx.daemon.sdk.calls.length;
+      const report = await verify(ctx, alert.id);
+      const brief = promptsSince(ctx, before).find((prompt) => prompt.includes('Find the cause of a failure')) ?? '';
+      expect(brief).toContain('OpenTelemetry logs');
+      expect(brief).toContain('NullPointerException in OrderService');
+      expect(brief).toContain('"service":"orders-api"');
+      expect(brief).toMatch(/no `pup` and no Datadog MCP Server/);
+      expect(brief).toMatch(/needed more logs than/);
+      expect(brief).not.toContain('Datadog query');
+      expect(brief).not.toContain('failure Datadog logged');
+      // The Datadog server stays out of the run.
+      expect(deniedSince(ctx, before)).toContain('datadog-pup');
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      // Prod parity still reads the version tag.
+      expect(stored.steps.map((step: { text: string }) => step.text)).toContainEqual(
+        expect.stringContaining('prod ran `1.4.2`'),
+      );
+    });
+
+    it('starts a Fix of an OpenTelemetry Alert with a Recheck of the folder and the same rule on its tools', async () => {
+      const ctx = await start();
+      const alert = await failingLogs(ctx);
+      await verify(ctx, alert.id);
+      const before = ctx.daemon.sdk.calls.length;
+      for (const run of stepTurns(PlaybookTrigger.Fix)) ctx.daemon.sdk.script(...run);
+      ctx.daemon.sdk.script(json({ description: 'Defaults the order total.' }));
+      const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
+      await until(
+        () => ctx.http.get(`/fixes/${confirm.body.data.fix.id}`).then((res) => res.body.data.status),
+        (status) => status !== 'running',
+        'the Fix to end',
+      );
+      const prompts = promptsSince(ctx, before);
+      expect(prompts[0]).toContain('OpenTelemetry logs recheck, last hour: still failing');
+      expect(prompts[0]).toMatch(/no `pup` and no Datadog MCP Server/);
+      expect(deniedSince(ctx, before)).toContain('datadog-pup');
+    });
+
+    it('keeps the Datadog brief, and heads the evidence section Log evidence for both sources', async () => {
+      const ctx = await start();
+      const alert = await failing(ctx);
+      await linkRepo(ctx, alert.service.id);
+      const before = ctx.daemon.sdk.calls.length;
+      await verify(ctx, alert.id);
+      const prompts = promptsSince(ctx, before);
+      const brief = prompts.find((prompt) => prompt.includes('Find the cause of a failure')) ?? '';
+      expect(brief).toContain('Datadog query: ');
+      expect(brief).not.toContain('OpenTelemetry');
+      expect(brief).not.toMatch(/no `pup`/);
+      expect(deniedSince(ctx, before)).not.toContain('datadog-pup');
+      const closing = prompts.find((prompt) => prompt.includes('Write the Report on this Alert')) ?? '';
+      expect(closing).toContain('Log evidence (log lines');
+      expect(closing).not.toContain('Datadog evidence');
+    });
+  });
+
+  describe('migration', () => {
+    it('keeps every existing Service, Route, Alert, Scan and event, reads them as Datadog, and reopens no Alert', async () => {
+      const dataDir = await tempDir();
+      const older = await tempDir('ops-console-migrations-');
+      await cp(MIGRATIONS_DIR, older, { recursive: true });
+      const journalFile = path.join(older, 'meta', '_journal.json');
+      const journal = JSON.parse(await readFile(journalFile, 'utf8'));
+      // The database as it was before the OpenTelemetry source: its migration is left out.
+      const cut = journal.entries.findIndex((entry: { tag: string }) => entry.tag === '0042_log_source_connector');
+      journal.entries = journal.entries.slice(0, cut);
+      await writeFile(journalFile, JSON.stringify(journal));
+      const before = await startTestDaemon({ dataDir, migrationsDir: older });
+      await before.stop();
+
+      const print = fingerprint('svc-1', 'POST', '/orders', 'NullPointerException in OrderService', 500);
+      const sqlite = new Database(path.join(dataDir, 'state.db'));
+      sqlite.exec(`
+        INSERT INTO services (id, name, env) VALUES ('svc-1', 'orders-api', 'prod');
+        INSERT INTO routes (id, service_id, method, path) VALUES ('route-1', 'svc-1', 'POST', '/orders');
+        INSERT INTO scans (id, triggered_by, window_size, status) VALUES ('scan-1', 'schedule', '24h', 'ok');
+        INSERT INTO scan_route_results (scan_id, route_id, scanned_at, error_count, state)
+          VALUES ('scan-1', 'route-1', '2026-10-01T00:00:00.000Z', 4, 'failing');
+        INSERT INTO alerts (id, route_id, fingerprint, http_status, severity, status, title, log_line, event_count,
+                            first_seen_at, last_seen_at, datadog_query)
+          VALUES ('alert-1', 'route-1', '${print}', 500, 'medium', 'open', 'old title', 'old line', 4,
+                  '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', 'env:prod service:orders-api');
+        INSERT INTO alert_events (id, alert_id, kind, actor) VALUES ('event-1', 'alert-1', 'detected', 'scan');
+      `);
+      sqlite.close();
+
+      const ctx = await start({ dataDir });
+      const db = new Database(path.join(dataDir, 'state.db'));
+      expect(db.prepare('SELECT connector, name, env FROM services').all()).toEqual([
+        { connector: 'datadog', name: 'orders-api', env: 'prod' },
+      ]);
+      expect(db.prepare('SELECT connector FROM scans').all()).toEqual([{ connector: 'datadog' }]);
+      expect(db.prepare('SELECT COUNT(*) AS n FROM routes').get()).toEqual({ n: 1 });
+      expect(db.prepare('SELECT COUNT(*) AS n FROM scan_route_results').get()).toEqual({ n: 1 });
+      expect(db.prepare('SELECT COUNT(*) AS n FROM alert_events').get()).toEqual({ n: 1 });
+      expect(db.prepare('SELECT connector, source_query, status, severity FROM alerts').all()).toEqual([
+        { connector: 'datadog', source_query: 'env:prod service:orders-api', status: 'open', severity: 'medium' },
+      ]);
+      db.close();
+
+      // The same failure seen again is the same Alert: nothing reopens and nothing is duplicated.
+      ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 6)])];
+      await scan(ctx);
+      const list = await alertList(ctx);
+      expect(list).toHaveLength(1);
+      expect(list[0]).toMatchObject({ id: 'alert-1', connector: 'datadog', status: 'open', event_count: 10 });
     });
   });
 });

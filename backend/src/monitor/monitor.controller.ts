@@ -6,11 +6,12 @@ import {
   type AlertSummary,
   alertsQuerySchema,
   createScanSchema,
-  type DatadogService,
-  datadogServicesQuerySchema,
   type FindCodeResult,
   type Fix,
+  type LogService,
+  logServicesQuerySchema,
   type MonitorEnv,
+  monitorEnvsQuerySchema,
   type Page,
   patchRouteSchema,
   patchServiceSchema,
@@ -101,21 +102,22 @@ export class MonitorController {
   }
 
   @Get('monitor/envs')
-  async envs(): Promise<{ data: MonitorEnv[] }> {
-    return { data: await this.scans.envs() };
+  async envs(@Query() query: unknown): Promise<{ data: MonitorEnv[] }> {
+    const { connector } = parseInput(monitorEnvsQuerySchema, query, 'query');
+    return { data: await this.scans.envs(connector) };
   }
 
-  @Get('monitor/datadog-services')
-  async datadogServices(@Query() query: unknown): Promise<{ data: DatadogService[] }> {
-    const { window, envs, codes } = parseInput(datadogServicesQuerySchema, query, 'query');
-    return { data: await this.scans.datadogServices(window, envs, codes ?? []) };
+  @Get('monitor/log-services')
+  async logServices(@Query() query: unknown): Promise<{ data: LogService[] }> {
+    const { connector, window, envs, codes } = parseInput(logServicesQuerySchema, query, 'query');
+    return { data: await this.scans.logServices(connector, window, envs, codes ?? []) };
   }
 
   /** The HTTP status codes from 400 up with requests in the range, every env together, busiest first. */
   @Get('monitor/status-codes')
   async statusCodes(@Query() query: unknown): Promise<{ data: StatusCodeCount[] }> {
-    const { window } = parseInput(statusCodesQuerySchema, query, 'query');
-    return { data: await this.scans.statusCodes(window) };
+    const { connector, window } = parseInput(statusCodesQuerySchema, query, 'query');
+    return { data: await this.scans.statusCodes(connector, window) };
   }
 
   @Get('alerts')

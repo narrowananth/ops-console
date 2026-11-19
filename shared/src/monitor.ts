@@ -1,5 +1,13 @@
 import { z } from 'zod';
+import { ConnectorId } from './connectors';
 import { jobPlaybookSchema } from './playbooks';
+
+/** The Connectors Monitor reads logs from, in the order Integrations lists them. */
+export const LOG_SOURCES = [ConnectorId.Datadog, ConnectorId.OtelLogs] as const;
+
+export type LogSource = (typeof LOG_SOURCES)[number];
+
+export const logSourceSchema = z.enum(LOG_SOURCES);
 
 /** How far back a Scan reads. A schedule uses its `CheckInterval`; the operator picks any of these. */
 export enum ScanWindow {
@@ -150,7 +158,7 @@ export const FIX_STAGES: FixStage[] = Object.values(FixStage);
 export const SAMPLE_LIMIT = 25;
 
 export const sampleSchema = z.object({
-  /** Datadog event id. */
+  /** The log source's event id. */
   id: z.string(),
   timestamp: z.string(),
   status: z.string(),
@@ -239,6 +247,8 @@ export const alertSchema = z.object({
     repo_id: z.string().nullable(),
     repo_url: z.string().nullable(),
   }),
+  /** The log source the Alert was read from. */
+  connector: logSourceSchema,
   fingerprint: z.string(),
   /** The HTTP status code its logs answered with; null for an Alert from before Scans read status codes. */
   http_status: z.number().int().nullable(),
@@ -254,7 +264,8 @@ export const alertSchema = z.object({
   regression_count: z.number().int(),
   /** When the Alert entered `verified`; null in any other status. */
   waiting_since: z.string().nullable(),
-  datadog_query: z.string(),
+  /** Datadog: the query string. OpenTelemetry logs: a JSON filter `{service, env, status, method, path}`. */
+  source_query: z.string(),
   /** The Session the Verification and Fix run in, once there is one. */
   session_id: z.string().nullable(),
   /** The end of the newest `ok` Scan that covered the Alert's Service and status code; null when none has. */
@@ -270,8 +281,8 @@ export type Alert = z.infer<typeof alertSchema>;
 /** Longest `log_line` a list row carries; the detail has the whole line. */
 export const LIST_LOG_LINE_MAX = 300;
 
-/** An Alert as a list shows it: no Datadog query, and a `log_line` cut to 300 characters. The detail has both whole. */
-export const alertListItemSchema = alertSchema.omit({ datadog_query: true });
+/** An Alert as a list shows it: no source query, and a `log_line` cut to 300 characters. The detail has both whole. */
+export const alertListItemSchema = alertSchema.omit({ source_query: true });
 
 export type AlertListItem = z.infer<typeof alertListItemSchema>;
 
@@ -319,6 +330,8 @@ export type RouteView = z.infer<typeof routeViewSchema>;
 
 export const serviceSchema = z.object({
   id: z.string(),
+  /** The log source the Service is read from. */
+  connector: logSourceSchema,
   name: z.string(),
   env: z.string(),
   repo_id: z.string().nullable(),
@@ -335,18 +348,22 @@ export type Service = z.infer<typeof serviceSchema>;
 
 export const scanSchema = z.object({
   id: z.string(),
+  /** The log source the Scan read. */
+  connector: logSourceSchema,
   triggered_by: z.enum(ScanTrigger),
   service_id: z.string().nullable(),
   window_size: z.enum(ScanWindow),
-  /** The Datadog environments read. */
+  /** The environments read. */
   envs: z.array(z.string()),
-  /** The Datadog Services read; null for every Service with failing requests. */
+  /** The Services read; null for every Service with failing requests. */
   services: z.array(z.string()).nullable(),
   /** The HTTP status codes read; empty for every code from 400 up. */
   status_codes: z.array(z.number().int()),
   status: z.enum(ScanStatus),
   error_code: z.string().nullable(),
   error_message: z.string().nullable(),
+  /** What an `ok` Scan did not read in full: lines it skipped, a read stopped at the size cap; empty otherwise. */
+  notes: z.array(z.string()),
   started_at: z.string(),
   finished_at: z.string().nullable(),
 });
@@ -393,11 +410,13 @@ export const scansQuerySchema = z.object({ service_id: z.string().min(1).optiona
 
 export const createScanSchema = z.strictObject({
   service_id: z.string().min(1).nullable(),
-  /** Defaults to the Datadog Connector's `default_interval`. */
+  /** The log source to read; every connected one when left out. */
+  connector: logSourceSchema.optional(),
+  /** Defaults to the source's `default_interval`. */
   window: z.enum(ScanWindow).optional(),
-  /** Defaults to every env Datadog has logs for, and the logs with no env tag. */
+  /** Defaults to every env the source has logs for, and the logs with no env tag. */
   envs: z.array(z.string().trim().min(1)).min(1).optional(),
-  /** Datadog Service names to read; every Service with failing requests when left out. */
+  /** Service names to read; every Service with failing requests when left out. */
   services: z.array(z.string().trim().min(1)).min(1).optional(),
   /** HTTP status codes to read, each 400 or more; every one from 400 up when left out or empty. */
   status_codes: z.array(z.number().int().min(400).max(999)).optional(),
@@ -410,8 +429,8 @@ export type CreateScan = z.infer<typeof createScanSchema>;
  */
 export const NO_ENV = 'no env';
 
-/** A Service Datadog has failing requests for (HTTP status 400 or more) in the range and codes asked about. */
-export const datadogServiceSchema = z.object({
+/** A Service a log source has failing requests for (HTTP status 400 or more) in the range and codes asked about. */
+export const logServiceSchema = z.object({
   name: z.string(),
   /** The envs it logged them in, busiest first. */
   envs: z.array(z.string()),
@@ -419,7 +438,7 @@ export const datadogServiceSchema = z.object({
   errors: z.number().int(),
 });
 
-export type DatadogService = z.infer<typeof datadogServiceSchema>;
+export type LogService = z.infer<typeof logServiceSchema>;
 
 const commaList = z.string().transform((value) => [
   ...new Set(
@@ -433,7 +452,9 @@ const commaList = z.string().transform((value) => [
 /** HTTP status codes from 400 up, comma-separated. */
 const codeList = commaList.transform((list) => list.map(Number)).pipe(z.array(z.number().int().min(400).max(999)));
 
-export const datadogServicesQuerySchema = z.object({
+export const logServicesQuerySchema = z.object({
+  /** The log source to ask; Datadog when left out. */
+  connector: logSourceSchema.default(ConnectorId.Datadog),
   window: z.enum(ScanWindow),
   /** Comma-separated env names; every env when left out. */
   envs: commaList.pipe(z.array(z.string()).min(1)).optional(),
@@ -441,17 +462,23 @@ export const datadogServicesQuerySchema = z.object({
   codes: codeList.optional(),
 });
 
-export const statusCodesQuerySchema = z.object({ window: z.enum(ScanWindow) });
+export const statusCodesQuerySchema = z.object({
+  /** The log source to ask; Datadog when left out. */
+  connector: logSourceSchema.default(ConnectorId.Datadog),
+  window: z.enum(ScanWindow),
+});
 
-/** An HTTP status code from 400 up that Datadog has requests for in the range, every env together. */
+export const monitorEnvsQuerySchema = z.object({ connector: logSourceSchema.default(ConnectorId.Datadog) });
+
+/** An HTTP status code from 400 up that a log source has requests for in the range, every env together. */
 export const statusCodeCountSchema = z.object({ code: z.number().int(), count: z.number().int() });
 
 export type StatusCodeCount = z.infer<typeof statusCodeCountSchema>;
 
-/** A Datadog `env` tag the Monitor can scan. */
+/** An `env` a log source has logs for, which the Monitor can scan. */
 export const monitorEnvSchema = z.object({
   name: z.string(),
-  /** In the Datadog Connector's `environments`: ticked by default. */
+  /** In the Connector's `environments`: ticked by default. */
   configured: z.boolean(),
 });
 
@@ -461,6 +488,8 @@ export const alertsQuerySchema = z.object({
   status: z.enum(AlertStatus).optional(),
   service_id: z.string().min(1).optional(),
   severity: z.enum(Severity).optional(),
+  /** Only the Alerts of this log source. */
+  connector: logSourceSchema.optional(),
   /** `closed` lists only resolved and dismissed Alerts, a page at a time; the default lists every other Alert. */
   scope: z.enum(['active', 'closed']).default('active'),
   /** With `scope=closed`: Alerts per page, and where the last page ended (`meta.next_cursor`). */

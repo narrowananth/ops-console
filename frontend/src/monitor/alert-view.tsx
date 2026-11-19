@@ -1,9 +1,12 @@
 import {
   AlertStatus,
+  CONNECTOR_NAMES,
+  ConnectorId,
   FIX_STAGES,
   type Fix,
   FixStage,
   FixStatus,
+  type LogSource,
   PlaybookStepStatus,
   PlaybookTrigger,
   type Report,
@@ -57,6 +60,7 @@ import {
 } from '../playbooks/job-steps';
 import { withPlaybook } from '../playbooks/labels';
 import { sessionPath } from '../workspace/links';
+import { readableQuery, SourceLabel } from './log-source';
 import { STATUS_TIP } from './logs-pane';
 import { FreshnessNote, MergeNote, ReportNotes } from './prod-notes';
 import { CodeSource } from './repo-link';
@@ -75,13 +79,15 @@ const FIX_STATUS_TIP: Record<FixStatus, string> = {
   [FixStatus.Abandoned]: 'The Fix was cancelled, or its PR was closed unmerged. The Alert is back at its Review.',
 };
 
-function SampleList({ samples }: { samples: Sample[] }) {
+function SampleList({ samples, source }: { samples: Sample[]; source: LogSource }) {
   const [asJson, setAsJson] = useStored('monitor.samples-json', z.boolean(), false);
   return (
     <section aria-label="Samples">
       <div className="flex items-center gap-2 py-1.5">
         <strong className="text-[13px]">Samples ({samples.length})</strong>
-        <Hint text="Datadog log events kept on this Alert. Secret values and request body values are redacted." />
+        <Hint
+          text={`${CONNECTOR_NAMES[source]} log events kept on this Alert. Secret values and request body values are redacted.`}
+        />
         <button
           type="button"
           aria-pressed={asJson}
@@ -600,6 +606,7 @@ export function AlertView({ id }: { id: string }) {
       <header>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <SeverityBadge severity={data.severity} />
+          <SourceLabel source={data.connector} />
           <span className="text-neutral-700" title={STATUS_TIP[data.status]}>
             {data.status.replace('_', ' ')}
           </span>
@@ -622,7 +629,9 @@ export function AlertView({ id }: { id: string }) {
         <h1 className="m-0 mt-1 text-lg break-words">{data.title}</h1>
         <div className="flex flex-wrap items-center gap-x-2 font-mono text-xs text-neutral-700">
           <span className="font-semibold text-text">{data.service.name}</span>
-          <span title="The Datadog env these logs came from. no env means the logs carry no env tag.">
+          <span
+            title={`The env these ${CONNECTOR_NAMES[data.connector]} logs came from. no env means the logs name none.`}
+          >
             {data.service.env}
           </span>
           <span>·</span>
@@ -650,9 +659,13 @@ export function AlertView({ id }: { id: string }) {
         />
         <div
           className="mt-1 font-mono text-xs break-all text-neutral-700"
-          title="The Datadog log search that finds these failures. Paste it into Datadog Logs to see them there."
+          title={
+            data.connector === ConnectorId.Datadog
+              ? 'The Datadog log search that finds these failures. Paste it into Datadog Logs to see them there.'
+              : 'The filter the Recheck reads the Log folder with: the Service, env, status code, method and path of these failures.'
+          }
         >
-          {data.datadog_query}
+          {readableQuery(data.connector, data.source_query)}
         </div>
       </header>
 
@@ -662,7 +675,11 @@ export function AlertView({ id }: { id: string }) {
         </div>
       )}
 
-      <CodeSource key={`${data.service.id}:${data.service.repo_url ?? ''}`} service={data.service} />
+      <CodeSource
+        key={`${data.service.id}:${data.service.repo_url ?? ''}`}
+        service={data.service}
+        source={data.connector}
+      />
 
       {canVerify && (
         <div className="flex flex-wrap items-center gap-3">
@@ -773,7 +790,7 @@ export function AlertView({ id }: { id: string }) {
 
       {data.fix && <FixProgress fix={data.fix} retrying={retry.isPending} onRetry={(skip) => retry.mutate(skip)} />}
 
-      <SampleList samples={data.samples} />
+      <SampleList samples={data.samples} source={data.connector} />
 
       <section aria-label="Events">
         <strong className="text-[13px]">Events</strong>{' '}

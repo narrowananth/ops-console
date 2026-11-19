@@ -6,6 +6,8 @@ import {
   AlertEventKind,
   AlertStatus,
   branchList,
+  CONNECTOR_NAMES,
+  ConnectorId,
   ErrorCode,
   type Part,
   PlaybookTrigger,
@@ -34,7 +36,8 @@ import { type CodeBase, codeBaseStep, GIT, Git, GitFailed } from '../repos/git';
 import { AnonymousSessionsService } from '../workspace/anonymous-sessions.service';
 import { AlertSessions, type CodeSource } from './alert-sessions';
 import { AlertsService } from './alerts.service';
-import { DATADOG_READER, type DatadogReader } from './datadog';
+import { LOG_READERS, type LogReaders } from './log-reader';
+import { logSourceRule, queryLabel } from './log-source-brief';
 import { type AlertRow, type ReportRow, type RouteRow, type ServiceRow, samplesOf, toReport } from './mappers';
 import { deployedVersion, PROD_PARITY_ASK, recheck, versionStep } from './prod-parity';
 import { ScansService } from './scans.service';
@@ -80,15 +83,18 @@ export function verificationBrief(
       ? `\nThe console could not fetch ${base.branch} from origin (${base.error ?? 'no reason given'}), so this is the local branch and may be behind production. Say so in the Report.\n`
       : '';
   const what = route.method ? `route ${route.method} ${route.path}` : 'logs with no HTTP route';
-  return `Find the cause of a failure Datadog logged, in the code in ${where}. The console throws this folder away afterwards: write files and run local commands here only when a step allows it.
+  const rule = logSourceRule(alert.connector);
+  const logged =
+    alert.connector === ConnectorId.OtelLogs ? `the ${CONNECTOR_NAMES[alert.connector]} hold` : 'Datadog logged';
+  return `Find the cause of a failure ${logged}, in the code in ${where}. The console throws this folder away afterwards: write files and run local commands here only when a step allows it.
 
 Alert: ${alert.title}
 Service: ${service.name} (${service.env}); ${what}
-Events: ${alert.eventCount} since ${alert.firstSeenAt}; Datadog query: ${alert.datadogQuery}${recheckLine ? `\n${recheckLine}` : ''}
+Events: ${alert.eventCount} since ${alert.firstSeenAt}; ${queryLabel(alert.connector)}: ${alert.sourceQuery}${recheckLine ? `\n${recheckLine}` : ''}
 
 Newest log lines:
 ${samples}
-${behind}
+${rule ? `\n${rule}\n` : ''}${behind}
 The console sends the work as steps, one per turn.`;
 }
 
@@ -107,7 +113,7 @@ export const REPORT_PROMPT = `Write the Report on this Alert from what you found
 }
 \`\`\`
 
-"replay" and "diff" may be null. The Markdown has these sections, in order: Issue summary (what happens, the observed behaviour); Datadog evidence (log lines, timestamps, trace IDs, error details); Affected services (which service writes the error, which consume the logic); Root cause; Code-level findings (repository, file:line, classes, methods, execution flow); Timeline (when it started and changes around then, where evidence exists); Blast radius (services, APIs, platforms, integrations, user impact); Consumer analysis (mobile, web, internal APIs, background work); Database findings (read only); External dependency findings (Shopify and other third parties); Reproduction and validation (mocks, scenarios, results); Existing PR verification (related pull requests and earlier fixes); Recommended stable fix (exact changes and why this approach); Regression risks and test plan; Prod parity (${PROD_PARITY_ASK}); Final conclusion (confirmed root cause, scope, next action). Mark each finding as verified, mocked or unverified.`;
+"replay" and "diff" may be null. The Markdown has these sections, in order: Issue summary (what happens, the observed behaviour); Log evidence (log lines, timestamps, trace IDs, error details); Affected services (which service writes the error, which consume the logic); Root cause; Code-level findings (repository, file:line, classes, methods, execution flow); Timeline (when it started and changes around then, where evidence exists); Blast radius (services, APIs, platforms, integrations, user impact); Consumer analysis (mobile, web, internal APIs, background work); Database findings (read only); External dependency findings (Shopify and other third parties); Reproduction and validation (mocks, scenarios, results); Existing PR verification (related pull requests and earlier fixes); Recommended stable fix (exact changes and why this approach); Regression risks and test plan; Prod parity (${PROD_PARITY_ASK}); Final conclusion (confirmed root cause, scope, next action). Mark each finding as verified, mocked or unverified.`;
 
 function stepOf(part: Part): ReportStep | null {
   if (part.kind === 'step') return { kind: part.text.startsWith('$ ') ? 'command' : 'step', text: part.text };
@@ -137,7 +143,7 @@ export class VerificationsService {
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
     @Inject(JobSteps) private readonly steps: JobSteps,
     @Inject(ScansService) private readonly scans: ScansService,
-    @Inject(DATADOG_READER) private readonly datadog: DatadogReader,
+    @Inject(LOG_READERS) private readonly readers: LogReaders,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
     recovery.register('monitor verifications', () => this.recover());
@@ -243,7 +249,7 @@ export class VerificationsService {
     const reportSteps: ReportStep[] = z.array(stepSchema).parse(JSON.parse(report.steps));
     const onPart = (part: Part) => this.step(reportId, reportSteps, part);
     // Before the Session and the scratch copy, so it is the first step the operator reads (Behavior 7).
-    const checked = await recheck(this.datadog, alert.datadogQuery);
+    const checked = await recheck(this.readers[alert.connector], alert.connector, alert.sourceQuery);
     this.addStep(reportId, reportSteps, checked.step);
     const sessionId = await this.sessions.ensure(alert, service, (text) => onPart({ kind: 'step', text }));
     const made = retry ? null : await this.makeScratch(report, source, sessionId, onPart);
@@ -401,10 +407,10 @@ export class VerificationsService {
     });
   }
 
-  /** The Report file goes in the Datadog Connector's reports folder; the database copy is the one that counts. */
+  /** The Report file goes in the reports folder of the Alert's source; the database copy is the one that counts. */
   private async writeFile(alert: AlertRow, reportId: string, markdown: string): Promise<string | null> {
     try {
-      const folder = path.resolve(this.dataDir, this.scans.config().reports_folder);
+      const folder = path.resolve(this.dataDir, this.scans.config(alert.connector).reports_folder);
       await mkdir(folder, { recursive: true });
       const row = this.store.db.select().from(reports).where(eq(reports.id, reportId)).get();
       const file = path.join(folder, `${alert.id.slice(0, 8)}-v${row?.version ?? 1}.md`);

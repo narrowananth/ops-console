@@ -17,7 +17,7 @@ import {
   type CliProxySetting,
   type ConnectionTestResult,
   type ConnectionType,
-  type ConnectorId,
+  ConnectorId,
   type CreateConnection,
   type CreatePlaybook,
   type CreateProcessBody,
@@ -35,7 +35,6 @@ import {
   connectionTestResultSchema,
   connectorListSchema,
   connectorSchema,
-  datadogServiceSchema,
   diskAccessSchema,
   editedMessageSchema,
   type FolderTarget,
@@ -51,7 +50,9 @@ import {
   healthSchema,
   keychainHandoverSchema,
   keychainWaitSchema,
+  type LogSource,
   localServersSchema,
+  logServiceSchema,
   type Message,
   mcpServerListSchema,
   mcpServerSchema,
@@ -147,8 +148,8 @@ export const queryKeys = {
   pullRequestLists: ['pull-requests', 'list'] as const,
   pullRequestRepoLists: ['pull-requests', 'repo'] as const,
   monitor: ['monitor'] as const,
-  /** Datadog reads for the Services pane: a monitor event does not refresh them, since each one is a `pup` call. */
-  datadog: ['datadog'] as const,
+  /** Log source reads for the Services pane: a monitor event does not refresh them, since each one reads the source. */
+  logSource: ['log-source'] as const,
   alert: (id: string) => ['monitor', 'alert', id] as const,
   messages: (id: string) => ['messages', id] as const,
   outputs: (id: string) => ['outputs', id] as const,
@@ -599,6 +600,13 @@ function useConnectorMutation<V>(send: (variables: V) => Promise<unknown>) {
 /** Starts the sign-in; the result arrives as `connection.checked`. */
 export function useConnectConnector() {
   return useConnectorMutation((id: ConnectorId) => apiSend('POST', `/connectors/${id}/connect`, {}, z.undefined()));
+}
+
+/** Connects the Log folder; the daemon reads the folder and refuses one it cannot (`folder_not_found`). */
+export function useConnectLogFolder() {
+  return useConnectorMutation((folder: string) =>
+    apiSend('POST', `/connectors/${ConnectorId.OtelLogs}/connect`, { folder }, z.undefined()),
+  );
 }
 
 /** Saves a Connector's settings, such as the slashdocs server, then starts its sign-in. */
@@ -1670,17 +1678,17 @@ export function useCancelScan() {
 }
 
 /**
- * The Services Datadog has failing requests for in the range, every env together, busiest first: HTTP status 400 or
- * more, or only `codes`.
+ * The Services a log source has failing requests for in the range, every env together, busiest first: HTTP status 400
+ * or more, or only `codes`.
  */
-export function useDatadogServices(window: ScanWindow, codes: number[], enabled: boolean) {
+export function useLogServices(connector: LogSource, window: ScanWindow, codes: number[], enabled: boolean) {
   const picked = [...codes].sort((a, b) => a - b);
   return useQuery({
-    queryKey: [...queryKeys.datadog, 'services', window, picked],
+    queryKey: [...queryKeys.logSource, connector, 'services', window, picked],
     queryFn: () =>
       apiGet(
-        `/monitor/datadog-services?window=${window}${picked.length > 0 ? `&codes=${picked.join(',')}` : ''}`,
-        listOf(datadogServiceSchema),
+        `/monitor/log-services?connector=${connector}&window=${window}${picked.length > 0 ? `&codes=${picked.join(',')}` : ''}`,
+        listOf(logServiceSchema),
       ).then((b) => b.data),
     enabled,
     staleTime: 2 * 60_000,
@@ -1688,11 +1696,14 @@ export function useDatadogServices(window: ScanWindow, codes: number[], enabled:
   });
 }
 
-/** The HTTP status codes from 400 up Datadog has requests for in the range, busiest first. */
-export function useStatusCodes(window: ScanWindow, enabled: boolean) {
+/** The HTTP status codes from 400 up a log source has requests for in the range, busiest first. */
+export function useStatusCodes(connector: LogSource, window: ScanWindow, enabled: boolean) {
   return useQuery({
-    queryKey: [...queryKeys.datadog, 'status-codes', window],
-    queryFn: () => apiGet(`/monitor/status-codes?window=${window}`, listOf(statusCodeCountSchema)).then((b) => b.data),
+    queryKey: [...queryKeys.logSource, connector, 'status-codes', window],
+    queryFn: () =>
+      apiGet(`/monitor/status-codes?connector=${connector}&window=${window}`, listOf(statusCodeCountSchema)).then(
+        (b) => b.data,
+      ),
     enabled,
     staleTime: 2 * 60_000,
     placeholderData: (previous) => previous,

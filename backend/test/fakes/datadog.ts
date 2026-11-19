@@ -1,6 +1,6 @@
 import { ErrorCode, type Sample } from '@ops-console/shared';
 import { ApiError } from '../../src/common/errors';
-import type { DatadogReader, LogGroup, ReadRequest, ServiceCount, ServiceReading } from '../../src/monitor/datadog';
+import type { LogGroup, LogReader, ReadRequest, ServiceCount, ServiceReading } from '../../src/monitor/log-reader';
 
 /** Newest first, as Datadog returns them. */
 export function samples(count: number, message = 'NullPointerException in OrderService', status = 'error'): Sample[] {
@@ -45,7 +45,7 @@ const picked = (codes: number[], group: LogGroup) =>
   codes.length === 0 || (group.statusCode !== null && codes.includes(group.statusCode));
 
 /** Datadog in memory: returns what the test set, or fails on cue. */
-export class FakeDatadog implements DatadogReader {
+export class FakeDatadog implements LogReader {
   readings: ServiceReading[] = [];
   envNames: string[] = ['prod', 'staging'];
   down: 'rate_limited' | 'failed' | null = null;

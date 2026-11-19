@@ -11,6 +11,8 @@ import {
   alertsQuerySchema,
   type CheckInterval,
   ErrorCode,
+  LOG_SOURCES,
+  type LogSource,
   type Page,
   type Report,
   ScanStatus,
@@ -38,8 +40,8 @@ import { afterCursor, toPage } from '../common/pagination';
 import { alertEvents, alerts, fixes, reports, reviews, routes, scans, services, sessions } from '../db/schema';
 import { STORE, type Store, type Tx } from '../db/store';
 import { jobPlaybook } from '../playbooks/job-steps';
-import { datadogConfig } from './datadog-config';
 import { awaitingProdCheck, freshnessOf } from './freshness';
+import { logSourceConfig } from './log-source-config';
 import {
   type AlertListRow,
   type AlertRow,
@@ -60,7 +62,7 @@ const SEQ = sql`"alert_events"."rowid"`;
 /** Events that put an Alert in `verified`: the newest one is when it began waiting (ADR 0002). */
 const ENTERED_VERIFIED = [AlertEventKind.Verified, AlertEventKind.Undone, AlertEventKind.Abandoned];
 
-type ScanRead = { scans: (typeof scans.$inferSelect)[]; interval: CheckInterval };
+type ScanRead = { scans: (typeof scans.$inferSelect)[]; intervals: Record<LogSource, CheckInterval> };
 
 @Injectable()
 export class AlertsService {
@@ -84,6 +86,7 @@ export class AlertsService {
       query.status === undefined ? undefined : eq(alerts.status, query.status),
       query.severity === undefined ? undefined : eq(alerts.severity, query.severity),
       query.service_id === undefined ? undefined : eq(services.id, query.service_id),
+      query.connector === undefined ? undefined : eq(alerts.connector, query.connector),
       closed
         ? inArray(alerts.status, CLOSED)
         : query.status === undefined
@@ -238,7 +241,7 @@ export class AlertsService {
     }
   }
 
-  /** The `ok` Scans newest end first, and the interval a Service with none of its own is scanned at. */
+  /** The `ok` Scans newest end first, and the interval a Service with none of its own is scanned at, per source. */
   private scanRead(): ScanRead {
     const ok = this.store.db
       .select()
@@ -246,7 +249,10 @@ export class AlertsService {
       .where(eq(scans.status, ScanStatus.Ok))
       .orderBy(desc(scans.finishedAt))
       .all();
-    return { scans: ok, interval: datadogConfig(this.store.db).default_interval as CheckInterval };
+    const intervals = Object.fromEntries(
+      LOG_SOURCES.map((connector) => [connector, logSourceConfig(this.store.db, connector).default_interval]),
+    ) as Record<LogSource, CheckInterval>;
+    return { scans: ok, intervals };
   }
 
   /** The Session of each Alert that has one, read once for a list. */
@@ -286,7 +292,7 @@ export class AlertsService {
     const key = `${service.id}|${alert.httpStatus}`;
     let fresh = memo?.get(key);
     if (!fresh) {
-      fresh = freshnessOf(read.scans, alert, service, read.interval);
+      fresh = freshnessOf(read.scans, alert, service, read.intervals[service.connector]);
       memo?.set(key, fresh);
     }
     return {

@@ -7,8 +7,10 @@ import {
   CheckInterval,
   ConnectorId,
   type CreateScan,
-  type DatadogService,
   ErrorCode,
+  LOG_SOURCES,
+  type LogService,
+  type LogSource,
   type MonitorEnv,
   NO_ENV,
   ReviewDecision,
@@ -26,7 +28,7 @@ import {
 } from '@ops-console/shared';
 import { and, desc, eq, inArray, isNull, lt, max } from 'drizzle-orm';
 import { redact } from '../action-log/redact';
-import { ApiError } from '../common/errors';
+import { ApiError, validationFailed } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
 import { ConnectorsService } from '../connectors/connectors.service';
 import { alerts, reports, reviews, routes, scanRouteResults, scans, services } from '../db/schema';
@@ -34,11 +36,12 @@ import { type Emit, STORE, type Store, type Tx } from '../db/store';
 import { Scheduler } from '../scheduler/scheduler';
 import { AlertsService } from './alerts.service';
 import { CodeFinder } from './code-finder';
-import { DATADOG_READER, type DatadogReader, ERROR_LEVEL, type LogGroup, type ServiceReading } from './datadog';
-import { type DatadogConfig, datadogConfig } from './datadog-config';
 import { fingerprint, maskSignature } from './fingerprint';
 import { HOURS, scanReads } from './freshness';
+import { ERROR_LEVEL, LOG_READERS, type LogGroup, type LogReaders, type ServiceReading } from './log-reader';
+import { type LogSourceConfig, logSourceConfig } from './log-source-config';
 import { type AlertRow, parseJson, type RouteRow, type ServiceRow, samplesOf } from './mappers';
+import { OTEL_ERROR_LEVEL } from './otel-logs';
 import { MonitorRetention } from './retention';
 
 type ScanRow = typeof scans.$inferSelect;
@@ -46,9 +49,14 @@ type ScanRow = typeof scans.$inferSelect;
 /** The finest interval; every slot of a longer interval is also one of these. */
 const GRID_HOURS = 6;
 
+/** An `ok` Scan keeps its notes, one to a line, where a failed one keeps its error message. */
+const NOTE_SEPARATOR = '\n';
+
 export function toScan(row: ScanRow): Scan {
+  const ok = row.status === ScanStatus.Ok;
   return {
     id: row.id,
+    connector: row.connector,
     triggered_by: row.triggeredBy,
     service_id: row.serviceId,
     window_size: row.windowSize,
@@ -57,7 +65,8 @@ export function toScan(row: ScanRow): Scan {
     status_codes: parseJson<number[]>(row.statusCodes, []),
     status: row.status,
     error_code: row.errorCode,
-    error_message: row.errorMessage,
+    error_message: ok ? null : row.errorMessage,
+    notes: ok && row.errorMessage ? row.errorMessage.split(NOTE_SEPARATOR) : [],
     started_at: row.startedAt,
     finished_at: row.finishedAt,
   };
@@ -92,7 +101,8 @@ function globMatch(pattern: string, path: string): boolean {
 }
 
 const SECRET_KEY = /pass(?:word|wd)?|secret|token|api[_-]?key|authorization|credential|cookie|session/i;
-const BODY_KEY = /^(?:body|request_body|response_body|payload|data)$/i;
+/** The last part of a dotted key counts: OpenTelemetry names it `http.request.body`. */
+const BODY_KEY = /(?:^|\.)(?:body|request_body|response_body|payload|data)$/i;
 
 function redactValue(value: unknown, key = ''): unknown {
   if (SECRET_KEY.test(key) || BODY_KEY.test(key)) return '[redacted]';
@@ -122,9 +132,9 @@ function mergeSamples(existing: Sample[], fresh: Sample[]): Sample[] {
 /** Logs that name no request hang on this Route of their Service; the API shows it as no Route. */
 const NO_ROUTE = { method: '', path: '' };
 
-/** How long the list of Datadog envs is kept before it is read again. */
+/** How long the list of a source's envs is kept before it is read again. */
 const ENVS_TTL_MS = 10 * 60_000;
-/** How long one range and env pick's list of Datadog Services is kept. */
+/** How long one range and env pick's list of Services is kept. */
 const SERVICES_TTL_MS = 2 * 60_000;
 
 /** The error kind of a reading: the most common masked message among its Samples, the newest on a tie. */
@@ -142,16 +152,16 @@ function signatureOf(samples: Sample[]): string {
 @Injectable()
 export class ScansService {
   private readonly logger = new Logger('monitor');
-  private envCache: { at: number; names: string[] } | null = null;
-  private readonly serviceCache = new Map<string, { at: number; list: DatadogService[] }>();
+  private readonly envCache = new Map<LogSource, { at: number; names: string[] }>();
+  private readonly serviceCache = new Map<string, { at: number; list: LogService[] }>();
   /** The running Scans' read, to stop it. */
   private readonly running = new Map<string, AbortController>();
-  private readonly codeCache = new Map<ScanWindow, { at: number; list: StatusCodeCount[] }>();
+  private readonly codeCache = new Map<string, { at: number; list: StatusCodeCount[] }>();
 
   constructor(
     @Inject(STORE) private readonly store: Store,
     @Inject(ConnectorsService) private readonly connectors: ConnectorsService,
-    @Inject(DATADOG_READER) private readonly reader: DatadogReader,
+    @Inject(LOG_READERS) private readonly readers: LogReaders,
     @Inject(AlertsService) private readonly alerts: AlertsService,
     @Inject(CodeFinder) private readonly finder: CodeFinder,
     @Inject(MonitorRetention) private readonly retention: MonitorRetention,
@@ -159,19 +169,22 @@ export class ScansService {
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
     recovery.register('monitor scans', () => this.recover());
-    scheduler.register({
-      name: 'monitor-scan',
-      nextSlot: (after) => nextSlot(this.config().daily_scan_time, GRID_HOURS, after),
-      run: () => this.runDue(new Date()),
-      lastRunAt: () => {
-        const last = this.store.db
-          .select({ at: max(scans.startedAt) })
-          .from(scans)
-          .where(eq(scans.triggeredBy, ScanTrigger.Schedule))
-          .get()?.at;
-        return last ? new Date(last) : null;
-      },
-    });
+    // Each source on its own schedule, from its own Connector's daily scan time.
+    for (const connector of LOG_SOURCES) {
+      scheduler.register({
+        name: connector === ConnectorId.Datadog ? 'monitor-scan' : `monitor-scan-${connector}`,
+        nextSlot: (after) => nextSlot(this.config(connector).daily_scan_time, GRID_HOURS, after),
+        run: () => this.runDue(new Date(), connector),
+        lastRunAt: () => {
+          const last = this.store.db
+            .select({ at: max(scans.startedAt) })
+            .from(scans)
+            .where(and(eq(scans.triggeredBy, ScanTrigger.Schedule), eq(scans.connector, connector)))
+            .get()?.at;
+          return last ? new Date(last) : null;
+        },
+      });
+    }
   }
 
   list(serviceId?: string): Scan[] {
@@ -198,38 +211,93 @@ export class ScansService {
   }
 
   /**
-   * The operator's Scan over the window, Datadog Services and HTTP status codes they picked; a null `service_id` and no
-   * `services` scans every Service, in every env. Answers once the Scan is stored; the read goes on in the background.
+   * The operator's Scan over the window, Services and HTTP status codes they picked; a null `service_id` and no
+   * `services` scans every Service, in every env. It reads the source asked for, or every connected one, a Scan each.
+   * Answers once the Scans are stored (with the first); the reads go on in the background.
    */
   async start(input: CreateScan): Promise<Scan> {
-    this.connectors.require(ConnectorId.Datadog);
-    const config = this.config();
     const serviceId = input.service_id;
+    const service =
+      serviceId === null ? undefined : this.store.db.select().from(services).where(eq(services.id, serviceId)).get();
+    if (serviceId !== null && !service) throw new ApiError(404, ErrorCode.NotFound, 'no such Service');
+    if (service && input.connector !== undefined && input.connector !== service.connector) {
+      throw validationFailed('the Service is read from another log source');
+    }
+    const asked = service?.connector ?? input.connector;
+    if (asked !== undefined) this.connectors.require(asked);
+    const sources = asked ? [asked] : LOG_SOURCES.filter((connector) => !this.connectorDown(connector));
+    if (sources.length === 0) {
+      throw new ApiError(409, ErrorCode.ConnectorNotConnected, 'no log source is connected');
+    }
+    const started: Scan[] = [];
+    for (const connector of sources) {
+      try {
+        started.push(await this.startOne(connector, input, service));
+      } catch (error) {
+        // With several sources, one that cannot be asked for its envs does not stop the others.
+        if (sources.length === 1) throw error;
+        started.push(this.failedAtStart(connector, input, error));
+      }
+    }
+    return started[0] as Scan;
+  }
+
+  private async startOne(connector: LogSource, input: CreateScan, service: ServiceRow | undefined): Promise<Scan> {
+    const config = this.config(connector);
     const codes = [...new Set(input.status_codes ?? [])].sort();
     let window: ScanWindow = input.window ?? (config.default_interval as CheckInterval);
-    let envs = [...new Set(input.envs ?? (await this.allEnvs()))];
+    let envs = [...new Set(input.envs ?? (await this.allEnvs(connector)))];
     let names = input.services ? [...new Set(input.services)] : null;
-    if (serviceId !== null) {
-      const service = this.store.db.select().from(services).where(eq(services.id, serviceId)).get();
-      if (!service) throw new ApiError(404, ErrorCode.NotFound, 'no such Service');
+    if (service) {
       window = input.window ?? service.checkInterval ?? window;
       envs = [service.env];
       names = [service.name];
     }
-    const row = this.create(ScanTrigger.Operator, serviceId, window, envs, names, codes);
+    const row = this.create(ScanTrigger.Operator, connector, service?.id ?? null, window, envs, names, codes);
     void this.execute(row).catch((error) =>
       this.logger.warn(`scan ${row.id} stopped: ${error instanceof Error ? error.message : String(error)}`),
     );
     return toScan(row);
   }
 
-  /** The scheduled Scans due at `now`: one per window that has Services and no Scan since its latest slot. */
-  async runDue(now: Date): Promise<void> {
-    if (this.connectorDown()) return;
-    const config = this.config();
+  /** A Scan that could not begin its read: stored, and ended failed, so the operator sees which source it was. */
+  private failedAtStart(connector: LogSource, input: CreateScan, error: unknown): Scan {
+    const window = input.window ?? (this.config(connector).default_interval as CheckInterval);
+    const row = this.create(
+      ScanTrigger.Operator,
+      connector,
+      null,
+      window,
+      input.envs ?? [],
+      input.services ?? null,
+      input.status_codes ?? [],
+    );
+    this.fail(row, error);
+    return toScan(this.store.db.select().from(scans).where(eq(scans.id, row.id)).get() as ScanRow);
+  }
+
+  /**
+   * The scheduled Scans of `connector` (every source when left out) due at `now`: one per window that has Services and
+   * no Scan since its latest slot. A source that is down is skipped, and one that fails does not stop the others.
+   */
+  async runDue(now: Date, connector?: LogSource): Promise<void> {
+    for (const source of connector ? [connector] : LOG_SOURCES) {
+      if (this.connectorDown(source)) continue;
+      try {
+        await this.runDueOf(now, source);
+      } catch (error) {
+        this.logger.warn(
+          `scheduled scan of ${source} failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+  }
+
+  private async runDueOf(now: Date, connector: LogSource): Promise<void> {
+    const config = this.config(connector);
     const fallback = config.default_interval as CheckInterval;
     const windows = new Set<CheckInterval>([fallback]);
-    for (const service of this.store.db.select().from(services).all()) {
+    for (const service of this.store.db.select().from(services).where(eq(services.connector, connector)).all()) {
       windows.add((service.checkInterval ?? fallback) as CheckInterval);
     }
     for (const window of windows) {
@@ -237,55 +305,70 @@ export class ScansService {
       const last = this.store.db
         .select({ at: max(scans.startedAt) })
         .from(scans)
-        .where(and(eq(scans.triggeredBy, ScanTrigger.Schedule), eq(scans.windowSize, window), isNull(scans.serviceId)))
+        .where(
+          and(
+            eq(scans.triggeredBy, ScanTrigger.Schedule),
+            eq(scans.connector, connector),
+            eq(scans.windowSize, window),
+            isNull(scans.serviceId),
+          ),
+        )
         .get()?.at;
       if (last && new Date(last) >= slot) continue;
-      await this.execute(this.create(ScanTrigger.Schedule, null, window, await this.allEnvs(), null, []));
+      const envs = await this.allEnvs(connector);
+      await this.execute(this.create(ScanTrigger.Schedule, connector, null, window, envs, null, []));
     }
   }
 
-  private connectorDown(): boolean {
+  private connectorDown(connector: LogSource): boolean {
     try {
-      this.connectors.require(ConnectorId.Datadog);
+      this.connectors.require(connector);
       return false;
     } catch {
       return true;
     }
   }
 
-  config(): DatadogConfig {
-    return datadogConfig(this.store.db);
+  config(connector: LogSource = ConnectorId.Datadog): LogSourceConfig {
+    return logSourceConfig(this.store.db, connector);
   }
 
-  /** The env tags Datadog has logs for, the Connector's own first; read again after 10 minutes. */
-  async envs(): Promise<MonitorEnv[]> {
-    const configured = this.config().environments;
-    if (!this.envCache || Date.now() - this.envCache.at > ENVS_TTL_MS) {
-      this.connectors.require(ConnectorId.Datadog);
-      this.envCache = { at: Date.now(), names: await this.reader.envs() };
+  /** The envs a source has logs for, the Connector's own first; read again after 10 minutes. */
+  async envs(connector: LogSource = ConnectorId.Datadog): Promise<MonitorEnv[]> {
+    const configured = this.config(connector).environments;
+    let kept = this.envCache.get(connector);
+    if (!kept || Date.now() - kept.at > ENVS_TTL_MS) {
+      this.connectors.require(connector);
+      kept = { at: Date.now(), names: await this.readers[connector].envs() };
+      this.envCache.set(connector, kept);
     }
-    // Logs with no `env` tag are their own choice: many services send none.
-    const names = [...new Set([...configured, ...this.envCache.names, NO_ENV])];
+    // Logs with no env are their own choice: many services send none.
+    const names = [...new Set([...configured, ...kept.names, NO_ENV])];
     return names.map((name) => ({ name, configured: configured.includes(name) }));
   }
 
-  /** Every env name a Scan reads by default: each env Datadog has logs for, and the logs with no env tag. */
-  private async allEnvs(): Promise<string[]> {
-    return (await this.envs()).map((env) => env.name);
+  /** Every env name a Scan reads by default: each env the source has logs for, and the logs with no env. */
+  private async allEnvs(connector: LogSource): Promise<string[]> {
+    return (await this.envs(connector)).map((env) => env.name);
   }
 
   /**
-   * The Services Datadog has failing requests for (HTTP status 400 or more, or only `codes`) in the window and envs,
+   * The Services a source has failing requests for (HTTP status 400 or more, or only `codes`) in the window and envs,
    * every env when none are given; busiest first, kept 2 minutes.
    */
-  async datadogServices(window: ScanWindow, envs: string[] | undefined, codes: number[]): Promise<DatadogService[]> {
-    const read = envs ?? (await this.allEnvs());
-    const key = `${window}|${[...read].sort().join(',')}|${[...codes].sort().join(',')}`;
+  async logServices(
+    connector: LogSource,
+    window: ScanWindow,
+    envs: string[] | undefined,
+    codes: number[],
+  ): Promise<LogService[]> {
+    const read = envs ?? (await this.allEnvs(connector));
+    const key = `${connector}|${window}|${[...read].sort().join(',')}|${[...codes].sort().join(',')}`;
     const kept = this.serviceCache.get(key);
     if (kept && Date.now() - kept.at < SERVICES_TTL_MS) return kept.list;
-    this.connectors.require(ConnectorId.Datadog);
+    this.connectors.require(connector);
     const byName = new Map<string, { envs: { env: string; errors: number }[]; errors: number }>();
-    for (const count of await this.reader.services(read, window, codes)) {
+    for (const count of await this.readers[connector].services(read, window, codes)) {
       const entry = byName.get(count.name) ?? { envs: [], errors: 0 };
       entry.envs.push({ env: count.env, errors: count.errors });
       entry.errors += count.errors;
@@ -303,17 +386,19 @@ export class ScansService {
   }
 
   /** The HTTP status codes from 400 up with requests in the window, busiest first; kept 2 minutes. */
-  async statusCodes(window: ScanWindow): Promise<StatusCodeCount[]> {
-    const kept = this.codeCache.get(window);
+  async statusCodes(connector: LogSource, window: ScanWindow): Promise<StatusCodeCount[]> {
+    const key = `${connector}|${window}`;
+    const kept = this.codeCache.get(key);
     if (kept && Date.now() - kept.at < SERVICES_TTL_MS) return kept.list;
-    this.connectors.require(ConnectorId.Datadog);
-    const list = await this.reader.statusCodes(window);
-    this.codeCache.set(window, { at: Date.now(), list });
+    this.connectors.require(connector);
+    const list = await this.readers[connector].statusCodes(window);
+    this.codeCache.set(key, { at: Date.now(), list });
     return list;
   }
 
   private create(
     triggeredBy: ScanTrigger,
+    connector: LogSource,
     serviceId: string | null,
     window: ScanWindow,
     envs: string[],
@@ -325,6 +410,7 @@ export class ScansService {
         .insert(scans)
         .values({
           id: crypto.randomUUID(),
+          connector,
           triggeredBy,
           serviceId,
           windowSize: window,
@@ -351,17 +437,19 @@ export class ScansService {
     const read = new AbortController();
     this.running.set(scan.id, read);
     try {
-      const config = this.config();
-      const readings = await this.reader.read({
+      const config = this.config(scan.connector);
+      const notes: string[] = [];
+      const readings = await this.readers[scan.connector].read({
         signal: read.signal,
         envs: parseJson<string[]>(scan.envs, []),
         window: scan.windowSize,
         services: parseJson<string[] | null>(scan.services, null),
         codes: parseJson<number[]>(scan.statusCodes, []),
         ignore: config.ignore,
+        note: (text) => notes.push(text),
       });
       read.signal.throwIfAborted();
-      await this.apply(scan, config, readings);
+      await this.apply(scan, config, readings, notes);
       this.finder.lookForUnlinked();
       this.retention.afterScan();
     } catch (error) {
@@ -369,22 +457,27 @@ export class ScansService {
         this.store.write((tx, emit) => this.end(tx, emit, scan.id, ScanStatus.Cancelled, null, null));
         return;
       }
-      const limited = error instanceof ApiError && error.code === ErrorCode.RateLimited;
-      const message = error instanceof Error ? error.message : String(error);
-      if (!limited) this.logger.warn(`scan ${scan.id} failed: ${message}`);
-      this.store.write((tx, emit) =>
-        this.end(
-          tx,
-          emit,
-          scan.id,
-          limited ? ScanStatus.RateLimited : ScanStatus.Failed,
-          limited ? ErrorCode.RateLimited : ErrorCode.UpstreamFailed,
-          message,
-        ),
-      );
+      this.fail(scan, error);
     } finally {
       this.running.delete(scan.id);
     }
+  }
+
+  /** Ends the Scan failed, or rate limited when the source throttled. */
+  private fail(scan: ScanRow, error: unknown): void {
+    const limited = error instanceof ApiError && error.code === ErrorCode.RateLimited;
+    const message = error instanceof Error ? error.message : String(error);
+    if (!limited) this.logger.warn(`scan ${scan.id} failed: ${message}`);
+    this.store.write((tx, emit) =>
+      this.end(
+        tx,
+        emit,
+        scan.id,
+        limited ? ScanStatus.RateLimited : ScanStatus.Failed,
+        limited ? ErrorCode.RateLimited : ErrorCode.UpstreamFailed,
+        message,
+      ),
+    );
   }
 
   private end(
@@ -424,10 +517,16 @@ export class ScansService {
     scan: ScanRow,
     name: string,
     existing: ServiceRow | undefined,
-    config: DatadogConfig,
+    config: LogSourceConfig,
     env: string,
   ): boolean {
-    const target = { id: existing?.id, name, env, checkInterval: existing?.checkInterval ?? null };
+    const target = {
+      id: existing?.id,
+      connector: existing?.connector ?? scan.connector,
+      name,
+      env,
+      checkInterval: existing?.checkInterval ?? null,
+    };
     return scanReads(scan, target, config.default_interval as CheckInterval);
   }
 
@@ -437,7 +536,12 @@ export class ScansService {
    * the Scan's end, in the last transaction. A Scan that stops part way keeps the Services stored so far and ends
    * `failed` through the start-up recovery.
    */
-  private async apply(scan: ScanRow, config: DatadogConfig, readings: ServiceReading[]): Promise<void> {
+  private async apply(
+    scan: ScanRow,
+    config: LogSourceConfig,
+    readings: ServiceReading[],
+    notes: string[],
+  ): Promise<void> {
     const now = new Date().toISOString();
     const seenRoutes = new Set<string>();
     for (const reading of readings) {
@@ -446,7 +550,7 @@ export class ScansService {
     }
     this.store.write((tx, emit) => {
       this.clearUnseen(tx, scan, config, now, seenRoutes);
-      this.end(tx, emit, scan.id, ScanStatus.Ok, null, null);
+      this.end(tx, emit, scan.id, ScanStatus.Ok, null, notes.length > 0 ? notes.join(NOTE_SEPARATOR) : null);
     });
   }
 
@@ -454,7 +558,7 @@ export class ScansService {
     tx: Tx,
     emit: Emit,
     scan: ScanRow,
-    config: DatadogConfig,
+    config: LogSourceConfig,
     reading: ServiceReading,
     now: string,
     seenRoutes: Set<string>,
@@ -462,12 +566,14 @@ export class ScansService {
     let service = tx
       .select()
       .from(services)
-      .where(and(eq(services.name, reading.name), eq(services.env, reading.env)))
+      .where(
+        and(eq(services.connector, scan.connector), eq(services.name, reading.name), eq(services.env, reading.env)),
+      )
       .get();
     if (!this.applies(scan, reading.name, service, config, reading.env)) return;
     service ??= tx
       .insert(services)
-      .values({ id: crypto.randomUUID(), name: reading.name, env: reading.env })
+      .values({ id: crypto.randomUUID(), connector: scan.connector, name: reading.name, env: reading.env })
       .returning()
       .get();
     // A URL from log content must look like a Git host URL, as one the operator types does.
@@ -505,7 +611,7 @@ export class ScansService {
   }
 
   /** A known Route that logged nothing this time is healthy, and so is an Alert of a covered Service that this Scan did not see. */
-  private clearUnseen(tx: Tx, scan: ScanRow, config: DatadogConfig, now: string, seenRoutes: Set<string>): void {
+  private clearUnseen(tx: Tx, scan: ScanRow, config: LogSourceConfig, now: string, seenRoutes: Set<string>): void {
     const scope = tx
       .select()
       .from(services)
@@ -552,11 +658,11 @@ export class ScansService {
     );
   }
 
-  private severity(config: DatadogConfig, window: ScanWindow, read: LogGroup): Severity {
+  private severity(config: LogSourceConfig, window: ScanWindow, read: LogGroup, connector: LogSource): Severity {
     if (read.peakPer10m >= config.rapid_errors_per_10m) return Severity.High;
     const perHour = read.errors / WINDOW_HOURS[window];
-    const errorLevel =
-      (read.statusCode ?? 0) >= 500 || read.samples.some((sample) => ERROR_LEVEL.includes(sample.status));
+    const levels = connector === ConnectorId.OtelLogs ? OTEL_ERROR_LEVEL : ERROR_LEVEL;
+    const errorLevel = (read.statusCode ?? 0) >= 500 || read.samples.some((sample) => levels.includes(sample.status));
     return perHour >= config.failing_errors_per_hour && errorLevel ? Severity.Medium : Severity.Low;
   }
 
@@ -565,15 +671,22 @@ export class ScansService {
     tx: Tx,
     emit: Emit,
     scan: ScanRow,
-    config: DatadogConfig,
+    config: LogSourceConfig,
     service: ServiceRow,
     route: RouteRow,
     read: LogGroup,
     now: string,
   ): string {
     const fresh = read.samples.map(redactSample);
-    const print = fingerprint(service.id, route.method, route.path, signatureOf(read.samples), read.statusCode);
-    const severity = this.severity(config, scan.windowSize, read);
+    const print = fingerprint(
+      service.id,
+      route.method,
+      route.path,
+      signatureOf(read.samples),
+      read.statusCode,
+      scan.connector,
+    );
+    const severity = this.severity(config, scan.windowSize, read, scan.connector);
     const existing = tx.select().from(alerts).where(eq(alerts.fingerprint, print)).get();
     if (!existing) {
       const row = tx
@@ -581,6 +694,7 @@ export class ScansService {
         .values({
           id: crypto.randomUUID(),
           routeId: route.id,
+          connector: scan.connector,
           fingerprint: print,
           httpStatus: read.statusCode,
           source: AlertSource.Scan,
@@ -593,7 +707,7 @@ export class ScansService {
           firstSeenAt: now,
           lastSeenAt: now,
           samples: JSON.stringify(mergeSamples([], fresh)),
-          datadogQuery: read.query,
+          sourceQuery: read.query,
         })
         .returning()
         .get();

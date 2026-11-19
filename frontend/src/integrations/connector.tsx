@@ -13,10 +13,12 @@ import {
   useCancelConnectorSignIn,
   useConnectConnector,
   useConnectConnectorWith,
+  useConnectLogFolder,
   useDisconnectConnector,
 } from '../lib/queries';
 import { type StatusLook, statusGlyph } from '../mcp/status';
 import { IntegrationRow, rowAction, rowActionAttention } from './integration-row';
+import { LogFolderStep, savedFolder } from './log-folder';
 
 /** The row and the pane read the same: signing in, not connected, or the check's status. */
 function connectorStatus(connector: Connector): StatusLook {
@@ -30,7 +32,10 @@ function connectorStatus(connector: Connector): StatusLook {
     return {
       glyph: '○ not connected',
       className: 'text-neutral-700',
-      tip: 'Not set up yet. Connect signs you in and adds its MCP Server when it has one.',
+      tip:
+        connector.id === ConnectorId.OtelLogs
+          ? 'Not set up yet. Connect starts reading the Log folder.'
+          : 'Not set up yet. Connect signs you in and adds its MCP Server when it has one.',
     };
   return statusGlyph[connector.status];
 }
@@ -42,14 +47,16 @@ const NO_SIGN_IN: ConnectorId[] = [ConnectorId.Shopify];
 export function ConnectorDrawer({ connector, onBack }: { connector: Connector; onBack: () => void }) {
   const connect = useConnectConnector();
   const connectWith = useConnectConnectorWith();
+  const connectFolder = useConnectLogFolder();
   const disconnect = useDisconnectConnector();
   const cancel = useCancelConnectorSignIn();
   const [confirming, setConfirming] = useState(false);
   const saved = typeof connector.config.server === 'string' ? connector.config.server : '';
   const [server, setServer] = useState(saved);
   const asksServer = connector.id === ConnectorId.Slashdocs;
+  const asksFolder = connector.id === ConnectorId.OtelLogs;
   const connected = connector.status !== HealthStatus.Off;
-  const error = connect.error ?? connectWith.error ?? disconnect.error ?? cancel.error;
+  const error = connect.error ?? connectWith.error ?? connectFolder.error ?? disconnect.error ?? cancel.error;
   const onConnect = () =>
     asksServer && server.trim() !== saved
       ? connectWith.mutate({ id: connector.id, config: { server: server.trim() } })
@@ -86,13 +93,21 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
             <span className="text-neutral-700">Blank uses the server the slashdocs CLI already signed in to.</span>
           </label>
         )}
-        <SignInStep
-          connector={connector}
-          pending={connect.isPending || connectWith.isPending}
-          cancelling={cancel.isPending}
-          onConnect={onConnect}
-          onCancel={() => cancel.mutate(connector.id)}
-        />
+        {asksFolder ? (
+          <LogFolderStep
+            connector={connector}
+            pending={connectFolder.isPending}
+            onConnect={(folder) => connectFolder.mutate(folder)}
+          />
+        ) : (
+          <SignInStep
+            connector={connector}
+            pending={connect.isPending || connectWith.isPending}
+            cancelling={cancel.isPending}
+            onConnect={onConnect}
+            onCancel={() => cancel.mutate(connector.id)}
+          />
+        )}
         {error && (
           <div role="alert" className="text-xs text-accent-700">
             {error.message}
@@ -104,9 +119,11 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
           <div className="mx-5 mb-4 flex flex-col gap-2.5 rounded-lg bg-accent-100 px-4 py-3.5">
             <div className="font-semibold text-accent-900">Disconnect {connector.name}?</div>
             <div className="text-xs text-accent-900">
-              {isGoogleConnector(connector.id)
-                ? 'Stops the console using it and takes its access back at Google. Every Claude account loses it.'
-                : 'Signs out and stops Claude from using it. Monitor and tasks that rely on it pause. Your own terminal stays signed in to the CLI.'}
+              {asksFolder
+                ? 'Stops the console reading the Log folder. The folder and its files stay as they are.'
+                : isGoogleConnector(connector.id)
+                  ? 'Stops the console using it and takes its access back at Google. Every Claude account loses it.'
+                  : 'Signs out and stops Claude from using it. Monitor and tasks that rely on it pause. Your own terminal stays signed in to the CLI.'}
             </div>
             <div className="flex gap-2">
               <Button
@@ -124,7 +141,11 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
             <div className="flex-1 text-xs text-neutral-700">Stops the console using {connector.name}.</div>
             <Button
               className="border-accent text-accent-700"
-              title={`Sign out of ${connector.name} and stop the console using it. Asks first.`}
+              title={
+                asksFolder
+                  ? 'Stop the console reading the Log folder. Asks first.'
+                  : `Sign out of ${connector.name} and stop the console using it. Asks first.`
+              }
               onClick={() => setConfirming(true)}
             >
               Disconnect…
@@ -229,6 +250,8 @@ function SignInStep(props: {
   );
 }
 
+const folderSuffix = (connector: Connector) => (savedFolder(connector) ? ` · ${savedFolder(connector)}` : '');
+
 /** A Connector in the Integrations list. Off reads "not connected": a Connector is never disabled. */
 export function ConnectorAction({ connector, onOpen }: { connector: Connector; onOpen: () => void }) {
   const action =
@@ -265,7 +288,7 @@ export function ConnectorRow({
       brand={CONNECTOR_BRAND[connector.id]}
       name={connector.name}
       kind="Connector"
-      line={`${connector.via}${connector.account_label ? ` · ${connector.account_label}` : ''}`}
+      line={`${connector.via}${connector.id === ConnectorId.OtelLogs ? folderSuffix(connector) : connector.account_label ? ` · ${connector.account_label}` : ''}`}
       status={status}
       health={health}
       selected={selected}

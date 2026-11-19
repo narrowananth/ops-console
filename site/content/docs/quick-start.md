@@ -20,11 +20,11 @@ Open Workspace, pick the Repo and write the task. The Access mode decides what t
 
 ## 5. Connect your services
 
-Open Integrations and connect the services you use: Datadog for Monitor, GitHub, GitLab or Bitbucket for pull requests, Jira for Tickets, and more. Each one signs in in your browser. See [Connectors](/docs/connectors/).
+Open Integrations and connect the services you use: Datadog or OpenTelemetry logs for Monitor, GitHub, GitLab or Bitbucket for pull requests, Jira for Tickets, and more. Each one signs in in your browser. See [Connectors](/docs/connectors/).
 
 ## 6. Watch a Service
 
-Once Datadog is connected, Monitor shows each Service's health and its Alerts. Start a Verification on an Alert, review the Report, and confirm it to start a Fix. See [Monitor and Playbooks](/docs/monitor/).
+Once a log source is connected, Monitor shows each Service's health and its Alerts. Start a Verification on an Alert, review the Report, and confirm it to start a Fix. See [Monitor and Playbooks](/docs/monitor/).
 
 ## When something goes wrong
 

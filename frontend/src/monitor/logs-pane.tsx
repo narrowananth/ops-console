@@ -1,10 +1,20 @@
-import { type AlertListItem, AlertStatus, type ScanWindow, SEVERITIES, type Severity } from '@ops-console/shared';
+import {
+  type AlertListItem,
+  AlertStatus,
+  CONNECTOR_NAMES,
+  LOG_SOURCES,
+  type LogSource,
+  type ScanWindow,
+  SEVERITIES,
+  type Severity,
+} from '@ops-console/shared';
 import { Fragment } from 'react';
 import { z } from 'zod';
 import { Empty } from '../components/ui/empty';
 import { item } from '../components/ui/item';
 import { useAlerts, useClosedAlerts } from '../lib/queries';
 import { useStored } from '../lib/remember';
+import { SOURCE_LABEL, type SourceFilter, SourceLabel } from './log-source';
 import { FreshnessNote, MergeNote } from './prod-notes';
 import { ago, shown as inMonitor } from './scan-scope';
 import { SEVERITY_LABEL } from './severity';
@@ -104,6 +114,7 @@ function Row({
         </span>
         <span className="flex w-full items-center gap-2 text-xs text-neutral-700">
           {showService && <strong className="min-w-0 truncate font-semibold text-text">{alert.service.name}</strong>}
+          <SourceLabel source={alert.connector} />
           {alert.http_status !== null && <StatusBadge code={alert.http_status} />}
           <span
             className="ml-auto flex-none font-mono"
@@ -139,12 +150,22 @@ export function LogsPane({
   range,
   selected,
   onSelect,
+  sources,
+  down,
+  source,
+  onSource,
 }: {
   service: string | null;
   codes: number[];
   range: ScanWindow;
   selected: string | null;
   onSelect: (alertId: string) => void;
+  /** The log sources connected now. */
+  sources: LogSource[];
+  /** The log sources that stopped answering, with the check's reason. */
+  down: { source: LogSource; reason: string | null }[];
+  source: SourceFilter;
+  onSource: (source: SourceFilter) => void;
 }) {
   const alerts = useAlerts();
   const [tier, setTier] = useStored<Severity | 'all'>('monitor.tier', z.enum(['all', ...SEVERITIES]), 'all');
@@ -159,7 +180,7 @@ export function LogsPane({
   const [query, setQuery] = useStored('monitor.logs-search', z.string(), '');
   const needle = query.trim().toLowerCase();
   // How many rows are drawn, for the list as it is now picked; a new pick starts at one page again.
-  const view = `${service}|${tier}|${showClosed}|${codes.join(',')}|${needle}`;
+  const view = `${service}|${tier}|${source}|${showClosed}|${codes.join(',')}|${needle}`;
   const [paged, setPaged] = useStored(
     'monitor.logs-shown',
     z.object({ view: z.string(), limit: z.number().int().positive() }),
@@ -169,9 +190,17 @@ export function LogsPane({
   const inScope = listed.filter(
     (alert) =>
       (service === null || alert.service.name === service) &&
+      (source === 'all' || alert.connector === source) &&
       inMonitor(alert, codes) &&
       (showClosed || !CLOSED.includes(alert.status)) &&
       (needle === '' || matches(alert, needle)),
+  );
+  // The filter shows once a second source is connected, down or has Alerts here.
+  const present = LOG_SOURCES.filter(
+    (one) =>
+      sources.includes(one) ||
+      down.some((gone) => gone.source === one) ||
+      listed.some((alert) => alert.connector === one),
   );
   const counts = Object.fromEntries(
     SEVERITIES.map((severity) => [severity, inScope.filter((alert) => alert.severity === severity).length]),
@@ -221,6 +250,26 @@ export function LogsPane({
             </button>
           ))}
         </div>
+        {present.length > 1 && (
+          <div role="tablist" aria-label="Source" className="flex gap-0.5 rounded-lg bg-neutral-200 p-0.75">
+            {(['all', ...present] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={source === value}
+                aria-label={value === 'all' ? 'All sources' : undefined}
+                title={
+                  value === 'all' ? 'Alerts from every log source' : `Only Alerts read from ${CONNECTOR_NAMES[value]}`
+                }
+                onClick={() => onSource(value)}
+                className={`flex flex-1 cursor-pointer items-center justify-center rounded-md border-0 py-1 text-xs whitespace-nowrap transition-colors ${source === value ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
+              >
+                {value === 'all' ? 'All' : SOURCE_LABEL[value]}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex gap-1.5">
           <div className="relative min-w-0 flex-1">
             <svg
@@ -265,6 +314,18 @@ export function LogsPane({
         </div>
       </div>
 
+      {down
+        .filter((gone) => source === 'all' || gone.source === source)
+        .map((gone) => (
+          <p
+            key={gone.source}
+            role="status"
+            className="m-0 border-b border-divider bg-accent-100 px-3.5 py-2 text-xs text-accent-900"
+          >
+            {SOURCE_LABEL[gone.source]} is down{gone.reason ? `: ${gone.reason}` : ''}. Scans skip it until a check
+            passes; its Alerts stay.
+          </p>
+        ))}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {alerts.isError ? (
           <Empty>Could not read Alerts: {alerts.error.message}</Empty>

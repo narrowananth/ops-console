@@ -29,6 +29,7 @@ import {
   type EditedMessage,
   Effort,
   ErrorCode,
+  type LogSource,
   type Message,
   type Part,
   RunOutcome,
@@ -51,6 +52,7 @@ import { DATA_DIR } from '../common/data-dir';
 import { ApiError } from '../common/errors';
 import { StartupRecovery } from '../common/recovery';
 import {
+  alerts,
   connections as connectionRows,
   disabledMcpServers,
   messageSkills,
@@ -1028,6 +1030,15 @@ export class AgentRuntime implements OnModuleDestroy {
     return token ? { GH_TOKEN: token } : {};
   }
 
+  /** The log source of the Alert the Session works on; null for a Session with none. */
+  private logSourceOf(alertId: string | null): LogSource | null {
+    if (alertId === null) return null;
+    return (
+      this.store.db.select({ connector: alerts.connector }).from(alerts).where(eq(alerts.id, alertId)).get()
+        ?.connector ?? null
+    );
+  }
+
   /** The checkouts of the Repos the operator opened to the Session, apart from the folder the run works in. */
   private openedRepoFolders(session: SessionRow, workingDir: string): string[] {
     const ids = extraRepoIds(session);
@@ -1211,7 +1222,7 @@ export class AgentRuntime implements OnModuleDestroy {
     const repoFolders = outputFolder === null ? [] : this.openedRepoFolders(session, run.workingDir);
     const extraDirs = [attached, outputFolder, ...repoFolders].filter((folder) => folder !== null);
     run.editRoots = editRoots({ workingDir: run.workingDir, outputFolder, repoFolders, configDir });
-    const scope = mcpScope(run.purpose, session.kind);
+    const scope = mcpScope(run.purpose, session.kind, this.logSourceOf(session.alertId));
     // The console tools this run offers, for `key`: the servers' own objects cannot be compared.
     const tools: string[] = [];
     const options: Options = {

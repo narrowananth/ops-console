@@ -1,72 +1,20 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { ErrorCode, NO_ENV, SAMPLE_LIMIT, type Sample, type ScanWindow } from '@ops-console/shared';
+import { ErrorCode, NO_ENV, type Sample, type ScanWindow } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import { mapLimit } from '../common/map-limit';
-import { maskSignature, normalizePath } from './fingerprint';
+import { normalizePath } from './fingerprint';
+import {
+  groupEntries,
+  type LogGroup,
+  type LogReader,
+  type ReadRequest,
+  type ServiceCount,
+  type ServiceReading,
+} from './log-reader';
 
 const run = promisify(execFile);
-
-export const DATADOG_READER = Symbol('DATADOG_READER');
-
-export type IgnoreRule = { kind: 'status_class' | 'route'; value: string };
-
-/**
- * One kind of failure as a Scan saw it: the logs of one Service that share an HTTP status code, a masked message and a
- * Route. `method` and `path` are empty for logs that name no request path. `errors` counts the logs read in the window;
- * `peakPer10m` is their worst 10-minute bucket.
- */
-export type LogGroup = {
-  method: string;
-  path: string;
-  /** The HTTP status code the requests answered with. */
-  statusCode: number | null;
-  errors: number;
-  peakPer10m: number;
-  /** Newest first, up to 25. */
-  samples: Sample[];
-  query: string;
-};
-
-export type ServiceReading = {
-  name: string;
-  env: string;
-  groups: LogGroup[];
-  /** The `git.repository_url` tag on the Service's logs, when Datadog's source code integration sets it. */
-  repoUrl: string | null;
-};
-
-export type ReadRequest = {
-  envs: string[];
-  window: ScanWindow;
-  /** Only these Services; every Service with failing requests when null. */
-  services: string[] | null;
-  /** Only these HTTP status codes; every code from 400 up when empty. */
-  codes: number[];
-  ignore: IgnoreRule[];
-  /** Aborts the read when the operator stops the Scan. */
-  signal?: AbortSignal;
-};
-
-/** Datadog as a Scan reads it (ADR 0005: fixed reads, no model turn). Tests replace it with a scripted fake. */
-export interface DatadogReader {
-  /** Throws `rate_limited` when Datadog throttles, `upstream_failed` when it cannot be reached. */
-  read(request: ReadRequest): Promise<ServiceReading[]>;
-  /** Every `env` tag with logs in the last 7 days. */
-  envs(): Promise<string[]>;
-  /** The Services with failing requests in each env over the window, and how many. */
-  services(envs: string[], window: ScanWindow, codes: number[]): Promise<ServiceCount[]>;
-  /** Each HTTP status code from 400 up with requests in the window, every env together, busiest first. */
-  statusCodes(window: ScanWindow): Promise<{ code: number; count: number }[]>;
-  /** How many logs the query matches in the window: the Recheck of an Alert. */
-  countLogs(query: string, window: ScanWindow): Promise<number>;
-}
-
-export type ServiceCount = { name: string; env: string; errors: number };
-
-/** Datadog's statuses at error level and above: it keeps `emergency`, `alert` and `critical` apart from `error`. */
-export const ERROR_LEVEL = ['emergency', 'alert', 'critical', 'error'];
 
 /** The requests that failed: every HTTP status code from 400 up, or only `codes`. */
 export const failingQuery = (codes: number[]) =>
@@ -102,7 +50,6 @@ export const LOGS_PER_SERVICE = 1000;
 const SERVICE_LIMIT = 500;
 const ENV_LIMIT = 50;
 const CODE_LIMIT = 100;
-const TEN_MINUTES = 600_000;
 /** `pup` searches a Scan runs at once. */
 const PUP_WORKERS = 4;
 const REPO_TAG = 'git.repository_url:';
@@ -151,30 +98,13 @@ function routeOf(sample: Sample): { method: string; path: string } {
  * them; each group's query narrows it to its Route.
  */
 export function groupLogs(logs: Sample[], scope: string): LogGroup[] {
-  const groups = new Map<string, LogGroup & { buckets: Map<number, number> }>();
-  for (const sample of logs) {
-    const { method, path } = routeOf(sample);
-    const statusCode = statusCodeOf(sample);
-    const key = `${statusCode} ${method} ${path}\n${maskSignature(sample.message)}`;
-    let group = groups.get(key);
-    if (!group) {
-      const parts = [scope];
-      if (statusCode !== null) parts.push(`@http.status_code:${statusCode}`);
-      if (method) parts.push(`@http.method:${method} @http.url_details.path:${path.replaceAll(':id', '*')}`);
-      const query = parts.join(' ');
-      group = { method, path, statusCode, errors: 0, peakPer10m: 0, samples: [], query, buckets: new Map() };
-      groups.set(key, group);
-    }
-    group.errors += 1;
-    if (group.samples.length < SAMPLE_LIMIT) group.samples.push(sample);
-    const bucket = Math.floor(Date.parse(sample.timestamp) / TEN_MINUTES);
-    if (!Number.isNaN(bucket)) {
-      const count = (group.buckets.get(bucket) ?? 0) + 1;
-      group.buckets.set(bucket, count);
-      group.peakPer10m = Math.max(group.peakPer10m, count);
-    }
-  }
-  return [...groups.values()].map(({ buckets: _buckets, ...group }) => group);
+  const entries = logs.map((sample) => ({ sample, statusCode: statusCodeOf(sample), ...routeOf(sample) }));
+  return groupEntries(entries, ({ statusCode, method, path }) => {
+    const parts = [scope];
+    if (statusCode !== null) parts.push(`@http.status_code:${statusCode}`);
+    if (method) parts.push(`@http.method:${method} @http.url_details.path:${path.replaceAll(':id', '*')}`);
+    return parts.join(' ');
+  });
 }
 
 /** `github.com/acme/orders` from the tag, or the attribute of that name, on any of the logs; null when none has it. */
@@ -189,7 +119,7 @@ export function repoUrlOf(logs: Sample[]): string | null {
 }
 
 /** `pup`, with the signed-in org. Errors name the tool and the cause class only: output may hold log content. */
-export class PupDatadog implements DatadogReader {
+export class PupDatadog implements LogReader {
   constructor(private readonly bin = 'pup') {}
 
   async read(request: ReadRequest): Promise<ServiceReading[]> {

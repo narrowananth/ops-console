@@ -21,6 +21,7 @@ import {
   type FixStatus,
   type GitHost,
   type HealthStatus,
+  type LogSource,
   type McpScope,
   type McpTransport,
   type Model,
@@ -553,25 +554,38 @@ export const agentComments = sqliteTable(
   (table) => [primaryKey({ columns: [table.repoId, table.prNumber, table.commentId] })],
 );
 
-/** A Datadog service in one env. Found by a Scan; the operator links it to a Repo. */
+/** The log source a row belongs to: `datadog` or `otel_logs`. */
+const connectorColumn = () =>
+  text('connector')
+    .$type<LogSource>()
+    .notNull()
+    .default('datadog' as LogSource);
+const connectorCheck = (table: { connector: AnySQLiteColumn }, name: string) =>
+  check(name, sql`${table.connector} IN ('datadog', 'otel_logs')`);
+
+/** A service of one log source in one env. Found by a Scan; the operator links it to a Repo. */
 export const services = sqliteTable(
   'services',
   {
     id: text().primaryKey().notNull(),
-    /** Datadog service name. */
+    connector: connectorColumn(),
+    /** The service name in the log source. */
     name: text().notNull(),
-    /** Datadog env tag. */
+    /** The env in the log source. */
     env: text().notNull(),
     repoId: text('repo_id').references(() => repos.id, { onDelete: 'set null' }),
     /** The Git host URL of the code: from the logs' `git.repository_url` tag, or set by the operator. */
     repoUrl: text('repo_url'),
-    /** Null: the Datadog Connector's default. */
+    /** Null: the Connector's default. */
     checkInterval: text('check_interval').$type<CheckInterval>(),
     /** When the code finder last looked for this Service's code and found none; null before it has looked. */
     codeLookedAt: text('code_looked_at'),
     createdAt: text('created_at').notNull().default(nowIso),
   },
-  (table) => [unique('services_name_env').on(table.name, table.env)],
+  (table) => [
+    unique('services_connector_name_env').on(table.connector, table.name, table.env),
+    connectorCheck(table, 'services_connector_known'),
+  ],
 );
 
 export const routes = sqliteTable(
@@ -597,6 +611,7 @@ export const scans = sqliteTable(
   'scans',
   {
     id: text().primaryKey().notNull(),
+    connector: connectorColumn(),
     triggeredBy: text('triggered_by').$type<ScanTrigger>().notNull(),
     /** Null: every Service. */
     serviceId: text('service_id').references(() => services.id, { onDelete: 'cascade' }),
@@ -613,6 +628,7 @@ export const scans = sqliteTable(
       .default('running' as ScanStatus),
     /** `interrupted` when the daemon stopped mid-Scan. */
     errorCode: text('error_code'),
+    /** Why a Scan failed; on an `ok` Scan, its notes one to a line (lines skipped, a read stopped at the cap). */
     errorMessage: text('error_message'),
     startedAt: text('started_at').notNull().default(nowIso),
     finishedAt: text('finished_at'),
@@ -620,6 +636,7 @@ export const scans = sqliteTable(
   (table) => [
     index('scans_started_idx').on(sql`${table.startedAt} DESC`),
     index('scans_service_idx').on(table.serviceId, sql`${table.startedAt} DESC`),
+    connectorCheck(table, 'scans_connector_known'),
   ],
 );
 
@@ -650,6 +667,7 @@ export const alerts = sqliteTable(
     routeId: text('route_id')
       .notNull()
       .references(() => routes.id, { onDelete: 'cascade' }),
+    connector: connectorColumn(),
     fingerprint: text().notNull().unique(),
     /** The HTTP status code its logs answered with; null for Alerts from before Scans read codes. */
     httpStatus: integer('http_status'),
@@ -673,13 +691,15 @@ export const alerts = sqliteTable(
     clearedAt: text('cleared_at'),
     regressionCount: integer('regression_count').notNull().default(0),
     samples: text().notNull().default('[]'),
-    datadogQuery: text('datadog_query').notNull(),
+    /** Datadog: the query string. OpenTelemetry logs: a JSON filter `{service, env, status, method, path}`. */
+    sourceQuery: text('source_query').notNull(),
     createdAt: text('created_at').notNull().default(nowIso),
     updatedAt: text('updated_at').notNull().default(nowIso),
   },
   (table) => [
     index('alerts_status_idx').on(table.status, sql`${table.lastSeenAt} DESC`),
     index('alerts_route_idx').on(table.routeId),
+    connectorCheck(table, 'alerts_connector_known'),
     check(
       'alerts_samples_json',
       sql`json_valid(${table.samples}) AND json_type(${table.samples}) = 'array' AND json_array_length(${table.samples}) <= 25`,
