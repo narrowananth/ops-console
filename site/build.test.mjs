@@ -67,6 +67,33 @@ test('the build writes every page, with the links Google asks of a home page', a
   assert.match(sitemap, /<loc>https:\/\/opsconsole\.org\/privacy\/<\/loc>/);
 });
 
+test('the troubleshooting page has its place, its sections and its links', async () => {
+  const slugs = DOCS.map(({ slug }) => slug);
+  const at = slugs.indexOf('troubleshooting');
+  assert.ok(at > -1, 'DOCS lists troubleshooting');
+  assert.equal(slugs[at - 1], 'safety');
+  assert.equal(slugs[at + 1], 'develop');
+  await build();
+  const page = await readFile(path.join(dist, 'docs', 'troubleshooting', 'index.html'), 'utf8');
+  const sections = [...page.matchAll(/<h2 id="[^"]+">([^<]+)<\/h2>/g)].map(([, text]) => text);
+  assert.deepEqual(sections, [
+    'Install',
+    'Start and stop',
+    'Keychain',
+    'Run sandbox',
+    'Permissions',
+    'When it is not here',
+  ]);
+  const install = await readFile(path.join(dist, 'docs', 'install', 'index.html'), 'utf8');
+  assert.match(
+    install.slice(install.indexOf('<article')),
+    /href="\/docs\/troubleshooting\/"/,
+    'Install links it in the text',
+  );
+  const index = await readFile(path.join(dist, 'docs', 'index.html'), 'utf8');
+  assert.match(index, /class="card" href="\/docs\/troubleshooting\/"/, 'the docs index has its card');
+});
+
 test('no page loads anything from a third party, and every internal link has a page', async () => {
   const pages = await build();
   const known = new Set(pages);
