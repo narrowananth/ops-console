@@ -15,7 +15,7 @@ type ServiceRef = { id: string; name: string; repo_id: string | null; repo_url: 
 /**
  * Where a Service's code is, for Verify and Fix: a local Repo, else the Git URL on GitHub, GitLab or Bitbucket that
  * the agent clones into an anonymous Session. Datadog fills the URL when its logs carry `git.repository_url`;
- * OpenTelemetry logs carry none, so the Repo is found by the Service's name or linked by hand.
+ * The other sources carry none, so the Repo is found by the Service's name or linked by hand.
  */
 export function CodeSource({ service, source }: { service: ServiceRef; source: LogSource }) {
   const repos = useRepos();

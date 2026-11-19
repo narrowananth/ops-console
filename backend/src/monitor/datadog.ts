@@ -7,6 +7,7 @@ import { mapLimit } from '../common/map-limit';
 import { normalizePath } from './fingerprint';
 import {
   groupEntries,
+  ignoredRanges,
   type LogGroup,
   type LogReader,
   type ReadRequest,
@@ -53,12 +54,6 @@ const CODE_LIMIT = 100;
 /** `pup` searches a Scan runs at once. */
 const PUP_WORKERS = 4;
 const REPO_TAG = 'git.repository_url:';
-
-/** `4xx` becomes a Datadog range on the status code. */
-function statusRange(value: string): string | null {
-  const match = /^([1-5])xx$/i.exec(value);
-  return match ? `-@http.status_code:[${match[1]}00 TO ${match[1]}99]` : null;
-}
 
 function field(attributes: Record<string, unknown>, ...keys: string[]): unknown {
   let at: unknown = attributes;
@@ -124,10 +119,7 @@ export class PupDatadog implements LogReader {
 
   async read(request: ReadRequest): Promise<ServiceReading[]> {
     const out: ServiceReading[] = [];
-    const ignored = request.ignore.flatMap((rule) => {
-      const range = rule.kind === 'status_class' ? statusRange(rule.value) : null;
-      return range ? [range] : [];
-    });
+    const ignored = ignoredRanges(request.ignore).map(([from, to]) => `-@http.status_code:[${from} TO ${to}]`);
     // The Services of every env are listed first, then read by a few `pup` workers at a time, in the order listed.
     const wanted: { env: string; name: string; scope: string }[] = [];
     for (const env of request.envs) {

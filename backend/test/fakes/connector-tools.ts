@@ -17,6 +17,14 @@ export class FakeConnectorTools implements ConnectorTools {
   githubPrompt: SignInPrompt = { code: 'WXYZ-1234', url: 'https://github.com/login/device' };
   readonly gitlabLogins: string[] = [];
   down = false;
+  /** The AWS profiles that are signed in, and the ones that sign in with Identity Center. */
+  awsSignedInProfiles = new Set<string>();
+  awsSsoProfiles = new Set<string>();
+  /** The log groups the signed-in profile sees. */
+  awsGroups: string[] = [];
+  /** Each `aws sso login`, by profile, and each `describe-log-groups` call. */
+  readonly awsLogins: string[] = [];
+  readonly awsListed: { profile: string; region: string }[] = [];
   /** Commands not on the PATH; `brew install` puts one there. */
   missing = new Set<string>();
   readonly brewed: string[] = [];
@@ -93,6 +101,27 @@ export class FakeConnectorTools implements ConnectorTools {
     this.gitlabLogins.push(host);
     await this.login(signal);
     this.gitlab = 'gl-operator';
+  }
+
+  async awsSignedIn(profile: string): Promise<boolean> {
+    return this.awsSignedInProfiles.has(profile);
+  }
+
+  async awsIsSso(profile: string): Promise<boolean> {
+    return this.awsSsoProfiles.has(profile);
+  }
+
+  async awsLogin(profile: string, signal: AbortSignal, _onPrompt: (prompt: SignInPrompt) => void): Promise<void> {
+    this.awsLogins.push(profile);
+    await this.login(signal);
+    this.awsSignedInProfiles.add(profile);
+  }
+
+  async awsLogGroups(profile: string, region: string): Promise<string[]> {
+    this.awsListed.push({ profile, region });
+    if (!this.awsSignedInProfiles.has(profile))
+      throw new ApiError(502, ErrorCode.UpstreamFailed, '`aws logs describe-log-groups` failed');
+    return this.awsGroups;
   }
 
   async openPage(url: string): Promise<void> {

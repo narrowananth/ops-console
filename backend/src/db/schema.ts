@@ -554,14 +554,12 @@ export const agentComments = sqliteTable(
   (table) => [primaryKey({ columns: [table.repoId, table.prNumber, table.commentId] })],
 );
 
-/** The log source a row belongs to: `datadog` or `otel_logs`. */
+/** The log source a row belongs to: a `LogSource`. The code validates it. */
 const connectorColumn = () =>
   text('connector')
     .$type<LogSource>()
     .notNull()
     .default('datadog' as LogSource);
-const connectorCheck = (table: { connector: AnySQLiteColumn }, name: string) =>
-  check(name, sql`${table.connector} IN ('datadog', 'otel_logs')`);
 
 /** A service of one log source in one env. Found by a Scan; the operator links it to a Repo. */
 export const services = sqliteTable(
@@ -582,10 +580,7 @@ export const services = sqliteTable(
     codeLookedAt: text('code_looked_at'),
     createdAt: text('created_at').notNull().default(nowIso),
   },
-  (table) => [
-    unique('services_connector_name_env').on(table.connector, table.name, table.env),
-    connectorCheck(table, 'services_connector_known'),
-  ],
+  (table) => [unique('services_connector_name_env').on(table.connector, table.name, table.env)],
 );
 
 export const routes = sqliteTable(
@@ -636,7 +631,6 @@ export const scans = sqliteTable(
   (table) => [
     index('scans_started_idx').on(sql`${table.startedAt} DESC`),
     index('scans_service_idx').on(table.serviceId, sql`${table.startedAt} DESC`),
-    connectorCheck(table, 'scans_connector_known'),
   ],
 );
 
@@ -691,7 +685,7 @@ export const alerts = sqliteTable(
     clearedAt: text('cleared_at'),
     regressionCount: integer('regression_count').notNull().default(0),
     samples: text().notNull().default('[]'),
-    /** Datadog: the query string. OpenTelemetry logs: a JSON filter `{service, env, status, method, path}`. */
+    /** Datadog: the query string. OpenTelemetry logs: a JSON filter `{service, env, status, method, path}`. CloudWatch logs: `{log_group, status, method, path}`. */
     sourceQuery: text('source_query').notNull(),
     createdAt: text('created_at').notNull().default(nowIso),
     updatedAt: text('updated_at').notNull().default(nowIso),
@@ -699,7 +693,6 @@ export const alerts = sqliteTable(
   (table) => [
     index('alerts_status_idx').on(table.status, sql`${table.lastSeenAt} DESC`),
     index('alerts_route_idx').on(table.routeId),
-    connectorCheck(table, 'alerts_connector_known'),
     check(
       'alerts_samples_json',
       sql`json_valid(${table.samples}) AND json_type(${table.samples}) = 'array' AND json_array_length(${table.samples}) <= 25`,

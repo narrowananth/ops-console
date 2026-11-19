@@ -322,8 +322,8 @@ export function LogsPane({
             role="status"
             className="m-0 border-b border-divider bg-accent-100 px-3.5 py-2 text-xs text-accent-900"
           >
-            {SOURCE_LABEL[gone.source]} is down{gone.reason ? `: ${gone.reason}` : ''}. Scans skip it until a check
-            passes; its Alerts stay.
+            {SOURCE_LABEL[gone.source]} is down{gone.reason ? `: ${gone.reason.replace(/\.$/, '')}` : ''}. Scans skip it
+            until a check passes; its Alerts stay.
           </p>
         ))}
       <div className="min-h-0 flex-1 overflow-y-auto">

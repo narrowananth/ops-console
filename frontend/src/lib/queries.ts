@@ -50,8 +50,10 @@ import {
   healthSchema,
   keychainHandoverSchema,
   keychainWaitSchema,
+  type LogGroupPick,
   type LogSource,
   localServersSchema,
+  logGroupListSchema,
   logServiceSchema,
   type Message,
   mcpServerListSchema,
@@ -150,6 +152,8 @@ export const queryKeys = {
   monitor: ['monitor'] as const,
   /** Log source reads for the Services pane: a monitor event does not refresh them, since each one reads the source. */
   logSource: ['log-source'] as const,
+  /** The log groups the CloudWatch picker lists for a profile and region. */
+  logGroups: (profile: string, region: string) => ['log-groups', profile, region] as const,
   alert: (id: string) => ['monitor', 'alert', id] as const,
   messages: (id: string) => ['messages', id] as const,
   outputs: (id: string) => ['outputs', id] as const,
@@ -607,6 +611,34 @@ export function useConnectLogFolder() {
   return useConnectorMutation((folder: string) =>
     apiSend('POST', `/connectors/${ConnectorId.OtelLogs}/connect`, { folder }, z.undefined()),
   );
+}
+
+/**
+ * Connects CloudWatch logs with its profile, region and picked log groups. A signed-in profile connects at once; the
+ * daemon refuses a missing tool, a group the account lacks and a repeated Service (`tool_missing`,
+ * `log_group_not_found`, `duplicate_service`).
+ */
+export function useConnectCloudWatch() {
+  return useConnectorMutation((body: { profile: string; region: string; log_groups: LogGroupPick[] }) =>
+    apiSend('POST', `/connectors/${ConnectorId.CloudWatchLogs}/connect`, body, z.undefined()),
+  );
+}
+
+/** The log groups of a profile and region, read with the AWS CLI once asked for: each read is an AWS call. */
+export function useLogGroups(asked: { profile: string; region: string } | null) {
+  const profile = asked?.profile ?? '';
+  const region = asked?.region ?? '';
+  return useQuery({
+    queryKey: queryKeys.logGroups(profile, region),
+    queryFn: () =>
+      apiGet(
+        `/connectors/${ConnectorId.CloudWatchLogs}/log-groups?profile=${encodeURIComponent(profile)}&region=${encodeURIComponent(region)}`,
+        logGroupListSchema,
+      ).then((b) => b.data.map((group) => group.name)),
+    enabled: asked !== null,
+    retry: false,
+    gcTime: 0,
+  });
 }
 
 /** Saves a Connector's settings, such as the slashdocs server, then starts its sign-in. */

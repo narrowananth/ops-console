@@ -761,13 +761,13 @@ describe('Google Connectors', () => {
   it('lists the three after slashdocs, off, with an empty config', async () => {
     const ctx = await start({ google: 'shipped' });
     const rows = await list(ctx);
-    expect(rows).toHaveLength(13);
-    expect(rows.slice(-4, -1).map((row) => [row.id, row.name, row.via, row.status, row.config])).toEqual([
+    expect(rows).toHaveLength(14);
+    expect(rows.slice(-5, -2).map((row) => [row.id, row.name, row.via, row.status, row.config])).toEqual([
       ['google_docs', 'Google Docs', 'Google Docs API', 'off', {}],
       ['google_sheets', 'Google Sheets', 'Google Sheets API', 'off', {}],
       ['google_drive', 'Google Drive', 'Google Drive API', 'off', {}],
     ]);
-    expect(rows.map((row) => row.id).slice(-5)).toEqual(['slashdocs', ...GOOGLE, 'otel_logs']);
+    expect(rows.map((row) => row.id).slice(-6)).toEqual(['slashdocs', ...GOOGLE, 'otel_logs', 'cloudwatch_logs']);
     // Nothing is typed in the pane.
     expect((await api(ctx.daemon).patch('/connectors/google_docs', { config: { client_id: 'x' } })).status).toBe(400);
   });
@@ -1003,7 +1003,7 @@ describe('OpenTelemetry logs Connector', () => {
       sign_in: null,
       config: { folder: '', environments: ['prod'], daily_scan_time: '09:00', default_interval: '24h' },
     });
-    expect((await list(ctx)).at(-1)?.id).toBe('otel_logs');
+    expect((await list(ctx)).map((row) => row.id).slice(-2)).toEqual(['otel_logs', 'cloudwatch_logs']);
   });
 
   it('connects at once to a folder that exists and can be read, with no sign-in, empty or not', async () => {
@@ -1063,5 +1063,277 @@ describe('OpenTelemetry logs Connector', () => {
     const off = await api(ctx.daemon).delete('/connectors/otel_logs/credentials');
     expect(off.body.data).toMatchObject({ status: 'off' });
     expect(await readFile(file, 'utf8')).toBe('{}\n');
+  });
+});
+
+describe('CloudWatch logs Connector', () => {
+  const GROUPS = [
+    { name: '/ecs/shop-api', service: 'shop-api', env: 'prod' },
+    { name: '/ecs/billing-api', service: 'billing-api', env: 'staging' },
+  ];
+  const connect = (ctx: Ctx, body: Record<string, unknown>) =>
+    api(ctx.daemon).post('/connectors/cloudwatch_logs/connect', body);
+  const signedIn = (ctx: Ctx, profile = 'ops') => {
+    ctx.tools.awsSignedInProfiles.add(profile);
+    ctx.tools.awsGroups = ['/ecs/shop-api', '/ecs/billing-api', '/ecs/worker'];
+  };
+  const registered = (ctx: Ctx) =>
+    ctx.dirs.map((dir) => {
+      const file = path.join(dir, '.claude.json');
+      return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).mcpServers?.cloudwatch : undefined;
+    });
+
+  it('is listed last, off, with an empty profile and region, no groups, and no AWS key', async () => {
+    const ctx = await start();
+    expect(await one(ctx, 'cloudwatch_logs')).toMatchObject({
+      name: 'CloudWatch logs',
+      via: 'aws CLI + CloudWatch MCP',
+      status: 'off',
+      sign_in: null,
+      config: {
+        profile: '',
+        region: '',
+        log_groups: [],
+        environments: ['prod'],
+        daily_scan_time: '09:00',
+        default_interval: '24h',
+        rapid_errors_per_10m: 100,
+        failing_errors_per_hour: 5,
+        ignore: [],
+        reports_folder: 'reports',
+      },
+    });
+    expect((await list(ctx)).at(-1)?.id).toBe('cloudwatch_logs');
+  });
+
+  it('connects at once to a signed-in profile, and registers AWS’s CloudWatch server in every Claude account with the profile in its environment', async () => {
+    const ctx = await start();
+    signedIn(ctx);
+    expect((await connect(ctx, { profile: 'ops', region: 'us-east-1', log_groups: GROUPS })).status).toBe(202);
+    expect(await one(ctx, 'cloudwatch_logs')).toMatchObject({
+      status: 'ok',
+      status_detail: null,
+      account_label: 'ops',
+      sign_in: null,
+      config: { profile: 'ops', region: 'us-east-1', log_groups: GROUPS },
+    });
+    for (const entry of registered(ctx)) {
+      expect(entry.command).toBe('env');
+      expect(entry.args).toEqual([
+        'AWS_PROFILE=ops',
+        'AWS_REGION=us-east-1',
+        'FASTMCP_LOG_LEVEL=ERROR',
+        'uvx',
+        'awslabs.cloudwatch-mcp-server@latest',
+      ]);
+    }
+    // A profile name is no secret: nothing goes to the Keychain.
+    expect(ctx.keychain.values.size).toBe(0);
+  });
+
+  it('stops and names the missing tool and its install command when aws or uvx is not on the PATH', async () => {
+    const ctx = await start();
+    signedIn(ctx);
+    const body = { profile: 'ops', region: 'us-east-1', log_groups: GROUPS };
+    ctx.tools.missing = new Set(['aws']);
+    const noAws = await connect(ctx, body);
+    expect([noAws.status, noAws.body.error.code]).toEqual([422, ErrorCode.ToolMissing]);
+    expect(noAws.body.error.message).toContain('aws');
+    expect(noAws.body.error.message).toContain('brew install awscli');
+    ctx.tools.missing = new Set(['uvx']);
+    const noUvx = await connect(ctx, body);
+    expect([noUvx.status, noUvx.body.error.code]).toEqual([422, ErrorCode.ToolMissing]);
+    expect(noUvx.body.error.message).toContain('brew install uv');
+    expect(await one(ctx, 'cloudwatch_logs')).toMatchObject({ status: 'off', config: { profile: '', log_groups: [] } });
+    expect(ctx.tools.brewed).toEqual([]);
+  });
+
+  it('refuses two picked groups with one Service name and env, and a group the account does not have, and stores nothing', async () => {
+    const ctx = await start();
+    signedIn(ctx);
+    const twice = await connect(ctx, {
+      profile: 'ops',
+      region: 'us-east-1',
+      log_groups: [GROUPS[0], { name: '/ecs/shop-api-2', service: 'shop-api', env: 'prod' }],
+    });
+    expect([twice.status, twice.body.error.code]).toEqual([422, ErrorCode.DuplicateService]);
+    // The same name in another env is a second Service.
+    const other = await api(ctx.daemon).patch('/connectors/cloudwatch_logs', {
+      config: { log_groups: [GROUPS[0], { name: '/ecs/shop-api-2', service: 'shop-api', env: 'staging' }] },
+    });
+    expect(other.status).toBe(200);
+    const patched = await api(ctx.daemon).patch('/connectors/cloudwatch_logs', {
+      config: { log_groups: [GROUPS[0], { name: '/ecs/shop-api-2', service: 'shop-api', env: 'prod' }] },
+    });
+    expect([patched.status, patched.body.error.code]).toEqual([422, ErrorCode.DuplicateService]);
+
+    const missing = await connect(ctx, {
+      profile: 'ops',
+      region: 'us-east-1',
+      log_groups: [{ name: '/ecs/gone', service: 'gone', env: 'prod' }],
+    });
+    expect([missing.status, missing.body.error.code]).toEqual([422, ErrorCode.LogGroupNotFound]);
+    expect(missing.body.error.message).toContain('/ecs/gone');
+    expect(await one(ctx, 'cloudwatch_logs')).toMatchObject({ status: 'off', config: { profile: '' } });
+    expect(registered(ctx).every((entry) => entry === undefined)).toBe(true);
+  });
+
+  it('reads connected when the profile answers, and needs auth for any failure, with the command to run', async () => {
+    const ctx = await start();
+    signedIn(ctx);
+    await connect(ctx, { profile: 'ops', region: 'us-east-1', log_groups: GROUPS });
+    const check = async () => (await api(ctx.daemon).post('/connectors/cloudwatch_logs/checks')).body.data;
+    expect(await check()).toMatchObject({ status: 'ok', account_label: 'ops' });
+    ctx.tools.awsSignedInProfiles.clear();
+    expect(await check()).toMatchObject({
+      status: 'auth',
+      status_detail: 'AWS profile ops is signed out. Run `aws login --profile ops`, then Connect again.',
+    });
+    ctx.tools.awsSsoProfiles.add('ops');
+    expect(await check()).toMatchObject({
+      status: 'auth',
+      status_detail: 'The AWS session for ops has expired. Connect to sign in again.',
+    });
+    ctx.tools.missing = new Set(['aws']);
+    expect(await check()).toMatchObject({
+      status: 'fail',
+      status_detail: expect.stringContaining('aws is not installed'),
+    });
+  });
+
+  it('signs an Identity Center profile in with aws sso login, offers Cancel while it waits, and connects after', async () => {
+    const ctx = await start();
+    ctx.tools.awsSsoProfiles.add('ops');
+    ctx.tools.awsGroups = ['/ecs/shop-api'];
+    ctx.tools.next = 'hang';
+    const body = { profile: 'ops', region: 'us-east-1', log_groups: [GROUPS[0]] };
+    expect((await connect(ctx, body)).status).toBe(202);
+    await until(
+      () => one(ctx, 'cloudwatch_logs'),
+      (row) => row.sign_in !== null,
+      'the waiting sign-in',
+    );
+    expect(ctx.tools.awsLogins).toEqual(['ops']);
+    // Cancel leaves the Connector as it was before Connect, with the choices kept.
+    const cancelled = await api(ctx.daemon).delete('/connectors/cloudwatch_logs/sign-in');
+    expect(cancelled.body.data).toMatchObject({ status: 'off', sign_in: null, config: { profile: 'ops' } });
+
+    ctx.tools.next = 'ok';
+    await connect(ctx, body);
+    await until(
+      () => one(ctx, 'cloudwatch_logs'),
+      (row) => row.status === 'ok' && row.sign_in === null,
+      'the sign-in',
+    );
+    expect(registered(ctx).every((entry) => entry !== undefined)).toBe(true);
+  });
+
+  it('tells the operator to run aws login for a profile that does not use Identity Center', async () => {
+    const ctx = await start();
+    await connect(ctx, { profile: 'ops', region: 'us-east-1', log_groups: [GROUPS[0]] });
+    const row = await until(
+      () => one(ctx, 'cloudwatch_logs'),
+      (found) => found.status === 'auth' && found.sign_in === null,
+      'the answer',
+    );
+    expect(row.status_detail).toBe('AWS profile ops is signed out. Run `aws login --profile ops`, then Connect again.');
+    expect(ctx.tools.awsLogins).toEqual([]);
+    expect(registered(ctx).every((entry) => entry === undefined)).toBe(true);
+  });
+
+  it('reads down with the reason when a picked group is gone after the sign-in', async () => {
+    const ctx = await start();
+    ctx.tools.awsSsoProfiles.add('ops');
+    ctx.tools.awsGroups = [];
+    await connect(ctx, { profile: 'ops', region: 'us-east-1', log_groups: [GROUPS[0]] });
+    await until(
+      () => one(ctx, 'cloudwatch_logs'),
+      (row) => row.status === 'fail',
+      'the failure',
+    );
+    expect(await one(ctx, 'cloudwatch_logs')).toMatchObject({
+      status_detail: expect.stringContaining('/ecs/shop-api'),
+    });
+  });
+
+  it('registers the server again with the new profile, and the new region, when either changes', async () => {
+    const ctx = await start();
+    signedIn(ctx);
+    signedIn(ctx, 'audit');
+    await connect(ctx, { profile: 'ops', region: 'us-east-1', log_groups: [GROUPS[0]] });
+    const changed = await api(ctx.daemon).patch('/connectors/cloudwatch_logs', { config: { profile: 'audit' } });
+    expect(changed.status).toBe(200);
+    for (const entry of registered(ctx))
+      expect(entry.args.slice(0, 2)).toEqual(['AWS_PROFILE=audit', 'AWS_REGION=us-east-1']);
+    await api(ctx.daemon).patch('/connectors/cloudwatch_logs', { config: { region: 'eu-west-1' } });
+    for (const entry of registered(ctx))
+      expect(entry.args.slice(0, 2)).toEqual(['AWS_PROFILE=audit', 'AWS_REGION=eu-west-1']);
+    expect(await one(ctx, 'cloudwatch_logs')).toMatchObject({ status: 'ok', account_label: 'audit' });
+  });
+
+  it('keeps a changed profile out of Claude Code while the Connector is not connected, since Connect registers it', async () => {
+    const ctx = await start();
+    const changed = await api(ctx.daemon).patch('/connectors/cloudwatch_logs', {
+      config: { profile: 'audit', region: 'eu-west-1' },
+    });
+    expect(changed.status).toBe(200);
+    expect(await one(ctx, 'cloudwatch_logs')).toMatchObject({ status: 'off', config: { profile: 'audit' } });
+    expect(registered(ctx).every((entry) => entry === undefined)).toBe(true);
+  });
+
+  it('refuses to connect over an MCP server the operator registered as cloudwatch, and leaves it as it was', async () => {
+    const ctx = await start();
+    signedIn(ctx);
+    const own = { name: 'cloudwatch', transport: 'stdio', target: 'node /opt/mine/cloudwatch.js', scope: 'user' };
+    expect((await api(ctx.daemon).post('/mcp-servers', own)).status).toBe(201);
+    const refused = await connect(ctx, { profile: 'ops', region: 'us-east-1', log_groups: [GROUPS[0]] });
+    expect([refused.status, refused.body.error.code]).toEqual([409, ErrorCode.Duplicate]);
+    expect(refused.body.error.message).toContain('cloudwatch');
+    expect((await one(ctx, 'cloudwatch_logs')).status).toBe('off');
+    for (const entry of registered(ctx)) expect(entry.args).toEqual(['/opt/mine/cloudwatch.js']);
+  });
+
+  it('removes the server on Disconnect and leaves the profile, region and groups as they were', async () => {
+    const ctx = await start();
+    signedIn(ctx);
+    await connect(ctx, { profile: 'ops', region: 'us-east-1', log_groups: GROUPS });
+    const off = await api(ctx.daemon).delete('/connectors/cloudwatch_logs/credentials');
+    expect(off.body.data).toMatchObject({
+      status: 'off',
+      config: { profile: 'ops', region: 'us-east-1', log_groups: GROUPS },
+    });
+    await ctx.daemon.app.get(McpServersService).settled();
+    expect(registered(ctx).every((entry) => entry === undefined)).toBe(true);
+    expect(ctx.tools.awsSignedInProfiles.has('ops')).toBe(true);
+  });
+
+  describe('the log group list', () => {
+    const groups = (ctx: Ctx, query = '') => api(ctx.daemon).get(`/connectors/cloudwatch_logs/log-groups${query}`);
+
+    it('lists the groups of the profile and region the pane has typed, or the stored ones', async () => {
+      const ctx = await start();
+      signedIn(ctx);
+      const typed = await groups(ctx, '?profile=ops&region=eu-west-1');
+      expect(typed.status).toBe(200);
+      expect(typed.body).toEqual({
+        data: [{ name: '/ecs/shop-api' }, { name: '/ecs/billing-api' }, { name: '/ecs/worker' }],
+        meta: { next_cursor: null },
+      });
+      expect(ctx.tools.awsListed).toEqual([{ profile: 'ops', region: 'eu-west-1' }]);
+      await connect(ctx, { profile: 'ops', region: 'us-east-1', log_groups: [GROUPS[0]] });
+      await groups(ctx);
+      expect(ctx.tools.awsListed.at(-1)).toEqual({ profile: 'ops', region: 'us-east-1' });
+    });
+
+    it('fails upstream_failed when the profile is signed out, tool_missing without aws, and 400 without a profile', async () => {
+      const ctx = await start();
+      const out = await groups(ctx, '?profile=ops&region=us-east-1');
+      expect([out.status, out.body.error.code]).toEqual([502, ErrorCode.UpstreamFailed]);
+      ctx.tools.missing = new Set(['aws']);
+      const none = await groups(ctx, '?profile=ops&region=us-east-1');
+      expect([none.status, none.body.error.code]).toEqual([422, ErrorCode.ToolMissing]);
+      ctx.tools.missing = new Set();
+      expect((await groups(ctx)).status).toBe(400);
+    });
   });
 });

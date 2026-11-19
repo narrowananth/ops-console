@@ -32,7 +32,7 @@ A user in any timezone should get from install to a first verified alert without
 Datadog covers one slice of teams. Order by reach per integration:
 
 1. Generic OpenTelemetry logs, which cover most other tools without a vendor-specific Connector. Spec: [otel-log-source](specs/otel-log-source.md).
-2. AWS CloudWatch.
+2. AWS CloudWatch. Spec: [cloudwatch-log-source](specs/cloudwatch-log-source.md).
 3. Grafana Loki.
 4. New Relic.
 
@@ -60,7 +60,7 @@ Translate the docs site first, then the UI. Do the UI after the screens settle, 
 | --- | --- | --- |
 | 1 | Data-flow docs. Homebrew shipped. Signing and Google verification on hold | No |
 | 2 | Onboarding: troubleshooting. Sample repo on hold, video waits for it | No |
-| 3 | OTel source shipped. CloudWatch, Loki, New Relic. Webhook receiver on hold | No |
+| 3 | OTel and CloudWatch sources shipped. Loki, New Relic. Webhook receiver on hold | No |
 | 4 | Linux | 0004, 0006 |
 | 5 | Windows via WSL2 | Inherits Linux |
 | 6 | Localization | No |

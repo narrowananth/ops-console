@@ -24,6 +24,7 @@ export const CONNECTOR_BRAND: Record<ConnectorId, BrandSlug> = {
   [ConnectorId.GoogleSheets]: 'googlesheets',
   [ConnectorId.GoogleDrive]: 'googledrive',
   [ConnectorId.OtelLogs]: 'opentelemetry',
+  [ConnectorId.CloudWatchLogs]: 'cloudwatch',
 };
 
 /** Words in an MCP Server's name or command that say whose it is; the first match wins. */
@@ -55,6 +56,7 @@ const SERVER_HINTS: [RegExp, BrandSlug][] = [
   [/stripe/, 'stripe'],
   [/vercel/, 'vercel'],
   [/supabase/, 'supabase'],
+  [/cloudwatch/, 'cloudwatch'],
   [/docker/, 'docker'],
   [/kubernetes|\bk8s\b|kubectl/, 'kubernetes'],
   [/gcloud|google-cloud|\bgcp\b/, 'googlecloud'],

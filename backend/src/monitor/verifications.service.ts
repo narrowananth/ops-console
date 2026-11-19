@@ -85,7 +85,7 @@ export function verificationBrief(
   const what = route.method ? `route ${route.method} ${route.path}` : 'logs with no HTTP route';
   const rule = logSourceRule(alert.connector);
   const logged =
-    alert.connector === ConnectorId.OtelLogs ? `the ${CONNECTOR_NAMES[alert.connector]} hold` : 'Datadog logged';
+    alert.connector === ConnectorId.Datadog ? 'Datadog logged' : `the ${CONNECTOR_NAMES[alert.connector]} hold`;
   return `Find the cause of a failure ${logged}, in the code in ${where}. The console throws this folder away afterwards: write files and run local commands here only when a step allows it.
 
 Alert: ${alert.title}

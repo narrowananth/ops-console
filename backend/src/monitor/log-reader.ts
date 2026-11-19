@@ -17,7 +17,7 @@ export type LogGroup = {
   peakPer10m: number;
   /** Newest first, up to 25. */
   samples: Sample[];
-  /** What finds these logs again in their source: Datadog's query string, or the JSON filter of the Log folder. */
+  /** What finds these logs again in their source: Datadog's query string, or the JSON filter of the other sources. */
   query: string;
 };
 
@@ -43,6 +43,31 @@ export type ReadRequest = {
   note?: (text: string) => void;
 };
 
+/** `4xx` as the status codes it covers. */
+function statusClass(value: string): [number, number] | null {
+  const match = /^([1-5])xx$/i.exec(value);
+  return match ? [Number(match[1]) * 100, Number(match[1]) * 100 + 99] : null;
+}
+
+/** The status codes the `4xx` rules of a request leave out, as ranges. */
+export function ignoredRanges(ignore: IgnoreRule[]): [number, number][] {
+  return ignore.flatMap((rule) => {
+    const range = rule.kind === 'status_class' ? statusClass(rule.value) : null;
+    return range ? [range] : [];
+  });
+}
+
+/** Whether a Scan reads a log with this status code: one of the asked codes, when any, and not an ignored class. */
+export function statusKept({
+  codes,
+  ignore,
+}: Pick<ReadRequest, 'codes' | 'ignore'>): (statusCode: number | null) => boolean {
+  const ignored = ignoredRanges(ignore);
+  return (statusCode) =>
+    (codes.length === 0 || (statusCode !== null && codes.includes(statusCode))) &&
+    !(statusCode !== null && ignored.some(([from, to]) => statusCode >= from && statusCode <= to));
+}
+
 export type ServiceCount = { name: string; env: string; errors: number };
 
 /** A log source as a Scan reads it (ADR 0005: fixed reads, no model turn). Tests replace Datadog with a scripted fake. */
@@ -66,10 +91,19 @@ export const LOG_READERS = Symbol('LOG_READERS');
 /** Statuses at error level and above. Datadog keeps `emergency`, `alert` and `critical` apart from `error`. */
 export const ERROR_LEVEL = ['emergency', 'alert', 'critical', 'error'];
 
+/** The levels the Log folder and CloudWatch logs read as failing: Datadog's, and `fatal`. */
+export const FATAL_ERROR_LEVEL = ['fatal', ...ERROR_LEVEL];
+
 const TEN_MINUTES = 600_000;
 
 /** One failing log with the fields a Scan groups by. */
 export type LogEntry = { sample: Sample; statusCode: number | null; method: string; path: string };
+
+/** What makes two failing logs one kind of failure: status code, Route and masked message. */
+export const entryKey = (
+  { statusCode, method, path }: { statusCode: number | null; method: string; path: string },
+  message: string,
+): string => `${statusCode} ${method} ${path}\n${maskSignature(message)}`;
 
 /**
  * The logs of one Service, newest first, as groups: one per Route, status code and masked message. `queryOf` gives each
@@ -81,7 +115,7 @@ export function groupEntries(
 ): LogGroup[] {
   const groups = new Map<string, LogGroup & { buckets: Map<number, number> }>();
   for (const { sample, statusCode, method, path } of entries) {
-    const key = `${statusCode} ${method} ${path}\n${maskSignature(sample.message)}`;
+    const key = entryKey({ statusCode, method, path }, sample.message);
     let group = groups.get(key);
     if (!group) {
       const query = queryOf({ statusCode, method, path });

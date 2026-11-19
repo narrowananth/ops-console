@@ -21,7 +21,7 @@ import { PanelToggle } from '../components/ui/side-panel';
 import { useAlerts, useCancelScan, useLogServices, useScans, useStartScan, useStatusCodes } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
-import { SOURCE_LABEL, type SourceFilter, SourceLabel, sourceNames } from './log-source';
+import { CONNECT_A_SOURCE, SOURCE_LABEL, type SourceFilter, SourceLabel, sourceNames } from './log-source';
 import { ago, shown as inMonitor, type ScanScope } from './scan-scope';
 import { StatusPicker } from './status-picker';
 
@@ -105,6 +105,16 @@ export function ServicesPane({
       services: useLogServices(ConnectorId.OtelLogs, scope.range, scope.codes, inView.includes(ConnectorId.OtelLogs)),
       codes: useStatusCodes(ConnectorId.OtelLogs, scope.range, inView.includes(ConnectorId.OtelLogs)),
     },
+    {
+      source: ConnectorId.CloudWatchLogs as LogSource,
+      services: useLogServices(
+        ConnectorId.CloudWatchLogs,
+        scope.range,
+        scope.codes,
+        inView.includes(ConnectorId.CloudWatchLogs),
+      ),
+      codes: useStatusCodes(ConnectorId.CloudWatchLogs, scope.range, inView.includes(ConnectorId.CloudWatchLogs)),
+    },
   ].filter((read) => inView.includes(read.source));
   const known =
     reads.every((read) => read.codes.data) && reads.length > 0
@@ -168,7 +178,7 @@ export function ServicesPane({
   };
   const scanTip =
     inView.length === 0
-      ? 'Connect Datadog or OpenTelemetry logs in Integrations'
+      ? CONNECT_A_SOURCE
       : running
         ? 'A Scan is running. Wait for it to finish.'
         : toScan.length === 0 && !selected && scanCount === 0

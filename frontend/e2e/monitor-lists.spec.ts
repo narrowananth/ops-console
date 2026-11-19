@@ -289,11 +289,11 @@ test('a running Scan shows Scanning… with a Stop button that cancels it', asyn
   await cancelled;
 });
 
-// Two log sources: Datadog (service apis) and OpenTelemetry logs (service api).
+// Log sources: Datadog (service apis), OpenTelemetry logs (service api) and CloudWatch logs (service shop-api).
 const connectorOf = (id: string, name: string, status: string, detail: string | null = null) => ({
   id,
   name,
-  via: id === 'otel_logs' ? 'a local folder' : 'pup',
+  via: id === 'otel_logs' ? 'a local folder' : id === 'cloudwatch_logs' ? 'aws CLI + CloudWatch MCP' : 'pup',
   status,
   status_detail: detail,
   account_label: null,
@@ -305,7 +305,13 @@ const connectorOf = (id: string, name: string, status: string, detail: string | 
 
 const OTEL_SERVICE = { id: 'sv2', name: 'api', env: 'prod', repo_id: null, repo_url: null };
 const OTEL_FILTER = { service: 'api', env: 'prod', status: 500, method: 'POST', path: '/orders' };
+const CLOUDWATCH_SERVICE = { id: 'sv3', name: 'shop-api', env: 'prod', repo_id: null, repo_url: null };
 const DATADOG_ALERT = alertOf('a1', 'high', '/v1/orders');
+const CLOUDWATCH_ALERT = alertOf('c1', 'high', '/checkout', {
+  connector: 'cloudwatch_logs',
+  service: CLOUDWATCH_SERVICE,
+  source_query: JSON.stringify({ log_group: '/ecs/shop-api', status: 502, method: 'POST', path: '/checkout' }),
+});
 const OTEL_ALERT = alertOf('o1', 'high', '/orders', {
   connector: 'otel_logs',
   service: OTEL_SERVICE,
@@ -329,19 +335,33 @@ const scanOf = (connector: string, notes: string[] = []) => ({
   finished_at: ago(0.2),
 });
 
-type Sources = { datadog?: [string, string | null]; otel?: [string, string | null]; scans?: unknown[] };
+type Sources = {
+  datadog?: [string, string | null];
+  otel?: [string, string | null];
+  /** CloudWatch logs adds its Connector, its Alert and its Service only when given. */
+  cloudwatch?: [string, string | null];
+  scans?: unknown[];
+};
 
-async function routeSources(page: Page, { datadog = ['ok', null], otel = ['ok', null], scans = [] }: Sources = {}) {
+async function routeSources(
+  page: Page,
+  { datadog = ['ok', null], otel = ['ok', null], cloudwatch, scans = [] }: Sources = {},
+) {
   const read = { datadog: 0 };
+  const alerts = cloudwatch ? [DATADOG_ALERT, OTEL_ALERT, CLOUDWATCH_ALERT] : [DATADOG_ALERT, OTEL_ALERT];
   await page.route('**/api/connectors', (route) =>
     route.fulfill(
-      list([connectorOf('datadog', 'Datadog', ...datadog), connectorOf('otel_logs', 'OpenTelemetry logs', ...otel)]),
+      list([
+        connectorOf('datadog', 'Datadog', ...datadog),
+        connectorOf('otel_logs', 'OpenTelemetry logs', ...otel),
+        ...(cloudwatch ? [connectorOf('cloudwatch_logs', 'CloudWatch logs', ...cloudwatch)] : []),
+      ]),
     ),
   );
   await page.route('**/api/services', (route) => route.fulfill(list([])));
   await page.route(/\/api\/scans(\?.*)?$/, (route) => route.fulfill(list(scans)));
-  await page.route(/\/api\/alerts(\?.*)?$/, (route) => route.fulfill(list([DATADOG_ALERT, OTEL_ALERT])));
-  for (const alert of [DATADOG_ALERT, OTEL_ALERT]) {
+  await page.route(/\/api\/alerts(\?.*)?$/, (route) => route.fulfill(list(alerts)));
+  for (const alert of alerts) {
     await page.route(`**/api/alerts/${alert.id}`, (route) =>
       route.fulfill({ json: { data: { ...alert, samples: [], latest_report: null, review: null, fix: null } } }),
     );
@@ -352,7 +372,8 @@ async function routeSources(page: Page, { datadog = ['ok', null], otel = ['ok', 
   await page.route(/\/api\/monitor\/log-services/, (route) => {
     const connector = new URL(route.request().url()).searchParams.get('connector');
     if (connector === 'datadog') read.datadog++;
-    return route.fulfill(list([{ name: connector === 'otel_logs' ? 'api' : 'apis', envs: ['prod'], errors: 120 }]));
+    const name = connector === 'otel_logs' ? 'api' : connector === 'cloudwatch_logs' ? 'shop-api' : 'apis';
+    return route.fulfill(list([{ name, envs: ['prod'], errors: 120 }]));
   });
   await page.route(/\/api\/monitor\/status-codes/, (route) => route.fulfill(list([{ code: 500, count: 20 }])));
   return read;
@@ -455,4 +476,69 @@ test('an OpenTelemetry Alert shows its filter as a line and never names Datadog;
   await page.goto(`${daemon.url}/monitor?alert=a1#token=${daemon.token}`);
   await expect(detail).toContainText('service:apis');
   await expect(detail).toContainText('Datadog');
+});
+
+test('three sources share one list, and the source filter offers all three and keeps one', async ({ page }) => {
+  await routeSources(page, { cloudwatch: ['ok', null] });
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  const logs = page.getByRole('list', { name: 'Logs' });
+  const services = page.getByRole('list', { name: 'Services' });
+  await expect(logs.getByRole('button')).toHaveCount(3);
+  await expect(logs.getByRole('button', { name: /POST \/checkout/ })).toContainText('CloudWatch');
+  await expect(services.getByRole('listitem').filter({ hasText: 'CloudWatch' })).toHaveCount(1);
+  await expect(page.getByRole('tablist', { name: 'Source' }).getByRole('tab')).toHaveText([
+    'All',
+    'Datadog',
+    'OpenTelemetry',
+    'CloudWatch',
+  ]);
+
+  await page.getByRole('tab', { name: 'CloudWatch' }).click();
+  await expect(logs.getByRole('button')).toHaveCount(1);
+  await expect(logs.getByRole('button')).toContainText('/checkout');
+  await expect(services.getByRole('listitem')).toHaveCount(1);
+  await expect(page.getByText('Failing requests in CloudWatch logs, every env')).toBeVisible();
+});
+
+test('a down CloudWatch source shows a notice naming it, and the other sources keep their Alerts', async ({ page }) => {
+  await routeSources(page, {
+    cloudwatch: ['auth', 'AWS profile shop-ro is signed out. Run `aws login --profile shop-ro`, then Connect again.'],
+  });
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  const notice = page.getByRole('status').filter({ hasText: 'CloudWatch' });
+  await expect(notice).toContainText('CloudWatch is down: AWS profile shop-ro is signed out.');
+  await expect(notice).toContainText('then Connect again. Scans skip it');
+  await expect(page.getByRole('status').filter({ hasText: 'OpenTelemetry is down' })).toHaveCount(0);
+  const logs = page.getByRole('list', { name: 'Logs' });
+  await expect(logs.getByRole('button', { name: /\/v1\/orders/ })).toBeVisible();
+  await expect(logs.getByRole('button', { name: /POST \/orders/ })).toBeVisible();
+});
+
+test('a CloudWatch Scan lists the bytes it scanned and the groups it left unread', async ({ page }) => {
+  await routeSources(page, {
+    cloudwatch: ['ok', null],
+    scans: [
+      scanOf('cloudwatch_logs', [
+        'Logs Insights scanned 1.2 GB',
+        '/ecs/shop-api was not read: the query took over 5 minutes',
+      ]),
+      scanOf('datadog'),
+    ],
+  });
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  await expect(page.getByRole('list', { name: 'Scan notes' }).getByRole('listitem')).toHaveText([
+    'Logs Insights scanned 1.2 GB',
+    '/ecs/shop-api was not read: the query took over 5 minutes',
+  ]);
+  await expect(page.getByText(/^CloudWatch · Last Scan \d+m ago$/)).toBeVisible();
+});
+
+test('a CloudWatch Alert shows its filter as a line and never names Datadog or the Log folder', async ({ page }) => {
+  await routeSources(page, { cloudwatch: ['ok', null] });
+  await page.goto(`${daemon.url}/monitor?alert=c1#token=${daemon.token}`);
+  const detail = page.locator('article');
+  await expect(detail).toContainText('CloudWatch');
+  await expect(detail).toContainText('log group /ecs/shop-api, 502 POST /checkout');
+  await expect(detail).not.toContainText('Datadog');
+  await expect(detail.locator('[title*="Datadog"], [title*="Log folder"]')).toHaveCount(0);
 });

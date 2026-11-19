@@ -1,4 +1,5 @@
 import { CONNECTOR_SERVERS, ConnectorId, type LogSource, RunPurpose, SessionKind } from '@ops-console/shared';
+import { CLOUDWATCH_SERVER } from './cloudwatch-tools';
 
 /**
  * Every MCP server a run starts costs start-up time and tool definitions in the prompt: all sixteen of a full setup
@@ -24,10 +25,11 @@ const PR_JOB_KEEPS = ['github', 'atlassian'];
 
 /**
  * `logSource` is the log source of the Alert the run works on, when it has one: only a Datadog Alert starts the Datadog
- * server.
+ * server, and only a CloudWatch Alert, or a run with no Alert, starts the CloudWatch one.
  */
 export function mcpScope(purpose: RunPurpose, kind: SessionKind, logSource: LogSource | null = null): McpScope {
   const datadog = logSource === null || logSource === ConnectorId.Datadog ? ['datadog-pup'] : [];
+  const cloudWatch = logSource === null || logSource === ConnectorId.CloudWatchLogs ? [CLOUDWATCH_SERVER] : [];
   switch (purpose) {
     case RunPurpose.OpenPullRequest:
       return { none: true, withoutConnections: true, withoutConnectors: [] };
@@ -42,8 +44,8 @@ export function mcpScope(purpose: RunPurpose, kind: SessionKind, logSource: LogS
         withoutConnectors: connectorServers(...PR_JOB_KEEPS, ...datadog),
       };
     case RunPurpose.Verify:
-      // The Alert's log source, if Datadog, and the read-only Connections it cross-checks.
-      return { none: false, withoutConnections: false, withoutConnectors: connectorServers(...datadog) };
+      // The Alert's log source server, and the read-only Connections it cross-checks.
+      return { none: false, withoutConnections: false, withoutConnectors: connectorServers(...datadog, ...cloudWatch) };
     case RunPurpose.Chat:
       // A Dev tools Session is scoped to its own Connections elsewhere; any other chat starts none of them.
       return { none: false, withoutConnections: kind !== SessionKind.Devtools, withoutConnectors: [] };

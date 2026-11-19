@@ -2,13 +2,20 @@ import { CONNECTOR_NAMES, ConnectorId, type LogSource } from '@ops-console/share
 
 /**
  * What the agent is told about the Alert's log source. A Datadog Alert has the pup CLI and the Datadog MCP Server, as
- * the Playbook's rules say; the Log folder has no tool, and the agent never reads it.
+ * the Playbook's rules say. The Log folder has no tool, and the agent never reads it. A CloudWatch Alert has the log
+ * tools of the CloudWatch MCP Server.
  */
 export function logSourceRule(connector: LogSource): string {
-  if (connector !== ConnectorId.OtelLogs) return '';
-  return `Log source: ${CONNECTOR_NAMES[connector]}, read by the console from a folder on the operator's Mac that you cannot read. Use no \`pup\` and no Datadog MCP Server for this Alert. You have no log tool: work from the log lines here, and say in the Report when you needed more logs than they give.`;
+  const name = CONNECTOR_NAMES[connector];
+  if (connector === ConnectorId.OtelLogs) {
+    return `Log source: ${name}, read by the console from a folder on the operator's Mac that you cannot read. Use no \`pup\` and no Datadog MCP Server for this Alert. You have no log tool: work from the log lines here, and say in the Report when you needed more logs than they give.`;
+  }
+  if (connector === ConnectorId.CloudWatchLogs) {
+    return `Log source: ${name}, a log group the console reads with the AWS CLI. Use no \`pup\` and no Datadog MCP Server for this Alert. When you need more logs than the lines here, use the CloudWatch log tools: list log groups, run a Logs Insights query, read its results and cancel it. Query the log group in the filter. You have no other CloudWatch tool.`;
+  }
+  return '';
 }
 
-/** The Alert's stored query as the brief names it: Datadog's query string, or the OpenTelemetry filter. */
+/** The Alert's stored query as the brief names it: Datadog's query string, or the other sources' filter. */
 export const queryLabel = (connector: LogSource): string =>
-  connector === ConnectorId.OtelLogs ? `${CONNECTOR_NAMES[connector]} filter` : 'Datadog query';
+  connector === ConnectorId.Datadog ? 'Datadog query' : `${CONNECTOR_NAMES[connector]} filter`;

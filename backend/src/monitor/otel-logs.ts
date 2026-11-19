@@ -8,13 +8,13 @@ import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import { normalizePath } from './fingerprint';
 import {
-  ERROR_LEVEL,
   groupEntries,
   type LogEntry,
   type LogReader,
   type ReadRequest,
   type ServiceCount,
   type ServiceReading,
+  statusKept,
 } from './log-reader';
 
 /** A Scan reads at most this many bytes from the Log folder, newest files first. */
@@ -25,9 +25,6 @@ const ENV_WINDOW = ScanWindow.Week;
 /** OpenTelemetry's `ERROR` severity number: a record at or above it is failing whatever its status code. */
 const ERROR_SEVERITY = 17;
 const FATAL_SEVERITY = 21;
-/** The statuses at error level for this source: OpenTelemetry's `fatal` joins Datadog's list. */
-export const OTEL_ERROR_LEVEL = ['fatal', ...ERROR_LEVEL];
-
 const anyValueSchema = z
   .object({
     stringValue: z.string().optional(),
@@ -178,12 +175,6 @@ function readRecord(resource: Record<string, string | number | boolean>, record:
 const failing = ({ severity, entry }: Found) =>
   (entry.statusCode !== null && entry.statusCode >= 400) || (severity !== null && severity >= ERROR_SEVERITY);
 
-/** `4xx` as the status codes it covers. */
-function statusClass(value: string): [number, number] | null {
-  const match = /^([1-5])xx$/i.exec(value);
-  return match ? [Number(match[1]) * 100, Number(match[1]) * 100 + 99] : null;
-}
-
 function sizeOf(bytes: number): string {
   return bytes >= MEGABYTE ? `${Math.round(bytes / MEGABYTE)} MB` : `${bytes} bytes`;
 }
@@ -201,21 +192,17 @@ export class OtelLogFolder implements LogReader {
   ) {}
 
   async read(request: ReadRequest): Promise<ServiceReading[]> {
-    const ignored = request.ignore.flatMap((rule) => {
-      const range = rule.kind === 'status_class' ? statusClass(rule.value) : null;
-      return range ? [range] : [];
-    });
+    const kept = statusKept(request);
     const byService = new Map<string, { name: string; env: string; entries: LogEntry[] }>();
     const walked = await this.walk(request.window, request.signal, (found) => {
       const { statusCode } = found.entry;
       if (!failing(found) || !request.envs.includes(found.env)) return;
       if (request.services && !request.services.includes(found.service)) return;
-      if (request.codes.length > 0 && (statusCode === null || !request.codes.includes(statusCode))) return;
-      if (statusCode !== null && ignored.some(([from, to]) => statusCode >= from && statusCode <= to)) return;
+      if (!kept(statusCode)) return;
       const key = `${found.env}\n${found.service}`;
-      const kept = byService.get(key) ?? { name: found.service, env: found.env, entries: [] };
-      kept.entries.push(found.entry);
-      byService.set(key, kept);
+      const service = byService.get(key) ?? { name: found.service, env: found.env, entries: [] };
+      service.entries.push(found.entry);
+      byService.set(key, service);
     });
     this.noteOf(walked, request.note);
     return [...byService.values()]

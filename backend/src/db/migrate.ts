@@ -22,6 +22,10 @@ export class MigrationFailedError extends Error {
 /**
  * Applies pending Drizzle Kit migrations from `dir`, recording them in Drizzle's own table. Every pending
  * migration runs in one transaction, so a failure leaves `state.db` as it was before this start.
+ *
+ * Foreign keys are off while they run, since `PRAGMA foreign_keys` does nothing inside a transaction and SQLite's
+ * table rebuild (copy, drop, rename) would otherwise fire `ON DELETE CASCADE` on every table that points at the one
+ * dropped. They are back on afterwards, whether the migrations ran or threw.
  */
 export function applyMigrations(sqlite: Database.Database, dir: string, log: (message: string) => void): void {
   const journal = journalSchema.parse(JSON.parse(readFileSync(path.join(dir, 'meta', '_journal.json'), 'utf8')));
@@ -36,19 +40,24 @@ export function applyMigrations(sqlite: Database.Database, dir: string, log: (me
   }
 
   const record = sqlite.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)');
-  sqlite.exec('BEGIN IMMEDIATE');
-  for (const entry of pending) {
-    try {
-      const text = readFileSync(path.join(dir, `${entry.tag}.sql`), 'utf8');
-      for (const statement of text.split('--> statement-breakpoint')) {
-        if (statement.trim()) sqlite.exec(statement);
+  sqlite.pragma('foreign_keys = OFF');
+  try {
+    sqlite.exec('BEGIN IMMEDIATE');
+    for (const entry of pending) {
+      try {
+        const text = readFileSync(path.join(dir, `${entry.tag}.sql`), 'utf8');
+        for (const statement of text.split('--> statement-breakpoint')) {
+          if (statement.trim()) sqlite.exec(statement);
+        }
+        record.run(createHash('sha256').update(text).digest('hex'), entry.when);
+      } catch (error) {
+        sqlite.exec('ROLLBACK');
+        throw new MigrationFailedError(entry.tag, error);
       }
-      record.run(createHash('sha256').update(text).digest('hex'), entry.when);
-    } catch (error) {
-      sqlite.exec('ROLLBACK');
-      throw new MigrationFailedError(entry.tag, error);
     }
+    sqlite.exec('COMMIT');
+  } finally {
+    sqlite.pragma('foreign_keys = ON');
   }
-  sqlite.exec('COMMIT');
   for (const entry of pending) log(`applied migration ${entry.tag}`);
 }
