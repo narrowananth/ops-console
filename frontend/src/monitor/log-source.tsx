@@ -14,6 +14,17 @@ import { useStored } from '../lib/remember';
 export const SOURCE_LABEL: Record<LogSource, string> = {
   [ConnectorId.Datadog]: 'Datadog',
   [ConnectorId.OtelLogs]: 'OpenTelemetry',
+  [ConnectorId.CloudWatchLogs]: 'CloudWatch',
+};
+
+/** What an Alert's stored query is, said where the operator reads it. */
+export const QUERY_TIP: Record<LogSource, string> = {
+  [ConnectorId.Datadog]:
+    'The Datadog log search that finds these failures. Paste it into Datadog Logs to see them there.',
+  [ConnectorId.OtelLogs]:
+    'The filter the Recheck reads the Log folder with: the Service, env, status code, method and path of these failures.',
+  [ConnectorId.CloudWatchLogs]:
+    'The filter the Recheck reads the log group with: the status code, method and path of these failures.',
 };
 
 /** A small tag saying which log source an Alert or a Service was read from. */
@@ -52,12 +63,18 @@ export function downSources(connectors: Connector[]): { source: LogSource; reaso
   });
 }
 
-/** `Datadog`, `OpenTelemetry logs` or `Datadog and OpenTelemetry logs`: the Connectors a view reads from. */
-export function sourceNames(sources: LogSource[]): string {
-  return sources.map((source) => CONNECTOR_NAMES[source]).join(' and ');
+/** `Datadog`, `Datadog and OpenTelemetry logs` or `Datadog, OpenTelemetry logs and CloudWatch logs`: what a view reads. */
+export function sourceNames(sources: LogSource[], joiner: 'and' | 'or' = 'and'): string {
+  const names = sources.map((source) => CONNECTOR_NAMES[source]);
+  const last = names.pop();
+  return names.length > 0 ? `${names.join(', ')} ${joiner} ${last}` : (last ?? '');
 }
 
+/** The sentence that sends the operator to Integrations when no log source is connected. */
+export const CONNECT_A_SOURCE = `Connect ${sourceNames([...LOG_SOURCES], 'or')} in Integrations`;
+
 const filterSchema = z.object({
+  log_group: z.string().nullish(),
   service: z.string().nullish(),
   env: z.string().nullish(),
   status: z.number().nullish(),
@@ -66,8 +83,9 @@ const filterSchema = z.object({
 });
 
 /**
- * The Alert's stored query for the operator: the Datadog query as it is, or an OpenTelemetry filter as a line such as
- * `service api, env prod, 500 POST /orders`. A filter that does not parse shows as stored.
+ * The Alert's stored query for the operator: the Datadog query as it is, or a filter as a line such as
+ * `service api, env prod, 500 POST /orders` (OpenTelemetry) or `log group /ecs/api, 500 POST /orders` (CloudWatch). A
+ * filter that does not parse shows as stored.
  */
 export function readableQuery(source: LogSource, query: string): string {
   if (source === ConnectorId.Datadog) return query;
@@ -79,9 +97,14 @@ export function readableQuery(source: LogSource, query: string): string {
   }
   const filter = filterSchema.safeParse(json);
   if (!filter.success) return query;
-  const { service, env, status, method, path } = filter.data;
+  const { log_group: logGroup, service, env, status, method, path } = filter.data;
   const request = [status, method, path].filter((part) => part !== null && part !== undefined && part !== '');
-  return [service ? `service ${service}` : '', env ? `env ${env}` : '', request.join(' ')]
+  return [
+    logGroup ? `log group ${logGroup}` : '',
+    service ? `service ${service}` : '',
+    env ? `env ${env}` : '',
+    request.join(' '),
+  ]
     .filter((part) => part !== '')
     .join(', ');
 }

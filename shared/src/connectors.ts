@@ -17,6 +17,8 @@ export enum ConnectorId {
   GoogleDrive = 'google_drive',
   /** Logs a Collector's file exporter writes to a folder on this Mac. */
   OtelLogs = 'otel_logs',
+  /** Logs of an AWS account, read with the AWS CLI. */
+  CloudWatchLogs = 'cloudwatch_logs',
 }
 
 export const CONNECTOR_ORDER: ConnectorId[] = Object.values(ConnectorId);
@@ -54,6 +56,7 @@ export const CONNECTOR_NAMES: Record<ConnectorId, string> = {
   [ConnectorId.GoogleSheets]: 'Google Sheets',
   [ConnectorId.GoogleDrive]: 'Google Drive',
   [ConnectorId.OtelLogs]: 'OpenTelemetry logs',
+  [ConnectorId.CloudWatchLogs]: 'CloudWatch logs',
 };
 
 /** How the console reaches the service (ADR 0005). */
@@ -71,6 +74,7 @@ export const CONNECTOR_VIA: Record<ConnectorId, string> = {
   [ConnectorId.GoogleSheets]: 'Google Sheets API',
   [ConnectorId.GoogleDrive]: 'Google Drive API',
   [ConnectorId.OtelLogs]: 'a local folder',
+  [ConnectorId.CloudWatchLogs]: 'aws CLI + CloudWatch MCP',
 };
 
 /**
@@ -119,10 +123,33 @@ export const CONNECTOR_SERVERS: Partial<
     transport: McpTransport.Stdio,
     target: 'ops-console google-mcp drive',
   },
+  // AWS Labs' CloudWatch server. The Connector registers it with its profile and region in the environment.
+  [ConnectorId.CloudWatchLogs]: {
+    name: 'cloudwatch',
+    transport: McpTransport.Stdio,
+    target: 'uvx awslabs.cloudwatch-mcp-server@latest',
+  },
 };
 
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:MM');
 const count = z.number().int().min(1);
+/** An AWS profile or region name: it goes into the MCP server's command line, so no spaces or quotes. */
+const awsName = z.string().regex(/^(?!-)[A-Za-z0-9_.@+=,-]*$/, 'letters, digits and . _ @ + = , -');
+
+/** One CloudWatch log group the operator picked, and the Service it is. */
+export const logGroupSchema = z.strictObject({
+  name: z.string().min(1),
+  service: z.string().min(1),
+  env: z.string().min(1),
+});
+
+export type LogGroupPick = z.infer<typeof logGroupSchema>;
+
+/** `GET /connectors/cloudwatch_logs/log-groups`: the log groups of the Connector's profile and region. */
+export const logGroupListSchema = z.object({
+  data: z.array(z.object({ name: z.string() })),
+  meta: z.object({ next_cursor: z.null() }),
+});
 
 export const connectorConfigSchemas = {
   [ConnectorId.Datadog]: z.strictObject({
@@ -168,6 +195,19 @@ export const connectorConfigSchemas = {
     ignore: z.array(z.strictObject({ kind: z.enum(['status_class', 'route']), value: z.string().min(1) })),
     reports_folder: z.string().min(1),
   }),
+  /** `profile` and `region`: empty until chosen. Each picked log group is one Service. */
+  [ConnectorId.CloudWatchLogs]: z.strictObject({
+    profile: awsName,
+    region: awsName,
+    log_groups: z.array(logGroupSchema),
+    environments: z.array(z.string().min(1)),
+    daily_scan_time: time,
+    default_interval: z.enum(['24h', '12h', '6h']),
+    rapid_errors_per_10m: count,
+    failing_errors_per_hour: count,
+    ignore: z.array(z.strictObject({ kind: z.enum(['status_class', 'route']), value: z.string().min(1) })),
+    reports_folder: z.string().min(1),
+  }),
 } satisfies Record<ConnectorId, z.ZodType>;
 
 export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknown>> = {
@@ -200,6 +240,18 @@ export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknow
   [ConnectorId.GoogleDrive]: {},
   [ConnectorId.OtelLogs]: {
     folder: '',
+    environments: ['prod'],
+    daily_scan_time: '09:00',
+    default_interval: '24h',
+    rapid_errors_per_10m: 100,
+    failing_errors_per_hour: 5,
+    ignore: [],
+    reports_folder: 'reports',
+  },
+  [ConnectorId.CloudWatchLogs]: {
+    profile: '',
+    region: '',
+    log_groups: [],
     environments: ['prod'],
     daily_scan_time: '09:00',
     default_interval: '24h',

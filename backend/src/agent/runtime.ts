@@ -69,6 +69,7 @@ import { PlaybooksService } from '../playbooks/playbooks.service';
 import { systemAppend } from '../playbooks/prompts';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
 import { Attachments } from './attachments';
+import { cloudWatchDenial } from './cloudwatch-tools';
 import { ConnectionLookup } from './connection-lookup';
 import { editRoots, outsideEditRoots } from './edit-scope';
 import { HOOK_BYPASS_REASON, skipsCommitHooks } from './hook-bypass';
@@ -1639,6 +1640,17 @@ export class AgentRuntime implements OnModuleDestroy {
             hookEventName: 'PreToolUse',
             permissionDecision: 'deny',
             permissionDecisionReason: EDIT_SCOPE_REASON,
+          },
+        };
+      }
+      const cloudWatch = cloudWatchDenial(input.tool_name);
+      if (cloudWatch !== null) {
+        this.steps.finish(input.tool_use_id, { ok: false, error: cloudWatch });
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: cloudWatch,
           },
         };
       }

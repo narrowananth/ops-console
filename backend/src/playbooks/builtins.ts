@@ -270,7 +270,7 @@ ${SHARED_RULES}`,
 - Keep the branch to this issue only: no unrelated changes.
 - Do not create a Jira ticket: the console makes one only when the Fix Playbook asks for it.
 - Follow the project's build, test, formatting and commit conventions.
-- The pull request description covers: the issue summary, the root cause, the implementation, the affected services, the testing evidence (what ran, what was mocked, what was not verified), regression considerations, the Datadog evidence and related pull requests.
+- The pull request description covers: the issue summary, the root cause, the implementation, the affected services, the testing evidence (what ran, what was mocked, what was not verified), regression considerations, the log evidence and related pull requests.
 
 ${SHARED_RULES}`,
   [PlaybookTrigger.ReviewPr]: `Review the pull request for production readiness: correctness, regressions, architecture and risk across every consumer, with actionable findings tied to lines. Every review is evidence-based and reproducible.

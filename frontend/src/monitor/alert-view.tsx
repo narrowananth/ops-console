@@ -1,7 +1,6 @@
 import {
   AlertStatus,
   CONNECTOR_NAMES,
-  ConnectorId,
   FIX_STAGES,
   type Fix,
   FixStage,
@@ -60,7 +59,7 @@ import {
 } from '../playbooks/job-steps';
 import { withPlaybook } from '../playbooks/labels';
 import { sessionPath } from '../workspace/links';
-import { readableQuery, SourceLabel } from './log-source';
+import { QUERY_TIP, readableQuery, SourceLabel } from './log-source';
 import { STATUS_TIP } from './logs-pane';
 import { FreshnessNote, MergeNote, ReportNotes } from './prod-notes';
 import { CodeSource } from './repo-link';
@@ -657,14 +656,7 @@ export function AlertView({ id }: { id: string }) {
           wrapperClassName="mt-2"
           className="m-0 rounded-lg bg-neutral-900 p-3 font-mono text-xs whitespace-pre-wrap break-all text-neutral-100"
         />
-        <div
-          className="mt-1 font-mono text-xs break-all text-neutral-700"
-          title={
-            data.connector === ConnectorId.Datadog
-              ? 'The Datadog log search that finds these failures. Paste it into Datadog Logs to see them there.'
-              : 'The filter the Recheck reads the Log folder with: the Service, env, status code, method and path of these failures.'
-          }
-        >
+        <div className="mt-1 font-mono text-xs break-all text-neutral-700" title={QUERY_TIP[data.connector]}>
           {readableQuery(data.connector, data.source_query)}
         </div>
       </header>

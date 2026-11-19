@@ -139,16 +139,27 @@ test('the data-flow docs page sits between Claude accounts and Safety, and the s
   assert.match(home, /href="\/docs\/data-flow\/"/);
 });
 
-test('the Connectors page lists thirteen Connectors and has an OpenTelemetry logs section', async () => {
+test('the Connectors page lists fourteen Connectors and has OpenTelemetry logs and CloudWatch logs sections', async () => {
   await build();
   const page = await readFile(path.join(dist, 'docs', 'connectors', 'index.html'), 'utf8');
-  assert.match(page, /<h2 id="[^"]+">The thirteen Connectors<\/h2>/);
+  assert.match(page, /<h2 id="[^"]+">The fourteen Connectors<\/h2>/);
   const [table] = page.match(/<table>[\s\S]*?<\/table>/) ?? [];
   assert.ok(table, 'the page has the Connector table');
-  assert.equal(table.match(/<tr><td>/g)?.length, 13, 'one row per Connector');
+  assert.equal(table.match(/<tr><td>/g)?.length, 14, 'one row per Connector');
   assert.match(table, /<td>OpenTelemetry logs<\/td>/);
   assert.match(page, /<h2 id="opentelemetry-logs">OpenTelemetry logs<\/h2>/);
   assert.match(page, /<pre><code>[\s\S]*exporters:[\s\S]*<\/code><\/pre>/, 'the section shows a Collector config');
+  assert.match(table, /<td>CloudWatch logs<\/td>/);
+  const [section] = page.match(/<h2 id="cloudwatch-logs">CloudWatch logs<\/h2>[\s\S]*?(?=<h2 )/) ?? [];
+  assert.ok(section, 'the page has a CloudWatch logs section');
+  assert.match(section, /CloudWatchLogsReadOnlyAccess/);
+  assert.match(section, /<code>statusCode<\/code>/, 'the section lists the JSON log fields');
+  assert.match(
+    section,
+    /<pre><code>[\s\S]*&quot;status&quot;:502[\s\S]*<\/code><\/pre>/,
+    'the section shows a log line',
+  );
+  assert.match(section, /per GB scanned/);
 });
 
 test('the data-flow page puts the Log folder on the Mac and its records in a prompt only as Samples', async () => {
@@ -158,4 +169,14 @@ test('the data-flow page puts the Log folder on the Mac and its records in a pro
   assert.ok(row, 'the By route table has a Log folder row');
   assert.match(row, /on your Mac/);
   assert.match(row, /only as Samples/);
+});
+
+test('the data-flow page says the daemon calls the AWS CLI and CloudWatch events reach Anthropic only as Samples or tool output', async () => {
+  await build();
+  const page = await readFile(path.join(dist, 'docs', 'data-flow', 'index.html'), 'utf8');
+  const [row] = page.match(/<tr><td>AWS CLI and MCP Server<\/td>[\s\S]*?<\/tr>/) ?? [];
+  assert.ok(row, 'the By route table has an AWS row');
+  assert.match(row, /calls the AWS CLI as you/);
+  assert.match(row, /calls AWS from there/);
+  assert.match(row, /only as Samples in a prompt or as the agent's tool output/);
 });

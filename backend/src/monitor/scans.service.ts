@@ -38,10 +38,16 @@ import { AlertsService } from './alerts.service';
 import { CodeFinder } from './code-finder';
 import { fingerprint, maskSignature } from './fingerprint';
 import { HOURS, scanReads } from './freshness';
-import { ERROR_LEVEL, LOG_READERS, type LogGroup, type LogReaders, type ServiceReading } from './log-reader';
+import {
+  ERROR_LEVEL,
+  FATAL_ERROR_LEVEL,
+  LOG_READERS,
+  type LogGroup,
+  type LogReaders,
+  type ServiceReading,
+} from './log-reader';
 import { type LogSourceConfig, logSourceConfig } from './log-source-config';
 import { type AlertRow, parseJson, type RouteRow, type ServiceRow, samplesOf } from './mappers';
-import { OTEL_ERROR_LEVEL } from './otel-logs';
 import { MonitorRetention } from './retention';
 
 type ScanRow = typeof scans.$inferSelect;
@@ -661,7 +667,7 @@ export class ScansService {
   private severity(config: LogSourceConfig, window: ScanWindow, read: LogGroup, connector: LogSource): Severity {
     if (read.peakPer10m >= config.rapid_errors_per_10m) return Severity.High;
     const perHour = read.errors / WINDOW_HOURS[window];
-    const levels = connector === ConnectorId.OtelLogs ? OTEL_ERROR_LEVEL : ERROR_LEVEL;
+    const levels = connector === ConnectorId.Datadog ? ERROR_LEVEL : FATAL_ERROR_LEVEL;
     const errorLevel = (read.statusCode ?? 0) >= 500 || read.samples.some((sample) => levels.includes(sample.status));
     return perHour >= config.failing_errors_per_hour && errorLevel ? Severity.Medium : Severity.Low;
   }

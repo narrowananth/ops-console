@@ -11,6 +11,7 @@ import { BrandIcon, CONNECTOR_BRAND } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import {
   useCancelConnectorSignIn,
+  useConnectCloudWatch,
   useConnectConnector,
   useConnectConnectorWith,
   useConnectLogFolder,
@@ -19,6 +20,14 @@ import {
 import { type StatusLook, statusGlyph } from '../mcp/status';
 import { IntegrationRow, rowAction, rowActionAttention } from './integration-row';
 import { LogFolderStep, savedFolder } from './log-folder';
+import { LogGroupsStep, savedCloudWatch } from './log-groups';
+import { SignInHandoff } from './sign-in-handoff';
+
+/** What Connect does for a Connector that reads logs instead of signing in to a service. */
+const NOT_SET_UP: Partial<Record<ConnectorId, string>> = {
+  [ConnectorId.OtelLogs]: 'Not set up yet. Connect starts reading the Log folder.',
+  [ConnectorId.CloudWatchLogs]: 'Not set up yet. Connect checks the AWS profile and starts reading the log groups.',
+};
 
 /** The row and the pane read the same: signing in, not connected, or the check's status. */
 function connectorStatus(connector: Connector): StatusLook {
@@ -32,10 +41,7 @@ function connectorStatus(connector: Connector): StatusLook {
     return {
       glyph: '○ not connected',
       className: 'text-neutral-700',
-      tip:
-        connector.id === ConnectorId.OtelLogs
-          ? 'Not set up yet. Connect starts reading the Log folder.'
-          : 'Not set up yet. Connect signs you in and adds its MCP Server when it has one.',
+      tip: NOT_SET_UP[connector.id] ?? 'Not set up yet. Connect signs you in and adds its MCP Server when it has one.',
     };
   return statusGlyph[connector.status];
 }
@@ -48,6 +54,7 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
   const connect = useConnectConnector();
   const connectWith = useConnectConnectorWith();
   const connectFolder = useConnectLogFolder();
+  const connectCloudWatch = useConnectCloudWatch();
   const disconnect = useDisconnectConnector();
   const cancel = useCancelConnectorSignIn();
   const [confirming, setConfirming] = useState(false);
@@ -55,8 +62,15 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
   const [server, setServer] = useState(saved);
   const asksServer = connector.id === ConnectorId.Slashdocs;
   const asksFolder = connector.id === ConnectorId.OtelLogs;
+  const asksGroups = connector.id === ConnectorId.CloudWatchLogs;
   const connected = connector.status !== HealthStatus.Off;
-  const error = connect.error ?? connectWith.error ?? connectFolder.error ?? disconnect.error ?? cancel.error;
+  const error =
+    connect.error ??
+    connectWith.error ??
+    connectFolder.error ??
+    connectCloudWatch.error ??
+    disconnect.error ??
+    cancel.error;
   const onConnect = () =>
     asksServer && server.trim() !== saved
       ? connectWith.mutate({ id: connector.id, config: { server: server.trim() } })
@@ -99,6 +113,14 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
             pending={connectFolder.isPending}
             onConnect={(folder) => connectFolder.mutate(folder)}
           />
+        ) : asksGroups ? (
+          <LogGroupsStep
+            connector={connector}
+            pending={connectCloudWatch.isPending}
+            cancelling={cancel.isPending}
+            onConnect={(body) => connectCloudWatch.mutate(body)}
+            onCancel={() => cancel.mutate(connector.id)}
+          />
         ) : (
           <SignInStep
             connector={connector}
@@ -121,9 +143,11 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
             <div className="text-xs text-accent-900">
               {asksFolder
                 ? 'Stops the console reading the Log folder. The folder and its files stay as they are.'
-                : isGoogleConnector(connector.id)
-                  ? 'Stops the console using it and takes its access back at Google. Every Claude account loses it.'
-                  : 'Signs out and stops Claude from using it. Monitor and tasks that rely on it pause. Your own terminal stays signed in to the CLI.'}
+                : asksGroups
+                  ? 'Stops the console reading the log groups and removes the CloudWatch MCP Server. Your AWS profile and account stay as they are.'
+                  : isGoogleConnector(connector.id)
+                    ? 'Stops the console using it and takes its access back at Google. Every Claude account loses it.'
+                    : 'Signs out and stops Claude from using it. Monitor and tasks that rely on it pause. Your own terminal stays signed in to the CLI.'}
             </div>
             <div className="flex gap-2">
               <Button
@@ -144,7 +168,9 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
               title={
                 asksFolder
                   ? 'Stop the console reading the Log folder. Asks first.'
-                  : `Sign out of ${connector.name} and stop the console using it. Asks first.`
+                  : asksGroups
+                    ? 'Stop the console reading the log groups. Asks first.'
+                    : `Sign out of ${connector.name} and stop the console using it. Asks first.`
               }
               onClick={() => setConfirming(true)}
             >
@@ -226,31 +252,27 @@ function SignInStep(props: {
           </Button>
         )}
       </div>
-      {signIn && (signIn.code || signIn.url) && (
-        <div className="flex flex-wrap items-center gap-3 rounded-md bg-neutral-200 px-3.5 py-3">
-          {signIn.code && (
-            <div className="flex flex-col">
-              <span className="text-xs text-neutral-700">Enter this code (already copied)</span>
-              <span className="font-mono text-lg font-semibold tracking-widest">{signIn.code}</span>
-            </div>
-          )}
-          {signIn.url && (
-            <a
-              href={signIn.url}
-              target="_blank"
-              rel="noreferrer"
-              className="ml-auto inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 font-heading text-sm font-semibold text-white no-underline shadow-sm hover:bg-accent-600 hover:text-white"
-            >
-              Open {viaGoogle ? 'Google' : connector.name} ↗
-            </a>
-          )}
-        </div>
-      )}
+      {signIn && <SignInHandoff signIn={signIn} label={viaGoogle ? 'Google' : connector.name} />}
     </section>
   );
 }
 
 const folderSuffix = (connector: Connector) => (savedFolder(connector) ? ` · ${savedFolder(connector)}` : '');
+
+const profileSuffix = (connector: Connector) => {
+  const { profile, region } = savedCloudWatch(connector);
+  return [profile, region]
+    .filter((part) => part !== '')
+    .map((part) => ` · ${part}`)
+    .join('');
+};
+
+/** What the row's second line adds to how the Connector is reached: the folder, the profile and region, the account. */
+function lineSuffix(connector: Connector): string {
+  if (connector.id === ConnectorId.OtelLogs) return folderSuffix(connector);
+  if (connector.id === ConnectorId.CloudWatchLogs) return profileSuffix(connector);
+  return connector.account_label ? ` · ${connector.account_label}` : '';
+}
 
 /** A Connector in the Integrations list. Off reads "not connected": a Connector is never disabled. */
 export function ConnectorAction({ connector, onOpen }: { connector: Connector; onOpen: () => void }) {
@@ -288,7 +310,7 @@ export function ConnectorRow({
       brand={CONNECTOR_BRAND[connector.id]}
       name={connector.name}
       kind="Connector"
-      line={`${connector.via}${connector.id === ConnectorId.OtelLogs ? folderSuffix(connector) : connector.account_label ? ` · ${connector.account_label}` : ''}`}
+      line={`${connector.via}${lineSuffix(connector)}`}
       status={status}
       health={health}
       selected={selected}

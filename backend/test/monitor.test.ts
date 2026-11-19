@@ -7,8 +7,10 @@ import {
   AlertStatus,
   CheckInterval,
   ConnectorId,
+  DEFAULT_CONNECTOR_CONFIG,
   FixStatus,
   HealthStatus,
+  type LogSource,
   PlaybookStepStatus,
   PlaybookTrigger,
   PrState,
@@ -39,6 +41,7 @@ import {
 } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
+import type { CloudWatchOptions } from '../src/monitor/cloudwatch-logs';
 import { fingerprint, maskSignature, normalizePath } from '../src/monitor/fingerprint';
 import { NO_TICKET_IN_PLAYBOOK } from '../src/monitor/fixes.service';
 import { MonitorModule } from '../src/monitor/monitor.module';
@@ -48,6 +51,7 @@ import { ReposModule } from '../src/repos/repos.module';
 import { WorkspaceModule } from '../src/workspace/workspace.module';
 import { type AgentDaemon, api, gate, listen, startAgentDaemon, stepTurns, until } from './agent-fixtures';
 import type { Step } from './fakes/agent-sdk';
+import { AWS_BIN, FakeAws } from './fakes/aws-logs';
 import { FakeCodeHosts } from './fakes/code-hosts';
 import { FakeConnectorTools } from './fakes/connector-tools';
 import { FakeDatadog, route, samples, service } from './fakes/datadog';
@@ -111,7 +115,13 @@ function setConnector(store: Store, id: ConnectorId, patch: Partial<typeof conne
 }
 
 async function start(
-  options: { dataDir?: string; datadog?: FakeDatadog; connected?: boolean; otelReadLimit?: number } = {},
+  options: {
+    dataDir?: string;
+    datadog?: FakeDatadog;
+    connected?: boolean;
+    otelReadLimit?: number;
+    cloudWatch?: CloudWatchOptions;
+  } = {},
 ): Promise<Ctx> {
   const datadog = options.datadog ?? new FakeDatadog();
   const host = new FakeGitHost();
@@ -124,7 +134,12 @@ async function start(
       ConnectorsModule.forRoot({ tools: new FakeConnectorTools() }),
       ReposModule.forRoot(),
       WorkspaceModule.forRoot({ hosts: host }),
-      MonitorModule.forRoot({ datadog, codeHosts, otelReadLimit: options.otelReadLimit }),
+      MonitorModule.forRoot({
+        datadog,
+        codeHosts,
+        otelReadLimit: options.otelReadLimit,
+        cloudWatch: { bin: AWS_BIN, pollMs: 10, ...options.cloudWatch },
+      }),
     ],
   });
   running.push(daemon);
@@ -2901,6 +2916,651 @@ describe('OpenTelemetry logs', () => {
       const list = await alertList(ctx);
       expect(list).toHaveLength(1);
       expect(list[0]).toMatchObject({ id: 'alert-1', connector: 'datadog', status: 'open', event_count: 10 });
+    });
+  });
+});
+
+describe('CloudWatch logs', () => {
+  const MINUTE = 60_000;
+  const minutesAgo = (minutes: number) => Date.now() - minutes * MINUTE;
+  const SHOP = { name: '/ecs/shop-api', service: 'shop-api', env: 'prod' };
+  const LINE = {
+    status: 500,
+    method: 'POST',
+    path: '/orders',
+    level: 'error',
+    message: 'NullPointerException in OrderService',
+  };
+  /** One failing JSON line, `minutes` ago; `extra` replaces its fields. */
+  const failure = (minutes: number, extra: Record<string, unknown> = {}) => ({
+    at: minutesAgo(minutes),
+    message: { ...LINE, ...extra },
+  });
+
+  /** Points the CloudWatch source at `groups`, as a Connector the operator connected. */
+  function connectCloudWatch(ctx: Ctx, groups = [SHOP]) {
+    setConnector(ctx.store, ConnectorId.CloudWatchLogs, {
+      status: HealthStatus.Ok,
+      config: JSON.stringify({
+        ...DEFAULT_CONNECTOR_CONFIG[ConnectorId.CloudWatchLogs],
+        profile: 'ops',
+        region: 'us-east-1',
+        log_groups: groups,
+      }),
+    });
+  }
+
+  async function scanCloudWatch(ctx: Ctx, body: Record<string, unknown> = {}) {
+    const started = await ctx.http.post('/scans', { service_id: null, connector: 'cloudwatch_logs', ...body });
+    expect(started.status).toBe(202);
+    return until(
+      () => ctx.http.get(`/scans/${started.body.data.id}`).then((res) => res.body.data),
+      (found) => found.status !== 'running',
+      'the Scan to end',
+    );
+  }
+
+  /** A CloudWatch source holding `events` in the log group, connected and scanned. */
+  async function scanned(
+    events: { at: number; message: string | object }[],
+    options: { cloudWatch?: CloudWatchOptions; body?: Record<string, unknown> } = {},
+  ) {
+    const aws = await FakeAws.create();
+    aws.group(SHOP.name, events);
+    const ctx = await start({ cloudWatch: options.cloudWatch });
+    connectCloudWatch(ctx);
+    const ended = await scanCloudWatch(ctx, options.body);
+    return { ctx, aws, ended };
+  }
+
+  const titles = (ctx: Ctx) =>
+    alertList(ctx).then((list: { title: string }[]) => list.map((alert) => alert.title).sort());
+
+  describe('the read', () => {
+    it('turns a failing log group into a Service, an Alert with Samples, and a filter that finds it again', async () => {
+      const { ctx, aws, ended } = await scanned([failure(5), failure(8), failure(9, { status: 200, level: 'info' })]);
+      expect(ended).toMatchObject({ status: 'ok', connector: 'cloudwatch_logs' });
+      expect((await ctx.http.get('/services')).body.data).toMatchObject([
+        { name: 'shop-api', env: 'prod', connector: 'cloudwatch_logs' },
+      ]);
+      const [listed] = await alertList(ctx);
+      expect(listed).toMatchObject({
+        connector: 'cloudwatch_logs',
+        http_status: 500,
+        route: { method: 'POST', path: '/orders' },
+        title: '500 POST /orders failing on shop-api',
+        event_count: 2,
+        log_line: 'NullPointerException in OrderService',
+      });
+      const detail = (await ctx.http.get(`/alerts/${listed.id}`)).body.data;
+      expect(JSON.parse(detail.source_query)).toEqual({
+        log_group: '/ecs/shop-api',
+        status: 500,
+        method: 'POST',
+        path: '/orders',
+      });
+      expect(detail.samples).toHaveLength(2);
+      expect(detail.samples[0]).toMatchObject({
+        status: 'error',
+        message: 'NullPointerException in OrderService',
+        tags: expect.arrayContaining(['service:shop-api', 'env:prod']),
+      });
+      expect(Math.abs(Date.parse(detail.samples[0].timestamp) - minutesAgo(5))).toBeLessThan(MINUTE);
+      // The daemon calls the CLI as the profile, in the Connector's region.
+      expect(aws.calls().every((call) => call.profile === 'ops' && call.region === 'us-east-1')).toBe(true);
+    });
+
+    it('takes each field from the first of its names present', async () => {
+      const route = (fields: Record<string, unknown>) => ({
+        status: undefined,
+        method: undefined,
+        path: undefined,
+        level: undefined,
+        message: undefined,
+        ...fields,
+      });
+      const { ctx } = await scanned([
+        failure(
+          5,
+          route({ statusCode: 502, httpMethod: 'get', resourcePath: '/a', severity: 'error', msg: 'by camel case' }),
+        ),
+        failure(
+          6,
+          route({ status_code: 503, method: 'PUT', route: '/b', log_level: 'ERROR', message: 'by snake case' }),
+        ),
+        failure(
+          7,
+          route({ http: { status_code: 504, method: 'delete' }, url: { path: '/c' }, msg: 'by dotted names' }),
+        ),
+        // The first name present wins: `status` is 200, so `statusCode` is not read and level makes it fail.
+        failure(
+          8,
+          route({ status: 200, statusCode: 500, path: '/d', method: 'GET', level: 'fatal', message: 'first wins' }),
+        ),
+      ]);
+      const list: { http_status: number | null; route: { method: string; path: string } | null; log_line: string }[] =
+        await alertList(ctx);
+      const found = Object.fromEntries(list.map((a) => [a.log_line, [a.http_status, a.route?.method, a.route?.path]]));
+      expect(found).toEqual({
+        'by camel case': [502, 'GET', '/a'],
+        'by snake case': [503, 'PUT', '/b'],
+        'by dotted names': [504, 'DELETE', '/c'],
+        'first wins': [200, 'GET', '/d'],
+      });
+    });
+
+    it('counts an event as failing by a status code of 400 or more or by an error level in any case, and not a plain-text line', async () => {
+      const bare = { status: undefined, method: undefined, path: undefined };
+      const { ctx } = await scanned([
+        failure(5, { ...bare, status: 404, level: 'info', message: 'no such cart' }),
+        failure(5, { ...bare, level: 'ERROR', message: 'level error' }),
+        failure(5, { ...bare, level: 'Critical', message: 'level critical' }),
+        failure(5, { ...bare, level: 'alert', message: 'level alert' }),
+        failure(5, { ...bare, level: 'EMERGENCY', message: 'level emergency' }),
+        failure(5, { ...bare, level: 'fatal', message: 'level fatal' }),
+        failure(5, { ...bare, status: 200, level: 'info', message: 'all fine' }),
+        failure(5, { ...bare, level: 'warn', message: 'slow call' }),
+        { at: minutesAgo(5), message: 'ERROR plain text, not JSON' },
+      ]);
+      expect((await titles(ctx)).map((title) => title.replace('shop-api: ', '')).sort()).toEqual([
+        'level alert',
+        'level critical',
+        'level emergency',
+        'level error',
+        'level fatal',
+        'no such cart',
+      ]);
+    });
+
+    it('reads only the events inside the Scan window', async () => {
+      const { ctx } = await scanned([failure(30, { message: 'inside' }), failure(150, { message: 'outside' })], {
+        body: { window: '1h' },
+      });
+      const [alert] = await alertList(ctx);
+      expect(alert).toMatchObject({ event_count: 1, log_line: 'inside' });
+    });
+
+    it('keeps secret values and request body values out of the Samples', async () => {
+      const { ctx } = await scanned([
+        failure(5, {
+          message: 'login failed password=hunter2hunter2 for u-1',
+          path: '/login',
+          body: '{"card":"4111111111111111"}',
+          headers: { authorization: 'Bearer abcdefghij123456' },
+          user: 'u-1',
+        }),
+      ]);
+      const [listed] = await alertList(ctx);
+      const [sample] = (await ctx.http.get(`/alerts/${listed.id}`)).body.data.samples;
+      expect(sample.message).toBe('login failed password=[redacted] for u-1');
+      expect(sample.attributes).toMatchObject({
+        body: '[redacted]',
+        headers: { authorization: '[redacted]' },
+        user: 'u-1',
+      });
+    });
+
+    it('reports the bytes Logs Insights scanned in the Scan notes', async () => {
+      const aws = await FakeAws.create();
+      aws.group(SHOP.name, [failure(5)]).scans(2_621_440);
+      const ctx = await start();
+      connectCloudWatch(ctx);
+      const ended = await scanCloudWatch(ctx);
+      // Two queries of 2.5 MB each.
+      expect(ended.notes).toEqual(['Logs Insights scanned 5.0 MB']);
+    });
+
+    it('stops at 10,000 failing events per log group and says so', async () => {
+      const many = Array.from({ length: 10_050 }, (_, index) => ({
+        at: Date.now() - 60_000 - index * 10,
+        message: { ...LINE, message: 'NullPointerException in OrderService' },
+      }));
+      const { ctx, ended } = await scanned(many);
+      expect(ended.status).toBe('ok');
+      expect(ended.notes).toContain('/ecs/shop-api: read the newest 10,000 failing events only');
+      const [alert] = await alertList(ctx);
+      // The counts come from the aggregate query, which the cap does not touch.
+      expect(alert.event_count).toBe(10_050);
+      const detail = (await ctx.http.get(`/alerts/${alert.id}`)).body.data;
+      expect(detail.samples).toHaveLength(25);
+    });
+
+    it('says the counts were cut off when the aggregate query returns 10,000 rows', async () => {
+      const distinct = Array.from({ length: 10_050 }, (_, index) => ({
+        at: Date.now() - 60_000 - index * 10,
+        message: { ...LINE, message: `failure ${String.fromCharCode(97 + (index % 26))}${index} in OrderService` },
+      }));
+      const { ended } = await scanned(distinct);
+      expect(ended.notes).toContain('/ecs/shop-api: counts cut off at 10,000 rows');
+    });
+
+    it('counts a failing event that names no status, method or route, past the cap on the events read', async () => {
+      const bare = { status: undefined, method: undefined, path: undefined };
+      const levelOnly = Array.from({ length: 10_050 }, (_, index) => ({
+        at: Date.now() - 60_000 - index * 10,
+        message: { ...LINE, ...bare, message: 'payments client timed out' },
+      }));
+      const { ctx } = await scanned(levelOnly);
+      const [alert] = await alertList(ctx);
+      expect(alert).toMatchObject({ http_status: null, route: null, event_count: 10_050 });
+    });
+
+    it('passes a log group name that starts with a dash as one argument, so the CLI does not read it as an option', async () => {
+      const aws = await FakeAws.create();
+      aws.group('-x', [failure(5)]);
+      const ctx = await start();
+      connectCloudWatch(ctx, [{ name: '-x', service: 'dashed', env: 'prod' }]);
+      expect(await scanCloudWatch(ctx)).toMatchObject({ status: 'ok' });
+      expect(await alertList(ctx)).toHaveLength(1);
+    });
+  });
+  describe('Alerts', () => {
+    it('sets Severity from the same rules as the other sources, from the counts Logs Insights gives', async () => {
+      const bucket = Math.floor(minutesAgo(60) / (10 * MINUTE)) * 10 * MINUTE;
+      const rapid = Array.from(
+        { length: 100 },
+        (_, i) => failure(0, { path: '/rapid' }) && { at: bucket + i * 1000, message: { ...LINE, path: '/rapid' } },
+      );
+      const steady = Array.from({ length: 120 }, (_, i) => ({
+        at: minutesAgo(i + 1),
+        message: { ...LINE, path: '/steady' },
+      }));
+      const few = [1, 2, 3].map((i) => failure(i, { path: '/few' }));
+      // Fatal is error level whatever the status code.
+      const fatal = Array.from({ length: 120 }, (_, i) => ({
+        at: minutesAgo(i + 1),
+        message: { ...LINE, status: 401, level: 'fatal', path: '/fatal' },
+      }));
+      const { ctx } = await scanned([...rapid, ...steady, ...few, ...fatal]);
+      const severities = Object.fromEntries(
+        (await alertList(ctx)).map((alert: { route: { path: string }; severity: string }) => [
+          alert.route.path,
+          alert.severity,
+        ]),
+      );
+      expect(severities).toEqual({ '/rapid': 'high', '/steady': 'medium', '/few': 'low', '/fatal': 'medium' });
+    });
+
+    it('puts the source in the Fingerprint, and leaves the other sources Fingerprints alone', async () => {
+      const ctx = await start();
+      const aws = await FakeAws.create();
+      aws.group(SHOP.name, [failure(5)]);
+      ctx.datadog.readings = [service('shop-api', [route('POST', '/orders', 4)])];
+      connectCloudWatch(ctx);
+      await scan(ctx);
+      await scanCloudWatch(ctx);
+      const rows = ctx.store.db.select().from(alerts).all();
+      const byConnector = Object.fromEntries(rows.map((row) => [row.connector, row.fingerprint]));
+      const rowOf = (connector: LogSource) =>
+        ctx.store.db.select().from(services).where(eq(services.connector, connector)).get();
+      expect(byConnector.cloudwatch_logs).toBe(
+        fingerprint(
+          rowOf(ConnectorId.CloudWatchLogs)?.id as string,
+          'POST',
+          '/orders',
+          'NullPointerException in OrderService',
+          500,
+          ConnectorId.CloudWatchLogs,
+        ),
+      );
+      expect(byConnector.datadog).toBe(
+        fingerprint(
+          rowOf(ConnectorId.Datadog)?.id as string,
+          'POST',
+          '/orders',
+          'NullPointerException in OrderService',
+          500,
+        ),
+      );
+      expect(Object.keys(byConnector).sort()).toEqual(['cloudwatch_logs', 'datadog']);
+    });
+
+    it('keeps one Service name and env in two sources as two Services', async () => {
+      const ctx = await start();
+      const aws = await FakeAws.create();
+      aws.group(SHOP.name, [failure(5)]);
+      ctx.datadog.readings = [service('shop-api', [route('POST', '/orders', 4)])];
+      connectCloudWatch(ctx);
+      expect((await ctx.http.post('/scans', { service_id: null })).status).toBe(202);
+      await until(
+        () => ctx.http.get('/scans').then((res) => res.body.data),
+        (all: { status: string }[]) => all.length === 2 && all.every((one) => one.status === 'ok'),
+        'both Scans',
+      );
+      const rows = ctx.store.db.select().from(services).all();
+      expect(rows.map((row) => [row.connector, row.name, row.env]).sort()).toEqual([
+        ['cloudwatch_logs', 'shop-api', 'prod'],
+        ['datadog', 'shop-api', 'prod'],
+      ]);
+      expect(
+        (await alertList(ctx, '?connector=cloudwatch_logs')).map((alert: { connector: string }) => alert.connector),
+      ).toEqual(['cloudwatch_logs']);
+    });
+  });
+
+  describe('failures', () => {
+    const outcome = async (behavior: 'throttle' | 'signed_out' | 'unreachable') => {
+      const aws = await FakeAws.create();
+      aws.group(SHOP.name, [failure(5)]).behave(behavior);
+      const ctx = await start();
+      connectCloudWatch(ctx);
+      return scanCloudWatch(ctx);
+    };
+
+    it('ends a throttled read rate limited', async () => {
+      expect(await outcome('throttle')).toMatchObject({ status: 'rate_limited', error_code: 'rate_limited' });
+    });
+
+    it('ends a signed-out profile and an unreachable AWS upstream failed, naming the cause', async () => {
+      expect(await outcome('signed_out')).toMatchObject({
+        status: 'failed',
+        error_code: 'upstream_failed',
+        error_message: 'AWS profile ops is signed out',
+      });
+      expect(await outcome('unreachable')).toMatchObject({ status: 'failed', error_code: 'upstream_failed' });
+    });
+
+    it('ends a missing log group upstream failed, naming it', async () => {
+      await FakeAws.create();
+      const ctx = await start();
+      connectCloudWatch(ctx);
+      expect(await scanCloudWatch(ctx)).toMatchObject({
+        status: 'failed',
+        error_code: 'upstream_failed',
+        error_message: 'Log group /ecs/shop-api was not found',
+      });
+    });
+
+    it('stops a query that has not finished in time, leaves the group unread and still ends the Scan ok', async () => {
+      const aws = await FakeAws.create();
+      aws.group(SHOP.name, [failure(5)]).behave('hang');
+      const ctx = await start({ cloudWatch: { timeoutMs: 100 } });
+      connectCloudWatch(ctx);
+      const ended = await scanCloudWatch(ctx);
+      expect(ended).toMatchObject({
+        status: 'ok',
+        notes: ['/ecs/shop-api not read: its query did not finish in 5 minutes and was stopped'],
+      });
+      expect(aws.commands().filter((command) => command === 'stop-query')).toHaveLength(2);
+      expect(await alertList(ctx)).toEqual([]);
+    });
+
+    it('stops the other query of a log group when one of them fails, before the Scan ends', async () => {
+      const aws = await FakeAws.create();
+      aws
+        .group(SHOP.name, [failure(5)])
+        .behaveOn('events', 'fail')
+        .behaveOn('counts', 'hang');
+      const ctx = await start({ cloudWatch: { timeoutMs: 5_000 } });
+      connectCloudWatch(ctx);
+      const ended = await scanCloudWatch(ctx);
+      expect(ended).toMatchObject({ status: 'failed', error_code: 'upstream_failed' });
+      const stopped = aws.calls().filter((call) => call.args[1] === 'stop-query');
+      expect(new Set(stopped.map((call) => call.args.join(' '))).size).toBe(2);
+    });
+
+    it('reports the bytes the finished query scanned when its sibling times out', async () => {
+      const aws = await FakeAws.create();
+      aws
+        .group(SHOP.name, [failure(5)])
+        .behaveOn('events', 'hang')
+        .scans(2_621_440);
+      const ctx = await start({ cloudWatch: { timeoutMs: 1_500 } });
+      connectCloudWatch(ctx);
+      const ended = await scanCloudWatch(ctx);
+      expect(ended).toMatchObject({
+        status: 'ok',
+        notes: [
+          '/ecs/shop-api not read: its query did not finish in 5 minutes and was stopped',
+          'Logs Insights scanned 2.5 MB',
+        ],
+      });
+    });
+
+    it('stops a query whose start was still in flight when the operator stopped the Scan, once it has an id', async () => {
+      const aws = await FakeAws.create();
+      aws.group(SHOP.name, [failure(5)]).startsAfter(800);
+      const ctx = await start();
+      connectCloudWatch(ctx);
+      const started = await ctx.http.post('/scans', { service_id: null, connector: 'cloudwatch_logs' });
+      await until(
+        () => aws.commands().filter((command) => command === 'start-query').length,
+        (asked) => asked >= 2,
+        'both queries to be starting',
+      );
+      expect((await ctx.http.post(`/scans/${started.body.data.id}/cancel`)).status).toBe(204);
+      await until(
+        () => aws.commands().filter((command) => command === 'stop-query').length,
+        (stopped) => stopped === 2,
+        'both queries to be stopped',
+      );
+    });
+
+    it('stops the running queries when the operator stops the Scan', async () => {
+      const aws = await FakeAws.create();
+      aws.group(SHOP.name, [failure(5)]).behave('hang');
+      const ctx = await start({ cloudWatch: { timeoutMs: 60_000 } });
+      connectCloudWatch(ctx);
+      const started = await ctx.http.post('/scans', { service_id: null, connector: 'cloudwatch_logs' });
+      await until(
+        () => aws.commands().filter((command) => command === 'get-query-results').length,
+        (asked) => asked >= 2,
+        'both queries to be running',
+      );
+      expect((await ctx.http.post(`/scans/${started.body.data.id}/cancel`)).status).toBe(204);
+      const ended = await until(
+        () => ctx.http.get(`/scans/${started.body.data.id}`).then((res) => res.body.data),
+        (found) => found.status !== 'running',
+        'the Scan to end',
+      );
+      expect(ended.status).toBe('cancelled');
+      await until(
+        () => aws.commands().filter((command) => command === 'stop-query').length,
+        (stopped) => stopped === 2,
+        'both queries to be stopped',
+      );
+    });
+
+    it('does not stop another source Scan when CloudWatch is down, and shows the others Alerts', async () => {
+      const ctx = await start();
+      const aws = await FakeAws.create();
+      aws.group(SHOP.name, [failure(5)]).behave('signed_out');
+      ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 4)])];
+      connectCloudWatch(ctx);
+      expect((await ctx.http.post('/scans', { service_id: null })).status).toBe(202);
+      const all = await until(
+        () => ctx.http.get('/scans').then((res) => res.body.data),
+        (found: { connector: string; status: string }[]) =>
+          found.length === 2 && found.every((one) => one.status !== 'running'),
+        'both Scans',
+      );
+      expect(all.map((one: { connector: string; status: string }) => [one.connector, one.status]).sort()).toEqual([
+        ['cloudwatch_logs', 'failed'],
+        ['datadog', 'ok'],
+      ]);
+      expect((await alertList(ctx)).map((alert: { connector: string }) => alert.connector)).toEqual(['datadog']);
+    });
+  });
+
+  it('links an imported Repo with the log group Service name, as any Service is', async () => {
+    const aws = await FakeAws.create();
+    aws.group(SHOP.name, [failure(5)]);
+    const ctx = await start();
+    const repo = (await ctx.http.post('/repos', { path: await makeRepo() })).body.data;
+    connectCloudWatch(ctx, [{ ...SHOP, service: 'orders-api' }]);
+    await scanCloudWatch(ctx);
+    const linked = await until(
+      () => ctx.http.get('/services').then((res) => res.body.data[0]),
+      (found) => found.repo_id !== null,
+      'the Repo to be linked',
+    );
+    expect(linked).toMatchObject({ connector: 'cloudwatch_logs', repo_id: repo.id });
+  });
+
+  describe('Services and the schedule', () => {
+    it('lists the picked groups as Services and envs, with their failing counts and status codes', async () => {
+      const aws = await FakeAws.create();
+      aws.group(SHOP.name, [failure(5), failure(6), failure(7, { status: 404 })]);
+      aws.group('/ecs/billing-api', [failure(5, { status: 502 })]);
+      const ctx = await start();
+      connectCloudWatch(ctx, [SHOP, { name: '/ecs/billing-api', service: 'billing-api', env: 'staging' }]);
+      expect((await ctx.http.get('/monitor/envs?connector=cloudwatch_logs')).body.data).toEqual([
+        { name: 'prod', configured: true },
+        { name: 'staging', configured: false },
+        { name: 'no env', configured: false },
+      ]);
+      expect((await ctx.http.get('/monitor/log-services?connector=cloudwatch_logs&window=24h')).body.data).toEqual([
+        { name: 'shop-api', envs: ['prod'], errors: 3 },
+        { name: 'billing-api', envs: ['staging'], errors: 1 },
+      ]);
+      expect((await ctx.http.get('/monitor/status-codes?connector=cloudwatch_logs&window=24h')).body.data).toEqual([
+        { code: 500, count: 2 },
+        { code: 404, count: 1 },
+        { code: 502, count: 1 },
+      ]);
+    });
+
+    it('runs on its own interval, and skips the source when it is not connected', async () => {
+      const aws = await FakeAws.create();
+      aws.group(SHOP.name, [failure(5)]);
+      const ctx = await start();
+      connectCloudWatch(ctx);
+      await ctx.http.patch('/connectors/cloudwatch_logs', { config: { default_interval: '12h' } });
+      const monitor = ctx.daemon.app.get(ScansService);
+      const scheduled = () =>
+        ctx.store.db
+          .select()
+          .from(scans)
+          .where(eq(scans.triggeredBy, ScanTrigger.Schedule))
+          .all()
+          .map((one) => [one.connector, one.windowSize])
+          .sort();
+      await monitor.runDue(new Date(2026, 9, 5, 9, 1));
+      expect(scheduled()).toEqual([
+        ['cloudwatch_logs', '12h'],
+        ['datadog', '24h'],
+      ]);
+      setConnector(ctx.store, ConnectorId.CloudWatchLogs, { status: HealthStatus.Fail });
+      await monitor.runDue(new Date(Date.now() + 2 * 86_400_000));
+      expect(scheduled().filter(([connector]) => connector === 'cloudwatch_logs')).toHaveLength(1);
+    });
+
+    it('keeps each source Scans through retention, per Service', async () => {
+      const aws = await FakeAws.create();
+      aws.group(SHOP.name, [failure(5)]);
+      const ctx = await start();
+      ctx.datadog.readings = [service('shop-api', [route('POST', '/orders', 4)])];
+      connectCloudWatch(ctx);
+      for (let round = 0; round < 2; round++) {
+        await scan(ctx);
+        await scanCloudWatch(ctx);
+      }
+      const long = new Date(Date.now() - 40 * 86_400_000).toISOString();
+      ctx.store.write((tx) => tx.update(scans).set({ startedAt: long }).run());
+      await ctx.daemon.app.get(MonitorRetention).run();
+      expect(
+        ctx.store.db
+          .select()
+          .from(scans)
+          .all()
+          .map((one) => one.connector)
+          .sort(),
+      ).toEqual(['cloudwatch_logs', 'datadog']);
+    });
+  });
+  describe('Recheck, Verification and Fix', () => {
+    const recheckOf = (report: { steps: { kind: string; text: string }[] }) =>
+      report.steps[0] as { kind: string; text: string };
+    const promptsSince = (ctx: Ctx, from: number) => ctx.daemon.sdk.calls.slice(from).map((call) => call.prompt);
+    const deniedSince = (ctx: Ctx, from: number) =>
+      ctx.daemon.sdk.calls.slice(from).flatMap((call) => {
+        const settings = call.options.settings as { deniedMcpServers?: { serverName: string }[] } | undefined;
+        return (settings?.deniedMcpServers ?? []).map((server) => server.serverName);
+      });
+
+    async function failingGroup(events = [failure(5), failure(8)]) {
+      const aws = await FakeAws.create();
+      aws.group(SHOP.name, events);
+      const ctx = await start();
+      connectCloudWatch(ctx);
+      await scanCloudWatch(ctx);
+      const [alert] = await alertList(ctx);
+      await linkRepo(ctx, alert.service.id);
+      return { ctx, aws, alert };
+    }
+
+    it('reads the Alert log group for the last hour through its filter, before the agent starts', async () => {
+      const { ctx, aws, alert } = await failingGroup();
+      aws.group(SHOP.name, [failure(5), failure(8), failure(5, { path: '/other' })]);
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(recheckOf(stored)).toEqual({ kind: 'result', text: 'CloudWatch logs recheck, last hour: still failing' });
+      expect(ctx.datadog.rechecks).toEqual([]);
+      expect(stored.status).toBe('ready');
+    });
+
+    it('says not seen when the last hour holds none of them, and only the Alert Route counts', async () => {
+      const { ctx, aws, alert } = await failingGroup();
+      // Failing an hour and a half ago, and failing now on another Route.
+      aws.group(SHOP.name, [failure(90), failure(5, { path: '/other' }), failure(5, { status: 502 })]);
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(recheckOf(stored).text).toBe('CloudWatch logs recheck, last hour: not seen');
+      expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.status).toBe('verified');
+    });
+
+    it('says why a Recheck could not read, and goes on', async () => {
+      const { ctx, aws, alert } = await failingGroup();
+      aws.behave('signed_out');
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(recheckOf(stored)).toEqual({ kind: 'warning', text: 'Recheck failed: AWS profile ops is signed out' });
+      expect(stored.status).toBe('ready');
+    });
+
+    it('briefs the agent with the source, the Samples and the filter, and names the log tools and no pup', async () => {
+      const { ctx, alert } = await failingGroup();
+      const before = ctx.daemon.sdk.calls.length;
+      await verify(ctx, alert.id);
+      const brief = promptsSince(ctx, before).find((prompt) => prompt.includes('Find the cause of a failure')) ?? '';
+      expect(brief).toContain('CloudWatch logs');
+      expect(brief).toContain('NullPointerException in OrderService');
+      expect(brief).toContain('"log_group":"/ecs/shop-api"');
+      expect(brief).toMatch(/no `pup` and no Datadog MCP Server/);
+      expect(brief).toMatch(/CloudWatch log tools/);
+      expect(brief).not.toContain('Datadog query');
+      expect(brief).not.toContain('failure Datadog logged');
+      // The Datadog server stays out, and the CloudWatch one starts.
+      expect(deniedSince(ctx, before)).toContain('datadog-pup');
+      expect(deniedSince(ctx, before)).not.toContain('cloudwatch');
+    });
+
+    it('starts a Fix of a CloudWatch Alert with a Recheck and without the CloudWatch server', async () => {
+      const { ctx, alert } = await failingGroup();
+      await verify(ctx, alert.id);
+      const before = ctx.daemon.sdk.calls.length;
+      for (const run of stepTurns(PlaybookTrigger.Fix)) ctx.daemon.sdk.script(...run);
+      ctx.daemon.sdk.script(json({ description: 'Defaults the order total.' }));
+      const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
+      await until(
+        () => ctx.http.get(`/fixes/${confirm.body.data.fix.id}`).then((res) => res.body.data.status),
+        (status) => status !== 'running',
+        'the Fix to end',
+      );
+      const prompts = promptsSince(ctx, before);
+      expect(prompts[0]).toContain('CloudWatch logs recheck, last hour: still failing');
+      expect(prompts[0]).toMatch(/no `pup` and no Datadog MCP Server/);
+      expect(deniedSince(ctx, before)).toEqual(expect.arrayContaining(['datadog-pup', 'cloudwatch']));
+    });
+
+    it('keeps the CloudWatch server out of a Datadog Verification', async () => {
+      const ctx = await start();
+      const alert = await failing(ctx);
+      await linkRepo(ctx, alert.service.id);
+      const before = ctx.daemon.sdk.calls.length;
+      await verify(ctx, alert.id);
+      expect(deniedSince(ctx, before)).toContain('cloudwatch');
+      expect(deniedSince(ctx, before)).not.toContain('datadog-pup');
     });
   });
 });

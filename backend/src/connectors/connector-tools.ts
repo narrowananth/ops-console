@@ -17,7 +17,7 @@ const BITBUCKET_USER_KEPT_MS = 10 * 60_000;
 export type SignInPrompt = { code: string | null; url: string | null };
 
 /** `gh` prints "One-time code (ABCD-1234) copied to clipboard", or "First copy your one-time code: ABCD-1234". */
-const ONE_TIME_CODE = /one-time code\W+([A-Z0-9]{4}-[A-Z0-9]{4})/i;
+const ONE_TIME_CODE = /(?:one-time code|enter the code)\W+([A-Z0-9]{4}-[A-Z0-9]{4})/i;
 const SIGN_IN_URL = /https:\/\/[^\s"'<>]+/;
 
 export const CONNECTOR_TOOLS = Symbol('CONNECTOR_TOOLS');
@@ -46,6 +46,14 @@ export interface ConnectorTools {
   slashdocsUser(): Promise<{ email: string; name: string | null } | null>;
   /** `slashdocs auth login`, to `server` or, when `null`, the CLI's active one. */
   slashdocsLogin(server: string | null, signal: AbortSignal, onPrompt: (prompt: SignInPrompt) => void): Promise<void>;
+  /** Whether `aws` answers `sts get-caller-identity` for the profile. Any failure reads as signed out. */
+  awsSignedIn(profile: string): Promise<boolean>;
+  /** Whether the profile is an IAM Identity Center one, which `aws sso login` can sign in. */
+  awsIsSso(profile: string): Promise<boolean>;
+  /** `aws sso login --profile <profile>`. */
+  awsLogin(profile: string, signal: AbortSignal, onPrompt: (prompt: SignInPrompt) => void): Promise<void>;
+  /** The names of the log groups the profile sees in the region. */
+  awsLogGroups(profile: string, region: string): Promise<string[]>;
   /** Opens a page in the operator's browser. */
   openPage(url: string): Promise<void>;
   /** Whether a command is on the PATH. */
@@ -56,12 +64,21 @@ export interface ConnectorTools {
 
 const datadogStatusSchema = z.object({ authenticated: z.boolean(), org: z.string().nullish() }).loose();
 
-export type ToolBins = { pup: string; gh: string; glab: string; bkt: string; slashdocs: string };
+export type ToolBins = { pup: string; gh: string; glab: string; bkt: string; slashdocs: string; aws: string };
+
+const logGroupsSchema = z.object({ logGroups: z.array(z.object({ logGroupName: z.string() }).loose()) }).loose();
 
 /** Errors name the tool only: output may hold tokens. */
 export class CliConnectorTools implements ConnectorTools {
   constructor(
-    private readonly bins: ToolBins = { pup: 'pup', gh: 'gh', glab: 'glab', bkt: 'bkt', slashdocs: 'slashdocs' },
+    private readonly bins: ToolBins = {
+      pup: 'pup',
+      gh: 'gh',
+      glab: 'glab',
+      bkt: 'bkt',
+      slashdocs: 'slashdocs',
+      aws: 'aws',
+    },
   ) {}
 
   async datadogStatus(): Promise<{ signedIn: boolean; org: string | null }> {
@@ -206,6 +223,48 @@ export class CliConnectorTools implements ConnectorTools {
       [0],
       { signal, login: true, onPrompt },
     );
+  }
+
+  async awsSignedIn(profile: string): Promise<boolean> {
+    try {
+      await run(this.bins.aws, ['sts', 'get-caller-identity', '--profile', profile], { timeout: 30_000 });
+      return true;
+    } catch {
+      // The CLI documents no exit code for an expired session, so any failure reads as signed out.
+      return false;
+    }
+  }
+
+  async awsIsSso(profile: string): Promise<boolean> {
+    for (const key of ['sso_session', 'sso_start_url']) {
+      try {
+        const { stdout } = await run(this.bins.aws, ['configure', 'get', key, '--profile', profile], {
+          timeout: 30_000,
+        });
+        if (stdout.trim() !== '') return true;
+      } catch {
+        // An unset key exits 1.
+      }
+    }
+    return false;
+  }
+
+  async awsLogin(profile: string, signal: AbortSignal, onPrompt: (prompt: SignInPrompt) => void): Promise<void> {
+    await this.exec(this.bins.aws, ['sso', 'login', '--profile', profile], 'aws sso login', [0], {
+      signal,
+      login: true,
+      onPrompt,
+    });
+  }
+
+  async awsLogGroups(profile: string, region: string): Promise<string[]> {
+    const args = ['logs', 'describe-log-groups', '--profile', profile, '--region', region, '--output', 'json'];
+    try {
+      const { stdout } = await run(this.bins.aws, args, { maxBuffer: 50 * 1024 * 1024, timeout: 60_000 });
+      return logGroupsSchema.parse(JSON.parse(stdout)).logGroups.map((group) => group.logGroupName);
+    } catch {
+      throw new ApiError(502, ErrorCode.UpstreamFailed, '`aws logs describe-log-groups` failed');
+    }
   }
 
   async openPage(url: string): Promise<void> {
