@@ -12,8 +12,8 @@ Cellar would break that layout.
 
 ## Behavior
 
-1. `brew install narrowananth/ops-console/ops-console` installs one command, `ops-console`, into Homebrew's `bin`, and
-   prints that the operator runs `ops-console start`. This is the Brew entry command. The formula's install step
+1. `brew tap narrowananth/ops-console https://github.com/narrowananth/ops-console`, then `brew install ops-console`,
+   installs one command, `ops-console`, into Homebrew's `bin`, and prints that the operator runs `ops-console start`. This is the Brew entry command. The formula's install step
    installs no app and writes nothing under the home folder.
 2. The Brew entry command with no installed app installs the formula's version from the tarball Homebrew already
    downloaded and checked. The Brew entry command's own messages go to stderr, and the install script's output passes through unchanged.
@@ -43,10 +43,10 @@ Cellar would break that layout.
 13. A tagged release updates the tap in the same workflow run, after the release is published. The job renders the
     formula with the new version and both tarballs' sha256, installs it from a local tap on a macOS runner, runs
     `brew audit --strict`, `brew style` and the formula's own test (`ops-console --version` prints the new version),
-    and only then pushes to the tap.
+    and only then commits it to `Formula/ops-console.rb` on `main`.
 14. A failed tap update fails that job and leaves the release published. The owner reruns the job.
-15. The tap holds only generated files: the formula and a README. The token for the tap exists only in the release
-    job's secrets.
+15. The only file the job writes to the repository is `Formula/ops-console.rb`, generated, and the job needs no secret
+    beyond the workflow's own token.
 16. Without the Brew entry command's variable set, the install script, the tarball and the checksums work as before.
 17. The README and the docs site show the Homebrew command beside `curl | sh`.
 
@@ -62,11 +62,11 @@ Cellar would break that layout.
   The Brew entry command sets it for the installs it starts. Without it the script behaves as today.
 - **Restart on upgrade**: the old version's `status` tells whether the daemon runs. After the install, the new
   version's `stop` and `start` restart it. The CLI has no restart command, and `start` on a running daemon only reports it.
-- **Tap**: a separate public repository, `narrowananth/homebrew-ops-console`, so the install command is the one above.
-  The owner creates it and a fine-grained token with write access to that repository only, stored as a secret of this
-  repository. Shipping this change creates nothing outside this repository.
+- **Tap**: this repository. The formula lives at `Formula/ops-console.rb` on `main`, and the operator taps it with the
+  repository's URL, since a repository not named `homebrew-*` has no short tap name. Shipping this change creates
+  nothing outside this repository, and no token or second repository is needed.
 - **Formula from a template**: this repository holds the template, the Brew entry command's script and the rendering. The
-  release job renders them with the version and both sha256 values and pushes the result to the tap.
+  release job renders them with the version and both sha256 values and commits the result to `main`.
 - **Check before push**: the formula is installed from a local tap (trusted with `brew trust`, which Homebrew now
   requires) before it reaches the real one, so a broken formula never goes live. The release it points at is already published when the job runs.
 - **Tarball kept in the Cellar**: the first run installs with no second download and no network. The cost is a second
@@ -111,8 +111,8 @@ No change. The in-app update card installs through the install script as before.
   upgrade, and needs the app's own update turned off for brew installs.
 - **Entry command that downloads from GitHub at run time**: no second copy on disk, but the checksum would come from
   the same server as the file, and a first run offline would fail.
-- **Formula folder in this repository**: no second repository or token, but users must tap with a full URL and a release
-  must commit back to `main`.
+- **A separate tap repository**: gives the short `brew install narrowananth/ops-console/ops-console`, but needs a second
+  public repository and a fine-grained token stored as a secret.
 - **Cask**: casks install apps, and a download through one adds the quarantine flag the unsigned build cannot pass.
 - **Run the install from `post_install`**: Homebrew's sandbox blocks writes to the home folder there.
 - **Check the formula after the push**: a broken formula would be live before anything looked at it.
@@ -121,7 +121,7 @@ No change. The in-app update card installs through the install script as before.
 
 - **Brew entry command**: the `ops-console` command Homebrew installs. It installs the matching app into the home
   folder on first run and after an upgrade, then runs the command typed.
-- **Tap**: the repository that holds the console's Homebrew formula.
+- **Tap**: this repository's `Formula` folder, which holds the console's Homebrew formula and which `brew tap` adds by URL.
 
 ## ADR
 

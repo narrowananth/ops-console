@@ -1,6 +1,6 @@
 # Homebrew installs an entry command around the install script
 
-`brew install narrowananth/ops-console/ops-console` puts one command, the Brew entry command, in Homebrew's `bin`. The
+`brew install ops-console`, after `brew tap` of this repository, puts one command, the Brew entry command, in Homebrew's `bin`. The
 formula also keeps the release tarball Homebrew checked, a `checksums.txt` for it and the install script from the
 tarball. The first `ops-console` command on a Mac with no app, and the first one after `brew upgrade` brings a newer
 formula, runs that install script against the kept tarball and installs the formula's version into `~/.ops-console`. A
@@ -14,9 +14,9 @@ the first run installs the app. The Brew entry command sets `OPS_CONSOLE_NO_LINK
 link, which would otherwise shadow it and stop `brew upgrade` from reaching the app. A link made earlier, or by the app's
 own update, still works and skips the version check.
 
-The tap is a separate public repository, `narrowananth/homebrew-ops-console`. The release workflow renders the formula
-from a template in this repository, installs it from a local tap and runs `brew audit --strict`, `brew style` and the
-formula's test, and only then pushes it. The formula carries one tarball per architecture, and a Rosetta Homebrew on an
+The tap is this repository: `Formula/ops-console.rb` on `main`, tapped with the repository's URL. The release workflow
+renders the formula from a template, installs it from a local tap and runs `brew audit --strict`, `brew style` and the
+formula's test, and only then commits it to `main`. The formula carries one tarball per architecture, and a Rosetta Homebrew on an
 Apple silicon Mac is refused, since the install script would pick the arm64 build there.
 
 The trade-offs: a second copy of the release in the Cellar, an app that updates itself past its formula, and no removal
@@ -29,7 +29,7 @@ change where launchd points, so this is hard to undo once operators run the Brew
   upgrade, and needs the app's own update turned off for brew installs.
 - **Entry command that downloads from GitHub at run time**: no second copy on disk, but the checksum would come from the
   same server as the file, and a first run offline would fail.
-- **Formula folder in this repository**: no second repository or token, but users must tap with a full URL and a release
-  must commit back to `main`.
+- **A separate tap repository**: gives the short `brew install narrowananth/ops-console/ops-console`, but needs a second
+  public repository and a fine-grained token stored as a secret.
 - **Cask**: casks install apps, and a download through one adds the quarantine flag the unsigned build cannot pass.
 - **Install from `post_install`**: Homebrew's sandbox blocks writes to the home folder there.
