@@ -11,7 +11,7 @@ Small items for first-run friction. None conflicts with an ADR.
 - Sign the binaries with an Apple Developer ID and notarize them, so Gatekeeper accepts a cask or browser download. Releases are ad hoc signed today. Spec: [sign-and-notarize-release](specs/sign-and-notarize-release.md). On hold until the owner has an Apple Developer Program membership.
 - Publish a Homebrew tap that installs the existing darwin tarballs, and make `brew upgrade` work next to `ops-console update`. Spec: [homebrew-tap](specs/homebrew-tap.md).
 - Finish Google OAuth verification for the Google Docs, Sheets and Drive Connectors. `drive.readonly` is a restricted scope, so verification may need a third-party security assessment. Until it passes, users see the unverified-app screen. Confirm the current verification status first.
-- Add a data-flow section to `PRIVACY.md` and the site: what moves between the operator's machine, Anthropic's API and each Connector, and that none of it reaches an Ops Console server. [ADR 0003](adr/0003-local-only-server.md) already guarantees this, so the work is documentation.
+- Add a data-flow section to `PRIVACY.md` and the site: what moves between the operator's machine, Anthropic's API and each Connector, and that none of it reaches an Ops Console server. [ADR 0003](adr/0003-local-only-server.md) already guarantees this, so the work is documentation. Spec: [data-flow-docs](specs/data-flow-docs.md).
 
 ## 2. Self-serve onboarding
 

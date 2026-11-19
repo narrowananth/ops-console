@@ -82,3 +82,32 @@ test('no page loads anything from a third party, and every internal link has a p
     }
   }
 });
+
+test('the data-flow summary in PRIVACY.md comes before the table of what leaves, and links the docs page by full address', async () => {
+  const source = await readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'PRIVACY.md'), 'utf8');
+  const flow = source.indexOf('\n## Data flow\n');
+  assert.ok(flow > -1, 'PRIVACY.md has a Data flow section');
+  assert.ok(flow < source.indexOf('\n## What leaves your Mac\n'), 'Data flow comes before What leaves your Mac');
+  for (const heading of ['## Google data', '## Your control']) {
+    assert.ok(source.includes(`\n${heading}\n`), `${heading} stays`);
+  }
+  const section = source.slice(flow, source.indexOf('\n## What leaves your Mac\n'));
+  assert.match(section, /https:\/\/opsconsole\.org\/docs\/data-flow\//);
+});
+
+test('the data-flow docs page sits between Claude accounts and Safety, and the site links it', async () => {
+  const slugs = DOCS.map(({ slug }) => slug);
+  const at = slugs.indexOf('data-flow');
+  assert.ok(at > -1, 'DOCS lists data-flow');
+  assert.equal(slugs[at - 1], 'claude-accounts');
+  assert.equal(slugs[at + 1], 'safety');
+  await build();
+  const page = await readFile(path.join(dist, 'docs', 'data-flow', 'index.html'), 'utf8');
+  assert.match(page, /<h1 id="data-flow">Data flow<\/h1>/);
+  for (const from of ['docs/safety', 'privacy']) {
+    const html = await readFile(path.join(dist, from, 'index.html'), 'utf8');
+    assert.match(html, /href="(?:https:\/\/opsconsole\.org)?\/docs\/data-flow\/"/, `${from} links the data-flow page`);
+  }
+  const home = await readFile(path.join(dist, 'index.html'), 'utf8');
+  assert.match(home, /href="\/docs\/data-flow\/"/);
+});

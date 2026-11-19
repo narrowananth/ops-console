@@ -25,7 +25,7 @@ A Connection tagged PROD is always marked, and the agent treats it as read-only.
 
 ## The console is local
 
-The server listens on `127.0.0.1` only, and every request and WebSocket carries a session token made at startup. There is no tunnel and no `0.0.0.0`. Reaching the server is the same as reaching your machine, so sharing the console with a team means a separate deployment with real sign-in, not opening the port.
+The server listens on `127.0.0.1` only, and every request and WebSocket carries a session token made at startup. There is no tunnel and no `0.0.0.0`. Reaching the server is the same as reaching your machine, so sharing the console with a team means a separate deployment with real sign-in, not opening the port. What leaves your Mac for Anthropic and the services you connect is on the [data flow](/docs/data-flow/) page.
 
 ## Secrets
 
