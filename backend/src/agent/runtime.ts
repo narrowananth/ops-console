@@ -73,7 +73,8 @@ import { cloudWatchDenial } from './cloudwatch-tools';
 import { ConnectionLookup } from './connection-lookup';
 import { editRoots, outsideEditRoots } from './edit-scope';
 import { HOOK_BYPASS_REASON, skipsCommitHooks } from './hook-bypass';
-import { classifyCli, type IntegrationInput, integrationInputSchema, outsideFile, runCli } from './integration-cli';
+import { classifyCli, type IntegrationInput, integrationInputSchema, outsideFile } from './integration-cli';
+import { runIntegration } from './integration-runner';
 import { mcpScope } from './mcp-scope';
 import { MessageInterceptors } from './message-interceptors';
 import { OutputFiles, saveFileInputSchema } from './output-files';
@@ -1287,7 +1288,10 @@ export class AgentRuntime implements OnModuleDestroy {
         const integrations =
           outputFolder === null
             ? null
-            : { run: (input: IntegrationInput) => runCli(input.cli, input.args, outputFolder) };
+            : {
+                run: (input: IntegrationInput) =>
+                  runIntegration({ db: this.store.db, keychain: this.keychain }, input, outputFolder),
+              };
         tools.push(
           ...Object.entries({ opener, joiner, spawner, saver, integrations, browser, processes })
             .filter(([, offered]) => offered)
@@ -1936,7 +1940,7 @@ export class AgentRuntime implements OnModuleDestroy {
     };
     const parsed = integrationInputSchema.safeParse(toolInput);
     if (!parsed.success)
-      return refuse('Give cli (pup, gh, glab, bkt or slashdocs) and args: command words first, one per entry.');
+      return refuse('Give cli (pup, gh, glab, bkt, slashdocs or logcli) and args: command words first, one per entry.');
     const { cli, args } = parsed.data;
     const verdict = classifyCli(cli, args);
     if (verdict.kind === 'deny') return refuse(verdict.reason);

@@ -77,6 +77,152 @@ describe('classifyCli', () => {
   });
 });
 
+describe('classifyCli for logcli', () => {
+  const QUERY = '{service_name="shop-api"} | json | status >= 500';
+  const reason = (...args: string[]) => {
+    const verdict = classifyCli('logcli', args);
+    return verdict.kind === 'deny' ? verdict.reason : null;
+  };
+
+  it('reads a log or metric query, the labels and the series, with the flags for time, limit, output and quiet', () => {
+    for (const args of [
+      ['query', QUERY],
+      ['query', '--since', '2h', '--limit', '100', QUERY],
+      ['query', '--since=2h', '--limit=100', QUERY],
+      ['query', '--from', '2026-10-01T00:00:00Z', '--to', '2026-10-01T01:00:00Z', QUERY],
+      ['query', '-o', 'jsonl', '-q', '-z', 'UTC', QUERY],
+      ['query', '--output=raw', '--quiet', '--timezone=UTC', '--output-timestamp-format=rfc3339nano', QUERY],
+      ['query', '--forward', '--batch', '500', '--no-labels', QUERY],
+      ['query', '--step', '10m', '--interval', '1m', 'sum by (route) (count_over_time({a="b"} [10m]))'],
+      [
+        'query',
+        '--include-label',
+        'route',
+        '--exclude-label',
+        'pod',
+        '--include-common-labels',
+        '--labels-length',
+        '10',
+        QUERY,
+      ],
+      ['labels'],
+      ['labels', 'service_name', '--since', '24h'],
+      ['labels', '--from=2026-10-01T00:00:00Z', '--to=2026-10-02T00:00:00Z'],
+      ['series', '{service_name="shop-api"}', '--since', '1h'],
+      ['series', '--analyze-labels', '{service_name=~".+"}'],
+    ]) {
+      expect(classifyCli('logcli', args), args.join(' ')).toEqual({ kind: 'read' });
+    }
+  });
+
+  it('refuses every flag that changes the address, tenant, credentials, TLS or proxy, in both spellings, and runs nothing', () => {
+    for (const flag of [
+      '--addr',
+      '--org-id',
+      '--username',
+      '--password',
+      '--bearer-token',
+      '--bearer-token-file',
+      '--tls-skip-verify',
+      '--ca-cert',
+      '--cert',
+      '--key',
+      '--proxy-url',
+      '--envproxy',
+      '--auth-header',
+      '--header',
+      '--query-tags',
+      '--compress',
+      '--nocache',
+    ]) {
+      expect(reason('query', flag, 'https://evil.example.com', QUERY), `${flag} value`).toMatch(new RegExp(`^${flag}`));
+      expect(reason('query', `${flag}=https://evil.example.com`, QUERY), `${flag}=value`).toMatch(
+        new RegExp(`^${flag}`),
+      );
+      expect(reason('labels', flag), `${flag} alone`).toMatch(new RegExp(`^${flag}`));
+    }
+  });
+
+  it('refuses a flag it does not know, a flag that reads or writes a file, and live tailing', () => {
+    for (const flag of [
+      '--tail',
+      '-t',
+      '-f',
+      '--follow',
+      '--store-config',
+      '--remote-schema',
+      '--schema-store',
+      '--part-path-prefix',
+      '--merge-parts',
+      '--keep-parts',
+      '--stdin',
+      '--parallel-max-workers',
+      '--retries',
+      '--log.level',
+      '--cpuprofile',
+      '--memprofile',
+      '--help',
+      '--version',
+      '--config',
+      '--env-file',
+      '--no-quiet',
+      '--future-flag',
+    ]) {
+      expect(reason('query', flag, QUERY), flag).toMatch(/not allowed|not on the list/);
+    }
+  });
+
+  it('refuses a short flag that is combined with another or glued to its value, since the CLI reads it differently', () => {
+    expect(reason('query', '-qo', 'jsonl', QUERY)).not.toBeNull();
+    expect(reason('query', '-ojsonl', QUERY)).not.toBeNull();
+    expect(reason('query', '-qz', 'UTC', QUERY)).not.toBeNull();
+    expect(reason('query', '-H', QUERY)).not.toBeNull();
+  });
+
+  it('refuses a flag that takes a value when the next argument is a flag, so no flag hides as a value', () => {
+    expect(reason('query', QUERY, '--limit', '--addr=http://evil.example')).toMatch(/--limit.*value/);
+    expect(reason('query', '-o', '--addr', 'http://evil.example', QUERY)).toMatch(/-o.*value/);
+    expect(reason('query', '--since', '--bearer-token=x', QUERY)).toMatch(/--since.*value/);
+    for (const args of [
+      ['query', '--since=1h', QUERY],
+      ['query', '--since', '1h', QUERY],
+      ['query', '--limit', '10', QUERY],
+      ['query', '-o', 'jsonl', QUERY],
+    ]) {
+      expect(classifyCli('logcli', args), args.join(' ')).toEqual({ kind: 'read' });
+    }
+  });
+
+  it('refuses an argument that makes the CLI read its arguments from a file, and the end-of-flags marker', () => {
+    expect(reason('query', '@/tmp/args.txt')).toMatch(/file/);
+    expect(reason('query', '--limit', '@/tmp/args.txt', QUERY)).toMatch(/file/);
+    expect(reason('labels', '--since=@/tmp/args.txt')).toMatch(/file/);
+    expect(reason('query', '--', '--addr=https://evil.example.com', QUERY)).not.toBeNull();
+  });
+
+  it('refuses every other command, and a flag before the command', () => {
+    for (const args of [
+      ['instant-query', QUERY],
+      ['stats', QUERY],
+      ['volume', QUERY],
+      ['detected-fields', QUERY],
+      ['fmt'],
+      ['delete', 'create', QUERY],
+      ['help'],
+      ['--addr=https://evil.example.com', 'query', QUERY],
+      ['-q', 'query', QUERY],
+    ]) {
+      expect(reason(...args), args.join(' ')).not.toBeNull();
+    }
+    expect(reason('delete', 'create', QUERY)).toContain('delete');
+  });
+
+  it('lets a query say anything a log line might, such as a merge word or an @', () => {
+    expect(classifyCli('logcli', ['query', '{app="x"} |= "auto-merge"'])).toEqual({ kind: 'read' });
+    expect(classifyCli('logcli', ['query', '{app="x"} |= "a@b.example.com"'])).toEqual({ kind: 'read' });
+  });
+});
+
 describe('outsideFile', () => {
   it('refuses a file the run could not reach, and lets API paths and its own folders through', async () => {
     const home = await tempDir('ops-console-home-');

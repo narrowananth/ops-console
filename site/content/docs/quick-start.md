@@ -20,7 +20,7 @@ Open Workspace, pick the Repo and write the task. The Access mode decides what t
 
 ## 5. Connect your services
 
-Open Integrations and connect the services you use: Datadog, OpenTelemetry logs or CloudWatch logs for Monitor, GitHub, GitLab or Bitbucket for pull requests, Jira for Tickets, and more. Each one signs in in your browser. See [Connectors](/docs/connectors/).
+Open Integrations and connect the services you use: Datadog, OpenTelemetry logs, CloudWatch logs or Loki logs for Monitor, GitHub, GitLab or Bitbucket for pull requests, Jira for Tickets, and more. Each one signs in in your browser. See [Connectors](/docs/connectors/).
 
 ## 6. Watch a Service
 

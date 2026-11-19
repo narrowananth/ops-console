@@ -9,7 +9,7 @@ import { redact } from '../action-log/redact';
 const exec = promisify(execFile);
 
 /** The integration CLIs a run may ask the console to run outside the Run sandbox (ADR 0006). */
-export const INTEGRATION_CLIS = ['pup', 'gh', 'glab', 'bkt', 'slashdocs'] as const;
+export const INTEGRATION_CLIS = ['pup', 'gh', 'glab', 'bkt', 'slashdocs', 'logcli'] as const;
 export type IntegrationCliName = (typeof INTEGRATION_CLIS)[number];
 
 export const integrationInputSchema = z.object({
@@ -157,6 +157,75 @@ const GIT_HOST_RULES = {
   },
 } as const;
 
+/** The commands of `logcli` that only read: a log or metric query, label names and values, series. */
+const LOGCLI_COMMANDS = ['query', 'labels', 'series'];
+/** The only flags of those commands that pass: time range, limit, output format and quiet. Each takes a value or none. */
+const LOGCLI_VALUE_FLAGS = new Set([
+  '--since',
+  '--from',
+  '--to',
+  '--limit',
+  '--batch',
+  '--step',
+  '--interval',
+  '--output',
+  '--timezone',
+  '--output-timestamp-format',
+  '--include-label',
+  '--exclude-label',
+  '--labels-length',
+]);
+const LOGCLI_SWITCHES = new Set(['--quiet', '--forward', '--no-labels', '--include-common-labels', '--analyze-labels']);
+const LOGCLI_SHORT: Record<string, string> = { '-q': '--quiet', '-o': '--output', '-z': '--timezone' };
+
+/**
+ * `logcli` runs with the address, tenant and secret the console sets in its environment, so the agent may not name
+ * any of them: a flag not on the list above is refused, and so is any argument that starts with `@`, which `logcli`
+ * reads as a file of more arguments. A command with only these flags reads and cannot write to Loki.
+ */
+function logcliVerdict(args: string[]): CliVerdict {
+  const command = args[0] ?? '';
+  if (!LOGCLI_COMMANDS.includes(command)) {
+    return deny(`logcli ${command} is not on the list the console runs: ${LOGCLI_COMMANDS.join(', ')}.`);
+  }
+  const refuse = (flag: string) =>
+    deny(
+      `${flag} is not allowed: the console sets logcli's address, tenant, credentials and TLS, and only time range, limit, output and quiet flags pass.`,
+    );
+  const fromFile = (value: string) => value.startsWith('@');
+  const fileReason = 'logcli would read its arguments from the file named by an @ argument.';
+  /** The value after a flag that takes one in a separate argument; a flag in its place is refused. */
+  const valueAfter = (flag: string, at: number): CliVerdict | null => {
+    const value = args[at] ?? '';
+    if (value.startsWith('-')) return deny(`${flag} takes a value, and ${value} is a flag: write ${flag}=value.`);
+    return fromFile(value) ? deny(fileReason) : null;
+  };
+  for (let i = 1; i < args.length; i++) {
+    const arg = args[i] ?? '';
+    if (fromFile(arg)) return deny(fileReason);
+    if (!arg.startsWith('-') || arg === '-') continue;
+    if (arg.startsWith('--')) {
+      const [name = '', ...rest] = arg.split('=');
+      if (LOGCLI_SWITCHES.has(name) && rest.length === 0) continue;
+      if (!LOGCLI_VALUE_FLAGS.has(name)) return refuse(name);
+      if (rest.length > 0) {
+        if (fromFile(rest.join('='))) return deny(fileReason);
+        continue;
+      }
+      const refused = valueAfter(name, ++i);
+      if (refused) return refused;
+      continue;
+    }
+    const long = LOGCLI_SHORT[arg];
+    if (long === undefined) return refuse(arg);
+    if (LOGCLI_VALUE_FLAGS.has(long)) {
+      const refused = valueAfter(arg, ++i);
+      if (refused) return refused;
+    }
+  }
+  return { kind: 'read' };
+}
+
 const READ_VERBS = new Set([
   'list',
   'get',
@@ -238,6 +307,8 @@ export function classifyCli(cli: IntegrationCliName, args: string[]): CliVerdict
   const first = args[0] ?? '';
   if (first.startsWith('-')) return deny('Put the command words first, then the flags.');
   if (args.some((arg) => arg.includes('\0'))) return deny('An argument holds a NUL byte.');
+  // Its own flag list is stricter than the checks below, and a query may hold any word.
+  if (cli === 'logcli') return logcliVerdict(args);
   const flag = args.find((arg) => FORBIDDEN_FLAGS.test(arg));
   if (flag) return deny(`${flag.split('=')[0]} is not allowed: it passes a secret or another server to the CLI.`);
   if (args.some((arg) => MERGE.some((pattern) => pattern.test(arg))))
@@ -315,17 +386,26 @@ export function cliEnv(source: NodeJS.ProcessEnv = process.env): Record<string, 
   };
 }
 
-/** Runs `cli` with `args` in `cwd`, no shell, no stdin, under a time and size cap. Never throws on a failed command. */
+/**
+ * Runs `cli` with `args` in `cwd`, no shell, no stdin, under a time and size cap. Never throws on a failed command.
+ * `env` is added to the CLI's environment, and every value in `secrets` is cut from the output.
+ */
 export async function runCli(
   cli: IntegrationCliName,
   args: string[],
   cwd: string,
+  { env = {}, secrets = [] }: { env?: Record<string, string>; secrets?: string[] } = {},
 ): Promise<{ text: string; ok: boolean }> {
   try {
-    const pending = exec(cli, args, { cwd, env: cliEnv(), timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 });
+    const pending = exec(cli, args, {
+      cwd,
+      env: { ...cliEnv(), ...env },
+      timeout: TIMEOUT_MS,
+      maxBuffer: 8 * 1024 * 1024,
+    });
     pending.child.stdin?.end();
     const { stdout, stderr } = await pending;
-    return { text: cap(`${stdout}${stderr ? `\n${stderr}` : ''}`), ok: true };
+    return { text: cap(`${stdout}${stderr ? `\n${stderr}` : ''}`, secrets), ok: true };
   } catch (error) {
     const { stdout, stderr, killed, code } = error as {
       stdout?: unknown;
@@ -339,11 +419,11 @@ export async function runCli(
       : code === 'ENOENT'
         ? `${cli} is not installed.`
         : '';
-    return { text: cap(`${why}\n${out}`.trim() || `${cli} failed.`), ok: false };
+    return { text: cap(`${why}\n${out}`.trim() || `${cli} failed.`, secrets), ok: false };
   }
 }
 
-function cap(text: string): string {
-  const safe = redact(text);
+function cap(text: string, secrets: string[]): string {
+  const safe = secrets.reduce((out, secret) => out.split(secret).join('[redacted]'), redact(text));
   return safe.length > OUTPUT_CHARS ? `${safe.slice(0, OUTPUT_CHARS)}\n… cut at ${OUTPUT_CHARS} characters.` : safe;
 }

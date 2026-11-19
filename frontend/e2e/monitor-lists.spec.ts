@@ -289,11 +289,12 @@ test('a running Scan shows Scanning… with a Stop button that cancels it', asyn
   await cancelled;
 });
 
-// Log sources: Datadog (service apis), OpenTelemetry logs (service api) and CloudWatch logs (service shop-api).
+// Log sources: Datadog (service apis), OpenTelemetry logs (service api), CloudWatch logs (service shop-api) and Loki logs (service cart).
 const connectorOf = (id: string, name: string, status: string, detail: string | null = null) => ({
   id,
   name,
-  via: id === 'otel_logs' ? 'a local folder' : id === 'cloudwatch_logs' ? 'aws CLI + CloudWatch MCP' : 'pup',
+  via:
+    { otel_logs: 'a local folder', cloudwatch_logs: 'aws CLI + CloudWatch MCP', loki_logs: 'logcli CLI' }[id] ?? 'pup',
   status,
   status_detail: detail,
   account_label: null,
@@ -306,7 +307,13 @@ const connectorOf = (id: string, name: string, status: string, detail: string | 
 const OTEL_SERVICE = { id: 'sv2', name: 'api', env: 'prod', repo_id: null, repo_url: null };
 const OTEL_FILTER = { service: 'api', env: 'prod', status: 500, method: 'POST', path: '/orders' };
 const CLOUDWATCH_SERVICE = { id: 'sv3', name: 'shop-api', env: 'prod', repo_id: null, repo_url: null };
+const LOKI_SERVICE = { id: 'sv4', name: 'cart', env: 'prod', repo_id: null, repo_url: null };
 const DATADOG_ALERT = alertOf('a1', 'high', '/v1/orders');
+const LOKI_ALERT = alertOf('l1', 'high', '/cart', {
+  connector: 'loki_logs',
+  service: LOKI_SERVICE,
+  source_query: JSON.stringify({ service: 'cart', env: 'prod', status: 503, method: 'POST', path: '/cart' }),
+});
 const CLOUDWATCH_ALERT = alertOf('c1', 'high', '/checkout', {
   connector: 'cloudwatch_logs',
   service: CLOUDWATCH_SERVICE,
@@ -340,21 +347,24 @@ type Sources = {
   otel?: [string, string | null];
   /** CloudWatch logs adds its Connector, its Alert and its Service only when given. */
   cloudwatch?: [string, string | null];
+  /** Loki logs adds its Connector, its Alert and its Service only when given. */
+  loki?: [string, string | null];
   scans?: unknown[];
 };
 
 async function routeSources(
   page: Page,
-  { datadog = ['ok', null], otel = ['ok', null], cloudwatch, scans = [] }: Sources = {},
+  { datadog = ['ok', null], otel = ['ok', null], cloudwatch, loki, scans = [] }: Sources = {},
 ) {
   const read = { datadog: 0 };
-  const alerts = cloudwatch ? [DATADOG_ALERT, OTEL_ALERT, CLOUDWATCH_ALERT] : [DATADOG_ALERT, OTEL_ALERT];
+  const alerts = [DATADOG_ALERT, OTEL_ALERT, ...(cloudwatch ? [CLOUDWATCH_ALERT] : []), ...(loki ? [LOKI_ALERT] : [])];
   await page.route('**/api/connectors', (route) =>
     route.fulfill(
       list([
         connectorOf('datadog', 'Datadog', ...datadog),
         connectorOf('otel_logs', 'OpenTelemetry logs', ...otel),
         ...(cloudwatch ? [connectorOf('cloudwatch_logs', 'CloudWatch logs', ...cloudwatch)] : []),
+        ...(loki ? [connectorOf('loki_logs', 'Loki logs', ...loki)] : []),
       ]),
     ),
   );
@@ -372,7 +382,7 @@ async function routeSources(
   await page.route(/\/api\/monitor\/log-services/, (route) => {
     const connector = new URL(route.request().url()).searchParams.get('connector');
     if (connector === 'datadog') read.datadog++;
-    const name = connector === 'otel_logs' ? 'api' : connector === 'cloudwatch_logs' ? 'shop-api' : 'apis';
+    const name = { otel_logs: 'api', cloudwatch_logs: 'shop-api', loki_logs: 'cart' }[connector ?? ''] ?? 'apis';
     return route.fulfill(list([{ name, envs: ['prod'], errors: 120 }]));
   });
   await page.route(/\/api\/monitor\/status-codes/, (route) => route.fulfill(list([{ code: 500, count: 20 }])));
@@ -478,19 +488,22 @@ test('an OpenTelemetry Alert shows its filter as a line and never names Datadog;
   await expect(detail).toContainText('Datadog');
 });
 
-test('three sources share one list, and the source filter offers all three and keeps one', async ({ page }) => {
-  await routeSources(page, { cloudwatch: ['ok', null] });
+test('four sources share one list, and the source filter offers all four and keeps one', async ({ page }) => {
+  await routeSources(page, { cloudwatch: ['ok', null], loki: ['ok', null] });
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
   const logs = page.getByRole('list', { name: 'Logs' });
   const services = page.getByRole('list', { name: 'Services' });
-  await expect(logs.getByRole('button')).toHaveCount(3);
+  await expect(logs.getByRole('button')).toHaveCount(4);
   await expect(logs.getByRole('button', { name: /POST \/checkout/ })).toContainText('CloudWatch');
+  await expect(logs.getByRole('button', { name: /POST \/cart/ })).toContainText('Loki');
   await expect(services.getByRole('listitem').filter({ hasText: 'CloudWatch' })).toHaveCount(1);
+  await expect(services.getByRole('listitem').filter({ hasText: 'Loki' })).toHaveCount(1);
   await expect(page.getByRole('tablist', { name: 'Source' }).getByRole('tab')).toHaveText([
     'All',
     'Datadog',
     'OpenTelemetry',
     'CloudWatch',
+    'Loki',
   ]);
 
   await page.getByRole('tab', { name: 'CloudWatch' }).click();
@@ -498,6 +511,47 @@ test('three sources share one list, and the source filter offers all three and k
   await expect(logs.getByRole('button')).toContainText('/checkout');
   await expect(services.getByRole('listitem')).toHaveCount(1);
   await expect(page.getByText('Failing requests in CloudWatch logs, every env')).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Loki' }).click();
+  await expect(logs.getByRole('button')).toHaveCount(1);
+  await expect(logs.getByRole('button')).toContainText('/cart');
+  await expect(services.getByRole('listitem')).toHaveCount(1);
+  await expect(page.getByText('Failing requests in Loki logs, every env')).toBeVisible();
+});
+
+test('a down Loki source shows a notice naming it, and the other sources keep their Alerts', async ({ page }) => {
+  await routeSources(page, {
+    loki: ['fail', 'Could not reach https://loki.example.com: connection refused'],
+  });
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  const notice = page.getByRole('status').filter({ hasText: 'Loki' });
+  await expect(notice).toContainText('Loki is down: Could not reach https://loki.example.com: connection refused.');
+  await expect(notice).toContainText('Scans skip it');
+  await expect(page.getByRole('status').filter({ hasText: 'OpenTelemetry is down' })).toHaveCount(0);
+  const logs = page.getByRole('list', { name: 'Logs' });
+  await expect(logs.getByRole('button', { name: /\/v1\/orders/ })).toBeVisible();
+  await expect(logs.getByRole('button', { name: /POST \/orders/ })).toBeVisible();
+});
+
+test('a Loki Scan shows its notes, and a Loki Alert shows its filter as a line and never names Datadog', async ({
+  page,
+}) => {
+  await routeSources(page, {
+    loki: ['ok', null],
+    scans: [
+      scanOf('loki_logs', ['cart has more than 5,000 failing lines; its counts come from the newest 5,000']),
+      scanOf('datadog'),
+    ],
+  });
+  await page.goto(`${daemon.url}/monitor?alert=l1#token=${daemon.token}`);
+  await expect(page.getByRole('list', { name: 'Scan notes' }).getByRole('listitem')).toHaveText([
+    'cart has more than 5,000 failing lines; its counts come from the newest 5,000',
+  ]);
+  const detail = page.locator('article');
+  await expect(detail).toContainText('Loki');
+  await expect(detail).toContainText('service cart, env prod, 503 POST /cart');
+  await expect(detail).not.toContainText('Datadog');
+  await expect(detail.locator('[title*="Datadog"], [title*="Log folder"]')).toHaveCount(0);
 });
 
 test('a down CloudWatch source shows a notice naming it, and the other sources keep their Alerts', async ({ page }) => {

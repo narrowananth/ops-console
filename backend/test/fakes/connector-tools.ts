@@ -1,6 +1,6 @@
 import { ErrorCode } from '@ops-console/shared';
 import { ApiError } from '../../src/common/errors';
-import type { ConnectorTools, SignInPrompt } from '../../src/connectors/connector-tools';
+import type { ConnectorTools, LokiHealth, SignInPrompt } from '../../src/connectors/connector-tools';
 
 /** `pup`, `gh` and `glab` as scripted state. Sign-ins succeed unless a test says otherwise. */
 export class FakeConnectorTools implements ConnectorTools {
@@ -25,6 +25,9 @@ export class FakeConnectorTools implements ConnectorTools {
   /** Each `aws sso login`, by profile, and each `describe-log-groups` call. */
   readonly awsLogins: string[] = [];
   readonly awsListed: { profile: string; region: string }[] = [];
+  /** What `logcli labels` finds, and the environment of each call: the address, tenant and secret. */
+  loki: LokiHealth = { status: 'ok' };
+  readonly lokiCalls: Record<string, string>[] = [];
   /** Commands not on the PATH; `brew install` puts one there. */
   missing = new Set<string>();
   readonly brewed: string[] = [];
@@ -122,6 +125,11 @@ export class FakeConnectorTools implements ConnectorTools {
     if (!this.awsSignedInProfiles.has(profile))
       throw new ApiError(502, ErrorCode.UpstreamFailed, '`aws logs describe-log-groups` failed');
     return this.awsGroups;
+  }
+
+  async lokiCheck(env: Record<string, string>): Promise<LokiHealth> {
+    this.lokiCalls.push(env);
+    return this.loki;
   }
 
   async openPage(url: string): Promise<void> {

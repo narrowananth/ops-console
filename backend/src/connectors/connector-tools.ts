@@ -4,6 +4,7 @@ import { ErrorCode } from '@ops-console/shared';
 import { z } from 'zod';
 import { LOGIN_TIMEOUT_MS } from '../claude-cli/claude-cli';
 import { ApiError } from '../common/errors';
+import { LogcliFailed, logcli, lokiFailure } from '../monitor/loki-cli';
 
 const run = promisify(execFile);
 
@@ -19,6 +20,9 @@ export type SignInPrompt = { code: string | null; url: string | null };
 /** `gh` prints "One-time code (ABCD-1234) copied to clipboard", or "First copy your one-time code: ABCD-1234". */
 const ONE_TIME_CODE = /(?:one-time code|enter the code)\W+([A-Z0-9]{4}-[A-Z0-9]{4})/i;
 const SIGN_IN_URL = /https:\/\/[^\s"'<>]+/;
+
+/** What a small `logcli` label query found: a Loki that answers, that refuses the secret, or that does not answer. */
+export type LokiHealth = { status: 'ok' } | { status: 'auth' } | { status: 'down'; reason: string };
 
 export const CONNECTOR_TOOLS = Symbol('CONNECTOR_TOOLS');
 
@@ -54,6 +58,8 @@ export interface ConnectorTools {
   awsLogin(profile: string, signal: AbortSignal, onPrompt: (prompt: SignInPrompt) => void): Promise<void>;
   /** The names of the log groups the profile sees in the region. */
   awsLogGroups(profile: string, region: string): Promise<string[]>;
+  /** `logcli labels` with `env` (the address, tenant and secret) in the child's environment. Never throws on a Loki failure. */
+  lokiCheck(env: Record<string, string>): Promise<LokiHealth>;
   /** Opens a page in the operator's browser. */
   openPage(url: string): Promise<void>;
   /** Whether a command is on the PATH. */
@@ -64,7 +70,15 @@ export interface ConnectorTools {
 
 const datadogStatusSchema = z.object({ authenticated: z.boolean(), org: z.string().nullish() }).loose();
 
-export type ToolBins = { pup: string; gh: string; glab: string; bkt: string; slashdocs: string; aws: string };
+export type ToolBins = {
+  pup: string;
+  gh: string;
+  glab: string;
+  bkt: string;
+  slashdocs: string;
+  aws: string;
+  logcli: string;
+};
 
 const logGroupsSchema = z.object({ logGroups: z.array(z.object({ logGroupName: z.string() }).loose()) }).loose();
 
@@ -78,6 +92,7 @@ export class CliConnectorTools implements ConnectorTools {
       bkt: 'bkt',
       slashdocs: 'slashdocs',
       aws: 'aws',
+      logcli: 'logcli',
     },
   ) {}
 
@@ -264,6 +279,18 @@ export class CliConnectorTools implements ConnectorTools {
       return logGroupsSchema.parse(JSON.parse(stdout)).logGroups.map((group) => group.logGroupName);
     } catch {
       throw new ApiError(502, ErrorCode.UpstreamFailed, '`aws logs describe-log-groups` failed');
+    }
+  }
+
+  async lokiCheck(env: Record<string, string>): Promise<LokiHealth> {
+    try {
+      await logcli(this.bins.logcli, ['-q', 'labels', '--since', '1h'], env);
+      return { status: 'ok' };
+    } catch (error) {
+      if (!(error instanceof LogcliFailed)) throw error;
+      const failure = lokiFailure(error.stderr);
+      if (failure.kind === 'auth') return { status: 'auth' };
+      return { status: 'down', reason: failure.kind === 'unreachable' ? failure.reason : 'it answered with an error' };
     }
   }
 

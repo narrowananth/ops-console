@@ -3,9 +3,11 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import os from 'node:os';
 import path from 'node:path';
 import { CONNECTOR_ORDER, ConnectorId, ErrorCode, type WsEvent } from '@ops-console/shared';
+import Database from 'better-sqlite3';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ApiError } from '../src/common/errors';
+import { CliConnectorTools } from '../src/connectors/connector-tools';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
 import { ConnectorsService } from '../src/connectors/connectors.service';
 import { LoopbackGoogleAuth } from '../src/connectors/google-auth';
@@ -18,6 +20,7 @@ import { type AgentDaemon, api, listen, signIn, startAgentDaemon, until } from '
 import { FakeConnectorTools } from './fakes/connector-tools';
 import { FakeGoogle } from './fakes/google';
 import { FakeKeychain } from './fakes/keychain';
+import { FakeLogcli } from './fakes/loki-logs';
 import { FakeProbe } from './fakes/probe';
 
 const running: AgentDaemon[] = [];
@@ -564,6 +567,9 @@ describe('config', () => {
     });
     const unknown = await api(ctx.daemon).patch('/connectors/jira', { config: { nope: 1 } });
     expect(unknown.status).toBe(400);
+    const secret = await api(ctx.daemon).patch('/connectors/loki_logs', { config: { secret: 'glc_example_secret' } });
+    expect(secret.status).toBe(400);
+    expect(JSON.stringify(await one(ctx, 'loki_logs'))).not.toContain('glc_example_secret');
   });
 });
 
@@ -761,13 +767,19 @@ describe('Google Connectors', () => {
   it('lists the three after slashdocs, off, with an empty config', async () => {
     const ctx = await start({ google: 'shipped' });
     const rows = await list(ctx);
-    expect(rows).toHaveLength(14);
-    expect(rows.slice(-5, -2).map((row) => [row.id, row.name, row.via, row.status, row.config])).toEqual([
+    expect(rows).toHaveLength(15);
+    expect(rows.slice(-6, -3).map((row) => [row.id, row.name, row.via, row.status, row.config])).toEqual([
       ['google_docs', 'Google Docs', 'Google Docs API', 'off', {}],
       ['google_sheets', 'Google Sheets', 'Google Sheets API', 'off', {}],
       ['google_drive', 'Google Drive', 'Google Drive API', 'off', {}],
     ]);
-    expect(rows.map((row) => row.id).slice(-6)).toEqual(['slashdocs', ...GOOGLE, 'otel_logs', 'cloudwatch_logs']);
+    expect(rows.map((row) => row.id).slice(-7)).toEqual([
+      'slashdocs',
+      ...GOOGLE,
+      'otel_logs',
+      'cloudwatch_logs',
+      'loki_logs',
+    ]);
     // Nothing is typed in the pane.
     expect((await api(ctx.daemon).patch('/connectors/google_docs', { config: { client_id: 'x' } })).status).toBe(400);
   });
@@ -1003,7 +1015,7 @@ describe('OpenTelemetry logs Connector', () => {
       sign_in: null,
       config: { folder: '', environments: ['prod'], daily_scan_time: '09:00', default_interval: '24h' },
     });
-    expect((await list(ctx)).map((row) => row.id).slice(-2)).toEqual(['otel_logs', 'cloudwatch_logs']);
+    expect((await list(ctx)).map((row) => row.id).slice(-3)).toEqual(['otel_logs', 'cloudwatch_logs', 'loki_logs']);
   });
 
   it('connects at once to a folder that exists and can be read, with no sign-in, empty or not', async () => {
@@ -1103,7 +1115,7 @@ describe('CloudWatch logs Connector', () => {
         reports_folder: 'reports',
       },
     });
-    expect((await list(ctx)).at(-1)?.id).toBe('cloudwatch_logs');
+    expect((await list(ctx)).at(-2)?.id).toBe('cloudwatch_logs');
   });
 
   it('connects at once to a signed-in profile, and registers AWS’s CloudWatch server in every Claude account with the profile in its environment', async () => {
@@ -1334,6 +1346,299 @@ describe('CloudWatch logs Connector', () => {
       expect([none.status, none.body.error.code]).toEqual([422, ErrorCode.ToolMissing]);
       ctx.tools.missing = new Set();
       expect((await groups(ctx)).status).toBe(400);
+    });
+  });
+});
+
+describe('Loki logs Connector', () => {
+  const connect = (ctx: Ctx, body: Record<string, unknown>) =>
+    api(ctx.daemon).post('/connectors/loki_logs/connect', body);
+  const status = (ctx: Ctx, want: string) =>
+    until(
+      () => one(ctx, 'loki_logs'),
+      (row) => row.status === want,
+      `Loki logs to read ${want}`,
+    );
+  const SECRET = 'glc_example_secret';
+  const URL = 'https://loki.example.com';
+  const registered = (ctx: Ctx) =>
+    ctx.dirs.flatMap((dir) => {
+      const file = path.join(dir, '.claude.json');
+      return existsSync(file) ? Object.keys(JSON.parse(readFileSync(file, 'utf8')).mcpServers ?? {}) : [];
+    });
+  const stored = (ctx: Ctx) => ctx.keychain.values.get('connection:loki_logs');
+  /** Everything the daemon says or keeps outside the Keychain. */
+  const everywhere = async (ctx: Ctx, events: WsEvent[]) =>
+    JSON.stringify([
+      await list(ctx),
+      events,
+      ctx.daemon.log,
+      new Database(path.join(ctx.daemon.dataDir, 'state.db'), { readonly: true })
+        .prepare('SELECT * FROM connectors')
+        .all(),
+    ]);
+
+  it('is listed last, off, with its default config and no secret', async () => {
+    const ctx = await start();
+    expect(await one(ctx, 'loki_logs')).toMatchObject({
+      name: 'Loki logs',
+      via: 'logcli CLI',
+      status: 'off',
+      sign_in: null,
+      config: {
+        url: '',
+        org_id: '',
+        auth: 'none',
+        username: '',
+        service_label: 'service_name',
+        env_label: 'deployment_environment_name',
+        selector: '',
+        format: 'json',
+        environments: ['prod'],
+        daily_scan_time: '09:00',
+        default_interval: '24h',
+        rapid_errors_per_10m: 100,
+        failing_errors_per_hour: 5,
+        ignore: [],
+        reports_folder: 'reports',
+      },
+    });
+    expect((await list(ctx)).at(-1)?.id).toBe('loki_logs');
+    expect(ctx.keychain.values.size).toBe(0);
+  });
+
+  it('connects with no auth: answers 202, checks the URL through logcli, and registers no MCP server', async () => {
+    const ctx = await start();
+    const before = registered(ctx);
+    const connected = await connect(ctx, { url: URL });
+    expect(connected.status).toBe(202);
+    expect(await status(ctx, 'ok')).toMatchObject({ status_detail: null, account_label: URL, config: { url: URL } });
+    expect(ctx.tools.lokiCalls).toEqual([{ LOKI_ADDR: URL }]);
+    expect(registered(ctx)).toEqual(before);
+    expect(ctx.keychain.values.size).toBe(0);
+  });
+
+  it('connects with a bearer token and with basic auth, each passing the credentials in the environment of its checks', async () => {
+    const ctx = await start();
+    await connect(ctx, { url: URL, auth: 'bearer', secret: SECRET });
+    await status(ctx, 'ok');
+    expect(ctx.tools.lokiCalls.at(-1)).toEqual({ LOKI_ADDR: URL, LOKI_BEARER_TOKEN: SECRET });
+    await connect(ctx, {
+      url: URL,
+      auth: 'basic',
+      username: '123456',
+      org_id: 'tenant-1',
+      secret: 'glc_example_basic',
+    });
+    await until(
+      () => ctx.tools.lokiCalls.at(-1),
+      (call) => call?.LOKI_PASSWORD === 'glc_example_basic',
+      'the basic check',
+    );
+    expect(ctx.tools.lokiCalls.at(-1)).toEqual({
+      LOKI_ADDR: URL,
+      LOKI_ORG_ID: 'tenant-1',
+      LOKI_USERNAME: '123456',
+      LOKI_PASSWORD: 'glc_example_basic',
+    });
+    expect(await one(ctx, 'loki_logs')).toMatchObject({
+      config: { auth: 'basic', username: '123456', org_id: 'tenant-1' },
+    });
+  });
+
+  it('keeps the secret only in the Keychain: in no response, event, log or database row', async () => {
+    const ctx = await start();
+    const { events, close } = await listen(ctx.daemon);
+    const connected = await connect(ctx, { url: URL, auth: 'bearer', secret: SECRET });
+    await status(ctx, 'ok');
+    const checked = await api(ctx.daemon).post('/connectors/loki_logs/checks');
+    close();
+    expect(stored(ctx)).toBe(SECRET);
+    expect(JSON.stringify([connected.body, checked.body])).not.toContain(SECRET);
+    expect(await everywhere(ctx, events)).not.toContain(SECRET);
+  });
+
+  it('keeps the stored secret when Connect leaves it out, replaces it when one is typed, and removes it on Disconnect', async () => {
+    const ctx = await start();
+    await connect(ctx, { url: URL, auth: 'bearer', secret: SECRET });
+    await status(ctx, 'ok');
+    await connect(ctx, { url: URL, auth: 'bearer', org_id: 'tenant-2' });
+    await until(
+      () => ctx.tools.lokiCalls.at(-1),
+      (call) => call?.LOKI_ORG_ID === 'tenant-2',
+      'the second check',
+    );
+    expect(stored(ctx)).toBe(SECRET);
+    expect(ctx.tools.lokiCalls.at(-1)).toMatchObject({ LOKI_BEARER_TOKEN: SECRET });
+    await connect(ctx, { url: URL, auth: 'bearer', secret: 'glc_example_new' });
+    await until(
+      () => stored(ctx),
+      (value) => value === 'glc_example_new',
+      'the new secret',
+    );
+    const disconnected = await api(ctx.daemon).delete('/connectors/loki_logs/credentials');
+    expect(disconnected.body.data).toMatchObject({ status: 'off', config: { url: URL } });
+    expect(ctx.keychain.values.size).toBe(0);
+  });
+
+  it('clears a field the operator emptied, which a blank in a PATCH would keep', async () => {
+    const ctx = await start();
+    await connect(ctx, { url: URL, org_id: 'tenant-1', selector: 'cluster="prod-1"' });
+    await status(ctx, 'ok');
+    await connect(ctx, { url: URL, org_id: '', selector: '' });
+    await until(
+      () => one(ctx, 'loki_logs'),
+      (row) => (row.config as { org_id: string }).org_id === '',
+      'the cleared config',
+    );
+    expect(await one(ctx, 'loki_logs')).toMatchObject({ config: { org_id: '', selector: '' } });
+  });
+
+  it('refuses a bad config with validation_failed and stores nothing', async () => {
+    const ctx = await start();
+    const refused: [Record<string, unknown>, string][] = [
+      [{ url: 'not a url' }, 'a URL that is not one'],
+      [{ url: 'ftp://loki.example.com' }, 'a URL that is not http or https'],
+      [{ url: 'https://user:tok@loki.example.com' }, 'a URL with credentials in it'],
+      [{ url: 'https://tok@loki.example.com' }, 'a URL with a user in it'],
+      [{}, 'no URL'],
+      [{ url: URL, auth: 'basic', secret: SECRET }, 'basic with no username'],
+      [{ url: URL, auth: 'bearer' }, 'bearer with no secret'],
+      [{ url: URL, auth: 'basic', username: 'u' }, 'basic with no secret'],
+      [{ url: URL, service_label: 'service-name' }, 'a service label that is not a label name'],
+      [{ url: URL, env_label: 'a"}|' }, 'an env label that is not a label name'],
+      [{ url: URL, selector: 'cluster=prod' }, 'a selector value with no quotes'],
+      [{ url: URL, selector: 'cluster="a"} | json | {x="b"' }, 'a selector that closes itself'],
+      [{ url: URL, format: 'plain' }, 'a format that is neither json nor logfmt'],
+    ];
+    for (const [body, why] of refused) {
+      const response = await connect(ctx, body);
+      expect([response.status, response.body.error?.code], why).toEqual([422, ErrorCode.ValidationFailed]);
+    }
+    expect(await one(ctx, 'loki_logs')).toMatchObject({ status: 'off', config: { url: '', auth: 'none' } });
+    expect(ctx.keychain.values.size).toBe(0);
+    expect(ctx.tools.lokiCalls).toEqual([]);
+  });
+
+  it('tells the operator that credentials belong in the secret field when the URL holds some', async () => {
+    const ctx = await start();
+    const response = await connect(ctx, { url: 'https://user:tok@loki.example.com' });
+    expect(response.body.error.message).toContain('secret field');
+    expect(response.body.error.message).not.toContain('tok@');
+  });
+
+  it('accepts selectors of several matchers and regular expressions', async () => {
+    const ctx = await start();
+    const selector = 'cluster="prod-1", namespace=~"shop.*", team!="legacy"';
+    expect((await connect(ctx, { url: URL, selector })).status).toBe(202);
+    expect(await status(ctx, 'ok')).toMatchObject({ config: { selector } });
+  });
+
+  it('stops and names logcli and its install command when it is not on the PATH, and installs nothing', async () => {
+    const ctx = await start();
+    ctx.tools.missing.add('logcli');
+    const refused = await connect(ctx, { url: URL });
+    expect([refused.status, refused.body.error.code]).toEqual([422, ErrorCode.ToolMissing]);
+    expect(refused.body.error.message).toContain('logcli');
+    expect(refused.body.error.message).toContain('brew install logcli');
+    expect(ctx.tools.brewCalls).toEqual([]);
+    expect(await one(ctx, 'loki_logs')).toMatchObject({ status: 'off', config: { url: '' } });
+  });
+
+  it('reads needs auth, with what to check, when Loki answers 401 or 403', async () => {
+    const ctx = await start();
+    ctx.tools.loki = { status: 'auth' };
+    await connect(ctx, { url: URL, auth: 'bearer', secret: SECRET });
+    const row = await status(ctx, 'auth');
+    expect(row.status_detail).toContain('Check the secret');
+    expect(row.status_detail).toContain('logs:read');
+  });
+
+  it('reads down, with the reason, when the URL does not answer', async () => {
+    const ctx = await start();
+    ctx.tools.loki = { status: 'down', reason: 'the connection was refused' };
+    await connect(ctx, { url: URL });
+    const row = await status(ctx, 'fail');
+    expect(row.status_detail).toBe(`Could not reach ${URL}: the connection was refused`);
+  });
+
+  it('reads down when logcli leaves the PATH after Connect, and connected again when it returns', async () => {
+    const ctx = await start();
+    await connect(ctx, { url: URL });
+    await status(ctx, 'ok');
+    ctx.tools.missing.add('logcli');
+    const down = await api(ctx.daemon).post('/connectors/loki_logs/checks');
+    expect(down.body.data).toMatchObject({ status: 'fail' });
+    expect(down.body.data.status_detail).toContain('brew install logcli');
+    ctx.tools.missing.delete('logcli');
+    expect((await api(ctx.daemon).post('/connectors/loki_logs/checks')).body.data.status).toBe('ok');
+  });
+
+  describe('the logcli health check', () => {
+    const tools = async (logcli: FakeLogcli) =>
+      new CliConnectorTools({
+        pup: 'pup',
+        gh: 'gh',
+        glab: 'glab',
+        bkt: 'bkt',
+        slashdocs: 'slashdocs',
+        aws: 'aws',
+        logcli: logcli.bin,
+      });
+    const ENV = { LOKI_ADDR: URL };
+
+    it('reads connected for a Loki that answers, with streams or none yet', async () => {
+      const logcli = await FakeLogcli.create();
+      expect(await (await tools(logcli)).lokiCheck(ENV)).toEqual({ status: 'ok' });
+      logcli.stream({ service_name: 'shop-api' }, [{ at: Date.now() - 60_000, line: 'x' }]);
+      expect(await (await tools(logcli)).lokiCheck(ENV)).toEqual({ status: 'ok' });
+    });
+
+    it('reads needs auth for a refused secret, with each auth mode, and connected for the right one', async () => {
+      const logcli = await FakeLogcli.create();
+      logcli.requires({ basic: { username: '123456', password: SECRET } }, 'tenant-1');
+      const check = async (env: Record<string, string>) => (await tools(logcli)).lokiCheck(env);
+      expect(await check({ ...ENV, LOKI_ORG_ID: 'tenant-1', LOKI_USERNAME: '123456', LOKI_PASSWORD: 'wrong' })).toEqual(
+        {
+          status: 'auth',
+        },
+      );
+      expect(await check({ ...ENV, LOKI_ORG_ID: 'tenant-1', LOKI_USERNAME: '123456', LOKI_PASSWORD: SECRET })).toEqual({
+        status: 'ok',
+      });
+      for (const behavior of ['unauthorized', 'forbidden'] as const) {
+        logcli.behave(behavior);
+        expect(await check(ENV), behavior).toEqual({ status: 'auth' });
+      }
+    });
+
+    it('reads down with the reason for an unreachable URL, and down for any other failure', async () => {
+      const logcli = await FakeLogcli.create();
+      logcli.behave('unreachable');
+      expect(await (await tools(logcli)).lokiCheck(ENV)).toEqual({
+        status: 'down',
+        reason: 'the connection was refused',
+      });
+      logcli.behave('throttle');
+      expect(await (await tools(logcli)).lokiCheck(ENV)).toEqual({
+        status: 'down',
+        reason: 'it answered with an error',
+      });
+    });
+
+    it('passes nothing of the secret on the command line, and no ambient LOKI_ variable of the daemon', async () => {
+      const logcli = await FakeLogcli.create();
+      process.env.LOKI_ADDR = 'https://ambient.example.com';
+      process.env.LOKI_PASSWORD = 'ambient-password';
+      try {
+        await (await tools(logcli)).lokiCheck({ ...ENV, LOKI_USERNAME: 'u', LOKI_PASSWORD: SECRET });
+      } finally {
+        delete process.env.LOKI_ADDR;
+        delete process.env.LOKI_PASSWORD;
+      }
+      const [call] = logcli.calls();
+      expect(call?.env).toEqual({ ...ENV, LOKI_USERNAME: 'u', LOKI_PASSWORD: SECRET });
+      expect(call?.args.join(' ')).not.toContain(SECRET);
     });
   });
 });

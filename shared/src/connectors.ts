@@ -19,6 +19,8 @@ export enum ConnectorId {
   OtelLogs = 'otel_logs',
   /** Logs of an AWS account, read with the AWS CLI. */
   CloudWatchLogs = 'cloudwatch_logs',
+  /** Logs of a Grafana Loki, read with the logcli CLI. */
+  LokiLogs = 'loki_logs',
 }
 
 export const CONNECTOR_ORDER: ConnectorId[] = Object.values(ConnectorId);
@@ -57,6 +59,7 @@ export const CONNECTOR_NAMES: Record<ConnectorId, string> = {
   [ConnectorId.GoogleDrive]: 'Google Drive',
   [ConnectorId.OtelLogs]: 'OpenTelemetry logs',
   [ConnectorId.CloudWatchLogs]: 'CloudWatch logs',
+  [ConnectorId.LokiLogs]: 'Loki logs',
 };
 
 /** How the console reaches the service (ADR 0005). */
@@ -75,6 +78,7 @@ export const CONNECTOR_VIA: Record<ConnectorId, string> = {
   [ConnectorId.GoogleDrive]: 'Google Drive API',
   [ConnectorId.OtelLogs]: 'a local folder',
   [ConnectorId.CloudWatchLogs]: 'aws CLI + CloudWatch MCP',
+  [ConnectorId.LokiLogs]: 'logcli CLI',
 };
 
 /**
@@ -135,6 +139,27 @@ const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:MM');
 const count = z.number().int().min(1);
 /** An AWS profile or region name: it goes into the MCP server's command line, so no spaces or quotes. */
 const awsName = z.string().regex(/^(?!-)[A-Za-z0-9_.@+=,-]*$/, 'letters, digits and . _ @ + = , -');
+
+/** How `logcli` signs in: no secret, a bearer token, or basic with a username and password. */
+export const LOKI_AUTH = ['none', 'bearer', 'basic'] as const;
+
+/** A LogQL label name. It goes into queries, so nothing else is accepted. */
+const logqlLabel = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'a label name: letters, digits and _');
+
+const httpUrl = z.url({ protocol: /^https?$/ });
+/** `https://user:token@host`: anything before an `@` in the part of the URL that holds the host. */
+const hasUserinfo = (url: string): boolean => /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/i.test(url);
+/** The Loki address, or empty until chosen. `logcli` gets the secret apart from it, so the URL holds none. */
+const lokiUrl = z
+  .string()
+  .refine((url) => url === '' || httpUrl.safeParse(url).success, 'an http or https URL')
+  .refine((url) => !hasUserinfo(url), 'credentials belong in the secret field, not the URL');
+
+const MATCHER = String.raw`[A-Za-z_][A-Za-z0-9_]*\s*(?:=~|!~|!=|=)\s*"(?:[^"\\\n]|\\.)*"`;
+/** Extra stream matchers such as `cluster="prod-1"`: comma-separated, each a label, an operator and a quoted value. */
+const logqlMatchers = z
+  .string()
+  .regex(new RegExp(`^\\s*(?:${MATCHER}(?:\\s*,\\s*${MATCHER})*)?\\s*$`), 'stream matchers such as cluster="prod-1"');
 
 /** One CloudWatch log group the operator picked, and the Service it is. */
 export const logGroupSchema = z.strictObject({
@@ -208,6 +233,24 @@ export const connectorConfigSchemas = {
     ignore: z.array(z.strictObject({ kind: z.enum(['status_class', 'route']), value: z.string().min(1) })),
     reports_folder: z.string().min(1),
   }),
+  /** `url`: empty until chosen. `username` is for basic only; the secret is in the Keychain, never here. */
+  [ConnectorId.LokiLogs]: z.strictObject({
+    url: lokiUrl,
+    org_id: z.string(),
+    auth: z.enum(LOKI_AUTH),
+    username: z.string(),
+    service_label: logqlLabel,
+    env_label: logqlLabel,
+    selector: logqlMatchers,
+    format: z.enum(['json', 'logfmt']),
+    environments: z.array(z.string().min(1)),
+    daily_scan_time: time,
+    default_interval: z.enum(['24h', '12h', '6h']),
+    rapid_errors_per_10m: count,
+    failing_errors_per_hour: count,
+    ignore: z.array(z.strictObject({ kind: z.enum(['status_class', 'route']), value: z.string().min(1) })),
+    reports_folder: z.string().min(1),
+  }),
 } satisfies Record<ConnectorId, z.ZodType>;
 
 export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknown>> = {
@@ -260,7 +303,41 @@ export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknow
     ignore: [],
     reports_folder: 'reports',
   },
+  [ConnectorId.LokiLogs]: {
+    url: '',
+    org_id: '',
+    auth: 'none',
+    username: '',
+    service_label: 'service_name',
+    env_label: 'deployment_environment_name',
+    selector: '',
+    format: 'json',
+    environments: ['prod'],
+    daily_scan_time: '09:00',
+    default_interval: '24h',
+    rapid_errors_per_10m: 100,
+    failing_errors_per_hour: 5,
+    ignore: [],
+    reports_folder: 'reports',
+  },
 };
+
+/**
+ * `POST /connectors/loki_logs/connect`: the config fields the pane edits, and the secret, which is write-only. A field
+ * left out keeps its stored value; the Connector checks the values against its config schema (422 `validation_failed`).
+ */
+export const lokiConnectBodySchema = z.object({
+  url: z.string().optional(),
+  org_id: z.string().optional(),
+  auth: z.string().optional(),
+  username: z.string().optional(),
+  service_label: z.string().optional(),
+  env_label: z.string().optional(),
+  selector: z.string().optional(),
+  format: z.string().optional(),
+  /** Bearer token or basic password. Left out, the one in the Keychain stays. */
+  secret: z.string().optional(),
+});
 
 export const connectorSchema = z.object({
   id: z.enum(ConnectorId),

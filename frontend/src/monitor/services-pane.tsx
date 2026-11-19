@@ -115,6 +115,11 @@ export function ServicesPane({
       ),
       codes: useStatusCodes(ConnectorId.CloudWatchLogs, scope.range, inView.includes(ConnectorId.CloudWatchLogs)),
     },
+    {
+      source: ConnectorId.LokiLogs as LogSource,
+      services: useLogServices(ConnectorId.LokiLogs, scope.range, scope.codes, inView.includes(ConnectorId.LokiLogs)),
+      codes: useStatusCodes(ConnectorId.LokiLogs, scope.range, inView.includes(ConnectorId.LokiLogs)),
+    },
   ].filter((read) => inView.includes(read.source));
   const known =
     reads.every((read) => read.codes.data) && reads.length > 0

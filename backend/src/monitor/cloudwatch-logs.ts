@@ -6,7 +6,6 @@ import { ErrorCode, type LogGroupPick, type Sample, type ScanWindow, WINDOW_HOUR
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import { mapLimit } from '../common/map-limit';
-import { normalizePath } from './fingerprint';
 import {
   entryKey,
   FATAL_ERROR_LEVEL,
@@ -14,9 +13,12 @@ import {
   type LogEntry,
   type LogGroup,
   type LogReader,
+  pathPattern,
   type ReadRequest,
+  routeOf,
   type ServiceCount,
   type ServiceReading,
+  statusCodeOf,
   statusKept,
 } from './log-reader';
 
@@ -88,19 +90,6 @@ function lookup(json: Record<string, unknown>, name: string): unknown {
 const firstOf = (json: Record<string, unknown>, names: string[]): unknown =>
   names.map((name) => lookup(json, name)).find((value) => value !== undefined && value !== null);
 
-const statusCodeOf = (value: unknown): number | null => {
-  const code = Number(value);
-  return Number.isInteger(code) && code > 0 ? code : null;
-};
-
-/** The Route a log names: method and path both, or none. */
-function routeOf(method: unknown, path: unknown): { method: string; path: string } {
-  if (typeof method !== 'string' || typeof path !== 'string' || method === '' || path === '') {
-    return { method: '', path: '' };
-  }
-  return { method: method.toUpperCase(), path: normalizePath(path) };
-}
-
 const messageOf = (value: unknown): string => {
   if (value === undefined || value === null || value === '') return '(no message)';
   return typeof value === 'string' ? value : JSON.stringify(value);
@@ -116,15 +105,6 @@ function sizeOf(bytes: number): string {
   if (bytes >= 1024 * MEGABYTE) return `${(bytes / (1024 * MEGABYTE)).toFixed(2)} GB`;
   if (bytes >= MEGABYTE) return `${(bytes / MEGABYTE).toFixed(1)} MB`;
   return `${Math.round(bytes)} bytes`;
-}
-
-/** `/orders/:id` as a pattern for Logs Insights' `like`. */
-function pathPattern(path: string): string {
-  const escaped = path
-    .split('/')
-    .map((part) => (part === ':id' ? '[^/]+' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-    .join('/');
-  return `^${escaped}(\\?.*)?$`.replaceAll('/', '\\/');
 }
 
 type CloudWatchSettings = { profile: string; region: string; log_groups: LogGroupPick[] };
@@ -242,7 +222,7 @@ export class CloudWatchLogs implements LogReader {
     if (filter.status !== null) conditions.push(`f_code = ${filter.status}`);
     if (filter.method !== null)
       conditions.push(`toupper(f_method) = "${filter.method.toUpperCase().replace(/[^A-Z]/g, '')}"`);
-    if (filter.path !== null) conditions.push(`f_route like /${pathPattern(filter.path)}/`);
+    if (filter.path !== null) conditions.push(`f_route like /${pathPattern(filter.path).replaceAll('/', '\\/')}/`);
     const text = `${FIELDS} | filter ${conditions.join(' and ')} | stats count(*) as n`;
     const { rows } = await this.query(filter.log_group, text, this.windowOf(window));
     return Number(rows[0]?.n ?? 0);

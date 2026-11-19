@@ -15,6 +15,7 @@ export const SOURCE_LABEL: Record<LogSource, string> = {
   [ConnectorId.Datadog]: 'Datadog',
   [ConnectorId.OtelLogs]: 'OpenTelemetry',
   [ConnectorId.CloudWatchLogs]: 'CloudWatch',
+  [ConnectorId.LokiLogs]: 'Loki',
 };
 
 /** What an Alert's stored query is, said where the operator reads it. */
@@ -25,6 +26,8 @@ export const QUERY_TIP: Record<LogSource, string> = {
     'The filter the Recheck reads the Log folder with: the Service, env, status code, method and path of these failures.',
   [ConnectorId.CloudWatchLogs]:
     'The filter the Recheck reads the log group with: the status code, method and path of these failures.',
+  [ConnectorId.LokiLogs]:
+    'The filter the Recheck reads Loki with: the Service, env, status code, method and path of these failures.',
 };
 
 /** A small tag saying which log source an Alert or a Service was read from. */
@@ -63,7 +66,7 @@ export function downSources(connectors: Connector[]): { source: LogSource; reaso
   });
 }
 
-/** `Datadog`, `Datadog and OpenTelemetry logs` or `Datadog, OpenTelemetry logs and CloudWatch logs`: what a view reads. */
+/** `Datadog`, `Datadog and OpenTelemetry logs` or `Datadog, OpenTelemetry logs and Loki logs`: what a view reads. */
 export function sourceNames(sources: LogSource[], joiner: 'and' | 'or' = 'and'): string {
   const names = sources.map((source) => CONNECTOR_NAMES[source]);
   const last = names.pop();
@@ -84,7 +87,7 @@ const filterSchema = z.object({
 
 /**
  * The Alert's stored query for the operator: the Datadog query as it is, or a filter as a line such as
- * `service api, env prod, 500 POST /orders` (OpenTelemetry) or `log group /ecs/api, 500 POST /orders` (CloudWatch). A
+ * `service api, env prod, 500 POST /orders` (OpenTelemetry and Loki) or `log group /ecs/api, 500 POST /orders` (CloudWatch). A
  * filter that does not parse shows as stored.
  */
 export function readableQuery(source: LogSource, query: string): string {

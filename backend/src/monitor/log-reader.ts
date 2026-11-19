@@ -1,5 +1,5 @@
 import { type LogSource, SAMPLE_LIMIT, type Sample, type ScanWindow } from '@ops-console/shared';
-import { maskSignature } from './fingerprint';
+import { maskSignature, normalizePath } from './fingerprint';
 
 export type IgnoreRule = { kind: 'status_class' | 'route'; value: string };
 
@@ -66,6 +66,29 @@ export function statusKept({
   return (statusCode) =>
     (codes.length === 0 || (statusCode !== null && codes.includes(statusCode))) &&
     !(statusCode !== null && ignored.some(([from, to]) => statusCode >= from && statusCode <= to));
+}
+
+/** A log's status code as a number; none when it is not a positive integer. */
+export const statusCodeOf = (value: unknown): number | null => {
+  const code = Number(value);
+  return Number.isInteger(code) && code > 0 ? code : null;
+};
+
+/** The Route a log names: method and path both, or none. */
+export function routeOf(method: unknown, path: unknown): { method: string; path: string } {
+  if (typeof method !== 'string' || typeof path !== 'string' || method === '' || path === '') {
+    return { method: '', path: '' };
+  }
+  return { method: method.toUpperCase(), path: normalizePath(path) };
+}
+
+/** `/orders/:id` as a regular expression that matches the path with or without a query string. */
+export function pathPattern(path: string): string {
+  const escaped = path
+    .split('/')
+    .map((part) => (part === ':id' ? '[^/]+' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    .join('/');
+  return `^${escaped}(\\?.*)?$`;
 }
 
 export type ServiceCount = { name: string; env: string; errors: number };

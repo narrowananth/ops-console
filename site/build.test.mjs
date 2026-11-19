@@ -139,13 +139,13 @@ test('the data-flow docs page sits between Claude accounts and Safety, and the s
   assert.match(home, /href="\/docs\/data-flow\/"/);
 });
 
-test('the Connectors page lists fourteen Connectors and has OpenTelemetry logs and CloudWatch logs sections', async () => {
+test('the Connectors page lists fifteen Connectors and has OpenTelemetry logs, CloudWatch logs and Loki logs sections', async () => {
   await build();
   const page = await readFile(path.join(dist, 'docs', 'connectors', 'index.html'), 'utf8');
-  assert.match(page, /<h2 id="[^"]+">The fourteen Connectors<\/h2>/);
+  assert.match(page, /<h2 id="[^"]+">The fifteen Connectors<\/h2>/);
   const [table] = page.match(/<table>[\s\S]*?<\/table>/) ?? [];
   assert.ok(table, 'the page has the Connector table');
-  assert.equal(table.match(/<tr><td>/g)?.length, 14, 'one row per Connector');
+  assert.equal(table.match(/<tr><td>/g)?.length, 15, 'one row per Connector');
   assert.match(table, /<td>OpenTelemetry logs<\/td>/);
   assert.match(page, /<h2 id="opentelemetry-logs">OpenTelemetry logs<\/h2>/);
   assert.match(page, /<pre><code>[\s\S]*exporters:[\s\S]*<\/code><\/pre>/, 'the section shows a Collector config');
@@ -160,6 +160,16 @@ test('the Connectors page lists fourteen Connectors and has OpenTelemetry logs a
     'the section shows a log line',
   );
   assert.match(section, /per GB scanned/);
+  assert.match(table, /<td>Loki logs<\/td>/);
+  const [loki] = page.match(/<h2 id="loki-logs">Loki logs<\/h2>[\s\S]*?(?=<h2 )/) ?? [];
+  assert.ok(loki, 'the page has a Loki logs section');
+  assert.match(loki, /brew install logcli/);
+  assert.match(loki, /<code>logs:read<\/code>/);
+  assert.match(loki, /<code>service_name<\/code>/);
+  assert.match(loki, /<code>deployment_environment_name<\/code>/);
+  assert.match(loki, /<code>http_status_code<\/code>/, 'the section lists the log fields');
+  assert.match(loki, /<pre><code>[\s\S]*&quot;status&quot;:502[\s\S]*<\/code><\/pre>/, 'the section shows a log line');
+  assert.match(loki, /Keychain/);
 });
 
 test('the data-flow page puts the Log folder on the Mac and its records in a prompt only as Samples', async () => {
@@ -179,4 +189,14 @@ test('the data-flow page says the daemon calls the AWS CLI and CloudWatch events
   assert.match(row, /calls the AWS CLI as you/);
   assert.match(row, /calls AWS from there/);
   assert.match(row, /only as Samples in a prompt or as the agent's tool output/);
+});
+
+test('the data-flow page puts logcli in the CLI group and says Loki lines reach Anthropic only as Samples or tool output', async () => {
+  await build();
+  const page = await readFile(path.join(dist, 'docs', 'data-flow', 'index.html'), 'utf8');
+  const [row] = page.match(/<tr><td>CLI the daemon calls<\/td>[\s\S]*?<\/tr>/) ?? [];
+  assert.ok(row, 'the By route table has the CLI row');
+  assert.match(row, /Loki logs \(<code>logcli<\/code>\)/);
+  assert.match(row, /runs <code>logcli<\/code> as you/);
+  assert.match(row, /Loki lines reach Anthropic only as Samples in a prompt or as the agent's tool output/);
 });

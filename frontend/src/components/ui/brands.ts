@@ -174,6 +174,12 @@ export const BRANDS = {
     // A ring around a pulse line: drawn here, not a third-party logo.
     path: 'M12 1a11 11 0 1 1 0 22 11 11 0 1 1 0-22zm0 2.4a8.6 8.6 0 1 0 0 17.2 8.6 8.6 0 1 0 0-17.2zM5.6 13.5L9.47 13.5L10.63 11.05L12.99 18.53L15.64 13.5L18.4 13.5L18.4 11.7L14.56 11.7L13.41 13.87L10.97 6.15L8.33 11.7L5.6 11.7z',
   },
+  loki: {
+    title: 'Loki logs',
+    hex: '#F46800',
+    // Three log lines, each with a dot: drawn here, not a third-party logo.
+    path: 'M4.6 4.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 1 1 0-3.2zM8.5 4.8h12v2.4h-12zM4.6 10.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 1 1 0-3.2zM8.5 10.8h8v2.4h-8zM4.6 16.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 1 1 0-3.2zM8.5 16.8h10v2.4h-10z',
+  },
 } satisfies Record<string, Brand>;
 
 export type BrandSlug = keyof typeof BRANDS;

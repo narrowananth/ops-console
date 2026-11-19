@@ -44,6 +44,8 @@ import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import type { CloudWatchOptions } from '../src/monitor/cloudwatch-logs';
 import { fingerprint, maskSignature, normalizePath } from '../src/monitor/fingerprint';
 import { NO_TICKET_IN_PLAYBOOK } from '../src/monitor/fixes.service';
+import { LOKI_SECRET_KEY } from '../src/monitor/loki-access';
+import type { LokiOptions } from '../src/monitor/loki-logs';
 import { MonitorModule } from '../src/monitor/monitor.module';
 import { MonitorRetention } from '../src/monitor/retention';
 import { latestSlot, nextSlot, ScansService } from '../src/monitor/scans.service';
@@ -56,6 +58,8 @@ import { FakeCodeHosts } from './fakes/code-hosts';
 import { FakeConnectorTools } from './fakes/connector-tools';
 import { FakeDatadog, route, samples, service } from './fakes/datadog';
 import { FakeGitHost, hostPr } from './fakes/git-host';
+import { FakeKeychain } from './fakes/keychain';
+import { FakeLogcli } from './fakes/loki-logs';
 import { type OtelRecord, otlpLine, writeLogFile } from './fakes/otlp';
 import { FakeProbe } from './fakes/probe';
 import { MIGRATIONS_DIR, startTestDaemon, tempDir } from './helpers';
@@ -121,6 +125,8 @@ async function start(
     connected?: boolean;
     otelReadLimit?: number;
     cloudWatch?: CloudWatchOptions;
+    loki?: LokiOptions;
+    keychain?: FakeKeychain;
   } = {},
 ): Promise<Ctx> {
   const datadog = options.datadog ?? new FakeDatadog();
@@ -129,6 +135,7 @@ async function start(
   const daemon = await startAgentDaemon({
     fixtureKinds: false,
     dataDir: options.dataDir,
+    keychain: options.keychain,
     modules: [
       McpServersModule.forRoot({ probe: new FakeProbe(), launcher: '/opt/ops-console' }),
       ConnectorsModule.forRoot({ tools: new FakeConnectorTools() }),
@@ -139,6 +146,7 @@ async function start(
         codeHosts,
         otelReadLimit: options.otelReadLimit,
         cloudWatch: { bin: AWS_BIN, pollMs: 10, ...options.cloudWatch },
+        loki: options.loki,
       }),
     ],
   });
@@ -3564,3 +3572,751 @@ describe('CloudWatch logs', () => {
     });
   });
 });
+
+describe('Loki logs', () => {
+  const MINUTE = 60_000;
+  const minutesAgo = (minutes: number) => Date.now() - minutes * MINUTE;
+  const SHOP = { service_name: 'shop-api', deployment_environment_name: 'prod' };
+  const LINE = {
+    status: 500,
+    method: 'POST',
+    path: '/orders',
+    level: 'error',
+    message: 'NullPointerException in OrderService',
+  };
+  const failure = (minutes: number, extra: Record<string, unknown> = {}) => ({
+    at: minutesAgo(minutes),
+    line: { ...LINE, ...extra },
+  });
+
+  /** Points the Loki source at the fake, as a Connector the operator connected. */
+  function connectLoki(ctx: Ctx, config: Record<string, unknown> = {}) {
+    setConnector(ctx.store, ConnectorId.LokiLogs, {
+      status: HealthStatus.Ok,
+      config: JSON.stringify({
+        ...DEFAULT_CONNECTOR_CONFIG[ConnectorId.LokiLogs],
+        url: 'https://loki.example.com',
+        ...config,
+      }),
+    });
+  }
+
+  async function scanLoki(ctx: Ctx, body: Record<string, unknown> = {}) {
+    const started = await ctx.http.post('/scans', { service_id: null, connector: 'loki_logs', ...body });
+    expect(started.status).toBe(202);
+    return until(
+      () => ctx.http.get(`/scans/${started.body.data.id}`).then((res) => res.body.data),
+      (found) => found.status !== 'running',
+      'the Scan to end',
+    );
+  }
+
+  /** A Loki holding `entries` in one stream, connected and scanned. */
+  async function scanned(
+    entries: { at: number; line: string | object }[],
+    options: { labels?: Record<string, string>; config?: Record<string, unknown>; body?: Record<string, unknown> } = {},
+  ) {
+    const logcli = await FakeLogcli.create();
+    logcli.stream(options.labels ?? SHOP, entries);
+    const ctx = await start({ loki: { bin: logcli.bin } });
+    connectLoki(ctx, options.config);
+    const ended = await scanLoki(ctx, options.body);
+    return { ctx, logcli, ended };
+  }
+
+  describe('the read', () => {
+    it('turns a failing stream into a Service, an Alert with Samples, and a filter that finds it again', async () => {
+      const { ctx, ended } = await scanned([failure(5), failure(8), failure(9, { status: 200, level: 'info' })]);
+      expect(ended).toMatchObject({ status: 'ok', connector: 'loki_logs' });
+      expect((await ctx.http.get('/services')).body.data).toMatchObject([
+        { name: 'shop-api', env: 'prod', connector: 'loki_logs' },
+      ]);
+      const [listed] = await alertList(ctx);
+      expect(listed).toMatchObject({
+        connector: 'loki_logs',
+        http_status: 500,
+        route: { method: 'POST', path: '/orders' },
+        title: '500 POST /orders failing on shop-api',
+        event_count: 2,
+        log_line: 'NullPointerException in OrderService',
+      });
+      const detail = (await ctx.http.get(`/alerts/${listed.id}`)).body.data;
+      expect(JSON.parse(detail.source_query)).toEqual({
+        service: 'shop-api',
+        env: 'prod',
+        status: 500,
+        method: 'POST',
+        path: '/orders',
+      });
+      expect(detail.samples).toHaveLength(2);
+      expect(detail.samples[0]).toMatchObject({
+        status: 'error',
+        message: 'NullPointerException in OrderService',
+        tags: expect.arrayContaining(['service:shop-api', 'env:prod']),
+      });
+      expect(Math.abs(Date.parse(detail.samples[0].timestamp) - minutesAgo(5))).toBeLessThan(MINUTE);
+    });
+
+    it('calls logcli as the Connector says, with the address, tenant and secret in its environment and none on the command line', async () => {
+      const keychain = new FakeKeychain();
+      keychain.values.set(LOKI_SECRET_KEY, 'glc_example_secret');
+      const logcli = await FakeLogcli.create();
+      logcli
+        .stream(SHOP, [failure(5)])
+        .requires({ basic: { username: '123456', password: 'glc_example_secret' } }, 'tenant-1');
+      const ctx = await start({ loki: { bin: logcli.bin }, keychain });
+      connectLoki(ctx, { auth: 'basic', username: '123456', org_id: 'tenant-1' });
+      process.env.LOKI_ADDR = 'https://ambient.example.com';
+      process.env.LOKI_BEARER_TOKEN = 'ambient-token';
+      try {
+        expect(await scanLoki(ctx)).toMatchObject({ status: 'ok' });
+      } finally {
+        delete process.env.LOKI_ADDR;
+        delete process.env.LOKI_BEARER_TOKEN;
+      }
+      expect(logcli.calls().length).toBeGreaterThan(0);
+      for (const call of logcli.calls()) {
+        expect(call.env).toEqual({
+          LOKI_ADDR: 'https://loki.example.com',
+          LOKI_ORG_ID: 'tenant-1',
+          LOKI_USERNAME: '123456',
+          LOKI_PASSWORD: 'glc_example_secret',
+        });
+        expect(call.args.join(' ')).not.toContain('glc_example_secret');
+      }
+    });
+
+    it('sends a bearer token as LOKI_BEARER_TOKEN alone', async () => {
+      const keychain = new FakeKeychain();
+      keychain.values.set(LOKI_SECRET_KEY, 'glc_example_bearer');
+      const logcli = await FakeLogcli.create();
+      logcli.stream(SHOP, [failure(5)]).requires({ bearer: 'glc_example_bearer' });
+      const ctx = await start({ loki: { bin: logcli.bin }, keychain });
+      connectLoki(ctx, { auth: 'bearer' });
+      expect(await scanLoki(ctx)).toMatchObject({ status: 'ok' });
+      expect(logcli.calls()[0]?.env).toEqual({
+        LOKI_ADDR: 'https://loki.example.com',
+        LOKI_BEARER_TOKEN: 'glc_example_bearer',
+      });
+    });
+
+    it('finds the Services from the service label inside the selector, and reads a stream with no env label as no env', async () => {
+      const logcli = await FakeLogcli.create();
+      logcli
+        .stream({ app: 'shop-api', env: 'prod', cluster: 'prod-1' }, [failure(5)])
+        .stream({ app: 'shop-api', cluster: 'prod-1' }, [failure(6, { message: 'no env failure' })])
+        .stream({ app: 'billing-api', env: 'prod', cluster: 'prod-2' }, [failure(7)])
+        .stream({ job: 'cron', env: 'prod', cluster: 'prod-1' }, [failure(8)]);
+      const ctx = await start({ loki: { bin: logcli.bin } });
+      connectLoki(ctx, { service_label: 'app', env_label: 'env', selector: 'cluster="prod-1"' });
+      expect((await ctx.http.get('/monitor/envs?connector=loki_logs')).body.data).toEqual([
+        { name: 'prod', configured: true },
+        { name: 'no env', configured: false },
+      ]);
+      expect(await scanLoki(ctx, { envs: ['prod', 'no env'] })).toMatchObject({ status: 'ok' });
+      const rows = ctx.store.db.select().from(services).where(eq(services.connector, ConnectorId.LokiLogs)).all();
+      expect(rows.map((row) => [row.name, row.env]).sort()).toEqual([
+        ['shop-api', 'no env'],
+        ['shop-api', 'prod'],
+      ]);
+      expect(await alertList(ctx)).toHaveLength(2);
+    });
+
+    it('reads only the Services of the env the Scan names', async () => {
+      const logcli = await FakeLogcli.create();
+      logcli
+        .stream({ ...SHOP }, [failure(5)])
+        .stream({ service_name: 'shop-api', deployment_environment_name: 'staging' }, [failure(5)]);
+      const ctx = await start({ loki: { bin: logcli.bin } });
+      connectLoki(ctx);
+      await scanLoki(ctx, { envs: ['staging'] });
+      expect((await ctx.http.get('/services')).body.data).toMatchObject([{ env: 'staging' }]);
+    });
+
+    it('reads logfmt lines when the Connector names that format, and skips JSON lines', async () => {
+      const { ctx } = await scanned(
+        [
+          {
+            at: minutesAgo(5),
+            line: 'level=error method=POST path=/orders status=500 msg="NullPointerException in OrderService"',
+          },
+          failure(6),
+        ],
+        { config: { format: 'logfmt' } },
+      );
+      const [listed] = await alertList(ctx);
+      expect(await alertList(ctx)).toHaveLength(1);
+      expect(listed).toMatchObject({
+        http_status: 500,
+        route: { method: 'POST', path: '/orders' },
+        log_line: 'NullPointerException in OrderService',
+        event_count: 1,
+      });
+    });
+
+    it('takes each field from the first of its names present, nested keys joined with an underscore', async () => {
+      const bare = { status: undefined, method: undefined, path: undefined, level: undefined, message: undefined };
+      const { ctx } = await scanned([
+        failure(5, {
+          ...bare,
+          statusCode: 502,
+          httpMethod: 'get',
+          resourcePath: '/a',
+          severity: 'error',
+          msg: 'by camel case',
+        }),
+        failure(6, {
+          ...bare,
+          status_code: 503,
+          method: 'PUT',
+          route: '/b',
+          log_level: 'ERROR',
+          message: 'by snake case',
+        }),
+        failure(7, {
+          ...bare,
+          http: { status_code: 504 },
+          http_method: 'delete',
+          url: { path: '/c' },
+          msg: 'by nested names',
+        }),
+        // The first name present wins: `status` is 200, so `statusCode` is not read and the level makes it fail.
+        failure(8, {
+          ...bare,
+          status: 200,
+          statusCode: 500,
+          path: '/d',
+          method: 'GET',
+          level: 'fatal',
+          message: 'first wins',
+        }),
+      ]);
+      const list: { http_status: number | null; route: { method: string; path: string } | null; log_line: string }[] =
+        await alertList(ctx);
+      const found = Object.fromEntries(list.map((a) => [a.log_line, [a.http_status, a.route?.method, a.route?.path]]));
+      expect(found).toEqual({
+        'by camel case': [502, 'GET', '/a'],
+        'by snake case': [503, 'PUT', '/b'],
+        'by nested names': [504, 'DELETE', '/c'],
+        'first wins': [200, 'GET', '/d'],
+      });
+    });
+
+    it('counts a line as failing by a status of 400 or more or an error level in any case, and not a line that does not parse', async () => {
+      const bare = { status: undefined, method: undefined, path: undefined };
+      const { ctx } = await scanned([
+        failure(5, { ...bare, status: 404, level: 'info', message: 'no such cart' }),
+        failure(5, { ...bare, level: 'ERROR', message: 'level error' }),
+        failure(5, { ...bare, level: 'Critical', message: 'level critical' }),
+        failure(5, { ...bare, level: 'alert', message: 'level alert' }),
+        failure(5, { ...bare, level: 'EMERGENCY', message: 'level emergency' }),
+        failure(5, { ...bare, level: 'fatal', message: 'level fatal' }),
+        failure(5, { ...bare, status: 200, level: 'info', message: 'all fine' }),
+        failure(5, { ...bare, status: 399, level: 'warn', message: 'redirect' }),
+        failure(5, { ...bare, level: 'warn', message: 'slow call' }),
+        { at: minutesAgo(5), line: 'ERROR plain text, not JSON' },
+      ]);
+      expect((await alertList(ctx)).map((alert: { log_line: string }) => alert.log_line).sort()).toEqual([
+        'level alert',
+        'level critical',
+        'level emergency',
+        'level error',
+        'level fatal',
+        'no such cart',
+      ]);
+    });
+
+    it('reads only the lines inside the Scan window', async () => {
+      const { ctx } = await scanned([failure(30, { message: 'inside' }), failure(150, { message: 'outside' })], {
+        body: { window: '1h' },
+      });
+      const [alert] = await alertList(ctx);
+      expect(alert).toMatchObject({ event_count: 1, log_line: 'inside' });
+    });
+
+    it('leaves out the ignored status classes and reads only the status codes the Scan asks for', async () => {
+      const entries = [
+        failure(5, { status: 404, message: 'missing' }),
+        failure(5, { status: 500, message: 'broken' }),
+        failure(5, { status: 502, message: 'gateway' }),
+      ];
+      const ignoring = await scanned(entries, { config: { ignore: [{ kind: 'status_class', value: '4xx' }] } });
+      expect((await alertList(ignoring.ctx)).map((a: { log_line: string }) => a.log_line).sort()).toEqual([
+        'broken',
+        'gateway',
+      ]);
+      const asked = await scanned(entries, { body: { status_codes: [502] } });
+      expect((await alertList(asked.ctx)).map((a: { log_line: string }) => a.log_line)).toEqual(['gateway']);
+    });
+
+    it('keeps secret values and request body values out of the Samples', async () => {
+      const { ctx } = await scanned([
+        failure(5, {
+          message: 'login failed password=hunter2hunter2 for u-1',
+          path: '/login',
+          body: '{"card":"4111111111111111"}',
+          headers: { authorization: 'Bearer abcdefghij123456' },
+          user: 'u-1',
+        }),
+      ]);
+      const [listed] = await alertList(ctx);
+      const [sample] = (await ctx.http.get(`/alerts/${listed.id}`)).body.data.samples;
+      expect(sample.message).toBe('login failed password=[redacted] for u-1');
+      expect(sample.attributes).toMatchObject({
+        body: '[redacted]',
+        headers: { authorization: '[redacted]' },
+        user: 'u-1',
+      });
+    });
+
+    it('reads the newest 5,000 failing lines of a Service, counts them in full, and says so in the Scan notes', async () => {
+      const many = Array.from({ length: 5_050 }, (_, index) => ({
+        at: Date.now() - 60_000 - index * 10,
+        line: { ...LINE, message: 'NullPointerException in OrderService' },
+      }));
+      const { ctx, ended } = await scanned(many);
+      expect(ended.status).toBe('ok');
+      expect(ended.notes).toContain('shop-api: read the newest 5,000 failing lines only');
+      const [alert] = await alertList(ctx);
+      // The counts query is not cut by the cap, and one message group on the Route takes its count.
+      expect(alert.event_count).toBe(5_050);
+      expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.samples).toHaveLength(25);
+    });
+
+    it('counts message groups of one Route from the lines read when the Route has several', async () => {
+      const lines = (message: string, count: number) =>
+        Array.from({ length: count }, (_, index) => ({
+          at: Date.now() - 60_000 - index * 10,
+          line: { ...LINE, message },
+        }));
+      const { ctx, ended } = await scanned([
+        ...lines('timed out calling payments', 3_000),
+        ...lines('stock service refused', 2_100),
+      ]);
+      expect(ended.notes).toContain('shop-api: read the newest 5,000 failing lines only');
+      const counts = Object.fromEntries(
+        (await alertList(ctx)).map((a: { log_line: string; event_count: number }) => [a.log_line, a.event_count]),
+      );
+      expect(counts['stock service refused']).toBeLessThanOrEqual(2_100);
+      expect(counts['timed out calling payments'] + counts['stock service refused']).toBe(5_000);
+    });
+
+    it('counts a failing line that names no status, method or route', async () => {
+      const bare = { status: undefined, method: undefined, path: undefined };
+      const { ctx } = await scanned(
+        Array.from({ length: 3 }, (_, index) => failure(5 + index, { ...bare, message: 'payments client timed out' })),
+      );
+      const [alert] = await alertList(ctx);
+      expect(alert).toMatchObject({ http_status: null, route: null, event_count: 3 });
+    });
+  });
+
+  describe('Alerts', () => {
+    it('sets Severity from the same rules as the other sources', async () => {
+      const bucket = Math.floor(minutesAgo(60) / (10 * MINUTE)) * 10 * MINUTE;
+      // Twice the threshold within 100 seconds: whichever 10 minutes Loki counts, one holds at least 100.
+      const rapid = Array.from({ length: 250 }, (_, i) => ({
+        at: bucket + (i % 100) * 1000,
+        line: { ...LINE, path: '/rapid' },
+      }));
+      const steady = Array.from({ length: 120 }, (_, i) => ({
+        at: minutesAgo(i + 1),
+        line: { ...LINE, path: '/steady' },
+      }));
+      const few = [1, 2, 3].map((i) => failure(i, { path: '/few' }));
+      // Fatal is error level whatever the status code.
+      const fatal = Array.from({ length: 120 }, (_, i) => ({
+        at: minutesAgo(i + 1),
+        line: { ...LINE, status: 401, level: 'fatal', path: '/fatal' },
+      }));
+      const { ctx } = await scanned([...rapid, ...steady, ...few, ...fatal]);
+      const severities = Object.fromEntries(
+        (await alertList(ctx)).map((alert: { route: { path: string }; severity: string }) => [
+          alert.route.path,
+          alert.severity,
+        ]),
+      );
+      expect(severities).toEqual({ '/rapid': 'high', '/steady': 'medium', '/few': 'low', '/fatal': 'medium' });
+    });
+
+    it('puts the source in the Fingerprint, and leaves the other sources Fingerprints alone', async () => {
+      const logcli = await FakeLogcli.create();
+      logcli.stream(SHOP, [failure(5)]);
+      const looped = await start({ loki: { bin: logcli.bin } });
+      looped.datadog.readings = [service('shop-api', [route('POST', '/orders', 4)])];
+      connectLoki(looped);
+      await scan(looped);
+      await scanLoki(looped);
+      const rows = looped.store.db.select().from(alerts).all();
+      const byConnector = Object.fromEntries(rows.map((row) => [row.connector, row.fingerprint]));
+      const rowOf = (connector: LogSource) =>
+        looped.store.db.select().from(services).where(eq(services.connector, connector)).get();
+      expect(byConnector.loki_logs).toBe(
+        fingerprint(
+          rowOf(ConnectorId.LokiLogs)?.id as string,
+          'POST',
+          '/orders',
+          'NullPointerException in OrderService',
+          500,
+          ConnectorId.LokiLogs,
+        ),
+      );
+      expect(byConnector.datadog).toBe(
+        fingerprint(
+          rowOf(ConnectorId.Datadog)?.id as string,
+          'POST',
+          '/orders',
+          'NullPointerException in OrderService',
+          500,
+        ),
+      );
+      expect(Object.keys(byConnector).sort()).toEqual(['datadog', 'loki_logs']);
+    });
+  });
+
+  describe('failures', () => {
+    const outcome = async (arrange: (logcli: FakeLogcli) => void) => {
+      const logcli = await FakeLogcli.create();
+      logcli.stream(SHOP, [failure(5)]);
+      arrange(logcli);
+      const ctx = await start({ loki: { bin: logcli.bin } });
+      connectLoki(ctx);
+      return scanLoki(ctx, { envs: ['prod'] });
+    };
+
+    it('shows Loki’s reason when a query limit refuses the read', async () => {
+      const reason = 'maximum of series (500) reached for a single query';
+      expect(await outcome((logcli) => logcli.rejectQueries(reason))).toMatchObject({
+        status: 'failed',
+        error_code: 'upstream_failed',
+        error_message: `Loki refused the query: ${reason}`,
+      });
+    });
+
+    it('shows Loki’s reason when logcli prints its error line with a capital E', async () => {
+      const reason = 'maximum of series (500) reached for a single query';
+      expect(await outcome((logcli) => logcli.printsCapitalized().rejectQueries(reason))).toMatchObject({
+        status: 'failed',
+        error_message: `Loki refused the query: ${reason}`,
+      });
+    });
+
+    it('ends a rate limit rate limited', async () => {
+      expect(await outcome((logcli) => logcli.behave('throttle'))).toMatchObject({
+        status: 'rate_limited',
+        error_code: 'rate_limited',
+      });
+    });
+
+    it('ends a refused secret and an unreachable URL upstream failed, with no Loki text in the message', async () => {
+      for (const behavior of ['unauthorized', 'forbidden', 'unreachable'] as const) {
+        expect(await outcome((logcli) => logcli.behave(behavior)), behavior).toMatchObject({
+          status: 'failed',
+          error_code: 'upstream_failed',
+          error_message: '`logcli series` failed',
+        });
+      }
+    });
+
+    it('kills the running logcli when the operator stops the Scan', async () => {
+      const logcli = await FakeLogcli.create();
+      logcli
+        .stream(SHOP, [failure(5)])
+        .behaveOn('samples', 'hang')
+        .behaveOn('counts', 'hang');
+      const ctx = await start({ loki: { bin: logcli.bin } });
+      connectLoki(ctx);
+      const started = await ctx.http.post('/scans', { service_id: null, connector: 'loki_logs', envs: ['prod'] });
+      await until(
+        () => logcli.commands().filter((command) => command === 'query').length,
+        (asked) => asked >= 2,
+        'both queries to be running',
+      );
+      expect((await ctx.http.post(`/scans/${started.body.data.id}/cancel`)).status).toBe(204);
+      await until(
+        () => ctx.http.get(`/scans/${started.body.data.id}`).then((res) => res.body.data.status),
+        (status) => status === 'cancelled',
+        'the Scan to be cancelled',
+      );
+      const pids = logcli
+        .calls()
+        .filter((call) => call.args.includes('query'))
+        .map((call) => call.pid);
+      for (const pid of pids) {
+        await until(
+          () => alive(pid),
+          (running) => !running,
+          'the query to be killed',
+        );
+      }
+    });
+
+    it('does not stop another source Scan when Loki is down, and shows the others Alerts', async () => {
+      const logcli = await FakeLogcli.create();
+      logcli.stream(SHOP, [failure(5)]).behave('unreachable');
+      const ctx = await start({ loki: { bin: logcli.bin } });
+      ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 4)])];
+      connectLoki(ctx);
+      expect((await ctx.http.post('/scans', { service_id: null })).status).toBe(202);
+      const all = await until(
+        () => ctx.http.get('/scans').then((res) => res.body.data),
+        (found: { connector: string; status: string }[]) =>
+          found.length === 2 && found.every((one) => one.status !== 'running'),
+        'both Scans',
+      );
+      expect(all.map((one: { connector: string; status: string }) => [one.connector, one.status]).sort()).toEqual([
+        ['datadog', 'ok'],
+        ['loki_logs', 'failed'],
+      ]);
+      expect((await alertList(ctx)).map((alert: { connector: string }) => alert.connector)).toEqual(['datadog']);
+    });
+  });
+
+  it('reads four sources at once into one Alert list, filterable by source, with the down source named by its failed Scan', async () => {
+    const logcli = await FakeLogcli.create();
+    logcli.stream(SHOP, [failure(5)]);
+    const aws = await FakeAws.create();
+    aws.group('/ecs/shop-api', [{ at: minutesAgo(5), message: LINE }]);
+    const ctx = await start({ loki: { bin: logcli.bin } });
+    ctx.datadog.readings = [service('shop-api', [route('POST', '/orders', 4)])];
+    await writeLogFile(ctx.logs, 'logs.jsonl', [
+      otlpLine({
+        at: minutesAgo(5),
+        service: 'shop-api',
+        resource: { 'deployment.environment.name': 'prod' },
+        severity: 17,
+        body: 'NullPointerException in OrderService',
+        attributes: { 'http.response.status_code': 500, 'http.request.method': 'POST', 'http.route': '/orders' },
+      }),
+    ]);
+    expect((await ctx.http.post('/connectors/otel_logs/connect', { folder: ctx.logs })).status).toBe(202);
+    setConnector(ctx.store, ConnectorId.CloudWatchLogs, {
+      status: HealthStatus.Ok,
+      config: JSON.stringify({
+        ...DEFAULT_CONNECTOR_CONFIG[ConnectorId.CloudWatchLogs],
+        profile: 'ops',
+        region: 'us-east-1',
+        log_groups: [{ name: '/ecs/shop-api', service: 'shop-api', env: 'prod' }],
+      }),
+    });
+    connectLoki(ctx);
+    logcli.behave('unreachable');
+    expect((await ctx.http.post('/scans', { service_id: null })).status).toBe(202);
+    const all = await until(
+      () => ctx.http.get('/scans').then((res) => res.body.data),
+      (found: { connector: string; status: string }[]) =>
+        found.length === 4 && found.every((one) => one.status !== 'running'),
+      'all four Scans',
+    );
+    expect(all.map((one: { connector: string; status: string }) => [one.connector, one.status]).sort()).toEqual([
+      ['cloudwatch_logs', 'ok'],
+      ['datadog', 'ok'],
+      ['loki_logs', 'failed'],
+      ['otel_logs', 'ok'],
+    ]);
+    expect((await alertList(ctx)).map((alert: { connector: string }) => alert.connector).sort()).toEqual([
+      'cloudwatch_logs',
+      'datadog',
+      'otel_logs',
+    ]);
+    logcli.behave(null);
+    await scanLoki(ctx);
+    expect((await alertList(ctx)).map((alert: { connector: string }) => alert.connector).sort()).toEqual([
+      'cloudwatch_logs',
+      'datadog',
+      'loki_logs',
+      'otel_logs',
+    ]);
+    expect(
+      (await alertList(ctx, '?connector=loki_logs')).map((alert: { connector: string }) => alert.connector),
+    ).toEqual(['loki_logs']);
+  });
+
+  it('refuses a Scan or a Service list while Loki logs is not connected', async () => {
+    const ctx = await start();
+    const scanRefused = await ctx.http.post('/scans', { service_id: null, connector: 'loki_logs' });
+    expect([scanRefused.status, scanRefused.body.error.code]).toEqual([409, 'connector_not_connected']);
+    const listed = await ctx.http.get('/monitor/log-services?connector=loki_logs&window=24h');
+    expect([listed.status, listed.body.error.code]).toEqual([409, 'connector_not_connected']);
+  });
+
+  it('links an imported Repo with the Service name, as any Service is', async () => {
+    const logcli = await FakeLogcli.create();
+    logcli.stream({ ...SHOP, service_name: 'orders-api' }, [failure(5)]);
+    const ctx = await start({ loki: { bin: logcli.bin } });
+    const repo = (await ctx.http.post('/repos', { path: await makeRepo() })).body.data;
+    connectLoki(ctx);
+    await scanLoki(ctx);
+    const linked = await until(
+      () => ctx.http.get('/services').then((res) => res.body.data[0]),
+      (found) => found.repo_id !== null,
+      'the Repo to be linked',
+    );
+    expect(linked).toMatchObject({ connector: 'loki_logs', repo_id: repo.id });
+  });
+
+  describe('Services and the schedule', () => {
+    it('lists the Services and envs with their failing counts and status codes', async () => {
+      const logcli = await FakeLogcli.create();
+      logcli
+        .stream(SHOP, [failure(5), failure(6), failure(7, { status: 404 })])
+        .stream({ service_name: 'billing-api', deployment_environment_name: 'staging' }, [failure(5, { status: 502 })]);
+      const ctx = await start({ loki: { bin: logcli.bin } });
+      connectLoki(ctx);
+      expect((await ctx.http.get('/monitor/envs?connector=loki_logs')).body.data).toEqual([
+        { name: 'prod', configured: true },
+        { name: 'staging', configured: false },
+        { name: 'no env', configured: false },
+      ]);
+      expect((await ctx.http.get('/monitor/log-services?connector=loki_logs&window=24h')).body.data).toEqual([
+        { name: 'shop-api', envs: ['prod'], errors: 3 },
+        { name: 'billing-api', envs: ['staging'], errors: 1 },
+      ]);
+      expect((await ctx.http.get('/monitor/status-codes?connector=loki_logs&window=24h')).body.data).toEqual([
+        { code: 500, count: 2 },
+        { code: 404, count: 1 },
+        { code: 502, count: 1 },
+      ]);
+    });
+
+    it('runs on its own interval, and skips the source when it is not connected', async () => {
+      const logcli = await FakeLogcli.create();
+      logcli.stream(SHOP, [failure(5)]);
+      const ctx = await start({ loki: { bin: logcli.bin } });
+      connectLoki(ctx);
+      await ctx.http.patch('/connectors/loki_logs', { config: { default_interval: '12h' } });
+      const monitor = ctx.daemon.app.get(ScansService);
+      const scheduled = () =>
+        ctx.store.db
+          .select()
+          .from(scans)
+          .where(eq(scans.triggeredBy, ScanTrigger.Schedule))
+          .all()
+          .map((one) => [one.connector, one.windowSize])
+          .sort();
+      await monitor.runDue(new Date(2026, 9, 5, 9, 1));
+      expect(scheduled()).toEqual([
+        ['datadog', '24h'],
+        ['loki_logs', '12h'],
+      ]);
+      setConnector(ctx.store, ConnectorId.LokiLogs, { status: HealthStatus.Fail });
+      await monitor.runDue(new Date(Date.now() + 2 * 86_400_000));
+      expect(scheduled().filter(([connector]) => connector === 'loki_logs')).toHaveLength(1);
+    });
+
+    it('keeps each source Scans through retention, per Service', async () => {
+      const logcli = await FakeLogcli.create();
+      logcli.stream(SHOP, [failure(5)]);
+      const ctx = await start({ loki: { bin: logcli.bin } });
+      ctx.datadog.readings = [service('shop-api', [route('POST', '/orders', 4)])];
+      connectLoki(ctx);
+      for (let round = 0; round < 2; round++) {
+        await scan(ctx);
+        await scanLoki(ctx);
+      }
+      const long = new Date(Date.now() - 40 * 86_400_000).toISOString();
+      ctx.store.write((tx) => tx.update(scans).set({ startedAt: long }).run());
+      await ctx.daemon.app.get(MonitorRetention).run();
+      expect(
+        ctx.store.db
+          .select()
+          .from(scans)
+          .all()
+          .map((one) => one.connector)
+          .sort(),
+      ).toEqual(['datadog', 'loki_logs']);
+    });
+  });
+
+  describe('Recheck, Verification and Fix', () => {
+    const recheckOf = (report: { steps: { kind: string; text: string }[] }) =>
+      report.steps[0] as { kind: string; text: string };
+    const promptsSince = (ctx: Ctx, from: number) => ctx.daemon.sdk.calls.slice(from).map((call) => call.prompt);
+    const deniedSince = (ctx: Ctx, from: number) =>
+      ctx.daemon.sdk.calls.slice(from).flatMap((call) => {
+        const settings = call.options.settings as { deniedMcpServers?: { serverName: string }[] } | undefined;
+        return (settings?.deniedMcpServers ?? []).map((server) => server.serverName);
+      });
+
+    async function failingLoki(entries = [failure(5), failure(8)]) {
+      const logcli = await FakeLogcli.create();
+      logcli.stream(SHOP, entries);
+      const ctx = await start({ loki: { bin: logcli.bin } });
+      connectLoki(ctx);
+      await scanLoki(ctx);
+      const [alert] = await alertList(ctx);
+      await linkRepo(ctx, alert.service.id);
+      return { ctx, logcli, alert };
+    }
+
+    it('counts the Alert’s lines for the last hour through its filter, before the agent starts', async () => {
+      const { ctx, logcli, alert } = await failingLoki();
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(recheckOf(stored)).toEqual({ kind: 'result', text: 'Loki logs recheck, last hour: still failing' });
+      expect(ctx.datadog.rechecks).toEqual([]);
+      expect(logcli.commands().at(-1)).toBe('instant-query');
+      expect(stored.status).toBe('ready');
+    });
+
+    it('says not seen when the last hour holds none of them', async () => {
+      const { ctx, alert } = await failingLoki([failure(100)]);
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(recheckOf(stored).text).toBe('Loki logs recheck, last hour: not seen');
+      expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.status).toBe('verified');
+    });
+
+    it('writes why a Recheck failed, and goes on', async () => {
+      const { ctx, logcli, alert } = await failingLoki();
+      logcli.behave('throttle');
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(recheckOf(stored)).toEqual({ kind: 'warning', text: 'Recheck failed: Loki rate limit reached' });
+      expect(stored.status).toBe('ready');
+    });
+
+    it('briefs the agent with the source, the Samples and the filter, and tells it to use no pup, no Datadog server, and logcli through run_integration', async () => {
+      const { ctx, alert } = await failingLoki([failure(5)]);
+      const before = ctx.daemon.sdk.calls.length;
+      await verify(ctx, alert.id);
+      const brief = promptsSince(ctx, before).find((prompt) => prompt.includes('Find the cause of a failure')) ?? '';
+      expect(brief).toContain('Loki logs');
+      expect(brief).toContain('NullPointerException in OrderService');
+      expect(brief).toContain('Loki logs filter: {"service":"shop-api","env":"prod"');
+      expect(brief).toMatch(/no `pup` and no Datadog MCP Server/);
+      expect(brief).toMatch(/`logcli` through the `run_integration` tool/);
+      expect(brief).not.toContain('Datadog query');
+      expect(brief).not.toContain('failure Datadog logged');
+      expect(deniedSince(ctx, before)).toContain('datadog-pup');
+    });
+
+    it('starts a Fix of a Loki Alert with a Recheck and the same rule on its tools', async () => {
+      const { ctx, alert } = await failingLoki();
+      await verify(ctx, alert.id);
+      const before = ctx.daemon.sdk.calls.length;
+      for (const run of stepTurns(PlaybookTrigger.Fix)) ctx.daemon.sdk.script(...run);
+      ctx.daemon.sdk.script(json({ description: 'Defaults the order total.' }));
+      const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
+      await until(
+        () => ctx.http.get(`/fixes/${confirm.body.data.fix.id}`).then((res) => res.body.data.status),
+        (status) => status !== 'running',
+        'the Fix to end',
+      );
+      const prompts = promptsSince(ctx, before);
+      expect(prompts[0]).toContain('Loki logs recheck, last hour: still failing');
+      expect(prompts[0]).toMatch(/no `pup` and no Datadog MCP Server/);
+      expect(deniedSince(ctx, before)).toContain('datadog-pup');
+    });
+  });
+});
+
+/** Whether the process still runs. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}

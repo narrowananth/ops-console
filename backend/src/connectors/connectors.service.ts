@@ -16,17 +16,21 @@ import {
   HealthStatus,
   isGoogleConnector,
   type LogGroupPick,
+  type lokiConnectBodySchema,
   type McpServer,
 } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
+import type { z } from 'zod';
 import { bounded } from '../common/bounded';
 import { ApiError, validationFailed } from '../common/errors';
 import { mergeConfig } from '../common/merge-config';
 import { connectors } from '../db/schema';
 import { STORE, type Store } from '../db/store';
+import { KEYCHAIN, type Keychain } from '../keychain/keychain';
 import { GOOGLE_ENV } from '../mcp/google-bridge';
 import { McpServersService } from '../mcp/mcp-servers.service';
-import { cloudWatchLogsConfig, otelLogsConfig } from '../monitor/log-source-config';
+import { cloudWatchLogsConfig, lokiLogsConfig, otelLogsConfig } from '../monitor/log-source-config';
+import { LOKI_SECRET_KEY, lokiAccess } from '../monitor/loki-access';
 import { CONNECTOR_TOOLS, type ConnectorTools, type SignInPrompt } from './connector-tools';
 import { GOOGLE_AUTH, type GoogleAuth, GoogleSignInError } from './google-auth';
 
@@ -56,6 +60,7 @@ export class ConnectorsService implements OnModuleDestroy {
     @Inject(CONNECTOR_TOOLS) private readonly tools: ConnectorTools,
     @Inject(GOOGLE_AUTH) private readonly google: GoogleAuth,
     @Inject(McpServersService) private readonly mcp: McpServersService,
+    @Inject(KEYCHAIN) private readonly keychain: Keychain,
   ) {}
 
   async onModuleDestroy(): Promise<void> {
@@ -136,6 +141,8 @@ export class ConnectorsService implements OnModuleDestroy {
   async connect(id: ConnectorId, input: ConnectInput = {}): Promise<void> {
     // The Log folder has no sign-in: choosing it connects, or is refused, before this answers.
     if (id === ConnectorId.OtelLogs) return this.chooseFolder(input.folder);
+    // Loki logs has no sign-in either: the typed config is checked and stored before this answers, its health after.
+    if (id === ConnectorId.LokiLogs) return this.connectLoki(input);
     // A profile that is already signed in connects before this answers; any other waits on its sign-in below.
     if (id === ConnectorId.CloudWatchLogs && (await this.prepareCloudWatch(input))) return;
     this.signIns.get(id)?.abort();
@@ -208,6 +215,7 @@ export class ConnectorsService implements OnModuleDestroy {
       // A read of the list that no longer holds the server means it is already gone: Disconnect goes on.
       if (found?.registered) await this.mcp.remove(server.name).catch(ignoreMissing);
     }
+    if (id === ConnectorId.LokiLogs) await this.keychain.delete(LOKI_SECRET_KEY);
     this.store.write((tx) => {
       tx.update(connectors)
         .set({ status: HealthStatus.Off, statusDetail: null, accountLabel: null, login: null })
@@ -218,7 +226,7 @@ export class ConnectorsService implements OnModuleDestroy {
   }
 
   /** Throws `tool_missing` for the first of `commands` not on the PATH. The console installs neither. */
-  private async requireTools(commands: ('aws' | 'uvx')[]): Promise<void> {
+  private async requireTools(commands: (keyof typeof INSTALL)[]): Promise<void> {
     for (const command of commands) {
       if (!(await this.tools.installed(command))) {
         throw new ApiError(422, ErrorCode.ToolMissing, missingToolMessage(command));
@@ -278,6 +286,46 @@ export class ConnectorsService implements OnModuleDestroy {
     await this.registerCloudWatch({ profile, region });
     this.record(ConnectorId.CloudWatchLogs, cloudWatchReading(profile));
     return true;
+  }
+
+  /**
+   * Stores the pane's Loki config and secret after the checks that need no network, then reads the health in the
+   * background. A field the body leaves out keeps its value; an empty one clears it. The secret goes only to the Keychain.
+   */
+  private async connectLoki(input: ConnectInput): Promise<void> {
+    await this.requireTools(['logcli']);
+    const { secret, ...typed } = input;
+    const edited = Object.fromEntries(Object.entries(typed).filter(([name]) => LOKI_FIELDS.includes(name)));
+    const parsed = connectorConfigSchemas[ConnectorId.LokiLogs].safeParse({
+      ...lokiLogsConfig(this.store.db),
+      ...edited,
+    });
+    if (!parsed.success) {
+      const problems = new Set(
+        parsed.error.issues.map((issue) => `${issue.path.join('.') || 'config'}: ${issue.message}`),
+      );
+      throw invalidLoki(`invalid config: ${[...problems].join('; ')}`);
+    }
+    const config = parsed.data;
+    if (config.url === '') throw invalidLoki('a Loki URL is required');
+    if (config.auth === 'basic' && config.username === '') throw invalidLoki('basic auth needs a username');
+    const typedSecret = secret === undefined || secret === '' ? null : secret;
+    if (config.auth !== 'none' && typedSecret === null && (await this.keychain.get(LOKI_SECRET_KEY)) === null) {
+      throw invalidLoki(`${config.auth} auth needs a secret`);
+    }
+    if (config.auth !== 'none' && typedSecret !== null) await this.keychain.set(LOKI_SECRET_KEY, typedSecret);
+    this.store.write((tx) => {
+      tx.update(connectors)
+        .set({ config: JSON.stringify(config) })
+        .where(eq(connectors.id, ConnectorId.LokiLogs))
+        .run();
+    });
+    this.record(ConnectorId.LokiLogs, { status: HealthStatus.Checking, detail: null, accountLabel: null, login: null });
+    const run = this.check(ConnectorId.LokiLogs)
+      .then(() => {})
+      .catch((error) => this.logger.warn(`checking loki_logs failed: ${String(error)}`))
+      .finally(() => this.running.delete(run));
+    this.running.add(run);
   }
 
   /** Connects the Log folder: `folder`, or the one kept from before. Refused with `folder_not_found`, nothing stored. */
@@ -532,6 +580,21 @@ export class ConnectorsService implements OnModuleDestroy {
             : signedOutDetail(profile),
         );
       }
+      case ConnectorId.LokiLogs: {
+        const down = (detail: string): Reading => ({
+          status: HealthStatus.Fail,
+          detail,
+          accountLabel: null,
+          login: null,
+        });
+        if (!(await this.tools.installed('logcli'))) return down(missingToolMessage('logcli'));
+        const { config, childEnv } = await lokiAccess(this.store.db, this.keychain);
+        if (config.url === '') return down('No Loki URL chosen');
+        const health = await this.tools.lokiCheck(childEnv);
+        if (health.status === 'auth') return signedOut(LOKI_AUTH_DETAIL);
+        if (health.status === 'down') return down(`Could not reach ${config.url}: ${health.reason}`);
+        return { status: HealthStatus.Ok, detail: null, accountLabel: config.url, login: null };
+      }
       case ConnectorId.Github: {
         const login = await this.tools.githubUser();
         return login === null
@@ -722,15 +785,32 @@ async function folderReading(folder: string): Promise<Reading> {
 
 type CloudWatchConfig = ReturnType<typeof cloudWatchLogsConfig>;
 
-/** What the pane's Connect sends. The Log folder takes `folder`; CloudWatch logs takes the other three. */
-export type ConnectInput = { folder?: string; profile?: string; region?: string; log_groups?: LogGroupPick[] };
+/**
+ * What the pane's Connect sends. The Log folder takes `folder`; CloudWatch logs takes `profile`, `region` and
+ * `log_groups`; Loki logs takes its config fields and the secret.
+ */
+export type ConnectInput = {
+  folder?: string;
+  profile?: string;
+  region?: string;
+  log_groups?: LogGroupPick[];
+} & z.infer<typeof lokiConnectBodySchema>;
 
-const INSTALL: Record<'aws' | 'uvx', string> = {
+/** The config fields of the Loki pane: the only ones a Connect may set. */
+const LOKI_FIELDS = ['url', 'org_id', 'auth', 'username', 'service_label', 'env_label', 'selector', 'format'];
+
+const LOKI_AUTH_DETAIL =
+  'Loki refused the secret. Check the secret, and for Grafana Cloud that the access-policy token has the `logs:read` scope.';
+
+const invalidLoki = (message: string) => new ApiError(422, ErrorCode.ValidationFailed, message);
+
+const INSTALL = {
   aws: 'the AWS CLI with `brew install awscli`',
   uvx: 'uv with `brew install uv`',
+  logcli: 'the Loki CLI with `brew install logcli`',
 };
 
-function missingToolMessage(command: 'aws' | 'uvx'): string {
+function missingToolMessage(command: keyof typeof INSTALL): string {
   return `${command} is not installed: install ${INSTALL[command]}, then Connect again`;
 }
 
