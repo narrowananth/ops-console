@@ -4,13 +4,18 @@ Where Ops Console goes from a macOS tool to one developers install anywhere. Ite
 
 Today the console runs on macOS 13.5 or later, on Apple silicon or Intel. `install.sh` rejects every other OS, and `release.yml` builds two darwin tarballs. Installing is `curl | sh`. Datadog is the only monitoring source.
 
+## On hold
+
+Owner decision. Each waits for the thing named, then moves back into the order below.
+
+- Sign the binaries with an Apple Developer ID and notarize them, so Gatekeeper accepts a cask or browser download. Releases are ad hoc signed today. Spec: [sign-and-notarize-release](specs/sign-and-notarize-release.md). Waits for an Apple Developer Program membership.
+- Finish Google OAuth verification for the Google Docs, Sheets and Drive Connectors. Until it passes, users see the unverified-app screen. `documents` and `spreadsheets` are sensitive scopes. `drive.readonly` is restricted and needs a paid third-party security assessment. No spec yet. Waits for the owner to restart it, and the current status in the Google Cloud console is not known.
+
 ## 1. Trust and install on macOS
 
 Small items for first-run friction. None conflicts with an ADR.
 
-- Sign the binaries with an Apple Developer ID and notarize them, so Gatekeeper accepts a cask or browser download. Releases are ad hoc signed today. Spec: [sign-and-notarize-release](specs/sign-and-notarize-release.md). On hold until the owner has an Apple Developer Program membership.
-- Publish a Homebrew tap that installs the existing darwin tarballs, and make `brew upgrade` work next to `ops-console update`. Spec: [homebrew-tap](specs/homebrew-tap.md).
-- Finish Google OAuth verification for the Google Docs, Sheets and Drive Connectors. `drive.readonly` is a restricted scope, so verification may need a third-party security assessment. Until it passes, users see the unverified-app screen. Confirm the current verification status first.
+- Homebrew tap, shipped in 0.1.61: `brew tap narrowananth/ops-console https://github.com/narrowananth/ops-console`, then `brew install ops-console`. Spec: [homebrew-tap](specs/homebrew-tap.md).
 - Add a data-flow section to `PRIVACY.md` and the site: what moves between the operator's machine, Anthropic's API and each Connector, and that none of it reaches an Ops Console server. [ADR 0003](adr/0003-local-only-server.md) already guarantees this, so the work is documentation.
 
 ## 2. Self-serve onboarding
@@ -54,7 +59,7 @@ Translate the docs site first, then the UI. Do the UI after the screens settle, 
 
 | Step | Work | Needs ADR change |
 | --- | --- | --- |
-| 1 | Signing, notarization, Homebrew, Google verification, data-flow docs | No |
+| 1 | Data-flow docs. Homebrew shipped. Signing and Google verification on hold | No |
 | 2 | Onboarding: sample repo, troubleshooting, video | No |
 | 3 | OTel and webhook source, then CloudWatch, Loki, New Relic | Possibly 0003 |
 | 4 | Linux | 0004, 0006 |
