@@ -55,6 +55,7 @@ import {
   localServersSchema,
   logGroupListSchema,
   logServiceSchema,
+  lokiConnectBodySchema,
   type Message,
   mcpServerListSchema,
   mcpServerSchema,
@@ -621,6 +622,17 @@ export function useConnectLogFolder() {
 export function useConnectCloudWatch() {
   return useConnectorMutation((body: { profile: string; region: string; log_groups: LogGroupPick[] }) =>
     apiSend('POST', `/connectors/${ConnectorId.CloudWatchLogs}/connect`, body, z.undefined()),
+  );
+}
+
+/**
+ * Connects Loki logs with its URL, auth mode and label names. The secret is write-only: left out, the Keychain's stays.
+ * The daemon refuses a missing `logcli` and a bad field (`tool_missing`, `validation_failed`); a refused secret shows
+ * as the health check's `auth` status.
+ */
+export function useConnectLoki() {
+  return useConnectorMutation((body: z.infer<typeof lokiConnectBodySchema>) =>
+    apiSend('POST', `/connectors/${ConnectorId.LokiLogs}/connect`, body, z.undefined()),
   );
 }
 

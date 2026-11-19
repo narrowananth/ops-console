@@ -15,18 +15,21 @@ import {
   useConnectConnector,
   useConnectConnectorWith,
   useConnectLogFolder,
+  useConnectLoki,
   useDisconnectConnector,
 } from '../lib/queries';
 import { type StatusLook, statusGlyph } from '../mcp/status';
 import { IntegrationRow, rowAction, rowActionAttention } from './integration-row';
 import { LogFolderStep, savedFolder } from './log-folder';
 import { LogGroupsStep, savedCloudWatch } from './log-groups';
+import { LokiStep } from './loki-logs';
 import { SignInHandoff } from './sign-in-handoff';
 
 /** What Connect does for a Connector that reads logs instead of signing in to a service. */
 const NOT_SET_UP: Partial<Record<ConnectorId, string>> = {
   [ConnectorId.OtelLogs]: 'Not set up yet. Connect starts reading the Log folder.',
   [ConnectorId.CloudWatchLogs]: 'Not set up yet. Connect checks the AWS profile and starts reading the log groups.',
+  [ConnectorId.LokiLogs]: 'Not set up yet. Connect checks Loki with the URL and the secret, and starts reading it.',
 };
 
 /** The row and the pane read the same: signing in, not connected, or the check's status. */
@@ -43,6 +46,9 @@ function connectorStatus(connector: Connector): StatusLook {
       className: 'text-neutral-700',
       tip: NOT_SET_UP[connector.id] ?? 'Not set up yet. Connect signs you in and adds its MCP Server when it has one.',
     };
+  // Loki has no sign-in: a refused secret is retyped.
+  if (connector.status === HealthStatus.Auth && connector.id === ConnectorId.LokiLogs)
+    return { ...statusGlyph[connector.status], tip: 'Loki refused the secret. Reconnect with the right one.' };
   return statusGlyph[connector.status];
 }
 
@@ -55,6 +61,7 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
   const connectWith = useConnectConnectorWith();
   const connectFolder = useConnectLogFolder();
   const connectCloudWatch = useConnectCloudWatch();
+  const connectLoki = useConnectLoki();
   const disconnect = useDisconnectConnector();
   const cancel = useCancelConnectorSignIn();
   const [confirming, setConfirming] = useState(false);
@@ -63,12 +70,14 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
   const asksServer = connector.id === ConnectorId.Slashdocs;
   const asksFolder = connector.id === ConnectorId.OtelLogs;
   const asksGroups = connector.id === ConnectorId.CloudWatchLogs;
+  const asksLoki = connector.id === ConnectorId.LokiLogs;
   const connected = connector.status !== HealthStatus.Off;
   const error =
     connect.error ??
     connectWith.error ??
     connectFolder.error ??
     connectCloudWatch.error ??
+    connectLoki.error ??
     disconnect.error ??
     cancel.error;
   const onConnect = () =>
@@ -121,6 +130,12 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
             onConnect={(body) => connectCloudWatch.mutate(body)}
             onCancel={() => cancel.mutate(connector.id)}
           />
+        ) : asksLoki ? (
+          <LokiStep
+            connector={connector}
+            pending={connectLoki.isPending}
+            onConnect={(body, done) => connectLoki.mutate(body, { onSuccess: done })}
+          />
         ) : (
           <SignInStep
             connector={connector}
@@ -145,9 +160,11 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
                 ? 'Stops the console reading the Log folder. The folder and its files stay as they are.'
                 : asksGroups
                   ? 'Stops the console reading the log groups and removes the CloudWatch MCP Server. Your AWS profile and account stay as they are.'
-                  : isGoogleConnector(connector.id)
-                    ? 'Stops the console using it and takes its access back at Google. Every Claude account loses it.'
-                    : 'Signs out and stops Claude from using it. Monitor and tasks that rely on it pause. Your own terminal stays signed in to the CLI.'}
+                  : asksLoki
+                    ? 'Stops the console reading Loki and removes the secret from the Keychain. Loki and its logs stay as they are.'
+                    : isGoogleConnector(connector.id)
+                      ? 'Stops the console using it and takes its access back at Google. Every Claude account loses it.'
+                      : 'Signs out and stops Claude from using it. Monitor and tasks that rely on it pause. Your own terminal stays signed in to the CLI.'}
             </div>
             <div className="flex gap-2">
               <Button
@@ -170,7 +187,9 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
                   ? 'Stop the console reading the Log folder. Asks first.'
                   : asksGroups
                     ? 'Stop the console reading the log groups. Asks first.'
-                    : `Sign out of ${connector.name} and stop the console using it. Asks first.`
+                    : asksLoki
+                      ? 'Stop the console reading Loki and remove its secret. Asks first.'
+                      : `Sign out of ${connector.name} and stop the console using it. Asks first.`
               }
               onClick={() => setConfirming(true)}
             >
@@ -276,12 +295,14 @@ function lineSuffix(connector: Connector): string {
 
 /** A Connector in the Integrations list. Off reads "not connected": a Connector is never disabled. */
 export function ConnectorAction({ connector, onOpen }: { connector: Connector; onOpen: () => void }) {
+  // Loki has no sign-in: a refused secret is retyped under Reconnect.
+  const retypes = connector.id === ConnectorId.LokiLogs;
   const action =
     connector.status === HealthStatus.Off
       ? 'Connect'
-      : connector.status === HealthStatus.Auth
+      : connector.status === HealthStatus.Auth && !retypes
         ? 'Sign in'
-        : connector.status === HealthStatus.Fail
+        : connector.status === HealthStatus.Auth || connector.status === HealthStatus.Fail
           ? 'Reconnect'
           : 'Manage';
   const attention = connector.status === HealthStatus.Auth || connector.status === HealthStatus.Fail;

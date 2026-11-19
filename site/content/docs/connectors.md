@@ -1,8 +1,8 @@
 # Connectors
 
-A Connector is an outside service you sign in to once, a folder of logs on your Mac, or an AWS profile the console reads logs with. It holds the sign-in, the folder or the profile and registers the service's MCP Server when it has one. You connect, check and disconnect Connectors in Integrations, the one place a source is connected.
+A Connector is an outside service you sign in to once, a folder of logs on your Mac, an AWS profile or a Loki URL the console reads logs with. It holds the sign-in, the folder, the profile or the URL and registers the service's MCP Server when it has one. You connect, check and disconnect Connectors in Integrations, the one place a source is connected.
 
-## The fourteen Connectors
+## The fifteen Connectors
 
 | Connector | How the console reaches it |
 | --------- | -------------------------- |
@@ -20,8 +20,9 @@ A Connector is an outside service you sign in to once, a folder of logs on your 
 | Google Drive | The console's Google tools, over the Google Drive API |
 | OpenTelemetry logs | A Log folder on your Mac, read by the daemon |
 | CloudWatch logs | The `aws` CLI and AWS's CloudWatch MCP server, started with `uvx` |
+| Loki logs | The `logcli` CLI, with a Loki URL and a secret kept in the Keychain |
 
-The agent reaches each service through Claude Code, with the service's own MCP server or CLI. OpenTelemetry logs has no service to reach. The console holds no extra copy of your access beyond the sign-in it keeps in the Keychain, and it stores no AWS key: CloudWatch logs uses the credentials where the AWS CLI keeps them.
+The agent reaches each service through Claude Code, with the service's own MCP server or CLI. OpenTelemetry logs has no service to reach. The console holds no extra copy of your access beyond the sign-in it keeps in the Keychain, and it stores no AWS key: CloudWatch logs uses the credentials where the AWS CLI keeps them. Loki logs has no sign-in, so you type its secret once and the console keeps it in the Keychain.
 
 ## Connect
 
@@ -126,6 +127,72 @@ Connect registers AWS's CloudWatch MCP server with Claude Code in every Claude a
 That server runs outside the Run sandbox, as Claude Code starts it, and it has the rights the profile has. The sandbox's block on `~/.aws` does not apply to it.
 
 Alerts and Services from this source carry a CloudWatch label in Monitor. A Verification or a Fix of a CloudWatch Alert starts with a Recheck of its Log group for the last hour, and the Report's evidence section is headed "Log evidence". Disconnect removes the MCP server and leaves the AWS profile and the account as they are.
+
+## Loki logs
+
+This Connector gives Monitor a fourth log source. It reads the logs in a Grafana Loki, on Grafana Cloud or self-hosted, with Loki's own CLI, `logcli`. It registers no MCP Server.
+
+You need `logcli` on your PATH. When it is missing, Connect stops and Integrations names the tool and the command that installs it, `brew install logcli`. The console installs nothing.
+
+Loki has no browser sign-in the console can use, so you type the secret once in Integrations. The console keeps it in the macOS Keychain and never shows it again. The pane shows only whether a secret is set, and typing a new one replaces it. The URL holds no user name or token: Connect refuses one, and credentials go in the secret field.
+
+### Grafana Cloud
+
+1. Enter the Loki URL of your Grafana Cloud stack.
+2. Choose basic auth. The username is the Loki instance ID.
+3. For the secret, use an access-policy token with the `logs:read` scope.
+
+### Self-hosted Loki
+
+1. Enter the Loki URL.
+2. Enter the org id if your Loki has tenants. It is sent as the `X-Scope-OrgID` header. Leave it empty for none.
+3. Choose the auth mode your Loki or its proxy takes: none, bearer or basic. A bearer mode needs a secret. A basic mode needs a username and a secret.
+
+### Fields
+
+| Field | Meaning | Default |
+| ----- | ------- | ------- |
+| Service label | The stream label whose values name the Services | `service_name` |
+| Env label | The stream label that says which env a stream belongs to. A stream without it reads as `no env`. | `deployment_environment_name` |
+| Selector | Extra stream matchers that narrow what a Scan reads, such as `cluster="prod-1"` | Empty |
+| Format | `JSON` or `logfmt`, the format of the log lines | `JSON` |
+
+Promtail setups often label the env as `env`. Change the env label to match your streams.
+
+One Connector reads one Loki URL. Each connected log source runs its own Scan schedule, with its own Check interval and daily scan time.
+
+### What a Scan reads
+
+A Scan finds the Services from the values of the service label over the Scan's window, inside the selector. It then runs two queries for each Service. The first counts failing lines per 10-minute bucket. The second reads the newest failing lines as Samples, at most 5,000 per Service. When a Service has more, a Route with one message group takes its count and 10-minute peak from the first query, and a Route with several message groups counts the newest 5,000 lines read. The Scan's notes say so. Loki's own query limits apply, and a query Loki refuses fails the source with Loki's reason shown.
+
+### Log fields
+
+The reader expects every log line in the format the Connector names. For each field it takes the first name in the list that the parsed line has:
+
+| Field | Names |
+| ----- | ----- |
+| Status code | `status`, `statusCode`, `status_code`, `http_status_code` |
+| Method | `method`, `httpMethod`, `http_method` |
+| Route | `route`, `path`, `resourcePath`, `url_path` |
+| Level | `level`, `severity`, `log_level` |
+| Message | `message`, `msg` |
+| Time | The time Loki stores for the line |
+
+A line counts as failing when its status code is 400 or more, or its level is `error`, `critical`, `alert`, `emergency` or `fatal`, in any case. This line in a `shop-api` stream is a failing line:
+
+```json
+{"level":"error","message":"payment provider timed out","method":"POST","route":"/checkout","status":502}
+```
+
+A line that does not parse has none of these fields and is not read as a failure. Plain-text logs and access logs are not read. Loki behind a Grafana instance is not supported: the URL must be Loki's own.
+
+### Access for the console and the agent
+
+The console reads logs and writes nothing to Loki, and a PROD env is read-only like any other. The daemon calls `logcli` as you, outside the Run sandbox, and passes the address, org id and secret in the command's environment, never on its command line.
+
+A Verification or a Fix of a Loki Alert starts with a Recheck that counts the Alert's failing lines for the last hour, and the Report's evidence section is headed "Log evidence". The agent's brief gives it the Samples. When it needs more logs, the agent reads them through `logcli`, run by the console as an Integration command. It may use the read commands, which are a log or metric query, listing labels and label values, and series, with a fixed set of flags for time range, limit, output format and quiet. It cannot change the address, the org id, the credentials, the TLS settings or a proxy, and the secret never reaches it.
+
+Alerts and Services from this source carry a Loki label in Monitor. Disconnect removes the secret from the Keychain and leaves Loki untouched.
 
 ## Checks and Disconnect
 

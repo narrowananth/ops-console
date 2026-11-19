@@ -1,10 +1,25 @@
 import os from 'node:os';
 import path from 'node:path';
-import { AccessMode, RunPurpose, type WsEvent } from '@ops-console/shared';
+import {
+  AccessMode,
+  ConnectorId,
+  DEFAULT_CONNECTOR_CONFIG,
+  HealthStatus,
+  RunPurpose,
+  type WsEvent,
+} from '@ops-console/shared';
+import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
+import { runIntegration } from '../src/agent/integration-runner';
+import { RUN_INTEGRATION_TOOL } from '../src/agent/pull-request-tool';
 import { AgentRuntime } from '../src/agent/runtime';
+import { connectors } from '../src/db/schema';
+import { STORE, type Store } from '../src/db/store';
+import { KEYCHAIN, type Keychain } from '../src/keychain/keychain';
+import { LOKI_SECRET_KEY } from '../src/monitor/loki-access';
 import { type AgentDaemon, api, converse, listen, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
 import type { Step } from './fakes/agent-sdk';
+import { FakeLogcli } from './fakes/loki-logs';
 
 const running: AgentDaemon[] = [];
 afterEach(async () => {
@@ -463,5 +478,130 @@ describe('CloudWatch Connector', () => {
     ];
     for (const name of [...allowed, ...refused]) await runTool(daemon, AccessMode.Full, tool(name));
     expect(daemon.sdk.ran.map((call) => call.tool.replace('mcp__cloudwatch__', ''))).toEqual(allowed);
+  });
+});
+
+describe('logcli through run_integration', () => {
+  const QUERY = '{service_name="shop-api"} | json | status >= 500';
+  const call = (...args: string[]): Step => ({ tool: RUN_INTEGRATION_TOOL, input: { cli: 'logcli', args } });
+  const SECRET = 'glc_example_secret';
+
+  it('runs a read with its time, limit, output and quiet flags at once, in every access mode', async () => {
+    const daemon = await start();
+    for (const mode of Object.values(AccessMode)) {
+      const { approvals } = await runTool(
+        daemon,
+        mode,
+        call('query', '--since', '1h', '--limit=50', '-o', 'jsonl', '-q', QUERY),
+      );
+      expect(approvals, mode).toEqual([]);
+    }
+    expect(daemon.sdk.ran).toHaveLength(Object.values(AccessMode).length);
+  });
+
+  it('lets a Verification read with it, as it reads with pup', async () => {
+    const daemon = await start();
+    const runtime = daemon.app.get(AgentRuntime);
+    daemon.sdk.script(call('labels', 'service_name', '--since', '24h'));
+    await runtime.runFor(daemon.createSession(), 'job', null, { purpose: RunPurpose.Verify }).finished;
+    expect(daemon.sdk.ran.map((step) => step.tool)).toEqual([RUN_INTEGRATION_TOOL]);
+  });
+
+  it('refuses every address, tenant, credential, TLS and proxy flag, any other command, and a file of arguments, in every access mode, and runs nothing', async () => {
+    const daemon = await start();
+    const refused = [
+      call('query', '--addr=https://evil.example.com', QUERY),
+      call('query', '--addr', 'https://evil.example.com', QUERY),
+      call('labels', '--org-id', 'another-tenant'),
+      call('query', '--username=u', '--password=p', QUERY),
+      call('query', '--bearer-token', 'x', QUERY),
+      call('query', '--bearer-token-file=/etc/passwd', QUERY),
+      call('query', '--tls-skip-verify', QUERY),
+      call('query', '--ca-cert=/tmp/ca.pem', '--cert=/tmp/c.pem', '--key=/tmp/k.pem', QUERY),
+      call('query', '--proxy-url=http://proxy.example.com', QUERY),
+      call('query', '--header', 'Authorization: x', QUERY),
+      call('query', '@/tmp/args.txt'),
+      call('query', '--tail', QUERY),
+      call('delete', 'create', QUERY),
+      call('fmt'),
+    ];
+    for (const mode of Object.values(AccessMode)) for (const step of refused) await runTool(daemon, mode, step);
+    expect(daemon.sdk.ran).toEqual([]);
+  });
+
+  describe('the daemon runs it with the Connector', () => {
+    let directory: string;
+    const withLoki = async (config: Record<string, unknown>, secret: string | null) => {
+      const logcli = await FakeLogcli.create();
+      const daemon = await start();
+      const store = daemon.app.get<Store>(STORE);
+      const keychain = daemon.app.get<Keychain>(KEYCHAIN);
+      store.write((tx) =>
+        tx
+          .update(connectors)
+          .set({
+            status: HealthStatus.Ok,
+            config: JSON.stringify({
+              ...DEFAULT_CONNECTOR_CONFIG[ConnectorId.LokiLogs],
+              url: 'https://loki.example.com',
+              ...config,
+            }),
+          })
+          .where(eq(connectors.id, ConnectorId.LokiLogs))
+          .run(),
+      );
+      if (secret !== null) await keychain.set(LOKI_SECRET_KEY, secret);
+      directory = os.tmpdir();
+      const previous = process.env.PATH;
+      process.env.PATH = `${logcli.dir}:${previous}`;
+      const run = (...args: string[]) =>
+        runIntegration({ db: store.db, keychain }, { cli: 'logcli', args }, directory).finally(() => {
+          process.env.PATH = previous;
+        });
+      return { logcli, daemon, run };
+    };
+
+    it('sets the address, tenant and secret in its environment, not its arguments, over any LOKI_ variable of the operator’s shell', async () => {
+      const { logcli, run } = await withLoki({ auth: 'basic', username: '123456', org_id: 'tenant-1' }, SECRET);
+      logcli.stream({ service_name: 'shop-api' }, [{ at: Date.now() - 60_000, line: 'x' }]);
+      process.env.LOKI_ADDR = 'https://ambient.example.com';
+      process.env.LOKI_BEARER_TOKEN = 'ambient-token';
+      let result: Awaited<ReturnType<typeof run>>;
+      try {
+        result = await run('labels', '--since', '1h');
+      } finally {
+        delete process.env.LOKI_ADDR;
+        delete process.env.LOKI_BEARER_TOKEN;
+      }
+      expect(result).toMatchObject({ ok: true, text: expect.stringContaining('service_name') });
+      const [only] = logcli.calls();
+      expect(only?.env).toEqual({
+        LOKI_ADDR: 'https://loki.example.com',
+        LOKI_ORG_ID: 'tenant-1',
+        LOKI_USERNAME: '123456',
+        LOKI_PASSWORD: SECRET,
+      });
+      expect(only?.args.join(' ')).not.toContain(SECRET);
+    });
+
+    it('cuts the secret from what the CLI prints, so a tool result never holds it', async () => {
+      const { logcli, run } = await withLoki({ auth: 'bearer' }, SECRET);
+      logcli.behave('leak');
+      const result = await run('query', QUERY);
+      expect(result.ok).toBe(true);
+      expect(result.text).toContain('credentials [redacted]');
+      expect(result.text).not.toContain(SECRET);
+    });
+
+    it('keeps the secret out of the agent’s environment, prompt and tool input', async () => {
+      const { logcli, daemon } = await withLoki({ auth: 'bearer' }, SECRET);
+      logcli.stream({ service_name: 'shop-api' }, []);
+      const { id } = await runTool(daemon, AccessMode.Full, call('labels'));
+      expect(id).toBeTruthy();
+      const calls = daemon.sdk.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      expect(JSON.stringify(calls.map((one) => [one.prompt, one.options.env]))).not.toContain(SECRET);
+      expect(Object.keys(calls.at(-1)?.options.env ?? {}).filter((name) => name.startsWith('LOKI_'))).toEqual([]);
+    });
   });
 });

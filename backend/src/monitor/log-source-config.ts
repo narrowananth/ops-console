@@ -8,6 +8,7 @@ import { parseJson } from './mappers';
 export type DatadogConfig = z.infer<(typeof connectorConfigSchemas)[ConnectorId.Datadog]>;
 export type OtelLogsConfig = z.infer<(typeof connectorConfigSchemas)[ConnectorId.OtelLogs]>;
 export type CloudWatchLogsConfig = z.infer<(typeof connectorConfigSchemas)[ConnectorId.CloudWatchLogs]>;
+export type LokiLogsConfig = z.infer<(typeof connectorConfigSchemas)[ConnectorId.LokiLogs]>;
 
 /** What every log source holds: when and how often to scan, the Severity thresholds, and what to ignore. */
 export type LogSourceConfig = Omit<DatadogConfig, 'site'>;
@@ -27,9 +28,14 @@ export const otelLogsConfig = (db: Store['db']): OtelLogsConfig =>
 export const cloudWatchLogsConfig = (db: Store['db']): CloudWatchLogsConfig =>
   connectorConfigSchemas[ConnectorId.CloudWatchLogs].parse(raw(db, ConnectorId.CloudWatchLogs));
 
+/** The Loki logs Connector's config, with defaults for what the operator has not set. */
+export const lokiLogsConfig = (db: Store['db']): LokiLogsConfig =>
+  connectorConfigSchemas[ConnectorId.LokiLogs].parse(raw(db, ConnectorId.LokiLogs));
+
 /** The config of one log source's Connector. */
 export function logSourceConfig(db: Store['db'], connector: LogSource): LogSourceConfig {
   if (connector === ConnectorId.OtelLogs) return otelLogsConfig(db);
   if (connector === ConnectorId.CloudWatchLogs) return cloudWatchLogsConfig(db);
+  if (connector === ConnectorId.LokiLogs) return lokiLogsConfig(db);
   return datadogConfig(db);
 }

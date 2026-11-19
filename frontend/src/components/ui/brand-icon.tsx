@@ -25,6 +25,7 @@ export const CONNECTOR_BRAND: Record<ConnectorId, BrandSlug> = {
   [ConnectorId.GoogleDrive]: 'googledrive',
   [ConnectorId.OtelLogs]: 'opentelemetry',
   [ConnectorId.CloudWatchLogs]: 'cloudwatch',
+  [ConnectorId.LokiLogs]: 'loki',
 };
 
 /** Words in an MCP Server's name or command that say whose it is; the first match wins. */
