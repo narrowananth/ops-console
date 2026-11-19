@@ -417,3 +417,51 @@ describe('Google Connectors', () => {
     expect(daemon.sdk.ran.map((call) => call.tool)).toEqual([write.tool, write.tool]);
   });
 });
+
+describe('CloudWatch Connector', () => {
+  const denied = (daemon: AgentDaemon) =>
+    (
+      daemon.sdk.calls.at(-1)?.options.settings as { deniedMcpServers?: { serverName: string }[] } | undefined
+    )?.deniedMcpServers?.map((server) => server.serverName) ?? [];
+  const tool = (name: string): Step => ({ tool: `mcp__cloudwatch__${name}`, input: {} });
+
+  it('starts its MCP server for a chat and for a Verification with no Alert, and for no other job', async () => {
+    const daemon = await start();
+    const runtime = daemon.app.get(AgentRuntime);
+    await converse(daemon, daemon.createSession(), 'which log groups are there');
+    expect(denied(daemon)).not.toContain('cloudwatch');
+    await runtime.runFor(daemon.createSession(), 'job', null, { purpose: RunPurpose.Verify }).finished;
+    expect(denied(daemon)).not.toContain('cloudwatch');
+
+    for (const purpose of [RunPurpose.Fix, RunPurpose.AgentReview, RunPurpose.ReplyCheck, RunPurpose.CommentPass]) {
+      await runtime.runFor(daemon.createSession(), 'job', null, { purpose }).finished;
+      expect(denied(daemon), purpose).toContain('cloudwatch');
+    }
+  });
+
+  it('lets the agent use only the four log tools of its server, in every access mode', async () => {
+    const daemon = await start();
+    const allowed = [
+      'describe_log_groups',
+      'execute_log_insights_query',
+      'get_logs_insight_query_results',
+      'cancel_logs_insight_query',
+    ];
+    const refused = [
+      'analyze_log_group',
+      'execute_cwl_insights_batch',
+      'get_metric_data',
+      'get_metric_metadata',
+      'get_recommended_metric_alarms',
+      'analyze_metric',
+      'execute_promql_query',
+      'get_promql_series',
+      'get_active_alarms',
+      'get_alarm_history',
+      // A tool a later version of the server adds is refused too.
+      'put_metric_data',
+    ];
+    for (const name of [...allowed, ...refused]) await runTool(daemon, AccessMode.Full, tool(name));
+    expect(daemon.sdk.ran.map((call) => call.tool.replace('mcp__cloudwatch__', ''))).toEqual(allowed);
+  });
+});

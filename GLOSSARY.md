@@ -149,7 +149,7 @@ Reply check, a Comment pass or an Agent Review, where the agent may write files 
 ### Monitor
 
 **Service**:
-A deployed app the console watches in a log source, Datadog or a Log folder, one per source, service name and env. Its
+A deployed app the console watches in a log source, one per source, service name and env. Its
 code is a local Repo, or a Git URL on its Git host when there is no local copy.
 _Avoid_: app, microservice
 
@@ -162,8 +162,8 @@ One HTTP method and path of a Service (`POST /fb/webhook`), the unit a Scan repo
 _Avoid_: endpoint, API
 
 **Scan**:
-A read of the failing requests in a log source, Datadog or a Log folder (logs with an HTTP status code of 400 or more,
-or the codes the operator picked) over a time window in every env, for every Service or the ones the operator ticked, on
+A read of the failing requests in a log source, Datadog, a Log folder or CloudWatch logs (logs with an HTTP status code of
+400 or more, or the codes the operator picked) over a time window in every env, for every Service or the ones the operator ticked, on
 the schedule or when the operator asks. Each connected source is read on its own schedule. A Scan of one Service reads
 its own env. Logs with no `env` tag count as the env `no env`. It groups the logs into Alerts and marks Routes healthy,
 failing or rapid.
@@ -171,7 +171,7 @@ _Avoid_: check, sweep
 
 **Fingerprint**:
 The identity of an Alert: Service, Route (none for a log with no request), HTTP status code and the error signature with
-ids, numbers, timestamps and addresses masked. For a Log folder the log source is part of it too. Two failures with the
+ids, numbers, timestamps and addresses masked. For a Log folder or CloudWatch logs the log source is part of it too. Two failures with the
 same Fingerprint belong to one Alert.
 
 **Severity**:
@@ -192,7 +192,7 @@ One read of the Alert's log source for its query over the last hour, made when a
 model turn. It says whether the failure is still happening.
 
 **Log source**:
-Where a Scan reads failing requests from: Datadog, or a Log folder. Each is a Connector, and a Service, an Alert and a
+Where a Scan reads failing requests from: Datadog, a Log folder, or CloudWatch logs. Each is a Connector, and a Service, an Alert and a
 Scan belong to one source.
 _Avoid_: log provider, backend
 
@@ -200,6 +200,9 @@ _Avoid_: log provider, backend
 The folder the OpenTelemetry logs Connector reads: OTLP JSON log files a Collector's `file` exporter writes on this Mac.
 The console reads it and never writes in it, and the agent never reads it.
 _Avoid_: log directory, log drop
+
+**Log group**:
+A CloudWatch Logs group the CloudWatch logs Connector reads. The operator picks it, and it is one Service.
 
 **Prod parity**:
 The section of a Report or pull request description that says how the run differed from prod: code version, data,
@@ -378,7 +381,7 @@ A short Agent SDK session that reads which MCP Servers connect and which tools t
 stops before the model runs.
 
 **Connector**:
-An outside service the operator signs in to, or a Log folder it reads: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets, Google Drive, OpenTelemetry logs. It holds the sign-in or the folder and registers the service's MCP Server when it has one. Each service is reached through a CLI or an MCP Server, and the daemon reads a Log folder. All are connected, checked and disconnected in Integrations, the one place a source is connected.
+An outside service the operator signs in to, or a Log folder it reads, or an AWS profile it reads logs with: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets, Google Drive, OpenTelemetry logs, CloudWatch logs. It holds the sign-in, the folder or the profile and registers the service's MCP Server when it has one. Each service is reached through a CLI or an MCP Server, and the daemon reads a Log folder. All are connected, checked and disconnected in Integrations, the one place a source is connected.
 
 **Google bridge**:
 The stdio MCP Server the console registers for a Google Connector. It keeps nothing on disk: the launcher hands it the Connector's refresh token from the Keychain, and it mints access tokens and answers each tool call from the product's REST API. One Google sign-in serves every Claude account and CLIProxy.

@@ -24,6 +24,9 @@ export enum ErrorCode {
   ChromeMissing = 'chrome_missing',
   NothingLoaded = 'nothing_loaded',
   FolderNotFound = 'folder_not_found',
+  ToolMissing = 'tool_missing',
+  LogGroupNotFound = 'log_group_not_found',
+  DuplicateService = 'duplicate_service',
 }
 
 export const errorBodySchema = z.object({

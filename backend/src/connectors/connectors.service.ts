@@ -15,6 +15,7 @@ import {
   GOOGLE_SCOPES,
   HealthStatus,
   isGoogleConnector,
+  type LogGroupPick,
   type McpServer,
 } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
@@ -25,7 +26,7 @@ import { connectors } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { GOOGLE_ENV } from '../mcp/google-bridge';
 import { McpServersService } from '../mcp/mcp-servers.service';
-import { otelLogsConfig } from '../monitor/log-source-config';
+import { cloudWatchLogsConfig, otelLogsConfig } from '../monitor/log-source-config';
 import { CONNECTOR_TOOLS, type ConnectorTools, type SignInPrompt } from './connector-tools';
 import { GOOGLE_AUTH, type GoogleAuth, GoogleSignInError } from './google-auth';
 
@@ -90,11 +91,16 @@ export class ConnectorsService implements OnModuleDestroy {
   /** Blank fields keep their value; a bad value names the fields and saves nothing. */
   async update(id: ConnectorId, changes: Record<string, unknown>): Promise<Connector> {
     const row = this.row(id);
-    const merged = mergeConfig(JSON.parse(row.config) as Record<string, unknown>, changes);
+    const before = JSON.parse(row.config) as Record<string, unknown>;
+    const merged = mergeConfig(before, changes);
     const parsed = connectorConfigSchemas[id].safeParse(merged);
     if (!parsed.success) {
       const fields = [...new Set(parsed.error.issues.map((issue) => issue.path.join('.') || 'config'))];
       throw validationFailed(`invalid config: ${fields.join(', ')}`);
+    }
+    if (id === ConnectorId.CloudWatchLogs) {
+      const next = parsed.data as CloudWatchConfig;
+      assertUniqueServices(next.log_groups);
     }
     this.store.write((tx) => {
       tx.update(connectors)
@@ -102,16 +108,36 @@ export class ConnectorsService implements OnModuleDestroy {
         .where(eq(connectors.id, id))
         .run();
     });
+    if (id === ConnectorId.CloudWatchLogs && row.status === HealthStatus.Ok) {
+      const next = parsed.data as CloudWatchConfig;
+      if (next.profile !== before.profile || next.region !== before.region) {
+        await this.registerCloudWatch(next);
+        await this.check(id);
+      }
+    }
     return this.get(id);
+  }
+
+  /** The log groups the profile sees in the region, for the picker; the Connector's own when none are given. */
+  async cloudWatchLogGroups(chosen: { profile?: string; region?: string }): Promise<string[]> {
+    const stored = cloudWatchLogsConfig(this.store.db);
+    const profile = chosen.profile?.trim() || stored.profile;
+    const region = chosen.region?.trim() || stored.region;
+    if (profile === '' || region === '') throw validationFailed('an AWS profile and a region are required');
+    this.assertAwsNames(profile, region);
+    await this.requireTools(['aws']);
+    return this.tools.awsLogGroups(profile, region);
   }
 
   /**
    * Starts the provider's own browser sign-in and answers at once. `sign_in` holds what the browser step needs until it
    * ends; `connection.checked` reports each change and the result.
    */
-  async connect(id: ConnectorId, input: { folder?: string } = {}): Promise<void> {
+  async connect(id: ConnectorId, input: ConnectInput = {}): Promise<void> {
     // The Log folder has no sign-in: choosing it connects, or is refused, before this answers.
     if (id === ConnectorId.OtelLogs) return this.chooseFolder(input.folder);
+    // A profile that is already signed in connects before this answers; any other waits on its sign-in below.
+    if (id === ConnectorId.CloudWatchLogs && (await this.prepareCloudWatch(input))) return;
     this.signIns.get(id)?.abort();
     const abort = new AbortController();
     this.signIns.set(id, abort);
@@ -189,6 +215,69 @@ export class ConnectorsService implements OnModuleDestroy {
         .run();
     });
     return this.get(id);
+  }
+
+  /** Throws `tool_missing` for the first of `commands` not on the PATH. The console installs neither. */
+  private async requireTools(commands: ('aws' | 'uvx')[]): Promise<void> {
+    for (const command of commands) {
+      if (!(await this.tools.installed(command))) {
+        throw new ApiError(422, ErrorCode.ToolMissing, missingToolMessage(command));
+      }
+    }
+  }
+
+  private assertAwsNames(profile: string, region: string): void {
+    const parsed = connectorConfigSchemas[ConnectorId.CloudWatchLogs]
+      .pick({ profile: true, region: true })
+      .safeParse({ profile, region });
+    if (!parsed.success) throw validationFailed('invalid AWS profile or region');
+  }
+
+  /** Throws `log_group_not_found` naming the first picked group the profile does not see. */
+  private async assertGroupsExist(profile: string, region: string, picked: LogGroupPick[]): Promise<void> {
+    if (picked.length === 0) return;
+    const have = new Set(await this.tools.awsLogGroups(profile, region));
+    const gone = picked.find((group) => !have.has(group.name));
+    if (gone) throw new ApiError(422, ErrorCode.LogGroupNotFound, `Log group ${gone.name} was not found in ${region}`);
+  }
+
+  /** Registers AWS's CloudWatch server with the profile and region in its environment; again when they changed. */
+  private async registerCloudWatch({ profile, region }: { profile: string; region: string }): Promise<void> {
+    const base = CONNECTOR_SERVERS[ConnectorId.CloudWatchLogs] as McpSpec;
+    const target = `env AWS_PROFILE=${profile} AWS_REGION=${region} FASTMCP_LOG_LEVEL=ERROR ${base.target}`;
+    const found = await this.mcp.find(base.name);
+    // A server of this name that is not the AWS Labs one is the operator's own: never replaced.
+    if (found?.registered && !found.target.endsWith(base.target)) {
+      throw new ApiError(409, ErrorCode.Duplicate, `${base.name} is already used`);
+    }
+    if (found?.registered && found.target !== target) {
+      await this.mcp.remove(base.name).catch(ignoreMissing);
+      await this.mcp.settled();
+    }
+    await this.mcp.ensureRegistered({ ...base, target });
+  }
+
+  /**
+   * Stores the pane's profile, region and groups after the checks that need no sign-in, and connects at once when the
+   * profile is already signed in. True when connected; false leaves the sign-in to Connect.
+   */
+  private async prepareCloudWatch(input: ConnectInput): Promise<boolean> {
+    await this.requireTools(['aws', 'uvx']);
+    const stored = cloudWatchLogsConfig(this.store.db);
+    const profile = input.profile?.trim() || stored.profile;
+    const region = input.region?.trim() || stored.region;
+    if (profile === '') throw validationFailed('an AWS profile is required');
+    if (region === '') throw validationFailed('an AWS region is required');
+    this.assertAwsNames(profile, region);
+    const picked = input.log_groups ?? stored.log_groups;
+    assertUniqueServices(picked);
+    const signedIn = await this.tools.awsSignedIn(profile);
+    if (signedIn) await this.assertGroupsExist(profile, region, picked);
+    await this.update(ConnectorId.CloudWatchLogs, { profile, region, log_groups: picked });
+    if (!signedIn) return false;
+    await this.registerCloudWatch({ profile, region });
+    this.record(ConnectorId.CloudWatchLogs, cloudWatchReading(profile));
+    return true;
   }
 
   /** Connects the Log folder: `folder`, or the one kept from before. Refused with `folder_not_found`, nothing stored. */
@@ -307,6 +396,21 @@ export class ConnectorsService implements OnModuleDestroy {
         if (!signal.aborted) this.record(id, serverReading(found, config));
         return;
       }
+      case ConnectorId.CloudWatchLogs: {
+        const settings = cloudWatchLogsConfig(this.store.db);
+        // Only an Identity Center profile has a browser sign-in; any other one is signed in with `aws login`.
+        if (!(await this.tools.awsIsSso(settings.profile)))
+          throw new ApiError(409, ErrorCode.InvalidState, signedOutDetail(settings.profile));
+        await this.tools.awsLogin(settings.profile, signal, onPrompt);
+        if (signal.aborted) return;
+        if (!(await this.tools.awsSignedIn(settings.profile))) {
+          throw new ApiError(409, ErrorCode.InvalidState, 'AWS did not finish signing in');
+        }
+        await this.assertGroupsExist(settings.profile, settings.region, settings.log_groups);
+        if (signal.aborted) return;
+        await this.registerCloudWatch(settings);
+        return this.landed(id, signal, cloudWatchReading(settings.profile));
+      }
       case ConnectorId.GoogleDocs:
       case ConnectorId.GoogleSheets:
       case ConnectorId.GoogleDrive: {
@@ -388,7 +492,10 @@ export class ConnectorsService implements OnModuleDestroy {
   private fail(id: ConnectorId, error: unknown): void {
     this.logger.warn(`${id} sign-in did not finish`);
     const detail = error instanceof ApiError ? error.message : 'the sign-in did not finish';
-    this.record(id, { status: HealthStatus.Auth, detail, accountLabel: null, login: null });
+    // A picked group that is gone, or a server name already used, is a Connector that is down, not one that needs signing in.
+    const down =
+      error instanceof ApiError && (error.code === ErrorCode.LogGroupNotFound || error.code === ErrorCode.Duplicate);
+    this.record(id, { status: down ? HealthStatus.Fail : HealthStatus.Auth, detail, accountLabel: null, login: null });
   }
 
   private async read(id: ConnectorId, row: Row): Promise<Reading> {
@@ -408,6 +515,23 @@ export class ConnectorsService implements OnModuleDestroy {
       }
       case ConnectorId.OtelLogs:
         return folderReading(config.folder ?? '');
+      case ConnectorId.CloudWatchLogs: {
+        const profile = config.profile ?? '';
+        const down = (detail: string): Reading => ({
+          status: HealthStatus.Fail,
+          detail,
+          accountLabel: null,
+          login: null,
+        });
+        if (!(await this.tools.installed('aws'))) return down(missingToolMessage('aws'));
+        if (profile === '') return down('No AWS profile chosen');
+        if (await this.tools.awsSignedIn(profile)) return cloudWatchReading(profile);
+        return signedOut(
+          (await this.tools.awsIsSso(profile))
+            ? `The AWS session for ${profile} has expired. Connect to sign in again.`
+            : signedOutDetail(profile),
+        );
+      }
       case ConnectorId.Github: {
         const login = await this.tools.githubUser();
         return login === null
@@ -594,6 +718,43 @@ async function folderReading(folder: string): Promise<Reading> {
   return listed
     ? { status: HealthStatus.Ok, detail: null, accountLabel: folder, login: null }
     : down('Folder not readable');
+}
+
+type CloudWatchConfig = ReturnType<typeof cloudWatchLogsConfig>;
+
+/** What the pane's Connect sends. The Log folder takes `folder`; CloudWatch logs takes the other three. */
+export type ConnectInput = { folder?: string; profile?: string; region?: string; log_groups?: LogGroupPick[] };
+
+const INSTALL: Record<'aws' | 'uvx', string> = {
+  aws: 'the AWS CLI with `brew install awscli`',
+  uvx: 'uv with `brew install uv`',
+};
+
+function missingToolMessage(command: 'aws' | 'uvx'): string {
+  return `${command} is not installed: install ${INSTALL[command]}, then Connect again`;
+}
+
+function signedOutDetail(profile: string): string {
+  return `AWS profile ${profile} is signed out. Run \`aws login --profile ${profile}\`, then Connect again.`;
+}
+
+const cloudWatchReading = (profile: string): Reading => ({
+  status: HealthStatus.Ok,
+  detail: null,
+  accountLabel: profile,
+  login: null,
+});
+
+/** Two picked groups with one Service name and env would be one Service. */
+function assertUniqueServices(picked: LogGroupPick[]): void {
+  const seen = new Set<string>();
+  for (const { service, env } of picked) {
+    const key = JSON.stringify([service, env]);
+    if (seen.has(key)) {
+      throw new ApiError(422, ErrorCode.DuplicateService, `Two log groups are the Service ${service} in ${env}`);
+    }
+    seen.add(key);
+  }
 }
 
 function unreachable(error: unknown): Reading {

@@ -1,4 +1,4 @@
-import { ConnectorId, ErrorCode } from '@ops-console/shared';
+import { ErrorCode, LOG_SOURCES } from '@ops-console/shared';
 import { z } from 'zod';
 import { BrandIcon, CONNECTOR_BRAND } from '../components/ui/brand-icon';
 import { Empty } from '../components/ui/empty';
@@ -7,7 +7,7 @@ import { ApiError } from '../lib/api';
 import { useAlert, useConnectors, useServices } from '../lib/queries';
 import { useAddress, useStored } from '../lib/remember';
 import { AlertView } from './alert-view';
-import { connectedSources, downSources, useSourceFilter } from './log-source';
+import { CONNECT_A_SOURCE, connectedSources, downSources, useSourceFilter } from './log-source';
 import { LogsPane } from './logs-pane';
 import { useScanScope } from './scan-scope';
 import { ServicesPane } from './services-pane';
@@ -33,9 +33,10 @@ export function MonitorView() {
     return (
       <Empty>
         <span className="flex items-center gap-2.5">
-          <BrandIcon brand={CONNECTOR_BRAND[ConnectorId.Datadog]} size="sm" />
-          <BrandIcon brand={CONNECTOR_BRAND[ConnectorId.OtelLogs]} size="sm" />
-          Connect Datadog or OpenTelemetry logs in Integrations.
+          {LOG_SOURCES.map((one) => (
+            <BrandIcon key={one} brand={CONNECTOR_BRAND[one]} size="sm" />
+          ))}
+          {CONNECT_A_SOURCE}.
         </span>
       </Empty>
     );

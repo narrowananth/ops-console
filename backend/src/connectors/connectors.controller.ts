@@ -1,12 +1,24 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post } from '@nestjs/common';
-import { type Connector, type ConnectorCheck, ConnectorId, updateConnectorSchema } from '@ops-console/shared';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  type Connector,
+  type ConnectorCheck,
+  ConnectorId,
+  logGroupSchema,
+  updateConnectorSchema,
+} from '@ops-console/shared';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
 import { ConnectorsService } from './connectors.service';
 
 const idParams = z.object({ id: z.enum(ConnectorId) });
-/** Only the Log folder Connector takes anything: the folder it reads. */
-const connectBody = z.object({ folder: z.string().optional() });
+/** The Log folder Connector takes its folder; CloudWatch logs takes its profile, region and picked groups. */
+const connectBody = z.object({
+  folder: z.string().optional(),
+  profile: z.string().optional(),
+  region: z.string().optional(),
+  log_groups: z.array(logGroupSchema).optional(),
+});
+const logGroupsQuery = z.object({ profile: z.string().optional(), region: z.string().optional() });
 
 @Controller('connectors')
 export class ConnectorsController {
@@ -15,6 +27,13 @@ export class ConnectorsController {
   @Get()
   list() {
     return this.connectors.list();
+  }
+
+  /** The log groups of a profile and region, for the CloudWatch picker; the Connector's own when none are given. */
+  @Get('cloudwatch_logs/log-groups')
+  async logGroups(@Query() query: unknown): Promise<{ data: { name: string }[]; meta: { next_cursor: null } }> {
+    const names = await this.connectors.cloudWatchLogGroups(parseInput(logGroupsQuery, query, 'query'));
+    return { data: names.map((name) => ({ name })), meta: { next_cursor: null } };
   }
 
   @Patch(':id')
