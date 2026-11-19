@@ -18,6 +18,8 @@ curl -fsSL https://raw.githubusercontent.com/narrowananth/ops-console/main/insta
 
 A shell running under Rosetta on an Apple silicon Mac installs the Apple silicon build.
 
+If the installer or `ops-console start` fails, see [Troubleshooting](/docs/troubleshooting/).
+
 ### With Homebrew
 
 ```

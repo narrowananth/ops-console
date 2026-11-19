@@ -23,7 +23,7 @@ Small items for first-run friction. None conflicts with an ADR.
 A user in any timezone should get from install to a first verified alert without asking anyone.
 
 - A sample repo with a failing route and mock Datadog alerts, so a new user can try the verify, review, fix and PR flow without production data.
-- A troubleshooting guide on the docs site, covering the install, Keychain and sandbox failures people hit.
+- A troubleshooting guide on the docs site, covering the install, Keychain and sandbox failures people hit. Spec: [troubleshooting-guide](specs/troubleshooting-guide.md).
 - A short video walkthrough of the same flow.
 
 ## 3. More monitoring sources
