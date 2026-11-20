@@ -2,7 +2,7 @@ import type { BrowserServerMessage, Tab } from '@ops-console/shared';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useChooseFiles } from '../lib/queries';
 import { createPainter } from './frame-painter';
-import { fillSize, fitScale, isFill, pageSize, type Size, toPagePoint } from './geometry';
+import { clampRatio, fillSize, fitScale, isFill, type Size, toPagePoint } from './geometry';
 import { buttonName, isPasteShortcut, keyMessage, modifiersOf, wheelPixels } from './input';
 import { usePageStream } from './use-page-stream';
 
@@ -42,7 +42,7 @@ export function PageStage({
   const stage = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [box, setBox] = useState<Size>({ width: 0, height: 0 });
-  const [frame, setFrame] = useState<Size | null>(null);
+  const [framePage, setFramePage] = useState<Size | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const fill = isFill(tab.viewport);
   const choose = useChooseFiles();
@@ -52,7 +52,7 @@ export function PageStage({
     () =>
       createPainter(
         () => canvas.current,
-        (size) => setFrame(size),
+        (size) => setFramePage(size),
       ),
     [],
   );
@@ -86,15 +86,18 @@ export function PageStage({
     if (!connected || !fill) return;
     const size = fillSize({ width: box.width, height: box.height });
     if (!size) return;
-    const timer = setTimeout(() => send({ type: 'resize', ...size }), RESIZE_WAIT_MS);
+    const timer = setTimeout(
+      () => send({ type: 'resize', ...size, dpr: clampRatio(window.devicePixelRatio) }),
+      RESIZE_WAIT_MS,
+    );
     return () => clearTimeout(timer);
   }, [connected, fill, box.width, box.height, send]);
 
-  const page: Size | null = frame
-    ? pageSize(tab.viewport, frame)
-    : tab.viewport.width !== null && tab.viewport.height !== null
+  const page: Size | null =
+    framePage ??
+    (tab.viewport.width !== null && tab.viewport.height !== null
       ? { width: tab.viewport.width, height: tab.viewport.height }
-      : null;
+      : null);
   const pageRef = useRef(page);
   pageRef.current = page;
 
@@ -304,6 +307,14 @@ export function PageStage({
             Cancel
           </button>
           {choose.isError && <span role="alert">{choose.error.message}</span>}
+        </div>
+      )}
+      {framePage !== null && !connected && (
+        <div
+          role="status"
+          className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 rounded-full bg-neutral-900 px-3.5 py-1.5 text-xs text-bg shadow-md"
+        >
+          Lost the page. Reconnecting; clicks and keys are not sent.
         </div>
       )}
       {notice && (

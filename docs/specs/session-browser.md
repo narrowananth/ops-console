@@ -37,8 +37,8 @@ adds the same to a Session.
    a download is refused and says so. A file picker the page opens shows as a bar over the page with "Choose from this computer"
    and Cancel; the chosen files go to the page by their own names, and the page cannot read any other file.
 7. Device menu: Fill (the panel's size, default), phone, tablet and desktop presets, a custom width and height, and rotate.
-   A preset sets the page's size and device pixel ratio; the panel scales it down to fit. The choice is kept per tab until
-   the tab closes.
+   A preset sets the page's size and device pixel ratio; the panel scales it down to fit. Fill takes the panel's pixel
+   ratio, so text is sharp on a Retina screen. The choice is kept per tab until the tab closes.
 8. A tab with no server on its port says "Nothing is listening on :5173" with Reload. A page that fails or crashes shows
    the error and Reload; the other tabs go on.
 9. Each Session has its own cookies, local storage and cache, kept for as long as the Session exists and gone when it is
@@ -101,7 +101,7 @@ adds the same to a Session.
 23. The browser tools ask for no Approval except `browser_evaluate`, which asks in every Access mode but `full` and shows the script.
     Each call is an Action Log row.
 24. `browser_snapshot` returns the page as an accessibility tree with a reference per element; click, type and press take
-    that reference. `browser_screenshot` returns an image in the transcript and saves nothing else. `browser_console` and
+    that reference. `browser_screenshot` returns an image at the page's CSS size, whatever the viewer's screen, in the transcript and saves nothing else. `browser_console` and
     `browser_network` return the last 200 entries of the tab, redacted as an Action Log row is.
 25. While the agent acts, the panel shows "Agent is using this tab". The operator's own input goes through at once and the
     agent's next call sees the changed page. A Stop on the run ends the call in flight.
@@ -124,7 +124,8 @@ adds the same to a Session.
     Session closes its tabs and stops its processes. The daemon exiting kills Chrome. A daemon start finds no Chrome of a
     previous run.
 31. Two browsers open on one Session see the same tabs and terminals. A tab shows the size of whichever browser sent input
-    last.
+    last. A browser that takes over sends its first click, key or scroll to the page it was shown; the page takes its size
+    after that.
 32. A reload of the console page reopens the panel and the dock on the same tabs and processes. A daemon restart closes both;
     the panel opens blank and the dock lists the processes as stopped, with Restart.
 
@@ -152,6 +153,9 @@ adds the same to a Session.
   the operator starts one, or approves the agent's command each time. `allowLocalBinding` is not added to the sandbox.
 - **Stream**: frames go to the panel over a WebSocket of their own, `/browser/:tabId`, behind the same token check as
   `/terminals/:id`. Input comes back on it. Process output has its own, `/processes/:id`. `/ws` is untouched.
+- **Sharp frames**: Chrome's screencast makes no frame with more pixels than its screen has, and a headless screen is 1x.
+  Chrome starts with `--force-device-scale-factor=2`, so a Retina panel gets 2x frames. Each tab sets its own device scale,
+  so a page still lays out at its CSS size and a 1x viewer's frames stay at 1x.
 - **Isolation**: one Chrome and one profile folder per Session, tabs inside it, so a Session's cookies survive its Chrome exiting and no two Sessions share one.
 - **Local servers**: read with `lsof` for listening TCP sockets on loopback, each process's folder, and the processes under
   the Session's own; only the Session's are returned.
@@ -261,8 +265,10 @@ Stops the server on `port` when it is this Session's. 204. 404 `not_found` for a
 
 ### WebSocket `/browser/:tabId`
 
-Raw stream behind the token. Server to client: a binary message per frame (width and height as two big-endian uint32, then the JPEG), `tab` (a changed `tab`; it carries
-`called_hosts` and `agent_active`), `dialog`. Client to server: `input` (pointer, key, wheel, text), `resize`, `focus`. `closed` then the socket closes.
+Raw stream behind the token. Server to client: a binary message per frame (the page's CSS width and height as two big-endian uint32, then the JPEG, which has
+those sizes times the page's device scale), `tab` (a changed `tab`; it carries `called_hosts` and `agent_active`), `dialog`.
+Client to server: `input` (pointer, key, wheel, text), `resize` (`width`, `height`, and `dpr`, 1 to 3, default 1: the viewer's
+pixels per CSS pixel, which a Fill page takes as its device scale), `focus`. `closed` then the socket closes.
 
 ### WebSocket `/processes/:id`
 
@@ -277,7 +283,8 @@ process }`), `process.removed` (`{ session_id, process_id }`), so the Browser bu
 ## UI
 
 The Browser panel, the Terminals dock, the Browser and Terminals buttons in the Session header (Workspace). States: no
-Chrome, loading, blank tab with the Local servers list, no server for the Session, called hosts, crashed, "Agent is using this tab";
+Chrome, loading, blank tab with the Local servers list, no server for the Session, called hosts, crashed, "Agent is using this tab",
+the page stream lost (a notice over the last frame while the panel reconnects);
 the dock with no process, a running one, an exited one, an Approval card for the agent's `start_process`. The link menu holds
 "In the console" and "In the external browser". Departure: neither design file has a browser or a dock, so the mock is new
 (`design/session-browser.html`).

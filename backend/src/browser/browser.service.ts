@@ -41,6 +41,8 @@ const LAUNCH_ARGS = [
   '--disable-default-apps',
   '--disable-features=Translate,MediaRouter,OptimizationHints',
   '--password-store=basic',
+  // A headless screen is 1x and screencast frames never exceed it; 2x lets a Retina panel get 2x frames.
+  '--force-device-scale-factor=2',
 ];
 const CHROME_STOPPED = 'Chrome stopped. Close this tab and open a new one.';
 
