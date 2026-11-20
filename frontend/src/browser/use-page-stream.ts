@@ -11,7 +11,7 @@ import { sessionToken } from '../lib/session';
 const RECONNECT_MIN_MS = 500;
 const RECONNECT_MAX_MS = 5000;
 
-/** A page frame: the size it was drawn at and its JPEG. */
+/** A page frame: the page's CSS size and its JPEG, which has more pixels than that on a sharp screen. */
 export type PageFrame = { width: number; height: number; jpeg: Uint8Array<ArrayBuffer> };
 
 /**

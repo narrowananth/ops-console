@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
+import { type APIRequestContext, expect, type Page, test, type WebSocketRoute } from '@playwright/test';
 import { DAEMON_FILE } from './global-setup';
 
 const daemon: { url: string; token: string } = JSON.parse(readFileSync(DAEMON_FILE, 'utf8'));
@@ -37,6 +37,14 @@ test.beforeAll(async () => {
       '/': ['text/html', PAGE],
       '/app.css': ['text/css', 'body { background: rgb(255, 247, 237); }'],
       '/app.js': ['text/javascript', JS],
+      '/corners': [
+        'text/html',
+        `<!doctype html><title>Corners</title><style>body { margin: 0 } button { position: fixed; width: 60px; height: 60px }
+#tl { left: 0; top: 0 } #tr { right: 0; top: 0 } #bl { left: 0; bottom: 0 } #br { right: 0; bottom: 0 }
+#mid { left: 50%; top: 50%; width: 80px; height: 80px; margin: -40px 0 0 -40px }</style>
+<button id="tl"></button><button id="tr"></button><button id="bl"></button><button id="br"></button><button id="mid"></button>
+<script>for (const b of document.querySelectorAll('button')) b.addEventListener('click', () => { document.title = 'hit-' + b.id; });</script>`,
+      ],
       '/upload': [
         'text/html',
         `<!doctype html><title>Upload</title><input id="f" type="file" style="display:none">
@@ -104,6 +112,97 @@ test('a Session shows the page the operator opens, takes input on it, and lists 
 
   // Nothing is blocked: the host the page called is listed.
   await expect(panel.getByText(/Called:.*assets\.example\.invalid/)).toBeVisible();
+});
+
+test('a dropped page stream says so while the last frame stays, and the notice goes when the stream returns', async ({
+  page,
+  request,
+}) => {
+  needsChrome();
+  // The viewer's socket is routed through the test, so it can be cut and refused, then let through again.
+  const open: WebSocketRoute[] = [];
+  let refusing = false;
+  await page.routeWebSocket(/\/browser\//, (route) => {
+    if (refusing) return void route.close();
+    route.connectToServer();
+    open.push(route);
+  });
+  await openSession(page, await newSession(request));
+  await browserButton(page).click();
+  const panel = page.getByRole('complementary', { name: 'Browser' });
+  await panel.getByRole('textbox', { name: 'Address' }).fill(origin);
+  await panel.getByRole('textbox', { name: 'Address' }).press('Enter');
+  await expect(panel.getByRole('tab', { name: /Dev shop/ })).toBeVisible({ timeout: 30_000 });
+  const lost = panel.getByRole('status').filter({ hasText: 'Reconnecting' });
+  await expect(lost).toHaveCount(0);
+
+  // A click answered by the page shows a frame was drawn and the stream carries input.
+  const box = await panel.locator('canvas').boundingBox();
+  if (!box) throw new Error('the page is not drawn');
+  await expect(async () => {
+    await page.mouse.click(box.x + 80, box.y + 50);
+    await expect(panel.getByRole('tab', { name: /clicks: \d/ })).toBeVisible({ timeout: 3000 });
+  }).toPass({ timeout: 20_000 });
+
+  refusing = true;
+  for (const route of open.splice(0)) await route.close();
+  await expect(lost).toBeVisible();
+  refusing = false;
+  await expect(lost).toHaveCount(0, { timeout: 15_000 });
+});
+
+test.describe('on a Retina screen', () => {
+  test.use({ deviceScaleFactor: 2 });
+
+  test('the page is drawn at twice the pixels on a canvas of the stage size, and clicks at the corners and the centre land (7)', async ({
+    page,
+    request,
+  }) => {
+    needsChrome();
+    await openSession(page, await newSession(request));
+    await browserButton(page).click();
+    const panel = page.getByRole('complementary', { name: 'Browser' });
+    await panel.getByRole('textbox', { name: 'Address' }).fill(`${origin}/corners`);
+    await panel.getByRole('textbox', { name: 'Address' }).press('Enter');
+    await expect(panel.getByRole('tab', { name: /Corners/ })).toBeVisible({ timeout: 30_000 });
+
+    const canvas = panel.locator('canvas');
+    const measure = () =>
+      canvas.evaluate((node: HTMLCanvasElement) => ({
+        pixels: { width: node.width, height: node.height },
+        css: { width: node.clientWidth, height: node.clientHeight },
+        stage: { width: node.parentElement?.clientWidth, height: node.parentElement?.clientHeight },
+      }));
+    // The frame is drawn at its own pixels, and the canvas stays the stage's CSS size.
+    await expect
+      .poll(
+        async () => {
+          const { pixels, css } = await measure();
+          return pixels.width === css.width * 2 && pixels.height === css.height * 2;
+        },
+        { timeout: 20_000 },
+      )
+      .toBe(true);
+    const size = await measure();
+    expect(size.css).toEqual(size.stage);
+
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error('the page is not drawn');
+    const at: [string, number, number][] = [
+      ['tl', 20, 20],
+      ['tr', box.width - 20, 20],
+      ['bl', 20, box.height - 20],
+      ['br', box.width - 20, box.height - 20],
+      ['mid', box.width / 2, box.height / 2],
+    ];
+    // The page may still be loading its script, so the first click repeats until it answers.
+    for (const [id, x, y] of at) {
+      await expect(async () => {
+        await page.mouse.click(box.x + x, box.y + y);
+        await expect(panel.getByRole('tab', { name: `hit-${id}` })).toBeVisible({ timeout: 2000 });
+      }).toPass({ timeout: 20_000 });
+    }
+  });
 });
 
 test('a port with no server says so (8)', async ({ page, request }) => {

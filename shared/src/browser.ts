@@ -171,14 +171,17 @@ export const browserClientMessageSchema = z.discriminatedUnion('type', [
     type: z.literal('resize'),
     width: z.number().int().min(100).max(3840),
     height: z.number().int().min(100).max(3840),
+    /** The viewer's device pixels per CSS pixel: a Fill page is drawn at it, so a sharp screen gets sharp frames. */
+    dpr: z.number().min(1).max(3).default(1),
   }),
   z.object({ type: z.literal('focus') }),
 ]);
 export type BrowserClientMessage = z.infer<typeof browserClientMessageSchema>;
 
 /**
- * Daemon to browser panel, as JSON text. A page frame is not here: it is a binary message, `FRAME_HEADER_BYTES` of
- * width and height (two big-endian uint32) and then the JPEG.
+ * Daemon to browser panel, as JSON text. A page frame is not here: it is a binary message, `FRAME_HEADER_BYTES` of the
+ * page's CSS width and height (two big-endian uint32) and then the JPEG, which has that many pixels times the page's
+ * device scale.
  */
 export const browserServerMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('tab'), tab: tabSchema }),
@@ -189,7 +192,7 @@ export type BrowserServerMessage = z.infer<typeof browserServerMessageSchema>;
 
 export const FRAME_HEADER_BYTES = 8;
 
-/** The size a frame's page was drawn at, as the first bytes of its binary message. */
+/** The CSS size of a frame's page, as the first bytes of its binary message. */
 export function frameHeader(width: number, height: number): Uint8Array {
   const header = new Uint8Array(FRAME_HEADER_BYTES);
   const view = new DataView(header.buffer);
@@ -198,7 +201,7 @@ export function frameHeader(width: number, height: number): Uint8Array {
   return header;
 }
 
-/** The size at the start of a binary frame message and where its JPEG begins. */
+/** The page size at the start of a binary frame message and where its JPEG begins. */
 export function readFrameHeader(
   message: ArrayBuffer,
 ): { width: number; height: number; jpeg: Uint8Array<ArrayBuffer> } | null {

@@ -52,8 +52,9 @@ function within<T>(ms: number, work: Promise<T>): Promise<T> {
 }
 /** Navigation events that arrive together are read once. */
 const READ_WAIT_MS = 150;
+type Fill = { width: number; height: number; dpr: number };
 /** Until a viewer reports its size. */
-const FILL_SIZE = { width: 1280, height: 800 };
+const FILL_SIZE: Fill = { width: 1280, height: 800, dpr: 1 };
 
 export type ConsoleEntry = { type: string; text: string };
 export type NetworkEntry = { method: string; url: string; status: number | null };
@@ -111,17 +112,17 @@ export function describeFailure(text: string, url: string): string | null {
   );
 }
 
-/** The size, scale and touch mode a viewport asks for; `fill` is the panel's own size. */
 const conflict = (message: string): ApiError => new ApiError(409, ErrorCode.InvalidState, message);
 
-function effective(viewport: Viewport, fill: { width: number; height: number }) {
+/** The size, scale and touch mode a viewport asks for; `fill` is the panel's own size and pixel ratio. */
+function effective(viewport: Viewport, fill: Fill) {
   const preset = VIEWPORT_PRESETS.find((p) => p.id === viewport.preset);
   const base =
     preset ??
     (viewport.width && viewport.height
       ? { width: viewport.width, height: viewport.height, scale: viewport.scale }
       : null);
-  if (!base) return { ...fill, scale: 1, mobile: false };
+  if (!base) return { width: fill.width, height: fill.height, scale: fill.dpr, mobile: false };
   const [width, height] = viewport.rotated ? [base.height, base.width] : [base.width, base.height];
   return { width, height, scale: base.scale, mobile: /^(iphone|pixel)/.test(viewport.preset ?? '') };
 }
@@ -147,12 +148,15 @@ export class BrowserTab {
   dead = false;
   private agentCalls = 0;
   private buttons = 0;
-  private size = FILL_SIZE;
+  /** The page's CSS size and the device scale its frames are drawn at. */
+  private size = { width: FILL_SIZE.width, height: FILL_SIZE.height, scale: FILL_SIZE.dpr };
   private fill = FILL_SIZE;
   /** Screenshots and size changes take turns: a screenshot restores the size it found when it finishes. */
   private sizing: Promise<unknown> = Promise.resolve();
   private lastInput: WebSocket | null = null;
-  private readonly viewerSizes = new Map<WebSocket, { width: number; height: number }>();
+  /** The size of a viewer that just took the tab, held until its first press, release, wheel or key has gone to the page it saw. */
+  private takeover: Fill | null = null;
+  private readonly viewerSizes = new Map<WebSocket, Fill>();
   private screencasting = false;
   private reading: NodeJS.Timeout | undefined;
   private inputQueue: Promise<void> = Promise.resolve();
@@ -444,9 +448,9 @@ export class BrowserTab {
       }),
       this.cdp.send('Emulation.setTouchEmulationEnabled', { enabled: mobile, maxTouchPoints: 5 }),
     ]);
-    const resized = width !== this.size.width || height !== this.size.height;
-    this.size = { width, height };
-    // Frames are capped at the page's size, so a new size needs a screencast that knows it.
+    const resized = width !== this.size.width || height !== this.size.height || scale !== this.size.scale;
+    this.size = { width, height, scale };
+    // Frames are capped at the page's size in device pixels, so a new size or scale needs a screencast that knows it.
     if (resized && this.screencasting) {
       await this.cdp.send('Page.stopScreencast').catch(() => {});
       await this.startScreencast();
@@ -462,8 +466,12 @@ export class BrowserTab {
     for (const viewer of only ? [only] : this.viewers) if (viewer.readyState === WebSocket.OPEN) viewer.send(text);
   }
 
-  /** A frame is binary: its size, then the JPEG. It resolves once the viewers it went to took it. */
-  private async sendFrame(base64: string, size = this.size, only?: WebSocket): Promise<void> {
+  /** A frame is binary: the page's CSS size, then the JPEG. It resolves once the viewers it went to took it. */
+  private async sendFrame(
+    base64: string,
+    size: { width: number; height: number } = this.size,
+    only?: WebSocket,
+  ): Promise<void> {
     const header = frameHeader(size.width, size.height);
     const jpeg = Buffer.from(base64, 'base64');
     const packet = Buffer.concat([header, jpeg]);
@@ -511,7 +519,10 @@ export class BrowserTab {
   /** The page as a base64 JPEG for the agent. Through CDP because Playwright's own screenshot clears the size the panel set. */
   capture(): Promise<string> {
     return this.turn(async () => {
-      const { data } = await this.cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: SHOT_QUALITY });
+      // At the page's CSS size whatever the viewer's screen, so the agent's image does not grow with a Retina panel.
+      const { width, height, scale } = this.size;
+      const clip = { x: 0, y: 0, width, height, scale: 1 / scale };
+      const { data } = await this.cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: SHOT_QUALITY, clip });
       return data;
     });
   }
@@ -519,7 +530,10 @@ export class BrowserTab {
   async detach(viewer: WebSocket): Promise<void> {
     this.viewers.delete(viewer);
     this.viewerSizes.delete(viewer);
-    if (this.lastInput === viewer) this.lastInput = null;
+    if (this.lastInput === viewer) {
+      this.lastInput = null;
+      this.takeover = null;
+    }
     if (this.viewers.size === 0 && this.screencasting && !this.dead) {
       this.screencasting = false;
       await this.cdp.send('Page.stopScreencast').catch(() => {});
@@ -531,10 +545,10 @@ export class BrowserTab {
     await this.cdp.send('Page.startScreencast', {
       format: 'jpeg',
       quality: FRAME_QUALITY,
-      // The panel draws a page at its CSS size, so a larger frame (a phone preset's device pixels) is only bytes.
-      maxWidth: this.size.width,
-      maxHeight: this.size.height,
-      everyNthFrame: 2,
+      maxWidth: Math.round(this.size.width * this.size.scale),
+      maxHeight: Math.round(this.size.height * this.size.scale),
+      // Every frame: skipping any caps the page at 30 fps.
+      everyNthFrame: 1,
     });
   }
 
@@ -547,7 +561,8 @@ export class BrowserTab {
   // Input from a viewer
 
   async input(viewer: WebSocket, message: BrowserClientMessage): Promise<void> {
-    if (message.type === 'resize') return this.resize(viewer, message.width, message.height);
+    if (message.type === 'resize')
+      return this.resize(viewer, { width: message.width, height: message.height, dpr: message.dpr });
     this.takeInput(viewer);
     if (message.type === 'focus') return;
     if (message.type === 'mouse' && message.action === 'move') {
@@ -579,6 +594,8 @@ export class BrowserTab {
           ...(typed ? { text } : {}),
         });
       }
+      // A press that is not yet released must not see the page change under it.
+      if (!(message.type === 'mouse' && message.action === 'down')) this.applyTakeover();
     });
   }
 
@@ -619,22 +636,33 @@ export class BrowserTab {
     await sent;
   }
 
-  /** The tab shows the size of the viewer that sent input last. */
+  /**
+   * The tab shows the size of the viewer that sent input last. A viewer that takes over aimed at the page it was shown,
+   * so its first press and release go to that page and the page takes the viewer's size after them.
+   */
   private takeInput(viewer: WebSocket): void {
     if (this.lastInput === viewer) return;
     this.lastInput = viewer;
-    const size = this.viewerSizes.get(viewer);
-    if (size) void this.fillTo(size.width, size.height);
+    this.takeover = this.viewerSizes.get(viewer) ?? null;
   }
 
-  private async resize(viewer: WebSocket, width: number, height: number): Promise<void> {
-    this.viewerSizes.set(viewer, { width, height });
+  private applyTakeover(): void {
+    const size = this.takeover;
+    this.takeover = null;
+    if (size) void this.fillTo(size);
+  }
+
+  private async resize(viewer: WebSocket, size: Fill): Promise<void> {
+    this.viewerSizes.set(viewer, size);
     if (this.lastInput === null) this.lastInput = viewer;
-    if (this.lastInput === viewer) await this.fillTo(width, height);
+    if (this.lastInput === viewer) {
+      this.takeover = null;
+      await this.fillTo(size);
+    }
   }
 
-  private async fillTo(width: number, height: number): Promise<void> {
-    this.fill = { width, height };
+  private async fillTo(size: Fill): Promise<void> {
+    this.fill = size;
     const { preset, width: custom } = this.state.viewport;
     if (preset === null && custom === null) await this.applyMetrics().catch(() => {});
   }

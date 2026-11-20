@@ -48,6 +48,17 @@ document.getElementById('btn').addEventListener('click', () => { document.getEle
 console.log('hello token=abc123secretvalue');
 fetch('http://example.invalid/data').then(() => {}, () => { document.getElementById('fetch').textContent = 'handled'; });`;
 
+/** Two columns that sit at percentages of the window, so a window of another width puts them elsewhere. */
+const COLUMNS = `<!doctype html><title>Columns</title><style>
+body { margin: 0 } div { position: fixed; top: 0; height: 100vh } #a { left: 10%; width: 30% } #b { left: 60%; width: 30% }
+</style><div id="a"></div><div id="b"></div><p id="hit" style="position:fixed;bottom:0"></p>
+<script>document.addEventListener('click', (event) => { document.getElementById('hit').textContent = event.target.id || event.target.tagName; });</script>`;
+
+/** A page that never stops changing, so the stream sends screencast frames and not only the still of a settled page. */
+const SPIN = `<!doctype html><title>Spin</title><style>
+div { width: 120px; height: 120px; background: #36c; animation: turn 1s linear infinite } @keyframes turn { to { transform: rotate(360deg) } }
+</style><div></div>`;
+
 /** A dev server on a loopback port: a page with CSS and script that calls an outside host, and a few odd routes. */
 class DevServer {
   readonly hits: string[] = [];
@@ -80,6 +91,10 @@ class DevServer {
         );
       case '/blank':
         return send('text/html', '<title>Blank</title>');
+      case '/columns':
+        return send('text/html', COLUMNS);
+      case '/spin':
+        return send('text/html', SPIN);
       case '/dialogs':
         return send(
           'text/html',
@@ -424,6 +439,38 @@ describe.skipIf(!chromePath)('Session browser in a real Chrome', () => {
       expect(jpegSize(last.jpeg)).toEqual({ width: 360, height: 514 });
     });
 
+    it('draws the page at the pixel ratio its viewer reports, and at 1 when it reports none', async () => {
+      const created = await openTab(h, session, `${dev.url}/spin`);
+      await settled(h, session, created.id);
+      const viewer = await watch(h.daemon, created.id);
+      const look = () => read<number[]>(h, session, created.id, '[innerWidth, innerHeight, devicePixelRatio]');
+      // The page moves, so what arrives is a run of screencast frames: ten in a row with the expected pixels.
+      const frames = (width: number, height: number) =>
+        until(
+          () =>
+            viewer.frames
+              .slice(-10)
+              .map((frame) => ({ pixels: jpegSize(frame.jpeg), page: [frame.width, frame.height] })),
+          (run) => run.length === 10 && run.every(({ pixels }) => pixels.width === width && pixels.height === height),
+          `frames of ${width}x${height} pixels`,
+        );
+
+      viewer.send({ type: 'resize', width: 780, height: 900 });
+      await until(look, (now) => now[0] === 780 && now[1] === 900, 'the page to take the viewer size');
+      expect(await look()).toEqual([780, 900, 1]);
+      await frames(780, 900);
+
+      // The page keeps its CSS size; its frames carry twice the pixels and say what size the page is.
+      viewer.send({ type: 'resize', width: 780, height: 900, dpr: 2 });
+      await until(look, (now) => now[2] === 2, 'the page to take the viewer pixel ratio');
+      expect(await look()).toEqual([780, 900, 2]);
+      const sharp = await frames(1560, 1800);
+      expect(sharp.map(({ page }) => page)).toEqual(Array(10).fill([780, 900]));
+      // The agent's screenshot stays at the page's CSS size whatever the viewer's screen.
+      const shot = await h.tools.screenshot(session, created.id);
+      expect(jpegSize(Buffer.from(shot.base64, 'base64'))).toEqual({ width: 780, height: 900 });
+    });
+
     it('sends frames, takes a resize and sends the page its mouse, keys and paste', async () => {
       const created = await openTab(h, session, dev.url);
       await settled(h, session, created.id);
@@ -444,6 +491,13 @@ describe.skipIf(!chromePath)('Session browser in a real Chrome', () => {
         () => read<number[]>(h, session, created.id, '[innerWidth, innerHeight]'),
         (size) => size[0] === 900 && size[1] === 700,
         'the page to take the viewer size',
+      );
+      // A person clicks after seeing the page at its new size. Chrome drops a click that comes before the page's first
+      // frame at that size.
+      await until(
+        () => viewer.frames.at(-1),
+        (frame) => frame?.width === 900 && frame.height === 700,
+        'a frame at the viewer size',
       );
 
       const at = async (id: string) => {
@@ -479,6 +533,31 @@ describe.skipIf(!chromePath)('Session browser in a real Chrome', () => {
         (value) => value === 'abcd',
         'the typing to reach the field',
       );
+    });
+
+    it('sends the first click of a viewer that takes over to the page it was shown, then gives the page its size', async () => {
+      const created = await openTab(h, session, `${dev.url}/columns`);
+      await settled(h, session, created.id);
+      const size = () => read<number[]>(h, session, created.id, '[innerWidth, innerHeight]');
+      const first = await watch(h.daemon, created.id);
+      first.send({ type: 'resize', width: 900, height: 700 });
+      await until(size, (now) => now[0] === 900 && now[1] === 700, 'the page to take the first viewer size');
+      // The second viewer is shown the 900 px page, so its click on the right column is aimed at x = 675.
+      const second = await watch(h.daemon, created.id);
+      second.send({ type: 'resize', width: 600, height: 600 });
+      const at = { x: 675, y: 350 };
+      second.send({ type: 'mouse', action: 'move', ...at });
+      // A hand takes a moment to go from hovering to pressing.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      second.send({ type: 'mouse', action: 'down', button: 'left', click_count: 1, ...at });
+      second.send({ type: 'mouse', action: 'up', button: 'left', click_count: 1, ...at });
+      await until(
+        () => read<string>(h, session, created.id, `document.getElementById('hit').textContent`),
+        (hit) => hit !== '',
+        'the click to reach the page',
+      );
+      expect(await read<string>(h, session, created.id, `document.getElementById('hit').textContent`)).toBe('b');
+      await until(size, (now) => now[0] === 600 && now[1] === 600, 'the page to take the second viewer size');
     });
 
     it('scrolls at once under a swipe of 150 wheel events, and a click after them still lands', async () => {

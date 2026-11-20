@@ -9,20 +9,10 @@ const MAX_SIDE = 3840;
 /** A side the daemon accepts, whole pixels. */
 export const clampSide = (value: number): number => Math.round(Math.min(MAX_SIDE, Math.max(MIN_SIDE, value)));
 
-export const isFill = (viewport: Viewport): boolean => viewport.width === null || viewport.height === null;
+/** A pixel ratio the daemon accepts: a zoomed-out page can report under 1, a zoomed-in one over 3. */
+export const clampRatio = (value: number): number => Math.min(3, Math.max(1, value));
 
-/**
- * The page's size in CSS pixels, which input coordinates are in. A fixed viewport names it; the frame may be larger
- * (the device pixel ratio) or turned (rotated), so the frame's own shape picks which way round the viewport goes. Fill
- * has a ratio of 1: the frame is the page.
- */
-export function pageSize(viewport: Viewport, frame: Size): Size {
-  if (viewport.width === null || viewport.height === null) return frame;
-  const wide = frame.width >= frame.height;
-  const long = Math.max(viewport.width, viewport.height);
-  const short = Math.min(viewport.width, viewport.height);
-  return wide ? { width: long, height: short } : { width: short, height: long };
-}
+export const isFill = (viewport: Viewport): boolean => viewport.width === null || viewport.height === null;
 
 /** How much to shrink `page` to fit `box`: never above 1, so a small page is not blown up. */
 export function fitScale(page: Size, box: Size): number {
