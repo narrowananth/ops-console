@@ -68,9 +68,12 @@ async function newSession(request: APIRequestContext): Promise<string> {
   return id;
 }
 
+// The row carries a `:port` badge while a server of the Session listens, and the badge is part of the button's name.
+const browserButton = (page: Page) => page.getByRole('button', { name: /^Browser( :\d+)?$/ });
+
 const openSession = async (page: Page, id: string) => {
   await page.goto(`${daemon.url}/workspace?session=${id}#token=${daemon.token}`);
-  await page.getByRole('button', { name: 'Browser', exact: true }).waitFor();
+  await browserButton(page).waitFor();
 };
 
 test('a Session shows the page the operator opens, takes input on it, and lists what it called (2, 3, 4, 6, 10)', async ({
@@ -79,7 +82,7 @@ test('a Session shows the page the operator opens, takes input on it, and lists 
 }) => {
   needsChrome();
   await openSession(page, await newSession(request));
-  await page.getByRole('button', { name: 'Browser', exact: true }).click();
+  await browserButton(page).click();
   const panel = page.getByRole('complementary', { name: 'Browser' });
   await expect(panel.getByText('No server is running for this Session')).toBeVisible();
 
@@ -106,7 +109,7 @@ test('a Session shows the page the operator opens, takes input on it, and lists 
 test('a port with no server says so (8)', async ({ page, request }) => {
   needsChrome();
   await openSession(page, await newSession(request));
-  await page.getByRole('button', { name: 'Browser', exact: true }).click();
+  await browserButton(page).click();
   const panel = page.getByRole('complementary', { name: 'Browser' });
   const unused = (await new Promise<number>((resolve) => {
     const probe = createServer().listen(0, '127.0.0.1', () => {
@@ -155,7 +158,7 @@ test('a file the page asks for is chosen in the panel and handed to the page by 
 }) => {
   needsChrome();
   await openSession(page, await newSession(request));
-  await page.getByRole('button', { name: 'Browser', exact: true }).click();
+  await browserButton(page).click();
   const panel = page.getByRole('complementary', { name: 'Browser' });
   await panel.getByRole('textbox', { name: 'Address' }).fill(`${origin}/upload`);
   await panel.getByRole('textbox', { name: 'Address' }).press('Enter');
@@ -275,7 +278,9 @@ test("a server left running in the Session's folder shows in Local servers with 
       });
     });
     await openSession(page, id);
-    await page.getByRole('button', { name: 'Browser', exact: true }).click();
+    // The badge shows once the Session's servers are read, so the click below runs with it, as it does on a slow machine.
+    await expect(page.getByText(`:${port}`, { exact: true })).toBeVisible();
+    await browserButton(page).click();
     const panel = page.getByRole('complementary', { name: 'Browser' });
     const row = panel.getByRole('listitem').filter({ hasText: `:${port}` });
     await expect(row).toBeVisible();
