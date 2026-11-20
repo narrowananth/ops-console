@@ -2,8 +2,8 @@
 
 Connection passwords, tokens and service-account keys live in the macOS Keychain under the service
 `ops-console`, keyed `connection:<id>`; an MCP Server's env vars are keyed `mcp:<name>`, the GitHub
-Connector's `gh` token included; the Loki logs Connector's secret is keyed `connection:loki_logs`; the CLIProxy
-API key is `cliproxy:api-key`. `state.db` holds only the Connection's non-secret fields. Secrets are read at the moment of use and never reach the database,
+Connector's `gh` token included; the Loki logs Connector's secret is keyed `connection:loki_logs`; the New Relic logs
+Connector's API key is keyed `connection:new_relic_logs`; the CLIProxy API key is `cliproxy:api-key`. `state.db` holds only the Connection's non-secret fields. Secrets are read at the moment of use and never reach the database,
 logs, WebSocket payloads or the browser.
 
 Each ad hoc release is a new app, and macOS asks for the login password once per Keychain item an app did not

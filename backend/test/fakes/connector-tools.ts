@@ -1,6 +1,6 @@
 import { ErrorCode } from '@ops-console/shared';
 import { ApiError } from '../../src/common/errors';
-import type { ConnectorTools, LokiHealth, SignInPrompt } from '../../src/connectors/connector-tools';
+import type { CliHealth, ConnectorTools, SignInPrompt } from '../../src/connectors/connector-tools';
 
 /** `pup`, `gh` and `glab` as scripted state. Sign-ins succeed unless a test says otherwise. */
 export class FakeConnectorTools implements ConnectorTools {
@@ -26,8 +26,11 @@ export class FakeConnectorTools implements ConnectorTools {
   readonly awsLogins: string[] = [];
   readonly awsListed: { profile: string; region: string }[] = [];
   /** What `logcli labels` finds, and the environment of each call: the address, tenant and secret. */
-  loki: LokiHealth = { status: 'ok' };
+  loki: CliHealth = { status: 'ok' };
   readonly lokiCalls: Record<string, string>[] = [];
+  /** What a small `newrelic` query finds, and the environment of each call: the key, account and region. */
+  newRelic: CliHealth = { status: 'ok' };
+  readonly newRelicCalls: Record<string, string>[] = [];
   /** Commands not on the PATH; `brew install` puts one there. */
   missing = new Set<string>();
   readonly brewed: string[] = [];
@@ -127,9 +130,14 @@ export class FakeConnectorTools implements ConnectorTools {
     return this.awsGroups;
   }
 
-  async lokiCheck(env: Record<string, string>): Promise<LokiHealth> {
+  async lokiCheck(env: Record<string, string>): Promise<CliHealth> {
     this.lokiCalls.push(env);
     return this.loki;
+  }
+
+  async newRelicCheck(env: Record<string, string>): Promise<CliHealth> {
+    this.newRelicCalls.push(env);
+    return this.newRelic;
   }
 
   async openPage(url: string): Promise<void> {

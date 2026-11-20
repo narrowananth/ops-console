@@ -1,7 +1,7 @@
 # ops-console
 
 A local console on top of Claude Code. It shows which MCP servers are connected, how each service
-is doing in Datadog, in OpenTelemetry logs, in CloudWatch logs or in Loki logs, the databases the agent may use, open PRs and Claude sessions. When a route
+is doing in Datadog, in OpenTelemetry logs, in CloudWatch logs, in Loki logs or in New Relic logs, the databases the agent may use, open PRs and Claude sessions. When a route
 fails, the agent reproduces it locally and writes a report; the operator reviews it, and only then
 does the agent fix the code and open a PR.
 

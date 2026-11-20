@@ -21,6 +21,8 @@ export enum ConnectorId {
   CloudWatchLogs = 'cloudwatch_logs',
   /** Logs of a Grafana Loki, read with the logcli CLI. */
   LokiLogs = 'loki_logs',
+  /** Logs of a New Relic account, read with the newrelic CLI. */
+  NewRelicLogs = 'new_relic_logs',
 }
 
 export const CONNECTOR_ORDER: ConnectorId[] = Object.values(ConnectorId);
@@ -60,6 +62,7 @@ export const CONNECTOR_NAMES: Record<ConnectorId, string> = {
   [ConnectorId.OtelLogs]: 'OpenTelemetry logs',
   [ConnectorId.CloudWatchLogs]: 'CloudWatch logs',
   [ConnectorId.LokiLogs]: 'Loki logs',
+  [ConnectorId.NewRelicLogs]: 'New Relic logs',
 };
 
 /** How the console reaches the service (ADR 0005). */
@@ -79,6 +82,7 @@ export const CONNECTOR_VIA: Record<ConnectorId, string> = {
   [ConnectorId.OtelLogs]: 'a local folder',
   [ConnectorId.CloudWatchLogs]: 'aws CLI + CloudWatch MCP',
   [ConnectorId.LokiLogs]: 'logcli CLI',
+  [ConnectorId.NewRelicLogs]: 'newrelic CLI',
 };
 
 /**
@@ -160,6 +164,38 @@ const MATCHER = String.raw`[A-Za-z_][A-Za-z0-9_]*\s*(?:=~|!~|!=|=)\s*"(?:[^"\\\n
 const logqlMatchers = z
   .string()
   .regex(new RegExp(`^\\s*(?:${MATCHER}(?:\\s*,\\s*${MATCHER})*)?\\s*$`), 'stream matchers such as cluster="prod-1"');
+
+/** Where a New Relic account lives: its data center. */
+export const NEW_RELIC_REGIONS = ['US', 'EU', 'JP'] as const;
+
+/** An attribute name. It goes into queries inside backticks, so nothing else is accepted. */
+const nrqlAttribute = z.string().regex(/^[A-Za-z_][A-Za-z0-9_.-]*$/, 'an attribute name: letters, digits and _ . -');
+
+/** A clause the reader adds itself, or one that ends the condition. Quoted text counts too. */
+const FILTER_REFUSED =
+  /\b(?:SINCE|UNTIL|LIMIT|FACET|TIMESERIES|ORDER\s+BY|COMPARE\s+WITH|SLIDE\s+BY|OFFSET|WITH\s+TIMEZONE|EXTRAPOLATE)\b|;/i;
+/** Whether a quote opened in `text` is never closed, or a parenthesis outside quotes has no partner. A backslash escapes. */
+function unbalanced(text: string): boolean {
+  let open: string | null = null;
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i] as string;
+    if (char === '\\') i++;
+    else if (open !== null) open = char === open ? null : open;
+    else if (char === "'" || char === '"' || char === '`') open = char;
+    else if (char === '(') depth++;
+    else if (char === ')' && --depth < 0) return true;
+  }
+  return open !== null || depth !== 0;
+}
+/** One condition such as `cluster = 'prod-1'`, or empty for none. */
+const nrqlFilter = z
+  .string()
+  .refine(
+    (text) => !FILTER_REFUSED.test(text),
+    'one condition: no SINCE, UNTIL, LIMIT, FACET, TIMESERIES, ORDER BY, COMPARE WITH, SLIDE BY, OFFSET, WITH TIMEZONE, EXTRAPOLATE or ;',
+  )
+  .refine((text) => !unbalanced(text), 'a condition with its quotes and parentheses closed');
 
 /** One CloudWatch log group the operator picked, and the Service it is. */
 export const logGroupSchema = z.strictObject({
@@ -251,6 +287,21 @@ export const connectorConfigSchemas = {
     ignore: z.array(z.strictObject({ kind: z.enum(['status_class', 'route']), value: z.string().min(1) })),
     reports_folder: z.string().min(1),
   }),
+  /** `account_id`: digits, empty until chosen. The API key is in the Keychain, never here. */
+  [ConnectorId.NewRelicLogs]: z.strictObject({
+    account_id: z.string().regex(/^\d*$/, 'digits only'),
+    region: z.enum(NEW_RELIC_REGIONS),
+    service_attribute: nrqlAttribute,
+    env_attribute: nrqlAttribute,
+    filter: nrqlFilter,
+    environments: z.array(z.string().min(1)),
+    daily_scan_time: time,
+    default_interval: z.enum(['24h', '12h', '6h']),
+    rapid_errors_per_10m: count,
+    failing_errors_per_hour: count,
+    ignore: z.array(z.strictObject({ kind: z.enum(['status_class', 'route']), value: z.string().min(1) })),
+    reports_folder: z.string().min(1),
+  }),
 } satisfies Record<ConnectorId, z.ZodType>;
 
 export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknown>> = {
@@ -320,6 +371,20 @@ export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknow
     ignore: [],
     reports_folder: 'reports',
   },
+  [ConnectorId.NewRelicLogs]: {
+    account_id: '',
+    region: 'US',
+    service_attribute: 'service.name',
+    env_attribute: 'environment',
+    filter: '',
+    environments: ['prod'],
+    daily_scan_time: '09:00',
+    default_interval: '24h',
+    rapid_errors_per_10m: 100,
+    failing_errors_per_hour: 5,
+    ignore: [],
+    reports_folder: 'reports',
+  },
 };
 
 /**
@@ -336,6 +401,21 @@ export const lokiConnectBodySchema = z.object({
   selector: z.string().optional(),
   format: z.string().optional(),
   /** Bearer token or basic password. Left out, the one in the Keychain stays. */
+  secret: z.string().optional(),
+});
+
+/**
+ * `POST /connectors/new_relic_logs/connect`: the config fields the pane edits, and the API key, which is write-only. A
+ * field left out keeps its stored value; the Connector checks the values against its config schema (422
+ * `validation_failed`).
+ */
+export const newRelicConnectBodySchema = z.object({
+  account_id: z.string().optional(),
+  region: z.string().optional(),
+  service_attribute: z.string().optional(),
+  env_attribute: z.string().optional(),
+  filter: z.string().optional(),
+  /** A User API key. Left out, the one in the Keychain stays. */
   secret: z.string().optional(),
 });
 

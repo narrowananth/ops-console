@@ -251,7 +251,7 @@ export function LogsPane({
           ))}
         </div>
         {present.length > 1 && (
-          <div role="tablist" aria-label="Source" className="flex gap-0.5 rounded-lg bg-neutral-200 p-0.75">
+          <div role="tablist" aria-label="Source" className="flex flex-wrap gap-0.5 rounded-lg bg-neutral-200 p-0.75">
             {(['all', ...present] as const).map((value) => (
               <button
                 key={value}
@@ -263,7 +263,7 @@ export function LogsPane({
                   value === 'all' ? 'Alerts from every log source' : `Only Alerts read from ${CONNECTOR_NAMES[value]}`
                 }
                 onClick={() => onSource(value)}
-                className={`flex flex-1 cursor-pointer items-center justify-center rounded-md border-0 py-1 text-xs whitespace-nowrap transition-colors ${source === value ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
+                className={`flex flex-1 cursor-pointer items-center justify-center rounded-md border-0 px-2 py-1 text-xs whitespace-nowrap transition-colors ${source === value ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
               >
                 {value === 'all' ? 'All' : SOURCE_LABEL[value]}
               </button>

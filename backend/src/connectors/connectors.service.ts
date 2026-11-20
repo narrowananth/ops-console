@@ -18,6 +18,7 @@ import {
   type LogGroupPick,
   type lokiConnectBodySchema,
   type McpServer,
+  type newRelicConnectBodySchema,
 } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import type { z } from 'zod';
@@ -29,8 +30,9 @@ import { STORE, type Store } from '../db/store';
 import { KEYCHAIN, type Keychain } from '../keychain/keychain';
 import { GOOGLE_ENV } from '../mcp/google-bridge';
 import { McpServersService } from '../mcp/mcp-servers.service';
-import { cloudWatchLogsConfig, lokiLogsConfig, otelLogsConfig } from '../monitor/log-source-config';
+import { cloudWatchLogsConfig, lokiLogsConfig, newRelicLogsConfig, otelLogsConfig } from '../monitor/log-source-config';
 import { LOKI_SECRET_KEY, lokiAccess } from '../monitor/loki-access';
+import { NEW_RELIC_KEY, newRelicAccess } from '../monitor/new-relic-access';
 import { CONNECTOR_TOOLS, type ConnectorTools, type SignInPrompt } from './connector-tools';
 import { GOOGLE_AUTH, type GoogleAuth, GoogleSignInError } from './google-auth';
 
@@ -143,6 +145,8 @@ export class ConnectorsService implements OnModuleDestroy {
     if (id === ConnectorId.OtelLogs) return this.chooseFolder(input.folder);
     // Loki logs has no sign-in either: the typed config is checked and stored before this answers, its health after.
     if (id === ConnectorId.LokiLogs) return this.connectLoki(input);
+    // New Relic logs is the same: a typed account and key, checked and stored before this answers.
+    if (id === ConnectorId.NewRelicLogs) return this.connectNewRelic(input);
     // A profile that is already signed in connects before this answers; any other waits on its sign-in below.
     if (id === ConnectorId.CloudWatchLogs && (await this.prepareCloudWatch(input))) return;
     this.signIns.get(id)?.abort();
@@ -216,6 +220,7 @@ export class ConnectorsService implements OnModuleDestroy {
       if (found?.registered) await this.mcp.remove(server.name).catch(ignoreMissing);
     }
     if (id === ConnectorId.LokiLogs) await this.keychain.delete(LOKI_SECRET_KEY);
+    if (id === ConnectorId.NewRelicLogs) await this.keychain.delete(NEW_RELIC_KEY);
     this.store.write((tx) => {
       tx.update(connectors)
         .set({ status: HealthStatus.Off, statusDetail: null, accountLabel: null, login: null })
@@ -294,36 +299,67 @@ export class ConnectorsService implements OnModuleDestroy {
    */
   private async connectLoki(input: ConnectInput): Promise<void> {
     await this.requireTools(['logcli']);
-    const { secret, ...typed } = input;
-    const edited = Object.fromEntries(Object.entries(typed).filter(([name]) => LOKI_FIELDS.includes(name)));
-    const parsed = connectorConfigSchemas[ConnectorId.LokiLogs].safeParse({
-      ...lokiLogsConfig(this.store.db),
-      ...edited,
-    });
+    const { secret } = input;
+    const config = this.typedConfig(ConnectorId.LokiLogs, input, LOKI_FIELDS, lokiLogsConfig(this.store.db));
+    if (config.url === '') throw invalidConfig('a Loki URL is required');
+    if (config.auth === 'basic' && config.username === '') throw invalidConfig('basic auth needs a username');
+    const typedSecret = secret === undefined || secret === '' ? null : secret;
+    if (config.auth !== 'none' && typedSecret === null && (await this.keychain.get(LOKI_SECRET_KEY)) === null) {
+      throw invalidConfig(`${config.auth} auth needs a secret`);
+    }
+    if (config.auth !== 'none' && typedSecret !== null) await this.keychain.set(LOKI_SECRET_KEY, typedSecret);
+    this.storeAndCheck(ConnectorId.LokiLogs, config);
+  }
+
+  /** Stores the pane's New Relic config and key like Loki's: the key only in the Keychain, the health in the background. */
+  private async connectNewRelic(input: ConnectInput): Promise<void> {
+    await this.requireTools(['newrelic']);
+    const { secret } = input;
+    const config = this.typedConfig(
+      ConnectorId.NewRelicLogs,
+      input,
+      NEW_RELIC_FIELDS,
+      newRelicLogsConfig(this.store.db),
+    );
+    if (config.account_id === '') throw invalidConfig('an account ID is required');
+    const typedKey = secret === undefined || secret === '' ? null : secret;
+    if (typedKey === null && (await this.keychain.get(NEW_RELIC_KEY)) === null) {
+      throw invalidConfig('an API key is required');
+    }
+    if (typedKey !== null) await this.keychain.set(NEW_RELIC_KEY, typedKey);
+    this.storeAndCheck(ConnectorId.NewRelicLogs, config);
+  }
+
+  /** The Connector's stored config with the fields `input` names laid over it, checked against its schema. */
+  private typedConfig<Id extends ConnectorId.LokiLogs | ConnectorId.NewRelicLogs>(
+    id: Id,
+    input: ConnectInput,
+    fields: string[],
+    stored: Record<string, unknown>,
+  ) {
+    const edited = Object.fromEntries(Object.entries(input).filter(([name]) => fields.includes(name)));
+    const parsed = connectorConfigSchemas[id].safeParse({ ...stored, ...edited });
     if (!parsed.success) {
       const problems = new Set(
         parsed.error.issues.map((issue) => `${issue.path.join('.') || 'config'}: ${issue.message}`),
       );
-      throw invalidLoki(`invalid config: ${[...problems].join('; ')}`);
+      throw invalidConfig(`invalid config: ${[...problems].join('; ')}`);
     }
-    const config = parsed.data;
-    if (config.url === '') throw invalidLoki('a Loki URL is required');
-    if (config.auth === 'basic' && config.username === '') throw invalidLoki('basic auth needs a username');
-    const typedSecret = secret === undefined || secret === '' ? null : secret;
-    if (config.auth !== 'none' && typedSecret === null && (await this.keychain.get(LOKI_SECRET_KEY)) === null) {
-      throw invalidLoki(`${config.auth} auth needs a secret`);
-    }
-    if (config.auth !== 'none' && typedSecret !== null) await this.keychain.set(LOKI_SECRET_KEY, typedSecret);
+    return parsed.data as z.infer<(typeof connectorConfigSchemas)[Id]>;
+  }
+
+  /** Saves the config, then checks the Connector's health in the background. */
+  private storeAndCheck(id: ConnectorId, config: unknown): void {
     this.store.write((tx) => {
       tx.update(connectors)
         .set({ config: JSON.stringify(config) })
-        .where(eq(connectors.id, ConnectorId.LokiLogs))
+        .where(eq(connectors.id, id))
         .run();
     });
-    this.record(ConnectorId.LokiLogs, { status: HealthStatus.Checking, detail: null, accountLabel: null, login: null });
-    const run = this.check(ConnectorId.LokiLogs)
+    this.record(id, { status: HealthStatus.Checking, detail: null, accountLabel: null, login: null });
+    const run = this.check(id)
       .then(() => {})
-      .catch((error) => this.logger.warn(`checking loki_logs failed: ${String(error)}`))
+      .catch((error) => this.logger.warn(`checking ${id} failed: ${String(error)}`))
       .finally(() => this.running.delete(run));
     this.running.add(run);
   }
@@ -554,6 +590,7 @@ export class ConnectorsService implements OnModuleDestroy {
       accountLabel: null,
       login: null,
     });
+    const down = (detail: string): Reading => ({ status: HealthStatus.Fail, detail, accountLabel: null, login: null });
     switch (id) {
       case ConnectorId.Datadog: {
         const status = await this.tools.datadogStatus();
@@ -581,12 +618,6 @@ export class ConnectorsService implements OnModuleDestroy {
         );
       }
       case ConnectorId.LokiLogs: {
-        const down = (detail: string): Reading => ({
-          status: HealthStatus.Fail,
-          detail,
-          accountLabel: null,
-          login: null,
-        });
         if (!(await this.tools.installed('logcli'))) return down(missingToolMessage('logcli'));
         const { config, childEnv } = await lokiAccess(this.store.db, this.keychain);
         if (config.url === '') return down('No Loki URL chosen');
@@ -594,6 +625,18 @@ export class ConnectorsService implements OnModuleDestroy {
         if (health.status === 'auth') return signedOut(LOKI_AUTH_DETAIL);
         if (health.status === 'down') return down(`Could not reach ${config.url}: ${health.reason}`);
         return { status: HealthStatus.Ok, detail: null, accountLabel: config.url, login: null };
+      }
+      case ConnectorId.NewRelicLogs: {
+        if (!(await this.tools.installed('newrelic'))) return down(missingToolMessage('newrelic'));
+        const { config: account, childEnv } = await newRelicAccess(this.store.db, this.keychain);
+        if (account.account_id === '') return down('No New Relic account ID chosen');
+        // With no key the CLI would fall back to the operator's own ~/.newrelic profile and read connected.
+        if (childEnv.NEW_RELIC_API_KEY === undefined)
+          return signedOut('No New Relic API key is stored. Connect to add one.');
+        const health = await this.tools.newRelicCheck(childEnv);
+        if (health.status === 'auth') return signedOut(NEW_RELIC_AUTH_DETAIL);
+        if (health.status === 'down') return down(`Could not reach New Relic: ${health.reason}`);
+        return { status: HealthStatus.Ok, detail: null, accountLabel: account.account_id, login: null };
       }
       case ConnectorId.Github: {
         const login = await this.tools.githubUser();
@@ -787,14 +830,14 @@ type CloudWatchConfig = ReturnType<typeof cloudWatchLogsConfig>;
 
 /**
  * What the pane's Connect sends. The Log folder takes `folder`; CloudWatch logs takes `profile`, `region` and
- * `log_groups`; Loki logs takes its config fields and the secret.
+ * `log_groups`; Loki logs and New Relic logs take their config fields and the secret.
  */
 export type ConnectInput = {
   folder?: string;
   profile?: string;
-  region?: string;
   log_groups?: LogGroupPick[];
-} & z.infer<typeof lokiConnectBodySchema>;
+} & z.infer<typeof lokiConnectBodySchema> &
+  z.infer<typeof newRelicConnectBodySchema>;
 
 /** The config fields of the Loki pane: the only ones a Connect may set. */
 const LOKI_FIELDS = ['url', 'org_id', 'auth', 'username', 'service_label', 'env_label', 'selector', 'format'];
@@ -802,12 +845,19 @@ const LOKI_FIELDS = ['url', 'org_id', 'auth', 'username', 'service_label', 'env_
 const LOKI_AUTH_DETAIL =
   'Loki refused the secret. Check the secret, and for Grafana Cloud that the access-policy token has the `logs:read` scope.';
 
-const invalidLoki = (message: string) => new ApiError(422, ErrorCode.ValidationFailed, message);
+/** The config fields of the New Relic pane: the only ones a Connect may set. */
+const NEW_RELIC_FIELDS = ['account_id', 'region', 'service_attribute', 'env_attribute', 'filter'];
+
+const NEW_RELIC_AUTH_DETAIL =
+  'New Relic refused the key. Check the key, and that a key belongs to one region: choose the region of the account.';
+
+const invalidConfig = (message: string) => new ApiError(422, ErrorCode.ValidationFailed, message);
 
 const INSTALL = {
   aws: 'the AWS CLI with `brew install awscli`',
   uvx: 'uv with `brew install uv`',
   logcli: 'the Loki CLI with `brew install logcli`',
+  newrelic: 'the New Relic CLI with `brew install newrelic-cli`',
 };
 
 function missingToolMessage(command: keyof typeof INSTALL): string {

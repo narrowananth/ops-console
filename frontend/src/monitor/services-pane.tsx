@@ -120,6 +120,16 @@ export function ServicesPane({
       services: useLogServices(ConnectorId.LokiLogs, scope.range, scope.codes, inView.includes(ConnectorId.LokiLogs)),
       codes: useStatusCodes(ConnectorId.LokiLogs, scope.range, inView.includes(ConnectorId.LokiLogs)),
     },
+    {
+      source: ConnectorId.NewRelicLogs as LogSource,
+      services: useLogServices(
+        ConnectorId.NewRelicLogs,
+        scope.range,
+        scope.codes,
+        inView.includes(ConnectorId.NewRelicLogs),
+      ),
+      codes: useStatusCodes(ConnectorId.NewRelicLogs, scope.range, inView.includes(ConnectorId.NewRelicLogs)),
+    },
   ].filter((read) => inView.includes(read.source));
   const known =
     reads.every((read) => read.codes.data) && reads.length > 0

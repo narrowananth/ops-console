@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto';
-import { ErrorCode, type Sample, type ScanWindow, WINDOW_HOURS } from '@ops-console/shared';
+import { ErrorCode, NO_ENV, type Sample, type ScanWindow, WINDOW_HOURS } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import { mapLimit } from '../common/map-limit';
+import { CliFailed, callCli } from './cli-call';
 import {
   FATAL_ERROR_LEVEL,
   groupEntries,
   ignoredRanges,
   type LogEntry,
-  type LogGroup,
   type LogReader,
   pathPattern,
   type ReadRequest,
@@ -16,10 +16,11 @@ import {
   type ServiceCount,
   type ServiceReading,
   statusCodeOf,
+  withRouteCounts,
 } from './log-reader';
 import type { LokiLogsConfig } from './log-source-config';
 import type { LokiAccess } from './loki-access';
-import { LogcliFailed, logcli, lokiFailure } from './loki-cli';
+import { lokiFailure } from './loki-cli';
 
 /** The names a log line may use for each field after parsing, first present wins. Nested keys are joined with `_`. */
 const STATUS_FIELDS = ['status', 'statusCode', 'status_code', 'http_status_code'];
@@ -32,8 +33,6 @@ const MESSAGE_FIELDS = ['message', 'msg'];
 const SAMPLE_LINES = 5_000;
 const SERVICES_AT_ONCE = 4;
 const STEP_MS = 600_000;
-/** An env with no value for the env label. */
-const NO_ENV = 'no env';
 const ENV_WINDOW_MS = 7 * 86_400_000;
 
 const quote = (text: string) => JSON.stringify(text);
@@ -184,7 +183,7 @@ export class LokiLogs implements LogReader {
       if (total > SAMPLE_LINES) {
         request.note?.(`${service.name}: read the newest ${SAMPLE_LINES.toLocaleString('en-US')} failing lines only`);
       }
-      const groups = this.withCounts(
+      const groups = withRouteCounts(
         groupEntries(entries, ({ statusCode, method, path }) =>
           JSON.stringify({
             service: service.name,
@@ -194,7 +193,11 @@ export class LokiLogs implements LogReader {
             path: path || null,
           }),
         ),
-        counts,
+        counts.map((row) => ({
+          statusCode: statusCodeOf(row.metric.f_code),
+          ...routeOf(row.metric.f_method, row.metric.f_route),
+          points: row.points,
+        })),
       );
       return groups.length > 0 ? { name: service.name, env: service.env, groups, repoUrl: null } : null;
     });
@@ -376,42 +379,13 @@ export class LokiLogs implements LogReader {
     return entries;
   }
 
-  /**
-   * A Route whose lines share one message gets the count and the 10-minute peak of the metric query, which cover more
-   * than the lines read. A Route with several messages keeps the counts of the lines read.
-   */
-  private withCounts(groups: LogGroup[], counts: Row[]): LogGroup[] {
-    const key = ({ statusCode, method, path }: { statusCode: number | null; method: string; path: string }) =>
-      `${statusCode} ${method} ${path}`;
-    const totals = new Map<string, { errors: number; buckets: Map<number, number> }>();
-    for (const row of counts) {
-      const route = key({
-        statusCode: statusCodeOf(row.metric.f_code),
-        ...routeOf(row.metric.f_method, row.metric.f_route),
-      });
-      const total = totals.get(route) ?? { errors: 0, buckets: new Map() };
-      for (const [at, count] of row.points) {
-        total.errors += count;
-        total.buckets.set(at, (total.buckets.get(at) ?? 0) + count);
-      }
-      totals.set(route, total);
-    }
-    const perRoute = new Map<string, number>();
-    for (const group of groups) perRoute.set(key(group), (perRoute.get(key(group)) ?? 0) + 1);
-    return groups.map((group) => {
-      const metric = perRoute.get(key(group)) === 1 ? totals.get(key(group)) : undefined;
-      if (!metric) return group;
-      return { ...group, errors: metric.errors, peakPer10m: Math.max(...metric.buckets.values()) };
-    });
-  }
-
   private async exec(childEnv: Record<string, string>, args: string[], signal?: AbortSignal): Promise<string> {
     // `-q` keeps logcli's own log lines (the query URL, common labels) out of the way.
     const full = ['-q', ...args];
     try {
-      return await logcli(this.bin, full, childEnv, signal);
+      return await callCli(this.bin, full, childEnv, signal);
     } catch (error) {
-      if (!(error instanceof LogcliFailed)) throw error;
+      if (!(error instanceof CliFailed)) throw error;
       const failure = lokiFailure(error.stderr);
       if (failure.kind === 'rate_limited') throw new ApiError(429, ErrorCode.RateLimited, 'Loki rate limit reached');
       if (failure.kind === 'limit') {

@@ -180,6 +180,12 @@ export const BRANDS = {
     // Three log lines, each with a dot: drawn here, not a third-party logo.
     path: 'M4.6 4.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 1 1 0-3.2zM8.5 4.8h12v2.4h-12zM4.6 10.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 1 1 0-3.2zM8.5 10.8h8v2.4h-8zM4.6 16.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 1 1 0-3.2zM8.5 16.8h10v2.4h-10z',
   },
+  newrelic: {
+    title: 'New Relic logs',
+    hex: '#1CE783',
+    // A rising line of three bars inside a rounded square: drawn here, not a third-party logo.
+    path: 'M5 2h14a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3zm1.6 10.6v4.8h2.4v-4.8zm4.2-3.6v8.4h2.4V9zm4.2-3.4v11.8h2.4V5.6z',
+  },
 } satisfies Record<string, Brand>;
 
 export type BrandSlug = keyof typeof BRANDS;

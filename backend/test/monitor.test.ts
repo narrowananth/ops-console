@@ -47,6 +47,8 @@ import { NO_TICKET_IN_PLAYBOOK } from '../src/monitor/fixes.service';
 import { LOKI_SECRET_KEY } from '../src/monitor/loki-access';
 import type { LokiOptions } from '../src/monitor/loki-logs';
 import { MonitorModule } from '../src/monitor/monitor.module';
+import { NEW_RELIC_KEY } from '../src/monitor/new-relic-access';
+import type { NewRelicOptions } from '../src/monitor/new-relic-logs';
 import { MonitorRetention } from '../src/monitor/retention';
 import { latestSlot, nextSlot, ScansService } from '../src/monitor/scans.service';
 import { ReposModule } from '../src/repos/repos.module';
@@ -60,6 +62,7 @@ import { FakeDatadog, route, samples, service } from './fakes/datadog';
 import { FakeGitHost, hostPr } from './fakes/git-host';
 import { FakeKeychain } from './fakes/keychain';
 import { FakeLogcli } from './fakes/loki-logs';
+import { FakeNewRelic } from './fakes/new-relic-logs';
 import { type OtelRecord, otlpLine, writeLogFile } from './fakes/otlp';
 import { FakeProbe } from './fakes/probe';
 import { MIGRATIONS_DIR, startTestDaemon, tempDir } from './helpers';
@@ -126,6 +129,7 @@ async function start(
     otelReadLimit?: number;
     cloudWatch?: CloudWatchOptions;
     loki?: LokiOptions;
+    newRelic?: NewRelicOptions;
     keychain?: FakeKeychain;
   } = {},
 ): Promise<Ctx> {
@@ -147,6 +151,7 @@ async function start(
         otelReadLimit: options.otelReadLimit,
         cloudWatch: { bin: AWS_BIN, pollMs: 10, ...options.cloudWatch },
         loki: options.loki,
+        newRelic: options.newRelic,
       }),
     ],
   });
@@ -4072,12 +4077,25 @@ describe('Loki logs', () => {
     });
   });
 
-  it('reads four sources at once into one Alert list, filterable by source, with the down source named by its failed Scan', async () => {
+  it('reads five sources at once into one Alert list, filterable by source, with the down source named by its failed Scan', async () => {
     const logcli = await FakeLogcli.create();
     logcli.stream(SHOP, [failure(5)]);
     const aws = await FakeAws.create();
     aws.group('/ecs/shop-api', [{ at: minutesAgo(5), message: LINE }]);
-    const ctx = await start({ loki: { bin: logcli.bin } });
+    const newrelic = await FakeNewRelic.create();
+    newrelic.events({
+      at: minutesAgo(5),
+      attrs: {
+        'service.name': 'shop-api',
+        environment: 'prod',
+        'http.response.status_code': 500,
+        'http.request.method': 'POST',
+        'http.route': '/orders',
+        level: 'error',
+        message: 'NullPointerException in OrderService',
+      },
+    });
+    const ctx = await start({ loki: { bin: logcli.bin }, newRelic: { bin: newrelic.bin } });
     ctx.datadog.readings = [service('shop-api', [route('POST', '/orders', 4)])];
     await writeLogFile(ctx.logs, 'logs.jsonl', [
       otlpLine({
@@ -4100,23 +4118,29 @@ describe('Loki logs', () => {
       }),
     });
     connectLoki(ctx);
+    setConnector(ctx.store, ConnectorId.NewRelicLogs, {
+      status: HealthStatus.Ok,
+      config: JSON.stringify({ ...DEFAULT_CONNECTOR_CONFIG[ConnectorId.NewRelicLogs], account_id: '1234567' }),
+    });
     logcli.behave('unreachable');
     expect((await ctx.http.post('/scans', { service_id: null })).status).toBe(202);
     const all = await until(
       () => ctx.http.get('/scans').then((res) => res.body.data),
       (found: { connector: string; status: string }[]) =>
-        found.length === 4 && found.every((one) => one.status !== 'running'),
-      'all four Scans',
+        found.length === 5 && found.every((one) => one.status !== 'running'),
+      'all five Scans',
     );
     expect(all.map((one: { connector: string; status: string }) => [one.connector, one.status]).sort()).toEqual([
       ['cloudwatch_logs', 'ok'],
       ['datadog', 'ok'],
       ['loki_logs', 'failed'],
+      ['new_relic_logs', 'ok'],
       ['otel_logs', 'ok'],
     ]);
     expect((await alertList(ctx)).map((alert: { connector: string }) => alert.connector).sort()).toEqual([
       'cloudwatch_logs',
       'datadog',
+      'new_relic_logs',
       'otel_logs',
     ]);
     logcli.behave(null);
@@ -4125,11 +4149,14 @@ describe('Loki logs', () => {
       'cloudwatch_logs',
       'datadog',
       'loki_logs',
+      'new_relic_logs',
       'otel_logs',
     ]);
-    expect(
-      (await alertList(ctx, '?connector=loki_logs')).map((alert: { connector: string }) => alert.connector),
-    ).toEqual(['loki_logs']);
+    for (const connector of ['loki_logs', 'new_relic_logs']) {
+      expect(
+        (await alertList(ctx, `?connector=${connector}`)).map((alert: { connector: string }) => alert.connector),
+      ).toEqual([connector]);
+    }
   });
 
   it('refuses a Scan or a Service list while Loki logs is not connected', async () => {
@@ -4305,6 +4332,784 @@ describe('Loki logs', () => {
       );
       const prompts = promptsSince(ctx, before);
       expect(prompts[0]).toContain('Loki logs recheck, last hour: still failing');
+      expect(prompts[0]).toMatch(/no `pup` and no Datadog MCP Server/);
+      expect(deniedSince(ctx, before)).toContain('datadog-pup');
+    });
+  });
+});
+
+describe('New Relic logs', () => {
+  const MINUTE = 60_000;
+  const minutesAgo = (minutes: number) => Date.now() - minutes * MINUTE;
+  const SHOP = { 'service.name': 'shop-api', environment: 'prod' };
+  const EVENT = {
+    'http.response.status_code': 500,
+    'http.request.method': 'POST',
+    'http.route': '/orders',
+    level: 'error',
+    message: 'NullPointerException in OrderService',
+  };
+  const KEY = 'NRAK-EXAMPLE';
+  /** A failing event of `SHOP`, `minutes` ago; an attribute set to undefined is left out. */
+  const failure = (minutes: number, extra: Record<string, unknown> = {}) => ({
+    at: minutesAgo(minutes),
+    attrs: { ...SHOP, ...EVENT, ...extra },
+  });
+  const NO_STATUS = {
+    'http.response.status_code': undefined,
+    'http.request.method': undefined,
+    'http.route': undefined,
+  };
+  const ALIASED = {
+    'http.response.status_code': undefined,
+    'http.request.method': undefined,
+    'http.route': undefined,
+    level: undefined,
+    message: undefined,
+  };
+
+  /** Points the New Relic source at the fake, as a Connector the operator connected. */
+  function connectNewRelic(ctx: Ctx, config: Record<string, unknown> = {}) {
+    setConnector(ctx.store, ConnectorId.NewRelicLogs, {
+      status: HealthStatus.Ok,
+      config: JSON.stringify({
+        ...DEFAULT_CONNECTOR_CONFIG[ConnectorId.NewRelicLogs],
+        account_id: '1234567',
+        ...config,
+      }),
+    });
+  }
+
+  async function scanNewRelic(ctx: Ctx, body: Record<string, unknown> = {}) {
+    const started = await ctx.http.post('/scans', { service_id: null, connector: 'new_relic_logs', ...body });
+    expect(started.status).toBe(202);
+    return until(
+      () => ctx.http.get(`/scans/${started.body.data.id}`).then((res) => res.body.data),
+      (found) => found.status !== 'running',
+      'the Scan to end',
+    );
+  }
+
+  /** An account holding `events`, connected and scanned. */
+  async function scanned(
+    events: { at: number; attrs: Record<string, unknown> }[],
+    options: { config?: Record<string, unknown>; body?: Record<string, unknown> } = {},
+  ) {
+    const newrelic = await FakeNewRelic.create();
+    newrelic.events(...events);
+    const ctx = await start({ newRelic: { bin: newrelic.bin } });
+    connectNewRelic(ctx, options.config);
+    const ended = await scanNewRelic(ctx, options.body);
+    return { ctx, newrelic, ended };
+  }
+
+  const logLines = async (ctx: Ctx, query = '') =>
+    (await alertList(ctx, query)).map((alert: { log_line: string }) => alert.log_line).sort();
+
+  describe('the read', () => {
+    it('turns failing events into a Service, an Alert with Samples, and a filter that finds it again', async () => {
+      const { ctx, ended } = await scanned([
+        failure(5),
+        failure(8),
+        failure(9, { 'http.response.status_code': 200, level: 'info' }),
+      ]);
+      expect(ended).toMatchObject({ status: 'ok', connector: 'new_relic_logs' });
+      expect((await ctx.http.get('/services')).body.data).toMatchObject([
+        { name: 'shop-api', env: 'prod', connector: 'new_relic_logs' },
+      ]);
+      const [listed] = await alertList(ctx);
+      expect(listed).toMatchObject({
+        connector: 'new_relic_logs',
+        http_status: 500,
+        route: { method: 'POST', path: '/orders' },
+        title: '500 POST /orders failing on shop-api',
+        event_count: 2,
+        log_line: 'NullPointerException in OrderService',
+      });
+      const detail = (await ctx.http.get(`/alerts/${listed.id}`)).body.data;
+      expect(JSON.parse(detail.source_query)).toEqual({
+        service: 'shop-api',
+        env: 'prod',
+        status: 500,
+        method: 'POST',
+        path: '/orders',
+      });
+      expect(detail.samples).toHaveLength(2);
+      expect(detail.samples[0]).toMatchObject({
+        status: 'error',
+        message: 'NullPointerException in OrderService',
+        attributes: { 'http.route': '/orders' },
+        tags: expect.arrayContaining(['service:shop-api', 'env:prod']),
+      });
+      expect(Math.abs(Date.parse(detail.samples[0].timestamp) - minutesAgo(5))).toBeLessThan(MINUTE);
+    });
+
+    it('calls newrelic with the Connector’s key, account and region in its environment and none on the command line, over any NEW_RELIC_ variable of the operator’s shell', async () => {
+      const keychain = new FakeKeychain();
+      keychain.values.set(NEW_RELIC_KEY, KEY);
+      const newrelic = await FakeNewRelic.create();
+      newrelic.events(failure(5)).requires({ apiKey: KEY, accountId: '1234567', region: 'EU' });
+      const ctx = await start({ newRelic: { bin: newrelic.bin }, keychain });
+      connectNewRelic(ctx, { region: 'EU' });
+      process.env.NEW_RELIC_API_KEY = 'NRAK-AMBIENT';
+      process.env.NEW_RELIC_ACCOUNT_ID = '999';
+      process.env.NEW_RELIC_REGION = 'JP';
+      try {
+        expect(await scanNewRelic(ctx)).toMatchObject({ status: 'ok' });
+      } finally {
+        delete process.env.NEW_RELIC_API_KEY;
+        delete process.env.NEW_RELIC_ACCOUNT_ID;
+        delete process.env.NEW_RELIC_REGION;
+      }
+      expect(newrelic.calls().length).toBeGreaterThan(0);
+      for (const call of newrelic.calls()) {
+        expect(call.env).toEqual({
+          NEW_RELIC_API_KEY: KEY,
+          NEW_RELIC_ACCOUNT_ID: '1234567',
+          NEW_RELIC_REGION: 'EU',
+        });
+        expect(call.args.join(' ')).not.toContain(KEY);
+        expect(call.args.slice(0, 2)).toEqual(['nrql', 'query']);
+      }
+    });
+
+    it('finds the Services from the service attribute inside the filter, and reads an event with no env attribute as no env', async () => {
+      const newrelic = await FakeNewRelic.create();
+      const at = (minutes: number, attrs: Record<string, unknown>) => ({ at: minutesAgo(minutes), attrs });
+      const base = { ...EVENT, 'service.name': undefined };
+      newrelic.events(
+        at(5, { ...base, app: 'shop-api', env: 'prod', cluster: 'prod-1' }),
+        at(6, { ...base, app: 'shop-api', cluster: 'prod-1', message: 'no env failure' }),
+        at(7, { ...base, app: 'billing-api', env: 'prod', cluster: 'prod-2' }),
+        at(8, { ...base, job: 'cron', env: 'prod', cluster: 'prod-1' }),
+      );
+      const ctx = await start({ newRelic: { bin: newrelic.bin } });
+      connectNewRelic(ctx, { service_attribute: 'app', env_attribute: 'env', filter: "cluster = 'prod-1'" });
+      expect((await ctx.http.get('/monitor/envs?connector=new_relic_logs')).body.data).toEqual([
+        { name: 'prod', configured: true },
+        { name: 'no env', configured: false },
+      ]);
+      expect(await scanNewRelic(ctx, { envs: ['prod', 'no env'] })).toMatchObject({ status: 'ok' });
+      const rows = ctx.store.db.select().from(services).where(eq(services.connector, ConnectorId.NewRelicLogs)).all();
+      expect(rows.map((row) => [row.name, row.env]).sort()).toEqual([
+        ['shop-api', 'no env'],
+        ['shop-api', 'prod'],
+      ]);
+      expect(await alertList(ctx)).toHaveLength(2);
+    });
+
+    it('reads only the Services of the env the Scan names', async () => {
+      const { ctx } = await scanned([failure(5), failure(5, { environment: 'staging' })], {
+        body: { envs: ['staging'] },
+      });
+      expect((await ctx.http.get('/services')).body.data).toMatchObject([{ env: 'staging' }]);
+    });
+
+    it('takes each field from the first of its names a Service has, each Service by its own', async () => {
+      const { ctx } = await scanned([
+        failure(5, {
+          ...ALIASED,
+          'service.name': 'svc-camel',
+          statusCode: 502,
+          httpMethod: 'get',
+          resourcePath: '/a',
+          severity: 'error',
+          msg: 'by camel case',
+        }),
+        failure(6, {
+          ...ALIASED,
+          'service.name': 'svc-snake',
+          status_code: 503,
+          method: 'PUT',
+          route: '/b',
+          log_level: 'ERROR',
+          message: 'by snake case',
+        }),
+        failure(7, {
+          ...ALIASED,
+          'service.name': 'svc-dotted',
+          'http.status_code': 504,
+          'http.method': 'delete',
+          'url.path': '/c',
+          'severity.text': 'error',
+          msg: 'by dotted names',
+        }),
+      ]);
+      const list: { http_status: number | null; route: { method: string; path: string } | null; log_line: string }[] =
+        await alertList(ctx);
+      const found = Object.fromEntries(list.map((a) => [a.log_line, [a.http_status, a.route?.method, a.route?.path]]));
+      expect(found).toEqual({
+        'by camel case': [502, 'GET', '/a'],
+        'by snake case': [503, 'PUT', '/b'],
+        'by dotted names': [504, 'DELETE', '/c'],
+      });
+    });
+
+    it('asks which names a Service has once per Scan, so two Services with different names are each read by their own', async () => {
+      const { ctx, newrelic } = await scanned([
+        failure(5, { message: 'dotted names' }),
+        failure(5, {
+          ...ALIASED,
+          'service.name': 'billing-api',
+          status: 503,
+          method: 'GET',
+          path: '/invoices',
+          msg: 'plain names',
+          level: 'error',
+        }),
+      ]);
+      expect(await logLines(ctx)).toEqual(['dotted names', 'plain names']);
+      const asked = newrelic.queries().filter((query) => query.includes('keyset()'));
+      expect(asked.filter((query) => query.includes("'billing-api'"))).toHaveLength(1);
+      expect(asked.filter((query) => query.includes("'shop-api'"))).toHaveLength(1);
+    });
+
+    it('takes the first name present when a Service has two: a status of 200 beats a later name, and the level fails the event', async () => {
+      const { ctx } = await scanned([
+        failure(8, {
+          ...ALIASED,
+          status: 200,
+          statusCode: 500,
+          path: '/d',
+          method: 'GET',
+          level: 'fatal',
+          message: 'first wins',
+        }),
+      ]);
+      const [alert] = await alertList(ctx);
+      expect(alert).toMatchObject({ http_status: 200, route: { method: 'GET', path: '/d' }, log_line: 'first wins' });
+    });
+
+    it('counts an event as failing by a status of 400 or more, text or number, or an error level in any case', async () => {
+      const { ctx } = await scanned([
+        failure(5, { ...NO_STATUS, status: 404, level: 'info', message: 'number status' }),
+        failure(5, { ...NO_STATUS, status: '404', level: 'info', message: 'text status' }),
+        ...(['ERROR', 'Critical', 'alert', 'EMERGENCY', 'fatal'] as const).map((level) =>
+          failure(5, { ...NO_STATUS, level, message: `level ${level.toLowerCase()}` }),
+        ),
+        failure(5, { ...NO_STATUS, status: 200, level: 'info', message: 'all fine' }),
+        failure(5, { ...NO_STATUS, status: '399', level: 'warn', message: 'text redirect' }),
+        failure(5, { ...NO_STATUS, status: 399, level: 'warn', message: 'redirect' }),
+        failure(5, { ...NO_STATUS, level: 'warn', message: 'slow call' }),
+      ]);
+      expect(await logLines(ctx)).toEqual([
+        'level alert',
+        'level critical',
+        'level emergency',
+        'level error',
+        'level fatal',
+        'number status',
+        'text status',
+      ]);
+    });
+
+    it('reads a Service whose logs have no status attribute by level only', async () => {
+      const { ctx } = await scanned([
+        failure(5, { ...NO_STATUS, message: 'level error' }),
+        failure(6, { ...NO_STATUS, level: 'info', message: 'quiet' }),
+      ]);
+      const [alert] = await alertList(ctx);
+      expect(await alertList(ctx)).toHaveLength(1);
+      expect(alert).toMatchObject({ http_status: null, route: null, log_line: 'level error', event_count: 1 });
+    });
+
+    it('reads only the events inside the Scan window', async () => {
+      const { ctx } = await scanned([failure(30, { message: 'inside' }), failure(150, { message: 'outside' })], {
+        body: { window: '1h' },
+      });
+      const [alert] = await alertList(ctx);
+      expect(alert).toMatchObject({ event_count: 1, log_line: 'inside' });
+    });
+
+    it('counts the newest 61 hours of a window longer than that, reads the Samples of all of it, and says so in the Scan notes', async () => {
+      const { ctx, ended } = await scanned([failure(120), failure(70 * 60)], { body: { window: '7d' } });
+      expect(ended.status).toBe('ok');
+      expect(ended.notes).toContain('New Relic logs: counts read the newest 61 hours only');
+      const [alert] = await alertList(ctx);
+      expect(alert.event_count).toBe(1);
+      expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.samples).toHaveLength(2);
+    });
+
+    it('adds no note for a window of 61 hours or less', async () => {
+      const { ended } = await scanned([failure(120)], { body: { window: '24h' } });
+      expect(ended.notes).toEqual([]);
+    });
+
+    it('leaves out the ignored status classes and reads only the status codes the Scan asks for', async () => {
+      const events = [
+        failure(5, { 'http.response.status_code': 404, message: 'missing' }),
+        failure(5, { 'http.response.status_code': 500, message: 'broken' }),
+        failure(5, { 'http.response.status_code': 502, message: 'gateway' }),
+      ];
+      const ignoring = await scanned(events, { config: { ignore: [{ kind: 'status_class', value: '4xx' }] } });
+      expect(await logLines(ignoring.ctx)).toEqual(['broken', 'gateway']);
+      const asked = await scanned(events, { body: { status_codes: [502] } });
+      expect(await logLines(asked.ctx)).toEqual(['gateway']);
+    });
+
+    it('keeps secret values and request body values out of the Samples', async () => {
+      const { ctx } = await scanned([
+        failure(5, {
+          message: 'login failed password=hunter2hunter2 for u-1',
+          'http.route': '/login',
+          body: '{"card":"4111111111111111"}',
+          'http.request.header.authorization': 'Bearer abcdefghij123456',
+          user: 'u-1',
+        }),
+      ]);
+      const [listed] = await alertList(ctx);
+      const [sample] = (await ctx.http.get(`/alerts/${listed.id}`)).body.data.samples;
+      expect(sample.message).toBe('login failed password=[redacted] for u-1');
+      expect(sample.attributes).toMatchObject({ body: '[redacted]', user: 'u-1' });
+      expect(JSON.stringify(sample.attributes)).not.toContain('abcdefghij123456');
+    });
+
+    it('reads every Route of a Service, not only the first ten', async () => {
+      const { ctx } = await scanned(
+        Array.from({ length: 12 }, (_, index) => failure(5, { 'http.route': `/route-${index}`, message: `m${index}` })),
+      );
+      expect(await alertList(ctx)).toHaveLength(12);
+    });
+
+    it('reads the newest 5,000 failing events of a Service, counts them in full, and says so in the Scan notes', async () => {
+      const many = Array.from({ length: 5_050 }, (_, index) => ({
+        at: Date.now() - 60_000 - index * 10,
+        attrs: { ...SHOP, ...EVENT },
+      }));
+      const { ctx, ended } = await scanned(many);
+      expect(ended.status).toBe('ok');
+      expect(ended.notes).toContain('shop-api: read the newest 5,000 failing events only');
+      const [alert] = await alertList(ctx);
+      // The counts query is not cut by the cap, and one message group on the Route takes its count.
+      expect(alert.event_count).toBe(5_050);
+      expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.samples).toHaveLength(25);
+    });
+
+    it('counts message groups of one Route from the events read when the Route has several', async () => {
+      const events = (message: string, count: number) =>
+        Array.from({ length: count }, (_, index) => ({
+          at: Date.now() - 60_000 - index * 10,
+          attrs: { ...SHOP, ...EVENT, message },
+        }));
+      const { ctx, ended } = await scanned([
+        ...events('timed out calling payments', 3_000),
+        ...events('stock service refused', 2_100),
+      ]);
+      expect(ended.notes).toContain('shop-api: read the newest 5,000 failing events only');
+      const counts = Object.fromEntries(
+        (await alertList(ctx)).map((a: { log_line: string; event_count: number }) => [a.log_line, a.event_count]),
+      );
+      expect(counts['stock service refused']).toBeLessThanOrEqual(2_100);
+      expect(counts['timed out calling payments'] + counts['stock service refused']).toBe(5_000);
+    });
+
+    it('counts a failing event that names no status, method or route', async () => {
+      const { ctx } = await scanned(
+        Array.from({ length: 3 }, (_, index) =>
+          failure(5 + index, { ...NO_STATUS, message: 'payments client timed out' }),
+        ),
+      );
+      const [alert] = await alertList(ctx);
+      expect(alert).toMatchObject({ http_status: null, route: null, event_count: 3 });
+    });
+
+    it('reads a FACET answer that names its values by attribute', async () => {
+      const newrelic = await FakeNewRelic.create();
+      newrelic.events(failure(5), failure(6)).facetsByName();
+      const ctx = await start({ newRelic: { bin: newrelic.bin } });
+      connectNewRelic(ctx);
+      await scanNewRelic(ctx);
+      expect(await alertList(ctx)).toMatchObject([
+        { http_status: 500, route: { method: 'POST', path: '/orders' }, event_count: 2 },
+      ]);
+    });
+
+    it('quotes attribute names with dots and escapes the values it puts into a query', async () => {
+      const { ctx, newrelic } = await scanned([failure(5, { 'service.name': "o'brien\\api" })]);
+      expect((await ctx.http.get('/services')).body.data).toMatchObject([{ name: "o'brien\\api" }]);
+      expect(await alertList(ctx)).toHaveLength(1);
+      const queries = newrelic.queries();
+      expect(queries.some((query) => query.includes('`service.name`'))).toBe(true);
+      expect(queries.some((query) => query.includes("'o\\'brien\\\\api'"))).toBe(true);
+    });
+  });
+
+  describe('Alerts', () => {
+    it('sets Severity from the same rules as the other sources', async () => {
+      const bucket = Math.floor(minutesAgo(60) / (10 * MINUTE)) * 10 * MINUTE;
+      // Twice the threshold within 100 seconds: whichever 10 minutes New Relic counts, one holds at least 100.
+      const rapid = Array.from({ length: 250 }, (_, i) => ({
+        at: bucket + (i % 100) * 1000,
+        attrs: { ...SHOP, ...EVENT, 'http.route': '/rapid' },
+      }));
+      const steady = Array.from({ length: 120 }, (_, i) => ({
+        at: minutesAgo(i + 1),
+        attrs: { ...SHOP, ...EVENT, 'http.route': '/steady' },
+      }));
+      const few = [1, 2, 3].map((i) => failure(i, { 'http.route': '/few' }));
+      // Fatal is error level whatever the status code.
+      const fatal = Array.from({ length: 120 }, (_, i) => ({
+        at: minutesAgo(i + 1),
+        attrs: { ...SHOP, ...EVENT, 'http.response.status_code': 401, level: 'fatal', 'http.route': '/fatal' },
+      }));
+      const { ctx } = await scanned([...rapid, ...steady, ...few, ...fatal]);
+      const severities = Object.fromEntries(
+        (await alertList(ctx)).map((alert: { route: { path: string }; severity: string }) => [
+          alert.route.path,
+          alert.severity,
+        ]),
+      );
+      expect(severities).toEqual({ '/rapid': 'high', '/steady': 'medium', '/few': 'low', '/fatal': 'medium' });
+    });
+
+    it('puts the source in the Fingerprint, and leaves the other sources Fingerprints alone', async () => {
+      const newrelic = await FakeNewRelic.create();
+      newrelic.events(failure(5));
+      const looped = await start({ newRelic: { bin: newrelic.bin } });
+      looped.datadog.readings = [service('shop-api', [route('POST', '/orders', 4)])];
+      connectNewRelic(looped);
+      await scan(looped);
+      await scanNewRelic(looped);
+      const rows = looped.store.db.select().from(alerts).all();
+      const byConnector = Object.fromEntries(rows.map((row) => [row.connector, row.fingerprint]));
+      const rowOf = (connector: LogSource) =>
+        looped.store.db.select().from(services).where(eq(services.connector, connector)).get();
+      expect(byConnector.new_relic_logs).toBe(
+        fingerprint(
+          rowOf(ConnectorId.NewRelicLogs)?.id as string,
+          'POST',
+          '/orders',
+          'NullPointerException in OrderService',
+          500,
+          ConnectorId.NewRelicLogs,
+        ),
+      );
+      expect(byConnector.datadog).toBe(
+        fingerprint(
+          rowOf(ConnectorId.Datadog)?.id as string,
+          'POST',
+          '/orders',
+          'NullPointerException in OrderService',
+          500,
+        ),
+      );
+      expect(Object.keys(byConnector).sort()).toEqual(['datadog', 'new_relic_logs']);
+    });
+  });
+
+  describe('failures', () => {
+    const outcome = async (arrange: (newrelic: FakeNewRelic) => void) => {
+      const newrelic = await FakeNewRelic.create();
+      newrelic.events(failure(5));
+      arrange(newrelic);
+      const ctx = await start({ newRelic: { bin: newrelic.bin } });
+      connectNewRelic(ctx);
+      return scanNewRelic(ctx, { envs: ['prod'] });
+    };
+
+    it('shows New Relic’s reason when it rejects a query or gives up on one', async () => {
+      for (const reason of [
+        "NRQL Syntax Error: Error at line 1 position 20, unexpected 'FORM'",
+        'NRQL query timed out: it took longer than 60 seconds',
+      ]) {
+        expect(await outcome((newrelic) => newrelic.rejectQueries(reason)), reason).toMatchObject({
+          status: 'failed',
+          error_code: 'upstream_failed',
+          error_message: `New Relic refused the query: ${reason}`,
+        });
+      }
+    });
+
+    it('cuts the key from New Relic’s reason before the Scan error shows it', async () => {
+      const keychain = new FakeKeychain();
+      keychain.values.set(NEW_RELIC_KEY, KEY);
+      const newrelic = await FakeNewRelic.create();
+      newrelic.events(failure(5)).rejectQueries(`NRQL Syntax Error: unexpected '${KEY}'`);
+      const ctx = await start({ newRelic: { bin: newrelic.bin }, keychain });
+      connectNewRelic(ctx);
+      const ended = await scanNewRelic(ctx, { envs: ['prod'] });
+      expect(ended).toMatchObject({ status: 'failed', error_message: expect.stringContaining('[redacted]') });
+      expect(JSON.stringify(ended)).not.toContain(KEY);
+    });
+
+    it('ends a timeout New Relic names as one, and a rate limit as rate limited', async () => {
+      expect(await outcome((newrelic) => newrelic.behave('timeout'))).toMatchObject({
+        status: 'failed',
+        error_code: 'upstream_failed',
+        error_message: expect.stringContaining('New Relic refused the query'),
+      });
+      expect(await outcome((newrelic) => newrelic.behave('throttle'))).toMatchObject({
+        status: 'rate_limited',
+        error_code: 'rate_limited',
+      });
+    });
+
+    it('ends a rejected key and an unreachable address upstream failed, with no New Relic text in the message', async () => {
+      for (const behavior of ['unauthorized', 'forbidden', 'unreachable'] as const) {
+        expect(await outcome((newrelic) => newrelic.behave(behavior)), behavior).toMatchObject({
+          status: 'failed',
+          error_code: 'upstream_failed',
+          error_message: '`newrelic nrql` failed',
+        });
+      }
+    });
+
+    it('kills the running newrelic when the operator stops the Scan', async () => {
+      const newrelic = await FakeNewRelic.create();
+      newrelic.events(failure(5)).behaveOn('samples', 'hang').behaveOn('counts', 'hang');
+      const ctx = await start({ newRelic: { bin: newrelic.bin } });
+      connectNewRelic(ctx);
+      const started = await ctx.http.post('/scans', { service_id: null, connector: 'new_relic_logs', envs: ['prod'] });
+      await until(
+        () => newrelic.queries().filter((query) => query.includes('TIMESERIES') || query.startsWith('SELECT *')).length,
+        (asked) => asked >= 2,
+        'both queries to be running',
+      );
+      expect((await ctx.http.post(`/scans/${started.body.data.id}/cancel`)).status).toBe(204);
+      await until(
+        () => ctx.http.get(`/scans/${started.body.data.id}`).then((res) => res.body.data.status),
+        (status) => status === 'cancelled',
+        'the Scan to be cancelled',
+      );
+      const asked = newrelic
+        .calls()
+        .filter((call) => call.args.some((arg) => arg.includes('TIMESERIES') || arg.startsWith('SELECT *')));
+      for (const { pid } of asked) {
+        await until(
+          () => alive(pid),
+          (running) => !running,
+          'the query to be killed',
+        );
+      }
+    });
+
+    it('does not stop another source Scan when New Relic is down, and shows the others Alerts', async () => {
+      const newrelic = await FakeNewRelic.create();
+      newrelic.events(failure(5)).behave('unreachable');
+      const ctx = await start({ newRelic: { bin: newrelic.bin } });
+      ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 4)])];
+      connectNewRelic(ctx);
+      expect((await ctx.http.post('/scans', { service_id: null })).status).toBe(202);
+      const all = await until(
+        () => ctx.http.get('/scans').then((res) => res.body.data),
+        (found: { connector: string; status: string }[]) =>
+          found.length === 2 && found.every((one) => one.status !== 'running'),
+        'both Scans',
+      );
+      expect(all.map((one: { connector: string; status: string }) => [one.connector, one.status]).sort()).toEqual([
+        ['datadog', 'ok'],
+        ['new_relic_logs', 'failed'],
+      ]);
+      expect((await alertList(ctx)).map((alert: { connector: string }) => alert.connector)).toEqual(['datadog']);
+    });
+  });
+
+  it('refuses a Scan or a Service list while New Relic logs is not connected', async () => {
+    const ctx = await start();
+    const scanRefused = await ctx.http.post('/scans', { service_id: null, connector: 'new_relic_logs' });
+    expect([scanRefused.status, scanRefused.body.error.code]).toEqual([409, 'connector_not_connected']);
+    const listed = await ctx.http.get('/monitor/log-services?connector=new_relic_logs&window=24h');
+    expect([listed.status, listed.body.error.code]).toEqual([409, 'connector_not_connected']);
+  });
+
+  it('links an imported Repo with the Service name, as any Service is', async () => {
+    const newrelic = await FakeNewRelic.create();
+    newrelic.events(failure(5, { 'service.name': 'orders-api' }));
+    const ctx = await start({ newRelic: { bin: newrelic.bin } });
+    const repo = (await ctx.http.post('/repos', { path: await makeRepo() })).body.data;
+    connectNewRelic(ctx);
+    await scanNewRelic(ctx);
+    const linked = await until(
+      () => ctx.http.get('/services').then((res) => res.body.data[0]),
+      (found) => found.repo_id !== null,
+      'the Repo to be linked',
+    );
+    expect(linked).toMatchObject({ connector: 'new_relic_logs', repo_id: repo.id });
+  });
+
+  describe('Services and the schedule', () => {
+    it('lists the Services and envs with their failing counts and status codes', async () => {
+      const newrelic = await FakeNewRelic.create();
+      newrelic.events(
+        failure(5),
+        failure(6),
+        failure(7, { 'http.response.status_code': 404 }),
+        failure(5, { 'service.name': 'billing-api', environment: 'staging', 'http.response.status_code': 502 }),
+        failure(5, { 'service.name': 'cron', environment: undefined, 'http.response.status_code': 200, level: 'info' }),
+      );
+      const ctx = await start({ newRelic: { bin: newrelic.bin } });
+      connectNewRelic(ctx);
+      expect((await ctx.http.get('/monitor/envs?connector=new_relic_logs')).body.data).toEqual([
+        { name: 'prod', configured: true },
+        { name: 'staging', configured: false },
+        { name: 'no env', configured: false },
+      ]);
+      expect((await ctx.http.get('/monitor/log-services?connector=new_relic_logs&window=24h')).body.data).toEqual([
+        { name: 'shop-api', envs: ['prod'], errors: 3 },
+        { name: 'billing-api', envs: ['staging'], errors: 1 },
+      ]);
+      expect((await ctx.http.get('/monitor/status-codes?connector=new_relic_logs&window=24h')).body.data).toEqual([
+        { code: 500, count: 2 },
+        { code: 404, count: 1 },
+        { code: 502, count: 1 },
+      ]);
+    });
+
+    it('lists more than ten Services, envs and status codes', async () => {
+      const newrelic = await FakeNewRelic.create();
+      newrelic.events(
+        ...Array.from({ length: 12 }, (_, index) =>
+          failure(5, {
+            'service.name': `api-${index}`,
+            environment: `env-${index}`,
+            'http.response.status_code': 500 + index,
+          }),
+        ),
+      );
+      const ctx = await start({ newRelic: { bin: newrelic.bin } });
+      connectNewRelic(ctx);
+      expect((await ctx.http.get('/monitor/envs?connector=new_relic_logs')).body.data).toHaveLength(14);
+      expect((await ctx.http.get('/monitor/log-services?connector=new_relic_logs&window=24h')).body.data).toHaveLength(
+        12,
+      );
+      expect((await ctx.http.get('/monitor/status-codes?connector=new_relic_logs&window=24h')).body.data).toHaveLength(
+        12,
+      );
+    });
+
+    it('runs on its own interval, and skips the source when it is not connected', async () => {
+      const newrelic = await FakeNewRelic.create();
+      newrelic.events(failure(5));
+      const ctx = await start({ newRelic: { bin: newrelic.bin } });
+      connectNewRelic(ctx);
+      await ctx.http.patch('/connectors/new_relic_logs', { config: { default_interval: '12h' } });
+      const monitor = ctx.daemon.app.get(ScansService);
+      const scheduled = () =>
+        ctx.store.db
+          .select()
+          .from(scans)
+          .where(eq(scans.triggeredBy, ScanTrigger.Schedule))
+          .all()
+          .map((one) => [one.connector, one.windowSize])
+          .sort();
+      await monitor.runDue(new Date(2026, 9, 5, 9, 1));
+      expect(scheduled()).toEqual([
+        ['datadog', '24h'],
+        ['new_relic_logs', '12h'],
+      ]);
+      setConnector(ctx.store, ConnectorId.NewRelicLogs, { status: HealthStatus.Fail });
+      await monitor.runDue(new Date(Date.now() + 2 * 86_400_000));
+      expect(scheduled().filter(([connector]) => connector === 'new_relic_logs')).toHaveLength(1);
+    });
+
+    it('keeps each source Scans through retention, per Service', async () => {
+      const newrelic = await FakeNewRelic.create();
+      newrelic.events(failure(5));
+      const ctx = await start({ newRelic: { bin: newrelic.bin } });
+      ctx.datadog.readings = [service('shop-api', [route('POST', '/orders', 4)])];
+      connectNewRelic(ctx);
+      for (let round = 0; round < 2; round++) {
+        await scan(ctx);
+        await scanNewRelic(ctx);
+      }
+      const long = new Date(Date.now() - 40 * 86_400_000).toISOString();
+      ctx.store.write((tx) => tx.update(scans).set({ startedAt: long }).run());
+      await ctx.daemon.app.get(MonitorRetention).run();
+      expect(
+        ctx.store.db
+          .select()
+          .from(scans)
+          .all()
+          .map((one) => one.connector)
+          .sort(),
+      ).toEqual(['datadog', 'new_relic_logs']);
+    });
+
+    it('seeds the Connector off with the default config, so existing rows keep their source', async () => {
+      const ctx = await start();
+      const rows = ctx.store.db.select().from(connectors).all();
+      expect(rows.find((row) => row.id === ConnectorId.NewRelicLogs)).toMatchObject({ status: 'off' });
+      expect(await alertList(ctx)).toEqual([]);
+    });
+  });
+
+  describe('Recheck, Verification and Fix', () => {
+    const recheckOf = (report: { steps: { kind: string; text: string }[] }) =>
+      report.steps[0] as { kind: string; text: string };
+    const promptsSince = (ctx: Ctx, from: number) => ctx.daemon.sdk.calls.slice(from).map((call) => call.prompt);
+    const deniedSince = (ctx: Ctx, from: number) =>
+      ctx.daemon.sdk.calls.slice(from).flatMap((call) => {
+        const settings = call.options.settings as { deniedMcpServers?: { serverName: string }[] } | undefined;
+        return (settings?.deniedMcpServers ?? []).map((server) => server.serverName);
+      });
+
+    async function failingNewRelic(events = [failure(5), failure(8)]) {
+      const newrelic = await FakeNewRelic.create();
+      newrelic.events(...events);
+      const ctx = await start({ newRelic: { bin: newrelic.bin } });
+      connectNewRelic(ctx);
+      await scanNewRelic(ctx);
+      const [alert] = await alertList(ctx);
+      await linkRepo(ctx, alert.service.id);
+      return { ctx, newrelic, alert };
+    }
+
+    it('counts the Alert’s events for the last hour through its filter, before the agent starts', async () => {
+      const { ctx, newrelic, alert } = await failingNewRelic();
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(recheckOf(stored)).toEqual({ kind: 'result', text: 'New Relic logs recheck, last hour: still failing' });
+      expect(ctx.datadog.rechecks).toEqual([]);
+      expect(newrelic.queries().at(-1)).toContain('SINCE 60 minutes ago');
+      expect(stored.status).toBe('ready');
+    });
+
+    it('says not seen when the last hour holds none of them', async () => {
+      const { ctx, alert } = await failingNewRelic([failure(100)]);
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(recheckOf(stored).text).toBe('New Relic logs recheck, last hour: not seen');
+      expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.status).toBe('verified');
+    });
+
+    it('writes why a Recheck failed, and goes on', async () => {
+      const { ctx, newrelic, alert } = await failingNewRelic();
+      newrelic.behave('throttle');
+      const report = await verify(ctx, alert.id);
+      const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+      expect(recheckOf(stored)).toEqual({ kind: 'warning', text: 'Recheck failed: New Relic rate limit reached' });
+      expect(stored.status).toBe('ready');
+    });
+
+    it('briefs the agent with the source, the Samples and the filter, and tells it to use no pup, no Datadog server, and newrelic through run_integration', async () => {
+      const { ctx, alert } = await failingNewRelic([failure(5)]);
+      const before = ctx.daemon.sdk.calls.length;
+      await verify(ctx, alert.id);
+      const brief = promptsSince(ctx, before).find((prompt) => prompt.includes('Find the cause of a failure')) ?? '';
+      expect(brief).toContain('New Relic logs');
+      expect(brief).toContain('NullPointerException in OrderService');
+      expect(brief).toContain('New Relic logs filter: {"service":"shop-api","env":"prod"');
+      expect(brief).toMatch(/no `pup` and no Datadog MCP Server/);
+      expect(brief).toMatch(/`newrelic` through the `run_integration` tool/);
+      expect(brief).not.toContain('Datadog query');
+      expect(brief).not.toContain('failure Datadog logged');
+      expect(deniedSince(ctx, before)).toContain('datadog-pup');
+    });
+
+    it('starts a Fix of a New Relic Alert with a Recheck and the same rule on its tools', async () => {
+      const { ctx, alert } = await failingNewRelic();
+      await verify(ctx, alert.id);
+      const before = ctx.daemon.sdk.calls.length;
+      for (const run of stepTurns(PlaybookTrigger.Fix)) ctx.daemon.sdk.script(...run);
+      ctx.daemon.sdk.script(json({ description: 'Defaults the order total.' }));
+      const confirm = await ctx.http.post(`/alerts/${alert.id}/review`, { decision: 'confirmed', kind: 'bug' });
+      await until(
+        () => ctx.http.get(`/fixes/${confirm.body.data.fix.id}`).then((res) => res.body.data.status),
+        (status) => status !== 'running',
+        'the Fix to end',
+      );
+      const prompts = promptsSince(ctx, before);
+      expect(prompts[0]).toContain('New Relic logs recheck, last hour: still failing');
       expect(prompts[0]).toMatch(/no `pup` and no Datadog MCP Server/);
       expect(deniedSince(ctx, before)).toContain('datadog-pup');
     });

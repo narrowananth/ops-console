@@ -61,6 +61,7 @@ import {
   mcpServerSchema,
   messageSchema,
   networkAllowlistSchema,
+  newRelicConnectBodySchema,
   type OpenPullRequest,
   openedPullRequestSchema,
   outputFileSchema,
@@ -633,6 +634,17 @@ export function useConnectCloudWatch() {
 export function useConnectLoki() {
   return useConnectorMutation((body: z.infer<typeof lokiConnectBodySchema>) =>
     apiSend('POST', `/connectors/${ConnectorId.LokiLogs}/connect`, body, z.undefined()),
+  );
+}
+
+/**
+ * Connects New Relic logs with its account ID, region, attribute names and filter. The key is write-only: left out, the
+ * Keychain's stays. The daemon refuses a missing `newrelic` and a bad field (`tool_missing`, `validation_failed`); a
+ * refused key shows as the health check's `auth` status.
+ */
+export function useConnectNewRelic() {
+  return useConnectorMutation((body: z.infer<typeof newRelicConnectBodySchema>) =>
+    apiSend('POST', `/connectors/${ConnectorId.NewRelicLogs}/connect`, body, z.undefined()),
   );
 }
 
