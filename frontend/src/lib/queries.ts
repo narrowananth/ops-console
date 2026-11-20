@@ -71,6 +71,7 @@ import {
   type PlaybookTrigger,
   ProcessState,
   type PrReviewEvent,
+  PrState,
   playbookListSchema,
   playbookSchema,
   prAgentReviewSchema,
@@ -1457,12 +1458,16 @@ export function usePullRequests(filter: PullRequestFilter) {
   return useQuery({ ...pullRequestsQuery(filter), placeholderData: keepPreviousData });
 }
 
-/** One Repo's open pull requests, from the same daemon cache as the list; read when `repoId` is set. */
-export function useRepoPullRequests(repoId: string | null) {
+/**
+ * One Repo's pull requests in one state, from the same daemon cache as the list; read when `repoId` is set and `enabled`.
+ * The open list is the default; merged and closed are read only by a caller that needs them.
+ */
+export function useRepoPullRequests(repoId: string | null, state: PrState = PrState.Open, enabled = true) {
   return useQuery({
-    queryKey: [...queryKeys.pulls, 'repo', repoId],
-    queryFn: () => apiGet(`/pull-requests?repo_id=${repoId}`, pullRequestListSchema),
-    enabled: repoId !== null,
+    queryKey:
+      state === PrState.Open ? [...queryKeys.pulls, 'repo', repoId] : [...queryKeys.pulls, 'repo', repoId, state],
+    queryFn: () => apiGet(`/pull-requests?repo_id=${repoId}&state=${state}`, pullRequestListSchema),
+    enabled: repoId !== null && enabled,
   });
 }
 

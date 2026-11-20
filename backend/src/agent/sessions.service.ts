@@ -20,7 +20,7 @@ import { and, desc, eq, inArray, isNull, lt, or, type SQL, sql } from 'drizzle-o
 import { z } from 'zod';
 import { ApiError, validationFailed } from '../common/errors';
 import { afterCursor, toPage } from '../common/pagination';
-import { repos, sessions } from '../db/schema';
+import { repos, sessionPullRequests, sessions } from '../db/schema';
 import { type Emit, STORE, type Store } from '../db/store';
 import { PlaybooksService } from '../playbooks/playbooks.service';
 import { SettingsRegistry } from '../settings/settings.registry';
@@ -43,6 +43,9 @@ export const KEPT_OUTCOMES = [
 
 export type SessionRow = typeof sessions.$inferSelect;
 
+/** A pull request the console opened for a Session. */
+export type OpenedPullRequest = Session['pull_requests'][number];
+
 export type NewSession = {
   kind: SessionKind;
   model?: Model;
@@ -55,7 +58,8 @@ export type NewSession = {
   spawnedBy?: { sessionId: string; callId: string };
 };
 
-export function toSession(row: SessionRow): Session {
+/** `pullRequests` are the Session's own, newest first, from `SessionsService.pullRequestsOf`. */
+export function toSession(row: SessionRow, pullRequests: OpenedPullRequest[]): Session {
   return {
     id: row.id,
     kind: row.kind,
@@ -67,10 +71,8 @@ export function toSession(row: SessionRow): Session {
     repo_id: row.repoId,
     branch: row.branch,
     pr_number: row.prNumber,
-    pull_request:
-      row.openedPrNumber !== null && row.openedPrUrl !== null && row.openedPrBranch === row.branch
-        ? { number: row.openedPrNumber, url: row.openedPrUrl }
-        : null,
+    pull_request: pullRequestOnBranch(row, pullRequests),
+    pull_requests: pullRequests,
     connection_ids: null,
     alert_id: row.alertId,
     extra_repo_ids: extraRepoIds(row),
@@ -85,6 +87,12 @@ export function toSession(row: SessionRow): Session {
     spawned: [],
     subagents: subagentsOf(row),
   };
+}
+
+/** The newest pull request the Session opened from the branch it is on now. */
+function pullRequestOnBranch(row: SessionRow, pullRequests: OpenedPullRequest[]): Session['pull_request'] {
+  const found = pullRequests.find((pull) => pull.branch === row.branch);
+  return found ? { number: found.number, url: found.url } : null;
 }
 
 /** The subagents the Session's latest run started, as the run kept them. */
@@ -197,8 +205,9 @@ export class SessionsService {
       .orderBy(desc(sessions.lastActiveAt), desc(sessions.id))
       .limit(query.limit + 1)
       .all();
+    const pulls = this.pullRequestsOf(rows.map((row) => row.id));
     return toPage(
-      rows.map((row) => this.view(row)),
+      rows.map((row) => this.view(row, pulls.get(row.id))),
       query.limit,
       (row) => `${row.last_active_at}|${row.id}`,
     );
@@ -255,14 +264,45 @@ export class SessionsService {
   }
 
   /** The Session with the fields its kind adds. */
-  view(row: SessionRow): Session {
+  view(row: SessionRow, pullRequests: OpenedPullRequest[] = this.pullRequestsFor(row.id)): Session {
     return {
-      ...toSession(row),
+      ...toSession(row, pullRequests),
       last_error: this.failures.get(row.id) ?? null,
       playbook: this.playbooks.forSession(row).playbook,
       ...this.spawnLinks(row),
       ...this.kinds.get(row.kind)?.view?.(row),
     };
+  }
+
+  /** The pull requests the console opened for each Session, newest first; a Session with none has no entry. One read. */
+  pullRequestsOf(ids: string[]): Map<string, OpenedPullRequest[]> {
+    const rows = this.store.db
+      .select()
+      .from(sessionPullRequests)
+      .where(inArray(sessionPullRequests.sessionId, ids))
+      .orderBy(desc(sessionPullRequests.createdAt), sql`${sessionPullRequests}.rowid desc`)
+      .all();
+    const byId = new Map<string, OpenedPullRequest[]>();
+    for (const { sessionId, number, url, branch } of rows) {
+      byId.set(sessionId, [...(byId.get(sessionId) ?? []), { number, url, branch }]);
+    }
+    return byId;
+  }
+
+  pullRequestsFor(id: string): OpenedPullRequest[] {
+    return this.pullRequestsOf([id]).get(id) ?? [];
+  }
+
+  /** Adds a pull request to the Session's list and sends `session.updated`; one already in the list stays as it is. */
+  rememberPullRequest(id: string, pull: OpenedPullRequest): void {
+    this.store.write((tx, emit) => {
+      tx.insert(sessionPullRequests)
+        .values({ sessionId: id, ...pull, createdAt: new Date().toISOString() })
+        .onConflictDoNothing()
+        .run();
+      const row = tx.select().from(sessions).where(eq(sessions.id, id)).get();
+      if (row) emitSessionUpdated(emit, row);
+    });
   }
 
   /** The Session that started this one and the Sessions this one started, with where each stands. */
@@ -278,6 +318,7 @@ export class SessionsService {
       .where(eq(sessions.spawnedBySessionId, row.id))
       .orderBy(sessions.createdAt)
       .all();
+    const pulls = this.pullRequestsOf(children.map(({ row: child }) => child.id));
     return {
       spawned_by: parent ? { id: parent.id, title: parent.title } : null,
       spawned: children.map(({ row: child, repoName }) => ({
@@ -288,7 +329,7 @@ export class SessionsService {
         branch: child.branch,
         state: child.state,
         run_outcome: child.runOutcome,
-        pull_request: toSession(child).pull_request,
+        pull_request: toSession(child, pulls.get(child.id) ?? []).pull_request,
       })),
     };
   }

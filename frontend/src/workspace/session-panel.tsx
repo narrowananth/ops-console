@@ -1,6 +1,7 @@
 import {
   type LocalServer,
   PrChecks,
+  type PrState,
   type Session,
   type SessionDiff,
   type Subagent,
@@ -115,9 +116,22 @@ type RowProps = {
   disabled?: boolean;
   /** The accessible name, when the text alone would repeat another control's. */
   label?: string;
+  /** Set on a row that opens or folds more rows: whether they are shown now. */
+  expanded?: boolean;
 };
 
-function Row({ children, onClick, to, href, title, icon, label, danger = false, disabled = false }: RowProps) {
+function Row({
+  children,
+  onClick,
+  to,
+  href,
+  title,
+  icon,
+  label,
+  expanded,
+  danger = false,
+  disabled = false,
+}: RowProps) {
   const cls = `flex w-full items-center gap-3 rounded-lg border-0 bg-transparent px-3 py-2 text-left text-sm no-underline enabled:cursor-pointer enabled:hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-50 ${danger ? 'text-accent-700' : 'text-text'}`;
   const inner = (
     <>
@@ -138,7 +152,15 @@ function Row({ children, onClick, to, href, title, icon, label, danger = false, 
       </a>
     );
   return (
-    <button type="button" title={title} aria-label={label} onClick={onClick} disabled={disabled} className={cls}>
+    <button
+      type="button"
+      title={title}
+      aria-label={label}
+      aria-expanded={expanded}
+      onClick={onClick}
+      disabled={disabled}
+      className={cls}
+    >
       {inner}
     </button>
   );
@@ -173,6 +195,73 @@ function ChecksMark({ checks }: { checks: PrChecks }) {
       )}
       checks {shown.word}
     </span>
+  );
+}
+
+/** A pull request of the Session. `info` is what the Git host's list says of it; null while that list is unread or lacks it. */
+export type PullRequestRow = {
+  number: number;
+  href: string;
+  to: string | null;
+  info: { title: string; checks: PrChecks; state: PrState } | null;
+};
+
+/** Rows shown before "Show N more". */
+const PULL_REQUESTS_SHOWN = 3;
+
+function PullRequestItem({ row }: { row: PullRequestRow }) {
+  const { number, to, href, info } = row;
+  return (
+    <div className="flex flex-col gap-1 px-3 py-2 text-sm">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex w-4 flex-none justify-center text-accent-2-600">
+          <PullRequestIcon />
+        </span>
+        <span className="min-w-0 flex-1 leading-snug break-words">{info?.title ?? `Pull request #${number}`}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-7 text-xs">
+        {to && (
+          <Link
+            to={to}
+            title={`Open pull request #${number} in the Workspace's Pull requests tab`}
+            className="text-neutral-700 no-underline hover:underline"
+          >
+            PR #{number} →
+          </Link>
+        )}
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          title={`Open pull request #${number} on the Git host`}
+          className="text-neutral-700 no-underline hover:underline"
+        >
+          #{number} on host ↗
+        </a>
+        {info && <span className="text-neutral-700">{info.state}</span>}
+        {info && <ChecksMark checks={info.checks} />}
+      </div>
+    </div>
+  );
+}
+
+/** The pull requests of the Session, the first few with the rest behind "Show N more". */
+function PullRequestList({ rows }: { rows: PullRequestRow[] }) {
+  const [all, setAll] = useState(false);
+  if (rows.length === 0) return null;
+  const hidden = rows.length - PULL_REQUESTS_SHOWN;
+  const shown = all || hidden <= 0 ? rows : rows.slice(0, PULL_REQUESTS_SHOWN);
+  return (
+    <>
+      {shown.map((row) => (
+        <PullRequestItem key={row.number} row={row} />
+      ))}
+      {hidden > 0 && (
+        <Row icon={<ChevronIcon open={all} />} expanded={all} onClick={() => setAll((now) => !now)}>
+          {all ? 'Show less' : `Show ${hidden} more`}
+        </Row>
+      )}
+    </>
   );
 }
 
@@ -294,8 +383,7 @@ function PublishRow({ publish }: { publish: Publish }) {
 export function SessionPanel({
   session,
   branch,
-  pullRequest,
-  pullInfo,
+  pullRequests,
   publish,
   branchControl,
   folder,
@@ -314,9 +402,8 @@ export function SessionPanel({
 }: {
   session: Session;
   branch: string | null;
-  pullRequest: { number: number; to: string | null; href: string } | null;
-  /** The pull request's title and CI state, read from the Git host's list; null until it is known. */
-  pullInfo: { title: string; checks: PrChecks } | null;
+  /** The pull requests to list, newest first. */
+  pullRequests: PullRequestRow[];
   /** Commit, Push and Create PR; null when the Session has no branch of its own. */
   publish: Publish | null;
   /** The branch picker, drawn where the branch name goes. */
@@ -442,39 +529,7 @@ export function SessionPanel({
                 {branchControl}
               </div>
             )}
-            {pullRequest && (
-              <div className="flex flex-col gap-1 px-3 py-2 text-sm">
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 flex w-4 flex-none justify-center text-accent-2-600">
-                    <PullRequestIcon />
-                  </span>
-                  <span className="min-w-0 flex-1 leading-snug break-words">
-                    {pullInfo?.title ?? `Pull request #${pullRequest.number}`}
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-7 text-xs">
-                  {pullRequest.to && (
-                    <Link
-                      to={pullRequest.to}
-                      title={`Open pull request #${pullRequest.number} in the Workspace's Pull requests tab`}
-                      className="text-neutral-700 no-underline hover:underline"
-                    >
-                      PR #{pullRequest.number} →
-                    </Link>
-                  )}
-                  <a
-                    href={pullRequest.href}
-                    target="_blank"
-                    rel="noreferrer"
-                    title={`Open pull request #${pullRequest.number} on the Git host`}
-                    className="text-neutral-700 no-underline hover:underline"
-                  >
-                    #{pullRequest.number} on host ↗
-                  </a>
-                  {pullInfo && <ChecksMark checks={pullInfo.checks} />}
-                </div>
-              </div>
-            )}
+            <PullRequestList rows={pullRequests} />
             {publish && <PublishRow publish={publish} />}
             {changed && (
               <Row icon={<DiffIcon />} onClick={() => onOpen('diff')} title="Show what this Session's branch changes">

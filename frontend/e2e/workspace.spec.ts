@@ -34,6 +34,7 @@ const session = (id: string, repoId: string, title: string, state = 'idle', bran
   connection_ids: null,
   extra_repo_ids: [],
   pull_request: null,
+  pull_requests: [],
   alert_id: null,
   state,
   last_message_preview: null,

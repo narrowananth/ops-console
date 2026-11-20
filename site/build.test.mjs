@@ -228,3 +228,14 @@ test('the data-flow page puts newrelic in the CLI group and says New Relic event
   assert.match(row, /run_integration/);
   assert.match(row, /New Relic events reach Anthropic only as Samples in a prompt or as the agent's tool output/);
 });
+
+test('the install page has the Homebrew trust step between tap and install', async () => {
+  await build();
+  const page = await readFile(path.join(dist, 'docs', 'install', 'index.html'), 'utf8');
+  const [commands] = page.match(/<pre><code>brew tap[\s\S]*?<\/code><\/pre>/) ?? [];
+  assert.ok(commands, 'the page shows the Homebrew commands');
+  const lines = commands.split('\n');
+  const at = (start) => lines.findIndex((line) => line.includes(start));
+  assert.ok(at('brew trust narrowananth/ops-console') > at('brew tap'), 'trust comes after tap');
+  assert.ok(at('brew trust narrowananth/ops-console') < at('brew install ops-console'), 'trust comes before install');
+});

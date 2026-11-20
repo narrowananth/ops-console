@@ -57,7 +57,7 @@ export class AnonymousSessionsService {
       access_mode: input.access_mode,
     });
     this.folder(row.id);
-    return toSession(input.title ? this.sessions.write(row.id, { title: input.title }) : row);
+    return toSession(input.title ? this.sessions.write(row.id, { title: input.title }) : row, []);
   }
 
   /** The Session's folder, made when missing so a run always has somewhere to work. */

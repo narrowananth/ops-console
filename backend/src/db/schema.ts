@@ -126,10 +126,6 @@ export const sessions = sqliteTable(
     repoId: text('repo_id').references((): AnySQLiteColumn => repos.id, { onDelete: 'restrict' }),
     branch: text(),
     prNumber: integer('pr_number'),
-    /** The pull request this Session opened, and the branch it came from; shown only while the Session is on that branch. */
-    openedPrNumber: integer('opened_pr_number'),
-    openedPrUrl: text('opened_pr_url'),
-    openedPrBranch: text('opened_pr_branch'),
     /** JSON array of the other Repos' ids the operator opened to this Session's agent; null for none. */
     extraRepoIds: text('extra_repo_ids'),
     /** JSON array of the integration CLIs whose writes the operator stopped being asked about in this Session; null for none. */
@@ -821,6 +817,23 @@ export const fixes = sqliteTable(
     playbookJiraTicket: bool('playbook_jira_ticket').notNull().default(false),
   },
   (table) => [index('fixes_session_idx').on(table.sessionId)],
+);
+
+/** The pull requests the console opened for a `repo` Session, one row per number; the list shown is newest first. */
+export const sessionPullRequests = sqliteTable(
+  'session_pull_requests',
+  {
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    number: integer().notNull(),
+    url: text().notNull(),
+    /** The branch the pull request came from. */
+    branch: text().notNull(),
+    /** When the console recorded it. */
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.sessionId, table.number] })],
 );
 
 /** The Connections a `devtools` Session may reach. No rows: every Connection with access. */

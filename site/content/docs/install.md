@@ -24,10 +24,13 @@ If the installer or `ops-console start` fails, see [Troubleshooting](/docs/troub
 
 ```
 brew tap narrowananth/ops-console https://github.com/narrowananth/ops-console
+brew trust narrowananth/ops-console
 brew install ops-console
 ops-console start
 ops-console open
 ```
+
+Current Homebrew refuses a formula from a tap you have not trusted. If `brew trust` is not found, your Homebrew does not ask for it: skip that line.
 
 Homebrew installs only the `ops-console` command. The first command you run installs the app into `~/.ops-console`, from the release Homebrew already downloaded and checked. After `brew upgrade`, the next command installs the new version when yours is older, and restarts a running console. It never installs an older version over a newer one, so `ops-console update` and the console's own update keep working. Homebrew needs to be the native one for your Mac: on Apple silicon that is the one in `/opt/homebrew`.
 

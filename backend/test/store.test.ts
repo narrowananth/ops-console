@@ -161,6 +161,10 @@ describe('migration that drops the connector CHECK', () => {
       'action_log',
     ];
     const rows = Object.fromEntries(tables.map((table) => [table, dump(db, table)]));
+    // A later migration moves these columns out of `sessions`.
+    rows.sessions = (rows.sessions as Row[]).map(
+      ({ opened_pr_number, opened_pr_url, opened_pr_branch, ...rest }) => rest,
+    );
 
     applyMigrations(db, MIGRATIONS_DIR, () => {});
 
@@ -180,6 +184,55 @@ describe('migration that drops the connector CHECK', () => {
     expect(db.prepare('SELECT id FROM alerts').all()).toEqual([{ id: 'a-ot' }]);
     expect(db.prepare('SELECT id FROM sessions').all()).toEqual([{ id: 'ses1' }]);
     expect(db.prepare('SELECT alert_id FROM sessions').get()).toEqual({ alert_id: null });
+    db.close();
+  });
+});
+
+describe('migration that moves the opened pull request into a list', () => {
+  it('gives a Session that remembered one pull request one entry, and changes nothing else', async () => {
+    const before = await tempDir('migrations-');
+    await cp(MIGRATIONS_DIR, before, { recursive: true });
+    const journalFile = path.join(before, 'meta', '_journal.json');
+    const journal = JSON.parse(await readFile(journalFile, 'utf8')) as { entries: { tag: string }[] };
+    const index = journal.entries.findIndex((entry) => entry.tag === '0046_session_pull_requests');
+    journal.entries.length = index;
+    await writeFile(journalFile, JSON.stringify(journal));
+
+    const db = openSqlite(await tempDir());
+    applyMigrations(db, before, () => {});
+    insert(db, 'sessions', {
+      id: 'remembered',
+      title: 'Fix totals',
+      branch: 'fix-total',
+      created_at: '2026-10-01T10:00:00.000Z',
+      opened_pr_number: 41,
+      opened_pr_url: 'https://github.com/acme/orders-api/pull/41',
+      opened_pr_branch: 'fix-total',
+    });
+    insert(db, 'sessions', { id: 'plain', title: 'Look around' });
+    insert(db, 'sessions', { id: 'half', opened_pr_number: 9 });
+    const sessionsBefore = db.prepare('SELECT * FROM sessions ORDER BY id').all() as Row[];
+
+    applyMigrations(db, MIGRATIONS_DIR, () => {});
+
+    expect(db.prepare('SELECT * FROM session_pull_requests').all()).toEqual([
+      {
+        session_id: 'remembered',
+        number: 41,
+        url: 'https://github.com/acme/orders-api/pull/41',
+        branch: 'fix-total',
+        created_at: '2026-10-01T10:00:00.000Z',
+      },
+    ]);
+    const dropped = ['opened_pr_number', 'opened_pr_url', 'opened_pr_branch'];
+    const sessionsAfter = db.prepare('SELECT * FROM sessions ORDER BY id').all() as Row[];
+    expect(sessionsAfter).toEqual(
+      sessionsBefore.map((row) => Object.fromEntries(Object.entries(row).filter(([name]) => !dropped.includes(name)))),
+    );
+    expect(db.pragma('foreign_key_check')).toEqual([]);
+    // The list goes with its Session.
+    db.prepare("DELETE FROM sessions WHERE id = 'remembered'").run();
+    expect(db.prepare('SELECT * FROM session_pull_requests').all()).toEqual([]);
     db.close();
   });
 });

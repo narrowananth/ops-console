@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AccessMode, ConnectorId, ErrorCode, HealthStatus } from '@ops-console/shared';
+import { AccessMode, ConnectorId, ErrorCode, GitHost, HealthStatus, SessionKind } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -11,9 +11,10 @@ import {
   runOpenPullRequest,
 } from '../src/agent/pull-request-tool';
 import { AgentRuntime } from '../src/agent/runtime';
+import { SessionsService } from '../src/agent/sessions.service';
 import { ApiError } from '../src/common/errors';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
-import { connectors } from '../src/db/schema';
+import { connectors, sessionPullRequests } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { ReposModule } from '../src/repos/repos.module';
@@ -177,6 +178,102 @@ describe('Pull request opening', () => {
     expect((await ctx.http.get(`/sessions/${id}`)).body.data.pull_request).toBeNull();
     await ctx.http.post(`/sessions/${id}/checkout`, { branch: 'work' });
     expect((await ctx.http.get(`/sessions/${id}`)).body.data.pull_request).toEqual(link);
+  });
+
+  describe('Session pull requests', () => {
+    const first = { number: 41, url: 'https://github.com/acme/orders-api/pull/41', branch: 'work' };
+    const second = { number: 42, url: 'https://github.com/acme/orders-api/pull/42', branch: 'other' };
+
+    /** Opens `work` through the button and `other`, a second branch of the Repo, through the agent's tool. */
+    async function openBoth(ctx: Ctx) {
+      const id = await session(ctx);
+      await ctx.http.post(`/sessions/${id}/pull-request`, BODY);
+      git(ctx.dir, 'branch', 'other', 'work');
+      await runOpenPullRequest(ctx.daemon.app.get(PullRequestOpeningService), id, {
+        title: 'T',
+        description: 'D',
+        branch: 'other',
+      });
+      return id;
+    }
+
+    it('keeps the first pull request when a second opens on another branch, newest first (1, 2)', async () => {
+      const ctx = await start();
+      const id = await openBoth(ctx);
+      const body = (await ctx.http.get(`/sessions/${id}`)).body.data;
+      expect(body.pull_requests).toEqual([second, first]);
+      // The header still reads the pull request of the branch the Session is on.
+      expect(body.pull_request).toEqual({ number: 41, url: first.url });
+      expect(
+        (await ctx.http.get('/sessions')).body.data.find((s: { id: string }) => s.id === id).pull_requests,
+      ).toEqual([second, first]);
+    });
+
+    it('leaves one entry when the same pull request is opened again, by a retry or from the other path (2)', async () => {
+      const ctx = await start();
+      const id = await openBoth(ctx);
+      await ctx.http.post(`/sessions/${id}/pull-request`, BODY);
+      await Promise.all([
+        ctx.http.post(`/sessions/${id}/pull-request`, BODY),
+        ctx.http.post(`/sessions/${id}/pull-request`, BODY),
+      ]);
+      expect((await ctx.http.get(`/sessions/${id}`)).body.data.pull_requests).toEqual([second, first]);
+    });
+
+    it('records a pull request that was already open for the branch (1)', async () => {
+      const ctx = await start();
+      ctx.host.prs.push(hostPr(7, { branch: 'work' }));
+      const id = await session(ctx);
+      await ctx.http.post(`/sessions/${id}/pull-request`, BODY);
+      expect((await ctx.http.get(`/sessions/${id}`)).body.data.pull_requests).toEqual([
+        { number: 7, url: 'https://github.com/acme/orders-api/pull/7', branch: 'work' },
+      ]);
+    });
+
+    it('survives a restart of the console, and a delete of the Session removes it (3)', async () => {
+      const ctx = await start();
+      const id = await openBoth(ctx);
+      running.splice(running.indexOf(ctx.daemon), 1);
+      await ctx.daemon.stop();
+      const again = await startAgentDaemon({
+        fixtureKinds: false,
+        dataDir: ctx.daemon.dataDir,
+        modules: [
+          McpServersModule.forRoot({ probe: new FakeProbe(), launcher: '/opt/ops-console' }),
+          ConnectorsModule.forRoot({ tools: new FakeConnectorTools() }),
+          ReposModule.forRoot(),
+          WorkspaceModule.forRoot({ hosts: ctx.host }),
+        ],
+      });
+      running.push(again);
+      expect((await api(again).get(`/sessions/${id}`)).body.data.pull_requests).toEqual([second, first]);
+      expect((await api(again).delete(`/sessions/${id}`)).status).toBe(204);
+      expect(again.app.get<Store>(STORE).db.select().from(sessionPullRequests).all()).toEqual([]);
+    });
+
+    it('holds none for a Session that is not a repo Session, and for one that opened nothing (4)', async () => {
+      const ctx = await start();
+      const sessions = ctx.daemon.app.get(SessionsService);
+      const review = sessions.create({ kind: SessionKind.PrReview, repoId: ctx.repoId, prNumber: 5 });
+      const anonymous = sessions.create({ kind: SessionKind.Anonymous });
+      const idle = await session(ctx);
+      const opener = ctx.daemon.app.get(PullRequestOpeningService);
+      for (const owner of [review, anonymous]) {
+        await opener.publish({
+          sessionId: owner.id,
+          dir: ctx.dir,
+          repoId: ctx.repoId,
+          remote: { host: GitHost.Github, slug: 'acme/orders-api' },
+          branch: 'work',
+          base: 'main',
+          title: 'T',
+          body: 'D',
+        });
+      }
+      for (const id of [review.id, anonymous.id, idle]) {
+        expect((await ctx.http.get(`/sessions/${id}`)).body.data.pull_requests, id).toEqual([]);
+      }
+    });
   });
 
   it('opens one pull request for two clicks at once, and shows the open one on a later click (14)', async () => {
