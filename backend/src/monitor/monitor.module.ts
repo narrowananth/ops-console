@@ -13,6 +13,8 @@ import { cloudWatchLogsConfig, otelLogsConfig } from './log-source-config';
 import { lokiAccess } from './loki-access';
 import { LokiLogs, type LokiOptions } from './loki-logs';
 import { MonitorController } from './monitor.controller';
+import { newRelicAccess } from './new-relic-access';
+import { NewRelicLogs, type NewRelicOptions } from './new-relic-logs';
 import { OtelLogFolder } from './otel-logs';
 import { MonitorRetention } from './retention';
 import { ReviewsService } from './reviews.service';
@@ -20,7 +22,7 @@ import { ScansService } from './scans.service';
 import { ServicesService } from './services.service';
 import { VerificationsService } from './verifications.service';
 
-/** Monitor: Scans of the log sources (Datadog, a Log folder, CloudWatch logs, Loki), Alerts, Verification, Review and Fix (ADR 0002). */
+/** Monitor: Scans of the log sources (Datadog, a Log folder, CloudWatch logs, Loki, New Relic), Alerts, Verification, Review and Fix (ADR 0002). */
 @Module({})
 export class MonitorModule {
   static forRoot(
@@ -33,6 +35,8 @@ export class MonitorModule {
       cloudWatch?: CloudWatchOptions;
       /** How the Loki source calls the `logcli` CLI. */
       loki?: LokiOptions;
+      /** How the New Relic source calls the `newrelic` CLI. */
+      newRelic?: NewRelicOptions;
     } = {},
   ): DynamicModule {
     return {
@@ -51,6 +55,7 @@ export class MonitorModule {
               return { profile, region, log_groups };
             }, config.cloudWatch),
             [ConnectorId.LokiLogs]: new LokiLogs(() => lokiAccess(store.db, keychain), config.loki),
+            [ConnectorId.NewRelicLogs]: new NewRelicLogs(() => newRelicAccess(store.db, keychain), config.newRelic),
           }),
         },
         { provide: CODE_HOSTS, useValue: config.codeHosts ?? new CliCodeHosts() },

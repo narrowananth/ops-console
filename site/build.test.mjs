@@ -139,13 +139,13 @@ test('the data-flow docs page sits between Claude accounts and Safety, and the s
   assert.match(home, /href="\/docs\/data-flow\/"/);
 });
 
-test('the Connectors page lists fifteen Connectors and has OpenTelemetry logs, CloudWatch logs and Loki logs sections', async () => {
+test('the Connectors page lists sixteen Connectors and has OpenTelemetry logs, CloudWatch logs, Loki logs and New Relic logs sections', async () => {
   await build();
   const page = await readFile(path.join(dist, 'docs', 'connectors', 'index.html'), 'utf8');
-  assert.match(page, /<h2 id="[^"]+">The fifteen Connectors<\/h2>/);
+  assert.match(page, /<h2 id="[^"]+">The sixteen Connectors<\/h2>/);
   const [table] = page.match(/<table>[\s\S]*?<\/table>/) ?? [];
   assert.ok(table, 'the page has the Connector table');
-  assert.equal(table.match(/<tr><td>/g)?.length, 15, 'one row per Connector');
+  assert.equal(table.match(/<tr><td>/g)?.length, 16, 'one row per Connector');
   assert.match(table, /<td>OpenTelemetry logs<\/td>/);
   assert.match(page, /<h2 id="opentelemetry-logs">OpenTelemetry logs<\/h2>/);
   assert.match(page, /<pre><code>[\s\S]*exporters:[\s\S]*<\/code><\/pre>/, 'the section shows a Collector config');
@@ -170,6 +170,23 @@ test('the Connectors page lists fifteen Connectors and has OpenTelemetry logs, C
   assert.match(loki, /<code>http_status_code<\/code>/, 'the section lists the log fields');
   assert.match(loki, /<pre><code>[\s\S]*&quot;status&quot;:502[\s\S]*<\/code><\/pre>/, 'the section shows a log line');
   assert.match(loki, /Keychain/);
+  assert.match(table, /<td>New Relic logs<\/td>/);
+  const [newRelic] = page.match(/<h2 id="new-relic-logs">New Relic logs<\/h2>[\s\S]*?(?=<h2 )/) ?? [];
+  assert.ok(newRelic, 'the page has a New Relic logs section');
+  assert.match(newRelic, /brew install newrelic-cli/);
+  assert.match(newRelic, /<code>NRAK-<\/code>/);
+  assert.match(newRelic, /<code>service\.name<\/code>/);
+  assert.match(newRelic, /<code>environment<\/code>/);
+  assert.match(newRelic, /<code>http\.response\.status_code<\/code>/, 'the section lists the log fields');
+  assert.match(
+    newRelic,
+    /<pre><code>[\s\S]*&quot;http\.response\.status_code&quot;:502[\s\S]*<\/code><\/pre>/,
+    'the section shows a log event',
+  );
+  assert.match(newRelic, /Keychain/);
+  assert.match(newRelic, /US, EU or JP/);
+  assert.match(newRelic, /5,000/);
+  assert.match(newRelic, /read-only role/);
 });
 
 test('the data-flow page puts the Log folder on the Mac and its records in a prompt only as Samples', async () => {
@@ -199,4 +216,15 @@ test('the data-flow page puts logcli in the CLI group and says Loki lines reach 
   assert.match(row, /Loki logs \(<code>logcli<\/code>\)/);
   assert.match(row, /runs <code>logcli<\/code> as you/);
   assert.match(row, /Loki lines reach Anthropic only as Samples in a prompt or as the agent's tool output/);
+});
+
+test('the data-flow page puts newrelic in the CLI group and says New Relic events reach Anthropic only as Samples or tool output', async () => {
+  await build();
+  const page = await readFile(path.join(dist, 'docs', 'data-flow', 'index.html'), 'utf8');
+  const [row] = page.match(/<tr><td>CLI the daemon calls<\/td>[\s\S]*?<\/tr>/) ?? [];
+  assert.ok(row, 'the By route table has the CLI row');
+  assert.match(row, /New Relic logs \(<code>newrelic<\/code>\)/);
+  assert.match(row, /runs <code>newrelic<\/code> as you/);
+  assert.match(row, /run_integration/);
+  assert.match(row, /New Relic events reach Anthropic only as Samples in a prompt or as the agent's tool output/);
 });

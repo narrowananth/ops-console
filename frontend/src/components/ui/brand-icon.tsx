@@ -26,6 +26,7 @@ export const CONNECTOR_BRAND: Record<ConnectorId, BrandSlug> = {
   [ConnectorId.OtelLogs]: 'opentelemetry',
   [ConnectorId.CloudWatchLogs]: 'cloudwatch',
   [ConnectorId.LokiLogs]: 'loki',
+  [ConnectorId.NewRelicLogs]: 'newrelic',
 };
 
 /** Words in an MCP Server's name or command that say whose it is; the first match wins. */

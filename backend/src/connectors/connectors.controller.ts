@@ -5,6 +5,7 @@ import {
   ConnectorId,
   logGroupSchema,
   lokiConnectBodySchema,
+  newRelicConnectBodySchema,
   updateConnectorSchema,
 } from '@ops-console/shared';
 import { z } from 'zod';
@@ -12,11 +13,13 @@ import { parseInput } from '../common/errors';
 import { ConnectorsService } from './connectors.service';
 
 const idParams = z.object({ id: z.enum(ConnectorId) });
-/** The Log folder Connector takes its folder; CloudWatch logs its profile, region and picked groups; Loki logs its address, auth and labels. */
-const connectBody = lokiConnectBodySchema.extend({
+/**
+ * The Log folder Connector takes its folder; CloudWatch logs its profile, region and picked groups; Loki logs its
+ * address, auth and labels; New Relic logs its account, region, attributes, filter and key.
+ */
+const connectBody = lokiConnectBodySchema.extend(newRelicConnectBodySchema.shape).extend({
   folder: z.string().optional(),
   profile: z.string().optional(),
-  region: z.string().optional(),
   log_groups: z.array(logGroupSchema).optional(),
 });
 const logGroupsQuery = z.object({ profile: z.string().optional(), region: z.string().optional() });

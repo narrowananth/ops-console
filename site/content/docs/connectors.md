@@ -1,8 +1,8 @@
 # Connectors
 
-A Connector is an outside service you sign in to once, a folder of logs on your Mac, an AWS profile or a Loki URL the console reads logs with. It holds the sign-in, the folder, the profile or the URL and registers the service's MCP Server when it has one. You connect, check and disconnect Connectors in Integrations, the one place a source is connected.
+A Connector is an outside service you sign in to once, a folder of logs on your Mac, an AWS profile, a Loki URL or a New Relic account the console reads logs with. It holds the sign-in, the folder, the profile, the URL or the account and registers the service's MCP Server when it has one. You connect, check and disconnect Connectors in Integrations, the one place a source is connected.
 
-## The fifteen Connectors
+## The sixteen Connectors
 
 | Connector | How the console reaches it |
 | --------- | -------------------------- |
@@ -21,8 +21,9 @@ A Connector is an outside service you sign in to once, a folder of logs on your 
 | OpenTelemetry logs | A Log folder on your Mac, read by the daemon |
 | CloudWatch logs | The `aws` CLI and AWS's CloudWatch MCP server, started with `uvx` |
 | Loki logs | The `logcli` CLI, with a Loki URL and a secret kept in the Keychain |
+| New Relic logs | The `newrelic` CLI, with an account ID and a User API key kept in the Keychain |
 
-The agent reaches each service through Claude Code, with the service's own MCP server or CLI. OpenTelemetry logs has no service to reach. The console holds no extra copy of your access beyond the sign-in it keeps in the Keychain, and it stores no AWS key: CloudWatch logs uses the credentials where the AWS CLI keeps them. Loki logs has no sign-in, so you type its secret once and the console keeps it in the Keychain.
+The agent reaches each service through Claude Code, with the service's own MCP server or CLI. OpenTelemetry logs has no service to reach. The console holds no extra copy of your access beyond the sign-in it keeps in the Keychain, and it stores no AWS key: CloudWatch logs uses the credentials where the AWS CLI keeps them. Loki logs and New Relic logs have no sign-in the console can use, so you type the secret or key once and the console keeps it in the Keychain.
 
 ## Connect
 
@@ -193,6 +194,67 @@ The console reads logs and writes nothing to Loki, and a PROD env is read-only l
 A Verification or a Fix of a Loki Alert starts with a Recheck that counts the Alert's failing lines for the last hour, and the Report's evidence section is headed "Log evidence". The agent's brief gives it the Samples. When it needs more logs, the agent reads them through `logcli`, run by the console as an Integration command. It may use the read commands, which are a log or metric query, listing labels and label values, and series, with a fixed set of flags for time range, limit, output format and quiet. It cannot change the address, the org id, the credentials, the TLS settings or a proxy, and the secret never reaches it.
 
 Alerts and Services from this source carry a Loki label in Monitor. Disconnect removes the secret from the Keychain and leaves Loki untouched.
+
+## New Relic logs
+
+This Connector gives Monitor a fifth log source. It reads the logs in a New Relic account with New Relic's own CLI, `newrelic`. It registers no MCP Server.
+
+You need `newrelic` on your PATH. When it is missing, Connect stops and Integrations names the tool and the command that installs it, `brew install newrelic-cli`. The console installs nothing.
+
+The `newrelic` CLI has no browser sign-in, so you type a User API key once in Integrations. It starts with `NRAK-`. The console keeps it in the macOS Keychain and never shows it again. The pane shows only whether a key is set, and typing a new one replaces it.
+
+### Account and region
+
+1. Enter the account ID. In one.newrelic.com, open the user menu, then Administration, Access management and Accounts. The ID is a number.
+2. Choose the region of the account: US, EU or JP. A key belongs to one region, so pick the region the key was made in. A check that fails with needs auth means the key or the region is wrong.
+3. Paste the User API key.
+
+### Fields
+
+| Field | Meaning | Default |
+| ----- | ------- | ------- |
+| Service attribute | The attribute whose values name the Services | `service.name` |
+| Env attribute | The attribute that says which env an event belongs to. An event without it reads as `no env`. | `environment` |
+| Filter | One extra condition that narrows what a Scan reads, such as `cluster = 'prod-1'` | Empty |
+
+The filter is one condition of the kind that follows `WHERE`. Connect refuses a filter that holds a semicolon or a clause the reader adds itself, such as `SINCE`, `UNTIL`, `LIMIT`, `FACET`, `TIMESERIES` or `ORDER BY`.
+
+One Connector reads one account. Each connected log source runs its own Scan schedule, with its own Check interval and daily scan time.
+
+### What a Scan reads
+
+A Scan finds the Services from the distinct values of the service attribute on failing events over the Scan's window, inside the filter. It then runs two queries for each Service. The first counts failing events per 10-minute bucket. The second reads the newest failing events as Samples, at most 5,000 per Service. When a Service has more, a Route with one message group takes its count and 10-minute peak from the first query, and a Route with several message groups counts the newest 5,000 events read. A window longer than 61 hours counts only the newest 61 hours. The Scan's notes say so. New Relic's own query limits apply, and a query New Relic refuses fails the source with New Relic's reason shown.
+
+### Log fields
+
+The reader asks New Relic which attributes a Service's logs have, once per Service. For each field it takes the first name in the list that the logs have:
+
+| Field | Names |
+| ----- | ----- |
+| Status code | `http.response.status_code`, `http.status_code`, `status`, `statusCode`, `status_code` |
+| Method | `http.request.method`, `http.method`, `method`, `httpMethod` |
+| Route | `http.route`, `url.path`, `route`, `path`, `resourcePath` |
+| Level | `level`, `severity.text`, `severity`, `log_level` |
+| Message | `message`, `msg` |
+| Time | The event's own timestamp |
+
+An event counts as failing when its status code is 400 or more, or its level is `error`, `critical`, `alert`, `emergency` or `fatal`, in any case. A Service whose logs have no status attribute is read by level only. This event for `shop-api` is a failing event:
+
+```json
+{"service.name":"shop-api","level":"error","message":"payment provider timed out","http.request.method":"POST","http.route":"/checkout","http.response.status_code":502}
+```
+
+Plain-text and access-log formats are not read. The reader uses the attributes New Relic has already parsed.
+
+### Access for the console and the agent
+
+The console reads logs and writes nothing to New Relic, and a PROD env is read-only like any other. The daemon calls `newrelic` as you, outside the Run sandbox, and passes the key, account ID and region in the command's environment, never on its command line. New Relic's hosted MCP server is not used.
+
+A Verification or a Fix of a New Relic Alert starts with a Recheck that counts the Alert's failing events for the last hour, and the Report's evidence section is headed "Log evidence". The agent's brief gives it the Samples. When it needs more logs, the agent reads them through `newrelic`, run by the console as an Integration command. It may run only `nrql query`, with a query and an output format. It cannot change the key, the account or the region, and the key never reaches it.
+
+Its NRQL can read any event type in the account, not only logs. A User key reaches every account its user can open. Create a dedicated user with a read-only role for the console. New Relic documents no read-only key, so permissions come from the user's roles.
+
+Alerts and Services from this source carry a New Relic label in Monitor. Disconnect removes the key from the Keychain and leaves New Relic untouched.
 
 ## Checks and Disconnect
 

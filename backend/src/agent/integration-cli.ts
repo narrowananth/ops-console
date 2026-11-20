@@ -9,7 +9,7 @@ import { redact } from '../action-log/redact';
 const exec = promisify(execFile);
 
 /** The integration CLIs a run may ask the console to run outside the Run sandbox (ADR 0006). */
-export const INTEGRATION_CLIS = ['pup', 'gh', 'glab', 'bkt', 'slashdocs', 'logcli'] as const;
+export const INTEGRATION_CLIS = ['pup', 'gh', 'glab', 'bkt', 'slashdocs', 'logcli', 'newrelic'] as const;
 export type IntegrationCliName = (typeof INTEGRATION_CLIS)[number];
 
 export const integrationInputSchema = z.object({
@@ -226,6 +226,33 @@ function logcliVerdict(args: string[]): CliVerdict {
   return { kind: 'read' };
 }
 
+/**
+ * `newrelic` runs with the key, account and region the console sets in its environment, so the agent may not name any
+ * of them: only `nrql query` passes, with `--query` and `--format`. Every other flag is refused, and so is a flag value
+ * that is empty or starts with `-`, in `--flag value` and `--flag=value` form, so no flag hides as a value. NRQL reads
+ * and cannot write to New Relic.
+ */
+function newrelicVerdict(args: string[]): CliVerdict {
+  if (args[0] !== 'nrql' || args[1] !== 'query') {
+    return deny(`newrelic ${args.slice(0, 2).join(' ')} is not on the list the console runs: nrql query.`);
+  }
+  for (let i = 2; i < args.length; i++) {
+    const arg = args[i] ?? '';
+    const [flag = ''] = arg.split('=', 1);
+    if (!arg.startsWith('-')) return deny(`${arg} is not allowed: give the NRQL with --query.`);
+    if (flag !== '--query' && flag !== '--format') {
+      return deny(
+        `${flag} is not allowed: the console sets newrelic's key, account, region and profile, and only --query and --format pass.`,
+      );
+    }
+    const value = arg.includes('=') ? arg.slice(flag.length + 1) : (args[++i] ?? '');
+    if (value === '' || value.startsWith('-')) {
+      return deny(`${flag} takes a value that is not empty and does not start with a dash.`);
+    }
+  }
+  return { kind: 'read' };
+}
+
 const READ_VERBS = new Set([
   'list',
   'get',
@@ -309,6 +336,7 @@ export function classifyCli(cli: IntegrationCliName, args: string[]): CliVerdict
   if (args.some((arg) => arg.includes('\0'))) return deny('An argument holds a NUL byte.');
   // Its own flag list is stricter than the checks below, and a query may hold any word.
   if (cli === 'logcli') return logcliVerdict(args);
+  if (cli === 'newrelic') return newrelicVerdict(args);
   const flag = args.find((arg) => FORBIDDEN_FLAGS.test(arg));
   if (flag) return deny(`${flag.split('=')[0]} is not allowed: it passes a secret or another server to the CLI.`);
   if (args.some((arg) => MERGE.some((pattern) => pattern.test(arg))))
@@ -423,7 +451,11 @@ export async function runCli(
   }
 }
 
+/** `text` with credential-shaped values and every one of `secrets` replaced by `[redacted]`. */
+export const scrub = (text: string, secrets: string[]): string =>
+  secrets.reduce((out, secret) => out.split(secret).join('[redacted]'), redact(text));
+
 function cap(text: string, secrets: string[]): string {
-  const safe = secrets.reduce((out, secret) => out.split(secret).join('[redacted]'), redact(text));
+  const safe = scrub(text, secrets);
   return safe.length > OUTPUT_CHARS ? `${safe.slice(0, OUTPUT_CHARS)}\n… cut at ${OUTPUT_CHARS} characters.` : safe;
 }

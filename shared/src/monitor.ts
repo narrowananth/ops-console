@@ -8,6 +8,7 @@ export const LOG_SOURCES = [
   ConnectorId.OtelLogs,
   ConnectorId.CloudWatchLogs,
   ConnectorId.LokiLogs,
+  ConnectorId.NewRelicLogs,
 ] as const;
 
 export type LogSource = (typeof LOG_SOURCES)[number];
@@ -269,7 +270,7 @@ export const alertSchema = z.object({
   regression_count: z.number().int(),
   /** When the Alert entered `verified`; null in any other status. */
   waiting_since: z.string().nullable(),
-  /** Datadog: the query string. OpenTelemetry logs: a JSON filter `{service, env, status, method, path}`. CloudWatch logs: `{log_group, status, method, path}`. Loki logs: `{service, env, status, method, path}`. */
+  /** Datadog: the query string. OpenTelemetry logs: a JSON filter `{service, env, status, method, path}`. CloudWatch logs: `{log_group, status, method, path}`. Loki logs and New Relic logs: `{service, env, status, method, path}`. */
   source_query: z.string(),
   /** The Session the Verification and Fix run in, once there is one. */
   session_id: z.string().nullable(),

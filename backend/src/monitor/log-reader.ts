@@ -156,3 +156,31 @@ export function groupEntries(
   }
   return [...groups.values()].map(({ buckets: _buckets, ...group }) => group);
 }
+
+/** The failing logs of one Route and status code a source counted in full: its 10-minute buckets, as `[start, count]`. */
+export type RouteCount = { statusCode: number | null; method: string; path: string; points: [number, number][] };
+
+/**
+ * A Route whose logs share one message gets the count and the 10-minute peak of the full counts, which cover more than
+ * the logs read. A Route with several messages keeps the counts of the logs read.
+ */
+export function withRouteCounts(groups: LogGroup[], counts: RouteCount[]): LogGroup[] {
+  const key = ({ statusCode, method, path }: Pick<RouteCount, 'statusCode' | 'method' | 'path'>) =>
+    `${statusCode} ${method} ${path}`;
+  const totals = new Map<string, { errors: number; buckets: Map<number, number> }>();
+  for (const row of counts) {
+    const total = totals.get(key(row)) ?? { errors: 0, buckets: new Map() };
+    for (const [at, count] of row.points) {
+      total.errors += count;
+      total.buckets.set(at, (total.buckets.get(at) ?? 0) + count);
+    }
+    totals.set(key(row), total);
+  }
+  const perRoute = new Map<string, number>();
+  for (const group of groups) perRoute.set(key(group), (perRoute.get(key(group)) ?? 0) + 1);
+  return groups.map((group) => {
+    const counted = perRoute.get(key(group)) === 1 ? totals.get(key(group)) : undefined;
+    if (!counted) return group;
+    return { ...group, errors: counted.errors, peakPer10m: Math.max(...counted.buckets.values()) };
+  });
+}

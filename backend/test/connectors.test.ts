@@ -21,6 +21,7 @@ import { FakeConnectorTools } from './fakes/connector-tools';
 import { FakeGoogle } from './fakes/google';
 import { FakeKeychain } from './fakes/keychain';
 import { FakeLogcli } from './fakes/loki-logs';
+import { FakeNewRelic } from './fakes/new-relic-logs';
 import { FakeProbe } from './fakes/probe';
 
 const running: AgentDaemon[] = [];
@@ -570,6 +571,9 @@ describe('config', () => {
     const secret = await api(ctx.daemon).patch('/connectors/loki_logs', { config: { secret: 'glc_example_secret' } });
     expect(secret.status).toBe(400);
     expect(JSON.stringify(await one(ctx, 'loki_logs'))).not.toContain('glc_example_secret');
+    const key = await api(ctx.daemon).patch('/connectors/new_relic_logs', { config: { secret: 'NRAK-EXAMPLE' } });
+    expect(key.status).toBe(400);
+    expect(JSON.stringify(await one(ctx, 'new_relic_logs'))).not.toContain('NRAK-EXAMPLE');
   });
 });
 
@@ -767,18 +771,19 @@ describe('Google Connectors', () => {
   it('lists the three after slashdocs, off, with an empty config', async () => {
     const ctx = await start({ google: 'shipped' });
     const rows = await list(ctx);
-    expect(rows).toHaveLength(15);
-    expect(rows.slice(-6, -3).map((row) => [row.id, row.name, row.via, row.status, row.config])).toEqual([
+    expect(rows).toHaveLength(16);
+    expect(rows.slice(-7, -4).map((row) => [row.id, row.name, row.via, row.status, row.config])).toEqual([
       ['google_docs', 'Google Docs', 'Google Docs API', 'off', {}],
       ['google_sheets', 'Google Sheets', 'Google Sheets API', 'off', {}],
       ['google_drive', 'Google Drive', 'Google Drive API', 'off', {}],
     ]);
-    expect(rows.map((row) => row.id).slice(-7)).toEqual([
+    expect(rows.map((row) => row.id).slice(-8)).toEqual([
       'slashdocs',
       ...GOOGLE,
       'otel_logs',
       'cloudwatch_logs',
       'loki_logs',
+      'new_relic_logs',
     ]);
     // Nothing is typed in the pane.
     expect((await api(ctx.daemon).patch('/connectors/google_docs', { config: { client_id: 'x' } })).status).toBe(400);
@@ -1015,7 +1020,12 @@ describe('OpenTelemetry logs Connector', () => {
       sign_in: null,
       config: { folder: '', environments: ['prod'], daily_scan_time: '09:00', default_interval: '24h' },
     });
-    expect((await list(ctx)).map((row) => row.id).slice(-3)).toEqual(['otel_logs', 'cloudwatch_logs', 'loki_logs']);
+    expect((await list(ctx)).map((row) => row.id).slice(-4)).toEqual([
+      'otel_logs',
+      'cloudwatch_logs',
+      'loki_logs',
+      'new_relic_logs',
+    ]);
   });
 
   it('connects at once to a folder that exists and can be read, with no sign-in, empty or not', async () => {
@@ -1115,7 +1125,6 @@ describe('CloudWatch logs Connector', () => {
         reports_folder: 'reports',
       },
     });
-    expect((await list(ctx)).at(-2)?.id).toBe('cloudwatch_logs');
   });
 
   it('connects at once to a signed-in profile, and registers AWS’s CloudWatch server in every Claude account with the profile in its environment', async () => {
@@ -1403,7 +1412,6 @@ describe('Loki logs Connector', () => {
         reports_folder: 'reports',
       },
     });
-    expect((await list(ctx)).at(-1)?.id).toBe('loki_logs');
     expect(ctx.keychain.values.size).toBe(0);
   });
 
@@ -1584,6 +1592,7 @@ describe('Loki logs Connector', () => {
         slashdocs: 'slashdocs',
         aws: 'aws',
         logcli: logcli.bin,
+        newrelic: 'newrelic',
       });
     const ENV = { LOKI_ADDR: URL };
 
@@ -1639,6 +1648,295 @@ describe('Loki logs Connector', () => {
       const [call] = logcli.calls();
       expect(call?.env).toEqual({ ...ENV, LOKI_USERNAME: 'u', LOKI_PASSWORD: SECRET });
       expect(call?.args.join(' ')).not.toContain(SECRET);
+    });
+  });
+});
+
+describe('New Relic logs Connector', () => {
+  const connect = (ctx: Ctx, body: Record<string, unknown>) =>
+    api(ctx.daemon).post('/connectors/new_relic_logs/connect', body);
+  const status = (ctx: Ctx, want: string) =>
+    until(
+      () => one(ctx, 'new_relic_logs'),
+      (row) => row.status === want,
+      `New Relic logs to read ${want}`,
+    );
+  const KEY = 'NRAK-EXAMPLE';
+  const ACCOUNT = '1234567';
+  const BODY = { account_id: ACCOUNT, region: 'US', secret: KEY };
+  const ENV = { NEW_RELIC_API_KEY: KEY, NEW_RELIC_ACCOUNT_ID: ACCOUNT, NEW_RELIC_REGION: 'US' };
+  const registered = (ctx: Ctx) =>
+    ctx.dirs.flatMap((dir) => {
+      const file = path.join(dir, '.claude.json');
+      return existsSync(file) ? Object.keys(JSON.parse(readFileSync(file, 'utf8')).mcpServers ?? {}) : [];
+    });
+  const stored = (ctx: Ctx) => ctx.keychain.values.get('connection:new_relic_logs');
+  /** Everything the daemon says or keeps outside the Keychain. */
+  const everywhere = async (ctx: Ctx, events: WsEvent[]) =>
+    JSON.stringify([
+      await list(ctx),
+      events,
+      ctx.daemon.log,
+      new Database(path.join(ctx.daemon.dataDir, 'state.db'), { readonly: true })
+        .prepare('SELECT * FROM connectors')
+        .all(),
+    ]);
+
+  it('is listed last, off, with its default config and no key', async () => {
+    const ctx = await start();
+    expect(await one(ctx, 'new_relic_logs')).toMatchObject({
+      name: 'New Relic logs',
+      via: 'newrelic CLI',
+      status: 'off',
+      sign_in: null,
+      config: {
+        account_id: '',
+        region: 'US',
+        service_attribute: 'service.name',
+        env_attribute: 'environment',
+        filter: '',
+        environments: ['prod'],
+        daily_scan_time: '09:00',
+        default_interval: '24h',
+        rapid_errors_per_10m: 100,
+        failing_errors_per_hour: 5,
+        ignore: [],
+        reports_folder: 'reports',
+      },
+    });
+    expect((await list(ctx)).at(-1)?.id).toBe('new_relic_logs');
+    expect(ctx.keychain.values.size).toBe(0);
+  });
+
+  it('connects with the key, account and region in the CLI’s environment, and registers no MCP server', async () => {
+    const ctx = await start();
+    const before = registered(ctx);
+    const connected = await connect(ctx, { ...BODY, region: 'EU' });
+    expect(connected.status).toBe(202);
+    expect(await status(ctx, 'ok')).toMatchObject({
+      status_detail: null,
+      account_label: ACCOUNT,
+      config: { account_id: ACCOUNT, region: 'EU' },
+    });
+    expect(ctx.tools.newRelicCalls).toEqual([{ ...ENV, NEW_RELIC_REGION: 'EU' }]);
+    expect(registered(ctx)).toEqual(before);
+  });
+
+  it('keeps the key only in the Keychain: in no response, event, log or database row', async () => {
+    const ctx = await start();
+    const { events, close } = await listen(ctx.daemon);
+    const connected = await connect(ctx, BODY);
+    await status(ctx, 'ok');
+    const checked = await api(ctx.daemon).post('/connectors/new_relic_logs/checks');
+    close();
+    expect(stored(ctx)).toBe(KEY);
+    expect(JSON.stringify([connected.body, checked.body])).not.toContain(KEY);
+    expect(await everywhere(ctx, events)).not.toContain(KEY);
+  });
+
+  it('keeps the key when Connect omits it, replaces it, and removes it on Disconnect', async () => {
+    const ctx = await start();
+    await connect(ctx, BODY);
+    await status(ctx, 'ok');
+    await connect(ctx, { account_id: '7654321', region: 'US' });
+    await until(
+      () => ctx.tools.newRelicCalls.at(-1),
+      (call) => call?.NEW_RELIC_ACCOUNT_ID === '7654321',
+      'the second check',
+    );
+    expect(stored(ctx)).toBe(KEY);
+    expect(ctx.tools.newRelicCalls.at(-1)).toMatchObject({ NEW_RELIC_API_KEY: KEY });
+    await connect(ctx, { ...BODY, secret: 'NRAK-EXAMPLE-NEW' });
+    await until(
+      () => stored(ctx),
+      (value) => value === 'NRAK-EXAMPLE-NEW',
+      'the new key',
+    );
+    const disconnected = await api(ctx.daemon).delete('/connectors/new_relic_logs/credentials');
+    expect(disconnected.body.data).toMatchObject({ status: 'off', config: { account_id: ACCOUNT } });
+    expect(ctx.keychain.values.size).toBe(0);
+  });
+
+  it('clears a field the operator emptied, which a blank in a PATCH would keep', async () => {
+    const ctx = await start();
+    await connect(ctx, { ...BODY, filter: "cluster = 'prod-1'" });
+    await status(ctx, 'ok');
+    await connect(ctx, { account_id: ACCOUNT, filter: '' });
+    await until(
+      () => one(ctx, 'new_relic_logs'),
+      (row) => (row.config as { filter: string }).filter === '',
+      'the cleared config',
+    );
+  });
+
+  it('refuses a bad config with validation_failed and stores nothing', async () => {
+    const ctx = await start();
+    const refused: [Record<string, unknown>, string][] = [
+      [{ ...BODY, account_id: '12ab' }, 'an account ID that is not digits'],
+      [{ ...BODY, account_id: '' }, 'no account ID'],
+      [{ account_id: ACCOUNT }, 'no key on a first Connect'],
+      [{ ...BODY, secret: '' }, 'an empty key on a first Connect'],
+      [{ ...BODY, region: 'AP' }, 'a region that is not US, EU or JP'],
+      [{ ...BODY, service_attribute: 'service name' }, 'a service attribute with a space'],
+      [{ ...BODY, env_attribute: 'env`; DROP' }, 'an env attribute that is not a plain name'],
+      [{ ...BODY, service_attribute: '' }, 'an empty service attribute'],
+      ...[
+        'SINCE 1 day ago',
+        'until now',
+        'LIMIT 1',
+        'FACET a',
+        'TimeSeries',
+        'order  by x',
+        'COMPARE WITH 1 day ago',
+        'slide  by 1 minute',
+        'OFFSET 5',
+        "WITH TIMEZONE 'UTC'",
+        'extrapolate',
+      ].map((clause): [Record<string, unknown>, string] => [
+        { ...BODY, filter: `a = 'b' ${clause}` },
+        `a filter with ${clause}`,
+      ]),
+      [{ ...BODY, filter: "a = 'b'; SELECT 1" }, 'a filter with a semicolon'],
+      [{ ...BODY, filter: "a = 'b" }, 'a filter with an open quote'],
+      [{ ...BODY, filter: 'a = "b' }, 'a filter with an open double quote'],
+      [{ ...BODY, filter: 'a=1) OR (1=1' }, 'a filter that closes the clause the reader opens'],
+      [{ ...BODY, filter: '(a = 1' }, 'a filter with an open parenthesis'],
+    ];
+    for (const [body, why] of refused) {
+      const response = await connect(ctx, body);
+      expect([response.status, response.body.error?.code], why).toEqual([422, ErrorCode.ValidationFailed]);
+    }
+    expect(await one(ctx, 'new_relic_logs')).toMatchObject({ status: 'off', config: { account_id: '' } });
+    expect(ctx.keychain.values.size).toBe(0);
+    expect(ctx.tools.newRelicCalls).toEqual([]);
+  });
+
+  it('accepts a filter of one condition, with quotes, parentheses, and a clause word inside a longer one', async () => {
+    const ctx = await start();
+    for (const filter of [
+      "cluster = 'prod-1'",
+      "(a = 'b' OR a = 'it\\'s') AND c IS NOT NULL",
+      "host LIKE 'untilly%'",
+      "message = 'a) b ('",
+    ]) {
+      expect((await connect(ctx, { ...BODY, filter })).status, filter).toBe(202);
+    }
+  });
+
+  it('names the install command when newrelic is missing, and installs nothing', async () => {
+    const ctx = await start();
+    ctx.tools.missing.add('newrelic');
+    const refused = await connect(ctx, BODY);
+    expect([refused.status, refused.body.error.code]).toEqual([422, ErrorCode.ToolMissing]);
+    expect(refused.body.error.message).toContain('newrelic');
+    expect(refused.body.error.message).toContain('brew install newrelic-cli');
+    expect(ctx.tools.brewCalls).toEqual([]);
+    expect(ctx.keychain.values.size).toBe(0);
+    expect(await one(ctx, 'new_relic_logs')).toMatchObject({ status: 'off', config: { account_id: '' } });
+  });
+
+  it('reads needs auth, with what to check, when New Relic answers 401 or 403', async () => {
+    const ctx = await start();
+    ctx.tools.newRelic = { status: 'auth' };
+    await connect(ctx, BODY);
+    const row = await status(ctx, 'auth');
+    expect(row.status_detail).toMatch(/check the key/i);
+    expect(row.status_detail).toContain('one region');
+  });
+
+  it('reads down, with the reason, when New Relic does not answer', async () => {
+    const ctx = await start();
+    ctx.tools.newRelic = { status: 'down', reason: 'the host name was not found' };
+    await connect(ctx, BODY);
+    const row = await status(ctx, 'fail');
+    expect(row.status_detail).toContain('the host name was not found');
+  });
+
+  it('reads down while newrelic is off the PATH, and connected when it returns', async () => {
+    const ctx = await start();
+    await connect(ctx, BODY);
+    await status(ctx, 'ok');
+    ctx.tools.missing.add('newrelic');
+    const down = await api(ctx.daemon).post('/connectors/new_relic_logs/checks');
+    expect(down.body.data).toMatchObject({ status: 'fail' });
+    expect(down.body.data.status_detail).toContain('brew install newrelic-cli');
+    ctx.tools.missing.delete('newrelic');
+    expect((await api(ctx.daemon).post('/connectors/new_relic_logs/checks')).body.data.status).toBe('ok');
+  });
+
+  it('does not read connected after Disconnect, and runs no query without a key', async () => {
+    const ctx = await start();
+    await connect(ctx, BODY);
+    await status(ctx, 'ok');
+    await api(ctx.daemon).delete('/connectors/new_relic_logs/credentials');
+    const calls = ctx.tools.newRelicCalls.length;
+    const checked = await api(ctx.daemon).post('/connectors/new_relic_logs/checks');
+    expect(checked.body.data.status).not.toBe('ok');
+    expect(ctx.tools.newRelicCalls).toHaveLength(calls);
+  });
+
+  describe('the newrelic health check', () => {
+    const tools = async (newrelic: FakeNewRelic) =>
+      new CliConnectorTools({
+        pup: 'pup',
+        gh: 'gh',
+        glab: 'glab',
+        bkt: 'bkt',
+        slashdocs: 'slashdocs',
+        aws: 'aws',
+        logcli: 'logcli',
+        newrelic: newrelic.bin,
+      });
+
+    it('reads connected for an account that answers, with logs or none yet', async () => {
+      const newrelic = await FakeNewRelic.create();
+      expect(await (await tools(newrelic)).newRelicCheck(ENV)).toEqual({ status: 'ok' });
+      newrelic.events({ at: Date.now() - 60_000, attrs: { message: 'x' } });
+      expect(await (await tools(newrelic)).newRelicCheck(ENV)).toEqual({ status: 'ok' });
+    });
+
+    it('reads needs auth for a refused key, account or region', async () => {
+      const newrelic = await FakeNewRelic.create();
+      newrelic.requires({ apiKey: KEY, accountId: ACCOUNT, region: 'EU' });
+      const check = async (env: Record<string, string>) => (await tools(newrelic)).newRelicCheck(env);
+      expect(await check({ ...ENV, NEW_RELIC_API_KEY: 'wrong' })).toEqual({ status: 'auth' });
+      expect(await check(ENV)).toEqual({ status: 'auth' });
+      expect(await check({ ...ENV, NEW_RELIC_REGION: 'EU' })).toEqual({ status: 'ok' });
+      for (const behavior of ['unauthorized', 'forbidden'] as const) {
+        newrelic.behave(behavior);
+        expect(await check(ENV), behavior).toEqual({ status: 'auth' });
+      }
+    });
+
+    it('reads down for an address that does not answer, and for any other failure', async () => {
+      const newrelic = await FakeNewRelic.create();
+      newrelic.behave('unreachable');
+      expect(await (await tools(newrelic)).newRelicCheck(ENV)).toMatchObject({
+        status: 'down',
+        reason: expect.stringContaining('host name'),
+      });
+      newrelic.behave('throttle');
+      expect(await (await tools(newrelic)).newRelicCheck(ENV)).toMatchObject({
+        status: 'down',
+        reason: expect.stringContaining('error'),
+      });
+    });
+
+    it('keeps the key off the command line and ambient NEW_RELIC_ variables out', async () => {
+      const newrelic = await FakeNewRelic.create();
+      process.env.NEW_RELIC_API_KEY = 'NRAK-AMBIENT';
+      process.env.NEW_RELIC_REGION = 'JP';
+      process.env.NEW_RELIC_LICENSE_KEY = 'ambient-license';
+      try {
+        await (await tools(newrelic)).newRelicCheck(ENV);
+      } finally {
+        delete process.env.NEW_RELIC_API_KEY;
+        delete process.env.NEW_RELIC_REGION;
+        delete process.env.NEW_RELIC_LICENSE_KEY;
+      }
+      const [call] = newrelic.calls();
+      expect(call?.env).toEqual(ENV);
+      expect(call?.args.join(' ')).not.toContain(KEY);
     });
   });
 });

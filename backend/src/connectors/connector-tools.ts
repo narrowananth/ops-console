@@ -4,7 +4,9 @@ import { ErrorCode } from '@ops-console/shared';
 import { z } from 'zod';
 import { LOGIN_TIMEOUT_MS } from '../claude-cli/claude-cli';
 import { ApiError } from '../common/errors';
-import { LogcliFailed, logcli, lokiFailure } from '../monitor/loki-cli';
+import { CliFailed, callCli } from '../monitor/cli-call';
+import { lokiFailure } from '../monitor/loki-cli';
+import { HEALTH_QUERY, newRelicFailure } from '../monitor/new-relic-cli';
 
 const run = promisify(execFile);
 
@@ -21,8 +23,8 @@ export type SignInPrompt = { code: string | null; url: string | null };
 const ONE_TIME_CODE = /(?:one-time code|enter the code)\W+([A-Z0-9]{4}-[A-Z0-9]{4})/i;
 const SIGN_IN_URL = /https:\/\/[^\s"'<>]+/;
 
-/** What a small `logcli` label query found: a Loki that answers, that refuses the secret, or that does not answer. */
-export type LokiHealth = { status: 'ok' } | { status: 'auth' } | { status: 'down'; reason: string };
+/** What a small query through a log CLI found: a service that answers, that refuses the secret, or that does not answer. */
+export type CliHealth = { status: 'ok' } | { status: 'auth' } | { status: 'down'; reason: string };
 
 export const CONNECTOR_TOOLS = Symbol('CONNECTOR_TOOLS');
 
@@ -59,7 +61,9 @@ export interface ConnectorTools {
   /** The names of the log groups the profile sees in the region. */
   awsLogGroups(profile: string, region: string): Promise<string[]>;
   /** `logcli labels` with `env` (the address, tenant and secret) in the child's environment. Never throws on a Loki failure. */
-  lokiCheck(env: Record<string, string>): Promise<LokiHealth>;
+  lokiCheck(env: Record<string, string>): Promise<CliHealth>;
+  /** A small NRQL query through `newrelic` with `env` (the key, account and region) in the child's environment. Never throws on a New Relic failure. */
+  newRelicCheck(env: Record<string, string>): Promise<CliHealth>;
   /** Opens a page in the operator's browser. */
   openPage(url: string): Promise<void>;
   /** Whether a command is on the PATH. */
@@ -78,6 +82,7 @@ export type ToolBins = {
   slashdocs: string;
   aws: string;
   logcli: string;
+  newrelic: string;
 };
 
 const logGroupsSchema = z.object({ logGroups: z.array(z.object({ logGroupName: z.string() }).loose()) }).loose();
@@ -93,6 +98,7 @@ export class CliConnectorTools implements ConnectorTools {
       slashdocs: 'slashdocs',
       aws: 'aws',
       logcli: 'logcli',
+      newrelic: 'newrelic',
     },
   ) {}
 
@@ -282,13 +288,25 @@ export class CliConnectorTools implements ConnectorTools {
     }
   }
 
-  async lokiCheck(env: Record<string, string>): Promise<LokiHealth> {
+  async lokiCheck(env: Record<string, string>): Promise<CliHealth> {
     try {
-      await logcli(this.bins.logcli, ['-q', 'labels', '--since', '1h'], env);
+      await callCli(this.bins.logcli, ['-q', 'labels', '--since', '1h'], env);
       return { status: 'ok' };
     } catch (error) {
-      if (!(error instanceof LogcliFailed)) throw error;
+      if (!(error instanceof CliFailed)) throw error;
       const failure = lokiFailure(error.stderr);
+      if (failure.kind === 'auth') return { status: 'auth' };
+      return { status: 'down', reason: failure.kind === 'unreachable' ? failure.reason : 'it answered with an error' };
+    }
+  }
+
+  async newRelicCheck(env: Record<string, string>): Promise<CliHealth> {
+    try {
+      await callCli(this.bins.newrelic, ['nrql', 'query', '--query', HEALTH_QUERY], env);
+      return { status: 'ok' };
+    } catch (error) {
+      if (!(error instanceof CliFailed)) throw error;
+      const failure = newRelicFailure(error);
       if (failure.kind === 'auth') return { status: 'auth' };
       return { status: 'down', reason: failure.kind === 'unreachable' ? failure.reason : 'it answered with an error' };
     }

@@ -179,7 +179,7 @@ describe('classifyCli for logcli', () => {
     expect(reason('query', '-H', QUERY)).not.toBeNull();
   });
 
-  it('refuses a flag that takes a value when the next argument is a flag, so no flag hides as a value', () => {
+  it('refuses a flag value that starts with a dash, in both spellings, so no flag hides as a value', () => {
     expect(reason('query', QUERY, '--limit', '--addr=http://evil.example')).toMatch(/--limit.*value/);
     expect(reason('query', '-o', '--addr', 'http://evil.example', QUERY)).toMatch(/-o.*value/);
     expect(reason('query', '--since', '--bearer-token=x', QUERY)).toMatch(/--since.*value/);
@@ -220,6 +220,108 @@ describe('classifyCli for logcli', () => {
   it('lets a query say anything a log line might, such as a merge word or an @', () => {
     expect(classifyCli('logcli', ['query', '{app="x"} |= "auto-merge"'])).toEqual({ kind: 'read' });
     expect(classifyCli('logcli', ['query', '{app="x"} |= "a@b.example.com"'])).toEqual({ kind: 'read' });
+  });
+});
+
+describe('classifyCli for newrelic', () => {
+  const NRQL = "SELECT count(*) FROM Log WHERE `service.name` = 'shop-api' SINCE 1 hour ago";
+  const reason = (...args: string[]) => {
+    const verdict = classifyCli('newrelic', args);
+    return verdict.kind === 'deny' ? verdict.reason : null;
+  };
+
+  it('reads an NRQL query, with the flags for the query and the output format, in both spellings', () => {
+    for (const args of [
+      ['nrql', 'query', '--query', NRQL],
+      ['nrql', 'query', `--query=${NRQL}`],
+      ['nrql', 'query', '--query', NRQL, '--format', 'JSON'],
+      ['nrql', 'query', '--format=Text', `--query=${NRQL}`],
+      ['nrql', 'query', '--format', 'yaml', '--query', NRQL],
+    ]) {
+      expect(classifyCli('newrelic', args), args.join(' ')).toEqual({ kind: 'read' });
+    }
+  });
+
+  it('refuses every flag that changes the key, account, region or profile, or what the CLI logs or reads, in both spellings, and runs nothing', () => {
+    for (const flag of [
+      '--apiKey',
+      '--accountId',
+      '--region',
+      '--profile',
+      '--licenseKey',
+      '--debug',
+      '--trace',
+      '--plain',
+      '--config',
+      '--configFile',
+      '--help',
+      '--version',
+    ]) {
+      expect(reason('nrql', 'query', flag, 'x', '--query', NRQL), `${flag} value`).toMatch(new RegExp(`^${flag}`));
+      expect(reason('nrql', 'query', `${flag}=x`, '--query', NRQL), `${flag}=value`).toMatch(new RegExp(`^${flag}`));
+      expect(reason('nrql', 'query', '--query', NRQL, flag), `${flag} alone`).toMatch(new RegExp(`^${flag}`));
+    }
+    for (const short of ['-a', '-q', '-h', '-v']) {
+      expect(reason('nrql', 'query', short, 'x'), short).toMatch(new RegExp(`^${short} `));
+    }
+  });
+
+  it('refuses an abbreviation, a flag in another case, and a flag with no value', () => {
+    for (const flag of ['--que', '--q', '--form', '--QUERY', '--Query', '--FORMAT', '--Format']) {
+      expect(reason('nrql', 'query', flag, NRQL), flag).toMatch(/not allowed/);
+    }
+    expect(reason('nrql', 'query', '--query', NRQL, '--format=')).toMatch(/--format.*value/);
+    expect(reason('nrql', 'query', '--query', NRQL, '--format')).toMatch(/--format.*value/);
+    expect(reason('nrql', 'query', '--query=')).toMatch(/--query.*value/);
+  });
+
+  it('refuses every other command, in any case, and a flag before the command', () => {
+    for (const args of [
+      ['nerdgraph', 'query', '{ actor { user { email } } }'],
+      ['profile', 'list'],
+      ['profile', 'add', '--profile', 'x'],
+      ['apiAccess', 'create'],
+      ['config', 'list'],
+      ['events', 'post'],
+      ['entity', 'search'],
+      ['workload', 'list'],
+      ['diagnose', 'run'],
+      ['install'],
+      ['nrql'],
+      ['nrql', 'history'],
+      ['query', '--query', NRQL],
+      ['NRQL', 'query', '--query', NRQL],
+      ['nrql', 'QUERY', '--query', NRQL],
+      ['--accountId=1', 'nrql', 'query'],
+      ['help'],
+    ]) {
+      expect(reason(...args), args.join(' ')).not.toBeNull();
+    }
+    expect(reason('nerdgraph', 'query', 'x')).toContain('nerdgraph');
+  });
+
+  it('refuses a flag value that starts with a dash, in both spellings, so no flag hides as a value', () => {
+    expect(reason('nrql', 'query', '--query', '--accountId=1')).toMatch(/--query.*value/);
+    expect(reason('nrql', 'query', '--query', '-1')).toMatch(/--query.*value/);
+    expect(reason('nrql', 'query', '--query', NRQL, '--format', '--region')).toMatch(/--format.*value/);
+    expect(reason('nrql', 'query', '--format', '--apiKey', 'x', '--query', NRQL)).toMatch(/--format.*value/);
+    expect(reason('nrql', 'query', '--query=-x')).toMatch(/--query.*value/);
+    expect(reason('nrql', 'query', '--query', NRQL, '--format=-x')).toMatch(/--format.*value/);
+  });
+
+  it('refuses the end-of-flags marker and a loose argument', () => {
+    expect(reason('nrql', 'query', '--', '--accountId=1', '--query', NRQL)).not.toBeNull();
+    expect(reason('nrql', 'query', '--query', NRQL, 'extra')).not.toBeNull();
+    expect(reason('nrql', 'query', NRQL)).not.toBeNull();
+  });
+
+  it('lets a query say anything an event might, such as a flag name or a merge word', () => {
+    for (const query of [
+      "SELECT * FROM Log WHERE message = '--accountId=1'",
+      "SELECT * FROM Log WHERE message LIKE '%auto-merge%'",
+    ]) {
+      expect(classifyCli('newrelic', ['nrql', 'query', '--query', query]), query).toEqual({ kind: 'read' });
+    }
   });
 });
 

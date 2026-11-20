@@ -34,7 +34,7 @@ Datadog covers one slice of teams. Order by reach per integration:
 1. Generic OpenTelemetry logs, which cover most other tools without a vendor-specific Connector. Spec: [otel-log-source](specs/otel-log-source.md).
 2. AWS CloudWatch. Spec: [cloudwatch-log-source](specs/cloudwatch-log-source.md).
 3. Grafana Loki. Spec: [loki-log-source](specs/loki-log-source.md).
-4. New Relic.
+4. New Relic. Spec: [new-relic-log-source](specs/new-relic-log-source.md).
 
 ## 4. Linux
 

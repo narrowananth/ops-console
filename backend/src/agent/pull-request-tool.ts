@@ -200,7 +200,7 @@ export function consoleToolsServer(
         ? [
             tool(
               'run_integration',
-              "Runs an integration CLI (pup for Datadog, gh, glab, bkt, slashdocs, logcli for Loki) outside your sandbox, as the operator, where their sign-in works. Give cli and args: the command words first, then the flags, one argument per entry, no shell (for example gh with args pr, view, 12, --repo, owner/name). A read runs at once. A write (comment, create, update, mute) waits for the operator's Approval. Sign-in, tokens, extensions, aliases, config and merges are refused. logcli runs query, labels and series only, with its time, limit, output and quiet flags: the console sets its address and credentials, so pass none. Your commands cannot run these CLIs themselves.",
+              "Runs an integration CLI (pup for Datadog, gh, glab, bkt, slashdocs, logcli for Loki, newrelic for New Relic) outside your sandbox, as the operator, where their sign-in works. Give cli and args: the command words first, then the flags, one argument per entry, no shell (for example gh with args pr, view, 12, --repo, owner/name). A read runs at once. A write (comment, create, update, mute) waits for the operator's Approval. Sign-in, tokens, extensions, aliases, config and merges are refused. logcli runs query, labels and series only, with its time, limit, output and quiet flags: the console sets its address and credentials, so pass none. newrelic runs nrql query only, with --query and --format: the console sets its key, account and region, so pass none. Your commands cannot run these CLIs themselves.",
               integrationInputSchema.shape,
               async (args) => {
                 const done = await integrations.run(args);

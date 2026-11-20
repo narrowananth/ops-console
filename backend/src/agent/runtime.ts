@@ -1940,7 +1940,9 @@ export class AgentRuntime implements OnModuleDestroy {
     };
     const parsed = integrationInputSchema.safeParse(toolInput);
     if (!parsed.success)
-      return refuse('Give cli (pup, gh, glab, bkt, slashdocs or logcli) and args: command words first, one per entry.');
+      return refuse(
+        'Give cli (pup, gh, glab, bkt, slashdocs, logcli or newrelic) and args: command words first, one per entry.',
+      );
     const { cli, args } = parsed.data;
     const verdict = classifyCli(cli, args);
     if (verdict.kind === 'deny') return refuse(verdict.reason);

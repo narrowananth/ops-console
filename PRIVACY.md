@@ -38,6 +38,7 @@ Three parties handle your data: your Mac, Anthropic's API and the services you c
 - **A Log folder** is read on your Mac. No service is involved, and its records reach Anthropic's API only as Samples in a prompt.
 - **CloudWatch logs** are read by the AWS CLI, which the console runs on your Mac with your AWS profile. The agent's CloudWatch MCP server also runs on your Mac and calls AWS with that profile. The events reach Anthropic's API only as Samples in a prompt or as the agent's tool output.
 - **Loki logs** are read by `logcli`, which the console runs on your Mac as you. The Loki address, org id and secret are passed in its environment. The agent reaches Loki through the same CLI, limited to read commands. The lines reach Anthropic's API only as Samples in a prompt or as the agent's tool output.
+- **New Relic logs** are read by `newrelic`, which the console runs on your Mac as you. The account ID, region and User API key are passed in its environment. The agent reaches New Relic through the same CLI, limited to NRQL queries. The events reach Anthropic's API only as Samples in a prompt or as the agent's tool output.
 - **A Connector** receives the requests you or the agent make with your sign-in, and answers them. An answer to one of the console's own checks stays on your Mac. An answer to the agent goes on to Anthropic's API.
 
 None of this reaches an Ops Console server. The only requests tied to the project go to GitHub: the update check asks for the latest release, and an update downloads from it. The app never calls opsconsole.org. Claude Code, which the console runs, has its own traffic to Anthropic under Anthropic's terms and your Claude Code settings. The console does not change it.
@@ -51,7 +52,7 @@ Ops Console sends nothing to the project. These things go elsewhere, because you
 | To | What | When |
 | -- | ---- | ---- |
 | The AI provider behind your Claude account, or the CLIProxy you set up | Your prompts, the files the agent reads, and the results of every tool it uses, which can include database rows, logs, pull requests, messages and documents | Whenever the agent runs. That provider handles it under its own terms. CLIProxy runs on your own machine and passes it to the providers you configured. |
-| The services you connect: Datadog, GitHub, GitLab, Bitbucket and Atlassian, Slack, Sentry, Shopify, slashdocs, Google, AWS CloudWatch, Grafana Loki | Requests the console or the agent makes with your sign-in, and what they return | When you connect, check or use the service, or the agent calls one of its tools |
+| The services you connect: Datadog, GitHub, GitLab, Bitbucket and Atlassian, Slack, Sentry, Shopify, slashdocs, Google, AWS CloudWatch, Grafana Loki, New Relic | Requests the console or the agent makes with your sign-in, and what they return | When you connect, check or use the service, or the agent calls one of its tools |
 | Your databases and other servers added as Connections or MCP Servers | Queries the agent runs and what they return | When the agent uses them. The Access Level and PROD tag of a Connection limit what it may do. |
 | GitHub | A request for the latest release, and the download of an update | When you run `ops-console update`, and when the console checks for a new version |
 | Websites | The pages you or the agent open in a Session's Browser panel | When a page is opened |
