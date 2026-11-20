@@ -12,7 +12,8 @@ Cellar would break that layout.
 
 ## Behavior
 
-1. `brew tap narrowananth/ops-console https://github.com/narrowananth/ops-console`, then `brew install ops-console`,
+1. `brew tap narrowananth/ops-console https://github.com/narrowananth/ops-console`, then `brew trust narrowananth/ops-console` on a
+   Homebrew that asks for it, then `brew install ops-console`,
    installs one command, `ops-console`, into Homebrew's `bin`, and prints that the operator runs `ops-console start`. This is the Brew entry command. The formula's install step
    installs no app and writes nothing under the home folder.
 2. The Brew entry command with no installed app installs the formula's version from the tarball Homebrew already

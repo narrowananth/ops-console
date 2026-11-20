@@ -117,7 +117,7 @@ export class WorkspaceSessionsService {
       throw error;
     }
     void asBackground(() => this.followOrigin(row));
-    return toSession(row);
+    return toSession(row, []);
   }
 
   /**
@@ -254,7 +254,10 @@ export class WorkspaceSessionsService {
         await this.git.pull(folder, branch);
       },
     );
-    return { session: toSession(this.sessions.write(sessionId, { branch })), stashed };
+    return {
+      session: toSession(this.sessions.write(sessionId, { branch }), this.sessions.pullRequestsFor(sessionId)),
+      stashed,
+    };
   }
 
   /** The Session's worktree, or `invalid_state` when a repo Session has none yet. */

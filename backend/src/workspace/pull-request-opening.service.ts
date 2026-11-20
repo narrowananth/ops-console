@@ -331,10 +331,10 @@ export class PullRequestOpeningService implements PullRequestOpener {
     }
   }
 
-  /** The Session keeps the pull request it opened, with its branch, so its header shows this one and no other. */
+  /** A `repo` Session lists the pull requests it opened, each with its branch; the header shows the one of its own branch. */
   private remember(sessionId: string, branch: string, pull: { number: number; url: string }): void {
     if (this.sessions.get(sessionId).kind !== SessionKind.Repo) return;
-    this.sessions.write(sessionId, { openedPrNumber: pull.number, openedPrUrl: pull.url, openedPrBranch: branch });
+    this.sessions.rememberPullRequest(sessionId, { number: pull.number, url: pull.url, branch });
   }
 
   /** The Action Log row exists before the work; a failure finishes it with the reason. */

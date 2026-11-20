@@ -25,10 +25,14 @@ With Homebrew instead:
 
 ```
 brew tap narrowananth/ops-console https://github.com/narrowananth/ops-console
+brew trust narrowananth/ops-console
 brew install ops-console
 ops-console start
 ops-console open
 ```
+
+Current Homebrew refuses a formula from a tap you have not trusted. If `brew trust` is not found, your Homebrew does not
+ask for it: skip that line.
 
 Homebrew installs the `ops-console` command. The first command you run installs the app into `~/.ops-console`, and
 `brew upgrade` brings the app up to the formula's version on the next command. `ops-console update` still installs the

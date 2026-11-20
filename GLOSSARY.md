@@ -250,7 +250,10 @@ repository under a new owner and the folder's `origin` has not changed. The cons
 The service holding a Repo's remote: GitHub, GitLab or Bitbucket.
 
 **Pull request opening**:
-The console's push of a Session's branch from its Session worktree to `origin` and its call to the Git host to open the pull request, run in the daemon as the operator. The Session keeps the pull request it opened for as long as it is on that branch. The agent writes the title and description; it never pushes or opens. The operator's click starts it in a Session, as does the agent's `open_pull_request` call, which needs no Approval, and a confirmed Fix starts it by itself. A branch that moved on `origin` is rebased onto it first, never forced.
+The console's push of a Session's branch from its Session worktree to `origin` and its call to the Git host to open the pull request, run in the daemon as the operator. The Session keeps it in its Session pull requests. The agent writes the title and description; it never pushes or opens. The operator's click starts it in a Session, as does the agent's `open_pull_request` call, which needs no Approval, and a confirmed Fix starts it by itself. A branch that moved on `origin` is rebased onto it first, never forced.
+
+**Session pull requests**:
+The pull requests the console opened for a Session, kept as a list that the Session panel shows. It does not hold a pull request that only the conversation names, or one someone else opened.
 
 **Merge checks**:
 The five things the pull request page lists between a pull request and its merge: approval, checks, conflicts, open

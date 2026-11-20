@@ -1,4 +1,11 @@
-import { type EditedMessage, FolderTarget, type OutputFile, SessionKind, SessionState } from '@ops-console/shared';
+import {
+  type EditedMessage,
+  FolderTarget,
+  type OutputFile,
+  PrState,
+  SessionKind,
+  SessionState,
+} from '@ops-console/shared';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
@@ -42,7 +49,7 @@ import { alertPath, pullRequestPath } from './links';
 import { OpenPullRequestForm } from './open-pull-request';
 import { SessionComposer } from './session-composer';
 import { DIFF_PANEL, DiffPanel } from './session-diff';
-import { SessionPanel, SubagentWait, type Surface, workingSubagents } from './session-panel';
+import { type PullRequestRow, SessionPanel, SubagentWait, type Surface, workingSubagents } from './session-panel';
 import { SESSION_STATE_TIP } from './sessions-pane';
 
 // xterm is a third of the page's code, and only an open dock needs it.
@@ -126,7 +133,15 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   }, [serverList]);
   const gone = sessions.isSuccess && session === undefined;
   const stop = useStopSession(id);
-  const pulls = useRepoPullRequests(session?.kind === SessionKind.Repo ? session.repo_id : null);
+  const pullsRepoId = session?.kind === SessionKind.Repo ? session.repo_id : null;
+  const pulls = useRepoPullRequests(pullsRepoId);
+  // The merged and closed lists are read only once the open one answered and left a pull request of the Session out.
+  const missingFromOpen =
+    pulls.isSuccess &&
+    session?.kind === SessionKind.Repo &&
+    session.pull_requests.some((one) => !pulls.data.data.some((candidate) => candidate.number === one.number));
+  const merged = useRepoPullRequests(pullsRepoId, PrState.Merged, missingFromOpen);
+  const closed = useRepoPullRequests(pullsRepoId, PrState.Closed, missingFromOpen);
   const sessionState = session?.state;
   const working = sessionState === SessionState.Working || sessionState === SessionState.WaitingApproval;
   // Read again as the agent works, so the Diff button shows once it has edited a file.
@@ -154,6 +169,24 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
       ? { repo_id: session.repo_id, number: pull.number }
       : null;
   const externalPull = pull;
+  // The pull requests the console opened for the Session, newest first. An open one the Git host lists for the
+  // Session's own branch is added as the top row, as the single row always showed it. Only a Repo's Sessions list any.
+  const opened = session?.kind === SessionKind.Repo ? session.pull_requests : [];
+  const pullRows: PullRequestRow[] = (
+    pull && !opened.some((one) => one.number === pull.number)
+      ? [{ number: pull.number, url: pull.url }, ...opened]
+      : opened
+  ).map((one) => {
+    const known = [pulls, merged, closed]
+      .flatMap((list) => list.data?.data ?? [])
+      .find((candidate) => candidate.number === one.number);
+    return {
+      number: one.number,
+      href: one.url,
+      to: internalPull ? pullRequestPath(internalPull.repo_id, one.number) : null,
+      info: known ? { title: known.title, checks: known.checks, state: known.state } : null,
+    };
+  });
   // A Session whose worktree changes nothing yet has nothing to show.
   const showDiff = hasDiff && (diff.data?.files.length ?? 0) > 0;
   // The Diff and the Browser share the right column: opening one folds the other, and the Browser wins if both were left open.
@@ -357,23 +390,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                     <SessionPanel
                       session={session}
                       branch={branch}
-                      pullRequest={
-                        pull
-                          ? {
-                              number: pull.number,
-                              href: pull.url,
-                              to: internalPull ? pullRequestPath(internalPull.repo_id, internalPull.number) : null,
-                            }
-                          : null
-                      }
-                      pullInfo={
-                        pull
-                          ? (() => {
-                              const known = pulls.data?.data.find((candidate) => candidate.number === pull.number);
-                              return known ? { title: known.title, checks: known.checks } : null;
-                            })()
-                          : null
-                      }
+                      pullRequests={pullRows}
                       publish={
                         hasDiff && branch
                           ? {

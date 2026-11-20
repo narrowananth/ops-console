@@ -34,6 +34,7 @@ const SESSION = {
   connection_ids: null,
   extra_repo_ids: [],
   pull_request: null,
+  pull_requests: [],
   alert_id: null,
   state: 'idle',
   last_message_preview: null,
