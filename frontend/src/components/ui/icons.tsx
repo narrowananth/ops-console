@@ -165,6 +165,35 @@ export const CrossCircleIcon = ({ tone }: { tone: string }) => (
   </span>
 );
 
+/** `</>`, for Inspect. */
+export const CodeIcon = () => (
+  <Icon>
+    <path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 5l-4 14" />
+  </Icon>
+);
+
+/** DevTools' own dock-side pictures: a window of its own, the bottom, the right. */
+export const DockWindowIcon = () => (
+  <Icon>
+    <rect x="8" y="3" width="13" height="13" rx="2" />
+    <path d="M16 20.5H5a2 2 0 0 1-2-2V8" />
+  </Icon>
+);
+
+export const DockBottomIcon = () => (
+  <Icon>
+    <rect x="3" y="4" width="18" height="16" rx="2.5" />
+    <path d="M3 14h18" />
+  </Icon>
+);
+
+export const DockRightIcon = () => (
+  <Icon>
+    <rect x="3" y="4" width="18" height="16" rx="2.5" />
+    <path d="M14.5 4v16" />
+  </Icon>
+);
+
 export const DotCircleIcon = ({ tone }: { tone: string }) => (
   <span className={tone}>
     <Icon>

@@ -20,7 +20,7 @@ ports); it opens no other host and acts on no tab that has left loopback. `brows
 job, no `pr_review` Session and no read-only run has these tools. The operator's own address field opens any `http` or
 `https` page.
 
-The panel's Inspect button opens Chrome's own DevTools frontend for a tab in a window of its own: the real frontend, built from a
+The panel's Inspect button shows Chrome's own DevTools frontend for a tab, docked in the panel or in a window of its own: the real frontend, built from a
 pinned revision of its repository and served by the daemon. It talks to the page through a relay, a WebSocket route behind the
 session token. Each window gets a CDP session of its own through Playwright, and the relay forwards the DevTools domains
 (DOM, CSS, Runtime, Network, Debugger, Storage and the like) and refuses `Browser`, `Target`, `Fetch`, `Tracing`, `Input`,
@@ -72,7 +72,7 @@ saved environment. The console shows a PROD Connection whose host that file hold
 Approval, but cannot see what the process does with it. A command that writes to PROD is the operator's to run, as the
 Prod rule says.
 
-The Inspector window runs on the console's origin and reads the token from local storage to open its socket, so a flaw in
+The Inspector runs on the console's origin, in an iframe or a window, and reads the token from local storage to open its socket, so a flaw in
 DevTools that a hostile page could trigger would reach it. The relay narrows what the window can ask of Chrome; it cannot
 narrow what the operator does in the page's own DevTools, such as running script or reading the cookies of every site the
 Session visited.

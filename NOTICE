@@ -13,7 +13,7 @@ Chrome DevTools frontend
 Copyright 2014 The Chromium Authors
 Licensed under the BSD 3-Clause License, text below.
 
-The Inspector window of the Browser panel is Chrome's DevTools frontend (https://github.com/ChromeDevTools/devtools-frontend),
+The Inspector of the Browser panel is Chrome's DevTools frontend (https://github.com/ChromeDevTools/devtools-frontend),
 built without changes at the revision pinned in scripts/devtools-frontend.json. A release carries it in
 app/public/devtools-frontend, with LICENSES.txt beside it holding the licence text of DevTools and of each package it bundles:
 acorn, codemirror.next and third-party-web (MIT); csp_evaluator, diff, legacy-javascript, lighthouse, puppeteer,

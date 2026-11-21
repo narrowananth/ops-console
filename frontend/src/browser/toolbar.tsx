@@ -1,6 +1,7 @@
 import { FILL_VIEWPORT, type Tab, TabAction, VIEWPORT_PRESETS, type Viewport } from '@ops-console/shared';
 import { useState } from 'react';
 import { z } from 'zod';
+import { CodeIcon } from '../components/ui/icons';
 import { useStored } from '../lib/remember';
 import { clampSide, customViewport, isFill, presetViewport, rotateViewport, viewportLabel } from './geometry';
 import { isLoopbackUrl } from './loopback';
@@ -33,6 +34,7 @@ export function Toolbar({
   onAddress,
   onViewport,
   onWindow,
+  inspecting,
   onInspect,
   onExternal,
   onClear,
@@ -45,6 +47,8 @@ export function Toolbar({
   onAddress: (text: string) => void;
   onViewport: (viewport: Viewport) => void;
   onWindow?: () => void;
+  /** DevTools are docked for this tab. */
+  inspecting: boolean;
   onInspect: () => void;
   onExternal: () => void;
   onClear?: () => void;
@@ -149,12 +153,13 @@ export function Toolbar({
         <button
           type="button"
           aria-label="Inspect"
-          title="Inspect this page: Chrome's DevTools in a window of their own"
+          aria-pressed={inspecting}
+          title={inspecting ? 'Close DevTools' : "Inspect this page with Chrome's DevTools"}
           disabled={blank}
           onClick={onInspect}
-          className={`${ROUND} font-mono text-[11px] font-semibold`}
+          className={`${ROUND} aria-pressed:bg-neutral-200 aria-pressed:text-accent-700`}
         >
-          {'</>'}
+          <CodeIcon />
         </button>
         <button
           type="button"
