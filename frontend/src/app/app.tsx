@@ -1,5 +1,6 @@
 import { ErrorCode, UpdateStatus } from '@ops-console/shared';
-import { useEffect, useRef } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
+import { useMatch } from 'react-router-dom';
 import { Empty } from '../components/ui/empty';
 import { TipLayer } from '../components/ui/tip';
 import { ApiError } from '../lib/api';
@@ -7,6 +8,10 @@ import { useHealth, useUpdates } from '../lib/queries';
 import { forgetToken, sessionToken } from '../lib/session';
 import { Shell } from './shell';
 import { useUi } from './ui-store';
+
+const BrowserWindow = lazy(async () => ({ default: (await import('../browser/browser-window')).BrowserWindow }));
+/** A Session's browser tab in a window of its own: it opens from the Browser panel and has no sidebar. */
+const BROWSER_WINDOW = '/browser-window/:sessionId/:tabId';
 
 function Panel({ children }: { children: React.ReactNode }) {
   return (
@@ -19,6 +24,7 @@ function Panel({ children }: { children: React.ReactNode }) {
 }
 
 function Gate() {
+  const browserWindow = useMatch(BROWSER_WINDOW);
   const updates = useUpdates().data?.data;
   const restarting = updates?.status === UpdateStatus.Updating;
   const health = useHealth(restarting);
@@ -40,6 +46,13 @@ function Gate() {
       <Panel>
         The console daemon is not running. Run <code>ops-console start</code>.
       </Panel>
+    );
+  }
+  if (browserWindow?.params.sessionId && browserWindow.params.tabId) {
+    return (
+      <Suspense fallback={<Empty>Loading the page…</Empty>}>
+        <BrowserWindow sessionId={browserWindow.params.sessionId} tabId={browserWindow.params.tabId} />
+      </Suspense>
     );
   }
   return <Shell />;
