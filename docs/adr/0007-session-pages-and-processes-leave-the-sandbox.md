@@ -20,6 +20,13 @@ ports); it opens no other host and acts on no tab that has left loopback. `brows
 job, no `pr_review` Session and no read-only run has these tools. The operator's own address field opens any `http` or
 `https` page.
 
+The panel's Inspect button opens Chrome's own DevTools frontend for a tab in a window of its own: the real frontend, built from a
+pinned revision of its repository and served by the daemon. It talks to the page through a relay, a WebSocket route behind the
+session token. Each window gets a CDP session of its own through Playwright, and the relay forwards the DevTools domains
+(DOM, CSS, Runtime, Network, Debugger, Storage and the like) and refuses `Browser`, `Target`, `Fetch`, `Tracing`, `Input`,
+`Emulation`, `Page` navigation and screencast, and the two methods that would read a file or stall requests. Chrome is never
+started with a remote debugging port.
+
 The Network allowlist ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md)) covers a run's commands. It does not cover what
 a page or a Session process reaches.
 
@@ -36,6 +43,17 @@ a page or a Session process reaches.
   allowlist): the servers end with the run, so no project stays up, and every host a project talks to joins the allowlist.
 - **An Approval on each browser tool call**: it stops the agent on every click. The reach is a loopback page the operator
   watches, so only `browser_evaluate` asks.
+- **Chrome with `--remote-debugging-port`, DevTools pointed at it**: no relay to write. It lost because any process on the
+  Mac, the sandboxed agent included, could then drive the Session's Chrome and read its cookies around the mediated
+  `browser_*` tools and the token (ADR 0003).
+- **A DevTools frontend from a package or a Google host**: `chrome-devtools-frontend` on npm is 68 MB of source with no
+  built files; `devtools-frontend-prebuilt` is a 2021 build by one person with no licence file; the copy at
+  `chrome-devtools-frontend.appspot.com` is served file by file with no list to pin, and the release would wait on it.
+  Building the pinned tag costs 3.4 GB of build tools and 8 to 19 minutes cold, depending on the network, then about 40 seconds of build; a cache keyed by the pin makes every later run free. Two clean builds gave the same hash, which the build checks.
+- **An inspector written for the console**: a DOM tree and a console cover a fraction of DevTools.
+- **DevTools on a second origin** (`localhost` beside `127.0.0.1`), the token passed by `postMessage`: a flaw in DevTools
+  that a hostile page triggered could not read the token. It lost to a smaller design for now: the page is one the
+  operator opened to inspect, and the frontend is Chrome's own. It stays open as a hardening step.
 - **Playwright's Chromium, bundled or downloaded**: 150 to 366 MB for a browser the operator already has.
 - **`$SHELL -ilc` for every command**: PATH is exactly what the terminal has, with nothing to keep in step. It lost
   because every process start and restart paid the full rc-file start-up, which the operator waits for. The saved
@@ -53,6 +71,11 @@ whatever that file names. A variable that a shell function or a prompt hook expo
 saved environment. The console shows a PROD Connection whose host that file holds, in the dock and in the agent's
 Approval, but cannot see what the process does with it. A command that writes to PROD is the operator's to run, as the
 Prod rule says.
+
+The Inspector window runs on the console's origin and reads the token from local storage to open its socket, so a flaw in
+DevTools that a hostile page could trigger would reach it. The relay narrows what the window can ask of Chrome; it cannot
+narrow what the operator does in the page's own DevTools, such as running script or reading the cookies of every site the
+Session visited.
 
 A steered chat can read a loopback page and click in it. The pages it reaches are the operator's own dev servers.
 

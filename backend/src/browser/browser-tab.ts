@@ -21,6 +21,7 @@ import type { BrowserContext, CDPSession, FileChooser, Page, Request } from 'pla
 import { WebSocket } from 'ws';
 import { ApiError, validationFailed } from '../common/errors';
 import { isLoopbackHost } from './addresses';
+import { InspectorRelay } from './inspector-relay';
 
 const RING = 200;
 const MAX_HOSTS = 50;
@@ -143,6 +144,8 @@ export class BrowserTab {
   readonly consoleEntries: ConsoleEntry[] = [];
   readonly networkEntries: NetworkEntry[] = [];
   readonly viewers = new Set<WebSocket>();
+  /** Inspector windows attached; each holds a CDP session of its own. */
+  private readonly inspectors = new Set<InspectorRelay>();
   /** Set when the daemon closes the page, so its close event is not a script's `window.close()` or a crash. */
   closing = false;
   dead = false;
@@ -552,10 +555,23 @@ export class BrowserTab {
     });
   }
 
-  /** Tells viewers the tab is gone and hangs up on them. */
+  /** Tells viewers the tab is gone and hangs up on them, and on the Inspector windows. */
   closeViewers(): void {
     this.send({ type: 'closed' });
     for (const viewer of this.viewers) viewer.close(1000, 'tab_closed');
+    for (const relay of [...this.inspectors]) relay.close(1000, 'tab_closed');
+  }
+
+  get inspectorCount(): number {
+    return this.inspectors.size;
+  }
+
+  /** Gives an Inspector window a CDP session of its own on this page; the window's socket ends it. */
+  inspect(socket: WebSocket): void {
+    const relay = new InspectorRelay(this.page.context().newCDPSession(this.page), socket, (done) =>
+      this.inspectors.delete(done),
+    );
+    this.inspectors.add(relay);
   }
 
   // Input from a viewer

@@ -13,6 +13,11 @@ function build(dir: string, args: string[]): void {
 
 /** Builds the daemon and UI, lays them out as the release tarball does, and starts the daemon. */
 export default async function setup(): Promise<() => Promise<void>> {
+  // CI builds Chrome's DevTools for the Inspector window; elsewhere `pnpm devtools-frontend` does, and the spec skips without it.
+  if (process.env.CI) {
+    const built = spawnSync(process.execPath, ['scripts/devtools-frontend.mjs'], { cwd: repo, stdio: 'inherit' });
+    if (built.status !== 0) throw new Error('DevTools frontend build failed');
+  }
   build('backend', [process.execPath, 'scripts/build.mjs']);
   build('frontend', ['pnpm', 'exec', 'vite', 'build', '--logLevel', 'warn']);
 

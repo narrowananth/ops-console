@@ -1,0 +1,10 @@
+{
+  "repo": "https://github.com/ChromeDevTools/devtools-frontend.git",
+  "tag": "v1.0.1749963",
+  "commit": "691ae5f55d345edbc832dca175590cdc02fe4c73",
+  "depotTools": {
+    "repo": "https://chromium.googlesource.com/chromium/tools/depot_tools.git",
+    "commit": "1b0972d3d5e5b1e78055147cb3576361e274b9ed"
+  },
+  "treeSha256": "2d8b1b2559bc35208e0e3ace00963902f663637765c019e4a5f968dadb879d11"
+}

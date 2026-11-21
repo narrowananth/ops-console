@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Empty } from '../components/ui/empty';
 import { ApiError } from '../lib/api';
 import { useBrowserState, useOpenExternal, usePatchTab, useStoreTab } from '../lib/queries';
+import { openInspector } from './inspector-window';
 import { PageStage } from './page-stage';
 import { Toolbar } from './toolbar';
 
@@ -43,6 +44,10 @@ export function BrowserWindow({ sessionId, tabId }: { sessionId: string; tabId: 
         onAction={(action) => change({ action })}
         onAddress={(url) => change({ url })}
         onViewport={(viewport) => change({ viewport })}
+        onInspect={() => {
+          setRefused(null);
+          if (!openInspector(tabId)) setRefused('The browser blocked the window. Allow pop-ups for this page.');
+        }}
         onExternal={() => external.mutate(tabId)}
       />
       {external.isError && (

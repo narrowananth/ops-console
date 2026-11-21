@@ -15,6 +15,7 @@ import {
   useStopServer,
   useStoreTab,
 } from '../lib/queries';
+import { openInspector } from './inspector-window';
 import { LocalServers } from './local-servers';
 import { PageStage } from './page-stage';
 import { TabStrip } from './tab-strip';
@@ -92,6 +93,12 @@ export function BrowserPanel({
     if (windows.out.has(active.id)) windows.show(active.id);
     else if (!windows.open(sessionId, active.id))
       setRefused('The browser blocked the window. Allow pop-ups for this page.');
+  };
+
+  const inspect = () => {
+    if (!active) return;
+    setRefused(null);
+    if (!openInspector(active.id)) setRefused('The browser blocked the window. Allow pop-ups for this page.');
   };
 
   let body: ReactNode;
@@ -172,6 +179,7 @@ export function BrowserPanel({
         onAddress={open}
         onViewport={(viewport) => act({ viewport })}
         onWindow={openWindow}
+        onInspect={inspect}
         onExternal={() => active && external.mutate(active.id)}
         onClear={() => setClearing(true)}
       />

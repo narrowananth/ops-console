@@ -16,6 +16,8 @@ pnpm dev:open          # open the UI signed in to the dev backend
 
 The dev build runs beside the installed app, which keeps port 4545. The dev backend keeps its data in `backend/.data` and its Keychain items under the service `ops-console-dev`, so it never reads or moves the installed app's. The browser tab reads Ops Console (dev). Its log streams into the `pnpm dev` terminal, and Ctrl+C stops it.
 
+The Browser panel's Inspect button opens Chrome's DevTools. Run `pnpm devtools-frontend` once to build them from the revision pinned in `scripts/devtools-frontend.json`: a 3.4 GB download of build tools and 8 to 19 minutes the first time. A release build already has them.
+
 ## Google sign-in in development
 
 A release build ships a Google OAuth client. A build from source does not, so the Google Connectors say "Google sign-in is not set up in this build". To connect them while developing, create a Desktop app OAuth client in your own Google Cloud project, enable the Docs, Sheets and Drive APIs, and set:
