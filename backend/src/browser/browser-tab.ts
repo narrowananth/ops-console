@@ -37,6 +37,10 @@ const MAX_BUFFERED = 1_000_000;
 const ACK_WAIT_MS = 250;
 /** A screenshot Chrome does not answer must not hold the queue that sizes the page. */
 const STILL_WAIT_MS = 3000;
+/** After a size change, Chrome sends a frame of the new size within a few tens of ms; the next size waits this long for it. */
+const FRAME_WAIT_MS = 100;
+/** A page that sent no frame of its newest size this long after it was set gets a screenshot of it. */
+const SETTLE_MS = 150;
 
 function within<T>(ms: number, work: Promise<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -163,6 +167,15 @@ export class BrowserTab {
   private takeover: Fill | null = null;
   private readonly viewerSizes = new Map<WebSocket, Fill>();
   private screencasting = false;
+  /** Counts size changes; `framedSeq` is the one the newest frame sent to viewers was taken at. */
+  private sizeSeq = 0;
+  private framedSeq = 0;
+  private settling: NodeJS.Timeout | undefined;
+  private touch: boolean | null = null;
+  /** Resolvers of the turns that wait for the next frame of the page's size. */
+  private frameWaiters: (() => void)[] = [];
+  /** The size turn that has not started yet, if any: it reads the newest size when it runs, so sizes asked meanwhile share it. */
+  private metricsTurn: Promise<void> | null = null;
   private reading: NodeJS.Timeout | undefined;
   private inputQueue: Promise<void> = Promise.resolve();
   private moveQueued = false;
@@ -275,6 +288,7 @@ export class BrowserTab {
     page.on('popup', (popup) => this.hooks.popup(this, popup));
     page.on('close', () => {
       clearTimeout(this.reading);
+      clearTimeout(this.settling);
       for (const dir of [...this.chosenDirs, ...(this.staged ? [this.staged.dir] : [])]) {
         void rm(dir, { recursive: true, force: true }).catch(() => {});
       }
@@ -289,6 +303,10 @@ export class BrowserTab {
       const { width, height, scale } = this.size;
       const near = (got: number, want: number) => Math.abs(got - want) <= Math.max(2, want * 0.02);
       const ofPage = pixels === null || (near(pixels.width, width * scale) && near(pixels.height, height * scale));
+      if (ofPage) {
+        this.framedSeq = this.sizeSeq;
+        for (const release of this.frameWaiters.splice(0)) release();
+      }
       // Chrome sends the next frame after this ack, so a slow viewer slows the page down instead of queueing frames.
       void (ofPage ? this.sendFrame(data) : Promise.resolve())
         .then(() => this.cdp.send('Page.screencastFrameAck', { sessionId }))
@@ -450,8 +468,15 @@ export class BrowserTab {
     return next;
   }
 
+  /** Sizes arrive faster than Chrome applies them: a turn that waits in the queue takes the newest, so a burst is one turn. */
   private applyMetrics(): Promise<void> {
-    return this.turn(() => this.applyNow());
+    if (this.metricsTurn) return this.metricsTurn;
+    const turn = this.turn(() => {
+      this.metricsTurn = null;
+      return this.applyNow();
+    });
+    this.metricsTurn = turn;
+    return turn;
   }
 
   private async applyNow(): Promise<void> {
@@ -465,17 +490,30 @@ export class BrowserTab {
         screenWidth: width,
         screenHeight: height,
       }),
-      this.cdp.send('Emulation.setTouchEmulationEnabled', { enabled: mobile, maxTouchPoints: 5 }),
+      this.touch === mobile
+        ? Promise.resolve()
+        : this.cdp.send('Emulation.setTouchEmulationEnabled', { enabled: mobile, maxTouchPoints: 5 }),
     ]);
+    this.touch = mobile;
     const resized = width !== this.size.width || height !== this.size.height || scale !== this.size.scale;
     this.size = { width, height, scale };
-    // Frames are capped at the page's size in device pixels, so a new size or scale needs a screencast that knows it.
-    if (resized && this.screencasting) {
+    if (!resized) return;
+    this.sizeSeq += 1;
+    // Frames are capped at the page's size in device pixels, so a new size needs a screencast that knows it. A screencast
+    // does not send a frame for a page that has stopped changing, but a new one sends its first at once. The next size
+    // waits for it, so Chrome gets one size per frame it can draw, however fast the viewer drags.
+    if (this.screencasting) {
       await this.cdp.send('Page.stopScreencast').catch(() => {});
+      const framed = new Promise<void>((resolve) => {
+        this.frameWaiters.push(resolve);
+        setTimeout(resolve, FRAME_WAIT_MS).unref();
+      });
       await this.startScreencast();
+      await framed;
     }
-    // Not awaited: it queues behind this turn.
-    void this.refreshStill();
+    clearTimeout(this.settling);
+    this.settling = setTimeout(() => void this.refreshStill(), SETTLE_MS);
+    this.settling.unref();
   }
 
   // Viewers
@@ -504,9 +542,11 @@ export class BrowserTab {
     await Promise.race([Promise.all(taken), timer]);
   }
 
-  async attach(viewer: WebSocket): Promise<void> {
+  /** `size` is the viewer's own, when it knows it at connect: the first frame is then taken at that size. */
+  async attach(viewer: WebSocket, size?: Fill): Promise<void> {
     this.viewers.add(viewer);
     this.send({ type: 'tab', tab: this.snapshot() }, viewer);
+    if (size) void this.resize(viewer, size);
     // A still page sends no screencast frame, so one screenshot shows it now. It goes out as soon as it is taken, in
     // turn with any size change, and does not wait for the screencast to start.
     const still = this.still().then(
@@ -528,11 +568,13 @@ export class BrowserTab {
     });
   }
 
-  /** A page that has stopped changing sends no screencast frame, so a new size needs one frame of its own. */
+  /** A page that has stopped changing may send no frame after a size change: it gets one screenshot, unless a frame came. */
   private async refreshStill(): Promise<void> {
-    if (this.viewers.size === 0 || this.dead) return;
+    if (this.viewers.size === 0 || this.dead || this.framedSeq === this.sizeSeq) return;
+    const seq = this.sizeSeq;
     const shot = await this.still().catch(() => null);
-    if (shot) void this.sendFrame(shot.data, shot);
+    // A size that came meanwhile has its own timer.
+    if (shot && seq === this.sizeSeq) void this.sendFrame(shot.data, shot);
   }
 
   /** The page as a base64 JPEG for the agent. Through CDP because Playwright's own screenshot clears the size the panel set. */

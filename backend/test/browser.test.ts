@@ -12,7 +12,7 @@ import {
   type Tab,
   WS_PROTOCOL,
 } from '@ops-console/shared';
-import { chromium } from 'playwright-core';
+import { type CDPSession, chromium } from 'playwright-core';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
@@ -196,8 +196,11 @@ async function read<T>(h: Harness, sessionId: string, tabId: string, script: str
   );
 }
 
-async function watch(daemon: AgentDaemon, tabId: string) {
-  const socket = new WebSocket(`${daemon.url.replace('http', 'ws')}/browser/${tabId}`, [WS_PROTOCOL, daemon.token]);
+async function watch(daemon: AgentDaemon, tabId: string, query = '') {
+  const socket = new WebSocket(`${daemon.url.replace('http', 'ws')}/browser/${tabId}${query}`, [
+    WS_PROTOCOL,
+    daemon.token,
+  ]);
   daemon.sockets.add(socket);
   const messages: BrowserServerMessage[] = [];
   const frames: { width: number; height: number; jpeg: Uint8Array }[] = [];
@@ -227,6 +230,19 @@ function jpegSize(bytes: Uint8Array): { width: number; height: number } {
     at += 2 + view.readUInt16BE(at + 2);
   }
   throw new Error('no frame header');
+}
+
+/** Counts the commands the daemon sends a tab's Chrome with this name, from now on. */
+function countCommands(h: Harness, tabId: string, method: string): () => number {
+  const tab = (h.browser as unknown as { byId: Map<string, { cdp: CDPSession }> }).byId.get(tabId);
+  if (!tab) throw new Error('no such tab');
+  let count = 0;
+  const send = tab.cdp.send.bind(tab.cdp) as (name: string, params?: object) => Promise<unknown>;
+  (tab.cdp as unknown as { send: typeof send }).send = (name, params) => {
+    if (name === method) count += 1;
+    return send(name, params);
+  };
+  return () => count;
 }
 
 const chromeRunning = (profile: string): Promise<boolean> =>
@@ -437,6 +453,52 @@ describe.skipIf(!chromePath)('Session browser in a real Chrome', () => {
       if (!last) throw new Error('no frame arrived');
       expect({ width: last.width, height: last.height }).toEqual({ width: 360, height: 514 });
       expect(jpegSize(last.jpeg)).toEqual({ width: 360, height: 514 });
+    });
+
+    it('takes the first frame at the size its viewer names in the address', async () => {
+      const created = await openTab(h, session, dev.url);
+      await settled(h, session, created.id);
+      const viewer = await watch(h.daemon, created.id, '?w=700&h=500&dpr=2');
+      const first = await until(
+        () => viewer.frames[0],
+        (frame) => frame !== undefined,
+        'a frame',
+      );
+      expect({ page: [first?.width, first?.height], pixels: jpegSize(first?.jpeg ?? new Uint8Array()) }).toEqual({
+        page: [700, 500],
+        pixels: { width: 1400, height: 1000 },
+      });
+    });
+
+    it('turns a burst of sizes into a few size changes, and ends at the last size', async () => {
+      const created = await openTab(h, session, dev.url);
+      await settled(h, session, created.id);
+      const viewer = await watch(h.daemon, created.id);
+      viewer.send({ type: 'resize', width: 500, height: 400, dpr: 2 });
+      await until(
+        () => viewer.frames.at(-1),
+        (frame) => frame?.width === 500,
+        'a frame at the first size',
+      );
+      const before = viewer.frames.length;
+      const sized = countCommands(h, created.id, 'Emulation.setDeviceMetricsOverride');
+      // A drag: forty sizes in a row, as fast as the socket takes them.
+      for (let step = 1; step <= 40; step += 1) {
+        viewer.send({ type: 'resize', width: 500 + step * 8, height: 400 + step * 4, dpr: 2 });
+      }
+      const last = await until(
+        () => viewer.frames.at(-1),
+        (frame) => frame?.width === 820 && frame.height === 560,
+        'a frame at the last size',
+      );
+      expect(jpegSize(last?.jpeg ?? new Uint8Array())).toEqual({ width: 1640, height: 1120 });
+      // Each size Chrome took waits for the frame it draws, so sizes that came meanwhile count once.
+      expect(sized()).toBeLessThan(15);
+      // Every frame on the way says the size it was taken at.
+      for (const frame of viewer.frames.slice(before)) {
+        const pixels = jpegSize(frame.jpeg);
+        expect(Math.abs(pixels.width - frame.width * 2)).toBeLessThanOrEqual(Math.max(2, frame.width * 0.04));
+      }
     });
 
     it('draws the page at the pixel ratio its viewer reports, and at 1 when it reports none', async () => {

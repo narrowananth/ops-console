@@ -240,6 +240,20 @@ adds the same to a Session.
     to read a pick or to turn the mode on.
 53. Two viewers of one tab share the outline. The capture goes back to the viewer that clicked, and each viewer ends its own pick mode.
 
+### The page keeps up
+
+54. The page follows a resize. A Fill page is asked for the stage's size at every change, at most once per frame drawn, and
+    the daemon takes the newest size when Chrome is free for it. Dragging the splitter beside the conversation, the DevTools
+    splitter or a window's edge shows the page laid out again as it goes, with frames at nearly every step. A frame that has
+    not caught up is at most a few steps out of shape, never the whole drag, and the page is at the stage's size within a
+    frame or two of the drag ending.
+55. The first frame is at the viewer's size and pixel ratio: the stream's address carries them (`?w=&h=&dpr=`), so a new tab
+    or a window is not drawn at a default size and then again. Nothing is drawn before the first frame, so the stage never
+    flashes a white canvas. A tab the panel showed a moment ago draws its last frame at once, when that frame is the stage's
+    size, and the stream's first frame replaces it.
+56. Hover, typing and scroll show on the canvas about as soon as in a Chrome driven over its own debugging port: a hover or
+    a key within 50 ms on an idle Mac, the end of a trackpad swipe within 100 ms of the last wheel event.
+
 ### Must not regress
 
 33. A run's commands still reach only the Network allowlist, and a run's sandbox is unchanged: no host is added by the
@@ -267,6 +281,11 @@ adds the same to a Session.
 - **Sharp frames**: Chrome's screencast makes no frame with more pixels than its screen has, and a headless screen is 1x.
   Chrome starts with `--force-device-scale-factor=2`, so a Retina panel gets 2x frames. Each tab sets its own device scale,
   so a page still lays out at its CSS size and a 1x viewer's frames stay at 1x.
+- **Resize**: Chrome's screencast sends no frame for a page that has stopped changing, so a new size restarts it, and the
+  restart sends the first frame of that size within about 30 ms. Sizes that arrive while one is applied replace each other, and
+  the next waits for the frame of the last. Setting a size on every message, or never restarting the screencast, gave 13
+  frames over a 40-step drag, or none; one size per frame gives about one frame per step. A screenshot of the page covers
+  the case where no frame comes within 150 ms.
 - **Frame rate**: the installed daemon runs under launchd, and Chrome inherits its priority. With no `ProcessType` in the
   plist, a panel page ran at 20 to 30 frames a second with gaps over 50 ms; with `Interactive` it runs at 57 to 60, the
   same as the daemon started from a terminal. Chrome's flags (GPU, frame-rate limit, backgrounding) and the screencast's
@@ -421,7 +440,7 @@ Stops the server on `port` when it is this Session's. 204. 404 `not_found` for a
 
 ### WebSocket `/browser/:tabId`
 
-Raw stream behind the token. Server to client: a binary message per frame (the page's CSS width and height as two big-endian uint32, then the JPEG, which has
+Raw stream behind the token. The address may carry `w`, `h` and `dpr`, the viewer's size, so its first frame is taken at it. Server to client: a binary message per frame (the page's CSS width and height as two big-endian uint32, then the JPEG, which has
 those sizes times the page's device scale), `tab` (a changed `tab`; it carries `called_hosts` and `agent_active`), `dialog`.
 Client to server: `input` (pointer, key, wheel, text), `resize` (`width`, `height`, and `dpr`, 1 to 3, default 1: the viewer's
 pixels per CSS pixel, which a Fill page takes as its device scale), `focus`, `pick` (`action` is `start`, `end`, `hover` or `click`; the last two carry `x` and `y`
