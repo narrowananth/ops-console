@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Page, test, type WebSocketRoute } from '@playwright/test';
 import { DAEMON_FILE } from './global-setup';
 
 const daemon: { url: string; token: string } = JSON.parse(readFileSync(DAEMON_FILE, 'utf8'));
@@ -1077,6 +1077,137 @@ test("the agent's tool steps fold to a count and the latest, and open as short l
   const steps = page.getByRole('list', { name: 'Agent steps' }).getByRole('listitem');
   await expect(steps).toHaveText([/Ran ls.*done/, /Read scripts\/platforms\/engage\.ts.*in progress/]);
   await expect(steps.last()).toHaveAttribute('aria-current', 'step');
+});
+
+test('a file the agent writes or edits is one collapsed row that opens to its diff', async ({ page }) => {
+  const path = '/tmp/oc-data/session/dashboard.html';
+  const body = Array.from({ length: 60 }, (_, line) => `<p>generated line ${line}</p>`).join('\n');
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'dashboard', 'idle')] } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          {
+            id: 'a1',
+            role: 'agent',
+            status: 'done',
+            parts: [
+              { kind: 'text', text: 'Writing the page.' },
+              { kind: 'diff', file: path, lines: body.split('\n').map((text) => ({ sign: '+', text })) },
+              {
+                kind: 'diff',
+                file: '/work/apis/src/server.ts',
+                lines: [
+                  { sign: '-', text: 'const port = 3000;' },
+                  { sign: '+', text: 'const port = 4000;' },
+                ],
+              },
+              {
+                kind: 'diff',
+                file: `/work/apis/src/${'deeply-nested-'.repeat(12)}component.test.tsx`,
+                lines: [{ sign: '+', text: 'x' }],
+              },
+            ],
+            created_at: NOW,
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const created = page.getByRole('button', { name: /dashboard\.html/ });
+  const edited = page.getByRole('button', { name: /server\.ts/ });
+  // Collapsed: file name, verb and counts, none of the code, and no diff in the page.
+  await expect(created).toHaveAttribute('aria-expanded', 'false');
+  await expect(created).toContainText('Wrote');
+  await expect(created).toContainText('+60');
+  await expect(created).toContainText('−0');
+  await expect(created.getByTitle(path)).toBeVisible();
+  await expect(edited).toContainText('Edited');
+  await expect(edited).toContainText('+1');
+  await expect(edited).toContainText('−1');
+  await expect(page.getByText('generated line 7')).toHaveCount(0);
+  await expect(page.getByText('const port = 3000;')).toHaveCount(0);
+  // Consecutive file changes stay consecutive rows.
+  const rows = page.getByRole('button', { name: /dashboard\.html|server\.ts|component\.test\.tsx/ });
+  await expect(rows).toHaveCount(3);
+  // A long name shortens in the middle and keeps its ending; the row never grows past its message.
+  const long = rows.last();
+  await expect(long).toContainText('component.test.tsx');
+  expect(await long.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0);
+
+  await created.click();
+  await expect(created).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByText('generated line 7')).toBeVisible();
+  await expect(page.getByText('const port = 3000;')).toHaveCount(0);
+  const controls = await created.getAttribute('aria-controls');
+  expect(controls).toBeTruthy();
+  await expect(page.locator(`[id="${controls}"]`)).toContainText('generated line 59');
+
+  await created.click();
+  await expect(created).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByText('generated line 7')).toHaveCount(0);
+
+  // The keyboard opens and closes a row too.
+  await edited.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('const port = 3000;')).toBeVisible();
+  await page.keyboard.press('Space');
+  await expect(page.getByText('const port = 3000;')).toHaveCount(0);
+});
+
+test('an open file row stays open while the message streams on', async ({ page }) => {
+  let socket: WebSocketRoute | undefined;
+  await page.routeWebSocket('**/ws', (ws) => {
+    socket = ws;
+  });
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'dashboard', 'working')] } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          {
+            id: 'a1',
+            role: 'agent',
+            status: 'streaming',
+            parts: [{ kind: 'diff', file: '/work/apis/src/a.ts', lines: [{ sign: '+', text: 'export const a = 1;' }] }],
+            created_at: NOW,
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.getByRole('button', { name: /a\.ts/ }).click();
+  await expect(page.getByText('export const a = 1;')).toBeVisible();
+  await expect.poll(() => socket !== undefined).toBe(true);
+  socket?.send(
+    JSON.stringify({
+      event: 'session.output',
+      at: new Date().toISOString(),
+      data: {
+        session_id: 's1',
+        message_id: 'a1',
+        part_index: 1,
+        part: { kind: 'diff', file: '/work/apis/src/b.ts', lines: [{ sign: '+', text: 'export const b = 2;' }] },
+      },
+    }),
+  );
+  await expect(page.getByRole('button', { name: /b\.ts/ })).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: /a\.ts/ })).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByText('export const a = 1;')).toBeVisible();
+  await expect(page.getByText('export const b = 2;')).toHaveCount(0);
 });
 
 test('the side panel collapses to a rail that counts Sessions waiting on you, and opens on a tab', async ({ page }) => {
