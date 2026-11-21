@@ -17,7 +17,13 @@ export default defineConfig({
     projects: [
       {
         extends: true,
-        test: { ...shared, name: 'daemon', include: ['test/**/*.test.ts'], exclude: CHROME, sequence: { groupOrder: 1 } },
+        test: {
+          ...shared,
+          name: 'daemon',
+          include: ['test/**/*.test.ts'],
+          exclude: CHROME,
+          sequence: { groupOrder: 1 },
+        },
       },
       {
         extends: true,
