@@ -20,8 +20,10 @@ const ROUND =
   'flex size-7 flex-none cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-0 text-sm text-neutral-700 hover:bg-neutral-200 hover:text-text disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent';
 
 /**
- * Back, forward and reload (stop while loading), the address field, the device menu, External and the menu with the
- * link setting. With no tab, only the address field works: an address makes the first tab.
+ * Back, forward and reload (stop while loading), the address field, the device menu, the window button, External and
+ * the menu with the link setting. With no tab, only the address field works: an address makes the first tab. A tab's own
+ * window passes neither `onWindow` nor `onClear`: it has no window button, and the menu (link setting, cookies) stays
+ * the panel's.
  */
 export function Toolbar({
   tab,
@@ -30,6 +32,7 @@ export function Toolbar({
   onAction,
   onAddress,
   onViewport,
+  onWindow,
   onExternal,
   onClear,
 }: {
@@ -40,8 +43,9 @@ export function Toolbar({
   onAction: (action: TabAction) => void;
   onAddress: (text: string) => void;
   onViewport: (viewport: Viewport) => void;
+  onWindow?: () => void;
   onExternal: () => void;
-  onClear: () => void;
+  onClear?: () => void;
 }) {
   const [linkTarget, setLinkTarget] = useLinkTarget();
   const [custom, setCustom] = useState(false);
@@ -128,6 +132,18 @@ export function Toolbar({
             ▾
           </span>
         </MenuButton>
+        {onWindow && (
+          <button
+            type="button"
+            aria-label="Open in a window"
+            title="Open this tab in a window of its own"
+            disabled={tab === undefined}
+            onClick={onWindow}
+            className={ROUND}
+          >
+            ⛶
+          </button>
+        )}
         <button
           type="button"
           title={blank ? 'Nothing is loaded yet' : 'Open this address in your own browser'}
@@ -138,46 +154,48 @@ export function Toolbar({
           <span aria-hidden>↗</span>
           <span className="hidden @md:inline">External</span>
         </button>
-        <MenuButton
-          label="Browser menu"
-          width="w-64"
-          className="[&>button]:border-transparent [&>button]:bg-transparent"
-          menuChildren={(close) => (
-            <>
-              <MenuHeading>Open links</MenuHeading>
-              <MenuItem
-                selected={linkTarget === 'app'}
-                onClick={() => {
-                  close();
-                  setLinkTarget('app');
-                }}
-              >
-                In the console
-              </MenuItem>
-              <MenuItem
-                selected={linkTarget === 'system'}
-                onClick={() => {
-                  close();
-                  setLinkTarget('system');
-                }}
-              >
-                In the external browser
-              </MenuItem>
-              <MenuRule />
-              <MenuItem
-                title="Signs this Session out of every site it logged in to"
-                onClick={() => {
-                  close();
-                  onClear();
-                }}
-              >
-                Clear this Session's cookies
-              </MenuItem>
-            </>
-          )}
-        >
-          <span aria-hidden>⋯</span>
-        </MenuButton>
+        {onClear && (
+          <MenuButton
+            label="Browser menu"
+            width="w-64"
+            className="[&>button]:border-transparent [&>button]:bg-transparent"
+            menuChildren={(close) => (
+              <>
+                <MenuHeading>Open links</MenuHeading>
+                <MenuItem
+                  selected={linkTarget === 'app'}
+                  onClick={() => {
+                    close();
+                    setLinkTarget('app');
+                  }}
+                >
+                  In the console
+                </MenuItem>
+                <MenuItem
+                  selected={linkTarget === 'system'}
+                  onClick={() => {
+                    close();
+                    setLinkTarget('system');
+                  }}
+                >
+                  In the external browser
+                </MenuItem>
+                <MenuRule />
+                <MenuItem
+                  title="Signs this Session out of every site it logged in to"
+                  onClick={() => {
+                    close();
+                    onClear();
+                  }}
+                >
+                  Clear this Session's cookies
+                </MenuItem>
+              </>
+            )}
+          >
+            <span aria-hidden>⋯</span>
+          </MenuButton>
+        )}
       </div>
       {error !== null && (
         <p role="alert" className="m-0 px-3.5 pb-1.5 text-xs text-accent-700">

@@ -20,6 +20,7 @@ import { PageStage } from './page-stage';
 import { TabStrip } from './tab-strip';
 import { blankTabFor, isBlank } from './tabs';
 import { Toolbar } from './toolbar';
+import { usePopOuts } from './use-pop-outs';
 
 /** The Browser panel's size: its width until the operator drags it, its narrowest, and the room the conversation keeps. */
 export const BROWSER_PANEL = { key: 'workspace.session-browser-width', initial: 640, narrowest: 360, keep: 360 };
@@ -53,6 +54,7 @@ export function BrowserPanel({
   const [picked, setPicked] = useState<string | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
+  const windows = usePopOuts();
 
   const tabs = state.data?.tabs ?? [];
   const active = tabs.find((tab) => tab.id === picked) ?? tabs[0];
@@ -83,6 +85,15 @@ export function BrowserPanel({
     patch.mutate({ tabId: active.id, body }, { onError: (error) => setRefused(error.message) });
   };
 
+  /** A tab in a window shows there; the same button brings that window forward. */
+  const openWindow = () => {
+    if (!active) return;
+    setRefused(null);
+    if (windows.out.has(active.id)) windows.show(active.id);
+    else if (!windows.open(sessionId, active.id))
+      setRefused('The browser blocked the window. Allow pop-ups for this page.');
+  };
+
   let body: ReactNode;
   if (state.isPending) body = <Empty>Reading the browser…</Empty>;
   else if (state.isError) body = <Empty>Could not read the browser: {state.error.message}</Empty>;
@@ -99,6 +110,8 @@ export function BrowserPanel({
         />
       </div>
     );
+  } else if (windows.out.has(active.id)) {
+    body = <InWindow onShow={() => windows.show(active.id)} onBringBack={() => windows.bringBack(active.id)} />;
   } else {
     body = (
       <PageStage
@@ -158,6 +171,7 @@ export function BrowserPanel({
         onAction={(action) => act({ action })}
         onAddress={open}
         onViewport={(viewport) => act({ viewport })}
+        onWindow={openWindow}
         onExternal={() => active && external.mutate(active.id)}
         onClear={() => setClearing(true)}
       />
@@ -184,6 +198,24 @@ export function BrowserPanel({
         </ConfirmDialog>
       )}
     </aside>
+  );
+}
+
+/** What the panel shows for a tab that sits in a window: one viewer draws it, so the page has one size. */
+function InWindow({ onShow, onBringBack }: { onShow: () => void; onBringBack: () => void }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2.5 bg-card px-8 text-center">
+      <h4 className="m-0 text-base font-semibold">This tab is open in its own window.</h4>
+      <p className="m-0 max-w-sm text-[13px] text-neutral-700">
+        It shows there at the window's size. Closing the window brings it back here.
+      </p>
+      <div className="flex gap-2">
+        <Button variant="primary" onClick={onShow}>
+          Show the window
+        </Button>
+        <Button onClick={onBringBack}>Bring it back</Button>
+      </div>
+    </div>
   );
 }
 

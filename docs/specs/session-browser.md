@@ -25,8 +25,8 @@ adds the same to a Session.
    width and open state are remembered per browser.
 2. The panel holds tabs, one page each. A new panel has one blank tab with the address field focused and the Local
    servers list below it (Behavior 11).
-3. The toolbar has back, forward, reload (stop while loading), an address field, a device menu, "Open in external
-   browser" and a close for the tab. The tab shows the page's title and favicon when it has them.
+3. The toolbar has back, forward, reload (stop while loading), an address field, a device menu, "Open in a window" (35),
+   "Open in external browser" and a close for the tab. The tab shows the page's title and favicon when it has them.
 4. The operator's address field takes any `http` or `https` URL, `localhost:5173`, `127.0.0.1:3000/path` or a bare port
    (read as `localhost:<port>`). Other schemes (`file:`, `chrome:`, `javascript:`) are refused.
 5. "Open in external browser" opens the current address in the operator's own browser, through the daemon, so it works the
@@ -129,6 +129,23 @@ adds the same to a Session.
 32. A reload of the console page reopens the panel and the dock on the same tabs and processes. A daemon restart closes both;
     the panel opens blank and the dock lists the processes as stopped, with Restart.
 
+### A tab in a window of its own
+
+35. The toolbar's "Open in a window" button opens the current tab in a popup window of the operator's own browser, at
+    `/browser-window/<session id>/<tab id>`. The address holds no token: the window is the console's own origin and
+    reads the token from local storage, as the panel does. It is disabled with no tab. A second click on the same tab
+    brings that window forward. A browser that blocks the popup shows "The browser blocked the window. Allow pop-ups for
+    this page." under the toolbar.
+36. The window has the panel's toolbar (back, forward, reload, address, device menu, External) and the drawn page, with
+    no tab strip, no window button and no "..." menu. The page takes the window's size once the operator clicks or types
+    in it, and the window's title is the page's title. It is one more viewer of the tab (31): the tab is the same
+    one the panel and the agent use, and the tab's input, address and history work from the window.
+37. While a tab is in a window, the panel shows "This tab is open in its own window." with "Show the window" and "Bring
+    it back", and draws no frames of it: one viewer draws the page, so the page keeps one size. The panel's other tabs are
+    unchanged. When the window closes, or "Bring it back" closes it, the panel draws the tab again.
+38. A window whose tab was closed says "This tab was closed.", and one whose Session was deleted says "This Session was
+    deleted."
+
 ### Must not regress
 
 33. A run's commands still reach only the Network allowlist, and a run's sandbox is unchanged: no host is added by the
@@ -192,6 +209,9 @@ adds the same to a Session.
 - The page may call any host, so a page the agent wrote can send what it reads to one. Accepted in the ADR: the operator
   reads the code in the Diff and runs the page.
 - The stream and terminal endpoints take the session token and listen on `127.0.0.1` only (ADR 0003).
+- A tab's window adds no route to the daemon and no dependency: `/browser-window/...` is a client route of the shipped UI,
+  and the window reads the token from local storage and streams from the same `/browser/:tabId` socket. The token never
+  enters the address.
 
 ## API
 
@@ -282,12 +302,12 @@ process }`), `process.removed` (`{ session_id, process_id }`), so the Browser bu
 
 ## UI
 
-The Browser panel, the Terminals dock, the Browser and Terminals buttons in the Session header (Workspace). States: no
+The Browser panel, a tab's window (the toolbar and the page, no sidebar), the Terminals dock, the Browser and Terminals buttons in the Session header (Workspace). States: no
 Chrome, loading, blank tab with the Local servers list, no server for the Session, called hosts, crashed, "Agent is using this tab",
-the page stream lost (a notice over the last frame while the panel reconnects);
+the page stream lost (a notice over the last frame while the panel reconnects), a tab in a window ("This tab is open in its own window."), a window whose tab or Session is gone;
 the dock with no process, a running one, an exited one, an Approval card for the agent's `start_process`. The link menu holds
 "In the console" and "In the external browser". Departure: neither design file has a browser or a dock, so the mock is new
-(`design/session-browser.html`).
+(`design/session-browser.html`), and the window and its panel placeholder are not in it.
 
 ## Rejected
 
@@ -332,9 +352,13 @@ the dock with no process, a running one, an exited one, an Approval card for the
   (a real listening socket): 11, 12, and the Stop of a leftover server.
 - **Browser** (`frontend/e2e/session-browser.spec.ts`, a real daemon and Chrome): 1 to 3, 5, 6, 8, 11 (Stop), 15 to 17 (Run menu, Restart, Stop, Close), 21, 26, 27, 28, 32, and the PROD warning of 17.
 - **Browser** (`frontend/e2e/skill-kinds.spec.ts` pattern): 13's setting and Cmd-click.
+- **Browser** (`frontend/e2e/session-browser-window.spec.ts`, a real daemon and Chrome, a popup of the test's browser): 35 to 38.
 
 ## Out of scope
 
+- Inspecting the page (elements, console and network, as Chrome's DevTools shows them): waits on where the DevTools
+  frontend comes from. The official `chrome-devtools-frontend` package is source that needs Chromium's own build tools,
+  and the prebuilt packages are an unmaintained repackaging with no licence file.
 - Recording, annotation, element picking and picture-in-picture: a later spec, from T3 Code's `Annotation` and `Recording`.
 - A Run button that detects a Repo's full stack (frontend, backend, database) and starts all at once: the operator picks
   scripts, or the agent starts them, one Approval each.

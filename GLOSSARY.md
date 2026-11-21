@@ -282,6 +282,10 @@ The panel beside a Session's conversation that shows pages from the Session's Ch
 agent drive the same tabs. It blocks no request the page makes; the panel lists the outside hosts the page called. The agent
 opens only loopback pages in it.
 
+**Browser window**:
+One tab of the Browser panel in a popup window of the operator's own browser, with the toolbar and the page. The panel
+shows a placeholder for that tab until the window closes.
+
 **Local server**:
 A Session's process listening on a loopback port, with its port, name and folder: one a Session process started, or one
 running in the Session's folders. Other listeners on the Mac are not shown.
