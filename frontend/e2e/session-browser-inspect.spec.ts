@@ -112,8 +112,8 @@ test('Inspect docks Chrome DevTools under the page, which keeps the area that is
   const canvas = panel.locator('canvas');
   await expect(inspect(panel)).toHaveAttribute('aria-pressed', 'false');
   const before = await area(canvas);
-  await expect.poll(() => resizes.last()?.height).toBeGreaterThan(before.height * 0.9);
-  const asked = resizes.last()?.height ?? 0;
+  // The first size travels in the stream's address, so the page already has it and no resize message is sent.
+  const asked = before.height;
 
   // DevTools asks no other host for anything (43): every request it makes goes to the daemon.
   const hosts = new Set<string>();
@@ -179,8 +179,8 @@ test('DevTools dock at the bottom or the right, and the side is kept, the splitt
   const { panel } = await openPanelOn(page, request, `${origin}/`);
   const canvas = panel.locator('canvas');
   const before = await area(canvas);
-  await expect.poll(() => resizes.last()?.width).toBeGreaterThan(before.width * 0.9);
-  const asked = resizes.last()?.width ?? 0;
+  // The first size travels in the stream's address, so the page already has it and no resize message is sent.
+  const asked = before.width;
   await inspect(panel).click();
   const frame = devtoolsFrame(panel);
   await expect(frame).toBeVisible();
