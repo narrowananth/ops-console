@@ -56,7 +56,7 @@
   /* Shell: sidebar */
   .app { display: grid; grid-template-columns: 248px 1fr; height: 100vh; min-height: 640px; transition: grid-template-columns .2s; }
   .side { background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
-  .brand { display: flex; align-items: center; gap: 10px; padding: 0 20px; height: 68px; flex: none; }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 0 20px; height: 56px; flex: none; }
   .brand svg { border-radius: 22%; flex: none; display: block; }
   .brand b { font-size: 17px; font-weight: 800; letter-spacing: -0.02em; }
   .nav { flex: 1; overflow: auto; padding: 0 12px 12px; }
@@ -96,11 +96,12 @@
   main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .page { display: none; flex: 1; min-height: 0; flex-direction: column; }
   .page.on { display: flex; }
-  .ph { flex: none; border-bottom: 1px solid var(--line); }
-  .ph-in { margin: 0 auto; display: flex; align-items: center; gap: 14px; height: 68px; padding: 0 32px; width: 100%; }
-  .ph h1 { font-size: 21px; }
-  .ph .sub { font-size: 13px; color: var(--n700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ph { flex: none; height: 40px; border-bottom: 1px solid var(--line); }
+  .ph-in { margin: 0 auto; display: flex; align-items: center; gap: 8px; height: 100%; padding: 0 32px; width: 100%; }
+  .ph h1 { font-size: 13px; white-space: nowrap; }
+  .ph .btn { padding: 4px 16px; font-size: 13px; }
   .ph .sp { flex: 1; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: -1px; }
   .narrow { max-width: 1000px; } .wide { max-width: 1120px; }
   .pb { flex: 1; min-height: 0; display: flex; overflow: auto; }
   .col { margin: 0 auto; width: 100%; align-self: flex-start; padding: 28px 32px; }
@@ -807,7 +808,7 @@
 
     <!-- ============ Monitor (monitor/*.tsx) ============ -->
     <section class="page on" id="p-monitor">
-      <header class="ph"><div class="ph-in"><h1>Monitor</h1><span class="sub">Datadog health of your services, their Alerts and fixes</span><span class="sp"></span></div></header>
+      <h1 class="sr">Monitor</h1>
       <div class="pb" style="overflow:hidden">
 
         <!-- Services: range, Status, filter, Services to tick, Scan -->
@@ -992,7 +993,7 @@
 
     <!-- ============ Workspace (workspace/*.tsx) ============ -->
     <section class="page" id="p-workspace">
-      <header class="ph"><div class="ph-in"><h1>Workspace</h1><span class="sub">Sessions in your Repos and their pull requests</span><span class="sp"></span></div></header>
+      <h1 class="sr">Workspace</h1>
       <div class="pb" style="overflow:hidden">
         <aside class="ws-side">
           <div class="seg" role="tablist" aria-label="Workspace" style="margin:14px 12px 8px;padding:4px">
@@ -1580,7 +1581,7 @@ git push</pre></details>
 
     <!-- ============ Dev tools (devtools/terminal-view.tsx) ============ -->
     <section class="page" id="p-devtools">
-      <header class="ph"><div class="ph-in"><h1>Dev tools</h1><span class="sub">Ask across your databases. PROD is read-only unless you allow write.</span><span class="sp"></span></div></header>
+      <h1 class="sr">Dev tools</h1>
       <div class="pb" style="overflow:hidden">
         <aside class="synced" aria-label="Synced dev tools">
           <button class="it b" data-scope="all" title="Search every connected dev tool. Pick tools below to narrow the search." style="align-items:center;gap:10px;padding:8px 10px;font-size:12px">
@@ -1642,7 +1643,7 @@ git push</pre></details>
 
     <!-- ============ Integrations (integrations/*.tsx) ============ -->
     <section class="page" id="p-integrations">
-      <header class="ph"><div class="ph-in wide"><h1>Integrations</h1><span class="sub">Connectors sign in to a service. MCP servers give Claude tools.</span><span class="sp"></span><button class="btn" data-page="setup">Add with Setup agent →</button></div></header>
+      <header class="ph"><div class="ph-in wide"><h1 title="Connectors sign in to a service. MCP servers give Claude tools.">Integrations</h1><span class="sp"></span><button class="btn" data-page="setup">Add with Setup agent →</button></div></header>
       <div class="pb" style="overflow:hidden">
         <div style="flex:1;min-width:0;overflow:auto">
           <div class="col wide">
@@ -1684,7 +1685,7 @@ git push</pre></details>
 
     <!-- ============ Connections (devtools/devtools-tab.tsx) ============ -->
     <section class="page" id="p-connections">
-      <header class="ph"><div class="ph-in wide"><h1>Connections</h1><span class="sub">Databases Dev tools and Claude can reach</span><span class="sp"></span><button class="btn" data-page="setup">Import with Setup agent →</button></div></header>
+      <header class="ph"><div class="ph-in wide"><h1 title="Databases Dev tools and Claude can reach">Connections</h1><span class="sp"></span><button class="btn" data-page="setup">Import with Setup agent →</button></div></header>
       <div class="pb">
         <div class="col wide"><div class="card">
           <div data-pane="conn:list">
@@ -1706,7 +1707,7 @@ git push</pre></details>
 
     <!-- ============ Repos (repos/repos-tab.tsx) ============ -->
     <section class="page" id="p-repos">
-      <header class="ph"><div class="ph-in wide"><h1>Repos</h1><span class="sub">Local git folders Sessions work in</span><span class="sp"></span></div></header>
+      <h1 class="sr">Repos</h1>
       <div class="pb">
         <div class="col wide"><div class="card">
           <div style="display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line);padding:16px 20px">
@@ -1728,7 +1729,7 @@ git push</pre></details>
 
     <!-- ============ Setup agent (setup/*.tsx) ============ -->
     <section class="page" id="p-setup">
-      <header class="ph"><div class="ph-in"><h1>Setup agent</h1><span class="sub">Claude adds Connections, MCP servers and Connectors for you</span><span class="sp"></span></div></header>
+      <h1 class="sr">Setup agent</h1>
       <div class="pb">
         <div style="margin:0 auto;display:flex;width:100%;max-width:1200px;gap:24px;padding:28px 32px;align-items:flex-start">
           <div style="display:flex;flex:1;min-width:0;flex-direction:column;gap:12px">
@@ -1764,7 +1765,7 @@ git push</pre></details>
 
     <!-- ============ Permissions (setup/permissions-tab.tsx) ============ -->
     <section class="page" id="p-permissions">
-      <header class="ph"><div class="ph-in"><h1>Permissions</h1><span class="sub">What macOS lets Ops Console do, and what an agent run's commands can reach</span><span class="sp"></span></div></header>
+      <h1 class="sr">Permissions</h1>
       <div class="pb">
         <div style="margin:0 auto;display:flex;width:100%;max-width:720px;flex-direction:column;gap:20px;padding:28px 32px">
           <section class="card" aria-label="Mac" style="display:flex;flex-direction:column;gap:12px;padding:16px 18px;font-size:12px;overflow:visible">
@@ -1796,7 +1797,7 @@ git push</pre></details>
 
     <!-- ============ Playbooks (playbooks/*.tsx) ============ -->
     <section class="page" id="p-playbooks">
-      <header class="ph"><div class="ph-in"><h1>Playbooks</h1><span class="sub">What the agent follows when each Trigger starts it. One Playbook per Trigger.</span><span class="sp"></span><button class="btn" id="pf-new">+ New Playbook</button></div></header>
+      <header class="ph"><div class="ph-in"><h1 title="What the agent follows when each Trigger starts it. One Playbook per Trigger.">Playbooks</h1><span class="sp"></span><button class="btn" id="pf-new">+ New Playbook</button></div></header>
       <div class="pf">
         <div class="pf-over" id="pf-over"></div>
         <div class="pf-bar" id="pf-bar" hidden></div>
@@ -1812,7 +1813,7 @@ git push</pre></details>
 
     <!-- ============ Agents & accounts (agents/agents-tab.tsx) ============ -->
     <section class="page" id="p-agents">
-      <header class="ph"><div class="ph-in narrow"><h1>Agents &amp; accounts</h1><span class="sub">Claude Code accounts and defaults for every session</span><span class="sp"></span></div></header>
+      <h1 class="sr">Agents &amp; accounts</h1>
       <div class="pb">
         <div class="col narrow">
           <section class="sec" aria-label="Claude Code accounts">

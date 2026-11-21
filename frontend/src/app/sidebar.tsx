@@ -178,7 +178,7 @@ export function Sidebar() {
         collapsed ? 'w-17' : 'w-62'
       }`}
     >
-      <div className={`flex h-17 flex-none items-center gap-2.5 ${collapsed ? 'justify-center' : 'px-5'}`}>
+      <div className={`flex h-14 flex-none items-center gap-2.5 ${collapsed ? 'justify-center' : 'px-5'}`}>
         <Logo />
         {!collapsed && <div className="font-brand text-[17px] font-extrabold tracking-[-0.02em]">Ops Console</div>}
       </div>
