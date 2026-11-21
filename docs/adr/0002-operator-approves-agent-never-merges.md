@@ -64,7 +64,7 @@ resolves threads, and a Reply check or Comment pass denies the agent `git push` 
   word from the operator. It lost because the sandbox cannot tell the operator's words from text injected through a log,
   so a writable folder would be writable to a steered run, and a run could write into `~/.zshrc`, `~/Library/LaunchAgents`
   or a folder on PATH. The copy goes through an Approval instead, and the daemon writes the destination. A Repo the operator
-  ticks in the composer's Repos chip is not this option: it is an imported checkout picked by a click, not a path from
+  ticks in the composer's Repos icon is not this option: it is an imported checkout picked by a click, not a path from
   words ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md)).
 - **An Approval on every `open_pull_request` call**: the operator read what would be pushed and where. It lost because
   the push is never forced and never merges, the diff and the pull request are on the host to read, and the stop broke

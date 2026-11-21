@@ -16,13 +16,13 @@ import { z } from 'zod';
 import { ApprovalPrompts } from '../agents/approval-prompts';
 import { PlayRun } from '../agents/play-run';
 import { QuestionPanel, trailingQuestions } from '../agents/question-panel';
-import { SessionChips } from '../agents/session-chips';
 import { StopRun } from '../agents/stop-run';
 import { AttachmentViewer, type Viewed } from '../components/ui/attachment-viewer';
 import { useRunQueue, useSendMessage, warmSession } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { AttachButton, filesIn, useAttachments } from './attachments';
 import { type ComposerCommand, useComposerMenus } from './composer-menus';
+import { ComposerSettings } from './composer-settings';
 import { ExtraRepos } from './extra-repos';
 import { sessionDraftKey } from './links';
 import { MessageEditor, type MessageEditorHandle } from './message-editor';
@@ -223,15 +223,16 @@ export function SessionComposer({
             onSubmit={submit}
             onKey={composerMenus.onKey}
           />
-          <div className="flex items-center gap-1.5 px-3 pt-1 pb-3">
+          <div className="flex flex-wrap items-center gap-1.5 px-3 pt-1 pb-3">
             <AttachButton onFiles={addFiles} />
+            <ExtraRepos session={session} repos={repos} />
             {send.isError && (
               <span role="alert" className="text-xs text-accent-700">
                 {send.error.message}
               </span>
             )}
             <span className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-              <SessionChips session={session} variant="chip" show={['model', 'effort']} bare />
+              <ComposerSettings session={session} />
               <PlayRun sessionId={id} />
               {busy && <StopRun sessionId={id} round />}
               {(!busy || !empty) && (
@@ -266,12 +267,6 @@ export function SessionComposer({
               )}
             </span>
           </div>
-        </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5 px-2 text-xs text-neutral-700">
-          <ExtraRepos session={session} repos={repos} />
-          <span className="ml-auto flex-none">
-            <SessionChips session={session} variant="chip" show={['access']} />
-          </span>
         </div>
       </div>
       {viewed && <AttachmentViewer viewed={viewed} onClose={() => setViewed(null)} />}

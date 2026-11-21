@@ -265,7 +265,7 @@ Adds `branch: string | null`.
   at the end; scrolled up to read, it stays where they left it. A map on its left edge has a mark per message, the operator's
   longer and darker, and tints the marks of the messages in view. Hovering a mark names its message's first line;
   clicking it scrolls there. Scrolled up, a "Scroll to end" button over the bottom edge goes back to the newest
-  message. The composer holds the Model, Effort and Access chips, the branch switcher on a `repo` Session, and Send.
+  message. The composer holds the model pill (Model, Effort and Access), the branch switcher on a `repo` Session, and Send.
   Send keeps the right end of the chips' row; a long branch name shortens before its chip drops to a new row.
   While a run goes, `waiting_input` included, Stop sits before Send and ends it (`02-settings-agents` Behavior 11a).
   Each run of the agent's tool steps folds to one line: the count and the latest step, turning while the message

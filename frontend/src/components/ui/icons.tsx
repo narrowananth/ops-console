@@ -202,3 +202,28 @@ export const DotCircleIcon = ({ tone }: { tone: string }) => (
     </Icon>
   </span>
 );
+
+export const LockIcon = () => (
+  <Icon>
+    <rect x="5" y="11" width="14" height="9" rx="2" />
+    <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+  </Icon>
+);
+
+export const PencilIcon = () => (
+  <Icon>
+    <path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3ZM14.5 7.5l3 3" />
+  </Icon>
+);
+
+export const SparkleIcon = () => (
+  <Icon>
+    <path d="M10 4.5 11.8 9.2 16.5 11 11.8 12.8 10 17.5 8.2 12.8 3.5 11 8.2 9.2 10 4.5ZM18 3.5v4M16 5.5h4M18 15v4M16 17h4" />
+  </Icon>
+);
+
+export const ShieldOffIcon = () => (
+  <Icon>
+    <path d="M12 3 5 6v5.5c0 4.2 2.8 7.4 7 9 1.6-.6 3-1.4 4.1-2.5M19 11.5V6l-7-3-2.2.9M3 3l18 18" />
+  </Icon>
+);
