@@ -260,3 +260,17 @@ export const ShieldOffIcon = () => (
     <path d="M12 3 5 6v5.5c0 4.2 2.8 7.4 7 9 1.6-.6 3-1.4 4.1-2.5M19 11.5V6l-7-3-2.2.9M3 3l18 18" />
   </Icon>
 );
+
+/** A filled square, for Stop. */
+export const StopIcon = () => (
+  <Icon fill="currentColor" weight={1.4}>
+    <rect x="6.5" y="6.5" width="11" height="11" rx="2" />
+  </Icon>
+);
+
+/** An arrow turning back on itself, for Restart. */
+export const RestartIcon = () => (
+  <Icon>
+    <path d="M4 12a8 8 0 1 0 2.6-5.9M4 4.5v4h4" />
+  </Icon>
+);

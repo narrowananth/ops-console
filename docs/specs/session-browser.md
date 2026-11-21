@@ -1,7 +1,7 @@
 # Session browser and processes
 
 **Status:** shipped
-**Design:** `design/session-browser.html`: the Browser panel in six states and the Terminals dock with the agent's Approval. It departs from every screen: neither `design/ops-console.html` nor `design/ops-console-sidebar.html` has a browser or a process panel.
+**Design:** `design/session-browser.html`: the Browser panel in six states, the Terminals dock in its states and the agent's Approval. It departs from every screen: neither `design/ops-console.html` nor `design/ops-console-sidebar.html` has a browser or a process panel.
 
 ## Problem
 
@@ -76,15 +76,26 @@ adds the same to a Session.
 ### Session processes
 
 15. A Session of kind `repo` or `anonymous` has a Terminals dock under the conversation and the panel. It opens from the
-    header's Terminals button. The dock holds one terminal per process, each with its name, command, state (running, or
-    exited with its code) and output, in the look of the Setup agent's terminal.
-16. A Run menu in the dock lists the `scripts` of the worktree's `package.json` (`dev`, `start`, `test`, `build`, ...) and
-    "New terminal". A script starts as `pnpm`, `npm`, `yarn` or `bun run <script>`, whichever lockfile the Repo has; a new
-    terminal is a shell the operator types in.
+    header's Terminals button. Its header names it "Terminals" and holds, left to right, one tab per process (a status dot,
+    the name, and "running", "exited 1" or "stopped"), a "New terminal" button, a script menu when the folder has scripts
+    (16), the folder menu (17) when the Session has Opened Repos, and one "×" with the tooltip "Hide terminals. Processes
+    keep running." The "×" hides the dock and ends nothing; Stop is the one way to end a process. The Terminals button in the Session
+    panel says the same. A dock under 448 px wide puts the tabs on their own row; under 384 px New terminal is a "+", and under 512 px
+    Stop, Restart and Remove are icons. Each keeps its tooltip and accessible name.
+    Under the header, the selected process has a line with its state in words ("Running · started 2m ago", "Exited with
+    code 1", "Stopped"), its command and its folder, then its output, in the look of the Setup agent's terminal. The
+    buttons for it sit at the right of that line: Stop (a square) while it runs, Remove (a bin) once it has exited or been
+    stopped, and Restart (a turning arrow) always. A Session with no process shows "No terminals yet", one line on what a
+    terminal is for and that it keeps running when the dock is hidden, a primary "New terminal" button, and the example
+    "e.g. run your dev server. Its page opens in the Browser panel."
+16. "New terminal" starts a shell the operator types in, and is never inside a menu. A "Run a script" menu opens upward
+    from the header and lists the `scripts` of the worktree's `package.json` (`dev`, `start`, `test`, `build`, ...) and the
+    other tools' commands the folder has. It appears only once the folder lists one; a folder with none shows no menu. A
+    script starts as `pnpm`, `npm`, `yarn` or `bun run <script>`, whichever lockfile the Repo has.
 17. The daemon runs each process as the operator, in the Session's worktree (or an Opened Repo's folder, picked in the
-    Run menu), with the operator's login environment and PATH, outside the Run sandbox, as the Setup agent's terminal does.
+    dock's folder menu, which names the folder new terminals and scripts run in), with the operator's login environment and PATH, outside the Run sandbox, as the Setup agent's terminal does.
     It runs until the operator stops it, the Session is deleted, or the daemon exits. When the folder's `.env` files name the host of a PROD Connection, the dock shows "This folder's .env names the PROD Connection <name>" over the process, and the agent's Approval says the same and shows as PROD. A process that exits stays listed with
-    its code and its last output until closed. Restart starts the same command again.
+    its code and its last output until the operator removes it. Restart starts the same command again.
 18. Any number of processes run at once, so the frontend, the backend and the database of one project run side by side.
     There is no cap. Processes of different Sessions never share a folder, since each Session has its own worktree.
 19. The terminal takes input, paste and resize. The daemon keeps the last 256 KB of each process's output, which the dock replays to a browser that opens late.
@@ -441,7 +452,7 @@ process }`), `process.removed` (`{ session_id, process_id }`), so the Browser bu
 The Browser panel, a tab's window (the toolbar and the page, no sidebar), the Terminals dock, the Browser and Terminals buttons in the Session header (Workspace). States: no
 Chrome, loading, blank tab with the Local servers list, no server for the Session, called hosts, crashed, "Agent is using this tab",
 the page stream lost (a notice over the last frame while the panel reconnects), a tab in a window ("This tab is open in its own window."), a window whose tab or Session is gone, the Inspect button with no page, pressed, and with a blocked popup; DevTools docked at the bottom and at the right;
-the dock with no process, a running one, an exited one, an Approval card for the agent's `start_process`; pick mode with an element
+the dock with no process, a running one, an exited one, the Run a script menu, a folder with no scripts, a narrow dock, an Approval card for the agent's `start_process`; pick mode with an element
 outlined, and the composer with picked-element chips. Departure: neither design file has a browser or a dock, so the mock is new
 (`design/session-browser.html`). The window, its panel placeholder, the Pick, Inspect, Open in your browser and Clear cookies icons and
 the DevTools dock are not in it, and the mock still shows the old External button and "..." menu.
@@ -502,7 +513,7 @@ the DevTools dock are not in it, and the mock still shows the old External butto
   no Chrome. `browser-orphans.test.ts`: 29.
 - **Backend + SQLite** (`session-processes.test.ts`, real child processes): 15 to 20, 26, 33; `process-prod-env.test.ts`: 17 and 26's PROD line; `process-hangup.test.ts`: 20; with `local-servers.test.ts`
   (a real listening socket): 11, 12, and the Stop of a leftover server.
-- **Browser** (`frontend/e2e/session-browser.spec.ts`, a real daemon and Chrome): 1 to 3, 5, 6, 8, 11 (Stop), 15 to 17 (Run menu, Restart, Stop, Close), 21, 26, 27, 28, 32, and the PROD warning of 17.
+- **Browser** (`frontend/e2e/session-browser.spec.ts`, a real daemon and Chrome): 1 to 3, 5, 6, 8, 11 (Stop), 15 to 17 (the empty state, New terminal, Run a script, Hide, Stop, Restart, Remove, an exited process), 21, 26, 27, 28, 32, and the PROD warning of 17.
 - **Browser** (`frontend/e2e/session-browser-pick.spec.ts`, a real daemon and Chrome): 3 (the icons and their names, no "..." menu, a
   narrow panel), 13, and 45 to 51 (the outline, a click that does not reach the page, the chips, several picks, send with the block
   and the crop, Escape, a tab's window).

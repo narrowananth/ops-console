@@ -308,6 +308,10 @@ A command the daemon runs for a Session as the operator, outside the Run sandbox
 database, a test watch, a shell. The operator starts it, or approves the agent's `start_process`. It runs until stopped,
 the Session is deleted or the daemon exits, and shows in the Terminals dock.
 
+**Terminals dock**:
+The strip under a Session's conversation and Browser panel that lists its Session processes, one tab each, with their output.
+The operator opens a terminal or runs a script from it, and stops, restarts or removes a process. Hiding the dock ends nothing.
+
 **Element pick**:
 The operator's click on an element of a tab's page in pick mode (the toolbar's pointer-arrow button). The element, with a
 crop of it, becomes a chip in the Session's message box, and the message then carries its selector, text, markup and styles

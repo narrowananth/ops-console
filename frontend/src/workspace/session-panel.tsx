@@ -503,8 +503,8 @@ export function SessionPanel({
               onClick={() => onOpen('terminal')}
               title={
                 terminalsOpen
-                  ? 'Close the terminals. Their processes keep running.'
-                  : 'Run scripts and open terminals for this Session'
+                  ? 'Hide the terminals. Their processes keep running.'
+                  : 'Run your dev server, a script or a shell for this Session'
               }
             >
               <span className="flex-1">Terminals</span>
