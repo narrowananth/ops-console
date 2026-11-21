@@ -2,6 +2,7 @@ import { createSdkMcpServer, type McpSdkServerConfigWithInstance, tool } from '@
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import { type IntegrationRunner, integrationInputSchema } from './integration-cli';
+import { type NewRelicQuery, newRelicQueryInputSchema, runNewRelicQuery } from './new-relic-tool';
 import { type FileSaver, runSaveFile, saveFileInputSchema } from './output-files';
 import { type BrowserTools, CONSOLE_TOOLS_SERVER, type ProcessTools, sessionTools } from './session-tools';
 
@@ -145,6 +146,8 @@ export function consoleToolsServer(
     spawnCallId?: () => string;
     saver: FileSaver | null;
     integrations?: IntegrationRunner | null;
+    /** New Relic logs read with a User API key, which only the daemon holds. */
+    newRelic?: NewRelicQuery | null;
     browser?: BrowserTools | null;
     processes?: ProcessTools | null;
     /** Aborts when the operator stops the run. */
@@ -159,6 +162,7 @@ export function consoleToolsServer(
     spawnCallId = () => '',
     saver,
     integrations = null,
+    newRelic = null,
     browser = null,
     processes = null,
     signal,
@@ -206,6 +210,16 @@ export function consoleToolsServer(
                 const done = await integrations.run(args);
                 return { content: [{ type: 'text' as const, text: done.text }], ...(done.ok ? {} : { isError: true }) };
               },
+            ),
+          ]
+        : []),
+      ...(newRelic
+        ? [
+            tool(
+              'query_new_relic',
+              "Runs one read-only NRQL query against the New Relic account the console reads logs from, with the console's own User API key, and returns the rows (at most 200). Give the NRQL text only: a SELECT or FROM query, or SHOW EVENT TYPES, with its own SINCE and LIMIT. The account and Region are fixed. Runs at once, with no Approval, and is logged.",
+              newRelicQueryInputSchema.shape,
+              (args) => runNewRelicQuery(newRelic, args),
             ),
           ]
         : []),

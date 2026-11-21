@@ -3,7 +3,8 @@
 Connection passwords, tokens and service-account keys live in the macOS Keychain under the service
 `ops-console`, keyed `connection:<id>`; an MCP Server's env vars are keyed `mcp:<name>`, the GitHub
 Connector's `gh` token included; the Loki logs Connector's own Grafana sign-in, the client the console registered and its tokens, is one item keyed
-`connection:loki_logs_oauth`; the CLIProxy API key is `cliproxy:api-key`. `state.db` holds only the Connection's non-secret fields. Secrets are read at the moment of use and never reach the database,
+`connection:loki_logs_oauth`; the New Relic User API key, when New Relic logs are read through its API, is
+`connection:new_relic_logs` ([ADR 0005](0005-claude-code-is-the-integration-layer.md)); the CLIProxy API key is `cliproxy:api-key`. `state.db` holds only the Connection's non-secret fields. Secrets are read at the moment of use and never reach the database,
 logs, WebSocket payloads or the browser.
 
 Each ad hoc release is a new app, and macOS asks for the login password once per Keychain item an app did not
@@ -51,5 +52,7 @@ clean up leaves the folder for macOS to clear from the temp directory.
 - **A typed secret for Loki and New Relic**, a Loki bearer token or password and a New Relic User API key, kept as
   `connection:loki_logs` and `connection:new_relic_logs` for the `logcli` and `newrelic` CLIs: the operator had to create a
   key on each service and paste it in, and the CLIs had to be installed. The hosted servers' browser sign-ins replaced it.
+  The New Relic key returned for an organization whose administrator turned off New Relic's MCP server, read by the daemon
+  through New Relic's API with no CLI.
 - **A New Relic token of the console's own**: New Relic's server takes a client registered for known MCP hosts, so the
   console could not sign in itself. It reads the one Claude Code stored.

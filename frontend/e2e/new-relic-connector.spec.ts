@@ -11,6 +11,7 @@ const PICK_DETAIL = 'The sign-in finished.';
 const CONFIG = {
   account_id: '',
   region: 'US',
+  route: 'mcp',
   environments: ['prod'],
   daily_scan_time: '09:00',
   default_interval: '24h',
@@ -189,7 +190,7 @@ test('after a Disconnect the Region stays for the next Connect', async ({ page }
   const { main, pane } = await openPane(page, connector, 'Manage');
   await pane.getByRole('button', { name: 'Disconnect…' }).click();
   await expect(pane.getByText(/removes the New Relic MCP Server/)).toBeVisible();
-  await expect(pane.getByText(/Keychain|secret|API key/i)).toHaveCount(0);
+  await expect(pane.getByText(/Keychain|secret/i)).toHaveCount(0);
   await expect(pane.getByText(/Signs out/)).toHaveCount(0);
   await pane.getByRole('button', { name: 'Disconnect', exact: true }).click();
   await expect(main.getByRole('listitem', { name: 'New Relic logs' })).toContainText('○ not connected');
@@ -247,4 +248,147 @@ test('a Connector that is down shows the reason on the pane and failed on the ro
   );
   await expect(pane.getByRole('alert')).toHaveText(detail);
   await expect(main.getByRole('listitem', { name: 'New Relic logs' })).toContainText('✕ failed');
+});
+
+const KEY = 'NRAK-EXAMPLEKEY0123456789';
+
+/** The disclosure under Connect that opens the one field for a User API key. */
+async function openKeyForm(pane: Locator) {
+  await pane.getByRole('button', { name: 'Use a User API key instead' }).click();
+  return pane.getByRole('region', { name: 'User API key' });
+}
+
+test('a User API key is one quiet link under Connect: closed at first, then one password field, with what the key needs said once', async ({
+  page,
+}) => {
+  const { pane } = await openPane(page, newRelic(), 'Connect');
+  await expect(pane.getByLabel('API key')).toHaveCount(0);
+  await expect(pane.getByRole('button', { name: 'Use a User API key instead' })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+
+  const form = await openKeyForm(pane);
+  await expect(pane.getByRole('button', { name: 'Hide the User API key' })).toHaveAttribute('aria-expanded', 'true');
+  await expect(form.getByLabel('API key')).toHaveAttribute('type', 'password');
+  await expect(form.locator('input')).toHaveCount(1);
+  await expect(form.getByText(/User API key with read access/)).toHaveCount(1);
+  await expect(form.getByText(/Keychain and never shows it again/)).toBeVisible();
+  await expect(form.getByRole('button', { name: 'Connect with key' })).toBeDisabled();
+  // The one-click Connect and its Region choice stay as they were.
+  await expect(pane.getByRole('radio', { name: 'US' })).toBeChecked();
+  await expect(connectButton(pane)).toBeEnabled();
+});
+
+test('Connect with key sends the key with the Region, empties the field, and the page never shows the key again', async ({
+  page,
+}) => {
+  const connector = newRelic();
+  await page.route('**/api/connectors/new_relic_logs/connect', (route) => {
+    Object.assign(connector, {
+      status: 'ok',
+      via: 'New Relic API',
+      account_label: 'Production (1111111)',
+      config: { ...connector.config, account_id: '1111111', region: 'EU', route: 'key' },
+    });
+    return route.fulfill({ status: 202 });
+  });
+  const { pane } = await openPane(page, connector, 'Connect');
+  await pick(pane, 'EU');
+  const form = await openKeyForm(pane);
+  await form.getByLabel('API key').fill(`  ${KEY}  `);
+
+  const sent = sentConnect(page);
+  await form.getByRole('button', { name: 'Connect with key' }).click();
+  expect((await sent).postDataJSON()).toEqual({ region: 'EU', api_key: KEY });
+
+  // The form closes with the key sent, and opens empty.
+  await expect(pane.getByLabel('API key')).toHaveCount(0);
+  await expect(pane.getByText('● connected')).toBeVisible();
+  await expect((await openKeyForm(pane)).getByLabel('API key')).toHaveValue('');
+  await expect(pane.getByText(/with your User API key/)).toBeVisible();
+  await expect(pane.getByText('Reached through New Relic API.')).toBeVisible();
+  expect(await page.content()).not.toContain(KEY);
+});
+
+test('the one-click Connect never carries a key, even after one was typed', async ({ page }) => {
+  const { pane } = await openPane(page, newRelic(), 'Connect');
+  const form = await openKeyForm(pane);
+  await form.getByLabel('API key').fill(KEY);
+  await page.route('**/api/connectors/new_relic_logs/connect', (route) => route.fulfill({ status: 202 }));
+  const sent = sentConnect(page);
+  await connectButton(pane).click();
+  expect((await sent).postDataJSON()).toEqual({ region: 'US' });
+});
+
+test('after a key that reads several accounts, the account picker shows and picking sends the Region and the account, not the key', async ({
+  page,
+}) => {
+  const connector = newRelic();
+  await page.route('**/api/connectors/new_relic_logs/accounts', (route) =>
+    route.fulfill({ json: { data: ACCOUNTS, meta: { next_cursor: null } } }),
+  );
+  await page.route('**/api/connectors/new_relic_logs/connect', (route) => {
+    const body = route.request().postDataJSON() as Record<string, string>;
+    if (body.api_key) {
+      Object.assign(connector, {
+        status: 'auth',
+        status_detail: PICK_DETAIL,
+        pick: 'account',
+        via: 'New Relic API',
+        config: { ...connector.config, route: 'key' },
+      });
+    } else {
+      Object.assign(connector, {
+        status: 'ok',
+        status_detail: null,
+        pick: null,
+        account_label: 'Production (1111111)',
+        config: { ...connector.config, account_id: body.account_id },
+      });
+    }
+    return route.fulfill({ status: 202 });
+  });
+  const { pane } = await openPane(page, connector, 'Connect');
+  const form = await openKeyForm(pane);
+  await form.getByLabel('API key').fill(KEY);
+  await form.getByRole('button', { name: 'Connect with key' }).click();
+
+  const picker = pane.getByRole('region', { name: 'Choose a New Relic account' });
+  await expect(picker).toBeVisible();
+  await expect(pane.getByRole('alert')).toHaveCount(0);
+  await picker.getByRole('button', { name: 'New Relic account' }).click();
+  const sent = sentConnect(page);
+  await page.getByRole('option', { name: 'Production' }).click();
+  expect((await sent).postDataJSON()).toEqual({ region: 'US', account_id: '1111111' });
+  await expect(pane.getByText('● connected')).toBeVisible();
+});
+
+test('a key New Relic refuses shows the daemon reason and leaves the field empty to type again', async ({ page }) => {
+  const message = 'New Relic refused the User API key. Use a User key and the Region its account is in.';
+  await page.route('**/api/connectors/new_relic_logs/connect', (route) =>
+    route.fulfill(error(422, 'validation_failed', message)),
+  );
+  const { pane } = await openPane(page, newRelic(), 'Connect');
+  const form = await openKeyForm(pane);
+  await form.getByLabel('API key').fill(KEY);
+  await form.getByRole('button', { name: 'Connect with key' }).click();
+  await expect(pane.getByRole('alert')).toHaveText(message);
+  await expect(pane.getByLabel('API key')).toHaveCount(0);
+  await expect(pane.getByText('○ not connected')).toBeVisible();
+  await expect((await openKeyForm(pane)).getByLabel('API key')).toHaveValue('');
+  expect(await page.content()).not.toContain(KEY);
+});
+
+test('a Connector read with a key says so, and Disconnect names the Keychain key it removes', async ({ page }) => {
+  const connector = newRelic(
+    { status: 'ok', via: 'New Relic API', account_label: 'Production (1111111)' },
+    { account_id: '1111111', region: 'EU', route: 'key' },
+  );
+  const { pane } = await openPane(page, connector, 'Manage');
+  await expect(
+    pane.getByText(/Reading the New Relic account Production \(1111111\) in EU with your User API key/),
+  ).toBeVisible();
+  await pane.getByRole('button', { name: 'Disconnect…' }).click();
+  await expect(pane.getByText(/removes your User API key from the Keychain/)).toBeVisible();
 });

@@ -197,7 +197,10 @@ test('the Connectors page lists sixteen Connectors and has OpenTelemetry logs, C
   );
   assert.match(newRelic, /5,000/);
   assert.match(newRelic, /only the server's read tools/);
-  assert.doesNotMatch(newRelic, /brew install newrelic-cli|NRAK-/);
+  assert.doesNotMatch(newRelic, /brew install newrelic-cli/);
+  assert.match(newRelic, /Use a User API key instead/, 'the section documents the key route');
+  assert.match(newRelic, /<code>query_new_relic<\/code>/, 'and the agent tool that keeps the key in the daemon');
+  assert.match(newRelic, /from the Keychain if you used one/, 'and that Disconnect removes the key');
 });
 
 test('the data-flow page puts the Log folder on the Mac and its records in a prompt only as Samples', async () => {

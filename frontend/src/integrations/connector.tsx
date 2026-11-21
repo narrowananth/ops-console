@@ -62,6 +62,10 @@ const DISCONNECT: Partial<Record<ConnectorId, string>> = {
     'Stops the console reading New Relic and removes the New Relic MCP Server. New Relic and its logs stay as they are, and the Region and account you picked stay for the next Connect.',
 };
 
+/** What Disconnect says for New Relic logs read with a User API key. */
+const NEW_RELIC_KEY_DISCONNECT =
+  'Stops the console reading New Relic and removes your User API key from the Keychain. New Relic and its logs stay as they are, and the Region and account you picked stay for the next Connect.';
+
 const DISCONNECT_TITLE: Partial<Record<ConnectorId, string>> = {
   [ConnectorId.OtelLogs]: 'Stop the console reading the Log folder. Asks first.',
   [ConnectorId.CloudWatchLogs]: 'Stop the console reading the log groups. Asks first.',
@@ -152,7 +156,10 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
           <div className="mx-5 mb-4 flex flex-col gap-2.5 rounded-lg bg-accent-100 px-4 py-3.5">
             <div className="font-semibold text-accent-900">Disconnect {connector.name}?</div>
             <div className="text-xs text-accent-900">
-              {DISCONNECT[connector.id] ??
+              {(connector.id === ConnectorId.NewRelicLogs && connector.config.route === 'key'
+                ? NEW_RELIC_KEY_DISCONNECT
+                : null) ??
+                DISCONNECT[connector.id] ??
                 (isGoogleConnector(connector.id)
                   ? 'Stops the console using it and takes its access back at Google. Every Claude account loses it.'
                   : 'Signs out and stops Claude from using it. Monitor and tasks that rely on it pause. Your own terminal stays signed in to the CLI.')}
@@ -174,6 +181,9 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
             <Button
               className="border-accent text-accent-700"
               title={
+                (connector.id === ConnectorId.NewRelicLogs && connector.config.route === 'key'
+                  ? 'Stop the console reading New Relic and remove its User API key. Asks first.'
+                  : null) ??
                 DISCONNECT_TITLE[connector.id] ??
                 `Sign out of ${connector.name} and stop the console using it. Asks first.`
               }

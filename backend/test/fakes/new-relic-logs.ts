@@ -1,13 +1,13 @@
 import { z } from 'zod';
 import { FakeMcpHost, failure, hang, json, type ToolCall, type ToolDef, type ToolResult, text } from './oauth-mcp';
 
-type Event = { at: number; attrs: Record<string, unknown> };
+export type Event = { at: number; attrs: Record<string, unknown> };
 type Behavior = 'throttle' | 'timeout' | 'unknownTool' | 'unreadable' | 'hang' | 'unauthorized' | 'unreachable' | null;
-type Row = Record<string, unknown>;
+export type Row = Record<string, unknown>;
 type Test = (row: Row) => boolean;
 
 /** What NRQL answers with a message instead of rows. */
-class NrqlError extends Error {}
+export class NrqlError extends Error {}
 
 const syntax = (message: string): never => {
   throw new NrqlError(`NRQL Syntax Error: ${message}`);
@@ -163,7 +163,7 @@ const MAX = 5000;
 const nameOf = (token: string): string => (token.startsWith('`') ? unquote(token) : token);
 
 /** The rows NRQL answers `query` with over `events`, or an `NrqlError`. `facetStyle` is how a FACET row names its values. */
-function runNrql(events: Event[], query: string, facetStyle: 'array' | 'keys'): Row[] {
+export function runNrql(events: Event[], query: string, facetStyle: 'array' | 'keys'): Row[] {
   const selected = /^\s*SELECT\s+(.+?)\s+FROM\s+(\w+)\s*(.*)$/is.exec(query);
   if (!selected) return syntax('expected SELECT ... FROM ...');
   const [, select = '', eventType, rest = ''] = selected;

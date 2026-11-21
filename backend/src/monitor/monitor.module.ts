@@ -13,6 +13,7 @@ import { LOG_READERS, type LogReader, type LogReaders } from './log-reader';
 import { cloudWatchLogsConfig, lokiLogsConfig, newRelicLogsConfig, otelLogsConfig } from './log-source-config';
 import { LokiLogs } from './loki-logs';
 import { MonitorController } from './monitor.controller';
+import { NewRelicAgentQuery } from './new-relic-agent-query';
 import { NewRelicLogs } from './new-relic-logs';
 import { OtelLogFolder } from './otel-logs';
 import { MonitorRetention } from './retention';
@@ -56,16 +57,17 @@ export class MonitorModule {
             ),
             [ConnectorId.NewRelicLogs]: new NewRelicLogs(
               () => {
-                const { account_id, region } = newRelicLogsConfig(store.db);
-                return { accountId: account_id, region };
+                const { account_id, region, route } = newRelicLogsConfig(store.db);
+                return { accountId: account_id, region, route };
               },
-              (region) => hosted.newRelic(region),
+              (route, region) => hosted.newRelic(route, region),
               () => connectors.needsSignIn(ConnectorId.NewRelicLogs),
             ),
           }),
         },
         { provide: CODE_HOSTS, useValue: config.codeHosts ?? new CliCodeHosts() },
         CodeFinder,
+        NewRelicAgentQuery,
         MonitorRetention,
         AlertsService,
         ServicesService,
