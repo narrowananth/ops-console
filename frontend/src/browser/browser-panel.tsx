@@ -66,13 +66,14 @@ export function BrowserPanel({
   const missing = state.data?.chrome === ChromeState.Missing;
 
   /**
-   * An address goes in the tab already on that site (it reloads there), else the blank tab, else a new one. The
-   * daemon's refusal shows under the toolbar.
+   * An address goes in the blank tab, else a new one. A page opened for the operator (a link, a Local servers row,
+   * a server that started) goes first in the tab already on that site, which reloads. The daemon's refusal shows
+   * under the toolbar.
    */
-  const open = (address: string) => {
+  const open = (address: string, reuse = false) => {
     setRefused(null);
     const fail = (error: Error) => setRefused(error.message);
-    const target = tabOnSite(tabs, active, address) ?? blankTabFor(tabs, active);
+    const target = (reuse ? tabOnSite(tabs, active, address) : undefined) ?? blankTabFor(tabs, active);
     if (target) {
       setPicked(target.id);
       patch.mutate({ tabId: target.id, body: { url: address } }, { onError: fail });
@@ -84,7 +85,7 @@ export function BrowserPanel({
   useEffect(() => {
     if (!request || handled.current === request.id || !state.data || missing) return;
     handled.current = request.id;
-    open(request.url);
+    open(request.url, true);
   }, [request, state.data, missing]);
 
   const act = (body: { action?: TabAction; viewport?: Viewport }) => {
@@ -131,7 +132,7 @@ export function BrowserPanel({
           servers={servers.data}
           processes={processes.data ?? []}
           error={servers.error?.message ?? null}
-          onOpen={open}
+          onOpen={(address) => open(address, true)}
           onStop={(port) => stopServer.mutate(port)}
         />
       </div>
@@ -152,7 +153,7 @@ export function BrowserPanel({
               servers={servers.data}
               processes={processes.data ?? []}
               error={servers.error?.message ?? null}
-              onOpen={open}
+              onOpen={(address) => open(address, true)}
               onStop={(port) => stopServer.mutate(port)}
             />
           ) : undefined

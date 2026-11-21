@@ -68,8 +68,9 @@ adds the same to a Session.
 
 13. A `http` or `https` link in a transcript, an Approval or an Agent's message to a loopback host opens in the panel when
     the Session has a Browser button. Any other link opens in the operator's own browser. Cmd-click, Ctrl-click and the
-    middle button always go there. There is no setting for it. An address whose site (scheme, host and port) a tab
-    already shows loads in that tab, which reloads, instead of a new tab.
+    middle button always go there. There is no setting for it. A page opened this way (a link, a Local servers row, a server that
+    started) whose site (scheme, host and port) a tab already shows loads in that tab, which reloads, instead of a new tab.
+    An address typed in the address field does not do this.
 14. Files the Session wrote (the viewer's HTML preview) are unchanged: no script, no network.
 
 ### Session processes
