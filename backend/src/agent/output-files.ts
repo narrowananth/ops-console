@@ -1,5 +1,5 @@
 import { constants, mkdirSync, type ReadStream } from 'node:fs';
-import { type FileHandle, lstat, open, readdir, rm, stat } from 'node:fs/promises';
+import { type FileHandle, lstat, mkdir, open, readdir, realpath, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -11,7 +11,7 @@ import { ApiError } from '../common/errors';
 import { fileType } from './attachments';
 
 export const saveFileInputSchema = z.object({
-  /** A file name in the Session's output folder. */
+  /** A file or folder name in the Session's output folder. */
   name: z.string().trim().min(1),
   /** The absolute path of a folder that exists, or one under `~/`. */
   folder: z.string().trim().min(1),
@@ -101,25 +101,72 @@ export class OutputFiles implements FileSaver {
   }
 
   async describe(sessionId: string, input: SaveFileInput): Promise<string> {
-    const found = bare(input.name) ? await this.plain(sessionId, input.name) : null;
-    if (!found) throw new ApiError(404, ErrorCode.NotFound, `No file ${input.name} in your output folder`);
-    const folder = await this.destination(input.folder);
-    return `Save ${input.name} (${bytes(found.size)}) to ${folder}${path.sep}`;
+    return (await this.plan(sessionId, input)).summary;
   }
 
   async save(sessionId: string, input: SaveFileInput): Promise<string> {
-    await this.describe(sessionId, input);
-    const to = path.join(await this.destination(input.folder), input.name);
-    const source = await this.openPlain(sessionId, input.name);
-    if (!source) throw notFound();
+    const { source, to } = await this.plan(sessionId, input);
+    if (source.kind === 'dir') return this.saveFolder(sessionId, input.name, source.files, to);
+    const opened = await this.openPlain(sessionId, input.name);
+    if (!opened) throw notFound();
     // The agent writes in the source folder and may write in the destination: neither end follows a symlink.
     const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW;
     const target = await open(to, flags).catch(() => null);
     if (!target) {
-      await source.handle.close();
+      await opened.handle.close();
       throw new ApiError(400, ErrorCode.ValidationFailed, `Cannot write ${to}`);
     }
-    await pipeline(source.handle.createReadStream(), target.createWriteStream());
+    await pipeline(opened.handle.createReadStream(), target.createWriteStream());
+    return to;
+  }
+
+  /** What a save would copy and where, with the words the Approval shows. Throws when it cannot be done. */
+  private async plan(sessionId: string, input: SaveFileInput) {
+    const source = bare(input.name) ? await this.source(sessionId, input.name) : null;
+    if (!source) throw new ApiError(404, ErrorCode.NotFound, `No file ${input.name} in your output folder`);
+    const folder = await this.destination(input.folder);
+    const to = path.join(folder, input.name);
+    const there = await lstat(to).catch(() => null);
+    if (source.kind === 'file') {
+      const replaces = there?.isFile() ? ' (replaces the file of that name there)' : '';
+      return { source, to, summary: `Save ${input.name} (${bytes(source.size)}) to ${folder}${path.sep}${replaces}` };
+    }
+    if (there) throw new ApiError(400, ErrorCode.ValidationFailed, `${to} exists already`);
+    const noun = source.files.length === 1 ? 'file' : 'files';
+    const head = `Save ${input.name}/ (${source.files.length} ${noun}, ${bytes(source.size)}) to ${folder}${path.sep}`;
+    return { source, to, summary: [head, ...source.files.map((file) => file.rel)].join('\n') };
+  }
+
+  /** Copies the listed files into a folder the daemon makes here. A failed copy removes the folder it made. */
+  private async saveFolder(sessionId: string, name: string, files: { rel: string }[], to: string): Promise<string> {
+    // Not recursive: a folder that appeared since the check stops the copy, never merges into it.
+    await mkdir(to).catch(() => {
+      throw new ApiError(400, ErrorCode.ValidationFailed, `Cannot write ${to}`);
+    });
+    try {
+      const root = await realpath(path.join(this.folder(sessionId), name));
+      for (const { rel } of files) {
+        const from = path.join(this.folder(sessionId), name, rel);
+        const handle = await open(from, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => null);
+        const info = await handle?.stat();
+        // The agent can swap a folder for a link after the check: the open file must sit where the list said.
+        if (!handle || !info?.isFile() || info.nlink !== 1 || (await realpath(from)) !== path.join(root, rel)) {
+          await handle?.close();
+          throw new ApiError(400, ErrorCode.ValidationFailed, `${rel} changed while copying`);
+        }
+        await mkdir(path.dirname(path.join(to, rel)), { recursive: true });
+        const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+        const target = await open(path.join(to, rel), flags).catch(() => null);
+        if (!target) {
+          await handle.close();
+          throw new ApiError(400, ErrorCode.ValidationFailed, `Cannot write ${path.join(to, rel)}`);
+        }
+        await pipeline(handle.createReadStream(), target.createWriteStream());
+      }
+    } catch (error) {
+      await rm(to, { recursive: true, force: true });
+      throw error;
+    }
     return to;
   }
 
@@ -139,6 +186,32 @@ export class OutputFiles implements FileSaver {
       return null;
     }
     return { handle, size: info.size };
+  }
+
+  /** A plain file, or a folder of plain files, never through a link. A link or odd file in a folder refuses it whole. */
+  private async source(
+    sessionId: string,
+    name: string,
+  ): Promise<
+    { kind: 'file'; size: number } | { kind: 'dir'; size: number; files: { rel: string; size: number }[] } | null
+  > {
+    const top = path.join(this.folder(sessionId), name);
+    const info = await lstat(top).catch(() => null);
+    if (info?.isFile()) return info.nlink === 1 ? { kind: 'file', size: info.size } : null;
+    if (!info?.isDirectory()) return null;
+    const files: { rel: string; size: number }[] = [];
+    const walk = async (rel: string): Promise<void> => {
+      for (const entry of (await readdir(path.join(top, rel))).sort()) {
+        const here = path.join(rel, entry);
+        const found = await lstat(path.join(top, here));
+        if (found.isDirectory()) await walk(here);
+        else if (found.isFile() && found.nlink === 1) files.push({ rel: here, size: found.size });
+        else throw new ApiError(400, ErrorCode.ValidationFailed, `${here} is a link or not a plain file`);
+      }
+    };
+    await walk('');
+    if (files.length === 0) throw new ApiError(400, ErrorCode.ValidationFailed, `${name} holds no files`);
+    return { kind: 'dir', size: files.reduce((sum, file) => sum + file.size, 0), files };
   }
 
   private async plain(sessionId: string, name: string) {

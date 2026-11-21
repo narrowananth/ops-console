@@ -1,4 +1,4 @@
-import { link, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { AccessMode } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -201,6 +201,143 @@ describe('save_file', () => {
     await runSaveFile(outputs, ctx.id, { name: 'b.txt', folder: downloads });
     expect(await readFile(path.join(downloads, 'b.txt'), 'utf8')).toBe('new');
     expect(await outputs.describe(ctx.id, { name: 'b.txt', folder: '~/' })).toMatch(/^Save b.txt \(3 B\) to \//);
+  });
+
+  describe('a folder', () => {
+    async function project(ctx: Awaited<ReturnType<typeof start>>) {
+      const dir = path.join(ctx.folder, 'sample-project');
+      await mkdir(path.join(dir, 'css'), { recursive: true });
+      await writeFile(path.join(dir, 'index.html'), '<h1>hi</h1>');
+      await writeFile(path.join(dir, 'css', 'styles.css'), 'a{}');
+      await writeFile(path.join(dir, '.gitignore'), 'x');
+      return dir;
+    }
+    const refusal = (ctx: Awaited<ReturnType<typeof start>>, input: { name: string; folder: string }) =>
+      ctx.daemon.app
+        .get(OutputFiles)
+        .describe(ctx.id, input)
+        .then(
+          () => 'asked',
+          (e: Error) => e.message,
+        );
+
+    it('asks once for the whole folder, listing its files and total size, and copies the tree only on a yes', async () => {
+      const ctx = await start();
+      await project(ctx);
+      const documents = await tempDir('ops-console-documents-');
+      const hold = gate();
+      await ctx.http.patch(`/sessions/${ctx.id}`, { access_mode: AccessMode.Supervised });
+      ctx.daemon.sdk.script({
+        tool: SAVE_FILE_TOOL,
+        input: { name: 'sample-project', folder: documents },
+        hold: hold.promise,
+      });
+      await ctx.http.post(`/sessions/${ctx.id}/messages`, { text: 'make sample-project in documents' });
+      const [approval] = await approvals(ctx);
+      expect(approval?.summary).toBe(
+        `Save sample-project/ (3 files, 15 B) to ${path.resolve(documents)}${path.sep}\n.gitignore\ncss/styles.css\nindex.html`,
+      );
+      expect(await readdir(documents)).toEqual([]);
+      await ctx.http.post(`/approvals/${approval?.id}/decision`, { decision: 'approved' });
+      const answer = await runSaveFile(ctx.daemon.app.get(OutputFiles), ctx.id, {
+        name: 'sample-project',
+        folder: documents,
+      });
+      expect(answer.content[0]?.text).toBe(`Saved the file to ${path.join(path.resolve(documents), 'sample-project')}`);
+      hold.open();
+      const copy = path.join(documents, 'sample-project');
+      expect(await readFile(path.join(copy, 'index.html'), 'utf8')).toBe('<h1>hi</h1>');
+      expect(await readFile(path.join(copy, 'css', 'styles.css'), 'utf8')).toBe('a{}');
+      expect(await readFile(path.join(copy, '.gitignore'), 'utf8')).toBe('x');
+      // The source stays in the output folder.
+      expect(await readFile(path.join(ctx.folder, 'sample-project', 'index.html'), 'utf8')).toBe('<h1>hi</h1>');
+    });
+
+    it('copies at once in full access', async () => {
+      const ctx = await start();
+      await ctx.http.patch(`/sessions/${ctx.id}`, { access_mode: AccessMode.Full });
+      await project(ctx);
+      const documents = await tempDir('ops-console-documents-');
+      await ask(ctx, { name: 'sample-project', folder: documents });
+      await until(
+        async () => (await ctx.http.get(`/sessions/${ctx.id}`)).body.data.state,
+        (state) => state === 'idle',
+        'the run to end',
+      );
+      expect((await ctx.http.get('/approvals')).body.data).toEqual([]);
+      expect(ctx.daemon.sdk.ran.map((call) => call.tool)).toEqual([SAVE_FILE_TOOL]);
+    });
+
+    it('refuses before it asks when the name is taken in the destination, and leaves what is there as it was', async () => {
+      const ctx = await start();
+      await project(ctx);
+      const documents = await tempDir('ops-console-documents-');
+      await mkdir(path.join(documents, 'sample-project'));
+      await writeFile(path.join(documents, 'sample-project', 'index.html'), 'mine');
+      const outputs = ctx.daemon.app.get(OutputFiles);
+      expect(await refusal(ctx, { name: 'sample-project', folder: documents })).toMatch(/already/);
+      const answer = await runSaveFile(outputs, ctx.id, { name: 'sample-project', folder: documents });
+      expect(answer).toMatchObject({ isError: true });
+      expect(await readFile(path.join(documents, 'sample-project', 'index.html'), 'utf8')).toBe('mine');
+      expect(await readdir(path.join(documents, 'sample-project'))).toEqual(['index.html']);
+    });
+
+    it('refuses a tree with a link, a second hard link or no file, and copies nothing', async () => {
+      const ctx = await start();
+      const dir = await project(ctx);
+      const documents = await tempDir('ops-console-documents-');
+      const outputs = ctx.daemon.app.get(OutputFiles);
+      await mkdir(path.join(ctx.folder, 'empty', 'sub'), { recursive: true });
+      expect(await refusal(ctx, { name: 'empty', folder: documents })).toMatch(/no files/);
+      const secret = path.join(ctx.daemon.dataDir, 'secret.txt');
+      await writeFile(secret, 'token');
+      await symlink(secret, path.join(dir, 'css', 'soft.txt'));
+      expect(await refusal(ctx, { name: 'sample-project', folder: documents })).toMatch(/css\/soft.txt/);
+      await rm(path.join(dir, 'css', 'soft.txt'));
+      await link(secret, path.join(dir, 'hard.txt'));
+      expect(await refusal(ctx, { name: 'sample-project', folder: documents })).toMatch(/hard.txt/);
+      expect(await runSaveFile(outputs, ctx.id, { name: 'sample-project', folder: documents })).toMatchObject({
+        isError: true,
+      });
+      expect(await readdir(documents)).toEqual([]);
+    });
+
+    it('refuses a folder that is a link, a dot name or a path, as for a file', async () => {
+      const ctx = await start();
+      await project(ctx);
+      const documents = await tempDir('ops-console-documents-');
+      await symlink(path.join(ctx.daemon.dataDir), path.join(ctx.folder, 'data-link'));
+      await mkdir(path.join(ctx.folder, '.ssh'));
+      await writeFile(path.join(ctx.folder, '.ssh', 'keys'), 'x');
+      for (const name of ['data-link', '.ssh', 'sample-project/css', '../outputs'])
+        expect(await refusal(ctx, { name, folder: documents })).toMatch(/No file/);
+      expect(await readdir(documents)).toEqual([]);
+    });
+
+    it('copies nothing from a folder swapped for a link', async () => {
+      const ctx = await start();
+      const dir = await project(ctx);
+      const documents = await tempDir('ops-console-documents-');
+      const outputs = ctx.daemon.app.get(OutputFiles);
+      const outside = await tempDir('ops-console-outside-');
+      await writeFile(path.join(outside, 'styles.css'), 'secret');
+      await rm(path.join(dir, 'css'), { recursive: true });
+      await symlink(outside, path.join(dir, 'css'));
+      const answer = await runSaveFile(outputs, ctx.id, { name: 'sample-project', folder: documents });
+      expect(answer).toMatchObject({ isError: true });
+      expect(await readdir(documents)).toEqual([]);
+    });
+  });
+
+  it('says on the card that a file of the same name in the folder is replaced', async () => {
+    const ctx = await start();
+    const downloads = await tempDir('ops-console-downloads-');
+    await mkdir(ctx.folder, { recursive: true });
+    await writeFile(path.join(ctx.folder, 'a.txt'), 'new');
+    const outputs = ctx.daemon.app.get(OutputFiles);
+    expect(await outputs.describe(ctx.id, { name: 'a.txt', folder: downloads })).not.toMatch(/replaces/);
+    await writeFile(path.join(downloads, 'a.txt'), 'old');
+    expect(await outputs.describe(ctx.id, { name: 'a.txt', folder: downloads })).toMatch(/replaces the file/);
   });
 
   it('never serves a file swapped for a link or sharing a hard link with a hidden file', async () => {

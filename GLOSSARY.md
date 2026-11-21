@@ -75,8 +75,8 @@ fails when the sandbox is unavailable. The agent's file tools write only in the 
 
 **Output file**:
 A file the agent wrote in its Session's output folder for the operator: a PDF, a spreadsheet, a chart, an archive. It shows
-in the transcript on the turn that wrote it and opens in the console, never launched on this Mac. The agent saves a copy in
-another folder only through `save_file`, which the operator approves.
+in the transcript on the turn that wrote it and opens in the console, never launched on this Mac. The agent saves a copy, or a
+folder of them, in another folder only through `save_file`, which the operator approves.
 _Avoid_: artifact, download
 
 **Code block**:
