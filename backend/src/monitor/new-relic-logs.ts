@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
-import { NO_ENV, type Sample, type ScanWindow, WINDOW_HOURS } from '@ops-console/shared';
+import { type NewRelicRoute, NO_ENV, type Sample, type ScanWindow, WINDOW_HOURS } from '@ops-console/shared';
 import { z } from 'zod';
 import { mapLimit } from '../common/map-limit';
-import { HostedAuthError, type HostedOpen, readFailure } from '../connectors/hosted-mcp';
-import { type NewRelicRegion, type NewRelicRow, newRelicTools } from '../connectors/new-relic-mcp';
+import { HostedAuthError, readFailure } from '../connectors/hosted-mcp';
+import type { NewRelicOpen, NewRelicRegion, NewRelicRow } from '../connectors/new-relic-mcp';
 import {
   FATAL_ERROR_LEVEL,
   groupEntries,
@@ -137,31 +137,33 @@ const envOf = (value: unknown): string => (typeof value === 'string' && value !=
 type ServiceKey = { name: string; env: string };
 
 /**
- * New Relic logs read through New Relic's hosted MCP server, signed in with the token Claude Code stored for it. A Scan
+ * New Relic logs read through New Relic's hosted MCP server, signed in with the token Claude Code stored for it, or
+ * through its API with the operator's User API key: the queries are the same. A Scan
  * lists the Services from the distinct values of the service attribute on failing events, asks once per Service which
  * attribute names its logs use, counts failing events per 10 minutes with one NRQL query, and reads the newest failing
  * events with another. A failure names the server and its own words.
  */
 export class NewRelicLogs implements LogReader {
   constructor(
-    /** The account and Region the Connector reads. */
-    private readonly source: () => { accountId: string; region: NewRelicRegion },
-    private readonly open: (region: NewRelicRegion) => HostedOpen,
+    /** The account, Region and route the Connector reads with. */
+    private readonly source: () => { accountId: string; region: NewRelicRegion; route: NewRelicRoute },
+    private readonly open: (route: NewRelicRoute, region: NewRelicRegion) => NewRelicOpen,
     /** Told when New Relic refuses the sign-in, so the Connector reads needs auth. */
     private readonly onAuthLost: () => void,
   ) {}
 
   /** `use` in one session with the Connector's account; a failure ends as the Scan's error, a refused sign-in also tells the Connector. */
   private async within<T>(use: (run: Run) => Promise<T>, signal?: AbortSignal): Promise<T> {
-    const { accountId, region } = this.source();
+    const { accountId, region, route } = this.source();
     try {
-      return await this.open(region)(async (tools) => {
-        const api = await newRelicTools(tools);
-        return use((nrql) => {
-          signal?.throwIfAborted();
-          return api.nrql(accountId, nrql);
-        });
-      }, signal);
+      return await this.open(route, region)(
+        (api) =>
+          use((nrql) => {
+            signal?.throwIfAborted();
+            return api.nrql(accountId, nrql);
+          }),
+        signal,
+      );
     } catch (error) {
       if (error instanceof HostedAuthError) this.onAuthLost();
       throw readFailure(error, 'New Relic logs');

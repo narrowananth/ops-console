@@ -24,6 +24,12 @@ export class NewRelicMcp {
     private readonly hosts: NewRelicHosts = {},
   ) {}
 
+  /** The MCP server's two tools as `NewRelicQueries`. */
+  queries(region: NewRelicRegion): NewRelicOpen {
+    const open = this.open(region);
+    return (use, signal) => open(async (tools) => use(await newRelicTools(tools)), signal);
+  }
+
   open(region: NewRelicRegion): HostedOpen {
     const url = this.hosts[region] ?? NEW_RELIC_MCP_URLS[region];
     return async (use, signal) => {
@@ -55,6 +61,16 @@ export class NewRelicMcp {
 
 export type NewRelicRow = Record<string, unknown>;
 export type NewRelicAccount = { id: string; name: string };
+
+/** What the console asks of New Relic, whichever route reaches it. Each method throws the errors of `hosted-mcp.ts`. */
+export interface NewRelicQueries {
+  accounts(): Promise<NewRelicAccount[]>;
+  /** The rows of one NRQL query for the account. */
+  nrql(accountId: string, query: string): Promise<NewRelicRow[]>;
+}
+
+/** Opens one session with New Relic on a route, runs `use`, closes it. */
+export type NewRelicOpen = <T>(use: (queries: NewRelicQueries) => Promise<T>, signal?: AbortSignal) => Promise<T>;
 
 const rowSchema = z.record(z.string(), z.unknown());
 const nrqlAnswer = z.union([
@@ -92,7 +108,7 @@ const argumentOf = (properties: string[], kind: RegExp, fallback: string): strin
  * The two tools the console calls. The server documents their names and not their arguments, so the argument names
  * are read from the tool list of the session, and a server without a tool says so in its own terms.
  */
-export async function newRelicTools(tools: HostedTools) {
+export async function newRelicTools(tools: HostedTools): Promise<NewRelicQueries> {
   const offered = await tools.list();
   const need = (name: string) => {
     const found = offered.find((tool) => tool.name === name);

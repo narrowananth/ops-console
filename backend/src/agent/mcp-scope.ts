@@ -61,3 +61,12 @@ export function mcpScope(purpose: RunPurpose, kind: SessionKind, logSource: LogS
       return { none: false, withoutConnections: kind !== SessionKind.Devtools, withoutConnectors: [] };
   }
 }
+
+/**
+ * Whether the console's own New Relic query tool reaches a run: the runs that start New Relic's MCP server, since a
+ * User API key leaves that server out and the daemon holds the key.
+ */
+export function offersNewRelicQuery(purpose: RunPurpose, logSource: LogSource | null): boolean {
+  const own = logSource === null || logSource === ConnectorId.NewRelicLogs;
+  return own && (purpose === RunPurpose.Verify || purpose === RunPurpose.Fix || purpose === RunPurpose.Chat);
+}

@@ -98,7 +98,7 @@ running after 5 seconds is left for the next start.
 Every outside system is an MCP server or a CLI registered with Claude Code (ADR 0005). A Connector
 hands off to the provider's browser sign-in, a secret the console must hold goes to the Keychain,
 and the console runs `claude mcp add` in every Claude account. Fixed reads run the CLIs with no
-model turn: `pup` and `aws` for Scans, the hosted Grafana Cloud and New Relic MCP servers for Loki and New Relic Scans (the daemon calls their tools itself, with its own Grafana token or the New Relic sign-in it reads from Claude Code), `gh`, `glab` and `bkt` for pull requests, a `bkt` repository list (or `git ls-remote`
+model turn: `pup` and `aws` for Scans, the hosted Grafana Cloud and New Relic MCP servers for Loki and New Relic Scans (the daemon calls their tools itself, with its own Grafana token or the New Relic sign-in it reads from Claude Code; or, for New Relic with a User API key from the Keychain, New Relic's own API through `connectors/new-relic-api.ts`), `gh`, `glab` and `bkt` for pull requests, a `bkt` repository list (or `git ls-remote`
 when the list cannot be read) when looking for a Service's code. The `slashdocs` CLI is a Connector's sign-in and has no MCP Server. Judgment work (Verification, Fix, Agent Review, Reply check, Comment pass, Dev tools questions) runs as an
 agent Session.
 
@@ -283,7 +283,7 @@ shutdown the daemon aborts every run and waits up to 10 seconds for them to end,
 recovery to fail; the process ends after 20 seconds whatever is left. A run starts the MCP servers its purpose can use
 (`mcp-scope.ts`): a Dev tools chat the Connections in its scope; any other chat the Connectors' servers and no
 Connection's; Verification the Connections and the log source server of its Alert (Datadog's for a Datadog Alert,
-CloudWatch's for a CloudWatch Alert, both when it has no Alert; a Loki Alert gets Grafana's, a New Relic Alert New Relic's); Fix and the pull request jobs GitHub and Atlassian, and a Fix of a Loki or New Relic Alert its source's server,
+CloudWatch's for a CloudWatch Alert, both when it has no Alert; a Loki Alert gets Grafana's, a New Relic Alert New Relic's, or on the key route the console's own `query_new_relic` tool, which the daemon runs with the key); Fix and the pull request jobs GitHub and Atlassian, and a Fix of a Loki or New Relic Alert its source's server,
 never CloudWatch's; the pull request text none. Of CloudWatch's tools a run may call only the four log tools. A server
 that starts goes through `mcp-exec`, which tells `npx` to use its cache before the registry, and the run waits up to 10
 seconds for the servers it started. The code update (`refresh` on a Session kind) runs while the
