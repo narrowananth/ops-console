@@ -83,6 +83,10 @@ function watchResizes(page: Page) {
   const sizes: { width: number; height: number }[] = [];
   page.on('websocket', (socket) => {
     if (!socket.url().includes('/browser/')) return;
+    // A stream that opens again carries the size in its address instead of sending a message.
+    const query = new URL(socket.url()).searchParams;
+    const [w, h] = [Number(query.get('w')), Number(query.get('h'))];
+    if (w > 0 && h > 0) sizes.push({ width: w, height: h });
     socket.on('framesent', (frame) => {
       const message = JSON.parse(String(frame.payload)) as { type: string; width?: number; height?: number };
       if (message.type === 'resize' && message.width && message.height) {

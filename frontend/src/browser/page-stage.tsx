@@ -109,8 +109,8 @@ export function PageStage({
     if (!size) return;
     const key = `${size.width}x${size.height}x${size.dpr}`;
     if (asked.current === key) return;
-    asked.current = key;
-    send({ type: 'resize', ...size });
+    // Only a size that went out counts as asked: a socket still opening takes none, and the open asks again.
+    if (send({ type: 'resize', ...size })) asked.current = key;
   };
   useEffect(() => {
     const node = stage.current;
@@ -143,7 +143,9 @@ export function PageStage({
   useEffect(() => {
     if (!picking || !connected) return;
     send({ type: 'pick', action: 'start', x: 0, y: 0 });
-    return () => send({ type: 'pick', action: 'end', x: 0, y: 0 });
+    return () => {
+      send({ type: 'pick', action: 'end', x: 0, y: 0 });
+    };
   }, [picking, connected, send]);
   useEffect(() => {
     if (!picking) return;

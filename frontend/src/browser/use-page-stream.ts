@@ -89,9 +89,12 @@ export function usePageStream(
     };
   }, [tabId]);
 
-  const send = useCallback((message: BrowserClientMessage) => {
+  /** True when the message went out: a socket that is not open yet takes nothing. */
+  const send = useCallback((message: BrowserClientMessage): boolean => {
     const ws = socket.current;
-    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+    if (ws?.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(message));
+    return true;
   }, []);
 
   return { connected, lost, send };
