@@ -1,7 +1,7 @@
 import { link, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { AccessMode } from '@ops-console/shared';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OutputFiles, runSaveFile } from '../src/agent/output-files';
 import { SAVE_FILE_TOOL } from '../src/agent/pull-request-tool';
 import { type AgentDaemon, api, converse, gate, startAgentDaemon, until } from './agent-fixtures';
@@ -9,6 +9,7 @@ import { tempDir } from './helpers';
 
 const running: AgentDaemon[] = [];
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const daemon of running.splice(0)) await daemon.stop();
 });
 
@@ -325,6 +326,87 @@ describe('save_file', () => {
       await symlink(outside, path.join(dir, 'css'));
       const answer = await runSaveFile(outputs, ctx.id, { name: 'sample-project', folder: documents });
       expect(answer).toMatchObject({ isError: true });
+      expect(await readdir(documents)).toEqual([]);
+    });
+  });
+
+  describe('destinations that stay closed', () => {
+    async function closed() {
+      const ctx = await start();
+      const home = await tempDir('ops-console-home-');
+      vi.stubEnv('HOME', home);
+      await mkdir(ctx.folder, { recursive: true });
+      await writeFile(path.join(ctx.folder, 'a.txt'), 'x');
+      await mkdir(path.join(ctx.folder, 'proj'));
+      await writeFile(path.join(ctx.folder, 'proj', 'b.txt'), 'x');
+      return { ctx, home, outputs: ctx.daemon.app.get(OutputFiles) };
+    }
+    const places = (home: string, dataDir: string) => [
+      path.join(home, '.ssh'),
+      path.join(home, '.gnupg'),
+      path.join(home, '.aws'),
+      path.join(home, 'Library', 'LaunchAgents'),
+      path.join(home, 'Library', 'LaunchDaemons'),
+      path.join(home, 'Library', 'Keychains'),
+      path.join(home, 'Library', 'Application Support', 'ops-console'),
+      dataDir,
+    ];
+
+    it('refuses each, and a folder inside it, in every Access mode, and copies nothing', async () => {
+      const { ctx, home, outputs } = await closed();
+      for (const root of places(home, ctx.daemon.dataDir)) {
+        await mkdir(path.join(root, 'sub'), { recursive: true });
+        const before = await readdir(root);
+        for (const folder of [root, path.join(root, 'sub')])
+          for (const name of ['a.txt', 'proj']) {
+            const refused = await outputs.describe(ctx.id, { name, folder }).catch((e: Error) => e.message);
+            expect(refused, folder).toMatch(/closed to saves.*Nothing was copied/s);
+            const answer = await runSaveFile(outputs, ctx.id, { name, folder });
+            expect(answer).toMatchObject({ isError: true });
+            expect(await readdir(folder)).toEqual(folder === root ? before : []);
+          }
+      }
+      for (const mode of Object.values(AccessMode)) {
+        await ctx.http.patch(`/sessions/${ctx.id}`, { access_mode: mode });
+        ctx.daemon.sdk.script({
+          tool: SAVE_FILE_TOOL,
+          input: { name: 'a.txt', folder: path.join(home, '.ssh') },
+        });
+        await ctx.http.post(`/sessions/${ctx.id}/messages`, { text: 'save it' });
+        await until(
+          async () => (await ctx.http.get(`/sessions/${ctx.id}`)).body.data.state,
+          (state) => state === 'idle',
+          'the run to end',
+        );
+        expect(await readdir(path.join(home, '.ssh'))).toEqual(['sub']);
+      }
+      expect((await ctx.http.get('/approvals')).body.data).toEqual([]);
+    });
+
+    it('refuses a link into one, and still allows a folder that only shares a name prefix', async () => {
+      const { ctx, home, outputs } = await closed();
+      await mkdir(path.join(home, '.ssh'));
+      await symlink(path.join(home, '.ssh'), path.join(home, 'Documents'));
+      const through = await outputs
+        .describe(ctx.id, { name: 'a.txt', folder: path.join(home, 'Documents') })
+        .catch((e: Error) => e.message);
+      expect(through).toMatch(/closed to saves.*Nothing was copied/s);
+      expect(await readdir(path.join(home, '.ssh'))).toEqual([]);
+      await mkdir(path.join(home, '.ssh-notes'));
+      await mkdir(`${ctx.daemon.dataDir}-copy`);
+      for (const folder of [path.join(home, '.ssh-notes'), `${ctx.daemon.dataDir}-copy`])
+        expect(await outputs.describe(ctx.id, { name: 'a.txt', folder })).toMatch(/^Save a.txt/);
+    });
+
+    it('refuses a name that starts with a dot, so a shell or git startup file is never written', async () => {
+      const { ctx, outputs } = await closed();
+      const documents = await tempDir('ops-console-documents-');
+      for (const name of ['.zshrc', '.zprofile', '.bashrc', '.bash_profile', '.profile', '.gitconfig']) {
+        await writeFile(path.join(ctx.folder, name), 'x');
+        expect(await outputs.describe(ctx.id, { name, folder: documents }).catch((e: Error) => e.message)).toMatch(
+          /No file/,
+        );
+      }
       expect(await readdir(documents)).toEqual([]);
     });
   });

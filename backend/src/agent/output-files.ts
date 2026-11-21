@@ -230,6 +230,31 @@ export class OutputFiles implements FileSaver {
       ))
     )
       throw new ApiError(404, ErrorCode.NotFound, `No folder ${folder}`);
+    await this.refuseClosed(folder);
     return folder;
+  }
+
+  /**
+   * Folders a save never writes in, whatever the Access mode: sign-in keys, launch agents that start programs, the
+   * Keychain and the console's own data folder (ADR 0002, 0003). Compared after links are resolved.
+   */
+  private async refuseClosed(folder: string): Promise<void> {
+    const home = os.homedir();
+    const closed = [
+      ...['.ssh', '.gnupg', '.aws'].map((name) => path.join(home, name)),
+      ...['LaunchAgents', 'LaunchDaemons', 'Keychains'].map((name) => path.join(home, 'Library', name)),
+      path.join(home, 'Library', 'Application Support', 'ops-console'),
+      this.dataDir,
+    ];
+    const real = await realpath(folder);
+    for (const root of closed) {
+      const resolved = await realpath(root).catch(() => null);
+      if (resolved && (real === resolved || real.startsWith(resolved + path.sep)))
+        throw new ApiError(
+          400,
+          ErrorCode.ValidationFailed,
+          `${folder} is closed to saves: it holds sign-in keys, startup programs or the console's own data. Nothing was copied.`,
+        );
+    }
   }
 }

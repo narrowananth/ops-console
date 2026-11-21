@@ -102,7 +102,9 @@ read, it could do any of these; the operator who set Full access chose that, and
 
 An approved `save_file` writes where the operator was shown: the daemon replaces a file of that name in the destination,
 which the card says, refuses a folder whose name is taken, and checks nothing else about the destination but that it
-exists. The operator reads the path on the card.
+exists and is not closed. `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/Library/LaunchAgents`, `~/Library/LaunchDaemons`,
+`~/Library/Keychains` and the console's data folder are refused as destinations, links resolved, in every Access mode
+including full. The operator reads the path on the card.
 
 A fix waits for the operator. The console shows how long each verified Alert has waited for its
 Review. A run steered by log text can execute local commands in the scratch copy; the safety lines,

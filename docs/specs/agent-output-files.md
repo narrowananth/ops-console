@@ -44,6 +44,10 @@ the agent can only print an `mv` command.
     name gives the agent an error and raises no Approval. The daemon never makes the destination folder itself, only
     the new folder of a folder save inside it. A file of the same name in the destination is replaced, and the card
     says so. A folder of that name already there is refused, never merged into, and nothing in it changes.
+    A destination that is, or after links are resolved sits inside, `~/.ssh`, `~/.gnupg`, `~/.aws`,
+    `~/Library/LaunchAgents`, `~/Library/LaunchDaemons`, `~/Library/Keychains` or the console's data folder (the default
+    one and the one `OPS_CONSOLE_DATA_DIR` names; the Keychain owner file sits in it) is refused in every Access mode,
+    full included. The error says what is closed and why, and that nothing was copied.
 16. The tool takes only a bare name from the Session's output folder. A path, `..`, a leading dot or a file elsewhere
     on this Mac is refused. A folder holds plain files and folders, at any depth. One link, a file with a second hard
     link or anything that is not a plain file refuses the whole folder, and so does a folder with no file in it. A copy
@@ -82,8 +86,8 @@ the agent can only print an `mv` command.
 - **Subfolders.** A file in a subfolder of the output folder gets no chip.
 - **Making missing destination folders** such as `~/Documents/a/b`. The agent builds `a/b` in the output folder and saves `a`.
 - **A size or file-count limit** on a folder save. The card shows both and the operator decides.
-- **Refusing destinations** such as `~/Library` or `~/.ssh`. The operator reads the path on the card; in full access
-  there is no card.
+- **Refusing other destinations**, such as the rest of `~/Library`. The operator reads the path on the card; in full
+  access there is no card.
 - **Live chips** while a turn runs. They appear when the turn ends.
 
 ## Safety
@@ -95,7 +99,10 @@ write list is unchanged.
 The agent gains write access to one more folder, under the data folder, and the daemon serves what it holds. The
 sandbox still denies reading the rest of the data folder, `runtime.json` included. The folder holds files only: the
 daemon serves no symlink and no file with a second hard link, and opens the file itself rather than trusting an earlier check, since the agent can swap a name between the two. It never writes through a symlink at the destination. A file's bytes reach the console with a type that never renders as a
-page. No new command, connection or network host. PROD rules unchanged.
+page. A destination in the closed folders of Behavior 15 is refused before any Approval and in full access, so a steered
+run cannot plant a key, a launch agent or a file in the console's data folder. A shell or git startup file (`.zshrc`,
+`.zprofile`, `.bashrc`, `.bash_profile`, `.profile`, `.gitconfig`) cannot be written either, since a name with a leading
+dot is never a file or folder of the output folder that the tool takes. No new command, connection or network host. PROD rules unchanged.
 
 ## API
 
