@@ -33,6 +33,8 @@ export class FakeProbe implements Probe {
 
   /** `one` runs; it never waits `delayMs`, as one server connects in seconds. */
   ones = 0;
+  /** Runs after every Probe, `run` and `one` alike: Claude Code refreshes a token as it reconnects a server. */
+  afterProbe: (() => void) | null = null;
   /** The config dir of each Probe, `run` and `one` alike, in order. */
   readonly asked: string[] = [];
 
@@ -40,6 +42,7 @@ export class FakeProbe implements Probe {
     this.ones += 1;
     this.asked.push(configDir);
     if (this.broken.has(configDir)) throw new Error('Claude did not answer');
+    this.afterProbe?.();
     return this.read(configDir, server.name);
   }
 
@@ -54,6 +57,7 @@ export class FakeProbe implements Probe {
       this.running -= 1;
     }
     if (this.broken.has(configDir)) throw new Error('Claude did not answer');
+    this.afterProbe?.();
     const project = (await readProject(cwd)).filter(({ name }) => this.approved.has(`${configDir}\n${name}`));
     return [...(await readRegistered(configDir, cwd)), ...project].map(({ name }) => this.read(configDir, name));
   }

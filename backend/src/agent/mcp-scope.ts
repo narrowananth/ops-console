@@ -23,13 +23,19 @@ const connectorServers = (...keep: string[]): string[] =>
 /** What a pull request job reads: the Git host's server and the ticket in Atlassian. */
 const PR_JOB_KEEPS = ['github', 'atlassian'];
 
+const serverOf = (id: ConnectorId): string => (CONNECTOR_SERVERS[id] as { name: string }).name;
+
 /**
  * `logSource` is the log source of the Alert the run works on, when it has one: only a Datadog Alert starts the Datadog
- * server, and only a CloudWatch Alert, or a run with no Alert, starts the CloudWatch one.
+ * server, only a Loki or New Relic Alert starts that source's hosted server, and only a CloudWatch Alert, or a run with
+ * no Alert, starts the CloudWatch one.
  */
 export function mcpScope(purpose: RunPurpose, kind: SessionKind, logSource: LogSource | null = null): McpScope {
   const datadog = logSource === null || logSource === ConnectorId.Datadog ? ['datadog-pup'] : [];
   const cloudWatch = logSource === null || logSource === ConnectorId.CloudWatchLogs ? [CLOUDWATCH_SERVER] : [];
+  const hosted = [ConnectorId.LokiLogs, ConnectorId.NewRelicLogs]
+    .filter((id) => logSource === null || logSource === id)
+    .map(serverOf);
   switch (purpose) {
     case RunPurpose.OpenPullRequest:
       return { none: true, withoutConnections: true, withoutConnectors: [] };
@@ -41,11 +47,15 @@ export function mcpScope(purpose: RunPurpose, kind: SessionKind, logSource: LogS
       return {
         none: false,
         withoutConnections: true,
-        withoutConnectors: connectorServers(...PR_JOB_KEEPS, ...datadog),
+        withoutConnectors: connectorServers(...PR_JOB_KEEPS, ...datadog, ...hosted),
       };
     case RunPurpose.Verify:
       // The Alert's log source server, and the read-only Connections it cross-checks.
-      return { none: false, withoutConnections: false, withoutConnectors: connectorServers(...datadog, ...cloudWatch) };
+      return {
+        none: false,
+        withoutConnections: false,
+        withoutConnectors: connectorServers(...datadog, ...cloudWatch, ...hosted),
+      };
     case RunPurpose.Chat:
       // A Dev tools Session is scoped to its own Connections elsewhere; any other chat starts none of them.
       return { none: false, withoutConnections: kind !== SessionKind.Devtools, withoutConnectors: [] };

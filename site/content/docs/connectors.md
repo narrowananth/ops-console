@@ -1,6 +1,6 @@
 # Connectors
 
-A Connector is an outside service you sign in to once, a folder of logs on your Mac, an AWS profile, a Loki URL or a New Relic account the console reads logs with. It holds the sign-in, the folder, the profile, the URL or the account and registers the service's MCP Server when it has one. You connect, check and disconnect Connectors in Integrations, the one place a source is connected.
+A Connector is an outside service you sign in to once, a folder of logs on your Mac, an AWS profile, a Grafana Cloud stack or a New Relic account the console reads logs with. It holds the sign-in, the folder, the profile, the stack or the account and registers the service's MCP Server when it has one. You connect, check and disconnect Connectors in Integrations, the one place a source is connected.
 
 ## The sixteen Connectors
 
@@ -20,10 +20,10 @@ A Connector is an outside service you sign in to once, a folder of logs on your 
 | Google Drive | The console's Google tools, over the Google Drive API |
 | OpenTelemetry logs | A Log folder on your Mac, read by the daemon |
 | CloudWatch logs | The `aws` CLI and AWS's CloudWatch MCP server, started with `uvx` |
-| Loki logs | The `logcli` CLI, with a Loki URL and a secret kept in the Keychain |
-| New Relic logs | The `newrelic` CLI, with an account ID and a User API key kept in the Keychain |
+| Loki logs | Grafana Cloud's hosted MCP server, signed in by the console itself with a token kept in the Keychain |
+| New Relic logs | New Relic's hosted MCP server, signed in through Claude Code |
 
-The agent reaches each service through Claude Code, with the service's own MCP server or CLI. OpenTelemetry logs has no service to reach. The console holds no extra copy of your access beyond the sign-in it keeps in the Keychain, and it stores no AWS key: CloudWatch logs uses the credentials where the AWS CLI keeps them. Loki logs and New Relic logs have no sign-in the console can use, so you type the secret or key once and the console keeps it in the Keychain.
+The agent reaches each service through Claude Code, with the service's own MCP server or CLI. OpenTelemetry logs has no service to reach. The console holds no extra copy of your access beyond the sign-in it keeps in the Keychain, and it stores no AWS key: CloudWatch logs uses the credentials where the AWS CLI keeps them. Loki logs, New Relic logs and CloudWatch logs have no field to fill in before Connect. A choice the sign-in cannot find, such as a New Relic Region, sits above the Connect button, and a choice the sign-in can list, such as an account, appears after you sign in.
 
 ## Connect
 
@@ -33,7 +33,7 @@ Slack, Atlassian, Sentry and other MCP servers sign in with their own OAuth. Git
 
 ## OpenTelemetry logs
 
-This Connector gives Monitor a second log source beside Datadog. It reads a Log folder: OTLP JSON lines that an OpenTelemetry Collector's `file` exporter writes on your Mac. There is no sign-in. You choose the folder in Integrations, and the Connector reads connected when the folder exists and the console can read it.
+This Connector gives Monitor a second log source beside Datadog. It reads a Log folder: OTLP JSON lines that an OpenTelemetry Collector's `file` exporter writes on your Mac. There is no sign-in. Press Choose folder in Integrations to open the macOS folder dialog, the one the Repos page uses. The pane shows the path you chose, and Connect starts reading. The Connector reads connected when the folder exists and the console can read it. A folder with no `.json` or `.jsonl` files connects, and its Scan says no files were found.
 
 What a Scan reads:
 
@@ -84,9 +84,12 @@ You need the `aws` CLI and `uvx` on your PATH. When one is missing, Connect stop
 
 Set it up in Integrations:
 
-1. Enter the AWS profile and the region, such as `us-east-1`.
-2. Pick Log groups from the list the profile can see. Each picked group is one Service. Its Service name starts as the last path segment of the group, so `/ecs/shop-api` becomes `shop-api`, and its env starts as `prod`. You can edit both. Two groups with the same Service name and env are refused.
-3. Press Connect. The Connector reads connected when the AWS CLI answers for the profile, and needs auth when it does not. For an Identity Center profile, Connect runs the AWS CLI's browser sign-in (`aws sso login`) and Cancel stops the wait. For any other profile, run `aws login` in a terminal and press Connect again.
+1. Choose the Profile. The picker lists the AWS profiles on this Mac, with `default` first. When none exists, the picker is empty and Connect creates `default` through the sign-in.
+2. Choose the Region, such as `us-east-1`. It starts as the profile's region when the profile has one.
+3. Press Connect. The console runs the AWS CLI's browser sign-in for the profile: `aws sso login` when the profile has an Identity Center session, `aws login` when it has none. Cancel stops the wait. The Connector reads connected when the AWS CLI answers for the profile, and needs auth when it does not. A profile that is already signed in connects at once.
+4. Pick Log groups from the list the profile can see. Each picked group is one Service. Its Service name starts as the last path segment of the group, so `/ecs/shop-api` becomes `shop-api`, and its env starts as `prod`. You can edit both. Two groups with the same Service name and env are refused.
+
+`aws login` needs AWS CLI 2.32.0 or later. With an older CLI, Connect stops, names the installed version and the command that updates it, `brew upgrade awscli`. The console updates nothing.
 
 One Connector reads one region. Each connected log source runs its own Scan schedule, with its own Check interval and daily scan time.
 
@@ -131,44 +134,34 @@ Alerts and Services from this source carry a CloudWatch label in Monitor. A Veri
 
 ## Loki logs
 
-This Connector gives Monitor a fourth log source. It reads the logs in a Grafana Loki, on Grafana Cloud or self-hosted, with Loki's own CLI, `logcli`. It registers no MCP Server.
+This Connector gives Monitor a fourth log source. It reads the logs of a Loki data source in a Grafana Cloud stack, through Grafana's hosted MCP server. It reads Grafana Cloud's Loki only: a self-hosted Loki is not read.
 
-You need `logcli` on your PATH. When it is missing, Connect stops and Integrations names the tool and the command that installs it, `brew install logcli`. The console installs nothing.
+Connect it in Integrations:
 
-Loki has no browser sign-in the console can use, so you type the secret once in Integrations. The console keeps it in the macOS Keychain and never shows it again. The pane shows only whether a secret is set, and typing a new one replaces it. The URL holds no user name or token: Connect refuses one, and credentials go in the secret field.
+1. Press Connect. The console opens Grafana's sign-in in your browser. The console signs in itself and keeps its token in the macOS Keychain. The browser comes back to a page on your Mac that closes after one use.
+2. Finish the sign-in in the browser. When the stack has one Loki data source, the Connector uses it. When it has several, the pane shows a picker with their names, and Connect finishes when you pick one. A stack with no Loki data source says so, and the Connector stays at needs auth with Reconnect.
+3. Connect also registers Grafana's MCP server with Claude Code for the agent. Claude Code can open one more browser sign-in for it, usually one click.
 
-### Grafana Cloud
+A Connector that held a self-hosted URL reads needs auth with the note "Loki on Grafana Cloud only: the self-hosted URL is no longer read." until you press Reconnect and sign in to Grafana Cloud. Its Services, Alerts and Scans stay.
 
-1. Enter the Loki URL of your Grafana Cloud stack.
-2. Choose basic auth. The username is the Loki instance ID.
-3. For the secret, use an access-policy token with the `logs:read` scope.
+### Names
 
-### Self-hosted Loki
+A Scan reads two labels, and you cannot change them:
 
-1. Enter the Loki URL.
-2. Enter the org id if your Loki has tenants. It is sent as the `X-Scope-OrgID` header. Leave it empty for none.
-3. Choose the auth mode your Loki or its proxy takes: none, bearer or basic. A bearer mode needs a secret. A basic mode needs a username and a secret.
+| Field | Label |
+| ----- | ----- |
+| Service | `service_name` |
+| Env | `deployment_environment_name`. A stream without it reads as `no env`. |
 
-### Fields
-
-| Field | Meaning | Default |
-| ----- | ------- | ------- |
-| Service label | The stream label whose values name the Services | `service_name` |
-| Env label | The stream label that says which env a stream belongs to. A stream without it reads as `no env`. | `deployment_environment_name` |
-| Selector | Extra stream matchers that narrow what a Scan reads, such as `cluster="prod-1"` | Empty |
-| Format | `JSON` or `logfmt`, the format of the log lines | `JSON` |
-
-Promtail setups often label the env as `env`. Change the env label to match your streams.
-
-One Connector reads one Loki URL. Each connected log source runs its own Scan schedule, with its own Check interval and daily scan time.
+A source whose logs have no `service_name` label connects, and its Scan says it found no Services under that name. Each connected log source runs its own Scan schedule, with its own Check interval and daily scan time.
 
 ### What a Scan reads
 
-A Scan finds the Services from the values of the service label over the Scan's window, inside the selector. It then runs two queries for each Service. The first counts failing lines per 10-minute bucket. The second reads the newest failing lines as Samples, at most 5,000 per Service. When a Service has more, a Route with one message group takes its count and 10-minute peak from the first query, and a Route with several message groups counts the newest 5,000 lines read. The Scan's notes say so. Loki's own query limits apply, and a query Loki refuses fails the source with Loki's reason shown.
+The daemon calls Grafana's query tools itself, on the Connector's schedule, with the Connector's own token and no model turn. A Scan finds the Services from the values of the service label over the Scan's window. It then runs two queries for each Service. The first counts failing lines per 10-minute bucket. The second reads the newest failing lines as Samples, at most 5,000 per Service. Grafana's server returns 100 lines for each call, so the Scan pages through the window until it has 5,000 lines or reaches the end. When a Service has more, a Route with one message group takes its count and 10-minute peak from the first query, and a Route with several message groups counts the newest 5,000 lines read. The Scan's notes say so. A server that refuses to page, an answer the console cannot read, or an error the server returns fails the source with the server's words shown. A rate limit the server names fails it as rate limited.
 
 ### Log fields
 
-The reader expects every log line in the format the Connector names. For each field it takes the first name in the list that the parsed line has:
+The reader expects every log line to be JSON. For each field it takes the first name in the list that the parsed line has:
 
 | Field | Names |
 | ----- | ----- |
@@ -185,45 +178,42 @@ A line counts as failing when its status code is 400 or more, or its level is `e
 {"level":"error","message":"payment provider timed out","method":"POST","route":"/checkout","status":502}
 ```
 
-A line that does not parse has none of these fields and is not read as a failure. Plain-text logs and access logs are not read. Loki behind a Grafana instance is not supported: the URL must be Loki's own.
+A line that does not parse has none of these fields and is not read as a failure. Plain-text logs and access logs are not read.
 
 ### Access for the console and the agent
 
-The console reads logs and writes nothing to Loki, and a PROD env is read-only like any other. The daemon calls `logcli` as you, outside the Run sandbox, and passes the address, org id and secret in the command's environment, never on its command line.
+The console reads logs and writes nothing to Loki, and a PROD env is read-only like any other. The console sends no write tool call to Grafana.
 
-A Verification or a Fix of a Loki Alert starts with a Recheck that counts the Alert's failing lines for the last hour, and the Report's evidence section is headed "Log evidence". The agent's brief gives it the Samples. When it needs more logs, the agent reads them through `logcli`, run by the console as an Integration command. It may use the read commands, which are a log or metric query, listing labels and label values, and series, with a fixed set of flags for time range, limit, output format and quiet. It cannot change the address, the org id, the credentials, the TLS settings or a proxy, and the secret never reaches it.
+A Verification or a Fix of a Loki Alert starts with a Recheck that counts the Alert's failing lines for the last hour, and the Report's evidence section is headed "Log evidence". The agent's brief gives it the Samples. When it needs more logs, the agent reads them through the Grafana MCP server that Connect registered with Claude Code, as it reads Jira. The agent may call only the server's read tools: data sources, labels and log queries.
 
-Alerts and Services from this source carry a Loki label in Monitor. Disconnect removes the secret from the Keychain and leaves Loki untouched.
+Alerts and Services from this source carry a Loki label in Monitor. Disconnect removes Grafana's MCP server from Claude Code's config and the console's token from the Keychain, and leaves Grafana untouched. The picked data source stays for the next Connect.
 
 ## New Relic logs
 
-This Connector gives Monitor a fifth log source. It reads the logs in a New Relic account with New Relic's own CLI, `newrelic`. It registers no MCP Server.
+This Connector gives Monitor a fifth log source. It reads the logs in a New Relic account through New Relic's hosted MCP server.
 
-You need `newrelic` on your PATH. When it is missing, Connect stops and Integrations names the tool and the command that installs it, `brew install newrelic-cli`. The console installs nothing.
+Connect it in Integrations:
 
-The `newrelic` CLI has no browser sign-in, so you type a User API key once in Integrations. It starts with `NRAK-`. The console keeps it in the macOS Keychain and never shows it again. The pane shows only whether a key is set, and typing a new one replaces it.
+1. Choose the Region above Connect: US, EU or JP. It starts as US and picks the address of New Relic's server.
+2. Press Connect. The sign-in belongs to Claude Code: Connect registers New Relic's MCP server with Claude Code and opens its browser sign-in. The console does not sign in to New Relic itself. Before the browser opens, the pane says macOS may ask for your Mac's login password once, so the console can read the sign-in Claude Code stored. If you refuse the prompt, the Connector reads needs auth.
+3. When the sign-in finishes, the console lists the accounts it can read. With one account the Connector uses it. With several, the pane shows a picker, and Connect finishes when you pick one.
 
-### Account and region
+A Scan reads the token Claude Code stored, and never refreshes it. When a read fails because the token expired, the console asks Claude Code to reconnect that one server, with no model turn, and reads again. When that fails too, the row reads needs auth and the pane offers Reconnect.
 
-1. Enter the account ID. In one.newrelic.com, open the user menu, then Administration, Access management and Accounts. The ID is a number.
-2. Choose the region of the account: US, EU or JP. A key belongs to one region, so pick the region the key was made in. A check that fails with needs auth means the key or the region is wrong.
-3. Paste the User API key.
+### Names
 
-### Fields
+A Scan reads two attributes, and you cannot change them:
 
-| Field | Meaning | Default |
-| ----- | ------- | ------- |
-| Service attribute | The attribute whose values name the Services | `service.name` |
-| Env attribute | The attribute that says which env an event belongs to. An event without it reads as `no env`. | `environment` |
-| Filter | One extra condition that narrows what a Scan reads, such as `cluster = 'prod-1'` | Empty |
+| Field | Attribute |
+| ----- | --------- |
+| Service | `service.name` |
+| Env | `environment`. An event without it reads as `no env`. |
 
-The filter is one condition of the kind that follows `WHERE`. Connect refuses a filter that holds a semicolon or a clause the reader adds itself, such as `SINCE`, `UNTIL`, `LIMIT`, `FACET`, `TIMESERIES` or `ORDER BY`.
-
-One Connector reads one account. Each connected log source runs its own Scan schedule, with its own Check interval and daily scan time.
+A source whose logs have no `service.name` attribute connects, and its Scan says it found no Services under that name. One Connector reads one account. Each connected log source runs its own Scan schedule, with its own Check interval and daily scan time.
 
 ### What a Scan reads
 
-A Scan finds the Services from the distinct values of the service attribute on failing events over the Scan's window, inside the filter. It then runs two queries for each Service. The first counts failing events per 10-minute bucket. The second reads the newest failing events as Samples, at most 5,000 per Service. When a Service has more, a Route with one message group takes its count and 10-minute peak from the first query, and a Route with several message groups counts the newest 5,000 events read. A window longer than 61 hours counts only the newest 61 hours. The Scan's notes say so. New Relic's own query limits apply, and a query New Relic refuses fails the source with New Relic's reason shown.
+The daemon calls New Relic's NRQL query tool itself, on the Connector's schedule, with the stored sign-in and no model turn. A Scan finds the Services from the distinct values of the service attribute on failing events over the Scan's window. It then runs two queries for each Service. The first counts failing events per 10-minute bucket. The second reads the newest failing events as Samples, at most 5,000 per Service. When a Service has more, a Route with one message group takes its count and 10-minute peak from the first query, and a Route with several message groups counts the newest 5,000 events read. A window longer than 61 hours counts only the newest 61 hours. The Scan's notes say so. A result the server cuts at its own row limit, an answer the console cannot read, or an error the server returns fails the source with the server's words shown. A rate limit the server names fails it as rate limited.
 
 ### Log fields
 
@@ -248,13 +238,11 @@ Plain-text and access-log formats are not read. The reader uses the attributes N
 
 ### Access for the console and the agent
 
-The console reads logs and writes nothing to New Relic, and a PROD env is read-only like any other. The daemon calls `newrelic` as you, outside the Run sandbox, and passes the key, account ID and region in the command's environment, never on its command line. New Relic's hosted MCP server is not used.
+The console reads logs and writes nothing to New Relic, and a PROD env is read-only like any other. The console sends no write tool call to New Relic.
 
-A Verification or a Fix of a New Relic Alert starts with a Recheck that counts the Alert's failing events for the last hour, and the Report's evidence section is headed "Log evidence". The agent's brief gives it the Samples. When it needs more logs, the agent reads them through `newrelic`, run by the console as an Integration command. It may run only `nrql query`, with a query and an output format. It cannot change the key, the account or the region, and the key never reaches it.
+A Verification or a Fix of a New Relic Alert starts with a Recheck that counts the Alert's failing events for the last hour, and the Report's evidence section is headed "Log evidence". The agent's brief gives it the Samples. When it needs more logs, the agent reads them through the New Relic MCP server that Connect registered with Claude Code. The agent may call only the server's read tools: NRQL queries and the account list.
 
-Its NRQL can read any event type in the account, not only logs. A User key reaches every account its user can open. Create a dedicated user with a read-only role for the console. New Relic documents no read-only key, so permissions come from the user's roles.
-
-Alerts and Services from this source carry a New Relic label in Monitor. Disconnect removes the key from the Keychain and leaves New Relic untouched.
+Alerts and Services from this source carry a New Relic label in Monitor. Disconnect removes New Relic's MCP server from Claude Code's config and leaves New Relic untouched. The Region and the picked account stay for the next Connect.
 
 ## Checks and Disconnect
 

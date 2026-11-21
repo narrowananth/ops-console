@@ -47,6 +47,7 @@ async function routeMonitor(page: Page) {
     config: {},
     last_checked_at: ago(1),
     sign_in: null,
+    pick: null,
   };
   await page.route('**/api/connectors', (route) => route.fulfill(list([datadog])));
   await page.route('**/api/services', (route) => route.fulfill(list([])));
@@ -298,8 +299,8 @@ const connectorOf = (id: string, name: string, status: string, detail: string | 
     {
       otel_logs: 'a local folder',
       cloudwatch_logs: 'aws CLI + CloudWatch MCP',
-      loki_logs: 'logcli CLI',
-      new_relic_logs: 'newrelic CLI',
+      loki_logs: 'Grafana Cloud MCP',
+      new_relic_logs: 'New Relic MCP',
     }[id] ?? 'pup',
   status,
   status_detail: detail,
@@ -308,6 +309,7 @@ const connectorOf = (id: string, name: string, status: string, detail: string | 
   config: {},
   last_checked_at: ago(1),
   sign_in: null,
+  pick: null,
 });
 
 const OTEL_SERVICE = { id: 'sv2', name: 'api', env: 'prod', repo_id: null, repo_url: null };
@@ -580,11 +582,11 @@ test('a New Relic Alert shows its filter as a line and never names Datadog', asy
 
 test('a down Loki source shows a notice naming it, and the other sources keep their Alerts', async ({ page }) => {
   await routeSources(page, {
-    loki: ['fail', 'Could not reach https://loki.example.com: connection refused'],
+    loki: ['fail', 'Could not reach Grafana: connection refused'],
   });
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
   const notice = page.getByRole('status').filter({ hasText: 'Loki' });
-  await expect(notice).toContainText('Loki is down: Could not reach https://loki.example.com: connection refused.');
+  await expect(notice).toContainText('Loki is down: Could not reach Grafana: connection refused.');
   await expect(notice).toContainText('Scans skip it');
   await expect(page.getByRole('status').filter({ hasText: 'OpenTelemetry is down' })).toHaveCount(0);
   const logs = page.getByRole('list', { name: 'Logs' });

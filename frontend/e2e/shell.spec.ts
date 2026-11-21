@@ -264,6 +264,7 @@ test('Connect asks for nothing, shows GitHub its one-time code and sign-in page,
     config: { org: null },
     last_checked_at: null,
     sign_in: null as { code: string | null; url: string | null } | null,
+    pick: null,
   };
   await page.route('**/api/connectors', (route) =>
     route.fulfill({ json: { data: [github], meta: { next_cursor: null } } }),
@@ -310,6 +311,7 @@ test('slashdocs asks for its server, saves it, then connects through its CLI', a
     config: { server: '' },
     last_checked_at: null,
     sign_in: null,
+    pick: null,
   };
   const calls: string[] = [];
   await page.route('**/api/connectors', (route) =>

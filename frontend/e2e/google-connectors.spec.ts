@@ -16,6 +16,7 @@ const google = (id: string, name: string) => ({
   config: {},
   last_checked_at: null,
   sign_in: null as { code: string | null; url: string | null } | null,
+  pick: null,
 });
 
 test("a Google Connector opens Google's sign-in, waits, and Cancel stops the wait", async ({ page }) => {

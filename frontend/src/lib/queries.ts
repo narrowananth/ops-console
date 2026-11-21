@@ -11,10 +11,12 @@ import {
   alertListItemSchema,
   alertSummarySchema,
   approvalSchema,
+  awsProfileListSchema,
   type BrowserState,
   branchSchema,
   browserStateSchema,
   type CliProxySetting,
+  type ConnectBody,
   type ConnectionTestResult,
   type ConnectionType,
   ConnectorId,
@@ -50,18 +52,15 @@ import {
   healthSchema,
   keychainHandoverSchema,
   keychainWaitSchema,
-  type LogGroupPick,
   type LogSource,
   localServersSchema,
   logGroupListSchema,
   logServiceSchema,
-  lokiConnectBodySchema,
   type Message,
   mcpServerListSchema,
   mcpServerSchema,
   messageSchema,
   networkAllowlistSchema,
-  newRelicConnectBodySchema,
   type OpenPullRequest,
   openedPullRequestSchema,
   outputFileSchema,
@@ -72,6 +71,7 @@ import {
   ProcessState,
   type PrReviewEvent,
   PrState,
+  pickableListSchema,
   playbookListSchema,
   playbookSchema,
   prAgentReviewSchema,
@@ -157,6 +157,9 @@ export const queryKeys = {
   logSource: ['log-source'] as const,
   /** The log groups the CloudWatch picker lists for a profile and region. */
   logGroups: (profile: string, region: string) => ['log-groups', profile, region] as const,
+  /** The Loki data sources or New Relic accounts a signed-in Connector offers. */
+  connectorPicks: (id: string) => ['connector-picks', id] as const,
+  awsProfiles: ['aws-profiles'] as const,
   alert: (id: string) => ['monitor', 'alert', id] as const,
   messages: (id: string) => ['messages', id] as const,
   outputs: (id: string) => ['outputs', id] as const,
@@ -604,49 +607,49 @@ function useConnectorMutation<V>(send: (variables: V) => Promise<unknown>) {
   });
 }
 
-/** Starts the sign-in; the result arrives as `connection.checked`. */
+/**
+ * Starts the sign-in with the choices the pane made, if any; the result arrives as `connection.checked`. The daemon
+ * refuses a missing tool, a pick it cannot read and a repeated Service (`tool_missing`, `validation_failed`,
+ * `pick_required`, `invalid_state`, `log_group_not_found`, `duplicate_service`, `folder_not_found`).
+ */
 export function useConnectConnector() {
-  return useConnectorMutation((id: ConnectorId) => apiSend('POST', `/connectors/${id}/connect`, {}, z.undefined()));
-}
-
-/** Connects the Log folder; the daemon reads the folder and refuses one it cannot (`folder_not_found`). */
-export function useConnectLogFolder() {
-  return useConnectorMutation((folder: string) =>
-    apiSend('POST', `/connectors/${ConnectorId.OtelLogs}/connect`, { folder }, z.undefined()),
+  return useConnectorMutation(({ id, body }: { id: ConnectorId; body?: ConnectBody }) =>
+    apiSend('POST', `/connectors/${id}/connect`, body ?? {}, z.undefined()),
   );
 }
 
-/**
- * Connects CloudWatch logs with its profile, region and picked log groups. A signed-in profile connects at once; the
- * daemon refuses a missing tool, a group the account lacks and a repeated Service (`tool_missing`,
- * `log_group_not_found`, `duplicate_service`).
- */
-export function useConnectCloudWatch() {
-  return useConnectorMutation((body: { profile: string; region: string; log_groups: LogGroupPick[] }) =>
-    apiSend('POST', `/connectors/${ConnectorId.CloudWatchLogs}/connect`, body, z.undefined()),
-  );
+/** Opens the macOS folder dialog for the Log folder. The path is not stored; Connect sends it. Null when cancelled. */
+export function usePickLogFolder() {
+  return useMutation({
+    mutationFn: () =>
+      apiSend(
+        'POST',
+        `/connectors/${ConnectorId.OtelLogs}/pick-folder`,
+        undefined,
+        z.object({ data: z.object({ path: z.string().nullable() }) }),
+      ).then((body) => body.data.path),
+  });
 }
 
-/**
- * Connects Loki logs with its URL, auth mode and label names. The secret is write-only: left out, the Keychain's stays.
- * The daemon refuses a missing `logcli` and a bad field (`tool_missing`, `validation_failed`); a refused secret shows
- * as the health check's `auth` status.
- */
-export function useConnectLoki() {
-  return useConnectorMutation((body: z.infer<typeof lokiConnectBodySchema>) =>
-    apiSend('POST', `/connectors/${ConnectorId.LokiLogs}/connect`, body, z.undefined()),
-  );
+/** What a signed-in Connector can read, for its picker: Loki data sources or New Relic accounts. */
+export function usePickables(id: ConnectorId.LokiLogs | ConnectorId.NewRelicLogs) {
+  const path = id === ConnectorId.LokiLogs ? 'datasources' : 'accounts';
+  return useQuery({
+    queryKey: queryKeys.connectorPicks(id),
+    queryFn: () => apiGet(`/connectors/${id}/${path}`, pickableListSchema).then((body) => body.data),
+    retry: false,
+    gcTime: 0,
+  });
 }
 
-/**
- * Connects New Relic logs with its account ID, region, attribute names and filter. The key is write-only: left out, the
- * Keychain's stays. The daemon refuses a missing `newrelic` and a bad field (`tool_missing`, `validation_failed`); a
- * refused key shows as the health check's `auth` status.
- */
-export function useConnectNewRelic() {
-  return useConnectorMutation((body: z.infer<typeof newRelicConnectBodySchema>) =>
-    apiSend('POST', `/connectors/${ConnectorId.NewRelicLogs}/connect`, body, z.undefined()),
-  );
+/** The AWS profiles on this Mac, for CloudWatch's picker. */
+export function useAwsProfiles() {
+  return useQuery({
+    queryKey: queryKeys.awsProfiles,
+    queryFn: () =>
+      apiGet(`/connectors/${ConnectorId.CloudWatchLogs}/profiles`, awsProfileListSchema).then((body) => body.data),
+    retry: false,
+  });
 }
 
 /** The log groups of a profile and region, read with the AWS CLI once asked for: each read is an AWS call. */

@@ -1,9 +1,14 @@
 import { createHash } from 'node:crypto';
-import { ErrorCode, NO_ENV, type Sample, type ScanWindow, WINDOW_HOURS } from '@ops-console/shared';
+import { NO_ENV, type Sample, type ScanWindow, WINDOW_HOURS } from '@ops-console/shared';
 import { z } from 'zod';
-import { ApiError } from '../common/errors';
 import { mapLimit } from '../common/map-limit';
-import { CliFailed, callCli } from './cli-call';
+import {
+  HostedAuthError,
+  HostedFailed,
+  type HostedOpen,
+  type HostedTools,
+  readFailure,
+} from '../connectors/hosted-mcp';
 import {
   FATAL_ERROR_LEVEL,
   groupEntries,
@@ -18,9 +23,6 @@ import {
   statusCodeOf,
   withRouteCounts,
 } from './log-reader';
-import type { LokiLogsConfig } from './log-source-config';
-import type { LokiAccess } from './loki-access';
-import { lokiFailure } from './loki-cli';
 
 /** The names a log line may use for each field after parsing, first present wins. Nested keys are joined with `_`. */
 const STATUS_FIELDS = ['status', 'statusCode', 'status_code', 'http_status_code'];
@@ -29,11 +31,17 @@ const ROUTE_FIELDS = ['route', 'path', 'resourcePath', 'url_path'];
 const LEVEL_FIELDS = ['level', 'severity', 'log_level'];
 const MESSAGE_FIELDS = ['message', 'msg'];
 
-/** At most this many failing lines a Scan reads per Service: Loki's default entry limit per query. */
+/** At most this many failing lines a Scan reads per Service. */
 const SAMPLE_LINES = 5_000;
+/** The most lines Grafana's hosted server returns for one call. */
+const LINES_PER_CALL = 100;
 const SERVICES_AT_ONCE = 4;
 const STEP_MS = 600_000;
 const ENV_WINDOW_MS = 7 * 86_400_000;
+
+/** The labels Loki readings group by: the names OpenTelemetry's Loki exporter gives them. */
+export const SERVICE_LABEL = 'service_name';
+export const ENV_LABEL = 'deployment_environment_name';
 
 const quote = (text: string) => JSON.stringify(text);
 const names = (fields: string[]) => fields.map((name) => `.${name}`).join(' ');
@@ -44,18 +52,23 @@ const ALIASES = `| label_format f_code=\`{{ or ${names(STATUS_FIELDS)} }}\`, f_m
 const FAILING = `| f_code=~"[4-9][0-9][0-9]" or f_level=~"(?i)(${FATAL_ERROR_LEVEL.join('|')})"`;
 const FAILING_CODE = '| f_code=~"[4-9][0-9][0-9]"';
 
-const rowsSchema = z
-  .array(
-    z
-      .object({
-        metric: z.record(z.string(), z.string()),
-        value: z.tuple([z.number(), z.string()]).optional(),
-        values: z.array(z.tuple([z.number(), z.string()])).optional(),
-      })
-      .loose(),
-  )
-  .nullable();
-const linesSchema = z.object({ line: z.string(), timestamp: z.string() }).loose();
+const labelsSchema = z
+  .record(z.string(), z.string())
+  .nullish()
+  .transform((labels) => labels ?? {});
+const entrySchema = z.looseObject({
+  timestamp: z.string().optional(),
+  line: z.string().optional(),
+  labels: labelsSchema,
+  value: z.number().optional(),
+  values: z.array(z.looseObject({ timestamp: z.string(), value: z.number() })).optional(),
+});
+/** What `query_loki_logs` answers: log entries, or metric samples, and how the server cut them. */
+const answerSchema = z.looseObject({
+  data: z.array(entrySchema),
+  metadata: z.looseObject({ resultsTruncated: z.boolean().optional() }).optional(),
+});
+type Answer = z.infer<typeof answerSchema>;
 /** The filter an Alert keeps to find its lines again. */
 const filterSchema = z.object({
   service: z.string(),
@@ -79,25 +92,8 @@ function flatten(value: Record<string, unknown>, prefix = '', into: Flat = {}): 
   return into;
 }
 
-/** The fields of a `key=value key="a b"` line, under the names Loki's logfmt parser gives them. */
-function logfmtFields(line: string): Flat | null {
-  const fields: Flat = {};
-  for (const match of line.matchAll(/([A-Za-z_][\w.]*)=(?:"((?:[^"\\]|\\.)*)"|(\S*))/g)) {
-    const name = (match[1] as string).replace(/[^A-Za-z0-9_:]/g, '_');
-    fields[name] = match[2] !== undefined ? match[2].replace(/\\(.)/g, '$1') : (match[3] as string);
-  }
-  return Object.keys(fields).length > 0 ? fields : null;
-}
-
-/** The line's fields as Loki names them, and the same fields as the Sample keeps them; null when the line does not parse. */
-function parseLine(
-  line: string,
-  format: LokiLogsConfig['format'],
-): { flat: Flat; attributes: Record<string, unknown> } | null {
-  if (format === 'logfmt') {
-    const fields = logfmtFields(line);
-    return fields && { flat: fields, attributes: fields };
-  }
+/** The line's fields as Loki names them, and the same fields as the Sample keeps them; null when the line is not JSON. */
+function parseLine(line: string): { flat: Flat; attributes: Record<string, unknown> } | null {
   try {
     const json: unknown = JSON.parse(line);
     if (json === null || typeof json !== 'object' || Array.isArray(json)) return null;
@@ -110,116 +106,106 @@ function parseLine(
 const firstOf = (flat: Flat, fields: string[]): string | undefined =>
   fields.map((name) => flat[name]).find((value) => value !== undefined && value !== '');
 
-/** The labels of a `series` line: `{app="api", env="prod"}`. */
-function labelsOf(line: string): Record<string, string> {
-  const labels: Record<string, string> = {};
-  for (const match of line.matchAll(/([A-Za-z_]\w*)=("(?:[^"\\]|\\.)*")/g)) {
-    try {
-      labels[match[1] as string] = JSON.parse(match[2] as string) as string;
-    } catch {
-      labels[match[1] as string] = (match[2] as string).slice(1, -1);
-    }
-  }
-  return labels;
-}
-
+const minutesOf = (milliseconds: number) => `${Math.max(1, Math.round(milliseconds / 60_000))}m`;
 const rangeOf = (window: ScanWindow) => `${Math.round(WINDOW_HOURS[window] * 60)}m`;
 
-export type LokiOptions = { bin?: string };
+/** A log entry's time in ms: an RFC 3339 time, or a number of seconds, milliseconds, microseconds or nanoseconds. */
+function timeOf(stamp: string | undefined): number {
+  if (stamp === undefined) return Number.NaN;
+  if (!/^\d+(?:\.\d+)?$/.test(stamp)) return Date.parse(stamp);
+  const value = Number(stamp);
+  if (value >= 1e17) return Math.floor(value / 1e6);
+  if (value >= 1e14) return Math.floor(value / 1e3);
+  return value >= 1e11 ? value : value * 1000;
+}
+
+type Found = { at: number; line: string };
 
 /**
- * Loki read with the `logcli` CLI, as the operator. A Scan lists the Services from the streams the service label names,
- * counts failing lines per 10 minutes with a metric query, and reads the newest failing lines as Samples. The failing
- * test, the field names and the ignored codes are LogQL, so Loki does the filtering. Errors name the tool and the
- * cause class only: output may hold log content.
+ * Loki read through Grafana Cloud's hosted MCP server, signed in with the console's own token. A Scan lists the
+ * Services from the streams the service label names, counts failing lines per 10 minutes with a metric query, and
+ * reads the newest failing lines as Samples, a page at a time. The failing test, the field names and the ignored codes
+ * are LogQL, so Loki does the filtering. A failure names the server and its own words.
  */
 export class LokiLogs implements LogReader {
-  private readonly bin: string;
-
   constructor(
-    private readonly source: () => Promise<LokiAccess>,
-    options: LokiOptions = {},
-  ) {
-    this.bin = options.bin ?? 'logcli';
-  }
+    /** The Loki data source the Connector reads. */
+    private readonly source: () => string,
+    private readonly open: HostedOpen,
+    /** Told when Grafana refuses the sign-in, so the Connector reads needs auth. */
+    private readonly onAuthLost: () => void,
+  ) {}
 
   async read(request: ReadRequest): Promise<ServiceReading[]> {
-    const { config, childEnv } = await this.source();
     const window = this.windowOf(request.window);
-    const streams = (await this.streams(config, childEnv, { from: window.from, to: window.to }, request.signal)).filter(
-      (stream) => request.envs.includes(stream.env) && (!request.services || request.services.includes(stream.name)),
-    );
-    const readings = await mapLimit(streams, SERVICES_AT_ONCE, async (service): Promise<ServiceReading | null> => {
-      const base = this.pipeline(config, this.selector(config, service), this.exclusions(request));
-      const evaluated = this.evaluationPoints(window);
-      const [counts, lines] = await Promise.all([
-        this.rows(
-          childEnv,
-          ['query', '--from', evaluated.from, '--to', evaluated.to, '--step', '10m', this.counted(base, '10m')],
-          request.signal,
-        ),
-        this.exec(
-          childEnv,
-          [
-            'query',
-            '--from',
-            window.fromIso,
-            '--to',
-            window.toIso,
-            '--limit',
-            String(SAMPLE_LINES),
-            '-o',
-            'jsonl',
-            '--no-labels',
-            '-z',
-            'UTC',
-            base,
-          ],
-          request.signal,
-        ),
-      ]);
-      const entries = this.entries(config, service, lines);
-      const total = counts.reduce((sum, row) => sum + row.points.reduce((points, [, count]) => points + count, 0), 0);
-      if (total > SAMPLE_LINES) {
-        request.note?.(`${service.name}: read the newest ${SAMPLE_LINES.toLocaleString('en-US')} failing lines only`);
-      }
-      const groups = withRouteCounts(
-        groupEntries(entries, ({ statusCode, method, path }) =>
-          JSON.stringify({
-            service: service.name,
-            env: service.env,
-            status: statusCode,
-            method: method || null,
-            path: path || null,
-          }),
-        ),
-        counts.map((row) => ({
-          statusCode: statusCodeOf(row.metric.f_code),
-          ...routeOf(row.metric.f_method, row.metric.f_route),
-          points: row.points,
-        })),
+    return this.within(async (tools, uid) => {
+      const streams = (await this.streams(tools, uid, window.to - window.from, request)).filter(
+        (stream) => request.envs.includes(stream.env) && (!request.services || request.services.includes(stream.name)),
       );
-      return groups.length > 0 ? { name: service.name, env: service.env, groups, repoUrl: null } : null;
-    });
-    return readings
-      .flatMap((reading) => (reading ? [reading] : []))
-      .sort((a, b) => a.name.localeCompare(b.name) || a.env.localeCompare(b.env));
+      const readings = await mapLimit(streams, SERVICES_AT_ONCE, async (service): Promise<ServiceReading | null> => {
+        const base = this.pipeline(this.selector(service), this.exclusions(request));
+        const evaluated = this.evaluationPoints(window);
+        const [counts, lines] = await Promise.all([
+          this.rows(
+            tools,
+            uid,
+            {
+              logql: this.counted(base, '10m'),
+              queryType: 'range',
+              startRfc3339: evaluated.from,
+              endRfc3339: evaluated.to,
+              stepSeconds: STEP_MS / 1000,
+            },
+            request.signal,
+          ),
+          this.lines(tools, uid, base, window, request.signal),
+        ]);
+        const entries = this.entries(service, lines.found);
+        const total = counts.reduce((sum, row) => sum + row.points.reduce((points, [, count]) => points + count, 0), 0);
+        if (total > SAMPLE_LINES || lines.capped) {
+          request.note?.(`${service.name}: read the newest ${SAMPLE_LINES.toLocaleString('en-US')} failing lines only`);
+        }
+        const groups = withRouteCounts(
+          groupEntries(entries, ({ statusCode, method, path }) =>
+            JSON.stringify({
+              service: service.name,
+              env: service.env,
+              status: statusCode,
+              method: method || null,
+              path: path || null,
+            }),
+          ),
+          counts.map((row) => ({
+            statusCode: statusCodeOf(row.metric.f_code),
+            ...routeOf(row.metric.f_method, row.metric.f_route),
+            points: row.points,
+          })),
+        );
+        return groups.length > 0 ? { name: service.name, env: service.env, groups, repoUrl: null } : null;
+      });
+      if (streams.length === 0) {
+        request.note?.(`Loki logs: no Services found under the label ${SERVICE_LABEL}`);
+      }
+      return readings
+        .flatMap((reading) => (reading ? [reading] : []))
+        .sort((a, b) => a.name.localeCompare(b.name) || a.env.localeCompare(b.env));
+    }, request.signal);
   }
 
   async envs(): Promise<string[]> {
-    const { config, childEnv } = await this.source();
-    const to = Date.now();
-    const streams = await this.streams(config, childEnv, { from: to - ENV_WINDOW_MS, to });
-    return [...new Set(streams.map((stream) => stream.env))].sort();
+    return this.within(async (tools, uid) => {
+      const streams = await this.streams(tools, uid, ENV_WINDOW_MS, {});
+      return [...new Set(streams.map((stream) => stream.env))].sort();
+    });
   }
 
   async services(envs: string[], window: ScanWindow, codes: number[]): Promise<ServiceCount[]> {
-    const { config, childEnv } = await this.source();
-    const query = `sum by (${config.service_label}, ${config.env_label}, f_code) (count_over_time(${this.pipeline(config, this.selector(config), [FAILING])} [${rangeOf(window)}]))`;
+    const query = `sum by (${SERVICE_LABEL}, ${ENV_LABEL}, f_code) (count_over_time(${this.pipeline(this.selector(), [FAILING])} [${rangeOf(window)}]))`;
+    const rows = await this.within((tools, uid) => this.rows(tools, uid, { logql: query, queryType: 'instant' }));
     const totals = new Map<string, ServiceCount>();
-    for (const row of await this.rows(childEnv, ['instant-query', query])) {
-      const name = row.metric[config.service_label];
-      const stream = row.metric[config.env_label] || NO_ENV;
+    for (const row of rows) {
+      const name = row.metric[SERVICE_LABEL];
+      const stream = row.metric[ENV_LABEL] || NO_ENV;
       const code = statusCodeOf(row.metric.f_code);
       if (name === undefined || !envs.includes(stream)) continue;
       if (codes.length > 0 && (code === null || !codes.includes(code))) continue;
@@ -232,10 +218,10 @@ export class LokiLogs implements LogReader {
   }
 
   async statusCodes(window: ScanWindow): Promise<{ code: number; count: number }[]> {
-    const { config, childEnv } = await this.source();
-    const query = `sum by (f_code) (count_over_time(${this.pipeline(config, this.selector(config), [FAILING_CODE])} [${rangeOf(window)}]))`;
+    const query = `sum by (f_code) (count_over_time(${this.pipeline(this.selector(), [FAILING_CODE])} [${rangeOf(window)}]))`;
+    const rows = await this.within((tools, uid) => this.rows(tools, uid, { logql: query, queryType: 'instant' }));
     const codes: { code: number; count: number }[] = [];
-    for (const row of await this.rows(childEnv, ['instant-query', query])) {
+    for (const row of rows) {
       const code = statusCodeOf(row.metric.f_code);
       if (code !== null) codes.push({ code, count: row.points.reduce((sum, [, count]) => sum + count, 0) });
     }
@@ -243,7 +229,6 @@ export class LokiLogs implements LogReader {
   }
 
   async countLogs(query: string, window: ScanWindow): Promise<number> {
-    const { config, childEnv } = await this.source();
     const filter = filterSchema.parse(JSON.parse(query));
     const conditions = [FAILING];
     if (filter.status !== null) conditions.push(`| f_code=${quote(String(filter.status))}`);
@@ -251,10 +236,21 @@ export class LokiLogs implements LogReader {
       conditions.push(`| f_method=~${quote(`(?i)${filter.method.replace(/[^A-Za-z]/g, '')}`)}`);
     }
     if (filter.path !== null) conditions.push(`| f_route=~${quote(pathPattern(filter.path))}`);
-    const selector = this.selector(config, { name: filter.service, env: filter.env });
-    const text = `sum(count_over_time(${this.pipeline(config, selector, conditions)} [${rangeOf(window)}]))`;
-    const [row] = await this.rows(childEnv, ['instant-query', text]);
+    const selector = this.selector({ name: filter.service, env: filter.env });
+    const text = `sum(count_over_time(${this.pipeline(selector, conditions)} [${rangeOf(window)}]))`;
+    const [row] = await this.within((tools, uid) => this.rows(tools, uid, { logql: text, queryType: 'instant' }));
     return row?.points.reduce((sum, [, count]) => sum + count, 0) ?? 0;
+  }
+
+  /** `use` in one session with the Connector's data source; a failure ends as the Scan's error, a refused sign-in also tells the Connector. */
+  private async within<T>(use: (tools: HostedTools, uid: string) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    const uid = this.source();
+    try {
+      return await this.open((tools) => use(tools, uid), signal);
+    } catch (error) {
+      if (error instanceof HostedAuthError) this.onAuthLost();
+      throw readFailure(error, 'Loki logs');
+    }
   }
 
   private windowOf(window: ScanWindow) {
@@ -269,22 +265,20 @@ export class LokiLogs implements LogReader {
     return { from: new Date(window.from + STEP_MS).toISOString(), to: new Date(end).toISOString() };
   }
 
-  /** `{service_label=..., env_label=..., extra}`; every Service of the selector when none is named. */
-  private selector(config: LokiLogsConfig, service?: { name: string; env: string }): string {
+  /** `{service_name=..., deployment_environment_name=...}`; every Service when none is named. */
+  private selector(service?: { name: string; env: string }): string {
     const parts = service
       ? [
-          `${config.service_label}=${quote(service.name)}`,
-          service.env === NO_ENV ? `${config.env_label}=""` : `${config.env_label}=${quote(service.env)}`,
+          `${SERVICE_LABEL}=${quote(service.name)}`,
+          service.env === NO_ENV ? `${ENV_LABEL}=""` : `${ENV_LABEL}=${quote(service.env)}`,
         ]
-      : [`${config.service_label}=~".+"`];
-    if (config.selector.trim() !== '') parts.push(config.selector.trim());
+      : [`${SERVICE_LABEL}=~".+"`];
     return `{${parts.join(', ')}}`;
   }
 
   /** Parse, drop lines that do not parse, name the fields, then keep what `after` says. */
-  private pipeline(config: LokiLogsConfig, selector: string, after: string[]): string {
-    const parser = config.format === 'json' ? '| json' : '| logfmt';
-    return `${selector} ${parser} | __error__="" ${ALIASES} ${after.join(' ')}`;
+  private pipeline(selector: string, after: string[]): string {
+    return `${selector} | json | __error__="" ${ALIASES} ${after.join(' ')}`;
   }
 
   /** The failing lines the request wants: the codes asked for, and not the ignored classes. */
@@ -298,73 +292,111 @@ export class LokiLogs implements LogReader {
     return `sum by (f_code, f_method, f_route) (count_over_time(${base} [${range}]))`;
   }
 
-  /** Every (service, env) the selector has a stream for in the window. */
+  /** Every (service, env) with a stream in the last `span` ms. Told when none has the service label. */
   private async streams(
-    config: LokiLogsConfig,
-    childEnv: Record<string, string>,
-    window: { from: number; to: number },
-    signal?: AbortSignal,
+    tools: HostedTools,
+    uid: string,
+    span: number,
+    request: Pick<ReadRequest, 'signal'>,
   ): Promise<{ name: string; env: string }[]> {
-    const out = await this.exec(
-      childEnv,
-      [
-        'series',
-        '--from',
-        new Date(window.from).toISOString(),
-        '--to',
-        new Date(window.to).toISOString(),
-        this.selector(config),
-      ],
-      signal,
-    );
+    const query = `sum by (${SERVICE_LABEL}, ${ENV_LABEL}) (count_over_time(${this.selector()} [${minutesOf(span)}]))`;
+    const rows = await this.rows(tools, uid, { logql: query, queryType: 'instant' }, request.signal);
     const seen = new Map<string, { name: string; env: string }>();
-    for (const line of out.split('\n')) {
-      const labels = labelsOf(line);
-      const name = labels[config.service_label];
+    for (const row of rows) {
+      const name = row.metric[SERVICE_LABEL];
       if (name === undefined || name === '') continue;
-      const stream = labels[config.env_label] || NO_ENV;
-      seen.set(JSON.stringify([name, stream]), { name, env: stream });
+      const env = row.metric[ENV_LABEL] || NO_ENV;
+      seen.set(JSON.stringify([name, env]), { name, env });
     }
     return [...seen.values()];
   }
 
-  /** The answer of a metric query as rows, each with its points; one point for an instant query. */
-  private async rows(childEnv: Record<string, string>, args: string[], signal?: AbortSignal): Promise<Row[]> {
-    const text = (await this.exec(childEnv, args, signal)).trim();
-    let parsed: z.infer<typeof rowsSchema>;
-    try {
-      parsed = rowsSchema.parse(text === '' ? null : JSON.parse(text));
-    } catch {
-      throw new ApiError(502, ErrorCode.UpstreamFailed, `\`logcli ${args[0]}\` gave an answer the console cannot read`);
+  /** One metric query as rows, each with its points; one point for an instant query. */
+  private async rows(
+    tools: HostedTools,
+    uid: string,
+    query: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<Row[]> {
+    signal?.throwIfAborted();
+    const answer = await this.query(tools, uid, query);
+    if (answer.metadata?.resultsTruncated) {
+      throw new HostedFailed('the server cut the result at its own row limit');
     }
-    return (parsed ?? []).map((row) => ({
-      metric: row.metric,
-      points: (row.values ?? (row.value ? [row.value] : [])).map(([at, count]) => [at, Number(count)]),
+    return answer.data.map((entry) => ({
+      metric: entry.labels,
+      points:
+        entry.values?.map(({ timestamp, value }): [number, number] => [timeOf(timestamp) / 1000, value]) ??
+        (entry.value === undefined ? [] : [[Date.now() / 1000, entry.value] as [number, number]]),
     }));
   }
 
-  /** One failing line as a Scan groups it; none for a line the parser the Connector names cannot read. */
-  private entries(config: LokiLogsConfig, service: { name: string; env: string }, out: string): LogEntry[] {
-    const entries: LogEntry[] = [];
-    for (const text of out.split('\n')) {
-      let record: z.infer<typeof linesSchema>;
-      try {
-        record = linesSchema.parse(JSON.parse(text));
-      } catch {
-        continue;
+  private query(tools: HostedTools, uid: string, query: Record<string, unknown>): Promise<Answer> {
+    return tools.callJson('query_loki_logs', { datasourceUid: uid, ...query }, answerSchema);
+  }
+
+  /**
+   * The newest failing lines in the window, at most `SAMPLE_LINES`: the server returns a hundred a call, so each call
+   * starts where the last one's oldest line ended. A server that returns the same lines again is not paging.
+   */
+  private async lines(
+    tools: HostedTools,
+    uid: string,
+    logql: string,
+    window: { from: number; to: number },
+    signal?: AbortSignal,
+  ): Promise<{ found: Found[]; capped: boolean }> {
+    const found = new Map<string, Found>();
+    let capped = false;
+    let end = window.to;
+    while (found.size < SAMPLE_LINES) {
+      signal?.throwIfAborted();
+      // One more than is missing: each call after the first starts on the line the last one ended with.
+      const asked = Math.min(LINES_PER_CALL, SAMPLE_LINES - found.size + 1);
+      const answer = await this.query(tools, uid, {
+        logql,
+        startRfc3339: new Date(window.from).toISOString(),
+        endRfc3339: new Date(end).toISOString(),
+        limit: asked,
+        direction: 'backward',
+      });
+      const before = found.size;
+      let oldest = end;
+      for (const entry of answer.data) {
+        const at = timeOf(entry.timestamp);
+        if (entry.line === undefined || Number.isNaN(at)) continue;
+        found.set(JSON.stringify([entry.timestamp, entry.line]), { at, line: entry.line });
+        oldest = Math.min(oldest, at);
       }
-      const parsed = parseLine(record.line, config.format);
-      const at = Date.parse(record.timestamp);
-      if (parsed === null || Number.isNaN(at)) continue;
+      // A page as long as the limit asked for may have more behind it, whatever the server says of truncation.
+      const full = answer.metadata?.resultsTruncated === true || answer.data.length >= asked;
+      if (!full || answer.data.length === 0) break;
+      capped = found.size >= SAMPLE_LINES;
+      // The next call includes the oldest millisecond again: a second line may share it.
+      const next = oldest + 1;
+      if (found.size === before || next >= end)
+        throw new HostedFailed('the server did not page: it returned the same lines again');
+      end = next;
+    }
+    return { found: [...found.values()].sort((a, b) => b.at - a.at).slice(0, SAMPLE_LINES), capped };
+  }
+
+  /** One failing line as a Scan groups it; none for a line that is not JSON. */
+  private entries(service: { name: string; env: string }, lines: Found[]): LogEntry[] {
+    const entries: LogEntry[] = [];
+    for (const { at, line } of lines) {
+      const parsed = parseLine(line);
+      if (parsed === null) continue;
       const { flat, attributes } = parsed;
       const level = firstOf(flat, LEVEL_FIELDS);
+      const stamp = new Date(at).toISOString();
       const sample: Sample = {
         // The same line read by two Scans is one Sample.
         id: createHash('sha256')
-          .update(JSON.stringify([service.name, service.env, record.timestamp, record.line]))
+          .update(JSON.stringify([service.name, service.env, stamp, line]))
           .digest('hex')
           .slice(0, 32),
-        timestamp: new Date(at).toISOString(),
+        timestamp: stamp,
         status: level ? level.toLowerCase() : 'error',
         message: firstOf(flat, MESSAGE_FIELDS) ?? '(no message)',
         attributes,
@@ -377,21 +409,5 @@ export class LokiLogs implements LogReader {
       });
     }
     return entries;
-  }
-
-  private async exec(childEnv: Record<string, string>, args: string[], signal?: AbortSignal): Promise<string> {
-    // `-q` keeps logcli's own log lines (the query URL, common labels) out of the way.
-    const full = ['-q', ...args];
-    try {
-      return await callCli(this.bin, full, childEnv, signal);
-    } catch (error) {
-      if (!(error instanceof CliFailed)) throw error;
-      const failure = lokiFailure(error.stderr);
-      if (failure.kind === 'rate_limited') throw new ApiError(429, ErrorCode.RateLimited, 'Loki rate limit reached');
-      if (failure.kind === 'limit') {
-        throw new ApiError(502, ErrorCode.UpstreamFailed, `Loki refused the query: ${failure.reason}`);
-      }
-      throw new ApiError(502, ErrorCode.UpstreamFailed, `\`logcli ${args[0]}\` failed`);
-    }
   }
 }

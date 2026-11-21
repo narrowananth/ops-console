@@ -19,9 +19,9 @@ export enum ConnectorId {
   OtelLogs = 'otel_logs',
   /** Logs of an AWS account, read with the AWS CLI. */
   CloudWatchLogs = 'cloudwatch_logs',
-  /** Logs of a Grafana Loki, read with the logcli CLI. */
+  /** Logs of a Loki data source in a Grafana Cloud stack, read through Grafana's hosted MCP server. */
   LokiLogs = 'loki_logs',
-  /** Logs of a New Relic account, read with the newrelic CLI. */
+  /** Logs of a New Relic account, read through New Relic's hosted MCP server. */
   NewRelicLogs = 'new_relic_logs',
 }
 
@@ -81,8 +81,8 @@ export const CONNECTOR_VIA: Record<ConnectorId, string> = {
   [ConnectorId.GoogleDrive]: 'Google Drive API',
   [ConnectorId.OtelLogs]: 'a local folder',
   [ConnectorId.CloudWatchLogs]: 'aws CLI + CloudWatch MCP',
-  [ConnectorId.LokiLogs]: 'logcli CLI',
-  [ConnectorId.NewRelicLogs]: 'newrelic CLI',
+  [ConnectorId.LokiLogs]: 'Grafana Cloud MCP',
+  [ConnectorId.NewRelicLogs]: 'New Relic MCP',
 };
 
 /**
@@ -90,6 +90,13 @@ export const CONNECTOR_VIA: Record<ConnectorId, string> = {
  * one allowed redirect is `http://localhost:<callback_port>/callback`.
  */
 export type McpOAuthClient = { client_id: string; callback_port: number };
+
+/** New Relic's hosted MCP server address in each region. */
+export const NEW_RELIC_MCP_URLS: Record<(typeof NEW_RELIC_REGIONS)[number], string> = {
+  US: 'https://mcp.newrelic.com/mcp/',
+  EU: 'https://mcp.eu.newrelic.com/mcp/',
+  JP: 'https://mcp.jp.newrelic.com/mcp/',
+};
 
 /**
  * The MCP Server each Connector registers when it connects. Jira and Bitbucket share Atlassian's; Disconnect removes a
@@ -131,6 +138,10 @@ export const CONNECTOR_SERVERS: Partial<
     transport: McpTransport.Stdio,
     target: 'ops-console google-mcp drive',
   },
+  // Grafana Cloud's hosted server. The console signs in to it itself and registers it for the agent.
+  [ConnectorId.LokiLogs]: { name: 'grafana', transport: McpTransport.Http, target: 'https://mcp.grafana.com/mcp' },
+  // New Relic's hosted server; Connect registers the address of the Region chosen.
+  [ConnectorId.NewRelicLogs]: { name: 'newrelic', transport: McpTransport.Http, target: NEW_RELIC_MCP_URLS.US },
   // AWS Labs' CloudWatch server. The Connector registers it with its profile and region in the environment.
   [ConnectorId.CloudWatchLogs]: {
     name: 'cloudwatch',
@@ -144,58 +155,8 @@ const count = z.number().int().min(1);
 /** An AWS profile or region name: it goes into the MCP server's command line, so no spaces or quotes. */
 const awsName = z.string().regex(/^(?!-)[A-Za-z0-9_.@+=,-]*$/, 'letters, digits and . _ @ + = , -');
 
-/** How `logcli` signs in: no secret, a bearer token, or basic with a username and password. */
-export const LOKI_AUTH = ['none', 'bearer', 'basic'] as const;
-
-/** A LogQL label name. It goes into queries, so nothing else is accepted. */
-const logqlLabel = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'a label name: letters, digits and _');
-
-const httpUrl = z.url({ protocol: /^https?$/ });
-/** `https://user:token@host`: anything before an `@` in the part of the URL that holds the host. */
-const hasUserinfo = (url: string): boolean => /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/i.test(url);
-/** The Loki address, or empty until chosen. `logcli` gets the secret apart from it, so the URL holds none. */
-const lokiUrl = z
-  .string()
-  .refine((url) => url === '' || httpUrl.safeParse(url).success, 'an http or https URL')
-  .refine((url) => !hasUserinfo(url), 'credentials belong in the secret field, not the URL');
-
-const MATCHER = String.raw`[A-Za-z_][A-Za-z0-9_]*\s*(?:=~|!~|!=|=)\s*"(?:[^"\\\n]|\\.)*"`;
-/** Extra stream matchers such as `cluster="prod-1"`: comma-separated, each a label, an operator and a quoted value. */
-const logqlMatchers = z
-  .string()
-  .regex(new RegExp(`^\\s*(?:${MATCHER}(?:\\s*,\\s*${MATCHER})*)?\\s*$`), 'stream matchers such as cluster="prod-1"');
-
 /** Where a New Relic account lives: its data center. */
 export const NEW_RELIC_REGIONS = ['US', 'EU', 'JP'] as const;
-
-/** An attribute name. It goes into queries inside backticks, so nothing else is accepted. */
-const nrqlAttribute = z.string().regex(/^[A-Za-z_][A-Za-z0-9_.-]*$/, 'an attribute name: letters, digits and _ . -');
-
-/** A clause the reader adds itself, or one that ends the condition. Quoted text counts too. */
-const FILTER_REFUSED =
-  /\b(?:SINCE|UNTIL|LIMIT|FACET|TIMESERIES|ORDER\s+BY|COMPARE\s+WITH|SLIDE\s+BY|OFFSET|WITH\s+TIMEZONE|EXTRAPOLATE)\b|;/i;
-/** Whether a quote opened in `text` is never closed, or a parenthesis outside quotes has no partner. A backslash escapes. */
-function unbalanced(text: string): boolean {
-  let open: string | null = null;
-  let depth = 0;
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i] as string;
-    if (char === '\\') i++;
-    else if (open !== null) open = char === open ? null : open;
-    else if (char === "'" || char === '"' || char === '`') open = char;
-    else if (char === '(') depth++;
-    else if (char === ')' && --depth < 0) return true;
-  }
-  return open !== null || depth !== 0;
-}
-/** One condition such as `cluster = 'prod-1'`, or empty for none. */
-const nrqlFilter = z
-  .string()
-  .refine(
-    (text) => !FILTER_REFUSED.test(text),
-    'one condition: no SINCE, UNTIL, LIMIT, FACET, TIMESERIES, ORDER BY, COMPARE WITH, SLIDE BY, OFFSET, WITH TIMEZONE, EXTRAPOLATE or ;',
-  )
-  .refine((text) => !unbalanced(text), 'a condition with its quotes and parentheses closed');
 
 /** One CloudWatch log group the operator picked, and the Service it is. */
 export const logGroupSchema = z.strictObject({
@@ -269,16 +230,9 @@ export const connectorConfigSchemas = {
     ignore: z.array(z.strictObject({ kind: z.enum(['status_class', 'route']), value: z.string().min(1) })),
     reports_folder: z.string().min(1),
   }),
-  /** `url`: empty until chosen. `username` is for basic only; the secret is in the Keychain, never here. */
+  /** `datasource_uid`: the Loki data source of the stack, empty until chosen. The sign-in is in the Keychain, never here. */
   [ConnectorId.LokiLogs]: z.strictObject({
-    url: lokiUrl,
-    org_id: z.string(),
-    auth: z.enum(LOKI_AUTH),
-    username: z.string(),
-    service_label: logqlLabel,
-    env_label: logqlLabel,
-    selector: logqlMatchers,
-    format: z.enum(['json', 'logfmt']),
+    datasource_uid: z.string(),
     environments: z.array(z.string().min(1)),
     daily_scan_time: time,
     default_interval: z.enum(['24h', '12h', '6h']),
@@ -287,13 +241,10 @@ export const connectorConfigSchemas = {
     ignore: z.array(z.strictObject({ kind: z.enum(['status_class', 'route']), value: z.string().min(1) })),
     reports_folder: z.string().min(1),
   }),
-  /** `account_id`: digits, empty until chosen. The API key is in the Keychain, never here. */
+  /** `account_id`: digits, empty until chosen. `region` picks the server's address. The sign-in is Claude Code's. */
   [ConnectorId.NewRelicLogs]: z.strictObject({
     account_id: z.string().regex(/^\d*$/, 'digits only'),
     region: z.enum(NEW_RELIC_REGIONS),
-    service_attribute: nrqlAttribute,
-    env_attribute: nrqlAttribute,
-    filter: nrqlFilter,
     environments: z.array(z.string().min(1)),
     daily_scan_time: time,
     default_interval: z.enum(['24h', '12h', '6h']),
@@ -355,14 +306,7 @@ export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknow
     reports_folder: 'reports',
   },
   [ConnectorId.LokiLogs]: {
-    url: '',
-    org_id: '',
-    auth: 'none',
-    username: '',
-    service_label: 'service_name',
-    env_label: 'deployment_environment_name',
-    selector: '',
-    format: 'json',
+    datasource_uid: '',
     environments: ['prod'],
     daily_scan_time: '09:00',
     default_interval: '24h',
@@ -374,9 +318,6 @@ export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknow
   [ConnectorId.NewRelicLogs]: {
     account_id: '',
     region: 'US',
-    service_attribute: 'service.name',
-    env_attribute: 'environment',
-    filter: '',
     environments: ['prod'],
     daily_scan_time: '09:00',
     default_interval: '24h',
@@ -388,36 +329,69 @@ export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknow
 };
 
 /**
- * `POST /connectors/loki_logs/connect`: the config fields the pane edits, and the secret, which is write-only. A field
- * left out keeps its stored value; the Connector checks the values against its config schema (422 `validation_failed`).
+ * `POST /connectors/:id/connect`: the choices a pane makes above Connect or after sign-in. Each Connector reads its own
+ * and checks the values (422 `validation_failed`); a field left out keeps its stored value. New Relic's `region` is
+ * `US`, `EU` or `JP`; CloudWatch's is an AWS region.
  */
-export const lokiConnectBodySchema = z.object({
-  url: z.string().optional(),
-  org_id: z.string().optional(),
-  auth: z.string().optional(),
-  username: z.string().optional(),
-  service_label: z.string().optional(),
-  env_label: z.string().optional(),
-  selector: z.string().optional(),
-  format: z.string().optional(),
-  /** Bearer token or basic password. Left out, the one in the Keychain stays. */
-  secret: z.string().optional(),
+export const connectBodySchema = z.object({
+  region: z.string().optional(),
+  /** New Relic: the account to read, when the sign-in can read several. */
+  account_id: z.string().optional(),
+  /** Loki: the data source to read, when the stack has several. */
+  datasource_uid: z.string().optional(),
+  /** CloudWatch: the AWS profile to sign in. */
+  profile: z.string().optional(),
+  log_groups: z.array(logGroupSchema).optional(),
+  /** OpenTelemetry: the Log folder, as the folder dialog answered. */
+  folder: z.string().optional(),
 });
 
+export type ConnectBody = z.infer<typeof connectBodySchema>;
+
 /**
- * `POST /connectors/new_relic_logs/connect`: the config fields the pane edits, and the API key, which is write-only. A
- * field left out keeps its stored value; the Connector checks the values against its config schema (422
- * `validation_failed`).
+ * `GET /connectors/loki_logs/datasources` and `GET /connectors/new_relic_logs/accounts`: what a signed-in Connector can
+ * read, for the picker. 409 `invalid_state` while the Connector is not signed in.
  */
-export const newRelicConnectBodySchema = z.object({
-  account_id: z.string().optional(),
-  region: z.string().optional(),
-  service_attribute: z.string().optional(),
-  env_attribute: z.string().optional(),
-  filter: z.string().optional(),
-  /** A User API key. Left out, the one in the Keychain stays. */
-  secret: z.string().optional(),
+export const pickableListSchema = z.object({
+  data: z.array(z.object({ id: z.string(), name: z.string() })),
+  meta: z.object({ next_cursor: z.null() }),
 });
+
+export type Pickable = z.infer<typeof pickableListSchema>['data'][number];
+
+/** `GET /connectors/cloudwatch_logs/profiles`: the AWS profiles on this Mac, `default` first, and each one's region. */
+export const awsProfileListSchema = z.object({
+  data: z.array(z.object({ name: z.string(), region: z.string().nullable() })),
+  meta: z.object({ next_cursor: z.null() }),
+});
+
+export type AwsProfile = z.infer<typeof awsProfileListSchema>['data'][number];
+
+/** The commercial AWS regions, for CloudWatch's Region picker. */
+export const AWS_REGIONS = [
+  'us-east-1',
+  'us-east-2',
+  'us-west-1',
+  'us-west-2',
+  'ca-central-1',
+  'eu-central-1',
+  'eu-west-1',
+  'eu-west-2',
+  'eu-west-3',
+  'eu-north-1',
+  'eu-south-1',
+  'ap-south-1',
+  'ap-southeast-1',
+  'ap-southeast-2',
+  'ap-southeast-3',
+  'ap-northeast-1',
+  'ap-northeast-2',
+  'ap-northeast-3',
+  'ap-east-1',
+  'sa-east-1',
+  'me-south-1',
+  'af-south-1',
+] as const;
 
 export const connectorSchema = z.object({
   id: z.enum(ConnectorId),
@@ -431,6 +405,11 @@ export const connectorSchema = z.object({
   last_checked_at: z.string().nullable(),
   /** Set while a sign-in waits on the operator; `code` is the one-time code GitHub asks for, else `null`. */
   sign_in: z.object({ code: z.string().nullable(), url: z.string().nullable() }).nullable(),
+  /**
+   * Set when the sign-in finished and waits for the operator to pick a Loki data source or a New Relic account, which
+   * the pane lists from `GET /connectors/loki_logs/datasources` or `/new_relic_logs/accounts`; `null` otherwise.
+   */
+  pick: z.enum(['data_source', 'account']).nullable(),
 });
 
 export type Connector = z.infer<typeof connectorSchema>;

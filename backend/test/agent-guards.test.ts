@@ -1,27 +1,12 @@
 import os from 'node:os';
 import path from 'node:path';
-import {
-  AccessMode,
-  ConnectorId,
-  DEFAULT_CONNECTOR_CONFIG,
-  HealthStatus,
-  RunPurpose,
-  type WsEvent,
-} from '@ops-console/shared';
-import { eq } from 'drizzle-orm';
+import { AccessMode, ConnectorId, type LogSource, RunPurpose, SessionKind, type WsEvent } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { runIntegration } from '../src/agent/integration-runner';
+import { mcpScope } from '../src/agent/mcp-scope';
 import { RUN_INTEGRATION_TOOL } from '../src/agent/pull-request-tool';
 import { AgentRuntime } from '../src/agent/runtime';
-import { connectors } from '../src/db/schema';
-import { STORE, type Store } from '../src/db/store';
-import { KEYCHAIN, type Keychain } from '../src/keychain/keychain';
-import { LOKI_SECRET_KEY } from '../src/monitor/loki-access';
-import { NEW_RELIC_KEY } from '../src/monitor/new-relic-access';
 import { type AgentDaemon, api, converse, listen, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
 import type { Step } from './fakes/agent-sdk';
-import { FakeLogcli } from './fakes/loki-logs';
-import { FakeNewRelic } from './fakes/new-relic-logs';
 
 const running: AgentDaemon[] = [];
 afterEach(async () => {
@@ -483,258 +468,66 @@ describe('CloudWatch Connector', () => {
   });
 });
 
-describe('logcli through run_integration', () => {
-  const QUERY = '{service_name="shop-api"} | json | status >= 500';
-  const call = (...args: string[]): Step => ({ tool: RUN_INTEGRATION_TOOL, input: { cli: 'logcli', args } });
-  const SECRET = 'glc_example_secret';
+describe('Loki and New Relic MCP servers', () => {
+  const kept = (purpose: RunPurpose, source: LogSource | null) => {
+    const scope = mcpScope(purpose, SessionKind.Repo, source);
+    return scope.none ? [] : ['grafana', 'newrelic'].filter((name) => !scope.withoutConnectors.includes(name));
+  };
 
-  it('runs a read with its time, limit, output and quiet flags at once, in every access mode', async () => {
-    const daemon = await start();
-    for (const mode of Object.values(AccessMode)) {
-      const { approvals } = await runTool(
-        daemon,
-        mode,
-        call('query', '--since', '1h', '--limit=50', '-o', 'jsonl', '-q', QUERY),
-      );
-      expect(approvals, mode).toEqual([]);
+  it('starts the server of the Alert’s own source for its Verification and Fix, and no other', () => {
+    for (const purpose of [RunPurpose.Verify, RunPurpose.Fix]) {
+      expect(kept(purpose, ConnectorId.LokiLogs), purpose).toEqual(['grafana']);
+      expect(kept(purpose, ConnectorId.NewRelicLogs), purpose).toEqual(['newrelic']);
+      expect(kept(purpose, ConnectorId.Datadog), purpose).toEqual([]);
     }
-    expect(daemon.sdk.ran).toHaveLength(Object.values(AccessMode).length);
   });
 
-  it('lets a Verification read with it, as it reads with pup', async () => {
-    const daemon = await start();
-    const runtime = daemon.app.get(AgentRuntime);
-    daemon.sdk.script(call('labels', 'service_name', '--since', '24h'));
-    await runtime.runFor(daemon.createSession(), 'job', null, { purpose: RunPurpose.Verify }).finished;
-    expect(daemon.sdk.ran.map((step) => step.tool)).toEqual([RUN_INTEGRATION_TOOL]);
-  });
-
-  it('refuses every address, tenant, credential, TLS and proxy flag, and any other command, in every access mode, and runs nothing', async () => {
-    const daemon = await start();
-    const refused = [
-      call('query', '--addr=https://evil.example.com', QUERY),
-      call('query', '--addr', 'https://evil.example.com', QUERY),
-      call('labels', '--org-id', 'another-tenant'),
-      call('query', '--username=u', '--password=p', QUERY),
-      call('query', '--bearer-token', 'x', QUERY),
-      call('query', '--bearer-token-file=/etc/passwd', QUERY),
-      call('query', '--tls-skip-verify', QUERY),
-      call('query', '--ca-cert=/tmp/ca.pem', '--cert=/tmp/c.pem', '--key=/tmp/k.pem', QUERY),
-      call('query', '--proxy-url=http://proxy.example.com', QUERY),
-      call('query', '--header', 'Authorization: x', QUERY),
-      call('query', '@/tmp/args.txt'),
-      call('query', '--tail', QUERY),
-      call('delete', 'create', QUERY),
-      call('fmt'),
-    ];
-    for (const mode of Object.values(AccessMode)) for (const step of refused) await runTool(daemon, mode, step);
-    expect(daemon.sdk.ran).toEqual([]);
-  });
-
-  describe('the daemon runs it with the Connector', () => {
-    let directory: string;
-    const withLoki = async (config: Record<string, unknown>, secret: string | null) => {
-      const logcli = await FakeLogcli.create();
-      const daemon = await start();
-      const store = daemon.app.get<Store>(STORE);
-      const keychain = daemon.app.get<Keychain>(KEYCHAIN);
-      store.write((tx) =>
-        tx
-          .update(connectors)
-          .set({
-            status: HealthStatus.Ok,
-            config: JSON.stringify({
-              ...DEFAULT_CONNECTOR_CONFIG[ConnectorId.LokiLogs],
-              url: 'https://loki.example.com',
-              ...config,
-            }),
-          })
-          .where(eq(connectors.id, ConnectorId.LokiLogs))
-          .run(),
-      );
-      if (secret !== null) await keychain.set(LOKI_SECRET_KEY, secret);
-      directory = os.tmpdir();
-      const previous = process.env.PATH;
-      process.env.PATH = `${logcli.dir}:${previous}`;
-      const run = (...args: string[]) =>
-        runIntegration({ db: store.db, keychain }, { cli: 'logcli', args }, directory).finally(() => {
-          process.env.PATH = previous;
-        });
-      return { logcli, daemon, run };
-    };
-
-    it('sets the address, tenant and secret in its environment, not its arguments, over any LOKI_ variable of the operator’s shell', async () => {
-      const { logcli, run } = await withLoki({ auth: 'basic', username: '123456', org_id: 'tenant-1' }, SECRET);
-      logcli.stream({ service_name: 'shop-api' }, [{ at: Date.now() - 60_000, line: 'x' }]);
-      process.env.LOKI_ADDR = 'https://ambient.example.com';
-      process.env.LOKI_BEARER_TOKEN = 'ambient-token';
-      let result: Awaited<ReturnType<typeof run>>;
-      try {
-        result = await run('labels', '--since', '1h');
-      } finally {
-        delete process.env.LOKI_ADDR;
-        delete process.env.LOKI_BEARER_TOKEN;
-      }
-      expect(result).toMatchObject({ ok: true, text: expect.stringContaining('service_name') });
-      const [only] = logcli.calls();
-      expect(only?.env).toEqual({
-        LOKI_ADDR: 'https://loki.example.com',
-        LOKI_ORG_ID: 'tenant-1',
-        LOKI_USERNAME: '123456',
-        LOKI_PASSWORD: SECRET,
-      });
-      expect(only?.args.join(' ')).not.toContain(SECRET);
-    });
-
-    it('cuts the secret from what the CLI prints, so a tool result never holds it', async () => {
-      const { logcli, run } = await withLoki({ auth: 'bearer' }, SECRET);
-      logcli.behave('leak');
-      const result = await run('query', QUERY);
-      expect(result.ok).toBe(true);
-      expect(result.text).toContain('credentials [redacted]');
-      expect(result.text).not.toContain(SECRET);
-    });
-
-    it('keeps the secret out of the agent’s environment, prompt and tool input', async () => {
-      const { logcli, daemon } = await withLoki({ auth: 'bearer' }, SECRET);
-      logcli.stream({ service_name: 'shop-api' }, []);
-      const { id } = await runTool(daemon, AccessMode.Full, call('labels'));
-      expect(id).toBeTruthy();
-      const calls = daemon.sdk.calls;
-      expect(calls.length).toBeGreaterThan(0);
-      expect(JSON.stringify(calls.map((one) => [one.prompt, one.options.env]))).not.toContain(SECRET);
-      expect(Object.keys(calls.at(-1)?.options.env ?? {}).filter((name) => name.startsWith('LOKI_'))).toEqual([]);
-    });
+  it('starts neither for a pull request job', () => {
+    for (const purpose of [RunPurpose.AgentReview, RunPurpose.OpenPullRequest]) {
+      expect(kept(purpose, ConnectorId.LokiLogs), purpose).toEqual([]);
+    }
   });
 });
 
-describe('newrelic through run_integration', () => {
-  const NRQL = "SELECT count(*) FROM Log WHERE `service.name` = 'shop-api' SINCE 1 hour ago";
-  const call = (...args: string[]): Step => ({ tool: RUN_INTEGRATION_TOOL, input: { cli: 'newrelic', args } });
-  const KEY = 'NRAK-EXAMPLE';
+describe('Loki and New Relic tools of the hosted servers', () => {
+  const tool = (server: string, name: string) => ({ tool: `mcp__${server}__${name}`, input: {} }) satisfies Step;
 
-  it('runs a read with its query and format flags at once, in every access mode', async () => {
+  it('lets the agent call only the read tools of Grafana’s and New Relic’s servers, in full access, and refuses any other, known or not', async () => {
     const daemon = await start();
-    for (const mode of Object.values(AccessMode)) {
-      const { approvals } = await runTool(daemon, mode, call('nrql', 'query', '--query', NRQL, '--format=JSON'));
-      expect(approvals, mode).toEqual([]);
-    }
-    expect(daemon.sdk.ran).toHaveLength(Object.values(AccessMode).length);
+    const allowed = [
+      ...[
+        'list_datasources',
+        'get_datasource',
+        'list_loki_label_names',
+        'list_loki_label_values',
+        'query_loki_logs',
+        'query_loki_stats',
+        'query_loki_patterns',
+      ].map((name) => tool('grafana', name)),
+      ...['execute_nrql_query', 'list_available_new_relic_accounts'].map((name) => tool('newrelic', name)),
+    ];
+    const refused = [
+      ...['update_dashboard', 'create_incident', 'query_prometheus', 'a_tool_a_later_version_adds'].map((name) =>
+        tool('grafana', name),
+      ),
+      ...['create_alert_condition', 'a_tool_a_later_version_adds'].map((name) => tool('newrelic', name)),
+    ];
+    for (const step of [...allowed, ...refused]) await runTool(daemon, AccessMode.Full, step);
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual(allowed.map((step) => step.tool));
   });
+});
 
-  it('lets a Verification read with it, as it reads with pup', async () => {
-    const daemon = await start();
-    const runtime = daemon.app.get(AgentRuntime);
-    daemon.sdk.script(call('nrql', 'query', '--query', NRQL));
-    await runtime.runFor(daemon.createSession(), 'job', null, { purpose: RunPurpose.Verify }).finished;
-    expect(daemon.sdk.ran.map((step) => step.tool)).toEqual([RUN_INTEGRATION_TOOL]);
-  });
+describe('Loki and New Relic through run_integration', () => {
+  const call = (cli: string, ...args: string[]): Step => ({ tool: RUN_INTEGRATION_TOOL, input: { cli, args } });
 
-  it('refuses every key, account, region, profile, debug and trace flag, and any other command, in every access mode, and runs nothing', async () => {
+  it('is not offered logcli or newrelic: a call naming either is refused in every access mode and runs nothing', async () => {
     const daemon = await start();
     const refused = [
-      call('nrql', 'query', '--apiKey=NRAK-OTHER', '--query', NRQL),
-      call('nrql', 'query', '--apiKey', 'NRAK-OTHER', '--query', NRQL),
-      call('nrql', 'query', '--accountId=999', '--query', NRQL),
-      call('nrql', 'query', '--accountId', '999', '--query', NRQL),
-      call('nrql', 'query', '-a', '999', '--query', NRQL),
-      call('nrql', 'query', '--region=EU', '--query', NRQL),
-      call('nrql', 'query', '--region', 'EU', '--query', NRQL),
-      call('nrql', 'query', '--profile=other', '--query', NRQL),
-      call('nrql', 'query', '--profile', 'other', '--query', NRQL),
-      call('nrql', 'query', '--debug', '--query', NRQL),
-      call('nrql', 'query', '--trace', '--query', NRQL),
-      call('nrql', 'query', '--query', '--accountId=999'),
-      call('nrql', 'query', '--query=-x'),
-      call('nrql', 'query', '--query', NRQL, '--format=-x'),
-      call('nerdgraph', 'query', '{ actor { user { email } } }'),
-      call('profile', 'list'),
-      call('config', 'list'),
-      call('apiAccess', 'create'),
+      call('logcli', 'query', '--since', '1h', '{service_name="shop-api"}'),
+      call('logcli', 'labels'),
+      call('newrelic', 'nrql', 'query', '--query', 'SELECT count(*) FROM Log SINCE 1 hour ago'),
     ];
     for (const mode of Object.values(AccessMode)) for (const step of refused) await runTool(daemon, mode, step);
     expect(daemon.sdk.ran).toEqual([]);
-  });
-
-  describe('the daemon runs it with the Connector', () => {
-    const withNewRelic = async (key: string | null) => {
-      const newrelic = await FakeNewRelic.create();
-      const daemon = await start();
-      const store = daemon.app.get<Store>(STORE);
-      const keychain = daemon.app.get<Keychain>(KEYCHAIN);
-      store.write((tx) =>
-        tx
-          .update(connectors)
-          .set({
-            status: HealthStatus.Ok,
-            config: JSON.stringify({
-              ...DEFAULT_CONNECTOR_CONFIG[ConnectorId.NewRelicLogs],
-              account_id: '1234567',
-              region: 'EU',
-            }),
-          })
-          .where(eq(connectors.id, ConnectorId.NewRelicLogs))
-          .run(),
-      );
-      if (key !== null) await keychain.set(NEW_RELIC_KEY, key);
-      const previous = process.env.PATH;
-      process.env.PATH = `${newrelic.dir}:${previous}`;
-      const run = (...args: string[]) =>
-        runIntegration({ db: store.db, keychain }, { cli: 'newrelic', args }, os.tmpdir()).finally(() => {
-          process.env.PATH = previous;
-        });
-      return { newrelic, daemon, run };
-    };
-
-    it('sets the key, account and region in its environment, not its arguments, over any NEW_RELIC_ variable of the operator’s shell', async () => {
-      const { newrelic, run } = await withNewRelic(KEY);
-      newrelic.events({ at: Date.now() - 60_000, attrs: { message: 'x' } });
-      process.env.NEW_RELIC_API_KEY = 'NRAK-AMBIENT';
-      process.env.NEW_RELIC_ACCOUNT_ID = '999';
-      process.env.NEW_RELIC_REGION = 'JP';
-      let result: Awaited<ReturnType<typeof run>>;
-      try {
-        result = await run('nrql', 'query', '--query', NRQL);
-      } finally {
-        delete process.env.NEW_RELIC_API_KEY;
-        delete process.env.NEW_RELIC_ACCOUNT_ID;
-        delete process.env.NEW_RELIC_REGION;
-      }
-      expect(result).toMatchObject({ ok: true, text: expect.stringContaining('count') });
-      const [only] = newrelic.calls();
-      expect(only?.env).toEqual({
-        NEW_RELIC_API_KEY: KEY,
-        NEW_RELIC_ACCOUNT_ID: '1234567',
-        NEW_RELIC_REGION: 'EU',
-      });
-      expect(only?.args.join(' ')).not.toContain(KEY);
-    });
-
-    it('refuses to run, and runs nothing, when the Connector has no key in the Keychain', async () => {
-      const { newrelic, run } = await withNewRelic(null);
-      const result = await run('nrql', 'query', '--query', NRQL);
-      expect(result.ok).toBe(false);
-      expect(result.text).toContain('not connected');
-      expect(newrelic.calls()).toEqual([]);
-    });
-
-    it('cuts the key from what the CLI prints, so a tool result never holds it', async () => {
-      const { newrelic, run } = await withNewRelic(KEY);
-      newrelic.behave('leak');
-      const result = await run('nrql', 'query', '--query', NRQL);
-      expect(result.ok).toBe(true);
-      expect(result.text).toContain('key [redacted]');
-      expect(result.text).not.toContain(KEY);
-    });
-
-    it('keeps the key out of the agent’s environment, prompt and tool input', async () => {
-      const { daemon } = await withNewRelic(KEY);
-      const { id } = await runTool(daemon, AccessMode.Full, call('nrql', 'query', '--query', NRQL));
-      expect(id).toBeTruthy();
-      const calls = daemon.sdk.calls;
-      expect(calls.length).toBeGreaterThan(0);
-      expect(JSON.stringify(calls.map((one) => [one.prompt, one.options.env]))).not.toContain(KEY);
-      expect(Object.keys(calls.at(-1)?.options.env ?? {}).filter((name) => name.startsWith('NEW_RELIC_'))).toEqual([]);
-    });
   });
 });

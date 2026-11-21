@@ -1,12 +1,9 @@
 import { type ChildProcess, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { ErrorCode } from '@ops-console/shared';
+import { type AwsProfile, ErrorCode } from '@ops-console/shared';
 import { z } from 'zod';
 import { LOGIN_TIMEOUT_MS } from '../claude-cli/claude-cli';
 import { ApiError } from '../common/errors';
-import { CliFailed, callCli } from '../monitor/cli-call';
-import { lokiFailure } from '../monitor/loki-cli';
-import { HEALTH_QUERY, newRelicFailure } from '../monitor/new-relic-cli';
 
 const run = promisify(execFile);
 
@@ -22,9 +19,6 @@ export type SignInPrompt = { code: string | null; url: string | null };
 /** `gh` prints "One-time code (ABCD-1234) copied to clipboard", or "First copy your one-time code: ABCD-1234". */
 const ONE_TIME_CODE = /(?:one-time code|enter the code)\W+([A-Z0-9]{4}-[A-Z0-9]{4})/i;
 const SIGN_IN_URL = /https:\/\/[^\s"'<>]+/;
-
-/** What a small query through a log CLI found: a service that answers, that refuses the secret, or that does not answer. */
-export type CliHealth = { status: 'ok' } | { status: 'auth' } | { status: 'down'; reason: string };
 
 export const CONNECTOR_TOOLS = Symbol('CONNECTOR_TOOLS');
 
@@ -56,14 +50,20 @@ export interface ConnectorTools {
   awsSignedIn(profile: string): Promise<boolean>;
   /** Whether the profile is an IAM Identity Center one, which `aws sso login` can sign in. */
   awsIsSso(profile: string): Promise<boolean>;
-  /** `aws sso login --profile <profile>`. */
-  awsLogin(profile: string, signal: AbortSignal, onPrompt: (prompt: SignInPrompt) => void): Promise<void>;
+  /** The AWS CLI's version such as `2.32.0`; null when `aws` prints none. */
+  awsVersion(): Promise<string | null>;
+  /** The profiles in the AWS config, `default` first, then A to Z, each with its region when it names one. */
+  awsProfiles(): Promise<AwsProfile[]>;
+  /** The browser sign-in: `aws sso login` for an Identity Center profile, `aws login` for any other. */
+  awsLogin(
+    profile: string,
+    region: string,
+    kind: 'sso' | 'console',
+    signal: AbortSignal,
+    onPrompt: (prompt: SignInPrompt) => void,
+  ): Promise<void>;
   /** The names of the log groups the profile sees in the region. */
   awsLogGroups(profile: string, region: string): Promise<string[]>;
-  /** `logcli labels` with `env` (the address, tenant and secret) in the child's environment. Never throws on a Loki failure. */
-  lokiCheck(env: Record<string, string>): Promise<CliHealth>;
-  /** A small NRQL query through `newrelic` with `env` (the key, account and region) in the child's environment. Never throws on a New Relic failure. */
-  newRelicCheck(env: Record<string, string>): Promise<CliHealth>;
   /** Opens a page in the operator's browser. */
   openPage(url: string): Promise<void>;
   /** Whether a command is on the PATH. */
@@ -81,8 +81,6 @@ export type ToolBins = {
   bkt: string;
   slashdocs: string;
   aws: string;
-  logcli: string;
-  newrelic: string;
 };
 
 const logGroupsSchema = z.object({ logGroups: z.array(z.object({ logGroupName: z.string() }).loose()) }).loose();
@@ -97,8 +95,6 @@ export class CliConnectorTools implements ConnectorTools {
       bkt: 'bkt',
       slashdocs: 'slashdocs',
       aws: 'aws',
-      logcli: 'logcli',
-      newrelic: 'newrelic',
     },
   ) {}
 
@@ -270,8 +266,54 @@ export class CliConnectorTools implements ConnectorTools {
     return false;
   }
 
-  async awsLogin(profile: string, signal: AbortSignal, onPrompt: (prompt: SignInPrompt) => void): Promise<void> {
-    await this.exec(this.bins.aws, ['sso', 'login', '--profile', profile], 'aws sso login', [0], {
+  async awsVersion(): Promise<string | null> {
+    try {
+      // The CLI prints its version on stdout, and on stderr before version 2.
+      const { stdout, stderr } = await run(this.bins.aws, ['--version'], { timeout: 30_000 });
+      return /aws-cli\/(\d+(?:\.\d+)*)/.exec(`${stdout}${stderr}`)?.[1] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async awsProfiles(): Promise<AwsProfile[]> {
+    let names: string[];
+    try {
+      const { stdout } = await run(this.bins.aws, ['configure', 'list-profiles'], { timeout: 30_000 });
+      names = stdout
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+    } catch {
+      throw new ApiError(502, ErrorCode.UpstreamFailed, '`aws configure list-profiles` failed');
+    }
+    const regionOf = async (profile: string): Promise<string | null> => {
+      try {
+        const { stdout } = await run(this.bins.aws, ['configure', 'get', 'region', '--profile', profile], {
+          timeout: 30_000,
+        });
+        return stdout.trim() || null;
+      } catch {
+        // An unset key exits 1.
+        return null;
+      }
+    };
+    const sorted = [...new Set(names)].sort((a, b) =>
+      a === 'default' ? -1 : b === 'default' ? 1 : a.localeCompare(b),
+    );
+    return Promise.all(sorted.map(async (name) => ({ name, region: await regionOf(name) })));
+  }
+
+  async awsLogin(
+    profile: string,
+    region: string,
+    kind: 'sso' | 'console',
+    signal: AbortSignal,
+    onPrompt: (prompt: SignInPrompt) => void,
+  ): Promise<void> {
+    const args =
+      kind === 'sso' ? ['sso', 'login', '--profile', profile] : ['login', '--profile', profile, '--region', region];
+    await this.exec(this.bins.aws, args, `aws ${args.slice(0, kind === 'sso' ? 2 : 1).join(' ')}`, [0], {
       signal,
       login: true,
       onPrompt,
@@ -285,30 +327,6 @@ export class CliConnectorTools implements ConnectorTools {
       return logGroupsSchema.parse(JSON.parse(stdout)).logGroups.map((group) => group.logGroupName);
     } catch {
       throw new ApiError(502, ErrorCode.UpstreamFailed, '`aws logs describe-log-groups` failed');
-    }
-  }
-
-  async lokiCheck(env: Record<string, string>): Promise<CliHealth> {
-    try {
-      await callCli(this.bins.logcli, ['-q', 'labels', '--since', '1h'], env);
-      return { status: 'ok' };
-    } catch (error) {
-      if (!(error instanceof CliFailed)) throw error;
-      const failure = lokiFailure(error.stderr);
-      if (failure.kind === 'auth') return { status: 'auth' };
-      return { status: 'down', reason: failure.kind === 'unreachable' ? failure.reason : 'it answered with an error' };
-    }
-  }
-
-  async newRelicCheck(env: Record<string, string>): Promise<CliHealth> {
-    try {
-      await callCli(this.bins.newrelic, ['nrql', 'query', '--query', HEALTH_QUERY], env);
-      return { status: 'ok' };
-    } catch (error) {
-      if (!(error instanceof CliFailed)) throw error;
-      const failure = newRelicFailure(error);
-      if (failure.kind === 'auth') return { status: 'auth' };
-      return { status: 'down', reason: failure.kind === 'unreachable' ? failure.reason : 'it answered with an error' };
     }
   }
 

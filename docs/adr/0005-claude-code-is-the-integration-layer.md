@@ -8,6 +8,13 @@ bundle. The Connector pane offers Connect, Reconnect and Disconnect,
 and Cancel while a sign-in waits; config the console needs keeps its defaults. A secret the console must hold, such as an MCP server's env var, goes to
 the Keychain. The console registers servers with `claude mcp add`. Fixed reads, such as a pull
 request list or a health check, call the same servers and CLIs directly, with no model turn.
+When a server lets any client register, the console may hold an MCP sign-in of its own: Grafana Cloud's, made with the MCP
+SDK's OAuth client and kept in the Keychain ([ADR 0004](0004-secrets-in-keychain.md)). Its browser comes back to a
+loopback page that lives for one callback, so [ADR 0003](0003-local-only-server.md) holds. When a server will not
+register the console, as New Relic's will not, the console may read the sign-in Claude Code stored for it, and never
+refreshes it. Both let a Scan call the hosted server's tools with no model turn. Connect also registers the server with
+Claude Code, so the agent reaches the same logs through the same MCP server. The second path depends on Claude Code's
+private storage and a macOS prompt; the alternative, a model turn for each Scan, costs tokens and varies.
 Judgment work runs as agent sessions. The agent writes a pull request's text; the console pushes the branch and opens
 the pull request through the Git host's CLI, since a run's sandbox cannot reach the operator's keys or sign-ins.
 The same limit reaches the agent's own use of those CLIs: a chat run asks the console to run one through its `run_integration` tool, and the daemon runs it as the operator ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md)).
@@ -48,3 +55,8 @@ console shows.
 - **Google's remote MCP servers for Docs, Sheets and Drive, behind the console's bridge**: Google maintains the tools, but the
   servers are in Developer Preview and Google asks a billing account on the Cloud project before the API can be enabled, which
   an open-source project cannot ask of everyone who runs it.
+- **A typed URL and key for Loki and New Relic, read with `logcli` and `newrelic`**: each needed an install and a key the
+  operator had to create and paste in. The hosted servers' browser sign-ins replaced them, and the two CLIs left the
+  `run_integration` allowlist.
+- **A model turn for each Scan of a hosted server**: the console could use Claude Code's sign-in with no stored copy, but
+  every Scan would spend tokens and read the logs differently each time.

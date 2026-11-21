@@ -1,6 +1,6 @@
 # OpenTelemetry logs are read from a folder, not received
 
-The console reads OpenTelemetry logs from a Log folder on the Mac: OTLP JSON files that a Collector's `file` exporter writes. The daemon pulls them on each Scan and runs no ingest endpoint. The server stays on `127.0.0.1` with its per-start session token ([ADR 0003](0003-local-only-server.md)), and a Collector holds no token that changes at every start.
+The console reads OpenTelemetry logs from a Log folder on the Mac: OTLP JSON files that a Collector's `file` exporter writes. The operator chooses the folder with the macOS folder dialog the Repos page uses and types no path. The daemon pulls them on each Scan and runs no ingest endpoint. The server stays on `127.0.0.1` with its per-start session token ([ADR 0003](0003-local-only-server.md)), and a Collector holds no token that changes at every start.
 
 A Log folder is a local source, so [ADR 0005](0005-claude-code-is-the-integration-layer.md) does not apply to it: no MCP server or CLI sits between the console and the files. The daemon reads them as the operator, read only. The agent never reads the folder, and the Run sandbox does not allow it ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md)). It works from the Samples in its brief.
 
@@ -18,3 +18,4 @@ A push receiver for OTLP or a webhook source needs its own ADR, because it rewri
 - **A webhook receiver**: a service that pushes to the console needs an address it can reach, which means a tunnel or a relay. ADR 0003 forbids both.
 - **A Monitor source concept beside Connectors**: a second place to connect a source. Integrations is the one place, so the Log folder is a Connector.
 - **A folder tool for the agent**: the Run sandbox does not allow the folder, and a tool would need its own review of what it may read.
+- **A typed path**: the operator had to know and spell the folder. The daemon is local ([ADR 0003](0003-local-only-server.md)), so its folder dialog opens on the operator's own screen.

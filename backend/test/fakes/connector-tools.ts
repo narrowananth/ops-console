@@ -1,6 +1,6 @@
-import { ErrorCode } from '@ops-console/shared';
+import { type AwsProfile, ErrorCode } from '@ops-console/shared';
 import { ApiError } from '../../src/common/errors';
-import type { CliHealth, ConnectorTools, SignInPrompt } from '../../src/connectors/connector-tools';
+import type { ConnectorTools, SignInPrompt } from '../../src/connectors/connector-tools';
 
 /** `pup`, `gh` and `glab` as scripted state. Sign-ins succeed unless a test says otherwise. */
 export class FakeConnectorTools implements ConnectorTools {
@@ -22,15 +22,14 @@ export class FakeConnectorTools implements ConnectorTools {
   awsSsoProfiles = new Set<string>();
   /** The log groups the signed-in profile sees. */
   awsGroups: string[] = [];
-  /** Each `aws sso login`, by profile, and each `describe-log-groups` call. */
+  /** Each `aws sso login` or `aws login`, by profile, and each `describe-log-groups` call. */
   readonly awsLogins: string[] = [];
+  readonly awsLoginKinds: ('sso' | 'console')[] = [];
+  readonly awsLoginRegions: string[] = [];
   readonly awsListed: { profile: string; region: string }[] = [];
-  /** What `logcli labels` finds, and the environment of each call: the address, tenant and secret. */
-  loki: CliHealth = { status: 'ok' };
-  readonly lokiCalls: Record<string, string>[] = [];
-  /** What a small `newrelic` query finds, and the environment of each call: the key, account and region. */
-  newRelic: CliHealth = { status: 'ok' };
-  readonly newRelicCalls: Record<string, string>[] = [];
+  /** The AWS CLI's version, and the profiles in its config. */
+  awsCliVersion: string | null = '2.32.1';
+  awsConfigured: AwsProfile[] = [];
   /** Commands not on the PATH; `brew install` puts one there. */
   missing = new Set<string>();
   readonly brewed: string[] = [];
@@ -117,8 +116,24 @@ export class FakeConnectorTools implements ConnectorTools {
     return this.awsSsoProfiles.has(profile);
   }
 
-  async awsLogin(profile: string, signal: AbortSignal, _onPrompt: (prompt: SignInPrompt) => void): Promise<void> {
+  async awsVersion(): Promise<string | null> {
+    return this.awsCliVersion;
+  }
+
+  async awsProfiles(): Promise<AwsProfile[]> {
+    return this.awsConfigured;
+  }
+
+  async awsLogin(
+    profile: string,
+    region: string,
+    kind: 'sso' | 'console',
+    signal: AbortSignal,
+    _onPrompt: (prompt: SignInPrompt) => void,
+  ): Promise<void> {
     this.awsLogins.push(profile);
+    this.awsLoginKinds.push(kind);
+    this.awsLoginRegions.push(region);
     await this.login(signal);
     this.awsSignedInProfiles.add(profile);
   }
@@ -128,16 +143,6 @@ export class FakeConnectorTools implements ConnectorTools {
     if (!this.awsSignedInProfiles.has(profile))
       throw new ApiError(502, ErrorCode.UpstreamFailed, '`aws logs describe-log-groups` failed');
     return this.awsGroups;
-  }
-
-  async lokiCheck(env: Record<string, string>): Promise<CliHealth> {
-    this.lokiCalls.push(env);
-    return this.loki;
-  }
-
-  async newRelicCheck(env: Record<string, string>): Promise<CliHealth> {
-    this.newRelicCalls.push(env);
-    return this.newRelic;
   }
 
   async openPage(url: string): Promise<void> {
