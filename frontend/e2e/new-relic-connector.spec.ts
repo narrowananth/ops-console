@@ -67,7 +67,7 @@ const ACCOUNTS = [
   { id: '3333333', name: 'Audit' },
 ];
 
-test('New Relic logs is not connected at first: only the Region is asked, US by default, and the pane warns of the macOS password prompt', async ({
+test('New Relic logs is not connected at first: only the Region is asked, US by default, and the pane warns of the macOS password prompt and says what to do when New Relic denies the sign-in', async ({
   page,
 }) => {
   const { main, pane } = await openPane(page, newRelic(), 'Connect');
@@ -82,6 +82,8 @@ test('New Relic logs is not connected at first: only the Region is asked, US by 
   await expect(pane.getByRole('textbox')).toHaveCount(0);
   await expect(pane.getByLabel('API key')).toHaveCount(0);
   await expect(pane.getByText(/macOS may ask for this Mac's login password once/)).toBeVisible();
+  await expect(pane.getByText(/administrator has disabled access/)).toBeVisible();
+  await expect(pane.getByText(/New Relic MCP Server in Feature Control Manager/)).toBeVisible();
   await expect(connectButton(pane)).toBeEnabled();
 });
 

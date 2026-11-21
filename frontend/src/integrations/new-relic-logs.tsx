@@ -32,6 +32,10 @@ export function NewRelicStep({ connector, pending, cancelling, onConnect, onCanc
           Connect signs in to New Relic through Claude Code. macOS may ask for this Mac's login password once, so the
           console can read that sign-in.
         </p>
+        <p className="m-0 text-xs text-neutral-700">
+          If New Relic's page says your administrator has disabled access, ask a New Relic administrator to turn on New
+          Relic MCP Server in Feature Control Manager. Nothing in the console can change that setting.
+        </p>
       </ChoiceCard>
       <SignInStep
         // The question has its own picker below: the step does not show it as a failure.

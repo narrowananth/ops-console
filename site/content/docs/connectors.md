@@ -195,7 +195,7 @@ This Connector gives Monitor a fifth log source. It reads the logs in a New Reli
 Connect it in Integrations:
 
 1. Choose the Region above Connect: US, EU or JP. It starts as US and picks the address of New Relic's server.
-2. Press Connect. The sign-in belongs to Claude Code: Connect registers New Relic's MCP server with Claude Code and opens its browser sign-in. The console does not sign in to New Relic itself. Before the browser opens, the pane says macOS may ask for your Mac's login password once, so the console can read the sign-in Claude Code stored. If you refuse the prompt, the Connector reads needs auth.
+2. Press Connect. The sign-in belongs to Claude Code: Connect registers New Relic's MCP server with Claude Code and opens its browser sign-in. The console does not sign in to New Relic itself. Before the browser opens, the pane says macOS may ask for your Mac's login password once, so the console can read the sign-in Claude Code stored. If you refuse the prompt, the Connector reads needs auth. If New Relic's page says your administrator has disabled access, a New Relic administrator must turn on New Relic MCP Server in Feature Control Manager; the console cannot change that setting.
 3. When the sign-in finishes, the console lists the accounts it can read. With one account the Connector uses it. With several, the pane shows a picker, and Connect finishes when you pick one.
 
 A Scan reads the token Claude Code stored, and never refreshes it. When a read fails because the token expired, the console asks Claude Code to reconnect that one server, with no model turn, and reads again. When that fails too, the row reads needs auth and the pane offers Reconnect.
