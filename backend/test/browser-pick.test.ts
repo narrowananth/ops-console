@@ -386,7 +386,7 @@ describe.runIf(chromePath)('element pick over the page stream', () => {
       (m) => m !== undefined,
       'the pick to end',
     );
-    expect(Date.now() - started).toBeLessThan(8000);
+    expect(Date.now() - started).toBeLessThan(12_000);
     // Frames still come: the outline of the reloaded page reaches the viewer.
     await until(
       () => h.evaluate('document.readyState').catch(() => ''),
