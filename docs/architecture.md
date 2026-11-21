@@ -45,7 +45,7 @@ holds the items. Installing only does `launchctl kickstart -k` on the loaded job
 the plist sets `UV_THREADPOOL_SIZE=16` and a Node compile cache (`~/.ops-console/compile-cache`, cleared by the next install).
 
 `ops-console start` writes a LaunchAgent plist (`RunAtLoad`, `KeepAlive`) that runs `current/Ops Console.app` on
-`current/app/main.js`, so launchd starts the daemon at login and again if it stops. macOS lists it as Ops Console
+`current/app/main.js`, so launchd starts the daemon at login and again if it stops, with `ProcessType` `Interactive` so the Chrome of a Session browser gets the priority of a foreground app. macOS lists it as Ops Console
 under App Background Activity in Login Items & Extensions; switched off there, it does not start at login. The Setup agent's
 The Permissions page shows it as Start at login, read from the plist and `launchctl print-disabled`. `OPS_CONSOLE_PORT` at
 `start` goes into the plist. The data folder is `~/Library/Application Support/ops-console`

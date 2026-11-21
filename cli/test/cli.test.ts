@@ -41,6 +41,8 @@ describe('ops-console start', () => {
     expect(plist).toContain(`<string>${path.join(m.installDir, 'current/app/main.js')}</string>`);
     expect(plist).toMatch(/<key>RunAtLoad<\/key>\s*<true\/>/);
     expect(plist).toMatch(/<key>KeepAlive<\/key>\s*<true\/>/);
+    // Chrome inherits the job's priority; without this the Session browser runs at 20 to 30 frames a second.
+    expect(plist).toMatch(/<key>ProcessType<\/key>\s*<string>Interactive<\/string>/);
     // Keychain calls that wait for a password must not use up the thread pool the daemon's file reads share.
     expect(plist).toMatch(/<key>UV_THREADPOOL_SIZE<\/key>\s*<string>16<\/string>/);
     expect(await m.calls()).toEqual(

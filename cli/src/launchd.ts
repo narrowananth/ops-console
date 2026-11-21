@@ -52,6 +52,8 @@ ${env}
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>ProcessType</key>
+    <string>Interactive</string>
     <key>StandardOutPath</key>
     <string>${xmlEscape(LOG_FILE)}</string>
     <key>StandardErrorPath</key>

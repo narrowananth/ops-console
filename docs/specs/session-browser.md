@@ -156,6 +156,10 @@ adds the same to a Session.
 - **Sharp frames**: Chrome's screencast makes no frame with more pixels than its screen has, and a headless screen is 1x.
   Chrome starts with `--force-device-scale-factor=2`, so a Retina panel gets 2x frames. Each tab sets its own device scale,
   so a page still lays out at its CSS size and a 1x viewer's frames stay at 1x.
+- **Frame rate**: the installed daemon runs under launchd, and Chrome inherits its priority. With no `ProcessType` in the
+  plist, a panel page ran at 20 to 30 frames a second with gaps over 50 ms; with `Interactive` it runs at 57 to 60, the
+  same as the daemon started from a terminal. Chrome's flags (GPU, frame-rate limit, backgrounding) and the screencast's
+  quality, size and ack did not change the numbers in a terminal run, so none is set.
 - **Isolation**: one Chrome and one profile folder per Session, tabs inside it, so a Session's cookies survive its Chrome exiting and no two Sessions share one.
 - **Local servers**: read with `lsof` for listening TCP sockets on loopback, each process's folder, and the processes under
   the Session's own; only the Session's are returned.
