@@ -11,7 +11,6 @@ import { memo, useState } from 'react';
 import { AttachmentViewer, outputAddress, PaperClip, size, type Viewed } from '../components/ui/attachment-viewer';
 import { Button, Spinner } from '../components/ui/button';
 import { CodeBlock } from '../components/ui/code-block';
-import { DiffLines } from '../components/ui/diff';
 import { Elapsed } from '../components/ui/elapsed';
 import { Markdown } from '../components/ui/markdown';
 import type { PathwayState } from '../components/ui/pathway';
@@ -19,12 +18,13 @@ import { ComparisonView, ResultView } from '../devtools/result-tables';
 import { COPY_FAILED, copyLabel, useCopy } from '../lib/clipboard';
 import { when } from '../monitor/scan-scope';
 import { KindBadge } from '../skills/kind-badge';
+import { FileChange } from './file-change';
 import { InlineText } from './inline-text';
 import { asReport, ReportDocument } from './report-document';
 import { SpawnCard } from './spawn-card';
 import { StepRun } from './step-run';
 
-/** One part of a Session's transcript: text, a tool step, a diff, a code block, a question or a Dev tools table. */
+/** One part of a Session's transcript: text, a tool step, a file change, a code block, a question or a Dev tools table. */
 const PartView = memo(function PartView({ part, sessionId }: { part: Part; sessionId: string | null }) {
   if (part.kind === 'spawn') return sessionId === null ? null : <SpawnCard part={part} sessionId={sessionId} />;
   if (part.kind === 'result') return <ResultView part={part} connections={[]} />;
@@ -39,14 +39,7 @@ const PartView = memo(function PartView({ part, sessionId }: { part: Part; sessi
     if (report) return <ReportDocument report={report} />;
     return <CodeBlock text={part.text} className="m-0 overflow-x-auto rounded-md bg-surface p-2.5 font-mono text-xs" />;
   }
-  if (part.kind === 'diff') {
-    return (
-      <div className="overflow-hidden rounded-md border border-line font-mono text-xs">
-        <div className="border-b border-line bg-surface px-2 py-1 font-semibold">{part.file}</div>
-        <DiffLines lines={part.lines} />
-      </div>
-    );
-  }
+  if (part.kind === 'diff') return <FileChange file={part.file} lines={part.lines} />;
   return (
     <div className="flex flex-col gap-1 rounded-lg bg-accent-100 px-3.5 py-2.5 text-[13px] text-accent-900">
       {part.header && <span className="text-xs font-semibold tracking-wide uppercase">{part.header}</span>}

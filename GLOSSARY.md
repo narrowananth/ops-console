@@ -83,6 +83,10 @@ _Avoid_: artifact, download
 Preformatted text the console draws in a box with a copy icon, however it got there: a fenced block in the agent's text, an
 Approval's command, a raw error, a step's output, a request or a text file.
 
+**File change row**:
+One line in the transcript for a file the agent wrote or edited: its type, name, verb and added and removed line counts. The
+lines themselves show only when the operator opens the row.
+
 **Network allowlist**:
 The hosts an agent run's commands may reach, built when the run starts from the built-in hosts, the hosts of the
 Repos' remotes and the operator's own domains. Any other host is refused.

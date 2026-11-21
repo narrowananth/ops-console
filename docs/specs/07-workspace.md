@@ -270,7 +270,11 @@ Adds `branch: string | null`.
   While a run goes, `waiting_input` included, Stop sits before Send and ends it (`02-settings-agents` Behavior 11a).
   Each run of the agent's tool steps folds to one line: the count and the latest step, turning while the message
   streams. Open, each step is one short line, such as "Ran git add +3" for a chain of shell commands; the full
-  command shows on hover. The state in the
+  command shows on hover. A file the agent writes or edits is its own File change row, closed: the file type, the
+  name in bold with its full path on hover, "Wrote" (the change removes no line) or "Edited", and `+N −M`. Clicking
+  the row, or Enter or Space on it, opens the diff under it and clicking again closes it. A long name shortens in
+  the middle and keeps its ending. The diff is not drawn while the row is closed, and a long one scrolls inside the
+  row. An open row stays open while the message streams on. Consecutive changes stay consecutive rows. The state in the
   header is a pill: tinted and pulsing while a run goes, red when failed.
   Each message the operator sent shows Copy on hover. The last one also shows Edit while no run goes: it opens the
   text in place with Cancel and Revert and rerun (`02-settings-agents` Behavior 8a). A note above the composer then
