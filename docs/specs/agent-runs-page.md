@@ -66,7 +66,7 @@ one browser tab, so no other view can show it.
     back clears it. Queue with no run going sends the message. A Session whose run is paused or stopped shows Play
     beside Send in its chat; Play carries the run on from the conversation, as it does on the page.
 14. Desktop alerts, off until the operator turns each on: when a run needs them, and when a run ends. The Alerts pill
-    in the page header and in the tray turns both on or off; the page keeps a switch for each. The browser asks
+    in the page bar and in the tray turns both on or off; the page keeps a switch for each. The browser asks
     permission once. An alert shows only while the console is open in a tab that is not in front, and not for what was
     there when the page loaded.
 15. The Running tray shows the same runs in a popup. Its header gives the counts, the Alerts pill and Stop all going

@@ -450,3 +450,83 @@ test('a control explains itself on hover and on keyboard focus, then keeps its t
   await page.keyboard.press('Escape');
   await expect(tip).toHaveCount(0);
 });
+
+test('the Workspace has no page bar: the Session header is the top bar and the transcript sits right under it', async ({
+  page,
+}) => {
+  const now = '2026-10-31T10:00:00.000Z';
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          {
+            id: 'r1',
+            name: 'apis',
+            path: '/work/apis',
+            host: 'github',
+            remote_slug: 'example/apis',
+            origin_slug: null,
+            default_branch: 'main',
+            created_at: now,
+            branch: 'main',
+            dirty: false,
+            missing: false,
+            session_count: 1,
+          },
+        ],
+        meta: { next_cursor: null },
+      },
+    }),
+  );
+  const session = {
+    id: 's1',
+    kind: 'repo',
+    title: 'fresh start',
+    model: 'claude-opus-5-5',
+    effort: 'medium',
+    access_mode: 'auto',
+    account_id: null,
+    repo_id: 'r1',
+    branch: 'main',
+    pr_number: null,
+    connection_ids: null,
+    extra_repo_ids: [],
+    pull_request: null,
+    pull_requests: [],
+    alert_id: null,
+    state: 'idle',
+    last_message_preview: null,
+    last_error: null,
+    created_at: now,
+    last_active_at: now,
+    playbook: null,
+    queued_message: null,
+    spawned_by: null,
+    spawned: [],
+    subagents: [],
+  };
+  await page.route(/\/api\/sessions\?kind=repo/, (route) => route.fulfill({ json: { data: [session] } }));
+  await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const sessionHeader = page.locator('header').filter({ has: page.getByRole('heading', { name: 'fresh start' }) });
+  await expect(sessionHeader).toBeVisible();
+  const box = await sessionHeader.boundingBox();
+  expect(box?.y).toBeLessThan(60);
+  // The page title stays for assistive tech and the heading outline.
+  await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toHaveCount(1);
+});
+
+test('a page with an action gets one slim bar and keeps the action in it', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`${daemon.url}/integrations#token=${daemon.token}`);
+
+  const bar = page.locator('header').filter({ has: page.getByRole('heading', { name: 'Integrations', level: 1 }) });
+  const action = bar.getByRole('button', { name: 'Add with Setup agent →' });
+  await expect(action).toBeVisible();
+  const box = await bar.boundingBox();
+  expect(box?.height).toBeLessThan(48);
+  const actionBox = await action.boundingBox();
+  expect(actionBox?.height).toBeLessThanOrEqual(box?.height ?? 0);
+});
