@@ -58,6 +58,10 @@ What the agent may do in a Session without asking: supervised, accept edits, aut
 write asks in every mode. Full asks about nothing else: the console's own tools (integration writes,
 `join_repo`, `save_file`, `spawn_sessions`, `start_process`, `browser_evaluate`) run at once in it.
 
+**Mention**:
+A `$skill` or `@file` in a message. The text the agent reads is `$name` or `@path`; the composer and the conversation draw
+it as a chip, the skill's name in words or the file's own name with its path in the tip.
+
 **Approval**:
 The operator's yes or no on one agent action that needs it: a PROD write, or an edit or command in
 a mode that asks.
@@ -66,7 +70,7 @@ a mode that asks.
 A `pup`, `gh`, `glab`, `bkt` or `slashdocs` command the agent asks the console to run through its `run_integration` tool. The daemon runs it outside the Run sandbox, as the operator. A read runs at once; a write needs an Approval, unless the Session's Access mode is full or the operator chose "Don't ask again this Session" for that CLI, which holds until the Session is deleted; sign-in, tokens and merges are refused whatever the choice.
 
 **Opened Repo**:
-An imported Repo, other than the Session's own, that the operator ticked in the composer's Repos chip. The operator's own runs in that Session write and read its checkout and run `git` there, inside the Run sandbox. The agent never pushes from it.
+An imported Repo, other than the Session's own, that the operator ticked in the composer's Repos icon. The operator's own runs in that Session write and read its checkout and run `git` there, inside the Run sandbox. The agent never pushes from it.
 
 **Run sandbox**:
 The operating-system limit on an agent run's commands: writes only in the run's working folder, the Session's output folder, its Opened Repos, temp and package-tool caches, no reads of
@@ -75,13 +79,17 @@ fails when the sandbox is unavailable. The agent's file tools write only in the 
 
 **Output file**:
 A file the agent wrote in its Session's output folder for the operator: a PDF, a spreadsheet, a chart, an archive. It shows
-in the transcript on the turn that wrote it and opens in the console, never launched on this Mac. The agent saves a copy in
-another folder only through `save_file`, which the operator approves.
+in the transcript on the turn that wrote it and opens in the console, never launched on this Mac. The agent saves a copy, or a
+folder of them, in another folder only through `save_file`, which the operator approves.
 _Avoid_: artifact, download
 
 **Code block**:
 Preformatted text the console draws in a box with a copy icon, however it got there: a fenced block in the agent's text, an
 Approval's command, a raw error, a step's output, a request or a text file.
+
+**File change row**:
+One line in the transcript for a file the agent wrote or edited: its type, name, verb and added and removed line counts. The
+lines themselves show only when the operator opens the row.
 
 **Network allowlist**:
 The hosts an agent run's commands may reach, built when the run starts from the built-in hosts, the hosts of the
@@ -282,6 +290,15 @@ The panel beside a Session's conversation that shows pages from the Session's Ch
 agent drive the same tabs. It blocks no request the page makes; the panel lists the outside hosts the page called. The agent
 opens only loopback pages in it.
 
+**Browser window**:
+One tab of the Browser panel in a popup window of the operator's own browser, with the toolbar and the page. The panel
+shows a placeholder for that tab until the window closes.
+
+**Inspector**:
+One tab's Chrome DevTools, docked in the Browser panel (under the page or beside it) or in a popup window of the operator's
+own browser, opened by Inspect. It reads and edits the tab's page through the daemon, which passes DevTools' own requests
+and refuses the rest.
+
 **Local server**:
 A Session's process listening on a loopback port, with its port, name and folder: one a Session process started, or one
 running in the Session's folders. Other listeners on the Mac are not shown.
@@ -291,8 +308,11 @@ A command the daemon runs for a Session as the operator, outside the Run sandbox
 database, a test watch, a shell. The operator starts it, or approves the agent's `start_process`. It runs until stopped,
 the Session is deleted or the daemon exits, and shows in the Terminals dock.
 
-**Link target**:
-Where a link opens: "In the console", the Browser panel, or "In the external browser". Set per browser.
+**Element pick**:
+The operator's click on an element of a tab's page in pick mode (the toolbar's pointer-arrow button). The element, with a
+crop of it, becomes a chip in the Session's message box, and the message then carries its selector, text, markup and styles
+in a delimited block. A typed value, a password field, cookies and storage are never taken. The agent cannot pick.
+_Avoid_: annotation, selection
 
 **Spawned Session**:
 A Session the agent started in an imported Repo through `spawn_sessions`, with a task the agent wrote, after the operator
@@ -390,7 +410,7 @@ A short Agent SDK session that reads which MCP Servers connect and which tools t
 stops before the model runs.
 
 **Connector**:
-An outside service the operator signs in to, or a Log folder, an AWS profile, a Loki data source or a New Relic account it reads logs with: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets, Google Drive, OpenTelemetry logs, CloudWatch logs, Loki logs, New Relic logs. It holds the sign-in, folder, profile, data source or account and registers the service's MCP Server when it has one. Each service is reached through a CLI or an MCP Server, and the daemon reads a Log folder. Loki logs and New Relic logs are read by the daemon through the hosted MCP Servers of Grafana Cloud and New Relic. All are connected, checked and disconnected in Integrations, the one place a source is connected.
+An outside service the operator signs in to, or a Log folder, an AWS profile, a Loki data source or a New Relic account it reads logs with: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets, Google Drive, OpenTelemetry logs, CloudWatch logs, Loki logs, New Relic logs. It holds the sign-in, folder, profile, data source or account and registers the service's MCP Server when it has one. Each service is reached through a CLI or an MCP Server, and the daemon reads a Log folder. Loki logs and New Relic logs are read by the daemon through the hosted MCP Servers of Grafana Cloud and New Relic, or, for New Relic logs when the operator gives a User API key, through New Relic's own API. All are connected, checked and disconnected in Integrations, the one place a source is connected.
 
 **Google bridge**:
 The stdio MCP Server the console registers for a Google Connector. It keeps nothing on disk: the launcher hands it the Connector's refresh token from the Keychain, and it mints access tokens and answers each tool call from the product's REST API. One Google sign-in serves every Claude account and CLIProxy.

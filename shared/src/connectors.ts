@@ -158,6 +158,10 @@ const awsName = z.string().regex(/^(?!-)[A-Za-z0-9_.@+=,-]*$/, 'letters, digits 
 /** Where a New Relic account lives: its data center. */
 export const NEW_RELIC_REGIONS = ['US', 'EU', 'JP'] as const;
 
+/** How New Relic logs are read: through New Relic's MCP server (`mcp`) or with a User API key through its API (`key`). */
+export const NEW_RELIC_ROUTES = ['mcp', 'key'] as const;
+export type NewRelicRoute = (typeof NEW_RELIC_ROUTES)[number];
+
 /** One CloudWatch log group the operator picked, and the Service it is. */
 export const logGroupSchema = z.strictObject({
   name: z.string().min(1),
@@ -241,10 +245,14 @@ export const connectorConfigSchemas = {
     ignore: z.array(z.strictObject({ kind: z.enum(['status_class', 'route']), value: z.string().min(1) })),
     reports_folder: z.string().min(1),
   }),
-  /** `account_id`: digits, empty until chosen. `region` picks the server's address. The sign-in is Claude Code's. */
+  /**
+   * `account_id`: digits, empty until chosen. `region` picks the server's or the API's address. `route` says which
+   * sign-in is in use: Claude Code's for the MCP server, or the User API key in the Keychain, never here.
+   */
   [ConnectorId.NewRelicLogs]: z.strictObject({
     account_id: z.string().regex(/^\d*$/, 'digits only'),
     region: z.enum(NEW_RELIC_REGIONS),
+    route: z.enum(NEW_RELIC_ROUTES).default('mcp'),
     environments: z.array(z.string().min(1)),
     daily_scan_time: time,
     default_interval: z.enum(['24h', '12h', '6h']),
@@ -318,6 +326,7 @@ export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknow
   [ConnectorId.NewRelicLogs]: {
     account_id: '',
     region: 'US',
+    route: 'mcp',
     environments: ['prod'],
     daily_scan_time: '09:00',
     default_interval: '24h',
@@ -337,6 +346,8 @@ export const connectBodySchema = z.object({
   region: z.string().optional(),
   /** New Relic: the account to read, when the sign-in can read several. */
   account_id: z.string().optional(),
+  /** New Relic: a User API key to read through New Relic's API, in place of the MCP sign-in. It goes to the Keychain. */
+  api_key: z.string().trim().min(1).max(200).optional(),
   /** Loki: the data source to read, when the stack has several. */
   datasource_uid: z.string().optional(),
   /** CloudWatch: the AWS profile to sign in. */

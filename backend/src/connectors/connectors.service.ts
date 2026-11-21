@@ -21,6 +21,7 @@ import {
   type McpServer,
   NEW_RELIC_MCP_URLS,
   NEW_RELIC_REGIONS,
+  type NewRelicRoute,
   type Pickable,
 } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
@@ -48,7 +49,8 @@ import {
   readFailure,
 } from './hosted-mcp';
 import { HostedServers } from './hosted-servers';
-import { NEW_RELIC_SERVER, newRelicTools } from './new-relic-mcp';
+import { NEW_RELIC_KEY } from './new-relic-api';
+import { NEW_RELIC_SERVER } from './new-relic-mcp';
 
 type Row = typeof connectors.$inferSelect;
 
@@ -164,6 +166,13 @@ export class ConnectorsService implements OnModuleDestroy {
   async connect(id: ConnectorId, input: ConnectInput = {}): Promise<void> {
     // The Log folder has no sign-in: choosing it connects, or is refused, before this answers.
     if (id === ConnectorId.OtelLogs) return this.chooseFolder(input.folder);
+    // A User API key replaces any sign-in waiting or held, and finishes before this answers.
+    if (id === ConnectorId.NewRelicLogs && input.api_key !== undefined)
+      return this.connectWithKey(input.api_key, input);
+    // A pick made while the key route is in use finishes with the stored key.
+    if (id === ConnectorId.NewRelicLogs && input.account_id && newRelicLogsConfig(this.store.db).route === 'key') {
+      return this.pickWithKey(input);
+    }
     // A second Connect during the wait of a log source's sign-in changes nothing.
     if (LOG_SIGN_INS.includes(id) && this.signIns.has(id)) return;
     if (id === ConnectorId.LokiLogs || id === ConnectorId.NewRelicLogs) await this.prepareHosted(id, input);
@@ -241,6 +250,11 @@ export class ConnectorsService implements OnModuleDestroy {
     }
     // The console's own Grafana sign-in leaves with it; New Relic's belongs to Claude Code and goes with the server.
     if (id === ConnectorId.LokiLogs) await this.keychain.delete(LOKI_OAUTH_KEY);
+    // The New Relic User API key leaves with it, and the next Connect starts on the MCP route again.
+    if (id === ConnectorId.NewRelicLogs) {
+      await this.keychain.delete(NEW_RELIC_KEY);
+      await this.update(id, { route: 'mcp' });
+    }
     this.picks.delete(id);
     this.store.write((tx) => {
       tx.update(connectors)
@@ -325,10 +339,7 @@ export class ConnectorsService implements OnModuleDestroy {
    */
   private async prepareHosted(id: ConnectorId.LokiLogs | ConnectorId.NewRelicLogs, input: ConnectInput): Promise<void> {
     if (id === ConnectorId.NewRelicLogs && input.region !== undefined) {
-      if (!NEW_RELIC_REGIONS.includes(input.region as (typeof NEW_RELIC_REGIONS)[number])) {
-        throw invalidConfig(`region must be one of ${NEW_RELIC_REGIONS.join(', ')}`);
-      }
-      await this.update(id, { region: input.region });
+      await this.update(id, { region: this.assertRegion(input.region) });
     }
     const pick = id === ConnectorId.LokiLogs ? input.datasource_uid : input.account_id;
     if (pick === undefined || pick === '') {
@@ -343,6 +354,14 @@ export class ConnectorsService implements OnModuleDestroy {
         `${pick} is not a ${id === ConnectorId.LokiLogs ? 'data source' : 'account'} this sign-in can read`,
       );
     }
+  }
+
+  /** The New Relic Region asked for, or undefined when none; 422 for any other value. */
+  private assertRegion(region: string | undefined): (typeof NEW_RELIC_REGIONS)[number] | undefined {
+    if (region === undefined) return undefined;
+    const found = NEW_RELIC_REGIONS.find((one) => one === region);
+    if (found === undefined) throw invalidConfig(`region must be one of ${NEW_RELIC_REGIONS.join(', ')}`);
+    return found;
   }
 
   /** Connects the Log folder: `folder`, or the one kept from before. Refused with `folder_not_found`, nothing stored. */
@@ -586,10 +605,13 @@ export class ConnectorsService implements OnModuleDestroy {
     const signedIn = await this.mcp.authenticateAndCheck(server.name, { signal, added });
     if (signal.aborted) return;
     if (signedIn.status !== HealthStatus.Ok) return this.landed(id, signal, serverReading(signedIn, {}));
-    const accounts = await this.newRelicAccounts(region).catch((error) => {
+    const accounts = await this.newRelicAccounts('mcp', region).catch((error) => {
       if (error instanceof HostedAuthError) throw new ApiError(409, ErrorCode.InvalidState, error.message);
       throw readFailure(error, 'New Relic');
     });
+    // The sign-in works: it replaces a User API key held before.
+    await this.keychain.delete(NEW_RELIC_KEY);
+    await this.update(id, { route: 'mcp' });
     if (accounts.length === 0) {
       this.picks.delete(id);
       return this.landed(id, signal, {
@@ -648,9 +670,72 @@ export class ConnectorsService implements OnModuleDestroy {
       .map(({ uid, name }) => ({ id: uid, name }));
   }
 
-  /** The accounts the New Relic sign-in can read. Throws the hosted errors. */
-  private newRelicAccounts(region: (typeof NEW_RELIC_REGIONS)[number]): Promise<Pickable[]> {
-    return this.hosted.newRelic(region)(async (tools) => (await newRelicTools(tools)).accounts());
+  /** The accounts the New Relic sign-in or User API key can read. Throws the hosted errors. */
+  private newRelicAccounts(route: NewRelicRoute, region: (typeof NEW_RELIC_REGIONS)[number]): Promise<Pickable[]> {
+    return this.hosted.newRelic(route, region)((api) => api.accounts());
+  }
+
+  /**
+   * New Relic with a User API key: the key proves itself by listing accounts, then goes to the Keychain, replacing the
+   * MCP server Claude Code holds, and the one account is used or the pane asks for one.
+   */
+  private async connectWithKey(key: string, input: ConnectInput): Promise<void> {
+    const id = ConnectorId.NewRelicLogs;
+    const region = this.assertRegion(input.region) ?? newRelicLogsConfig(this.store.db).region;
+    const accounts = await this.hosted.newRelicAccountsOf(region, key).catch((error) => {
+      if (error instanceof HostedAuthError) {
+        throw invalidConfig(
+          'New Relic refused the User API key. Use a User key (it starts with NRAK-) and the Region its account is in.',
+        );
+      }
+      throw readFailure(error, 'New Relic');
+    });
+    await this.keychain.set(NEW_RELIC_KEY, key);
+    this.signIns.get(id)?.abort();
+    this.signIns.delete(id);
+    this.prompts.delete(id);
+    await this.update(id, { region, route: 'key' });
+    const server = CONNECTOR_SERVERS[id] as McpSpec;
+    if ((await this.mcp.find(server.name))?.registered) {
+      await this.mcp.remove(server.name).catch(ignoreMissing);
+      await this.mcp.settled();
+    }
+    await this.finishAccounts(accounts, input.account_id || undefined);
+  }
+
+  /** The account picked after a User API key connected: it must be one the key can read. */
+  private async pickWithKey(input: ConnectInput): Promise<void> {
+    const id = ConnectorId.NewRelicLogs;
+    const region = this.assertRegion(input.region) ?? newRelicLogsConfig(this.store.db).region;
+    const accounts = await this.newRelicAccounts('key', region).catch((error) => {
+      throw pickerFailure(error, 'New Relic', 'New Relic logs');
+    });
+    await this.update(id, { region });
+    await this.finishAccounts(accounts, input.account_id);
+  }
+
+  /** The accounts a New Relic route can read, settled: one used, several asked about, none a reason. */
+  private async finishAccounts(accounts: Pickable[], asked: string | undefined): Promise<void> {
+    const id = ConnectorId.NewRelicLogs;
+    if (accounts.length === 0) {
+      this.picks.delete(id);
+      this.record(id, {
+        status: HealthStatus.Auth,
+        detail: 'This New Relic key can read no account. Connect with a user that can.',
+        accountLabel: null,
+        login: null,
+      });
+      return;
+    }
+    const chosen = this.choose('account', accounts, newRelicLogsConfig(this.store.db).account_id, asked);
+    if (chosen === null) {
+      this.picks.set(id, 'account');
+      this.record(id, { status: HealthStatus.Auth, detail: NEW_RELIC_PICK_DETAIL, accountLabel: null, login: null });
+      return;
+    }
+    await this.update(id, { account_id: chosen.id });
+    this.picks.delete(id);
+    this.record(id, { status: HealthStatus.Ok, detail: null, accountLabel: accountLabelOf(chosen), login: null });
   }
 
   /** For the picker: the Loki data sources of the signed-in stack; 409 `invalid_state` when the Connector is not signed in. */
@@ -665,10 +750,11 @@ export class ConnectorsService implements OnModuleDestroy {
 
   /** For the picker: the accounts of the New Relic sign-in; 409 `invalid_state` when it is not signed in. */
   async newRelicAccountList(): Promise<Pickable[]> {
-    if (!(await this.mcp.find(NEW_RELIC_SERVER))?.registered) {
+    const { region, route } = newRelicLogsConfig(this.store.db);
+    if (route === 'mcp' && !(await this.mcp.find(NEW_RELIC_SERVER))?.registered) {
       throw new ApiError(409, ErrorCode.InvalidState, 'New Relic logs is not signed in');
     }
-    return this.newRelicAccounts(newRelicLogsConfig(this.store.db).region).catch((error) => {
+    return this.newRelicAccounts(route, region).catch((error) => {
       throw pickerFailure(error, 'New Relic', 'New Relic logs');
     });
   }
@@ -810,11 +896,13 @@ export class ConnectorsService implements OnModuleDestroy {
           : down('The Loki data source is not in this Grafana stack any more. Reconnect to choose another.');
       }
       case ConnectorId.NewRelicLogs: {
-        const { region, account_id: accountId } = newRelicLogsConfig(this.store.db);
-        if (!(await this.mcp.find(NEW_RELIC_SERVER))?.registered) return signedOut(NEW_RELIC_SIGN_IN_DETAIL);
+        const { region, account_id: accountId, route } = newRelicLogsConfig(this.store.db);
+        if (route === 'mcp' && !(await this.mcp.find(NEW_RELIC_SERVER))?.registered) {
+          return signedOut(NEW_RELIC_SIGN_IN_DETAIL);
+        }
         let accounts: Pickable[];
         try {
-          accounts = await this.newRelicAccounts(region);
+          accounts = await this.newRelicAccounts(route, region);
         } catch (error) {
           return hostedReading(error, 'New Relic');
         }
@@ -931,15 +1019,18 @@ export class ConnectorsService implements OnModuleDestroy {
   }
 
   private async view(row: Row): Promise<Connector> {
+    // A row stored before the route existed reads with its default.
+    const stored = JSON.parse(row.config) as Record<string, unknown>;
+    const config = row.id === ConnectorId.NewRelicLogs ? { ...stored, route: stored.route ?? 'mcp' } : stored;
     return {
       id: row.id,
       name: CONNECTOR_NAMES[row.id],
-      via: CONNECTOR_VIA[row.id],
+      via: row.id === ConnectorId.NewRelicLogs && config.route === 'key' ? NEW_RELIC_API_VIA : CONNECTOR_VIA[row.id],
       status: row.status,
       status_detail: row.statusDetail,
       account_label: row.accountLabel,
       login: row.login,
-      config: JSON.parse(row.config) as Record<string, unknown>,
+      config,
       last_checked_at: row.lastCheckedAt,
       sign_in: this.prompts.get(row.id) ?? null,
       pick: pickOf(row),
@@ -1026,9 +1117,10 @@ const LOKI_PICK_DETAIL = 'Choose a Loki data source to finish connecting.';
 const NEW_RELIC_PICK_DETAIL = 'Choose a New Relic account to finish connecting.';
 const LOKI_SELF_HOSTED_DETAIL = 'Loki on Grafana Cloud only: the self-hosted URL is no longer read.';
 const NEW_RELIC_SIGN_IN_DETAIL = 'Sign in again to use the New Relic MCP server.';
+const NEW_RELIC_API_VIA = 'New Relic API';
 
-/** Keychain items of Loki logs and New Relic logs that nothing reads; removed at start. */
-const RETIRED_KEYS = [`connection:${ConnectorId.LokiLogs}`, `connection:${ConnectorId.NewRelicLogs}`];
+/** Keychain items of Loki logs that nothing reads; removed at start. */
+const RETIRED_KEYS = [`connection:${ConnectorId.LokiLogs}`];
 
 /** The first AWS CLI with `aws login`. */
 const AWS_LOGIN_VERSION = '2.32.0';

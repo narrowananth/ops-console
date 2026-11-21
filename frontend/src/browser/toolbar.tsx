@@ -1,27 +1,21 @@
 import { FILL_VIEWPORT, type Tab, TabAction, VIEWPORT_PRESETS, type Viewport } from '@ops-console/shared';
 import { useState } from 'react';
-import { z } from 'zod';
-import { useStored } from '../lib/remember';
+import { CodeIcon, CookieIcon, ExternalIcon, PointerIcon } from '../components/ui/icons';
 import { clampSide, customViewport, isFill, presetViewport, rotateViewport, viewportLabel } from './geometry';
 import { isLoopbackUrl } from './loopback';
-import { MenuButton, MenuHeading, MenuItem, MenuRule } from './menu-button';
+import { MenuButton, MenuHeading, MenuItem } from './menu-button';
 import { isBlank } from './tabs';
-
-/** Where a link in the conversation opens. Kept per browser. */
-export const LINK_TARGETS = ['app', 'system'] as const;
-export type LinkTarget = (typeof LINK_TARGETS)[number];
-export const LINK_TARGET_KEY = 'browser.link-target';
-
-export function useLinkTarget() {
-  return useStored<LinkTarget>(LINK_TARGET_KEY, z.enum(LINK_TARGETS), 'app');
-}
 
 const ROUND =
   'flex size-7 flex-none cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-0 text-sm text-neutral-700 hover:bg-neutral-200 hover:text-text disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent';
+const PRESSED = 'aria-pressed:bg-neutral-200 aria-pressed:text-accent-700';
 
 /**
- * Back, forward and reload (stop while loading), the address field, the device menu, External and the menu with the
- * link setting. With no tab, only the address field works: an address makes the first tab.
+ * Back, forward and reload (stop while loading), the address field, then one icon button per action: the device menu,
+ * the window button, Pick an element, Inspect, Open in your browser and Clear cookies. With no tab, only the address
+ * field works: an address makes the first tab. A tab's own window passes neither `onWindow` nor `onClear`: it has no
+ * window button, and clearing the Session's cookies stays the panel's. In a narrow row the address field shrinks to its
+ * least first, and then the buttons wrap to a second row together.
  */
 export function Toolbar({
   tab,
@@ -30,6 +24,11 @@ export function Toolbar({
   onAction,
   onAddress,
   onViewport,
+  onWindow,
+  picking,
+  onPick,
+  inspecting,
+  onInspect,
   onExternal,
   onClear,
 }: {
@@ -40,16 +39,22 @@ export function Toolbar({
   onAction: (action: TabAction) => void;
   onAddress: (text: string) => void;
   onViewport: (viewport: Viewport) => void;
+  onWindow?: () => void;
+  /** Pick mode is on for this tab. */
+  picking: boolean;
+  onPick: () => void;
+  /** DevTools are docked for this tab. */
+  inspecting: boolean;
+  onInspect: () => void;
   onExternal: () => void;
-  onClear: () => void;
+  onClear?: () => void;
 }) {
-  const [linkTarget, setLinkTarget] = useLinkTarget();
   const [custom, setCustom] = useState(false);
   const viewport = tab?.viewport;
   const blank = tab === undefined || isBlank(tab);
   return (
     <div className="@container border-b border-line">
-      <div className="flex items-center gap-1 px-2 py-1.5">
+      <div className="flex flex-wrap items-center gap-1 px-2 py-1.5">
         <button
           type="button"
           aria-label="Back"
@@ -102,82 +107,89 @@ export function Toolbar({
           focus={blank}
           onSubmit={onAddress}
         />
-        <MenuButton
-          label="Device"
-          title="Page size: the panel's own, or a phone, tablet or desktop"
-          disabled={tab === undefined}
-          width="w-60"
-          menuChildren={(close) => (
-            <DeviceMenu
-              viewport={viewport}
-              custom={custom}
-              setCustom={setCustom}
-              onPick={(next) => {
-                close();
-                setCustom(false);
-                onViewport(next);
-              }}
-            />
+        <div className="ml-auto flex flex-none items-center gap-1">
+          <MenuButton
+            label="Device"
+            title="Page size: the panel's own, or a phone, tablet or desktop"
+            disabled={tab === undefined}
+            width="w-60"
+            menuChildren={(close) => (
+              <DeviceMenu
+                viewport={viewport}
+                custom={custom}
+                setCustom={setCustom}
+                onPick={(next) => {
+                  close();
+                  setCustom(false);
+                  onViewport(next);
+                }}
+              />
+            )}
+          >
+            <span aria-hidden className="text-neutral-600">
+              ▭
+            </span>
+            <span className="hidden max-w-28 truncate @xl:inline">{viewport ? viewportLabel(viewport) : 'Fill'}</span>
+            <span aria-hidden className="text-neutral-600">
+              ▾
+            </span>
+          </MenuButton>
+          {onWindow && (
+            <button
+              type="button"
+              aria-label="Open in a window"
+              title="Open this tab in a window of its own"
+              disabled={tab === undefined}
+              onClick={onWindow}
+              className={ROUND}
+            >
+              ⛶
+            </button>
           )}
-        >
-          <span aria-hidden className="text-neutral-600">
-            ▭
-          </span>
-          <span className="max-w-28 truncate">{viewport ? viewportLabel(viewport) : 'Fill'}</span>
-          <span aria-hidden className="text-neutral-600">
-            ▾
-          </span>
-        </MenuButton>
-        <button
-          type="button"
-          title={blank ? 'Nothing is loaded yet' : 'Open this address in your own browser'}
-          disabled={blank}
-          onClick={onExternal}
-          className="flex flex-none cursor-pointer items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 py-1 text-xs font-semibold text-text hover:border-neutral-400 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <span aria-hidden>↗</span>
-          <span className="hidden @md:inline">External</span>
-        </button>
-        <MenuButton
-          label="Browser menu"
-          width="w-64"
-          className="[&>button]:border-transparent [&>button]:bg-transparent"
-          menuChildren={(close) => (
-            <>
-              <MenuHeading>Open links</MenuHeading>
-              <MenuItem
-                selected={linkTarget === 'app'}
-                onClick={() => {
-                  close();
-                  setLinkTarget('app');
-                }}
-              >
-                In the console
-              </MenuItem>
-              <MenuItem
-                selected={linkTarget === 'system'}
-                onClick={() => {
-                  close();
-                  setLinkTarget('system');
-                }}
-              >
-                In the external browser
-              </MenuItem>
-              <MenuRule />
-              <MenuItem
-                title="Signs this Session out of every site it logged in to"
-                onClick={() => {
-                  close();
-                  onClear();
-                }}
-              >
-                Clear this Session's cookies
-              </MenuItem>
-            </>
+          <button
+            type="button"
+            aria-label="Pick an element"
+            aria-pressed={picking}
+            title={picking ? 'Stop picking (Esc)' : 'Pick an element on the page and add it to your message'}
+            disabled={blank}
+            onClick={onPick}
+            className={`${ROUND} ${PRESSED}`}
+          >
+            <PointerIcon solid={picking} />
+          </button>
+          <button
+            type="button"
+            aria-label="Inspect"
+            aria-pressed={inspecting}
+            title={inspecting ? 'Close DevTools' : "Inspect this page with Chrome's DevTools"}
+            disabled={blank}
+            onClick={onInspect}
+            className={`${ROUND} ${PRESSED}`}
+          >
+            <CodeIcon />
+          </button>
+          <button
+            type="button"
+            aria-label="Open in your browser"
+            title="Open in your browser"
+            disabled={blank}
+            onClick={onExternal}
+            className={ROUND}
+          >
+            <ExternalIcon />
+          </button>
+          {onClear && (
+            <button
+              type="button"
+              aria-label="Clear this Session's cookies"
+              title="Clear this Session's cookies"
+              onClick={onClear}
+              className={ROUND}
+            >
+              <CookieIcon />
+            </button>
           )}
-        >
-          <span aria-hidden>⋯</span>
-        </MenuButton>
+        </div>
       </div>
       {error !== null && (
         <p role="alert" className="m-0 px-3.5 pb-1.5 text-xs text-accent-700">
@@ -208,7 +220,7 @@ function AddressField({
   const [draft, setDraft] = useState<string | null>(null);
   return (
     <form
-      className="relative min-w-0 flex-1"
+      className="relative min-w-32 flex-1"
       onSubmit={(event) => {
         event.preventDefault();
         const text = (draft ?? address).trim();

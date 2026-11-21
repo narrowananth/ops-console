@@ -9,6 +9,7 @@ import {
   CONNECTOR_NAMES,
   ConnectorId,
   ErrorCode,
+  type NewRelicRoute,
   type Part,
   PlaybookTrigger,
   type Report,
@@ -38,6 +39,7 @@ import { AlertSessions, type CodeSource } from './alert-sessions';
 import { AlertsService } from './alerts.service';
 import { LOG_READERS, type LogReaders } from './log-reader';
 import { logSourceRule, queryLabel } from './log-source-brief';
+import { newRelicLogsConfig } from './log-source-config';
 import { type AlertRow, type ReportRow, type RouteRow, type ServiceRow, samplesOf, toReport } from './mappers';
 import { deployedVersion, PROD_PARITY_ASK, recheck, versionStep } from './prod-parity';
 import { ScansService } from './scans.service';
@@ -70,6 +72,7 @@ export function verificationBrief(
   source: CodeSource,
   base: CodeBase | null = null,
   recheckLine: string | null = null,
+  newRelicRoute: NewRelicRoute = 'mcp',
 ): string {
   const samples = samplesOf(alert)
     .slice(0, 5)
@@ -83,7 +86,7 @@ export function verificationBrief(
       ? `\nThe console could not fetch ${base.branch} from origin (${base.error ?? 'no reason given'}), so this is the local branch and may be behind production. Say so in the Report.\n`
       : '';
   const what = route.method ? `route ${route.method} ${route.path}` : 'logs with no HTTP route';
-  const rule = logSourceRule(alert.connector);
+  const rule = logSourceRule(alert.connector, newRelicRoute);
   const logged =
     alert.connector === ConnectorId.Datadog ? 'Datadog logged' : `the ${CONNECTOR_NAMES[alert.connector]} hold`;
   return `Find the cause of a failure ${logged}, in the code in ${where}. The console throws this folder away afterwards: write files and run local commands here only when a step allows it.
@@ -264,7 +267,15 @@ export class VerificationsService {
         reportSteps,
         versionStep(deployedVersion(samplesOf(alert)), made.base.sha, made.base.branch),
       );
-    const brief = verificationBrief(alert, service, route, source, made?.base ?? null, checked.line);
+    const brief = verificationBrief(
+      alert,
+      service,
+      route,
+      source,
+      made?.base ?? null,
+      checked.line,
+      newRelicLogsConfig(this.store.db).route,
+    );
     // A clone of a URL the operator never imported may hold hostile settings, hooks and servers: leave them out.
     const projectSettings = source.kind === 'repo';
     const failure = await this.steps.run({

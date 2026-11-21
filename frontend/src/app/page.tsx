@@ -5,8 +5,10 @@ type Width = 'full' | 'narrow' | 'wide' | 'xwide';
 const WIDTH: Record<Width, string> = { full: '', narrow: 'max-w-250', wide: 'max-w-280', xwide: 'max-w-350' };
 
 /**
- * A sidebar page: its title and one line under it, its main actions on the right, then its body. A page whose body is
- * one centered column passes its width, so the title lines up with the column.
+ * A sidebar page. The sidebar already names the page, so a page with no actions has no bar: its title stays as a
+ * hidden h1 and the body takes the whole height. A page with actions gets one slim bar, the title small on the left
+ * (the line under it is the tooltip) and the actions on the right. A page whose body is one centered column passes
+ * its width, so the bar lines up with the column.
  */
 export function Page({
   title,
@@ -23,14 +25,19 @@ export function Page({
 }) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex-none border-b border-line">
-        <div className={`mx-auto flex h-17 w-full items-center gap-3.5 px-8 ${WIDTH[width]}`}>
-          <h1 className="m-0 flex-none text-[21px] whitespace-nowrap">{title}</h1>
-          <span className="truncate text-[13px] text-neutral-700">{sub}</span>
-          <span className="flex-1" />
-          {actions}
-        </div>
-      </header>
+      {actions ? (
+        <header className="h-10 flex-none border-b border-line">
+          <div className={`mx-auto flex h-full w-full items-center gap-2 px-8 ${WIDTH[width]}`}>
+            <h1 title={sub} className="m-0 flex-none text-[13px] whitespace-nowrap">
+              {title}
+            </h1>
+            <span className="flex-1" />
+            <div className="flex items-center gap-2 [&>button]:py-1 [&>button]:text-[13px]">{actions}</div>
+          </div>
+        </header>
+      ) : (
+        <h1 className="sr-only">{title}</h1>
+      )}
       <div className="flex min-h-0 flex-1 overflow-auto">{children}</div>
     </div>
   );

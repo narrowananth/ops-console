@@ -192,7 +192,7 @@ Server to client:
 
 ## UI
 
-Connections, as designed, without Add with Claude: "Import with Setup agent →" in the page header, then the Connections list (type logo, name, PROD badge, type and host, status glyph, and "Claude: off", "Claude: read-only" or "Claude: read / write"), + Add connection opening the type picker (one card per type, logo and a line), and the form with the type's fields, the secret field ("Kept in the Keychain; never shown again."), Environment, Claude access (Off, Read-only, Read / write, with the levels the type has no server for disabled) and its hint, Test, Save and Delete with a confirm.
+Connections, as designed, without Add with Claude: "Import with Setup agent →" in the page bar, then the Connections list (type logo, name, PROD badge, type and host, status glyph, and "Claude: off", "Claude: read-only" or "Claude: read / write"), + Add connection opening the type picker (one card per type, logo and a line), and the form with the type's fields, the secret field ("Kept in the Keychain; never shown again."), Environment, Claude access (Off, Read-only, Read / write, with the levels the type has no server for disabled) and its hint, Test, Save and Delete with a confirm.
 
 - Loading: "Loading connections…".
 - Empty: "No connections yet" with both ways to add one.

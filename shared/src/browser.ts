@@ -145,6 +145,34 @@ export type CreateProcessBody = z.infer<typeof createProcessBodySchema>;
 
 const modifiers = z.number().int().min(0).max(15);
 
+/**
+ * What an element pick takes from the page, for the operator's prompt. It never holds a typed value, a cookie, storage or
+ * the page's full DOM; secret-looking text is redacted. `crop` is a base64 JPEG of the element, null when the element
+ * holds something typed or is out of view.
+ */
+export const elementCaptureSchema = z.object({
+  page_url: z.string(),
+  page_title: z.string(),
+  tag: z.string(),
+  /** A CSS path from `body` that finds the element: an id or test id where one is unique, `:nth-of-type` otherwise. */
+  selector: z.string(),
+  id: z.string().nullable(),
+  classes: z.array(z.string()),
+  role: z.string().nullable(),
+  /** The accessible name. */
+  name: z.string(),
+  /** The element's visible text, cut to a few hundred characters. */
+  text: z.string(),
+  attributes: z.record(z.string(), z.string()),
+  /** The element's HTML with input values removed, cut to about 2 KB. */
+  html: z.string(),
+  /** The element's box in the page's CSS pixels. */
+  box: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
+  styles: z.record(z.string(), z.string()),
+  crop: z.string().nullable(),
+});
+export type ElementCapture = z.infer<typeof elementCaptureSchema>;
+
 /** Browser panel to daemon, over `/browser/:tabId`. */
 export const browserClientMessageSchema = z.discriminatedUnion('type', [
   z.object({
@@ -175,6 +203,13 @@ export const browserClientMessageSchema = z.discriminatedUnion('type', [
     dpr: z.number().min(1).max(3).default(1),
   }),
   z.object({ type: z.literal('focus') }),
+  /** Pick mode: `start` and `end` switch it for this viewer; `hover` and `click` carry a point in the page's CSS pixels. */
+  z.object({
+    type: z.literal('pick'),
+    action: z.enum(['start', 'end', 'hover', 'click']),
+    x: z.number().default(0),
+    y: z.number().default(0),
+  }),
 ]);
 export type BrowserClientMessage = z.infer<typeof browserClientMessageSchema>;
 
@@ -187,6 +222,9 @@ export const browserServerMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('tab'), tab: tabSchema }),
   z.object({ type: z.literal('dialog'), kind: z.string(), message: z.string() }),
   z.object({ type: z.literal('closed') }),
+  /** The element a `pick` click captured, for the viewer that clicked; pick mode stays on. */
+  z.object({ type: z.literal('picked'), capture: elementCaptureSchema }),
+  z.object({ type: z.literal('pick_failed'), message: z.string() }),
 ]);
 export type BrowserServerMessage = z.infer<typeof browserServerMessageSchema>;
 

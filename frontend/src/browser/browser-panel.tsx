@@ -15,11 +15,15 @@ import {
   useStopServer,
   useStoreTab,
 } from '../lib/queries';
+import { deliverPick, usePickEnds } from './element-picks';
+import { InspectorLayout, useDockedTabs } from './inspector-dock';
+import { openInspector } from './inspector-window';
 import { LocalServers } from './local-servers';
 import { PageStage } from './page-stage';
 import { TabStrip } from './tab-strip';
-import { blankTabFor, isBlank } from './tabs';
+import { blankTabFor, isBlank, tabOnSite } from './tabs';
 import { Toolbar } from './toolbar';
+import { usePopOuts } from './use-pop-outs';
 
 /** The Browser panel's size: its width until the operator drags it, its narrowest, and the room the conversation keeps. */
 export const BROWSER_PANEL = { key: 'workspace.session-browser-width', initial: 640, narrowest: 360, keep: 360 };
@@ -53,19 +57,26 @@ export function BrowserPanel({
   const [picked, setPicked] = useState<string | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
+  // The tab in pick mode: leaving it for another tab ends the mode.
+  const [pickTab, setPickTab] = useState<string | null>(null);
+  const windows = usePopOuts();
 
   const tabs = state.data?.tabs ?? [];
   const active = tabs.find((tab) => tab.id === picked) ?? tabs[0];
   const missing = state.data?.chrome === ChromeState.Missing;
 
-  /** An address goes in the blank tab, else in a new one. The daemon's refusal shows under the toolbar. */
-  const open = (address: string) => {
+  /**
+   * An address goes in the blank tab, else a new one. A page opened for the operator (a link, a Local servers row,
+   * a server that started) goes first in the tab already on that site, which reloads. The daemon's refusal shows
+   * under the toolbar.
+   */
+  const open = (address: string, reuse = false) => {
     setRefused(null);
     const fail = (error: Error) => setRefused(error.message);
-    const blank = blankTabFor(tabs, active);
-    if (blank) {
-      setPicked(blank.id);
-      patch.mutate({ tabId: blank.id, body: { url: address } }, { onError: fail });
+    const target = (reuse ? tabOnSite(tabs, active, address) : undefined) ?? blankTabFor(tabs, active);
+    if (target) {
+      setPicked(target.id);
+      patch.mutate({ tabId: target.id, body: { url: address } }, { onError: fail });
     } else create.mutate({ url: address }, { onSuccess: (tab) => setPicked(tab.id), onError: fail });
   };
 
@@ -74,13 +85,40 @@ export function BrowserPanel({
   useEffect(() => {
     if (!request || handled.current === request.id || !state.data || missing) return;
     handled.current = request.id;
-    open(request.url);
+    open(request.url, true);
   }, [request, state.data, missing]);
 
   const act = (body: { action?: TabAction; viewport?: Viewport }) => {
     if (!active) return;
     setRefused(null);
     patch.mutate({ tabId: active.id, body }, { onError: (error) => setRefused(error.message) });
+  };
+
+  /** A tab in a window shows there; the same button brings that window forward. */
+  const openWindow = () => {
+    if (!active) return;
+    setRefused(null);
+    if (windows.out.has(active.id)) windows.show(active.id);
+    else if (!windows.open(sessionId, active.id))
+      setRefused('The browser blocked the window. Allow pop-ups for this page.');
+  };
+
+  const picking = active !== undefined && pickTab === active.id;
+  const stopPicking = () => setPickTab(null);
+  usePickEnds(sessionId, stopPicking);
+
+  const dock = useDockedTabs();
+  const inspecting = active !== undefined && dock.docked.has(active.id) ? active.id : null;
+  const inspect = () => {
+    if (!active) return;
+    setRefused(null);
+    dock.toggle(active.id);
+  };
+  /** DevTools leave the panel for a window of their own; a window the browser refuses leaves them docked. */
+  const inspectInWindow = () => {
+    if (!active) return;
+    if (openInspector(active.id)) dock.close(active.id);
+    else setRefused('The browser blocked the window. Allow pop-ups for this page.');
   };
 
   let body: ReactNode;
@@ -94,11 +132,13 @@ export function BrowserPanel({
           servers={servers.data}
           processes={processes.data ?? []}
           error={servers.error?.message ?? null}
-          onOpen={open}
+          onOpen={(address) => open(address, true)}
           onStop={(port) => stopServer.mutate(port)}
         />
       </div>
     );
+  } else if (windows.out.has(active.id)) {
+    body = <InWindow onShow={() => windows.show(active.id)} onBringBack={() => windows.bringBack(active.id)} />;
   } else {
     body = (
       <PageStage
@@ -113,11 +153,14 @@ export function BrowserPanel({
               servers={servers.data}
               processes={processes.data ?? []}
               error={servers.error?.message ?? null}
-              onOpen={open}
+              onOpen={(address) => open(address, true)}
               onStop={(port) => stopServer.mutate(port)}
             />
           ) : undefined
         }
+        picking={picking}
+        onPicked={(capture) => deliverPick(sessionId, capture)}
+        onPickEnd={stopPicking}
         onTab={storeTab}
         onClosed={() => void state.refetch()}
       />
@@ -158,6 +201,14 @@ export function BrowserPanel({
         onAction={(action) => act({ action })}
         onAddress={open}
         onViewport={(viewport) => act({ viewport })}
+        onWindow={openWindow}
+        picking={picking}
+        onPick={() => {
+          setRefused(null);
+          setPickTab(picking || active === undefined ? null : active.id);
+        }}
+        inspecting={inspecting !== null}
+        onInspect={inspect}
         onExternal={() => active && external.mutate(active.id)}
         onClear={() => setClearing(true)}
       />
@@ -166,7 +217,13 @@ export function BrowserPanel({
           {external.error.message}
         </p>
       )}
-      {body}
+      <InspectorLayout
+        inspecting={inspecting}
+        onClose={() => active && dock.close(active.id)}
+        onWindow={inspectInWindow}
+      >
+        {body}
+      </InspectorLayout>
       {clearing && (
         <ConfirmDialog
           title="Clear this Session's cookies?"
@@ -184,6 +241,24 @@ export function BrowserPanel({
         </ConfirmDialog>
       )}
     </aside>
+  );
+}
+
+/** What the panel shows for a tab that sits in a window: one viewer draws it, so the page has one size. */
+function InWindow({ onShow, onBringBack }: { onShow: () => void; onBringBack: () => void }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2.5 bg-card px-8 text-center">
+      <h4 className="m-0 text-base font-semibold">This tab is open in its own window.</h4>
+      <p className="m-0 max-w-sm text-[13px] text-neutral-700">
+        It shows there at the window's size. Closing the window brings it back here.
+      </p>
+      <div className="flex gap-2">
+        <Button variant="primary" onClick={onShow}>
+          Show the window
+        </Button>
+        <Button onClick={onBringBack}>Bring it back</Button>
+      </div>
+    </div>
   );
 }
 

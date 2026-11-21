@@ -44,7 +44,7 @@ Behavior this spec does not list is as in `agent-playbooks` and `playbook-skills
 
 ### New Playbook
 
-10. New Playbook sits in the page header on the overview, and is absent while a Playbook is open. Its dialog asks for
+10. New Playbook sits in the page bar on the overview, and is absent while a Playbook is open. Its dialog asks for
     a name and a start: Blank, or Copy of a built-in, with a dropdown of the seven built-ins. The name is up to 60
     characters and unique without regard to case.
 11. A new Playbook runs on no Trigger. It opens on its flow with the Trigger node asking the operator to attach

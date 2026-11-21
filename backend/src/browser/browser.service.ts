@@ -30,6 +30,8 @@ import { BrowserTab, type TabHooks } from './browser-tab';
 import { killOrphanChromes } from './orphans';
 
 const TITLE_POLL_MS = 2000;
+/** Inspector windows one tab takes at once. */
+const MAX_INSPECTORS = 3;
 /** Chrome with nothing the console shows: no extensions, updates, sync or background requests. */
 const LAUNCH_ARGS = [
   '--no-first-run',
@@ -297,7 +299,7 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
   private touch(slot: Slot): void {
     clearTimeout(slot.idle);
     slot.idle = setTimeout(() => {
-      const watched = slot.tabs.some((tab) => tab.viewers.size > 0 || tab.agentBusy);
+      const watched = slot.tabs.some((tab) => tab.viewers.size > 0 || tab.inspectorCount > 0 || tab.agentBusy);
       if (watched) this.touch(slot);
       else void this.stop(slot);
     }, this.idleMs);
@@ -379,6 +381,19 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
       this.touch(slot);
       this.pollTitles(slot);
     }
+  }
+
+  /** The status that refuses an Inspector window's attach, or null when it may attach. */
+  inspectorRefusal(tabId: string): 404 | 409 | 429 | null {
+    const tab = this.byId.get(tabId);
+    if (!tab) return 404;
+    if (tab.dead) return 409;
+    return tab.inspectorCount >= MAX_INSPECTORS ? 429 : null;
+  }
+
+  /** Opens an Inspector window's line to the tab: DevTools' protocol, through a session of its own. */
+  inspect(tabId: string, window: WebSocket): void {
+    this.live(tabId).inspect(window);
   }
 
   async input(tabId: string, viewer: WebSocket, message: BrowserClientMessage): Promise<void> {

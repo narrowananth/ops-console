@@ -23,11 +23,13 @@ A write to a PROD Connection asks in every mode. When the agent asks, you get an
 
 ## What a Session can use
 
-- **The Browser panel** shows pages from the Session's Chrome beside the conversation, one tab each. You and the agent drive the same tabs, and the panel lists the outside hosts a page called.
+- **The Browser panel** shows pages from the Session's Chrome beside the conversation, one tab each. You and the agent drive the same tabs, and the panel lists the outside hosts a page called. Inspect shows Chrome's own DevTools for the tab under the page, or beside it or in a window of their own: Elements, Console, Sources, Network, Application and Memory. Device emulation, Performance recording and Lighthouse do not work there.
 - **The Terminals dock** runs shells and Session processes. A server a process starts opens its page in the Browser panel.
 - **Output files** are files the agent writes for you, kept in a folder per Session. To put a file in another folder, such as Downloads, the agent calls `save_file`, and you approve the destination.
 - **Pull requests** open through the console, never through the agent. You press the button, or the agent asks the console to open one, and the console pushes the branch with your git access and never forces it.
-- **Repos** you open from the composer's Repos chip become part of the Session. The agent writes in them as it does in its own folder, and still never pushes.
+- **Repos** you open from the composer's Repos icon become part of the Session. The agent writes in them as it does in its own folder, and still never pushes.
+- **Mentions** work anywhere in a message. Type `$` for a skill, `@` for a file or `/` for a command, and the menu opens for that word. A skill or file you pick shows as a chip with its name; the agent reads `$name` or the file's path.
+- **Attached files** can be pictures, video, audio, PDFs, Office files, text, archives or anything else. Attach them, drop them on the message box or paste them. Each shows as a chip above the text. The agent reads them from the Session's attachments folder, and is told each file's type and size.
 
 ## Pull request review
 

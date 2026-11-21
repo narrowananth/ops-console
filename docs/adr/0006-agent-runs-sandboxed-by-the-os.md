@@ -9,7 +9,7 @@ a few like them), never in a folder on PATH such as `~/.cargo/bin` or `~/go/bin`
 console sets the rules and leaves the profile to the SDK. It fails a run when the sandbox is unavailable, never runs a
 command the agent wrote outside it, and has no Setting to turn it off. One door leads out: the console's `run_integration` tool (below). The Setup agent's terminal and a Session process (the Terminals dock) are no agent run and are not sandboxed; neither is the Session's browser page ([ADR 0007](0007-session-pages-and-processes-leave-the-sandbox.md)).
 
-The operator opens other imported Repos to a Session from the composer's Repos chip. A run the operator started (a chat turn) then
+The operator opens other imported Repos to a Session from the composer's Repos icon. A run the operator started (a chat turn) then
 writes and reads those checkouts as it does its working folder, commands and file tools alike, and may run `git` there
 (checkout, branch, add, commit). The choice is the operator's click on a Repo the console imported, never a path or the
 agent's request, so text injected through a log cannot widen it. The git control files of each opened Repo stay closed as in the

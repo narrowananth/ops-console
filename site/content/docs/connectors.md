@@ -21,7 +21,7 @@ A Connector is an outside service you sign in to once, a folder of logs on your 
 | OpenTelemetry logs | A Log folder on your Mac, read by the daemon |
 | CloudWatch logs | The `aws` CLI and AWS's CloudWatch MCP server, started with `uvx` |
 | Loki logs | Grafana Cloud's hosted MCP server, signed in by the console itself with a token kept in the Keychain |
-| New Relic logs | New Relic's hosted MCP server, signed in through Claude Code |
+| New Relic logs | New Relic's hosted MCP server, signed in through Claude Code, or New Relic's own API with your User API key |
 
 The agent reaches each service through Claude Code, with the service's own MCP server or CLI. OpenTelemetry logs has no service to reach. The console holds no extra copy of your access beyond the sign-in it keeps in the Keychain, and it stores no AWS key: CloudWatch logs uses the credentials where the AWS CLI keeps them. Loki logs, New Relic logs and CloudWatch logs have no field to fill in before Connect. A choice the sign-in cannot find, such as a New Relic Region, sits above the Connect button, and a choice the sign-in can list, such as an account, appears after you sign in.
 
@@ -190,15 +190,27 @@ Alerts and Services from this source carry a Loki label in Monitor. Disconnect r
 
 ## New Relic logs
 
-This Connector gives Monitor a fifth log source. It reads the logs in a New Relic account through New Relic's hosted MCP server.
+This Connector gives Monitor a fifth log source. It reads the logs in a New Relic account through New Relic's hosted MCP server, or through New Relic's own API with a User API key when your administrator has turned the MCP server off.
 
 Connect it in Integrations:
 
 1. Choose the Region above Connect: US, EU or JP. It starts as US and picks the address of New Relic's server.
-2. Press Connect. The sign-in belongs to Claude Code: Connect registers New Relic's MCP server with Claude Code and opens its browser sign-in. The console does not sign in to New Relic itself. Before the browser opens, the pane says macOS may ask for your Mac's login password once, so the console can read the sign-in Claude Code stored. If you refuse the prompt, the Connector reads needs auth.
+2. Press Connect. The sign-in belongs to Claude Code: Connect registers New Relic's MCP server with Claude Code and opens its browser sign-in. The console does not sign in to New Relic itself. Before the browser opens, the pane says macOS may ask for your Mac's login password once, so the console can read the sign-in Claude Code stored. If you refuse the prompt, the Connector reads needs auth. If New Relic's page says your administrator has disabled access, a New Relic administrator must turn on New Relic MCP Server in Feature Control Manager; the console cannot change that setting.
 3. When the sign-in finishes, the console lists the accounts it can read. With one account the Connector uses it. With several, the pane shows a picker, and Connect finishes when you pick one.
 
 A Scan reads the token Claude Code stored, and never refreshes it. When a read fails because the token expired, the console asks Claude Code to reconnect that one server, with no model turn, and reads again. When that fails too, the row reads needs auth and the pane offers Reconnect.
+
+### With a User API key instead
+
+When New Relic's page says your administrator has disabled access to the MCP server, the sign-in above cannot work, and the console cannot change that setting. Use a key instead:
+
+1. In New Relic, create a User API key (it starts with `NRAK-`) for a user that can read the account's logs. A dedicated user with a read-only role is the safest choice, because a User key reaches every account its user can open.
+2. In the pane, choose the Region, then open "Use a User API key instead" under Connect. Paste the key in the one field and press Connect with key.
+3. The console checks the key by listing the accounts it can read. A key New Relic refuses is not stored, and the pane says why. A good key goes to your Keychain, never to the database, a log or the browser, and the pane never shows it again. The account is picked as in step 3 above.
+
+The daemon then calls New Relic's own API (NerdGraph) from your Mac, over HTTPS, with the key in a request header. The key route does not use New Relic's MCP server. New Relic's documentation ties the Feature Control Manager switches to that server and does not say they reach this API. If your organization blocks it anyway, New Relic refuses the key and the pane says so. Only one route is active at a time. Connecting with a key replaces the MCP sign-in and removes New Relic's MCP server from Claude Code's config. Pressing Connect for the sign-in replaces the key and deletes it from the Keychain. A key that New Relic later refuses reads needs auth, and you paste a new one.
+
+Scans read the same way on either route: the same queries, the same fields, the same 5,000-event cap and 61-hour limit on counts.
 
 ### Names
 
@@ -240,9 +252,9 @@ Plain-text and access-log formats are not read. The reader uses the attributes N
 
 The console reads logs and writes nothing to New Relic, and a PROD env is read-only like any other. The console sends no write tool call to New Relic.
 
-A Verification or a Fix of a New Relic Alert starts with a Recheck that counts the Alert's failing events for the last hour, and the Report's evidence section is headed "Log evidence". The agent's brief gives it the Samples. When it needs more logs, the agent reads them through the New Relic MCP server that Connect registered with Claude Code. The agent may call only the server's read tools: NRQL queries and the account list.
+A Verification or a Fix of a New Relic Alert starts with a Recheck that counts the Alert's failing events for the last hour, and the Report's evidence section is headed "Log evidence". The agent's brief gives it the Samples. When it needs more logs, the agent reads them through the New Relic MCP server that Connect registered with Claude Code. The agent may call only the server's read tools: NRQL queries and the account list. On the key route there is no MCP server for the agent, and it never holds the key. It calls a tool of the console's own, `query_new_relic`, that takes NRQL text only and runs one read-only query for the picked account, with the key the daemon holds. The tool refuses anything that is not a `SELECT`, `FROM` or `SHOW` query, returns at most 200 rows, and runs with no Approval. Each call is a row in the Action Log.
 
-Alerts and Services from this source carry a New Relic label in Monitor. Disconnect removes New Relic's MCP server from Claude Code's config and leaves New Relic untouched. The Region and the picked account stay for the next Connect.
+Alerts and Services from this source carry a New Relic label in Monitor. Disconnect removes New Relic's MCP server from Claude Code's config, and your User API key from the Keychain if you used one, and leaves New Relic untouched. The Region and the picked account stay for the next Connect.
 
 ## Checks and Disconnect
 

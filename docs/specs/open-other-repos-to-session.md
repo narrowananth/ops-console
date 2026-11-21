@@ -1,7 +1,7 @@
 # Open other Repos to a Session
 
 **Status:** shipped
-**Design:** none. The composer's Repos chip sits next to Model, Effort and Access.
+**Design:** none. The composer's Repos icon sits beside Attach.
 
 ## Problem
 
@@ -10,9 +10,10 @@ lets a run write only in its own Repo, so the agent could print a patch and the 
 
 ## Behavior
 
-1. The composer shows a Repos chip: "Repos this one" until the operator opens another, then "Repos +N". It is hidden
-   when the console has no other Repo.
-2. The chip opens a list of the other imported Repos, A to Z, with a search box. It does not list the Session's own Repo.
+1. The composer shows a Repos icon beside Attach. Its tooltip reads "Repos: this one" until the operator opens another,
+   then lists them ("Repos: this one, admin-panel"), and the icon carries the count. It is hidden when the console has
+   no other Repo.
+2. The icon opens a list of the other imported Repos, A to Z, with a search box. It does not list the Session's own Repo.
    The operator ticks and unticks Repos; each click saves.
 3. From the Session's next run, the operator's own runs in that Session (a chat turn) write and read each ticked
    checkout as they do the working folder: commands and file tools, `git` checkout, branch, add and commit included.

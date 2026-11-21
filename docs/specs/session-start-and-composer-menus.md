@@ -1,7 +1,7 @@
 # Session start on any branch, and composer menus
 
 **Status:** shipped
-**Design:** none. The New Session card and the Session composer keep their layout; the menus follow the skills menu that was already above the composer.
+**Design:** none. The New Session card keeps its layout. The composer's toolbar holds one settings pill; the design's Workspace screen is not redrawn.
 
 ## Problem
 
@@ -25,20 +25,54 @@ In the composer, files could not be mentioned from the keyboard, and the placeho
    branch's commit the same way.
 6. An error from Start clears when the operator picks or creates another branch.
 7. The composer placeholder reads `Ask anything. @ files, $ skills, / commands`, except while the agent works.
-8. `$` as the first character opens the skills menu that `/` opened before. A pick writes `$name` and keeps the note. A typed
-   `$name` or `/name` that matches a skill runs it, as before.
-9. `/` as the first character opens a commands menu: `stop` while the agent works, `diff` when the Session has changes, `pr`
-   when a pull request can be opened, `skills` and `files`, which open those menus. Picking a command clears the message and
-   runs it. Text that matches no command, such as an old `/skill-name`, sends as typed.
-10. `@` at the end of the message, at its start or after a space, opens a files menu narrowed by the letters after it.
-    Names that start with the letters come first, then names that hold them, then paths that do; shorter paths first. Files
-    git ignores are not listed.
+8. A word that starts with `$` opens the skills menu that `/` opened before, wherever the word starts: the start of the
+   message, after a space, after a line break, in front of text already there. The menu is for the word before the cursor.
+   A pick replaces that word and nothing else, puts the cursor after it and keeps the rest of the message. A typed `$name`
+   or `/name` at the start of the message that matches a skill runs it, as before.
+9. A word that starts with `/` opens a commands menu: `stop` while the agent works, `diff` when the Session has changes, `pr`
+   when a pull request can be opened, `skills` and `files`, which open those menus at the cursor. Picking a command removes
+   the word, leaves the rest of the message and runs the command. Text that matches no command, such as an old
+   `/skill-name`, sends as typed.
+10. A word that starts with `@` opens a files menu narrowed by the letters after it. Names that start with the letters come
+    first, then names that hold them, then paths that do; shorter paths first. Files git ignores are not listed.
 11. A Repo Session lists the files of its own worktree, each with its name and folder. An Anonymous Session lists the files
     of every imported Repo, each tagged with its Repo's name.
 12. Picking a file writes its path after the `@`: relative to the worktree in a Repo Session, absolute in an Anonymous one,
     in quotes when it holds a space.
-13. Arrows move, Enter or Tab picks, Escape closes until the text changes, in all three menus. With no row, Enter sends.
+13. Arrows move, Enter or Tab picks, Escape closes until the word changes, in all three menus. With no row, Enter sends.
+    The menu is a listbox and the message box names the row that is picked with `aria-activedescendant`.
 14. The menus show only in a Repo Session and an Anonymous Session. A `pr_review` or dev-tools Session shows none.
+15. The composer's toolbar holds Attach and the Repos icon on the left, and on the right one settings pill, then Send
+    (Stop and Queue as before). A second row under the message box does not exist.
+16. The pill reads the model's short name and the effort, such as `Sonnet 5.5 High`, with the Claude mark. It opens one
+    popover over the message box, no wider than the box except in a very narrow Session column, which it still fits.
+17. The popover has a search box (focused on open) over the model list, the effort list under `Reasoning`, and a footer chip
+    that names the Session's Access mode. The chip opens four icon buttons in order of trust: lock for Supervised, pencil for
+    Auto-accept edits, sparkle for Auto, shield-off for Full access. The picked mode's name and description show under them,
+    worded as the terminal's Access dropdown words them.
+18. A pick saves at once and applies from the Session's next run. The popover stays open for the next pick.
+19. Typing narrows the models; Enter picks the first match. Down arrow leaves the search box for the list, arrows walk a
+    list, Escape or a click outside closes the popover and returns the focus to the pill.
+20. The Repos icon shows a count when other Repos are open to the Session. Its tooltip names the choice: `Repos: this one`
+    or `Repos: this one, admin-panel`. It opens the same list as before.
+21. The pill shows no context-used chip: the console holds no per-Session context usage.
+22. Skill and file picks are chips in the message, drawn in line with the text: a skill as its name in words (`code-review`
+    as `Code Review`, `caveman:cavecrew` as `Caveman Cavecrew`) with a cube, a file as its own name with a badge for its
+    extension and its path in the tip. Text goes before, between and after chips. Mentions of both kinds mix in any order.
+23. A chip is one unit: Backspace and Delete remove it whole, the arrow keys step over it, a selection that holds it copies it,
+    and undo and redo step over it. A copy from the message box pastes back as chips; text from anywhere else pastes as text.
+24. What is sent is the plain text: `$code-review`, `@src/app.ts`, and in an Anonymous Session the absolute path. A chip only
+    changes how the console draws it. A skill runs as a skill only when its mention opens the message; elsewhere it is text
+    the agent reads. A message restored from a draft, taken back from the queue or sent shows its `$name` and `@path` words as
+    chips again, the same chip in the conversation. `/command` leaves no chip: it runs when picked.
+25. Attach, drag and drop onto the message box, and paste take any file: pictures, video, audio, PDFs and Office files, text,
+    archives, anything else. Each is a chip in a row above the text, in the order added: a picture or a video's first frame
+    (an icon when the browser cannot read the video), else an icon for its kind, with the name, the size and an `x`. Several
+    files go at once. A file that fails to upload says why in its chip and the others stay; an empty file is refused in its
+    chip. The row keeps the files through a reload until they are sent or removed.
+26. The agent gets each sent file as a line `- <name>: <path> (<type>, <size>)` under "Attached files", saved in the Session's
+    `attachments/` folder that a run may read. Pictures are read from that path like every other file. The conversation shows
+    the sent files as chips with their size under the text.
 
 ## Settled
 
@@ -74,15 +108,22 @@ list for a Session kind with no menu.
 
 ## UI
 
-The New Session card's branch list and the composer's three menus. States: reading, error, no match.
+The New Session card's branch list, the composer's three menus and its settings popover. States: reading, error, no match.
 
 ## Rejected
 
 - **A commands list in the daemon**: the commands are actions of the page the Session is on, so they live in the page.
 - **Refusing a branch the folder holds, with advice**: the operator's goal is a Session, not a lesson in worktrees.
+- **A provider rail in the popover**: Claude is the only provider, so a rail would hold one icon that does nothing.
+- **Model, Effort and Access as separate chips with a second row under the box**: three menus and two rows of chrome for
+  settings the operator changes a few times a day.
 
 ## Seams
 
 - **Backend + SQLite** (`workspace.test.ts`): 1 to 5, 10 to 12.
 - **Backend + SQLite** (`skill-kinds.test.ts`): 8.
 - **Browser** (`skill-kinds.spec.ts`): 8, 9, 10, 13.
+- **Browser** (`workspace.spec.ts`): 15 to 20, 25, 26.
+- **Browser** (`skill-kinds.spec.ts`): 8 to 10, 13, 22 to 24.
+- **Backend + SQLite** (`agent-sessions.test.ts`): 25, 26 (the saved type and size, the empty file).
+- **Browser** (`session-card.spec.ts`): 16, at a wide and a narrow window.

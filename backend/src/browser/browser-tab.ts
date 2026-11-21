@@ -21,6 +21,9 @@ import type { BrowserContext, CDPSession, FileChooser, Page, Request } from 'pla
 import { WebSocket } from 'ws';
 import { ApiError, validationFailed } from '../common/errors';
 import { isLoopbackHost } from './addresses';
+import { ElementPicker } from './element-picker';
+import { InspectorRelay } from './inspector-relay';
+import { jpegSize } from './jpeg-size';
 
 const RING = 200;
 const MAX_HOSTS = 50;
@@ -143,6 +146,8 @@ export class BrowserTab {
   readonly consoleEntries: ConsoleEntry[] = [];
   readonly networkEntries: NetworkEntry[] = [];
   readonly viewers = new Set<WebSocket>();
+  /** Inspector windows attached; each holds a CDP session of its own. */
+  private readonly inspectors = new Set<InspectorRelay>();
   /** Set when the daemon closes the page, so its close event is not a script's `window.close()` or a crash. */
   closing = false;
   dead = false;
@@ -164,6 +169,7 @@ export class BrowserTab {
   /** The newest mouse move not yet sent: moves arriving while one is in flight replace each other. */
   private nextMove: MouseMessage | null = null;
   private readonly requests = new WeakMap<Request, NetworkEntry>();
+  private readonly picker: ElementPicker;
 
   private constructor(
     readonly page: Page,
@@ -188,6 +194,11 @@ export class BrowserTab {
       agent_active: false,
       file_chooser: null,
     };
+    this.picker = new ElementPicker({
+      cdp,
+      size: () => this.size,
+      turn: (work) => this.turn(work),
+    });
     this.listen();
   }
 
@@ -270,8 +281,16 @@ export class BrowserTab {
       this.hooks.closed(this, this.closing);
     });
     this.cdp.on('Page.screencastFrame', ({ data, sessionId }) => {
+      // A screenshot with a clip, such as an element pick's crop, resizes the view while it is taken, and Chrome sends a
+      // frame of that size. Drawn under the page's size it would show as the crop, magnified. The frame's own pixels
+      // tell, since its metadata can lag the view on a slow machine: only a frame at the page's size goes out.
+      // Chrome scales a frame by its own rounding, a few pixels off the page's size (1277 for 1280); a crop is far off.
+      const pixels = jpegSize(data);
+      const { width, height, scale } = this.size;
+      const near = (got: number, want: number) => Math.abs(got - want) <= Math.max(2, want * 0.02);
+      const ofPage = pixels === null || (near(pixels.width, width * scale) && near(pixels.height, height * scale));
       // Chrome sends the next frame after this ack, so a slow viewer slows the page down instead of queueing frames.
-      void this.sendFrame(data)
+      void (ofPage ? this.sendFrame(data) : Promise.resolve())
         .then(() => this.cdp.send('Page.screencastFrameAck', { sessionId }))
         .catch(() => {});
     });
@@ -530,6 +549,7 @@ export class BrowserTab {
   async detach(viewer: WebSocket): Promise<void> {
     this.viewers.delete(viewer);
     this.viewerSizes.delete(viewer);
+    await this.picker.end(viewer);
     if (this.lastInput === viewer) {
       this.lastInput = null;
       this.takeover = null;
@@ -552,10 +572,23 @@ export class BrowserTab {
     });
   }
 
-  /** Tells viewers the tab is gone and hangs up on them. */
+  /** Tells viewers the tab is gone and hangs up on them, and on the Inspector windows. */
   closeViewers(): void {
     this.send({ type: 'closed' });
     for (const viewer of this.viewers) viewer.close(1000, 'tab_closed');
+    for (const relay of [...this.inspectors]) relay.close(1000, 'tab_closed');
+  }
+
+  get inspectorCount(): number {
+    return this.inspectors.size;
+  }
+
+  /** Gives an Inspector window a CDP session of its own on this page; the window's socket ends it. */
+  inspect(socket: WebSocket): void {
+    const relay = new InspectorRelay(this.page.context().newCDPSession(this.page), socket, (done) =>
+      this.inspectors.delete(done),
+    );
+    this.inspectors.add(relay);
   }
 
   // Input from a viewer
@@ -565,6 +598,7 @@ export class BrowserTab {
       return this.resize(viewer, { width: message.width, height: message.height, dpr: message.dpr });
     this.takeInput(viewer);
     if (message.type === 'focus') return;
+    if (message.type === 'pick') return this.pick(viewer, message);
     if (message.type === 'mouse' && message.action === 'move') {
       // Moves are many and only the newest matters: one turn in the queue reads the newest at its time.
       this.nextMove = message;
@@ -597,6 +631,22 @@ export class BrowserTab {
       // A press that is not yet released must not see the page change under it.
       if (!(message.type === 'mouse' && message.action === 'down')) this.applyTakeover();
     });
+  }
+
+  /** Pick mode: the point is the page's CSS pixels. The capture goes back to the viewer that clicked, and to no other. */
+  private async pick(viewer: WebSocket, message: Extract<BrowserClientMessage, { type: 'pick' }>): Promise<void> {
+    if (message.action === 'start') return this.picker.start(viewer);
+    if (message.action === 'end') return this.picker.end(viewer);
+    if (!this.picker.has(viewer)) return;
+    if (message.action === 'hover') return this.picker.hover(message.x, message.y);
+    try {
+      const capture = await this.picker.click(message.x, message.y);
+      if (capture) this.send({ type: 'picked', capture }, viewer);
+      // The viewer took the tab at the size it was shown; the page takes that size now the point has been read.
+      this.applyTakeover();
+    } catch (error) {
+      this.send({ type: 'pick_failed', message: errorText(error) }, viewer);
+    }
   }
 
   private inOrder(action: () => Promise<void>): Promise<void> {

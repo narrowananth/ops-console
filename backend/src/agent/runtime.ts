@@ -75,8 +75,9 @@ import { editRoots, outsideEditRoots } from './edit-scope';
 import { HOOK_BYPASS_REASON, skipsCommitHooks } from './hook-bypass';
 import { hostedLogDenial } from './hosted-log-tools';
 import { classifyCli, type IntegrationInput, integrationInputSchema, outsideFile, runCli } from './integration-cli';
-import { mcpScope } from './mcp-scope';
+import { mcpScope, offersNewRelicQuery } from './mcp-scope';
 import { MessageInterceptors } from './message-interceptors';
+import { NEW_RELIC_QUERY_TOOL, type NewRelicQuery } from './new-relic-tool';
 import { OutputFiles, saveFileInputSchema } from './output-files';
 import { blockParts, contentSchema, EDIT_TOOLS, questionInputSchema, stepText, toMessages } from './parts';
 import { mergeLines, type UsageLine } from './pricing';
@@ -456,6 +457,13 @@ export class AgentRuntime implements OnModuleDestroy {
 
   setBrowserTools(tools: BrowserTools): void {
     this.browserTools = tools;
+  }
+
+  /** Who runs the New Relic query tool, with the User API key only the daemon holds. Set once by the Monitor module. */
+  private newRelicQuery: NewRelicQuery | null = null;
+
+  setNewRelicQuery(query: NewRelicQuery): void {
+    this.newRelicQuery = query;
   }
 
   /** Who runs the process tools. Set once by the Processes module. */
@@ -1224,7 +1232,8 @@ export class AgentRuntime implements OnModuleDestroy {
     const repoFolders = outputFolder === null ? [] : this.openedRepoFolders(session, run.workingDir);
     const extraDirs = [attached, outputFolder, ...repoFolders].filter((folder) => folder !== null);
     run.editRoots = editRoots({ workingDir: run.workingDir, outputFolder, repoFolders, configDir });
-    const scope = mcpScope(run.purpose, session.kind, this.logSourceOf(session.alertId));
+    const logSource = this.logSourceOf(session.alertId);
+    const scope = mcpScope(run.purpose, session.kind, logSource);
     // The console tools this run offers, for `key`: the servers' own objects cannot be compared.
     const tools: string[] = [];
     const options: Options = {
@@ -1291,12 +1300,15 @@ export class AgentRuntime implements OnModuleDestroy {
             : {
                 run: (input: IntegrationInput) => runCli(input.cli, input.args, outputFolder),
               };
+        // New Relic read with a User API key has no MCP server: the daemon runs the query with the key.
+        const newRelic =
+          offersNewRelicQuery(run.purpose, logSource) && this.newRelicQuery?.offers() ? this.newRelicQuery : null;
         tools.push(
-          ...Object.entries({ opener, joiner, spawner, saver, integrations, browser, processes })
+          ...Object.entries({ opener, joiner, spawner, saver, integrations, newRelic, browser, processes })
             .filter(([, offered]) => offered)
             .map(([name]) => name),
         );
-        return opener || joiner || spawner || saver || integrations || browser || processes
+        return opener || joiner || spawner || saver || integrations || newRelic || browser || processes
           ? {
               mcpServers: {
                 [CONSOLE_TOOLS_SERVER]: consoleToolsServer(
@@ -1307,6 +1319,7 @@ export class AgentRuntime implements OnModuleDestroy {
                     spawnCallId: () => run.spawnCallIds.shift() ?? '',
                     saver,
                     integrations,
+                    newRelic,
                     browser,
                     processes,
                     signal: run.abort.signal,
@@ -1664,6 +1677,13 @@ export class AgentRuntime implements OnModuleDestroy {
       if (input.tool_name === RUN_INTEGRATION_TOOL) return this.approveIntegration(run, toolInput, input.tool_use_id);
       if (input.tool_name === START_PROCESS_TOOL) return this.approveStartProcess(run, toolInput, input.tool_use_id);
       if (input.tool_name === BROWSER_EVALUATE_TOOL) return this.approveEvaluate(run, toolInput, input.tool_use_id);
+      if (input.tool_name === NEW_RELIC_QUERY_TOOL) {
+        return this.allowLogged(run, input.tool_name, toolInput, input.tool_use_id, {
+          target: 'New Relic',
+          command: `NRQL ${redact(String(toolInput.nrql ?? ''))}`,
+          reason: 'A read-only NRQL query, run by the console with its own key.',
+        });
+      }
       if (
         BROWSER_QUIET_TOOLS.has(input.tool_name) ||
         input.tool_name === PROCESS_OUTPUT_TOOL ||
@@ -2041,12 +2061,22 @@ export class AgentRuntime implements OnModuleDestroy {
   }
 
   /** A browser or process tool that asks for nothing: a loopback page or the Session's own process. Each call is a row. */
-  private allowLogged(run: Run, toolName: string, toolInput: Record<string, unknown>, stepId: string): HookJSONOutput {
+  private allowLogged(
+    run: Run,
+    toolName: string,
+    toolInput: Record<string, unknown>,
+    stepId: string,
+    as: { target: string; command: string; reason: string } = {
+      target: 'session browser',
+      command: stepText(toolName, toolInput),
+      reason: "This tool acts on the Session's own browser and processes.",
+    },
+  ): HookJSONOutput {
     const row = this.actionLog.start({
       sessionId: run.sessionId,
       kind: ActionKind.Query,
-      target: 'session browser',
-      command: stepText(toolName, toolInput),
+      target: as.target,
+      command: as.command,
       isProd: false,
     });
     run.toolRows.set(stepId, row);
@@ -2054,7 +2084,7 @@ export class AgentRuntime implements OnModuleDestroy {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'allow',
-        permissionDecisionReason: "This tool acts on the Session's own browser and processes.",
+        permissionDecisionReason: as.reason,
       },
     };
   }

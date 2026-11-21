@@ -3,6 +3,7 @@ import path from 'node:path';
 import { AccessMode, ConnectorId, type LogSource, RunPurpose, SessionKind, type WsEvent } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mcpScope } from '../src/agent/mcp-scope';
+import { NEW_RELIC_QUERY_TOOL } from '../src/agent/new-relic-tool';
 import { RUN_INTEGRATION_TOOL } from '../src/agent/pull-request-tool';
 import { AgentRuntime } from '../src/agent/runtime';
 import { type AgentDaemon, api, converse, listen, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
@@ -529,5 +530,24 @@ describe('Loki and New Relic through run_integration', () => {
     ];
     for (const mode of Object.values(AccessMode)) for (const step of refused) await runTool(daemon, mode, step);
     expect(daemon.sdk.ran).toEqual([]);
+  });
+});
+
+describe('New Relic through the console’s own query tool', () => {
+  it('runs with no Approval in every access mode, as a logged query that holds no secret', async () => {
+    const daemon = await start();
+    const nrql = "SELECT count(*) FROM Log WHERE api_key = 'abc123secret' SINCE 1 hour ago";
+    for (const mode of Object.values(AccessMode)) {
+      const { approvals } = await runTool(daemon, mode, { tool: NEW_RELIC_QUERY_TOOL, input: { nrql } });
+      expect(approvals, mode).toEqual([]);
+    }
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual(Object.values(AccessMode).map(() => NEW_RELIC_QUERY_TOOL));
+    const log = (await api(daemon).get('/action-log')).body.data as { target: string; command: string }[];
+    expect(log).toHaveLength(Object.values(AccessMode).length);
+    for (const row of log) {
+      expect(row.target).toBe('New Relic');
+      expect(row.command).toMatch(/^NRQL SELECT count\(\*\) FROM Log/);
+      expect(row.command).not.toContain('abc123secret');
+    }
   });
 });

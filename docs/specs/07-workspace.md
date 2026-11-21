@@ -265,12 +265,16 @@ Adds `branch: string | null`.
   at the end; scrolled up to read, it stays where they left it. A map on its left edge has a mark per message, the operator's
   longer and darker, and tints the marks of the messages in view. Hovering a mark names its message's first line;
   clicking it scrolls there. Scrolled up, a "Scroll to end" button over the bottom edge goes back to the newest
-  message. The composer holds the Model, Effort and Access chips, the branch switcher on a `repo` Session, and Send.
+  message. The composer holds the model pill (Model, Effort and Access), the branch switcher on a `repo` Session, and Send.
   Send keeps the right end of the chips' row; a long branch name shortens before its chip drops to a new row.
   While a run goes, `waiting_input` included, Stop sits before Send and ends it (`02-settings-agents` Behavior 11a).
   Each run of the agent's tool steps folds to one line: the count and the latest step, turning while the message
   streams. Open, each step is one short line, such as "Ran git add +3" for a chain of shell commands; the full
-  command shows on hover. The state in the
+  command shows on hover. A file the agent writes or edits is its own File change row, closed: the file type, the
+  name in bold with its full path on hover, "Wrote" (the change removes no line) or "Edited", and `+N −M`. Clicking
+  the row, or Enter or Space on it, opens the diff under it and clicking again closes it. A long name shortens in
+  the middle and keeps its ending. The diff is not drawn while the row is closed, and a long one scrolls inside the
+  row. An open row stays open while the message streams on. Consecutive changes stay consecutive rows. The state in the
   header is a pill: tinted and pulsing while a run goes, red when failed.
   Each message the operator sent shows Copy on hover. The last one also shows Edit while no run goes: it opens the
   text in place with Cancel and Revert and rerun (`02-settings-agents` Behavior 8a). A note above the composer then
@@ -282,13 +286,13 @@ Adds `branch: string | null`.
   Take back puts it in the box. Its draft is kept per Session.
   Files attach to the next message three ways: the paperclip, dropping them on the box, or pasting them (a
   screenshot, a file copied in Finder). Each uploads at once to `POST /api/sessions/:id/attachments?name=` and is
-  saved under a new name in `attachments/<session id>/` in the data folder. A file sits in the text as a chip where
-  the cursor was, written `[📎 <name>]` in the message, with a thumbnail for images, its size and a remove button. Two
-  files with one name get `name (2)` and on. Taking a chip out of the text removes its file. Saved files stay with the
-  Session through a reload, a switch of Session or tab, until removed or sent. Send waits until every file is saved.
-  The message ends with an "Attached files" list of each name and saved path, and the run lets the agent read that
-  folder, so its Read tool opens them without an Approval. A sent message shows each file as a chip where it sat in
-  the text, and any other under it. A chip, in the box or in the conversation, opens its file over the page from
+  saved under a new name in `attachments/<session id>/` in the data folder. Each file is a chip in a row above the
+  text (`session-start-and-composer-menus` Behavior 25), with a thumbnail for images, its size and a remove button. Two
+  files with one name get `name (2)` and on. Saved files stay with the Session through a reload, a switch of Session or
+  tab, until removed or sent. Send waits until every file is saved. The message ends with an "Attached files" list of
+  each name, saved path, type and size, and the run lets the agent read that folder, so its Read tool opens them without
+  an Approval. A sent message shows each file as a chip under its text; a message sent before the row existed shows a
+  file as a chip where it sat in the text. A chip, in the box or in the conversation, opens its file over the page from
   `GET /api/sessions/:id/attachments/:file`: an image or PDF as itself, text as text up to 256 KB, anything else
   with Download.
 - Diff: on a `repo` Session whose branch changes something, the header's Diff button, with the totals, opens a panel right of the

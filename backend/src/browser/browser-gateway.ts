@@ -4,6 +4,8 @@ import { WebSocketServer } from 'ws';
 import { WsHub } from '../common/ws-hub';
 import { BrowserService } from './browser.service';
 
+const REFUSALS = { 404: 'Not Found', 409: 'Conflict', 429: 'Too Many Requests' } as const;
+
 /** `/browser/:tabId`: the page's frames to the panel and the panel's input back, behind the same token as `/ws`. */
 @Injectable()
 export class BrowserGateway implements OnModuleInit, OnModuleDestroy {
@@ -17,7 +19,29 @@ export class BrowserGateway implements OnModuleInit, OnModuleDestroy {
     @Inject(BrowserService) private readonly browser: BrowserService,
   ) {}
 
+  /** The Inspector windows' sockets: DevTools' protocol to a tab, not the page stream. */
+  private readonly inspectors = new WebSocketServer({
+    noServer: true,
+    handleProtocols: (protocols) => (protocols.has(WS_PROTOCOL) ? WS_PROTOCOL : false),
+  });
+
   onModuleInit(): void {
+    this.hub.route(/^\/browser\/([^/]+)\/devtools$/, (match, request, socket, head) => {
+      const id = match[1] ?? '';
+      const refusal = this.browser.inspectorRefusal(id);
+      if (refusal !== null) {
+        socket.end(`HTTP/1.1 ${refusal} ${REFUSALS[refusal]}\r\nConnection: close\r\n\r\n`);
+        return;
+      }
+      this.inspectors.handleUpgrade(request, socket, head, (window) => {
+        window.on('error', () => {});
+        try {
+          this.browser.inspect(id, window);
+        } catch {
+          window.close(1011, 'tab_unavailable');
+        }
+      });
+    });
     this.hub.route(/^\/browser\/([^/]+)$/, (match, request, socket, head) => {
       const id = match[1] ?? '';
       if (!this.browser.known(id)) {
@@ -38,8 +62,9 @@ export class BrowserGateway implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
-    for (const client of this.server.clients) client.terminate();
+    for (const client of [...this.server.clients, ...this.inspectors.clients]) client.terminate();
     this.server.close();
+    this.inspectors.close();
   }
 }
 

@@ -41,6 +41,7 @@ import { AlertSessions } from './alert-sessions';
 import { AlertsService } from './alerts.service';
 import { LOG_READERS, type LogReaders } from './log-reader';
 import { logSourceRule } from './log-source-brief';
+import { newRelicLogsConfig } from './log-source-config';
 import { type AlertRow, type FixRow, type ReportRow, type ReviewRow, type ServiceRow, toFix } from './mappers';
 import { PROD_PARITY_ASK, recheck } from './prod-parity';
 
@@ -371,7 +372,7 @@ export class FixesService {
 
   private brief(context: Context): string {
     const jira = context.fix.jiraKey ? `Jira: ${context.fix.jiraKey}. ` : '';
-    const rule = logSourceRule(context.alert.connector);
+    const rule = logSourceRule(context.alert.connector, newRelicLogsConfig(this.store.db).route);
     return `Fix for Alert "${context.alert.title}" on ${context.service.name}.
 ${jira}Root cause: ${context.report.rootCause}. Proposed fix: ${context.report.proposedFix}.
 ${context.recheckLine}${rule ? `\n${rule}` : ''}`;

@@ -1,15 +1,9 @@
 import type { FileMenuItem, SkillMenuItem } from '@ops-console/shared';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useId, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useFileMenu, useSkillMenu } from '../lib/queries';
 import { KindBadge } from '../skills/kind-badge';
-
-/** `$` and the name so far: the skills menu is open while the message is one word that starts with a dollar sign. */
-const SKILL = /^\$[^\s]*$/;
-/** `/` and the name so far: the commands menu is open while the message is one word that starts with a slash. */
-const COMMAND = /^\/[^\s]*$/;
-/** The `@` and the text after it at the end of the message, which starts the message or follows a space. */
-const FILE = /(?:^|\s)@([^\s]*)$/;
+import { filePath, type Token } from './mentions';
 
 /** A Session action the `/` menu runs; the message is cleared when it runs. */
 export type ComposerCommand = { name: string; description: string; run: () => void };
@@ -32,8 +26,7 @@ type Entry = { key: string; row: ReactNode; pick: () => void };
 /** A row's key: two skills of one name differ by kind (a Project `pr` and an Ops Console `pr`). */
 const keyOf = (item: SkillMenuItem) => `${item.kind}:${item.name}`;
 
-const modeOf = (text: string): Mode | null =>
-  SKILL.test(text) ? 'skills' : COMMAND.test(text) ? 'commands' : FILE.test(text) ? 'files' : null;
+const MODE: Record<Token['trigger'], Mode> = { $: 'skills', '/': 'commands', '@': 'files' };
 
 const HINT: Record<Mode, string> = {
   skills: 'Enter picks, Esc closes. What you type after the name is the task.',
@@ -43,36 +36,34 @@ const HINT: Record<Mode, string> = {
 
 const TITLE: Record<Mode, string> = { skills: 'Skills', commands: 'Commands', files: 'Files' };
 
-/** A path as the agent reads it after an `@`: quoted when it holds a space. */
-const mention = (path: string) => (/\s/.test(path) ? `@"${path}"` : `@${path}`);
-
 /**
  * The menus above a Session's composer: `$` skills (Ops Console, Custom and, in a Repo, Project), `/` commands for the
  * Session, and `@` files of the Session's Repo, or of every imported Repo when it has none. Each reads when it opens.
- * Arrows move, Enter or Tab picks, Escape closes until the text changes.
+ * The word before the cursor opens a menu wherever it sits in the message. Arrows move, Enter or Tab picks, Escape closes until the word changes.
  */
 export function useComposerMenus({
   sessionId,
-  text,
+  token,
   enabled,
   commands,
-  setText,
+  replaceToken,
   onSkill,
-  focusEnd,
 }: {
   sessionId: string;
-  text: string;
+  /** The `$`, `@` or `/` word before the cursor, wherever it is in the message. */
+  token: Token | null;
   enabled: boolean;
   commands: ComposerCommand[];
-  setText: (text: string) => void;
+  /** Puts the mention (`$name`, `@path`) in the place of the word, or takes the word out for null. */
+  replaceToken: (raw: string | null) => void;
+  /** A skill was picked: the message may run it. */
   onSkill: (item: SkillMenuItem) => void;
-  /** The editor keeps its focus while a row is clicked and moves the cursor after the new text itself. */
-  focusEnd: () => void;
-}): { onKey: (event: KeyboardEvent) => boolean; menu: ReactNode } {
+}): { onKey: (event: KeyboardEvent) => boolean; menu: ReactNode; activeId: string | undefined } {
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [active, setActive] = useState(0);
-  const mode = enabled && dismissed !== text ? modeOf(text) : null;
-  const q = mode === 'files' ? (FILE.exec(text)?.[1] ?? '') : text.slice(1);
+  const listId = useId();
+  const mode = enabled && token && dismissed !== token.key ? MODE[token.trigger] : null;
+  const q = token?.query ?? '';
   const asked = useSettled(q, 120);
   const skills = useSkillMenu(sessionId, asked, mode === 'skills');
   const files = useFileMenu(sessionId, asked, mode === 'files');
@@ -81,7 +72,10 @@ export function useComposerMenus({
     mode === 'skills'
       ? (skills.data?.items ?? []).map((item) => ({
           key: keyOf(item),
-          pick: () => onSkill(item),
+          pick: () => {
+            onSkill(item);
+            replaceToken(`$${item.name}`);
+          },
           row: (
             <>
               <span className="flex-none font-mono font-semibold">${item.name}</span>
@@ -94,7 +88,7 @@ export function useComposerMenus({
         ? matching(commands, q).map((command) => ({
             key: command.name,
             pick: () => {
-              setText('');
+              replaceToken(null);
               command.run();
             },
             row: (
@@ -107,12 +101,7 @@ export function useComposerMenus({
         : mode === 'files'
           ? (files.data?.items ?? []).map((item: FileMenuItem) => ({
               key: item.path,
-              pick: () => {
-                setText(
-                  text.replace(FILE, (found) => `${found.startsWith('@') ? '' : found[0]}${mention(item.path)} `),
-                );
-                focusEnd();
-              },
+              pick: () => replaceToken(filePath(item.path)),
               row: (
                 <>
                   <span className="max-w-[55%] flex-none truncate font-mono font-semibold">{item.name}</span>
@@ -127,13 +116,13 @@ export function useComposerMenus({
             }))
           : [];
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the pick goes back to the first row whenever the text changes
-  useEffect(() => setActive(0), [text]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the pick goes back to the first row whenever the word changes
+  useEffect(() => setActive(0), [token?.text]);
 
   const onKey = (event: KeyboardEvent): boolean => {
     if (mode === null || event.isComposing) return false;
     if (event.key === 'Escape') {
-      setDismissed(text);
+      setDismissed(token?.key ?? null);
       return true;
     }
     if (entries.length === 0) return false;
@@ -145,10 +134,12 @@ export function useComposerMenus({
     return true;
   };
 
-  if (mode === null) return { onKey, menu: null };
+  if (mode === null) return { onKey, menu: null, activeId: undefined };
+  const optionId = (index: number) => `${listId}-${index}`;
   const query = mode === 'skills' ? skills : mode === 'files' ? files : null;
   return {
     onKey,
+    activeId: entries.length > 0 ? optionId(Math.min(active, entries.length - 1)) : undefined,
     menu: (
       <div
         role="listbox"
@@ -178,6 +169,7 @@ export function useComposerMenus({
           entries.map((entry, index) => (
             <div
               key={entry.key}
+              id={optionId(index)}
               role="option"
               aria-selected={index === active}
               tabIndex={-1}
@@ -186,7 +178,7 @@ export function useComposerMenus({
               onClick={entry.pick}
               onKeyDown={() => undefined}
               onMouseEnter={() => setActive(index)}
-              className={`flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] ${index === active ? 'bg-accent-100 text-accent-900' : 'hover:bg-neutral-200'}`}
+              className={`flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] ${index === active ? 'bg-accent-100 text-accent-900' : 'text-text hover:bg-neutral-200'}`}
             >
               {entry.row}
             </div>

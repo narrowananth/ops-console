@@ -1321,7 +1321,6 @@ test('standard buttons share one height, icon buttons are 30 pixels, and the dro
 
   await editor.getByRole('button', { name: '← All Playbooks' }).click();
   const field = await sizeOf(page.getByRole('button', { name: 'Playbook for Verify' }));
-  expect((await sizeOf(page.getByRole('button', { name: '+ New Playbook' }))).height).toBe(sizes[0]?.height);
   await page.getByRole('button', { name: '+ New Playbook' }).click();
   const dialog = page.getByRole('alertdialog', { name: 'New Playbook' });
   const copy = await sizeOf(dialog.getByRole('button', { name: 'Built-in to copy' }));

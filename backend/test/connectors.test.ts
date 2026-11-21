@@ -22,6 +22,7 @@ import { FakeFolderPicker } from './fakes/folder-picker';
 import { FakeGoogle } from './fakes/google';
 import { FakeKeychain } from './fakes/keychain';
 import { FakeGrafana } from './fakes/loki-logs';
+import { FakeNerdGraph } from './fakes/nerdgraph';
 import { FakeNewRelic } from './fakes/new-relic-logs';
 import { FakeProbe } from './fakes/probe';
 
@@ -49,6 +50,8 @@ type Ctx = {
   /** The stand-ins for Grafana Cloud and New Relic, when the test asked for them. */
   grafana: FakeGrafana;
   newrelic: FakeNewRelic;
+  /** New Relic's regular API, for the User API key route. */
+  nerdgraph: FakeNerdGraph;
 };
 type Row = Record<string, unknown> & { id: string; status: string };
 
@@ -67,7 +70,8 @@ async function start(
   const folder = new FakeFolderPicker();
   const grafana = await FakeGrafana.start();
   const newrelic = await FakeNewRelic.start();
-  hostedServers.push(grafana, newrelic);
+  const nerdgraph = await FakeNerdGraph.start();
+  hostedServers.push(grafana, newrelic, nerdgraph);
   const daemon = await startAgentDaemon({
     ...(options.keychain ? { keychain: options.keychain } : {}),
     modules: [
@@ -77,7 +81,11 @@ async function start(
         google: auth,
         claudeCredentials: claude,
         folderPicker: folder,
-        hosts: { grafana: grafana.url, newRelic: { US: newrelic.url, EU: newrelic.url, JP: newrelic.url } },
+        hosts: {
+          grafana: grafana.url,
+          newRelic: { US: newrelic.url, EU: newrelic.url, JP: newrelic.url },
+          newRelicApi: { US: nerdgraph.url, EU: nerdgraph.url, JP: nerdgraph.url },
+        },
         grafanaSignInMs: options.signInMs,
       }),
     ],
@@ -98,6 +106,7 @@ async function start(
     folder,
     grafana,
     newrelic,
+    nerdgraph,
   };
 }
 
@@ -1816,14 +1825,14 @@ describe('New Relic logs Connector', () => {
       return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).mcpServers?.newrelic : undefined;
     });
 
-  it('is listed last, off, with only the Region and the account in its config', async () => {
+  it('is listed last, off, with only the Region, the route and the account in its config', async () => {
     const ctx = await start();
     expect(await one(ctx, 'new_relic_logs')).toMatchObject({
       name: 'New Relic logs',
       via: 'New Relic MCP',
       status: 'off',
       sign_in: null,
-      config: { account_id: '', region: 'US', environments: ['prod'], daily_scan_time: '09:00' },
+      config: { account_id: '', region: 'US', route: 'mcp', environments: ['prod'], daily_scan_time: '09:00' },
     });
     expect(Object.keys((await one(ctx, 'new_relic_logs')).config as object).sort()).toEqual([
       'account_id',
@@ -1835,6 +1844,7 @@ describe('New Relic logs Connector', () => {
       'rapid_errors_per_10m',
       'region',
       'reports_folder',
+      'route',
     ]);
     expect((await list(ctx)).at(-1)?.id).toBe('new_relic_logs');
   });
@@ -1978,14 +1988,250 @@ describe('New Relic logs Connector', () => {
   });
 });
 
+describe('New Relic logs Connector with a User API key', () => {
+  const KEY = 'NRAK-EXAMPLEKEY0123456789';
+  const KEYCHAIN_ITEM = 'connection:new_relic_logs';
+  const connect = (ctx: Ctx, body: Record<string, unknown> = {}) =>
+    api(ctx.daemon).post('/connectors/new_relic_logs/connect', body);
+  const withKey = (ctx: Ctx, body: Record<string, unknown> = {}) => connect(ctx, { api_key: KEY, ...body });
+  const status = (ctx: Ctx, want: string) =>
+    until(
+      () => one(ctx, 'new_relic_logs'),
+      (row) => row.status === want && row.sign_in === null,
+      `New Relic logs to read ${want}`,
+    );
+  const check = async (ctx: Ctx) => (await api(ctx.daemon).post('/connectors/new_relic_logs/checks')).body.data;
+  const registered = (ctx: Ctx) =>
+    ctx.dirs.map((dir) => {
+      const file = path.join(dir, '.claude.json');
+      return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).mcpServers?.newrelic : undefined;
+    });
+  /** The pane has no way to see the key again: nothing the daemon sends holds it. */
+  const nothingHoldsTheKey = async (ctx: Ctx, ...answers: unknown[]) => {
+    for (const answer of [...answers, await list(ctx)]) expect(JSON.stringify(answer)).not.toContain(KEY);
+  };
+  const TOKEN = 'nr-token-example';
+  const signedInByMcp = (ctx: Ctx) => {
+    for (const dir of ctx.dirs) ctx.probe.set(dir, 'newrelic', { status: 'needs-auth' });
+    ctx.newrelic.grant(TOKEN);
+    ctx.claude.hold('newrelic', TOKEN);
+  };
+
+  it('validates the key with the account list, keeps it in the Keychain, reads the one account, and touches neither Claude Code nor a browser', async () => {
+    const ctx = await start();
+    ctx.nerdgraph.grant(KEY);
+    const sent = await withKey(ctx, { region: 'EU' });
+    expect(sent.status).toBe(202);
+    expect(await status(ctx, 'ok')).toMatchObject({
+      via: 'New Relic API',
+      account_label: 'Example Prod (1234567)',
+      config: { account_id: '1234567', region: 'EU', route: 'key' },
+    });
+    expect(ctx.keychain.values.get(KEYCHAIN_ITEM)).toBe(KEY);
+    // A User key goes in New Relic's header, to its API only.
+    expect(ctx.nerdgraph.calls().map((call) => [call.key, call.path])).toEqual([[KEY, '/graphql']]);
+    expect(registered(ctx).every((entry) => entry === undefined)).toBe(true);
+    expect(ctx.claude.reads).toEqual([]);
+    expect(ctx.tools.opened).toEqual([]);
+    expect(ctx.newrelic.calls()).toEqual([]);
+    await nothingHoldsTheKey(ctx, sent.body);
+  });
+
+  it('refuses a key New Relic rejects with its reason, and stores and changes nothing', async () => {
+    const ctx = await start();
+    ctx.nerdgraph.grant('NRAK-ANOTHER');
+    const refused = await withKey(ctx);
+    expect([refused.status, refused.body.error.code]).toEqual([422, ErrorCode.ValidationFailed]);
+    expect(refused.body.error.message).toMatch(/New Relic refused the User API key/);
+    expect(JSON.stringify(refused.body)).not.toContain(KEY);
+    expect(ctx.keychain.values.has(KEYCHAIN_ITEM)).toBe(false);
+    expect(await one(ctx, 'new_relic_logs')).toMatchObject({ status: 'off', config: { route: 'mcp' } });
+  });
+
+  it('refuses a Region outside US, EU and JP before any request leaves, and an empty key', async () => {
+    const ctx = await start();
+    ctx.nerdgraph.grant(KEY);
+    const region = await withKey(ctx, { region: 'evil.example.com' });
+    expect([region.status, region.body.error.code]).toEqual([422, ErrorCode.ValidationFailed]);
+    expect((await withKey(ctx, { api_key: '  ' })).status).toBe(400);
+    expect(ctx.nerdgraph.calls()).toEqual([]);
+  });
+
+  it('maps a throttled API to rate_limited and a failing one to upstream_failed, never with the key', async () => {
+    const ctx = await start();
+    ctx.nerdgraph.grant(KEY);
+    ctx.nerdgraph.behave('throttle');
+    const throttled = await withKey(ctx);
+    expect([throttled.status, throttled.body.error.code]).toEqual([429, ErrorCode.RateLimited]);
+    ctx.nerdgraph.behave('leakyError');
+    const leaky = await withKey(ctx);
+    expect([leaky.status, leaky.body.error.code]).toEqual([502, ErrorCode.UpstreamFailed]);
+    expect(leaky.body.error.message).toContain('Bad request from [key]');
+    ctx.nerdgraph.behave('unreadable');
+    expect((await withKey(ctx)).body.error.code).toBe(ErrorCode.UpstreamFailed);
+    await nothingHoldsTheKey(ctx, throttled.body, leaky.body);
+    expect(ctx.keychain.values.has(KEYCHAIN_ITEM)).toBe(false);
+  });
+
+  it('asks which account to read when the key sees several, lists them with the key, and finishes when one is picked', async () => {
+    const ctx = await start();
+    ctx.nerdgraph.grant(KEY).accounts([
+      { id: 1234567, name: 'Example Prod' },
+      { id: 7654321, name: 'Example Staging' },
+    ]);
+    await withKey(ctx);
+    expect(await status(ctx, 'auth')).toMatchObject({
+      status_detail: 'Choose a New Relic account to finish connecting.',
+      pick: 'account',
+      config: { account_id: '', route: 'key' },
+    });
+    const listed = await api(ctx.daemon).get('/connectors/new_relic_logs/accounts');
+    expect(listed.body.data).toEqual([
+      { id: '1234567', name: 'Example Prod' },
+      { id: '7654321', name: 'Example Staging' },
+    ]);
+    const wrong = await connect(ctx, { account_id: '999' });
+    expect([wrong.status, wrong.body.error.code]).toEqual([422, ErrorCode.ValidationFailed]);
+    expect((await connect(ctx, { account_id: '7654321' })).status).toBe(202);
+    expect(await status(ctx, 'ok')).toMatchObject({
+      account_label: 'Example Staging (7654321)',
+      config: { account_id: '7654321', route: 'key' },
+      pick: null,
+    });
+    expect(ctx.keychain.values.get(KEYCHAIN_ITEM)).toBe(KEY);
+    expect(ctx.claude.reads).toEqual([]);
+  });
+
+  it('reads a key that can read no account as needs auth with a reason', async () => {
+    const ctx = await start();
+    ctx.nerdgraph.grant(KEY).accounts([]);
+    await withKey(ctx);
+    expect(await status(ctx, 'auth')).toMatchObject({ status_detail: expect.stringContaining('can read no account') });
+  });
+
+  describe('the health check', () => {
+    const connected = async () => {
+      const ctx = await start();
+      ctx.nerdgraph.grant(KEY);
+      await withKey(ctx);
+      await status(ctx, 'ok');
+      return ctx;
+    };
+
+    it('reads connected through the API, with the account', async () => {
+      const ctx = await connected();
+      expect(await check(ctx)).toMatchObject({ status: 'ok', account_label: 'Example Prod (1234567)' });
+    });
+
+    it('reads needs auth when New Relic refuses the key now, or the Keychain item is gone', async () => {
+      const ctx = await connected();
+      ctx.nerdgraph.revokeKeys();
+      expect(await check(ctx)).toMatchObject({ status: 'auth', status_detail: expect.stringContaining('refused') });
+      ctx.nerdgraph.grant(KEY);
+      expect(await check(ctx)).toMatchObject({ status: 'ok' });
+      ctx.keychain.values.delete(KEYCHAIN_ITEM);
+      expect(await check(ctx)).toMatchObject({ status: 'auth' });
+    });
+
+    it('reads down with the reason for a throttle or an error, with the key scrubbed from it', async () => {
+      const ctx = await connected();
+      ctx.nerdgraph.behave('throttle');
+      expect(await check(ctx)).toMatchObject({ status: 'fail', status_detail: expect.stringContaining('rate limit') });
+      ctx.nerdgraph.behave('leakyError');
+      const leaky = await check(ctx);
+      expect(leaky.status).toBe('fail');
+      expect(leaky.status_detail).toContain('[key]');
+      await nothingHoldsTheKey(ctx, leaky);
+    });
+  });
+
+  it('replaces the MCP sign-in when a key connects, and the key when the MCP sign-in connects', async () => {
+    const ctx = await start();
+    signedInByMcp(ctx);
+    await connect(ctx, {});
+    await status(ctx, 'ok');
+    expect(registered(ctx).some((entry) => entry !== undefined)).toBe(true);
+    expect(ctx.keychain.values.has(KEYCHAIN_ITEM)).toBe(false);
+
+    ctx.nerdgraph.grant(KEY);
+    await withKey(ctx);
+    await until(
+      () => registered(ctx),
+      (entries) => entries.every((entry) => entry === undefined),
+      'the MCP server removed',
+    );
+    expect(await status(ctx, 'ok')).toMatchObject({ via: 'New Relic API', config: { route: 'key' } });
+    expect(ctx.keychain.values.get(KEYCHAIN_ITEM)).toBe(KEY);
+
+    await connect(ctx, {});
+    await until(
+      () => ctx.keychain.values.has(KEYCHAIN_ITEM),
+      (held) => !held,
+      'the key removed',
+    );
+    expect(await status(ctx, 'ok')).toMatchObject({ via: 'New Relic MCP', config: { route: 'mcp' } });
+    expect(registered(ctx).some((entry) => entry !== undefined)).toBe(true);
+  });
+
+  it('keeps the key and the account when an MCP sign-in does not finish', async () => {
+    const ctx = await start();
+    ctx.nerdgraph.grant(KEY);
+    await withKey(ctx);
+    await status(ctx, 'ok');
+    signedInByMcp(ctx);
+    ctx.claude.refused = true;
+    await connect(ctx, {});
+    await status(ctx, 'auth');
+    expect(ctx.keychain.values.get(KEYCHAIN_ITEM)).toBe(KEY);
+    expect((await one(ctx, 'new_relic_logs')).config).toMatchObject({ route: 'key', account_id: '1234567' });
+  });
+
+  it('clears the Keychain key on Disconnect and keeps the Region and the account for the next Connect', async () => {
+    const ctx = await start();
+    ctx.nerdgraph.grant(KEY);
+    await withKey(ctx, { region: 'JP' });
+    await status(ctx, 'ok');
+    const off = await api(ctx.daemon).delete('/connectors/new_relic_logs/credentials');
+    expect(off.body.data).toMatchObject({
+      status: 'off',
+      config: { region: 'JP', account_id: '1234567', route: 'mcp' },
+    });
+    expect(ctx.keychain.values.has(KEYCHAIN_ITEM)).toBe(false);
+  });
+
+  it('keeps the key across a daemon restart and reads through it', async () => {
+    const ctx = await start();
+    ctx.nerdgraph.grant(KEY);
+    await withKey(ctx);
+    await status(ctx, 'ok');
+    const { dataDir, keychain } = { dataDir: ctx.daemon.dataDir, keychain: ctx.keychain };
+    await ctx.daemon.stop();
+    running.splice(running.indexOf(ctx.daemon), 1);
+    const again = await startAgentDaemon({
+      dataDir,
+      keychain,
+      modules: [
+        McpServersModule.forRoot({ probe: new FakeProbe(), launcher: '/opt/ops-console' }),
+        ConnectorsModule.forRoot({
+          tools: new FakeConnectorTools(),
+          hosts: { newRelicApi: { US: ctx.nerdgraph.url } },
+        }),
+      ],
+    });
+    running.push(again);
+    const checked = await api(again).post('/connectors/new_relic_logs/checks');
+    expect(checked.body.data).toMatchObject({ status: 'ok', account_label: 'Example Prod (1234567)' });
+  });
+});
+
 describe('first start after the typed forms', () => {
-  it('deletes the old Loki and New Relic Keychain items once, and does nothing when neither is there', async () => {
+  it('deletes the old Loki Keychain item once, keeps the New Relic User API key, and does nothing when neither is there', async () => {
     const keychain = new FakeKeychain();
     keychain.values.set('connection:loki_logs', 'glc_example_secret');
     keychain.values.set('connection:new_relic_logs', 'NRAK-EXAMPLE');
     keychain.values.set('connection:datadog', 'kept');
     const ctx = await start({ keychain });
-    expect([...ctx.keychain.values.keys()]).toEqual(['connection:datadog']);
+    expect([...ctx.keychain.values.keys()].sort()).toEqual(['connection:datadog', 'connection:new_relic_logs']);
     const dataDir = ctx.daemon.dataDir;
     await ctx.daemon.stop();
     running.splice(running.indexOf(ctx.daemon), 1);
@@ -1998,6 +2244,6 @@ describe('first start after the typed forms', () => {
       ],
     });
     running.push(again);
-    expect([...keychain.values.keys()]).toEqual(['connection:datadog']);
+    expect([...keychain.values.keys()].sort()).toEqual(['connection:datadog', 'connection:new_relic_logs']);
   });
 });

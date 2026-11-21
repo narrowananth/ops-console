@@ -5,25 +5,29 @@ import {
   type OutputFile,
   type Part,
   splitAttachments,
+  splitElementPicks,
 } from '@ops-console/shared';
-import { memo, useState } from 'react';
-import { AttachmentViewer, outputAddress, PaperClip, size, type Viewed } from '../components/ui/attachment-viewer';
+import { memo, type ReactNode, useState } from 'react';
+import { AttachmentViewer, outputAddress, size, type Viewed } from '../components/ui/attachment-viewer';
 import { Button, Spinner } from '../components/ui/button';
 import { CodeBlock } from '../components/ui/code-block';
-import { DiffLines } from '../components/ui/diff';
 import { Elapsed } from '../components/ui/elapsed';
+import { FileKindIcon, kindOf } from '../components/ui/file-kind';
 import { Markdown } from '../components/ui/markdown';
 import type { PathwayState } from '../components/ui/pathway';
 import { ComparisonView, ResultView } from '../devtools/result-tables';
 import { COPY_FAILED, copyLabel, useCopy } from '../lib/clipboard';
 import { when } from '../monitor/scan-scope';
 import { KindBadge } from '../skills/kind-badge';
+import { MentionChip } from '../workspace/mention-chip';
+import { mentionsIn } from '../workspace/mentions';
+import { FileChange } from './file-change';
 import { InlineText } from './inline-text';
 import { asReport, ReportDocument } from './report-document';
 import { SpawnCard } from './spawn-card';
 import { StepRun } from './step-run';
 
-/** One part of a Session's transcript: text, a tool step, a diff, a code block, a question or a Dev tools table. */
+/** One part of a Session's transcript: text, a tool step, a file change, a code block, a question or a Dev tools table. */
 const PartView = memo(function PartView({ part, sessionId }: { part: Part; sessionId: string | null }) {
   if (part.kind === 'spawn') return sessionId === null ? null : <SpawnCard part={part} sessionId={sessionId} />;
   if (part.kind === 'result') return <ResultView part={part} connections={[]} />;
@@ -38,14 +42,7 @@ const PartView = memo(function PartView({ part, sessionId }: { part: Part; sessi
     if (report) return <ReportDocument report={report} />;
     return <CodeBlock text={part.text} className="m-0 overflow-x-auto rounded-md bg-surface p-2.5 font-mono text-xs" />;
   }
-  if (part.kind === 'diff') {
-    return (
-      <div className="overflow-hidden rounded-md border border-line font-mono text-xs">
-        <div className="border-b border-line bg-surface px-2 py-1 font-semibold">{part.file}</div>
-        <DiffLines lines={part.lines} />
-      </div>
-    );
-  }
+  if (part.kind === 'diff') return <FileChange file={part.file} lines={part.lines} />;
   return (
     <div className="flex flex-col gap-1 rounded-lg bg-accent-100 px-3.5 py-2.5 text-[13px] text-accent-900">
       {part.header && <span className="text-xs font-semibold tracking-wide uppercase">{part.header}</span>}
@@ -242,16 +239,19 @@ function MessageItem({
  * text. A chip opens its file over the page.
  */
 function SentText({ text }: { text: string }) {
-  const sent = splitAttachments(text);
+  const files = splitAttachments(text);
+  const { text: said, picks } = splitElementPicks(files.text);
+  const sent = { text: said, attachments: files.attachments };
   const [viewed, setViewed] = useState<Viewed | null>(null);
   const byName = new Map(sent.attachments.map((file) => [file.name, file]));
   const placed = new Set(namesInText(sent.text).filter((name) => byName.has(name)));
   const open = (file: { name: string; path: string }) => setViewed({ name: file.name, path: file.path });
   const rest = sent.attachments.filter((file) => !placed.has(file.name));
+  const mentioned = mentionsIn(sent.text).length > 0;
   return (
     <>
       {sent.text &&
-        (placed.size === 0 ? (
+        (placed.size === 0 && !mentioned ? (
           <Markdown source={sent.text} />
         ) : (
           <p className="m-0 text-sm leading-relaxed break-words whitespace-pre-wrap">
@@ -263,16 +263,31 @@ function SentText({ text }: { text: string }) {
                 <FileChip key={`${file.path}-${index}`} name={file.name} onOpen={() => open(file)} />
               ) : (
                 // biome-ignore lint/suspicious/noArrayIndexKey: pieces sit by position and never reorder
-                <InlineText key={index} text={piece} />
+                <MentionedText key={index} text={piece} />
               );
             })}
           </p>
         ))}
+      {picks.length > 0 && (
+        <ul aria-label="Elements in this message" className="m-0 flex list-none flex-col gap-1.5 p-0">
+          {picks.map((pick, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: one element may be picked twice; picks never reorder
+            <li key={index}>
+              <details className="rounded-md border border-line bg-bg px-2 py-1 text-xs">
+                <summary className="cursor-pointer font-mono" title={pick.page}>
+                  {pick.selector}
+                </summary>
+                <CodeBlock text={pick.block} className="m-0 mt-1 overflow-x-auto font-mono text-[11px]" />
+              </details>
+            </li>
+          ))}
+        </ul>
+      )}
       {rest.length > 0 && (
         <ul aria-label="Attached files" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
           {rest.map((file) => (
             <li key={file.path}>
-              <FileChip name={file.name} onOpen={() => open(file)} />
+              <FileChip name={file.name} size={file.sizeLabel} onOpen={() => open(file)} />
             </li>
           ))}
         </ul>
@@ -321,16 +336,33 @@ export function outputsByMessage(messages: Message[], files: OutputFile[]): Map<
   return byMessage;
 }
 
-function FileChip({ name, onOpen }: { name: string; onOpen: () => void }) {
+/** Text with a chip for each `$skill` and `@file` mention in it. */
+function MentionedText({ text }: { text: string }) {
+  const nodes: ReactNode[] = [];
+  let at = 0;
+  for (const { raw, start, end } of mentionsIn(text)) {
+    if (start > at) nodes.push(<InlineText key={`t${at}`} text={text.slice(at, start)} />);
+    nodes.push(<MentionChip key={`m${start}`} raw={raw} />);
+    at = end;
+  }
+  if (at < text.length) nodes.push(<InlineText key={`t${at}`} text={text.slice(at)} />);
+  return nodes;
+}
+
+function FileChip({ name, size: sizeLabel, onOpen }: { name: string; size?: string; onOpen: () => void }) {
+  const kind = kindOf(name);
   return (
     <button
       type="button"
+      data-file={name}
+      data-kind={kind}
       title={`Open ${name}`}
       onClick={onOpen}
       className="mx-0.5 inline-flex max-w-72 cursor-pointer items-center gap-1.5 rounded-md border border-line bg-bg px-1.5 py-0.5 align-middle font-mono text-xs text-neutral-800 hover:border-accent-300 hover:text-text"
     >
-      <PaperClip />
+      <FileKindIcon kind={kind} size={14} />
       <span className="min-w-0 truncate">{name}</span>
+      {sizeLabel && <span className="flex-none text-[11px] text-neutral-700">{sizeLabel}</span>}
     </button>
   );
 }

@@ -22,6 +22,8 @@ const sh = (command, args, cwd = repo) => execFileSync(command, args, { cwd, std
 await rm(out, { recursive: true, force: true });
 await mkdir(stage, { recursive: true });
 
+// Chrome's DevTools for the Inspector window land in frontend/public, which the UI build copies.
+sh('node', ['scripts/devtools-frontend.mjs']);
 sh('pnpm', ['-r', 'build']);
 
 await writeFile(path.join(stage, 'VERSION'), `${version}\n`);

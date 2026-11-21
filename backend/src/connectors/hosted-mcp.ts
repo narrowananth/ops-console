@@ -45,7 +45,7 @@ export interface HostedTools {
 export type HostedOpen = <T>(use: (tools: HostedTools) => Promise<T>, signal?: AbortSignal) => Promise<T>;
 
 const CALL_TIMEOUT_MS = 60_000;
-const RATE_LIMITED = /\b429\b|too many requests|rate.?limit/i;
+export const RATE_LIMITED = /\b429\b|too many requests|rate.?limit/i;
 
 const REASONS: [RegExp, string][] = [
   [/ENOTFOUND|EAI_AGAIN/, 'the host name was not found'],
@@ -55,7 +55,7 @@ const REASONS: [RegExp, string][] = [
 ];
 
 /** Why a request that never got an answer failed, in words safe to show. */
-function reasonOf(error: unknown): string {
+export function reasonOf(error: unknown): string {
   const cause = (error as { cause?: unknown }).cause;
   const text = `${String(error)} ${String(cause ?? '')} ${String((cause as { code?: unknown } | undefined)?.code ?? '')}`;
   return REASONS.find(([pattern]) => pattern.test(text))?.[1] ?? 'the connection failed';

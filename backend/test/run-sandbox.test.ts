@@ -58,6 +58,10 @@ const sandboxOf = (daemon: AgentDaemon, call = -1) => {
 };
 
 describe('Run sandbox on agent runs', () => {
+  it('lets every run reach the SheetJS CDN, its npm mirror and Google Docs without an entry of the operator (Network Behavior 7)', () => {
+    expect(BUILT_IN).toEqual(expect.arrayContaining(['cdn.sheetjs.com', 'npm.apkg.io', 'docs.google.com']));
+  });
+
   it('sandboxes a run in every Access mode, full included (Behavior 1; Network Behavior 1, 3, 7)', async () => {
     const daemon = await start();
     for (const mode of Object.values(AccessMode)) {

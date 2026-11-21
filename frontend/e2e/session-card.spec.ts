@@ -236,10 +236,21 @@ test('the composer and the card have rounded corners, and a chip list opens insi
     .locator('xpath=ancestor::div[contains(@class,"rounded-3xl")][1]');
   expect(await box.evaluate((node) => getComputedStyle(node).borderTopLeftRadius)).not.toBe('0px');
 
-  await page.setViewportSize({ width: 1100, height: 800 });
-  await page.getByRole('button', { name: /^Effort/ }).click();
-  const list = page.getByRole('listbox');
-  await expect(list).toBeVisible();
-  const right = await list.evaluate((node) => node.getBoundingClientRect().right);
-  expect(right).toBeLessThanOrEqual(1100);
+  for (const width of [1100, 800]) {
+    await page.setViewportSize({ width, height: 800 });
+    // Below 1100 the Session panel floats over the page; the narrow composer is the one to check.
+    if (width < 1100) await page.getByRole('button', { name: 'Close the Session panel' }).click();
+    await page.getByRole('button', { name: 'Model, effort and access' }).click();
+    const popover = page.getByRole('dialog', { name: 'Model, effort and access' });
+    await expect(popover).toBeVisible();
+    const edges = await popover.evaluate((node) => {
+      const { left, right } = node.getBoundingClientRect();
+      return { left, right, overflow: document.documentElement.scrollWidth - window.innerWidth };
+    });
+    expect(edges.left).toBeGreaterThanOrEqual(0);
+    expect(edges.right).toBeLessThanOrEqual(width);
+    expect(edges.overflow).toBeLessThanOrEqual(0);
+    await page.keyboard.press('Escape');
+    await expect(popover).toHaveCount(0);
+  }
 });

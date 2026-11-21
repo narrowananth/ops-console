@@ -24,6 +24,11 @@ export const BUILT_IN_NETWORK_DOMAINS = [
   'files.pythonhosted.org',
   'rubygems.org',
   'index.rubygems.org',
+  // Downloads a build fetches from outside the registries above: the SheetJS CDN and the npm mirror it publishes to,
+  // and Google Docs pages an agent reads.
+  'cdn.sheetjs.com',
+  'npm.apkg.io',
+  'docs.google.com',
   // The Connectors' own APIs (Git hosts, Atlassian, Datadog, Slack, Sentry, Shopify), by API host: never an ingest or
   // webhook host, which takes data from anyone.
   'bitbucket.org',

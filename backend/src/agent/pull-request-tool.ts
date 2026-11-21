@@ -2,6 +2,7 @@ import { createSdkMcpServer, type McpSdkServerConfigWithInstance, tool } from '@
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import { type IntegrationRunner, integrationInputSchema } from './integration-cli';
+import { type NewRelicQuery, newRelicQueryInputSchema, runNewRelicQuery } from './new-relic-tool';
 import { type FileSaver, runSaveFile, saveFileInputSchema } from './output-files';
 import { type BrowserTools, CONSOLE_TOOLS_SERVER, type ProcessTools, sessionTools } from './session-tools';
 
@@ -145,6 +146,8 @@ export function consoleToolsServer(
     spawnCallId?: () => string;
     saver: FileSaver | null;
     integrations?: IntegrationRunner | null;
+    /** New Relic logs read with a User API key, which only the daemon holds. */
+    newRelic?: NewRelicQuery | null;
     browser?: BrowserTools | null;
     processes?: ProcessTools | null;
     /** Aborts when the operator stops the run. */
@@ -159,6 +162,7 @@ export function consoleToolsServer(
     spawnCallId = () => '',
     saver,
     integrations = null,
+    newRelic = null,
     browser = null,
     processes = null,
     signal,
@@ -209,11 +213,21 @@ export function consoleToolsServer(
             ),
           ]
         : []),
+      ...(newRelic
+        ? [
+            tool(
+              'query_new_relic',
+              "Runs one read-only NRQL query against the New Relic account the console reads logs from, with the console's own User API key, and returns the rows (at most 200). Give the NRQL text only: a SELECT or FROM query, or SHOW EVENT TYPES, with its own SINCE and LIMIT. The account and Region are fixed. Runs at once, with no Approval, and is logged.",
+              newRelicQueryInputSchema.shape,
+              (args) => runNewRelicQuery(newRelic, args),
+            ),
+          ]
+        : []),
       ...(saver
         ? [
             tool(
               'save_file',
-              "Copies a file from your output folder into a folder the operator names, such as ~/Downloads, after the operator approves. Your commands cannot write there. Give the file's name and the folder's absolute path.",
+              "Copies a file, or a whole folder with its files, from your output folder into a folder the operator names, such as ~/Downloads or ~/Documents. Your commands cannot write there, in any Access mode. The operator approves first unless the Session has full access. Give the name of the file or folder in your output folder and the destination folder's absolute path. A folder is copied as a new folder of that name inside the destination, so to make ~/Documents/sample-project, build sample-project in your output folder and save it to ~/Documents. A folder or file that is already there is never merged into; a file of the same name is replaced.",
               saveFileInputSchema.shape,
               (args) => runSaveFile(saver, sessionId, args),
             ),

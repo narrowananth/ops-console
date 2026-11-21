@@ -1,15 +1,25 @@
 import type { ReactNode } from 'react';
 
 /** Small line icons for the Session page's header and side card; each is 16px and takes the text colour. */
-function Icon({ children, size = 16 }: { children: ReactNode; size?: number }) {
+function Icon({
+  children,
+  size = 16,
+  weight = 1.8,
+  fill = 'none',
+}: {
+  children: ReactNode;
+  size?: number;
+  weight?: number;
+  fill?: string;
+}) {
   return (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
-      fill="none"
+      fill={fill}
       stroke="currentColor"
-      strokeWidth="1.8"
+      strokeWidth={weight}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden
@@ -112,8 +122,8 @@ export const LaptopIcon = () => (
   </Icon>
 );
 
-export const FolderIcon = () => (
-  <Icon>
+export const FolderIcon = ({ size }: { size?: number }) => (
+  <Icon size={size}>
     <path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2.5h8A1.5 1.5 0 0 1 20.5 10v7.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5v-10Z" />
   </Icon>
 );
@@ -165,6 +175,58 @@ export const CrossCircleIcon = ({ tone }: { tone: string }) => (
   </span>
 );
 
+/** `</>`, for Inspect. */
+export const CodeIcon = () => (
+  <Icon>
+    <path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 5l-4 14" />
+  </Icon>
+);
+
+/** An arrow leaving a box, for "Open in your browser". */
+export const ExternalIcon = () => (
+  <Icon>
+    <path d="M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" />
+  </Icon>
+);
+
+/** A cookie with a bite out of it and a small x, for clearing a Session's cookies. */
+export const CookieIcon = () => (
+  <Icon>
+    <path d="M9.5 3a6.5 6.5 0 1 0 6.5 6.5 3 3 0 0 1-3-3 3 3 0 0 1-3.5-3.5Z" />
+    <path d="M6.8 8.2h.01M8.2 12h.01M11.8 11h.01" />
+    <path d="m16.5 16.5 4.5 4.5m0-4.5-4.5 4.5" />
+  </Icon>
+);
+
+/** A pointer arrow, for picking an element: drawn to the edges of its box and heavier than its neighbours, solid while on. */
+export const PointerIcon = ({ solid = false }: { solid?: boolean }) => (
+  <Icon size={20} weight={2.2} fill={solid ? 'currentColor' : 'none'}>
+    <path d="M4 3.5 20 11l-7 2.2L10.8 20.5 4 3.5Z" />
+  </Icon>
+);
+
+/** DevTools' own dock-side pictures: a window of its own, the bottom, the right. */
+export const DockWindowIcon = () => (
+  <Icon>
+    <rect x="8" y="3" width="13" height="13" rx="2" />
+    <path d="M16 20.5H5a2 2 0 0 1-2-2V8" />
+  </Icon>
+);
+
+export const DockBottomIcon = () => (
+  <Icon>
+    <rect x="3" y="4" width="18" height="16" rx="2.5" />
+    <path d="M3 14h18" />
+  </Icon>
+);
+
+export const DockRightIcon = () => (
+  <Icon>
+    <rect x="3" y="4" width="18" height="16" rx="2.5" />
+    <path d="M14.5 4v16" />
+  </Icon>
+);
+
 export const DotCircleIcon = ({ tone }: { tone: string }) => (
   <span className={tone}>
     <Icon>
@@ -172,4 +234,29 @@ export const DotCircleIcon = ({ tone }: { tone: string }) => (
       <circle cx="12" cy="12" r="2.2" fill="currentColor" />
     </Icon>
   </span>
+);
+
+export const LockIcon = () => (
+  <Icon>
+    <rect x="5" y="11" width="14" height="9" rx="2" />
+    <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+  </Icon>
+);
+
+export const PencilIcon = () => (
+  <Icon>
+    <path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3ZM14.5 7.5l3 3" />
+  </Icon>
+);
+
+export const SparkleIcon = () => (
+  <Icon>
+    <path d="M10 4.5 11.8 9.2 16.5 11 11.8 12.8 10 17.5 8.2 12.8 3.5 11 8.2 9.2 10 4.5ZM18 3.5v4M16 5.5h4M18 15v4M16 17h4" />
+  </Icon>
+);
+
+export const ShieldOffIcon = () => (
+  <Icon>
+    <path d="M12 3 5 6v5.5c0 4.2 2.8 7.4 7 9 1.6-.6 3-1.4 4.1-2.5M19 11.5V6l-7-3-2.2.9M3 3l18 18" />
+  </Icon>
 );

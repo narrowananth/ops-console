@@ -158,9 +158,9 @@ function viewKind(type: string, name: string): 'image' | 'pdf' | 'html' | 'video
   return 'other';
 }
 
-export function PaperClip() {
+export function PaperClip({ size = 14 }: { size?: number }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden className="flex-none">
+    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden className="flex-none">
       <path
         d="M13 7.5 8 12.5a3.2 3.2 0 0 1-4.5-4.5l5.3-5.3a2.1 2.1 0 0 1 3 3L6.6 10.9a1 1 0 0 1-1.5-1.5L10 4.5"
         fill="none"

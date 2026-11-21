@@ -16,6 +16,7 @@ import {
   PlaybookStepStatus,
   PlaybookTrigger,
   PrState,
+  RunPurpose,
   RunStatus,
   ScanStatus,
   ScanTrigger,
@@ -26,6 +27,8 @@ import Database from 'better-sqlite3';
 import { desc, eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
+import { offersNewRelicQuery } from '../src/agent/mcp-scope';
+import { NEW_RELIC_QUERY_TOOL } from '../src/agent/new-relic-tool';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
 import type { HostedHosts } from '../src/connectors/hosted-servers';
 import {
@@ -43,6 +46,7 @@ import {
   sessions,
 } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
+import { KEYCHAIN } from '../src/keychain/keychain';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { McpServersService } from '../src/mcp/mcp-servers.service';
 import type { CloudWatchOptions } from '../src/monitor/cloudwatch-logs';
@@ -63,6 +67,7 @@ import { FakeDatadog, route, samples, service } from './fakes/datadog';
 import { FakeGitHost, hostPr } from './fakes/git-host';
 import { FakeKeychain } from './fakes/keychain';
 import { FakeGrafana } from './fakes/loki-logs';
+import { FakeNerdGraph } from './fakes/nerdgraph';
 import { FakeNewRelic } from './fakes/new-relic-logs';
 import { type OtelRecord, otlpLine, writeLogFile } from './fakes/otlp';
 import { FakeProbe } from './fakes/probe';
@@ -4379,6 +4384,32 @@ describe('New Relic logs', () => {
       .get(McpServersService)
       .ensureRegistered({ name: 'newrelic', transport: McpTransport.Http, target: NEW_RELIC_MCP_URLS.US });
 
+  const KEY = 'NRAK-EXAMPLEKEY0123456789';
+
+  /** A daemon with the Connector on the key route: the key in the Keychain, New Relic's API a stand-in `arrange` sets up. */
+  async function withApi(arrange: (api: FakeNerdGraph) => void = () => {}, config: Record<string, unknown> = {}) {
+    const nerdgraph = await FakeNerdGraph.start();
+    hosted.push(nerdgraph);
+    arrange(nerdgraph);
+    nerdgraph.grant(KEY);
+    const newrelic = await FakeNewRelic.start();
+    hosted.push(newrelic);
+    const claude = new FakeClaudeCredentials();
+    const ctx = await start({
+      hosts: {
+        newRelic: { US: newrelic.url, EU: newrelic.url, JP: newrelic.url },
+        newRelicApi: { US: nerdgraph.url, EU: nerdgraph.url, JP: nerdgraph.url },
+      },
+      claudeCredentials: claude,
+    });
+    ctx.daemon.app.get<FakeKeychain>(KEYCHAIN).values.set('connection:new_relic_logs', KEY);
+    connectNewRelic(ctx, { route: 'key', ...config });
+    return { ctx, nerdgraph, newrelic, claude };
+  }
+
+  const row = (ctx: Ctx) =>
+    ctx.http.get('/connectors').then((res) => res.body.data.find((one: { id: string }) => one.id === 'new_relic_logs'));
+
   async function scanNewRelic(ctx: Ctx, body: Record<string, unknown> = {}) {
     const started = await ctx.http.post('/scans', { service_id: null, connector: 'new_relic_logs', ...body });
     expect(started.status).toBe(202);
@@ -4772,6 +4803,91 @@ describe('New Relic logs', () => {
     });
   });
 
+  describe('through a User API key', () => {
+    it('reads the same Alerts as the MCP route from the same events, with the same NRQL, with the key and no model turn', async () => {
+      const events = [
+        failure(5),
+        failure(8),
+        failure(9, { 'http.route': '/refunds', 'http.response.status_code': 503 }),
+      ];
+      const viaMcp = await scanned(events);
+      const { ctx, nerdgraph, newrelic, claude } = await withApi((api) => api.events(...events));
+      const turns = ctx.daemon.sdk.calls.length;
+      expect(await scanNewRelic(ctx)).toMatchObject({ status: 'ok' });
+      const summary = async (one: Ctx) =>
+        (await alertList(one))
+          .map((alert: Record<string, unknown>) => [alert.title, alert.event_count, alert.log_line])
+          .sort((a: unknown[], b: unknown[]) => String(a[0]).localeCompare(String(b[0])));
+      expect(await summary(ctx)).toEqual(await summary(viaMcp.ctx));
+      expect(await summary(ctx)).toHaveLength(2);
+      expect([...nerdgraph.queries()].sort()).toEqual([...viaMcp.newrelic.queries()].sort());
+      for (const call of nerdgraph.calls()) {
+        expect(call.key).toBe(KEY);
+        expect(call.path).toBe('/graphql');
+      }
+      expect(nerdgraph.calls().every((call) => call.variables.id === 1234567 || call.variables.id === undefined)).toBe(
+        true,
+      );
+      expect(newrelic.calls()).toEqual([]);
+      expect(claude.reads).toEqual([]);
+      expect(ctx.daemon.sdk.calls.length).toBe(turns);
+    });
+
+    it('keeps the 61-hour clamp on the counts and the 5,000 cap with its note', async () => {
+      const long = await withApi((api) => api.events(failure(120), failure(70 * 60)));
+      const ended = await scanNewRelic(long.ctx, { window: '7d' });
+      expect(ended.status).toBe('ok');
+      expect(ended.notes).toContain('New Relic logs: counts read the newest 61 hours only');
+      const [alert] = await alertList(long.ctx);
+      expect((await long.ctx.http.get(`/alerts/${alert.id}`)).body.data.samples).toHaveLength(2);
+
+      const many = await withApi((api) =>
+        api.events(...Array.from({ length: 5_001 }, (_, index) => failure(5 + (index % 30) / 100, { index }))),
+      );
+      const capped = await scanNewRelic(many.ctx, { envs: ['prod'] });
+      expect(capped.notes).toContain('shop-api: read the newest 5,000 failing events only');
+    });
+
+    it('ends a throttled API rate limited and a failing one upstream failed, and the key is in no message', async () => {
+      for (const [behavior, status, code] of [
+        ['throttle', 'rate_limited', 'rate_limited'],
+        ['graphqlError', 'failed', 'upstream_failed'],
+        ['unreadable', 'failed', 'upstream_failed'],
+        ['leakyError', 'failed', 'upstream_failed'],
+      ] as const) {
+        const { ctx } = await withApi((api) => api.events(failure(5)).behave(behavior));
+        const ended = await scanNewRelic(ctx, { envs: ['prod'] });
+        expect(ended, behavior).toMatchObject({ status, error_code: code });
+        expect(JSON.stringify(ended), behavior).not.toContain(KEY);
+        expect(JSON.stringify(await row(ctx)), behavior).not.toContain(KEY);
+      }
+    });
+
+    it('shows New Relic’s own words for a rejected query', async () => {
+      const { ctx } = await withApi((api) => api.events(failure(5)).requiresAccount(7654321));
+      expect(await scanNewRelic(ctx, { envs: ['prod'] })).toMatchObject({
+        status: 'failed',
+        error_code: 'upstream_failed',
+        error_message: expect.stringContaining('account 1234567 not found'),
+      });
+    });
+
+    it('reads a key New Relic refuses as a failed Scan that says to reconnect, and the Connector as needs auth', async () => {
+      const { ctx } = await withApi((api) => api.events(failure(5)).behave('unauthorized'));
+      const ended = await scanNewRelic(ctx, { envs: ['prod'] });
+      expect(ended).toMatchObject({ status: 'failed', error_code: 'upstream_failed' });
+      expect(ended.error_message).toContain('needs signing in again');
+      expect(await row(ctx)).toMatchObject({ status: 'auth' });
+    });
+
+    it('reads a Keychain item that is gone as needs auth', async () => {
+      const { ctx } = await withApi((api) => api.events(failure(5)));
+      ctx.daemon.app.get<FakeKeychain>(KEYCHAIN).values.clear();
+      expect(await scanNewRelic(ctx, { envs: ['prod'] })).toMatchObject({ status: 'failed' });
+      expect(await row(ctx)).toMatchObject({ status: 'auth' });
+    });
+  });
+
   describe('failures', () => {
     const outcome = async (arrange: (newrelic: FakeNewRelic) => void) => {
       const { ctx } = await withNewRelic((newrelic) => {
@@ -5117,6 +5233,122 @@ describe('New Relic logs', () => {
       expect(prompts[0]).toContain('New Relic logs recheck, last hour: still failing');
       expect(prompts[0]).toMatch(/no `pup` and no Datadog MCP Server/);
       expect(deniedSince(ctx, before)).toContain('datadog-pup');
+    });
+
+    describe('with a User API key', () => {
+      async function failingApi(events = [failure(5), failure(8)]) {
+        const made = await withApi((api) => api.events(...events));
+        await scanNewRelic(made.ctx);
+        const [alert] = await alertList(made.ctx);
+        await linkRepo(made.ctx, alert.service.id);
+        return { ...made, alert };
+      }
+
+      type Tool = { handler: (args: Record<string, unknown>, extra: unknown) => Promise<ToolAnswer> };
+      type ToolAnswer = { content: { type: string; text?: string }[]; isError?: boolean };
+      /** The console's own tools a run was given, by name. */
+      const consoleTools = (call: { options: { mcpServers?: Record<string, unknown> } }): Record<string, Tool> => {
+        const server = call.options.mcpServers?.['ops-console'] as
+          | { instance: { _registeredTools: Record<string, Tool> } }
+          | undefined;
+        return server?.instance._registeredTools ?? {};
+      };
+
+      it('rechecks through the API, and gives the Verification the console’s own NRQL tool and a brief that names it and not the key', async () => {
+        const { ctx, nerdgraph, alert } = await failingApi([failure(5)]);
+        const before = ctx.daemon.sdk.calls.length;
+        const report = await verify(ctx, alert.id);
+        const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
+        expect(recheckOf(stored).text).toBe('New Relic logs recheck, last hour: still failing');
+        expect(nerdgraph.queries().at(-1)).toContain('SINCE 60 minutes ago');
+        const runs = ctx.daemon.sdk.calls.slice(before);
+        const brief = runs.map((call) => call.prompt).find((prompt) => prompt.includes('Find the cause')) ?? '';
+        expect(brief).toContain('mcp__ops-console__query_new_relic');
+        expect(brief).toMatch(/NRQL text only/);
+        expect(brief).not.toMatch(/New Relic MCP Server|mcp__newrelic/);
+        expect(JSON.stringify(runs.map((call) => [call.prompt, call.options.env]))).not.toContain(KEY);
+        for (const call of runs) expect(Object.keys(consoleTools(call))).toContain('query_new_relic');
+      });
+
+      it('runs the agent’s NRQL through the daemon with the stored key, for the Connector’s account only, and writes an Action Log row first', async () => {
+        const { ctx, nerdgraph, alert } = await failingApi([failure(5)]);
+        const before = ctx.daemon.sdk.calls.length;
+        const nrql = "SELECT count(*) FROM Log WHERE `service.name` = 'shop-api' SINCE 30 minutes ago";
+        const report = await verify(ctx, alert.id, [json(REPORT)], [[{ tool: NEW_RELIC_QUERY_TOOL, input: { nrql } }]]);
+        expect(report.id).toBeTruthy();
+        expect(ctx.daemon.sdk.ran.filter((call) => call.tool === NEW_RELIC_QUERY_TOOL)).toHaveLength(1);
+        const log = (await ctx.http.get('/action-log')).body.data as {
+          target: string;
+          command: string;
+          kind: string;
+        }[];
+        expect(log).toEqual([expect.objectContaining({ target: 'New Relic', command: `NRQL ${nrql}`, kind: 'query' })]);
+        expect((await ctx.http.get('/approvals')).body.data).toEqual([]);
+
+        const call = ctx.daemon.sdk.calls.slice(before).find((one) => 'query_new_relic' in consoleTools(one));
+        if (!call) throw new Error('no run had the tool');
+        const answer = await (consoleTools(call).query_new_relic as Tool).handler({ nrql }, {});
+        expect(answer.isError).toBeUndefined();
+        expect(JSON.parse(answer.content[0]?.text ?? '[]')).toEqual([{ count: 1 }]);
+        const sent = nerdgraph.calls().at(-1);
+        expect(sent?.key).toBe(KEY);
+        expect(sent?.variables).toEqual({ id: 1234567, nrql });
+        expect(JSON.stringify(answer)).not.toContain(KEY);
+      });
+
+      it('refuses what is not a SELECT, FROM or SHOW query before any call leaves, and cuts the rows at 200', async () => {
+        const { ctx, nerdgraph, alert } = await failingApi([failure(5)]);
+        const before = ctx.daemon.sdk.calls.length;
+        await verify(ctx, alert.id);
+        const call = ctx.daemon.sdk.calls.slice(before).find((one) => 'query_new_relic' in consoleTools(one));
+        if (!call) throw new Error('no run had the tool');
+        const run = (nrql: string) => (consoleTools(call).query_new_relic as Tool).handler({ nrql }, {});
+        const queries = nerdgraph.queries().length;
+        for (const nrql of ['DELETE FROM Log', 'mutation { x }', '{ actor { user { email } } }']) {
+          const refused = await run(nrql);
+          expect([nrql, refused.isError]).toEqual([nrql, true]);
+        }
+        expect(nerdgraph.queries().length).toBe(queries);
+        nerdgraph.events(...Array.from({ length: 300 }, (_, index) => failure(5 + index / 1_000, { index })));
+        const wide = await run('SELECT * FROM Log LIMIT 300 SINCE 1 hour ago');
+        const text = wide.content[0]?.text ?? '';
+        expect(text).toMatch(/\(\d+ more rows were cut/);
+        expect((text.match(/"message"/g) ?? []).length).toBe(200);
+      });
+
+      it('tells the agent why a query failed in New Relic’s words, and never repeats the key', async () => {
+        const { ctx, nerdgraph, alert } = await failingApi([failure(5)]);
+        const before = ctx.daemon.sdk.calls.length;
+        await verify(ctx, alert.id);
+        const call = ctx.daemon.sdk.calls.slice(before).find((one) => 'query_new_relic' in consoleTools(one));
+        if (!call) throw new Error('no run had the tool');
+        const run = () =>
+          (consoleTools(call).query_new_relic as Tool).handler({ nrql: 'SELECT count(*) FROM Log' }, {});
+        nerdgraph.behave('leakyError');
+        const leaky = await run();
+        expect(leaky.isError).toBe(true);
+        expect(leaky.content[0]?.text).toContain('Bad request from [key]');
+        nerdgraph.behave('throttle');
+        expect((await run()).content[0]?.text).toContain('rate limit');
+        nerdgraph.behave('unauthorized');
+        expect((await run()).isError).toBe(true);
+        expect(await row(ctx)).toMatchObject({ status: 'auth' });
+        expect(JSON.stringify(leaky)).not.toContain(KEY);
+      });
+
+      it('is not offered on the MCP route, to another source’s Alert, or to a pull request job', async () => {
+        const mcp = await failingNewRelic([failure(5)]);
+        const before = mcp.ctx.daemon.sdk.calls.length;
+        await verify(mcp.ctx, mcp.alert.id);
+        for (const call of mcp.ctx.daemon.sdk.calls.slice(before)) {
+          expect(Object.keys(consoleTools(call))).not.toContain('query_new_relic');
+        }
+        expect(offersNewRelicQuery(RunPurpose.Verify, ConnectorId.LokiLogs)).toBe(false);
+        expect(offersNewRelicQuery(RunPurpose.Verify, ConnectorId.Datadog)).toBe(false);
+        expect(offersNewRelicQuery(RunPurpose.OpenPullRequest, ConnectorId.NewRelicLogs)).toBe(false);
+        expect(offersNewRelicQuery(RunPurpose.AgentReview, null)).toBe(false);
+        expect(offersNewRelicQuery(RunPurpose.Fix, ConnectorId.NewRelicLogs)).toBe(true);
+      });
     });
   });
 });

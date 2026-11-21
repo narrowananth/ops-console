@@ -24,4 +24,9 @@ jobs:
           node-version: 24
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @ops-console/frontend exec playwright install chromium
+      - name: Chrome DevTools frontend, kept per pin
+        uses: actions/cache@v5
+        with:
+          path: frontend/public/devtools-frontend
+          key: devtools-frontend-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/devtools-frontend.json') }}
       - run: pnpm check

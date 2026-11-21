@@ -1,11 +1,12 @@
 import type { Repo, Session } from '@ops-console/shared';
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { FolderIcon } from '../components/ui/icons';
 import { item, menu } from '../components/ui/item';
 import { useUpdateSession } from '../lib/queries';
 import { ascending } from '../lib/sort';
 
 /**
- * The composer's Repos chip: other Repos the operator opens to this Session, so its agent reads, edits and commits in
+ * The composer's Repos icon, beside Attach: other Repos the operator opens to this Session, so its agent reads, edits and commits in
  * their checkouts as in its own. The choice is the operator's, made here, and applies from the Session's next run.
  */
 export function ExtraRepos({ session, repos }: { session: Session; repos: Repo[] }) {
@@ -19,6 +20,8 @@ export function ExtraRepos({ session, repos }: { session: Session; repos: Repo[]
     repos.filter((repo) => repo.id !== session.repo_id),
     (repo) => repo.name,
   );
+  // `others` is A to Z, so the choice reads the same way.
+  const choice = ['this one', ...others.filter((repo) => picked.includes(repo.id)).map((repo) => repo.name)].join(', ');
   const needle = query.trim().toLowerCase();
   const shown = needle ? others.filter((repo) => repo.name.toLowerCase().includes(needle)) : others;
 
@@ -50,7 +53,11 @@ export function ExtraRepos({ session, repos }: { session: Session; repos: Repo[]
     const box = trigger.current?.getBoundingClientRect();
     if (open || !box) return setPlace(null);
     setQuery('');
-    setPlace({ bottom: window.innerHeight - box.top + 6, left: box.left });
+    // The list is 18rem wide; the button sits at the toolbar's left edge, so the list only needs a nudge in a narrow window.
+    setPlace({
+      bottom: window.innerHeight - box.top + 6,
+      left: Math.max(8, Math.min(box.left, window.innerWidth - 296)),
+    });
   };
   const flip = (id: string) =>
     update.mutate({ extra_repo_ids: picked.includes(id) ? picked.filter((one) => one !== id) : [...picked, id] });
@@ -71,24 +78,23 @@ export function ExtraRepos({ session, repos }: { session: Session; repos: Repo[]
         type="button"
         aria-haspopup="true"
         aria-expanded={open}
-        aria-label="Other Repos"
-        title="Other Repos this Session's agent may read, edit and commit in, as in its own. Applies from its next run."
+        aria-label={`Repos: ${choice}`}
+        title={`Repos: ${choice}. Other Repos this Session's agent may read, edit and commit in, as in its own. Applies from its next run.`}
         onClick={toggle}
-        className={`flex cursor-pointer items-center gap-1.25 rounded-full border px-2.5 py-1 text-xs text-text transition-colors hover:bg-neutral-200 ${
-          open ? 'border-divider bg-neutral-200' : 'border-transparent bg-transparent'
+        className={`relative flex size-9 cursor-pointer items-center justify-center rounded-full border text-neutral-700 hover:border-accent-300 hover:text-text ${
+          open
+            ? 'border-divider bg-neutral-200'
+            : picked.length > 0
+              ? 'border-accent-300 bg-accent-100'
+              : 'border-line bg-card'
         }`}
       >
-        <span className="text-neutral-700">Repos</span>
-        <span className="font-semibold">{picked.length === 0 ? 'this one' : `+${picked.length}`}</span>
-        <svg
-          width="10"
-          height="10"
-          viewBox="0 0 10 10"
-          aria-hidden
-          className={`flex-none text-neutral-600 transition-transform ${open ? 'rotate-180' : ''}`}
-        >
-          <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
+        <FolderIcon size={19} />
+        {picked.length > 0 && (
+          <span className="absolute -top-1 -right-1 min-w-4 rounded-full bg-accent px-1 text-center text-[10px] leading-4 font-semibold text-white">
+            {picked.length}
+          </span>
+        )}
       </button>
       {place && (
         <div
