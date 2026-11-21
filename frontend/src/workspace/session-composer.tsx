@@ -10,6 +10,7 @@ import {
   SessionState,
   type SkillRef,
   withAttachments,
+  withElementPicks,
 } from '@ops-console/shared';
 import { useRef, useState } from 'react';
 import { z } from 'zod';
@@ -17,6 +18,7 @@ import { ApprovalPrompts } from '../agents/approval-prompts';
 import { PlayRun } from '../agents/play-run';
 import { QuestionPanel, trailingQuestions } from '../agents/question-panel';
 import { StopRun } from '../agents/stop-run';
+import { useIncomingPicks } from '../browser/element-picks';
 import { AttachmentViewer, type Viewed } from '../components/ui/attachment-viewer';
 import { useRunQueue, useSendMessage, warmSession } from '../lib/queries';
 import { useStored } from '../lib/remember';
@@ -27,6 +29,7 @@ import { ExtraRepos } from './extra-repos';
 import { sessionDraftKey } from './links';
 import { MessageEditor, type MessageEditorHandle } from './message-editor';
 import { type PastedText, PastedTextEditor } from './pasted-text-editor';
+import { PickedChips, useElementPicks } from './picked-elements';
 
 /**
  * Everything below the conversation: the Approval prompts, the question panel, the queued message and the message box.
@@ -60,6 +63,7 @@ export function SessionComposer({
   const [text, setText] = useStored(sessionDraftKey(id), z.string(), '', 'typing');
   const [picked, setPicked] = useState<SkillRef | null>(null);
   const attachments = useAttachments(id);
+  const elements = useElementPicks(id, attachments);
   const editor = useRef<MessageEditorHandle>(null);
   // An attached file open over the page.
   const [viewed, setViewed] = useState<Viewed | null>(null);
@@ -71,18 +75,25 @@ export function SessionComposer({
   const queued = session.queued_message;
   // A question waiting on the operator still holds the run: the next message answers it.
   const busy = running || session.state === SessionState.WaitingInput;
-  // The files whose chips sit in the message, and those saved so far.
+  // The files whose chips sit in the message and the crops of the picked elements, and those saved so far.
   const placed = namesInText(text);
-  const files = attachments.saved(placed);
-  const uploading = attachments.uploading(placed);
+  const crops = elements.picks.flatMap((pick) => (pick.crop ? [pick.crop] : []));
+  const attached = [...placed, ...crops];
+  const files = attachments.saved(attached);
+  const uploading = attachments.uploading(attached);
   const typed = text.replace(FILE_TOKEN, '');
-  const empty = typed.trim() === '' && files.length === 0;
+  const empty = typed.trim() === '' && files.length === 0 && elements.picks.length === 0;
   // Takes a file out of the message: its file, and its card in the text.
   const clearPasted = (name: string) => {
     attachments.remove([name]);
     setText((now) => now.split(fileToken(name)).join('').replace(/ {2,}/g, ' '));
   };
   const addFiles = (picked: File[]) => editor.current?.insertFiles(attachments.add(picked));
+  // An element picked in the Browser panel or a tab's window lands here with its crop attached.
+  useIncomingPicks(id, (captures) => {
+    elements.add(captures);
+    editor.current?.focusEnd();
+  });
   const questions =
     session.state === SessionState.WaitingInput && lastMessage?.role === 'agent'
       ? trailingQuestions(lastMessage.parts)
@@ -111,11 +122,16 @@ export function SessionComposer({
     if (empty || queued !== null || uploading) return;
     onSent();
     const draft = text;
-    const message = withAttachments(text, files);
+    const sentPicks = elements.picks;
+    const message = withAttachments(withElementPicks(text, elements.forMessage()), files);
+    const sent = () => {
+      attachments.remove(attached);
+      elements.drop(sentPicks.map((pick) => pick.id));
+    };
     setText('');
     if (running) {
       queue.queue.mutate(message, {
-        onSuccess: () => attachments.remove(placed),
+        onSuccess: sent,
         onError: () => putBack(draft),
       });
       return;
@@ -128,7 +144,7 @@ export function SessionComposer({
     send.mutate(
       { text: message, ...(skill ? { skill } : {}) },
       {
-        onSuccess: () => attachments.remove(placed),
+        onSuccess: sent,
         onError: () => {
           putBack(draft);
           setPicked(kept);
@@ -191,6 +207,16 @@ export function SessionComposer({
           className={`relative rounded-3xl border bg-card shadow-md transition-[border-color,box-shadow] focus-within:border-accent-400 focus-within:shadow-[0_0_0_3px_var(--color-accent-100)] ${dropping ? 'border-dashed border-accent-400 bg-accent-100' : 'border-divider'}`}
         >
           {composerMenus.menu}
+          <PickedChips
+            picks={elements.picks}
+            thumb={(name) => attachments.find(name)?.preview ?? null}
+            onOpen={(name) => {
+              const item = attachments.find(name);
+              if (item?.file) setViewed({ name, file: item.file });
+              else if (item?.saved) setViewed({ name, path: item.saved.path });
+            }}
+            onRemove={elements.remove}
+          />
           <MessageEditor
             ref={editor}
             label="Message"

@@ -13,7 +13,6 @@ import { MessageView, outputsByMessage } from '../agents/transcript';
 import { BrowserLinksProvider } from '../browser/browser-links';
 import { BROWSER_PANEL, BrowserPanel, type OpenRequest } from '../browser/browser-panel';
 import { freshServers, serverAddress, sessionPort } from '../browser/servers';
-import { useLinkTarget } from '../browser/toolbar';
 import { Button } from '../components/ui/button';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { Empty } from '../components/ui/empty';
@@ -94,7 +93,6 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   const [sessionOpen, setSessionOpen] = useStored('workspace.session-panel-open', z.boolean(), true);
   const browserPanel = usePanelWidth(BROWSER_PANEL, body);
   const sessionPanelWidth = usePanelWidth(SESSION_PANEL, body);
-  const [linkTarget] = useLinkTarget();
   // The link the operator last clicked in the conversation, for the panel to open.
   const [openRequest, setOpenRequest] = useState<OpenRequest | null>(null);
   const requests = useRef(0);
@@ -253,7 +251,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   // Only the last thing the operator asked can be edited and run again.
   const lastAsked = messages.data?.findLast((message) => message.role === 'user')?.id;
   return (
-    <BrowserLinksProvider value={hasBrowser && linkTarget === 'app' ? openInBrowser : null}>
+    <BrowserLinksProvider value={hasBrowser ? openInBrowser : null}>
       <div className="flex h-full min-h-0 flex-col">
         <header className="flex items-center gap-2.5 border-b border-line px-6 py-2.5">
           <span className="flex-none text-sm text-neutral-700">{repo ? `${repo.name} /` : 'No Repo /'}</span>

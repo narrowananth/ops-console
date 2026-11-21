@@ -21,6 +21,7 @@ import type { BrowserContext, CDPSession, FileChooser, Page, Request } from 'pla
 import { WebSocket } from 'ws';
 import { ApiError, validationFailed } from '../common/errors';
 import { isLoopbackHost } from './addresses';
+import { ElementPicker } from './element-picker';
 import { InspectorRelay } from './inspector-relay';
 
 const RING = 200;
@@ -167,6 +168,7 @@ export class BrowserTab {
   /** The newest mouse move not yet sent: moves arriving while one is in flight replace each other. */
   private nextMove: MouseMessage | null = null;
   private readonly requests = new WeakMap<Request, NetworkEntry>();
+  private readonly picker: ElementPicker;
 
   private constructor(
     readonly page: Page,
@@ -191,6 +193,11 @@ export class BrowserTab {
       agent_active: false,
       file_chooser: null,
     };
+    this.picker = new ElementPicker({
+      cdp,
+      size: () => this.size,
+      turn: (work) => this.turn(work),
+    });
     this.listen();
   }
 
@@ -533,6 +540,7 @@ export class BrowserTab {
   async detach(viewer: WebSocket): Promise<void> {
     this.viewers.delete(viewer);
     this.viewerSizes.delete(viewer);
+    await this.picker.end(viewer);
     if (this.lastInput === viewer) {
       this.lastInput = null;
       this.takeover = null;
@@ -581,6 +589,7 @@ export class BrowserTab {
       return this.resize(viewer, { width: message.width, height: message.height, dpr: message.dpr });
     this.takeInput(viewer);
     if (message.type === 'focus') return;
+    if (message.type === 'pick') return this.pick(viewer, message);
     if (message.type === 'mouse' && message.action === 'move') {
       // Moves are many and only the newest matters: one turn in the queue reads the newest at its time.
       this.nextMove = message;
@@ -613,6 +622,22 @@ export class BrowserTab {
       // A press that is not yet released must not see the page change under it.
       if (!(message.type === 'mouse' && message.action === 'down')) this.applyTakeover();
     });
+  }
+
+  /** Pick mode: the point is the page's CSS pixels. The capture goes back to the viewer that clicked, and to no other. */
+  private async pick(viewer: WebSocket, message: Extract<BrowserClientMessage, { type: 'pick' }>): Promise<void> {
+    if (message.action === 'start') return this.picker.start(viewer);
+    if (message.action === 'end') return this.picker.end(viewer);
+    if (!this.picker.has(viewer)) return;
+    if (message.action === 'hover') return this.picker.hover(message.x, message.y);
+    try {
+      const capture = await this.picker.click(viewer, message.x, message.y);
+      if (capture) this.send({ type: 'picked', capture }, viewer);
+      // The viewer took the tab at the size it was shown; the page takes that size now the point has been read.
+      this.applyTakeover();
+    } catch (error) {
+      this.send({ type: 'pick_failed', message: errorText(error) }, viewer);
+    }
   }
 
   private inOrder(action: () => Promise<void>): Promise<void> {

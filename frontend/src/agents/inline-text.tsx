@@ -8,9 +8,8 @@ const MARKDOWN_LINK = /^\[([^\]]+)\]\(([^)\s]+)\)$/;
 const TRAILING = /[.,;:!?)\]'"]+$/;
 
 /**
- * A link in agent text. A loopback page opens in the Session's Browser panel when the Session has one and the operator
- * keeps links "In the console"; any other link, and a click with Cmd, Ctrl, Shift or Alt, opens a new tab of the
- * operator's own browser.
+ * A link in agent text. A loopback page opens in the Session's Browser panel when the Session has one; any other link,
+ * and a click with Cmd, Ctrl, Shift or Alt, opens a new tab of the operator's own browser.
  */
 function TextLink({ href, children }: { href: string; children: ReactNode }) {
   const panel = useBrowserPanel();

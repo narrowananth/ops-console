@@ -15,6 +15,7 @@ import {
   useStopServer,
   useStoreTab,
 } from '../lib/queries';
+import { deliverPick } from './element-picks';
 import { InspectorLayout, useDockedTabs } from './inspector-dock';
 import { openInspector } from './inspector-window';
 import { LocalServers } from './local-servers';
@@ -56,6 +57,8 @@ export function BrowserPanel({
   const [picked, setPicked] = useState<string | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
+  // The tab in pick mode: leaving it for another tab ends the mode.
+  const [pickTab, setPickTab] = useState<string | null>(null);
   const windows = usePopOuts();
 
   const tabs = state.data?.tabs ?? [];
@@ -95,6 +98,9 @@ export function BrowserPanel({
     else if (!windows.open(sessionId, active.id))
       setRefused('The browser blocked the window. Allow pop-ups for this page.');
   };
+
+  const picking = active !== undefined && pickTab === active.id;
+  const stopPicking = () => setPickTab(null);
 
   const dock = useDockedTabs();
   const inspecting = active !== undefined && dock.docked.has(active.id) ? active.id : null;
@@ -147,6 +153,12 @@ export function BrowserPanel({
             />
           ) : undefined
         }
+        picking={picking}
+        onPicked={(capture) => {
+          deliverPick(sessionId, capture);
+          stopPicking();
+        }}
+        onPickEnd={stopPicking}
         onTab={storeTab}
         onClosed={() => void state.refetch()}
       />
@@ -188,6 +200,11 @@ export function BrowserPanel({
         onAddress={open}
         onViewport={(viewport) => act({ viewport })}
         onWindow={openWindow}
+        picking={picking}
+        onPick={() => {
+          setRefused(null);
+          setPickTab(picking || active === undefined ? null : active.id);
+        }}
         inspecting={inspecting !== null}
         onInspect={inspect}
         onExternal={() => active && external.mutate(active.id)}

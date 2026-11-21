@@ -300,8 +300,11 @@ A command the daemon runs for a Session as the operator, outside the Run sandbox
 database, a test watch, a shell. The operator starts it, or approves the agent's `start_process`. It runs until stopped,
 the Session is deleted or the daemon exits, and shows in the Terminals dock.
 
-**Link target**:
-Where a link opens: "In the console", the Browser panel, or "In the external browser". Set per browser.
+**Element pick**:
+The operator's click on an element of a tab's page in pick mode (the toolbar's pointer-arrow button). The element, with a
+crop of it, becomes a chip in the Session's message box, and the message then carries its selector, text, markup and styles
+in a delimited block. A typed value, a password field, cookies and storage are never taken. The agent cannot pick.
+_Avoid_: annotation, selection
 
 **Spawned Session**:
 A Session the agent started in an imported Repo through `spawn_sessions`, with a task the agent wrote, after the operator
