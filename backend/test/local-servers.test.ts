@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { realpath } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { copyFile, realpath } from 'node:fs/promises';
 import { connect, createServer, type Server } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -91,6 +92,26 @@ describe('local servers', () => {
       session_id: sessionId,
       process_id: started.id,
     });
+  });
+
+  it("leaves out the agent's own listener, the sandbox's filtering proxy, though its folder is the Session's", async () => {
+    // The proxy is a port of the `claude` process, which runs in the Session's folder and answers only as a proxy.
+    // A copy of node named `claude`: `ps` names a process by its real path, so a link would read as `node`.
+    const agent = path.join(await tempDir('ops-console-agent-'), 'claude');
+    await copyFile(process.execPath, agent, constants.COPYFILE_FICLONE);
+    const child = spawn(agent, [fixtures.server], { cwd: WORKING_DIR });
+    children.push(child);
+    const proxyPort = await new Promise<number>((resolve, reject) => {
+      child.once('error', reject);
+      child.stdout.on('data', (chunk) => {
+        if (String(chunk).includes('listening on')) resolve(portIn(String(chunk)));
+      });
+    });
+    const { daemon, sessionId } = await start();
+    const page = await listenIn(WORKING_DIR);
+
+    await waitForPort(daemon, sessionId, page);
+    expect((await servers(daemon, sessionId)).some((server) => server.port === proxyPort)).toBe(false);
   });
 
   it('lists a server by its folder when no Session process started it, and leaves out one outside the Session', async () => {

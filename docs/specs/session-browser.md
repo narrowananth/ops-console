@@ -52,7 +52,7 @@ adds the same to a Session.
     the Session's processes (Behavior 17) is tagged with that process; one whose folder is in the Session's worktree, its
     Opened Repos or its output folder is tagged with the Session. A server of any other process on the Mac is not listed.
     A click opens one in the tab. The list refreshes when a process starts or ends, within half a second of a started server listening, and
-    every 30 seconds while a panel is open. The console's own ports (4545, 4555, 4556) are never listed. A server that is the Session's but that no Session
+    every 30 seconds while a panel is open. The console's own ports (4545, 4555, 4556) are never listed, nor is a port of the agent's own `claude` process, which runs the Run sandbox's network filter. A server that is the Session's but that no Session
     process owns, such as one started with `nohup` that outlived its terminal, shows a Stop button. Stop ends that process
     and what it started (by parent links, never by process group).
 11a. When a process started while the Session is open begins listening, its page opens in the Browser panel with no
