@@ -115,6 +115,11 @@ export function useAttachments(sessionId: string) {
       ...now.filter((item) => item.name !== name),
       { name, file, preview, snippet: null, saved: null, error: null },
     ]);
+    // The daemon refuses an empty file too; saying so here spares the trip.
+    if (file.size === 0) {
+      update(name, { error: `${name} is empty: nothing to attach` });
+      return;
+    }
     apiUpload(`/sessions/${sessionId}/attachments?name=${encodeURIComponent(name)}`, file, savedBody).then(
       (body) => {
         const saved = { ...body.data, name };
@@ -134,6 +139,9 @@ export function useAttachments(sessionId: string) {
       const preview = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
       if (preview) urls.current.add(preview);
       upload(name, file, preview);
+      // A video shows its first frame once the browser has read it; one it cannot decode keeps its icon.
+      if (file.type.startsWith('video/'))
+        void videoPoster(file).then((poster) => poster && update(name, { preview: poster }));
       return name;
     });
   };
@@ -167,6 +175,30 @@ export function useAttachments(sessionId: string) {
   };
 }
 
+/** The first frame of a video as a small picture, or null when the browser cannot read it. */
+function videoPoster(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    const done = (poster: string | null) => {
+      URL.revokeObjectURL(url);
+      resolve(poster);
+    };
+    video.muted = true;
+    video.preload = 'metadata';
+    video.onerror = () => done(null);
+    video.onloadeddata = () => {
+      const canvas = document.createElement('canvas');
+      const scale = Math.min(1, 96 / (video.videoWidth || 96));
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+      canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
+      done(canvas.toDataURL('image/jpeg', 0.7));
+    };
+    video.src = url;
+  });
+}
+
 /** Files in a drag or a paste; empty when it carries only text. */
 export const filesIn = (data: DataTransfer | null) => Array.from(data?.files ?? []);
 
@@ -183,9 +215,9 @@ export function AttachButton({ onFiles, disabled }: { onFiles: (files: File[]) =
         // Keeps the cursor where it is in the message, so the file goes there.
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => input.current?.click()}
-        className="flex size-7.5 flex-none cursor-pointer items-center justify-center rounded-full border border-line bg-card text-neutral-700 hover:border-accent-300 hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex size-9 flex-none cursor-pointer items-center justify-center rounded-full border border-line bg-card text-neutral-700 hover:border-accent-300 hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
       >
-        <PaperClip />
+        <PaperClip size={18} />
       </button>
       <input
         ref={input}

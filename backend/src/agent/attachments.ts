@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream, existsSync, type ReadStream, statSync } from 'node:fs';
-import { mkdir, stat } from 'node:fs/promises';
+import { mkdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -61,6 +61,41 @@ const TEXT = new Set([
   '.yml',
 ]);
 
+/** The media type the agent is told for a file, from its extension. A label only: nothing is served with it. */
+const MEDIA_TYPES: Record<string, string> = {
+  '.7z': 'application/x-7z-compressed',
+  '.avi': 'video/x-msvideo',
+  '.csv': 'text/csv',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.flac': 'audio/flac',
+  '.gz': 'application/gzip',
+  '.heic': 'image/heic',
+  '.html': 'text/html',
+  '.json': 'application/json',
+  '.key': 'application/vnd.apple.keynote',
+  '.m4v': 'video/x-m4v',
+  '.md': 'text/markdown',
+  '.mkv': 'video/x-matroska',
+  '.numbers': 'application/vnd.apple.numbers',
+  '.pages': 'application/vnd.apple.pages',
+  '.ppt': 'application/vnd.ms-powerpoint',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.rtf': 'application/rtf',
+  '.svg': 'image/svg+xml',
+  '.tar': 'application/x-tar',
+  '.tgz': 'application/gzip',
+  '.xls': 'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.zip': 'application/zip',
+};
+
+/** The type a message tells the agent for a file: a known extension, else plain text for text, else bytes. */
+export function mediaType(name: string): string {
+  const ext = path.extname(name).toLowerCase();
+  return MEDIA_TYPES[ext] ?? TYPES[ext] ?? (TEXT.has(ext) ? 'text/plain' : 'application/octet-stream');
+}
+
 /** The type a file is served with: never one a browser renders as a page or runs (HTML, SVG). The viewer shows those in a sandbox. */
 export function fileType(name: string): string {
   const ext = path.extname(name).toLowerCase();
@@ -91,7 +126,12 @@ export class Attachments {
     const shown = path.basename(name);
     const file = path.join(folder, `${crypto.randomUUID()}${path.extname(shown)}`);
     await pipeline(body, createWriteStream(file));
-    return { name: shown, path: file, size: (await stat(file)).size };
+    const { size } = await stat(file);
+    if (size === 0) {
+      await rm(file);
+      throw new ApiError(400, ErrorCode.ValidationFailed, `${shown} is empty: nothing to attach`);
+    }
+    return { name: shown, path: file, size, type: mediaType(shown) };
   }
 
   /** A saved file of the Session's, to show the operator; a name not saved here is `not_found`. */

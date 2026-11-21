@@ -1,13 +1,15 @@
-import { FILE_TOKEN, fileToken, PASTE_AS_FILE_LIMIT, PASTED_TEXT_NAME } from '@ops-console/shared';
+import { PASTE_AS_FILE_LIMIT } from '@ops-console/shared';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react';
-import { size } from '../components/ui/attachment-viewer';
-import { type FileItem, filesIn } from './attachments';
+import { filesIn } from './attachments';
+import { CHIP_CLASS, CUBE_PATH, describeMention, mentionsIn, type Token } from './mentions';
 
 export type MessageEditorHandle = {
-  /** Puts a chip per file at the cursor, or at the end when the cursor is not in the message. */
-  insertFiles: (names: string[]) => void;
   /** Focuses the message with the cursor after its last character. */
   focusEnd: () => void;
+  /** Takes the `$`, `@` or `/` word before the cursor out and puts the mention in its place, as a chip. */
+  replaceToken: (raw: string | null) => void;
+  /** Types `text` at the cursor, as the keyboard would. */
+  insertText: (text: string) => void;
 };
 
 type Props = {
@@ -15,33 +17,44 @@ type Props = {
   value: string;
   placeholder: string;
   onChange: (value: string) => void;
-  /** The file under each chip's name; a token with no file shows as the text it is. */
-  find: (name: string) => FileItem | undefined;
-  onOpen: (name: string) => void;
-  /** The pencil on a pasted text card. */
-  onEdit?: (name: string) => void;
+  /** The word before the cursor when it starts with `$`, `@` or `/`; null when it does not. */
+  onToken?: (token: Token | null) => void;
+  /** The option the open menu has picked, for assistive technology. */
+  activeId?: string;
   onPasteFiles: (files: File[]) => void;
   onSubmit: () => void;
-  /** Sees each key first; true means it was handled (the skill menu's arrows and Enter) and the editor leaves it. */
+  /** Sees each key first; true means it was handled (the menus' arrows and Enter) and the editor leaves it. */
   onKey?: (event: KeyboardEvent) => boolean;
 };
 
-const CHIP = 'data-file';
+const MENTION_ATTR = 'data-mention';
+/** What copy writes besides plain text, so a paste inside the console brings the chips back. */
+const CLIPBOARD_TYPE = 'application/x-ops-console-composer';
 
 /**
- * The message box: text with a chip in it for each attached file, where it was dropped, pasted or picked. Its value is
- * plain text, each chip written as `[📎 <name>]`. Enter sends, Shift+Enter adds a line, pasted text comes in plain.
+ * The message box: text with a chip for each `$skill` and `@file` mention. Its value is the plain text the agent reads,
+ * each chip written as its mention (`$code-review`, `@src/app.ts`). Enter sends, Shift+Enter adds a line, pasted text
+ * comes in plain, and a paste that came from this box brings its chips back.
  */
 export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function MessageEditor(
-  { label, value, placeholder, onChange, find, onOpen, onEdit, onPasteFiles, onSubmit, onKey },
+  { label, value, placeholder, onChange, onToken, activeId, onPasteFiles, onSubmit, onKey },
   handle,
 ) {
   const root = useRef<HTMLDivElement>(null);
-  // The cursor while the message had focus, so a file picked from the button goes where the operator was typing.
-  const caret = useRef<Range | null>(null);
   const emitted = useRef<string | null>(null);
-  const findRef = useRef(find);
-  findRef.current = find;
+  const reported = useRef<string | null>(null);
+  const tokenRef = useRef(onToken);
+  tokenRef.current = onToken;
+
+  const report = useCallback(() => {
+    const node = root.current;
+    if (!node) return;
+    const found = tokenAtCaret(node);
+    const key = found?.token.key ?? null;
+    if (key === reported.current) return;
+    reported.current = key;
+    tokenRef.current?.(found?.token ?? null);
+  }, []);
 
   const emit = useCallback(() => {
     const node = root.current;
@@ -49,43 +62,23 @@ export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function Mes
     const next = serialize(node);
     emitted.current = next;
     onChange(next);
-  }, [onChange]);
+    report();
+  }, [onChange, report]);
 
   // The value changed from outside (sent, restored, taken back): draw it again.
   useLayoutEffect(() => {
     const node = root.current;
     if (!node || value === emitted.current || value === serialize(node)) return;
-    draw(node, value, findRef.current);
+    draw(node, value);
     emitted.current = value;
-    // Text put in from outside while the operator is typing here (a skill picked from the menu): carry on after it.
-    if (document.activeElement === node) {
-      const end = endOf(node);
-      caret.current = end;
-      document.getSelection()?.removeAllRanges();
-      document.getSelection()?.addRange(end);
-    }
+    if (document.activeElement === node) placeCaret(endOf(node));
   }, [value]);
 
-  // Chips follow their files: uploading, saved, failed, a thumbnail once read.
+  // The menus follow the cursor: a move into or out of a `$`, `@` or `/` word opens or closes its menu.
   useEffect(() => {
-    const node = root.current;
-    if (!node) return;
-    for (const chip of node.querySelectorAll<HTMLElement>(`[${CHIP}]`)) {
-      paint(chip, find(chip.getAttribute(CHIP) ?? ''));
-    }
-  });
-
-  useEffect(() => {
-    const keep = () => {
-      const selection = document.getSelection();
-      const node = root.current;
-      if (selection && selection.rangeCount > 0 && node?.contains(selection.anchorNode)) {
-        caret.current = selection.getRangeAt(0).cloneRange();
-      }
-    };
-    document.addEventListener('selectionchange', keep);
-    return () => document.removeEventListener('selectionchange', keep);
-  }, []);
+    document.addEventListener('selectionchange', report);
+    return () => document.removeEventListener('selectionchange', report);
+  }, [report]);
 
   useImperativeHandle(
     handle,
@@ -94,37 +87,31 @@ export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function Mes
         const node = root.current;
         if (!node) return;
         node.focus();
-        const end = endOf(node);
-        caret.current = end;
-        document.getSelection()?.removeAllRanges();
-        document.getSelection()?.addRange(end);
+        placeCaret(endOf(node));
       },
-      insertFiles: (names) => {
+      replaceToken: (raw) => {
         const node = root.current;
-        if (!node || names.length === 0) return;
-        const range =
-          caret.current && node.contains(caret.current.startContainer) ? caret.current.cloneRange() : endOf(node);
-        range.deleteContents();
-        const piece = document.createDocumentFragment();
-        for (const name of names) {
-          piece.append(chip(name, findRef.current(name)), document.createTextNode(' '));
+        const found = node && tokenAtCaret(node);
+        if (!node || !found) return;
+        node.focus();
+        const range = document.createRange();
+        range.setStart(found.text, found.start);
+        range.setEnd(found.text, found.end);
+        placeCaret(range);
+        if (raw === null) {
+          document.execCommand('delete');
+          return;
         }
-        const last = piece.lastChild;
-        range.insertNode(piece);
-        if (last) {
-          const after = document.createRange();
-          after.setStartAfter(last);
-          after.collapse(true);
-          caret.current = after;
-          if (document.activeElement === node) {
-            document.getSelection()?.removeAllRanges();
-            document.getSelection()?.addRange(after);
-          }
-        }
-        emit();
+        // Two commands, so undo steps back over the chip and then the space.
+        insertHtml(chip(raw).outerHTML);
+        document.execCommand('insertText', false, ' ');
+      },
+      insertText: (text) => {
+        root.current?.focus();
+        document.execCommand('insertText', false, text);
       },
     }),
-    [emit],
+    [],
   );
 
   return (
@@ -137,7 +124,7 @@ export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function Mes
           {placeholder}
         </span>
       )}
-      {/* biome-ignore lint/a11y/useSemanticElements: a textarea cannot hold the file chips; this is the text box */}
+      {/* biome-ignore lint/a11y/useSemanticElements: a textarea cannot hold the mention chips; this is the text box */}
       <div
         ref={root}
         role="textbox"
@@ -145,15 +132,27 @@ export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function Mes
         aria-multiline
         aria-label={label}
         aria-placeholder={placeholder}
+        aria-autocomplete="list"
+        aria-activedescendant={activeId}
         contentEditable
         suppressContentEditableWarning
         onInput={emit}
+        onCopy={(event) => copy(event, false)}
+        onCut={(event) => copy(event, true)}
         onPaste={(event) => {
           event.preventDefault();
           const files = filesIn(event.clipboardData);
           // A pasted screenshot or copied file attaches; pasted text comes in as plain text.
           if (files.length > 0) {
             onPasteFiles(files);
+            return;
+          }
+          const own = event.clipboardData.getData(CLIPBOARD_TYPE);
+          if (own) {
+            const holder = document.createElement('div');
+            draw(holder, own);
+            insertHtml(holder.innerHTML);
+            revealCaret(event.currentTarget);
             return;
           }
           const text = event.clipboardData.getData('text/plain');
@@ -175,37 +174,31 @@ export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function Mes
           if (event.shiftKey) document.execCommand('insertLineBreak');
           else onSubmit();
         }}
-        onClick={(event) => {
-          const target = event.target as HTMLElement;
-          const at = target.closest<HTMLElement>(`[${CHIP}]`);
-          if (!at) return;
-          if (target.closest('[data-remove]')) {
-            const space = at.nextSibling;
-            if (space?.nodeType === Node.TEXT_NODE && space.textContent === ' ') space.remove();
-            at.remove();
-            emit();
-            return;
-          }
-          if (target.closest('[data-edit]')) {
-            onEdit?.(at.getAttribute(CHIP) ?? '');
-            return;
-          }
-          onOpen(at.getAttribute(CHIP) ?? '');
-        }}
         className="block max-h-[50vh] min-h-28 w-full overflow-y-auto px-4 pt-3.5 pb-1.5 text-sm leading-relaxed break-words whitespace-pre-wrap text-text outline-none"
       />
     </div>
   );
 });
 
-/** The message as text: each chip as its token, each line break as `\n`. A last `<br>` only holds the cursor. */
-function serialize(node: HTMLElement): string {
+/** Writes the selection as plain text and as the box's own form; a cut takes it out too. */
+function copy(event: React.ClipboardEvent<HTMLElement>, cut: boolean) {
+  const selection = document.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
+  event.preventDefault();
+  const text = serialize(selection.getRangeAt(0).cloneContents());
+  event.clipboardData.setData('text/plain', text);
+  event.clipboardData.setData(CLIPBOARD_TYPE, text);
+  if (cut) document.execCommand('delete');
+}
+
+/** The message as text: each chip as its mention, each line break as `\n`. A last `<br>` only holds the cursor. */
+function serialize(node: Node): string {
   let out = '';
   const walk = (parent: Node) => {
     parent.childNodes.forEach((child, index) => {
-      if (child.nodeType === Node.TEXT_NODE) out += (child.textContent ?? '').replace(/ /g, ' ');
-      else if (child instanceof HTMLElement && child.hasAttribute(CHIP))
-        out += fileToken(child.getAttribute(CHIP) ?? '');
+      if (child.nodeType === Node.TEXT_NODE) out += (child.textContent ?? '').replace(/\u00a0/g, ' ');
+      else if (child instanceof HTMLElement && child.hasAttribute(MENTION_ATTR))
+        out += child.getAttribute(MENTION_ATTR) ?? '';
       else if (child.nodeName === 'BR') {
         if (!(parent === node && index === parent.childNodes.length - 1)) out += '\n';
       } else if (child.nodeName === 'DIV' || child.nodeName === 'P') {
@@ -218,8 +211,8 @@ function serialize(node: HTMLElement): string {
   return out;
 }
 
-/** Draws `value` into the box: text, a `<br>` per line break, a chip per token whose file is known. */
-function draw(node: HTMLElement, value: string, find: (name: string) => FileItem | undefined) {
+/** Draws `value` into the box: text, a `<br>` per line break, a chip per mention. */
+function draw(node: HTMLElement, value: string) {
   node.replaceChildren();
   let at = 0;
   const text = (piece: string) => {
@@ -228,131 +221,88 @@ function draw(node: HTMLElement, value: string, find: (name: string) => FileItem
       if (line) node.append(document.createTextNode(line));
     });
   };
-  for (const match of value.matchAll(FILE_TOKEN)) {
-    const name = match[1] as string;
-    const start = match.index ?? 0;
+  for (const { raw, start, end } of mentionsIn(value)) {
     text(value.slice(at, start));
-    node.append(find(name) ? chip(name, find(name)) : document.createTextNode(match[0]));
-    at = start + match[0].length;
+    node.append(chip(raw));
+    at = end;
   }
   text(value.slice(at));
   // A line break at the very end needs one more for the cursor to sit on the new line.
   if (value.endsWith('\n')) node.append(document.createElement('br'));
 }
 
-function chip(name: string, item: FileItem | undefined): HTMLElement {
+const SVG = 'http://www.w3.org/2000/svg';
+
+/** A mention as a chip that cannot be edited into: the cursor steps over it and Backspace takes it whole. */
+function chip(raw: string): HTMLElement {
+  const { kind, label, title, badge } = describeMention(raw);
   const element = document.createElement('span');
-  element.setAttribute(CHIP, name);
+  element.setAttribute(MENTION_ATTR, raw);
   element.contentEditable = 'false';
-  element.className = PASTED_TEXT_NAME.test(name)
-    ? 'group relative mr-2 mb-1 inline-flex h-32 w-44 cursor-pointer flex-col justify-between rounded-xl border p-2.5 align-top font-sans text-xs select-none hover:border-accent-300'
-    : 'mx-0.5 inline-flex max-w-72 cursor-pointer items-center gap-1.5 rounded-md border py-0.5 pr-0.5 pl-1 align-middle font-mono text-xs leading-5 select-none hover:border-accent-300';
-  paint(element, item);
+  element.setAttribute('role', 'img');
+  element.setAttribute('aria-label', `${kind === 'skill' ? 'Skill' : 'File'} ${label}`);
+  element.title = title;
+  element.className = CHIP_CLASS[kind];
+  const name = Object.assign(document.createElement('span'), { className: 'min-w-0 truncate', textContent: label });
+  if (kind === 'skill') {
+    const svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '14');
+    svg.setAttribute('height', '14');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.8');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('class', 'flex-none');
+    const path = document.createElementNS(SVG, 'path');
+    path.setAttribute('d', CUBE_PATH);
+    svg.append(path);
+    element.append(svg, name);
+  } else {
+    const mark = Object.assign(document.createElement('span'), { className: CHIP_CLASS.badge });
+    mark.setAttribute('data-badge', badge || 'FILE');
+    mark.setAttribute('aria-hidden', 'true');
+    element.append(mark, name);
+  }
   return element;
 }
 
-/** A chip's look for its file's state; drawn again as the upload goes. */
-function paint(element: HTMLElement, item: FileItem | undefined) {
-  const name = element.getAttribute(CHIP) ?? '';
-  const state = !item ? 'gone' : item.error ? 'failed' : item.saved ? size(item.saved.size) : 'uploading…';
-  const key = `${state}|${item?.preview ?? ''}|${item?.snippet ?? ''}`;
-  if (element.dataset.painted === key) return;
-  element.dataset.painted = key;
-  element.title = item?.error ?? (item ? `Open ${name}` : `${name} is no longer attached`);
-  element.setAttribute('aria-label', `${name}, ${state}`);
-  element.classList.toggle('border-accent-300', state === 'failed');
-  element.classList.toggle('text-accent-700', state === 'failed');
-  element.classList.toggle('border-line', state !== 'failed');
-  element.classList.toggle('bg-bg', true);
-  const card = PASTED_TEXT_NAME.test(name);
-  const remove = Object.assign(document.createElement('span'), {
-    className: card
-      ? 'absolute -top-2 -right-2 flex size-6 items-center justify-center rounded-full border border-line bg-card text-sm leading-none text-neutral-700 shadow-sm hover:bg-neutral-200 hover:text-text'
-      : 'flex size-4.5 flex-none items-center justify-center rounded-sm text-neutral-700 hover:bg-neutral-200 hover:text-text',
-    textContent: '×',
-    title: card ? `Clear ${name}` : `Remove ${name}`,
-  });
-  remove.setAttribute('data-remove', '');
-  remove.setAttribute('role', 'button');
-  remove.setAttribute('aria-label', `Remove ${name}`);
-  const note = Object.assign(document.createElement('span'), {
-    className: 'flex-none text-[11px] text-neutral-700',
-    textContent: state,
-  });
-  if (card) {
-    // Pasted text shows as a card: its first lines, a PASTED badge and the size.
-    const lines = Object.assign(document.createElement('span'), {
-      className: 'line-clamp-5 font-mono text-[11px] leading-4 break-all text-neutral-700',
-      textContent: item?.snippet || name,
-    });
-    const badge = Object.assign(document.createElement('span'), {
-      className:
-        'rounded-md border border-line px-1.5 py-0.5 font-sans text-[10px] font-medium tracking-wide text-neutral-700 uppercase',
-      textContent: 'Pasted',
-    });
-    const foot = Object.assign(document.createElement('span'), {
-      className: 'flex items-center justify-between gap-2',
-    });
-    const edit = Object.assign(document.createElement('span'), {
-      className:
-        'flex size-7 flex-none items-center justify-center rounded-md border border-line bg-card text-neutral-700 hover:border-accent-300 hover:text-text',
-      title: `Edit ${name}`,
-    });
-    edit.setAttribute('data-edit', '');
-    edit.setAttribute('role', 'button');
-    edit.setAttribute('aria-label', `Edit ${name}`);
-    edit.append(pencil());
-    const tools = Object.assign(document.createElement('span'), { className: 'flex items-center gap-1.5' });
-    tools.append(note, edit);
-    foot.append(badge, tools);
-    element.replaceChildren(lines, foot, remove);
-    return;
-  }
-  const thumb = item?.preview
-    ? Object.assign(document.createElement('img'), {
-        src: item.preview,
-        alt: '',
-        className: 'size-5 flex-none rounded-sm object-cover',
-      })
-    : clip();
-  const label = Object.assign(document.createElement('span'), { className: 'min-w-0 truncate', textContent: name });
-  element.replaceChildren(thumb, label, note, remove);
+/** The `$`, `@` or `/` word that ends at the cursor, with where it sits in its text node. */
+function tokenAtCaret(node: HTMLElement): { token: Token; text: Text; start: number; end: number } | null {
+  const selection = document.getSelection();
+  const at = selection?.anchorNode;
+  if (!selection?.isCollapsed || !at || !node.contains(at) || !(at instanceof Text)) return null;
+  const end = selection.anchorOffset;
+  const word = /\S*$/.exec(at.data.slice(0, end))?.[0] ?? '';
+  const trigger = word.charAt(0);
+  if (trigger !== '$' && trigger !== '@' && trigger !== '/') return null;
+  const start = end - word.length;
+  // Where the word starts in the message, so the same word in another place is another menu.
+  const before = document.createRange();
+  before.setStart(node, 0);
+  before.setEnd(at, start);
+  const place = serialize(before.cloneContents()).length;
+  return { token: { trigger, query: word.slice(1), text: word, key: `${place}:${word}` }, text: at, start, end };
 }
 
-function pencil(): SVGSVGElement {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('width', '13');
-  svg.setAttribute('height', '13');
-  svg.setAttribute('viewBox', '0 0 16 16');
-  svg.setAttribute('aria-hidden', 'true');
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', 'M11 2.5 13.5 5 5.5 13 2.5 13.5 3 10.5 11 2.5Z');
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke', 'currentColor');
-  path.setAttribute('stroke-width', '1.4');
-  path.setAttribute('stroke-linejoin', 'round');
-  svg.append(path);
-  return svg;
+/** Inserts markup at the cursor with the browser's own command, so undo steps back over it. */
+function insertHtml(html: string) {
+  document.execCommand('insertHTML', false, html);
+  // The browser can leave the cursor inside the last chip, where nothing can be typed: it goes after it.
+  const at = document.getSelection()?.anchorNode;
+  const inside = (at instanceof Element ? at : at?.parentElement)?.closest(`[${MENTION_ATTR}]`);
+  if (!inside) return;
+  const after = document.createRange();
+  after.setStartAfter(inside);
+  after.collapse(true);
+  placeCaret(after);
 }
 
-function clip(): SVGSVGElement {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('width', '12');
-  svg.setAttribute('height', '12');
-  svg.setAttribute('viewBox', '0 0 16 16');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.setAttribute('class', 'flex-none');
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute(
-    'd',
-    'M13 7.5 8 12.5a3.2 3.2 0 0 1-4.5-4.5l5.3-5.3a2.1 2.1 0 0 1 3 3L6.6 10.9a1 1 0 0 1-1.5-1.5L10 4.5',
-  );
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke', 'currentColor');
-  path.setAttribute('stroke-width', '1.4');
-  path.setAttribute('stroke-linecap', 'round');
-  svg.append(path);
-  return svg;
+function placeCaret(range: Range) {
+  const selection = document.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
 }
 
 /** Scrolls the box so the cursor, which a paste leaves after the pasted text, is in view. */

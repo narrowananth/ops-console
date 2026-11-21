@@ -58,6 +58,10 @@ What the agent may do in a Session without asking: supervised, accept edits, aut
 write asks in every mode. Full asks about nothing else: the console's own tools (integration writes,
 `join_repo`, `save_file`, `spawn_sessions`, `start_process`, `browser_evaluate`) run at once in it.
 
+**Mention**:
+A `$skill` or `@file` in a message. The text the agent reads is `$name` or `@path`; the composer and the conversation draw
+it as a chip, the skill's name in words or the file's own name with its path in the tip.
+
 **Approval**:
 The operator's yes or no on one agent action that needs it: a PROD write, or an edit or command in
 a mode that asks.

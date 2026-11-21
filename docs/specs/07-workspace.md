@@ -286,13 +286,13 @@ Adds `branch: string | null`.
   Take back puts it in the box. Its draft is kept per Session.
   Files attach to the next message three ways: the paperclip, dropping them on the box, or pasting them (a
   screenshot, a file copied in Finder). Each uploads at once to `POST /api/sessions/:id/attachments?name=` and is
-  saved under a new name in `attachments/<session id>/` in the data folder. A file sits in the text as a chip where
-  the cursor was, written `[📎 <name>]` in the message, with a thumbnail for images, its size and a remove button. Two
-  files with one name get `name (2)` and on. Taking a chip out of the text removes its file. Saved files stay with the
-  Session through a reload, a switch of Session or tab, until removed or sent. Send waits until every file is saved.
-  The message ends with an "Attached files" list of each name and saved path, and the run lets the agent read that
-  folder, so its Read tool opens them without an Approval. A sent message shows each file as a chip where it sat in
-  the text, and any other under it. A chip, in the box or in the conversation, opens its file over the page from
+  saved under a new name in `attachments/<session id>/` in the data folder. Each file is a chip in a row above the
+  text (`session-start-and-composer-menus` Behavior 25), with a thumbnail for images, its size and a remove button. Two
+  files with one name get `name (2)` and on. Saved files stay with the Session through a reload, a switch of Session or
+  tab, until removed or sent. Send waits until every file is saved. The message ends with an "Attached files" list of
+  each name, saved path, type and size, and the run lets the agent read that folder, so its Read tool opens them without
+  an Approval. A sent message shows each file as a chip under its text; a message sent before the row existed shows a
+  file as a chip where it sat in the text. A chip, in the box or in the conversation, opens its file over the page from
   `GET /api/sessions/:id/attachments/:file`: an image or PDF as itself, text as text up to 256 KB, anything else
   with Download.
 - Diff: on a `repo` Session whose branch changes something, the header's Diff button, with the totals, opens a panel right of the

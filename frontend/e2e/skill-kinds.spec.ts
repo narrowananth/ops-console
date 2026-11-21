@@ -179,7 +179,16 @@ const MENU = [
   { kind: 'custom', name: 'pr-body-style', description: 'Use when writing a pull request description', pack: null },
 ];
 
-async function mockSession(page: Page, sent: unknown[]) {
+const FILES = [
+  { path: 'src/orders/retry.ts', name: 'retry.ts', dir: 'src/orders', repo: null },
+  { path: 'src/webhook.ts', name: 'webhook.ts', dir: 'src', repo: null },
+];
+
+async function mockSession(page: Page, sent: unknown[], userText = '/caveman-commit only the tax fix') {
+  await page.route(/\/api\/file-menu\?.*/, (route) => {
+    const q = new URL(route.request().url()).searchParams.get('q') ?? '';
+    return route.fulfill({ json: { data: { items: FILES.filter((item) => item.path.includes(q)) } } });
+  });
   await page.route('**/api/repos', (route) => route.fulfill({ json: { data: [REPO], meta: { next_cursor: null } } }));
   await page.route('**/api/playbooks', (route) => route.fulfill({ json: { data: { items: [], blocks: [] } } }));
   await page.route(/\/api\/sessions(\?.*)?$/, (route) => route.fulfill({ json: { data: [SESSION] } }));
@@ -201,7 +210,7 @@ async function mockSession(page: Page, sent: unknown[]) {
             role: 'user',
             status: 'done',
             created_at: NOW,
-            parts: [{ kind: 'text', text: '/caveman-commit only the tax fix' }],
+            parts: [{ kind: 'text', text: userText }],
             skill: { kind: 'builtin', name: 'caveman-commit' },
           },
           {
@@ -247,7 +256,9 @@ test('typing $ opens the skill menu; picking keeps the note, and Send names the 
   await menu.getByRole('option', { name: /code-review/ }).click();
   await expect(menu).toHaveCount(0);
   await page.keyboard.type('the auth changes only');
-  await expect(box).toHaveText('$code-review the auth changes only');
+  // The pick shows as the skill's display name; what is sent stays `$code-review`.
+  await expect(box.locator('[data-mention]')).toHaveText('Code Review');
+  await expect(box).toHaveText('Code Review the auth changes only');
 
   await page.keyboard.press('Enter');
   await expect
@@ -290,15 +301,8 @@ test('typing / lists the Session commands, and picking one runs it', async ({ pa
 });
 
 test('typing @ searches files; picking puts the path in the message', async ({ page }) => {
-  await mockSession(page, []);
-  await page.route(/\/api\/file-menu\?.*/, (route) => {
-    const q = new URL(route.request().url()).searchParams.get('q') ?? '';
-    const all = [
-      { path: 'src/orders/retry.ts', name: 'retry.ts', dir: 'src/orders', repo: null },
-      { path: 'src/webhook.ts', name: 'webhook.ts', dir: 'src', repo: null },
-    ];
-    return route.fulfill({ json: { data: { items: all.filter((item) => item.path.includes(q)) } } });
-  });
+  const sent: unknown[] = [];
+  await mockSession(page, sent);
   const box = page.getByRole('textbox', { name: 'Message' });
   const files = page.getByRole('listbox', { name: 'Files' });
   await box.click();
@@ -308,8 +312,151 @@ test('typing @ searches files; picking puts the path in the message', async ({ p
   await expect(files.getByRole('option').first()).toContainText('src/orders');
   await page.keyboard.press('Enter');
   await expect(files).toHaveCount(0);
-  await expect(box).toHaveText('look at @src/orders/retry.ts');
+  // The message shows the file's name, with its path in the tip; the agent gets the path.
+  const chip = box.locator('[data-mention]');
+  await expect(chip).toHaveText('retry.ts');
+  await expect(chip).toHaveAttribute('title', 'src/orders/retry.ts');
+  await expect(box).toHaveText('look at retry.ts');
   await expect(box).toHaveAttribute('aria-placeholder', 'Ask anything. @ files, $ skills, / commands');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => sent).toEqual([{ text: 'look at @src/orders/retry.ts' }]);
+});
+
+test('a $, @ or / token opens its menu wherever it starts, and a pick replaces only that token', async ({ page }) => {
+  const sent: unknown[] = [];
+  await mockSession(page, sent);
+  const box = page.getByRole('textbox', { name: 'Message' });
+  const skills = page.getByRole('listbox', { name: 'Skills' });
+  const files = page.getByRole('listbox', { name: 'Files' });
+  const chips = box.locator('[data-mention]');
+  await box.click();
+
+  // After other text on the line.
+  await page.keyboard.type('explain this and $cod');
+  await expect(skills.getByRole('option')).toHaveCount(1);
+  const optionId = await skills.getByRole('option').first().getAttribute('id');
+  expect(optionId).toBeTruthy();
+  await expect(box).toHaveAttribute('aria-activedescendant', optionId ?? '');
+  await page.keyboard.press('Tab');
+  await expect(skills).toHaveCount(0);
+  await expect(chips).toHaveText(['Code Review']);
+  // The caret is after the pick: typing goes on there.
+  await page.keyboard.type('now');
+  await expect(box).toHaveText('explain this and Code Review now');
+
+  // After a newline, with a file mention in the same prompt.
+  await page.keyboard.press('Shift+Enter');
+  await page.keyboard.type('$shi');
+  await skills.getByRole('option', { name: /ship/ }).click();
+  await page.keyboard.type('@web');
+  await expect(files.getByRole('option')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('done');
+  await expect(chips).toHaveText(['Code Review', 'Ship', 'webhook.ts']);
+
+  // In front of text already there, with the caret before it.
+  await box.evaluate((node) => {
+    const range = document.createRange();
+    range.setStart(node, 0);
+    range.collapse(true);
+    document.getSelection()?.removeAllRanges();
+    document.getSelection()?.addRange(range);
+  });
+  await page.keyboard.type('$pr-b');
+  await skills.getByRole('option', { name: /pr-body-style/ }).click();
+  await expect(chips).toHaveText(['Pr Body Style', 'Code Review', 'Ship', 'webhook.ts']);
+  await expect(box).toHaveText('Pr Body Style explain this and Code Review now\nShip webhook.ts done');
+
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(() => sent)
+    .toEqual([
+      {
+        text: '$pr-body-style explain this and $code-review now\n$ship @src/webhook.ts done',
+        skill: { kind: 'custom', name: 'pr-body-style' },
+      },
+    ]);
+});
+
+test('a / command in the middle of a prompt runs and leaves the rest of the prompt alone', async ({ page }) => {
+  await mockSession(page, []);
+  const box = page.getByRole('textbox', { name: 'Message' });
+  await box.click();
+  await page.keyboard.type('keep this /sk');
+  await page
+    .getByRole('listbox', { name: 'Commands' })
+    .getByRole('option', { name: /skills/ })
+    .click();
+  await expect(page.getByRole('listbox', { name: 'Skills' }).getByRole('option')).toHaveCount(4);
+  await expect(box).toHaveText('keep this $');
+});
+
+test('a chip goes as one unit: Backspace removes it, arrows step over it, and a copy pastes back as chips', async ({
+  page,
+}) => {
+  await mockSession(page, []);
+  const box = page.getByRole('textbox', { name: 'Message' });
+  const chips = box.locator('[data-mention]');
+  await box.click();
+  await page.keyboard.type('$cod');
+  await expect(page.getByRole('listbox', { name: 'Skills' }).getByRole('option')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  await expect(chips).toHaveCount(1);
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.type('Z');
+  await expect(box).toHaveText('ZCode Review');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Backspace');
+  await expect(chips).toHaveCount(0);
+  await expect(box).toHaveText('Z');
+
+  // Copy writes the prompt as plain text and as the composer's own form; the own form comes back as chips.
+  await box.evaluate((node) => {
+    node.focus();
+    document.execCommand('insertText', false, 'see ');
+  });
+  const copied = await box.evaluate((node) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', 'see $ship and @src/webhook.ts');
+    data.setData('application/x-ops-console-composer', 'see $ship and @src/webhook.ts');
+    node.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    return node.textContent;
+  });
+  expect(copied).toBe('Zsee see Ship and webhook.ts ');
+  await expect(chips).toHaveText(['Ship', 'webhook.ts']);
+  const written = await box.evaluate((node) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    document.getSelection()?.removeAllRanges();
+    document.getSelection()?.addRange(range);
+    const data = new DataTransfer();
+    node.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }));
+    return [data.getData('text/plain'), data.getData('application/x-ops-console-composer')];
+  });
+  expect(written).toEqual(['Zsee see $ship and @src/webhook.ts ', 'Zsee see $ship and @src/webhook.ts ']);
+
+  // Text from anywhere else stays text.
+  await box.evaluate((node) => {
+    node.replaceChildren();
+    node.dispatchEvent(new Event('input', { bubbles: true }));
+    const data = new DataTransfer();
+    data.setData('text/plain', 'costs $ship money');
+    node.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  await expect(chips).toHaveCount(0);
+  await expect(box).toHaveText('costs $ship money');
+});
+
+test('a sent message shows its $skill and @file as chips, with the path in the tip', async ({ page }) => {
+  await mockSession(page, [], 'use $code-review on @/work/checkout-api/src/tax.ts please');
+  const message = page.getByRole('listitem', { name: 'Your message' });
+  await expect(message.locator('[data-mention]')).toHaveText(['Code Review', 'tax.ts']);
+  await expect(message.locator('[data-mention]').nth(1)).toHaveAttribute('title', '/work/checkout-api/src/tax.ts');
+  await expect(message).toContainText('use');
+  await expect(message).toContainText('please');
+  await expect(message).not.toContainText('/work/checkout-api');
 });
 
 test('a skill message shows its skill chip and that the Playbook was not used, after a reload', async ({ page }) => {
@@ -322,4 +469,21 @@ test('a skill message shows its skill chip and that the Playbook was not used, a
   await expect(page.getByRole('listitem', { name: 'Your message' })).toContainText(
     'Playbook not used for this message',
   );
+});
+
+test('undo and redo step over a picked chip', async ({ page }) => {
+  await mockSession(page, []);
+  const box = page.getByRole('textbox', { name: 'Message' });
+  await box.click();
+  await page.keyboard.type('a $cod');
+  await expect(page.getByRole('listbox', { name: 'Skills' }).getByRole('option')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  await expect(box.locator('[data-mention]')).toHaveCount(1);
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(box.locator('[data-mention]')).toHaveCount(0);
+  await expect(box).toHaveText('a $cod');
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  await expect(box.locator('[data-mention]')).toHaveCount(1);
 });

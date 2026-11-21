@@ -19,7 +19,7 @@ const short = (label: string) => label.replace(/^Claude /, '');
 
 function ClaudeMark() {
   return (
-    <svg viewBox="0 0 24 24" width="14" height="14" fill={BRANDS.claude.hex} aria-hidden className="flex-none">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill={BRANDS.claude.hex} aria-hidden className="flex-none">
       <path d={BRANDS.claude.path} />
     </svg>
   );
@@ -114,7 +114,7 @@ export function ComposerSettings({ session }: { session: Session }) {
           setQuery('');
           setOpen((now) => !now);
         }}
-        className={`flex h-8 max-w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-xs text-text transition-colors hover:bg-neutral-200 ${
+        className={`flex h-9 max-w-full min-w-0 cursor-pointer items-center gap-2 rounded-full border px-3 text-sm text-text transition-colors hover:bg-neutral-200 ${
           open ? 'border-divider bg-neutral-200' : 'border-transparent bg-transparent'
         }`}
       >
