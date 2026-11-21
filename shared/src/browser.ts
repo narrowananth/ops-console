@@ -222,7 +222,7 @@ export const browserServerMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('tab'), tab: tabSchema }),
   z.object({ type: z.literal('dialog'), kind: z.string(), message: z.string() }),
   z.object({ type: z.literal('closed') }),
-  /** The element a `pick` click captured; the viewer that clicked leaves pick mode. */
+  /** The element a `pick` click captured, for the viewer that clicked; pick mode stays on. */
   z.object({ type: z.literal('picked'), capture: elementCaptureSchema }),
   z.object({ type: z.literal('pick_failed'), message: z.string() }),
 ]);

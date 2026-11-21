@@ -1,15 +1,25 @@
 import type { ReactNode } from 'react';
 
 /** Small line icons for the Session page's header and side card; each is 16px and takes the text colour. */
-function Icon({ children, size = 16 }: { children: ReactNode; size?: number }) {
+function Icon({
+  children,
+  size = 16,
+  weight = 1.8,
+  fill = 'none',
+}: {
+  children: ReactNode;
+  size?: number;
+  weight?: number;
+  fill?: string;
+}) {
   return (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
-      fill="none"
+      fill={fill}
       stroke="currentColor"
-      strokeWidth="1.8"
+      strokeWidth={weight}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden
@@ -188,10 +198,10 @@ export const CookieIcon = () => (
   </Icon>
 );
 
-/** A pointer arrow, for picking an element on the page. */
-export const PointerIcon = () => (
-  <Icon>
-    <path d="m5 3 14 7.5-6 1.8-1.8 6.2L5 3Z" />
+/** A pointer arrow, for picking an element: drawn to the edges of its box and heavier than its neighbours, solid while on. */
+export const PointerIcon = ({ solid = false }: { solid?: boolean }) => (
+  <Icon size={20} weight={2.2} fill={solid ? 'currentColor' : 'none'}>
+    <path d="M4 3.5 20 11l-7 2.2L10.8 20.5 4 3.5Z" />
   </Icon>
 );
 

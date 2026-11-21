@@ -6,6 +6,10 @@ import { readStored, writeStored } from '../lib/remember';
 const inboxKey = (sessionId: string) => `browser.element-picks.${sessionId}`;
 const inbox = z.array(elementCaptureSchema);
 const EVENT = 'ops-console:element-pick';
+const END_EVENT = 'ops-console:pick-end';
+const END_CHANNEL = 'ops-console:pick-end';
+/** The message box. Focus in it ends pick mode; the composer needs no hook for that. */
+const MESSAGE_BOX = '[role="textbox"][aria-label="Message"]';
 
 /**
  * Hands a picked element to the Session's message box. The Browser panel and a tab's own window both call it, and the
@@ -36,12 +40,45 @@ export function useIncomingPicks(sessionId: string, onPicks: (captures: ElementC
     const onStorage = (event: StorageEvent) => {
       if (event.key?.endsWith(key)) drain();
     };
+    // Focus in the message box ends pick mode in the panel and in a tab's window.
+    const onFocus = (event: FocusEvent) => {
+      if (event.target instanceof Element && event.target.closest(MESSAGE_BOX)) endPicking(sessionId);
+    };
     drain();
     window.addEventListener(EVENT, onEvent);
     window.addEventListener('storage', onStorage);
+    document.addEventListener('focusin', onFocus);
     return () => {
       window.removeEventListener(EVENT, onEvent);
       window.removeEventListener('storage', onStorage);
+      document.removeEventListener('focusin', onFocus);
+    };
+  }, [sessionId]);
+}
+
+function endPicking(sessionId: string): void {
+  window.dispatchEvent(new CustomEvent(END_EVENT, { detail: sessionId }));
+  const channel = new BroadcastChannel(END_CHANNEL);
+  channel.postMessage(sessionId);
+  channel.close();
+}
+
+/** Calls `onEnd` when the operator takes the message box for the Session, here or in another window of this browser. */
+export function usePickEnds(sessionId: string, onEnd: () => void): void {
+  const latest = useRef(onEnd);
+  latest.current = onEnd;
+  useEffect(() => {
+    const onEvent = (event: Event) => {
+      if (event instanceof CustomEvent && event.detail === sessionId) latest.current();
+    };
+    const channel = new BroadcastChannel(END_CHANNEL);
+    channel.onmessage = (event) => {
+      if (event.data === sessionId) latest.current();
+    };
+    window.addEventListener(END_EVENT, onEvent);
+    return () => {
+      window.removeEventListener(END_EVENT, onEvent);
+      channel.close();
     };
   }, [sessionId]);
 }

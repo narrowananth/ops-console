@@ -90,10 +90,7 @@ export function SessionComposer({
   };
   const addFiles = (picked: File[]) => editor.current?.insertFiles(attachments.add(picked));
   // An element picked in the Browser panel or a tab's window lands here with its crop attached.
-  useIncomingPicks(id, (captures) => {
-    elements.add(captures);
-    editor.current?.focusEnd();
-  });
+  useIncomingPicks(id, elements.add);
   const questions =
     session.state === SessionState.WaitingInput && lastMessage?.role === 'agent'
       ? trailingQuestions(lastMessage.parts)

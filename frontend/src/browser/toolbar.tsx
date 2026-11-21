@@ -155,7 +155,7 @@ export function Toolbar({
             onClick={onPick}
             className={`${ROUND} ${PRESSED}`}
           >
-            <PointerIcon />
+            <PointerIcon solid={picking} />
           </button>
           <button
             type="button"

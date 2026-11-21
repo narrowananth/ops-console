@@ -84,27 +84,15 @@ export class ElementPicker {
     await this.host.cdp.send('Overlay.hideHighlight').catch(() => {});
   }
 
-  /** Takes the element at the point and leaves pick mode. Null when the point is on the page itself. */
-  async click(viewer: WebSocket, x: number, y: number): Promise<ElementCapture | null> {
+  /** Takes the element at the point; pick mode stays on. Null when the point is on the page itself. */
+  async click(x: number, y: number): Promise<ElementCapture | null> {
     this.next = null;
     await this.moving?.catch(() => {});
-    try {
-      const node = await elementAt(this.host.cdp, x, y);
-      if (node === null) return null;
-      // The highlight is part of the page's pixels, so it goes before the crop is taken.
-      await this.hide();
-      const capture = await captureElement(
-        this.host.cdp,
-        node,
-        (clip, scale) => this.crop(clip, scale),
-        this.host.size(),
-      );
-      await this.end(viewer);
-      return capture;
-    } catch (error) {
-      await this.end(viewer);
-      throw error;
-    }
+    const node = await elementAt(this.host.cdp, x, y);
+    if (node === null) return null;
+    // The highlight is part of the page's pixels, so it goes before the crop is taken; the next hover draws it again.
+    await this.hide();
+    return captureElement(this.host.cdp, node, (clip, scale) => this.crop(clip, scale), this.host.size());
   }
 
   private crop(clip: { x: number; y: number; width: number; height: number }, scale: number): Promise<string> {

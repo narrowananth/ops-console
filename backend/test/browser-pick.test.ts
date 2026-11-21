@@ -209,7 +209,19 @@ describe.runIf(chromePath)('element pick over the page stream', () => {
     expect(await h.evaluate('document.title')).toBe('Pick me');
     expect(await h.shot()).toBe(plain);
 
-    // Pick mode ended with the pick: another click is not a pick.
+    // Pick mode stays on after a pick: the next click picks again, and the outline follows the pointer again.
+    const again = await h.pick(x, y);
+    expect(again.type).toBe('picked');
+    expect(await h.evaluate('document.title')).toBe('Pick me');
+    h.send({ type: 'pick', action: 'hover', x, y });
+    await until(
+      () => h.shot(),
+      (now) => now !== plain,
+      'the outline to come back',
+    );
+
+    // Until the viewer ends it: then a click is not a pick.
+    h.send({ type: 'pick', action: 'end' });
     const before = h.messages.length;
     h.send({ type: 'pick', action: 'click', x, y });
     await new Promise((resolve) => setTimeout(resolve, 300));

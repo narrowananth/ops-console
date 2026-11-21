@@ -84,13 +84,14 @@ async function onPage(canvas: Locator, x: number, y: number) {
 }
 
 /**
- * Turns pick mode on, moves to the point until Chrome's outline shows in the canvas (pick mode is on in the daemon by
- * then), and clicks.
+ * Moves to the point until Chrome's outline shows in the canvas (pick mode is on in the daemon by then), and returns the
+ * click. `arm` presses the Pick button first; later picks in the same mode do not.
  */
-async function pickAt(page: Page, panel: Locator, x: number, y: number) {
+async function pickAt(page: Page, panel: Locator, x: number, y: number, arm = true) {
   const canvas = panel.locator('canvas');
+  // Away from the point first, so the outline under it is drawn again after the last pick.
   const quiet = await canvas.screenshot();
-  await panel.getByRole('button', { name: 'Pick an element' }).click();
+  if (arm) await panel.getByRole('button', { name: 'Pick an element' }).click();
   const at = await onPage(canvas, x, y);
   await expect(async () => {
     await page.mouse.move(at.x + 1, at.y);
@@ -222,33 +223,55 @@ test.describe('picking an element', () => {
     const click = await pickAt(page, panel, 100, 60);
     await expect(pick).toHaveAttribute('aria-pressed', 'true');
     await shoot(panel, 'pick-mode-highlight');
+    await shoot(panel.locator('div.border-b').first(), 'toolbar-pick-on');
 
     await click();
     const chips = page.getByRole('list', { name: 'Picked elements' });
     await expect(chips.getByText('button#sign-in: Sign in')).toBeVisible({ timeout: 15_000 });
     await expect(chips.locator('img')).toBeVisible();
-    // Pick mode ends with the pick, the page saw no click, and the message box has the focus.
-    await expect(pick).toHaveAttribute('aria-pressed', 'false');
-    await expect(page.getByRole('textbox', { name: 'Message' })).toBeFocused();
-    // The tab's title follows the page within two seconds: a click that reached the page would have shown by now.
+    // Pick mode stays on, and the page saw no click: its title follows the page within two seconds.
+    await expect(pick).toHaveAttribute('aria-pressed', 'true');
     await page.waitForTimeout(2500);
     await expect(panel.getByRole('tab', { name: 'Pick page' })).toBeVisible();
+
+    // A second pick without pressing the arrow again makes a second chip.
+    await (await pickAt(page, panel, 40, 210, false))();
+    await expect(chips.getByText('a#docs: Read the docs')).toBeVisible({ timeout: 15_000 });
+    await expect(chips.getByRole('listitem')).toHaveCount(2);
+    await expect(pick).toHaveAttribute('aria-pressed', 'true');
     await shoot(
       page.getByRole('textbox', { name: 'Message' }).locator('xpath=ancestor::div[contains(@class,"rounded-3xl")]'),
       'composer-chip',
     );
 
-    // Several picks in a row make several chips; one is taken out with its x.
-    await (await pickAt(page, panel, 40, 210))();
-    await expect(chips.getByText('a#docs: Read the docs')).toBeVisible({ timeout: 15_000 });
-    await expect(chips.getByRole('listitem')).toHaveCount(2);
+    // Clicking the message box turns pick mode off, and the page takes clicks again.
+    await page.getByRole('textbox', { name: 'Message' }).click();
+    await expect(pick).toHaveAttribute('aria-pressed', 'false');
     await chips.getByRole('button', { name: 'Remove a#docs: Read the docs' }).click();
     await expect(chips.getByRole('listitem')).toHaveCount(1);
-
-    // The page still takes clicks once pick mode is off.
     const button = await onPage(canvas, 100, 60);
-    await page.mouse.click(button.x, button.y);
-    await expect(panel.getByRole('tab', { name: 'clicked' })).toBeVisible({ timeout: 15_000 });
+    await expect(async () => {
+      await page.mouse.click(button.x, button.y);
+      await expect(panel.getByRole('tab', { name: 'clicked' })).toBeVisible({ timeout: 2000 });
+    }).toPass({ timeout: 20_000 });
+  });
+
+  test('the arrow toggles pick mode, and the page takes clicks while it is off (pick)', async ({ page, request }) => {
+    needsChrome();
+    const { panel } = await openPanel(page, request);
+    const pick = panel.getByRole('button', { name: 'Pick an element' });
+    await pick.click();
+    await expect(pick).toHaveAttribute('aria-pressed', 'true');
+    await pick.click();
+    await expect(pick).toHaveAttribute('aria-pressed', 'false');
+    // Pressed twice: nothing is armed, so a hover draws no outline and a click reaches the page.
+    const canvas = panel.locator('canvas');
+    const button = await onPage(canvas, 100, 60);
+    await expect(async () => {
+      await page.mouse.click(button.x, button.y);
+      await expect(panel.getByRole('tab', { name: 'clicked' })).toBeVisible({ timeout: 2000 });
+    }).toPass({ timeout: 20_000 });
+    await expect(page.getByRole('list', { name: 'Picked elements' })).toHaveCount(0);
   });
 
   test('sends the element in a delimited block with its crop attached, and nothing the operator typed into the page (pick)', async ({
@@ -268,7 +291,7 @@ test.describe('picking an element', () => {
     await expect(chips.getByText('button#sign-in: Sign in')).toBeVisible({ timeout: 15_000 });
 
     // The password field is picked too: its chip has no image, and no value is anywhere.
-    await (await pickAt(page, panel, 100, 150))();
+    await (await pickAt(page, panel, 100, 150, false))();
     await expect(chips.getByRole('listitem')).toHaveCount(2, { timeout: 15_000 });
     await expect(chips.getByRole('listitem').nth(1).locator('img')).toHaveCount(0);
 
@@ -338,10 +361,13 @@ test.describe('picking an element', () => {
         timeout: 15_000,
       },
     );
-    await expect(pick).toHaveAttribute('aria-pressed', 'false');
+    // The window's pick mode stays on until the arrow, Escape, or the console's message box takes the focus.
+    await expect(pick).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByRole('list', { name: 'Picked elements' }).getByText('button#sign-in: Sign in')).toBeVisible({
       timeout: 15_000,
     });
+    await page.getByRole('textbox', { name: 'Message' }).click();
+    await expect(pick).toHaveAttribute('aria-pressed', 'false');
     // The window has the icons and no menu.
     await expect(popup.getByRole('button', { name: 'Open in your browser' })).toBeVisible();
     await expect(popup.getByRole('button', { name: 'Browser menu' })).toHaveCount(0);

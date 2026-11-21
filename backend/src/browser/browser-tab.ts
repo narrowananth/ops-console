@@ -631,7 +631,7 @@ export class BrowserTab {
     if (!this.picker.has(viewer)) return;
     if (message.action === 'hover') return this.picker.hover(message.x, message.y);
     try {
-      const capture = await this.picker.click(viewer, message.x, message.y);
+      const capture = await this.picker.click(message.x, message.y);
       if (capture) this.send({ type: 'picked', capture }, viewer);
       // The viewer took the tab at the size it was shown; the page takes that size now the point has been read.
       this.applyTakeover();

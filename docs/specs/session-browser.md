@@ -186,14 +186,14 @@ adds the same to a Session.
 
 ### Picking an element
 
-45. The toolbar's "Pick an element" button (a pointer arrow, `aria-pressed` while on) turns pick mode on for the current tab.
-    It is disabled with no page, and works on any tab, loopback or not, as the address field does. The panel and a tab's
-    own window (35) both have it. Pressing it again, pressing Escape, picking an element or leaving for another tab turns the
-    mode off. A page stream that drops and returns keeps the mode.
+45. The toolbar's "Pick an element" button (a pointer arrow, `aria-pressed` while on) toggles pick mode for the current tab. The
+    button is solid and 20 px while on, and it stays on until the operator turns it off. It is disabled with no page, and works on any tab, loopback or not, as the address field does. The panel and a tab's
+    own window (35) both have it. Pressing it again, pressing Escape, clicking or focusing the Session's message box in the console, or leaving for another tab turns
+    the mode off. Picking an element does not. A page stream that drops and returns keeps the mode.
 46. In pick mode the pointer is a crosshair and the element under it is outlined by Chrome's own overlay (a box with a card of its tag,
     size, accessible name and role), drawn into the page, so every viewer of the tab sees it. A click, a key and a paste do not reach the page; the
-    wheel still scrolls it. A click on the page's own `html` or `body` picks nothing and the mode stays on. The outline goes
-    before the crop is taken and when the mode ends.
+    wheel still scrolls it. A click on the page's own `html` or `body` picks nothing. The outline goes before the crop is
+    taken, follows the pointer again after the click, and goes when the mode ends.
 47. A click takes the element at the point: its tag, a CSS selector path that finds it (an id or `data-testid` where one is
     unique, else the tags and `:nth-of-type` from `body`), its id and up to eight classes, its role and accessible name from
     Chrome's accessibility tree, its visible text (300 characters), its `href`, `src`, `alt`, `title`, `type`, `name`,
@@ -208,7 +208,8 @@ adds the same to a Session.
     Action Log and the Monitor Samples use.
 49. The capture reaches the Session's message box as chips above the text, one per pick, in the order picked: the crop as a
     thumbnail, the label (`button#sign-in: Sign in`: the tag, the id or first class, and the text or name) and an x. A chip opens
-    its crop. The message box takes the focus. Several picks make several chips; a repeated label gets ` (2)`. The crop is
+    its crop. The message box does not take the focus, since focusing it ends pick mode. Each click while the mode is on adds a chip, so
+    several picks in a row need no re-arming; a repeated label gets ` (2)`. The crop is
     attached as an image through the upload a pasted image uses. Picks stay with the Session through a reload until removed or
     sent, and a message of picks alone can be sent.
 50. On send the message is the operator's text, then one block per pick, then the Attached files list that names each crop:
@@ -217,12 +218,12 @@ adds the same to a Session.
     text cannot close or open a block. The transcript shows each block as a closed card headed by its selector. A Session's
     first message of picks alone is titled "Picked element".
 51. A tab's own window picks the same way. The window has no message box, so the capture is kept in the browser's local
-    storage under the Session and the console page takes it into its composer, open now or when it opens. The window says
-    "Added to the message box in the console."
+    storage under the Session and the console page takes it into its composer, open now or when it opens. The window's mode is the
+    same toggle, stays on until its arrow, Escape or focus in the console's message box (the console page tells the window through a
+    `BroadcastChannel`), and says "Added to the message box in the console." after a pick.
 52. Picking is the operator's input: it goes through while the agent works on the tab (25), and the agent has no tool to pick,
     to read a pick or to turn the mode on.
-53. Two viewers of one tab share the outline. The capture goes back to the viewer that clicked, and only that viewer leaves pick
-    mode.
+53. Two viewers of one tab share the outline. The capture goes back to the viewer that clicked, and each viewer ends its own pick mode.
 
 ### Must not regress
 

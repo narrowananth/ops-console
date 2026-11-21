@@ -15,7 +15,7 @@ import {
   useStopServer,
   useStoreTab,
 } from '../lib/queries';
-import { deliverPick } from './element-picks';
+import { deliverPick, usePickEnds } from './element-picks';
 import { InspectorLayout, useDockedTabs } from './inspector-dock';
 import { openInspector } from './inspector-window';
 import { LocalServers } from './local-servers';
@@ -101,6 +101,7 @@ export function BrowserPanel({
 
   const picking = active !== undefined && pickTab === active.id;
   const stopPicking = () => setPickTab(null);
+  usePickEnds(sessionId, stopPicking);
 
   const dock = useDockedTabs();
   const inspecting = active !== undefined && dock.docked.has(active.id) ? active.id : null;
@@ -154,10 +155,7 @@ export function BrowserPanel({
           ) : undefined
         }
         picking={picking}
-        onPicked={(capture) => {
-          deliverPick(sessionId, capture);
-          stopPicking();
-        }}
+        onPicked={(capture) => deliverPick(sessionId, capture)}
         onPickEnd={stopPicking}
         onTab={storeTab}
         onClosed={() => void state.refetch()}

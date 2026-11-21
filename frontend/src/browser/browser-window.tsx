@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Empty } from '../components/ui/empty';
 import { ApiError } from '../lib/api';
 import { useBrowserState, useOpenExternal, usePatchTab, useStoreTab } from '../lib/queries';
-import { deliverPick } from './element-picks';
+import { deliverPick, usePickEnds } from './element-picks';
 import { InspectorLayout } from './inspector-dock';
 import { openInspector } from './inspector-window';
 import { PageStage } from './page-stage';
@@ -25,6 +25,7 @@ export function BrowserWindow({ sessionId, tabId }: { sessionId: string; tabId: 
   const [picking, setPicking] = useState(false);
   // The window has no message box: a pick goes to the Session's page in the console.
   const [sent, setSent] = useState(false);
+  usePickEnds(sessionId, () => setPicking(false));
 
   useEffect(() => {
     document.title = tab?.title || 'Ops Console browser';
@@ -86,7 +87,6 @@ export function BrowserWindow({ sessionId, tabId }: { sessionId: string; tabId: 
           picking={picking}
           onPicked={(capture) => {
             deliverPick(sessionId, capture);
-            setPicking(false);
             setSent(true);
           }}
           onPickEnd={() => setPicking(false)}
