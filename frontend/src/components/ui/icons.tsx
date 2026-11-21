@@ -172,6 +172,29 @@ export const CodeIcon = () => (
   </Icon>
 );
 
+/** An arrow leaving a box, for "Open in your browser". */
+export const ExternalIcon = () => (
+  <Icon>
+    <path d="M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" />
+  </Icon>
+);
+
+/** A cookie with a bite out of it and a small x, for clearing a Session's cookies. */
+export const CookieIcon = () => (
+  <Icon>
+    <path d="M9.5 3a6.5 6.5 0 1 0 6.5 6.5 3 3 0 0 1-3-3 3 3 0 0 1-3.5-3.5Z" />
+    <path d="M6.8 8.2h.01M8.2 12h.01M11.8 11h.01" />
+    <path d="m16.5 16.5 4.5 4.5m0-4.5-4.5 4.5" />
+  </Icon>
+);
+
+/** A pointer arrow, for picking an element on the page. */
+export const PointerIcon = () => (
+  <Icon>
+    <path d="m5 3 14 7.5-6 1.8-1.8 6.2L5 3Z" />
+  </Icon>
+);
+
 /** DevTools' own dock-side pictures: a window of its own, the bottom, the right. */
 export const DockWindowIcon = () => (
   <Icon>

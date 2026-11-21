@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Empty } from '../components/ui/empty';
 import { ApiError } from '../lib/api';
 import { useBrowserState, useOpenExternal, usePatchTab, useStoreTab } from '../lib/queries';
+import { deliverPick } from './element-picks';
 import { InspectorLayout } from './inspector-dock';
 import { openInspector } from './inspector-window';
 import { PageStage } from './page-stage';
@@ -21,6 +22,9 @@ export function BrowserWindow({ sessionId, tabId }: { sessionId: string; tabId: 
   const storeTab = useStoreTab(sessionId);
   const [refused, setRefused] = useState<string | null>(null);
   const [docked, setDocked] = useState(false);
+  const [picking, setPicking] = useState(false);
+  // The window has no message box: a pick goes to the Session's page in the console.
+  const [sent, setSent] = useState(false);
 
   useEffect(() => {
     document.title = tab?.title || 'Ops Console browser';
@@ -46,6 +50,12 @@ export function BrowserWindow({ sessionId, tabId }: { sessionId: string; tabId: 
         onAction={(action) => change({ action })}
         onAddress={(url) => change({ url })}
         onViewport={(viewport) => change({ viewport })}
+        picking={picking}
+        onPick={() => {
+          setRefused(null);
+          setSent(false);
+          setPicking((now) => !now);
+        }}
         inspecting={docked}
         onInspect={() => {
           setRefused(null);
@@ -53,6 +63,11 @@ export function BrowserWindow({ sessionId, tabId }: { sessionId: string; tabId: 
         }}
         onExternal={() => external.mutate(tabId)}
       />
+      {sent && (
+        <p role="status" className="m-0 px-3.5 py-1.5 text-xs text-neutral-700">
+          Added to the message box in the console.
+        </p>
+      )}
       {external.isError && (
         <p role="alert" className="m-0 px-3.5 py-1.5 text-xs text-accent-700">
           {external.error.message}
@@ -66,7 +81,18 @@ export function BrowserWindow({ sessionId, tabId }: { sessionId: string; tabId: 
           else setRefused('The browser blocked the window. Allow pop-ups for this page.');
         }}
       >
-        <PageStage tab={tab} onTab={storeTab} onClosed={() => void state.refetch()} />
+        <PageStage
+          tab={tab}
+          picking={picking}
+          onPicked={(capture) => {
+            deliverPick(sessionId, capture);
+            setPicking(false);
+            setSent(true);
+          }}
+          onPickEnd={() => setPicking(false)}
+          onTab={storeTab}
+          onClosed={() => void state.refetch()}
+        />
       </InspectorLayout>
     </section>
   );

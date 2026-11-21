@@ -23,4 +23,10 @@ describe('sessionTitle', () => {
     expect(sessionTitle('[📎 a.png] [📎 b.png]')).toBe('Attached files');
     expect(sessionTitle('   ')).toBeNull();
   });
+
+  it('leaves picked elements out of the title', () => {
+    const block = '<picked-element page="http://localhost:5173/" selector="#go">\nhtml:\n<b>Go</b>\n</picked-element>';
+    expect(sessionTitle(`Make this button blue.\n\n${block}`)).toBe('Make this button blue');
+    expect(sessionTitle(block)).toBe('Picked element');
+  });
 });

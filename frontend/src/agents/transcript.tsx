@@ -5,6 +5,7 @@ import {
   type OutputFile,
   type Part,
   splitAttachments,
+  splitElementPicks,
 } from '@ops-console/shared';
 import { memo, useState } from 'react';
 import { AttachmentViewer, outputAddress, PaperClip, size, type Viewed } from '../components/ui/attachment-viewer';
@@ -242,7 +243,9 @@ function MessageItem({
  * text. A chip opens its file over the page.
  */
 function SentText({ text }: { text: string }) {
-  const sent = splitAttachments(text);
+  const files = splitAttachments(text);
+  const { text: said, picks } = splitElementPicks(files.text);
+  const sent = { text: said, attachments: files.attachments };
   const [viewed, setViewed] = useState<Viewed | null>(null);
   const byName = new Map(sent.attachments.map((file) => [file.name, file]));
   const placed = new Set(namesInText(sent.text).filter((name) => byName.has(name)));
@@ -268,6 +271,21 @@ function SentText({ text }: { text: string }) {
             })}
           </p>
         ))}
+      {picks.length > 0 && (
+        <ul aria-label="Elements in this message" className="m-0 flex list-none flex-col gap-1.5 p-0">
+          {picks.map((pick, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: one element may be picked twice; picks never reorder
+            <li key={index}>
+              <details className="rounded-md border border-line bg-bg px-2 py-1 text-xs">
+                <summary className="cursor-pointer font-mono" title={pick.page}>
+                  {pick.selector}
+                </summary>
+                <CodeBlock text={pick.block} className="m-0 mt-1 overflow-x-auto font-mono text-[11px]" />
+              </details>
+            </li>
+          ))}
+        </ul>
+      )}
       {rest.length > 0 && (
         <ul aria-label="Attached files" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
           {rest.map((file) => (

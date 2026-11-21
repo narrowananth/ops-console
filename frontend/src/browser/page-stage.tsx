@@ -1,4 +1,4 @@
-import type { BrowserServerMessage, Tab } from '@ops-console/shared';
+import type { BrowserServerMessage, ElementCapture, Tab } from '@ops-console/shared';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useChooseFiles } from '../lib/queries';
 import { createPainter } from './frame-painter';
@@ -26,16 +26,23 @@ type Pointer = {
 /**
  * One tab's page: JPEG frames from `/browser/:tabId` on a canvas, and the operator's mouse, wheel, keys and paste sent
  * back as a person's. A Fill page takes the stage's size; a device page keeps its own and shrinks to fit. `overlay`
- * covers the page, for a blank tab or an error.
+ * covers the page, for a blank tab or an error. While `picking`, the pointer picks an element instead of reaching the
+ * page: the daemon highlights what is under it, a click goes to `onPicked` with the capture, and Escape calls `onPickEnd`.
  */
 export function PageStage({
   tab,
   overlay,
+  picking = false,
+  onPicked,
+  onPickEnd,
   onTab,
   onClosed,
 }: {
   tab: Tab;
   overlay?: ReactNode;
+  picking?: boolean;
+  onPicked?: (capture: ElementCapture) => void;
+  onPickEnd?: () => void;
   onTab: (tab: Tab) => void;
   onClosed: () => void;
 }) {
@@ -61,6 +68,8 @@ export function PageStage({
     (message: BrowserServerMessage) => {
       if (message.type === 'tab') onTab(message.tab);
       else if (message.type === 'dialog') setNotice(message.message);
+      else if (message.type === 'picked') onPicked?.(message.capture);
+      else if (message.type === 'pick_failed') setNotice(message.message);
       else onClosed();
     },
     paint,
@@ -93,6 +102,25 @@ export function PageStage({
     return () => clearTimeout(timer);
   }, [connected, fill, box.width, box.height, send]);
 
+  const pickEnd = useRef(onPickEnd);
+  pickEnd.current = onPickEnd;
+  // The daemon forgets pick mode with the socket, so it starts again whenever the stream opens.
+  useEffect(() => {
+    if (!picking || !connected) return;
+    send({ type: 'pick', action: 'start', x: 0, y: 0 });
+    return () => send({ type: 'pick', action: 'end', x: 0, y: 0 });
+  }, [picking, connected, send]);
+  useEffect(() => {
+    if (!picking) return;
+    const leave = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') pickEnd.current?.();
+    };
+    window.addEventListener('keydown', leave);
+    return () => window.removeEventListener('keydown', leave);
+  }, [picking]);
+  const pickingRef = useRef(picking);
+  pickingRef.current = picking;
+
   const page: Size | null =
     framePage ??
     (tab.viewport.width !== null && tab.viewport.height !== null
@@ -100,6 +128,17 @@ export function PageStage({
       : null);
   const pageRef = useRef(page);
   pageRef.current = page;
+
+  const pickAt = (action: 'hover' | 'click', event: Pointer) => {
+    const target = canvas.current;
+    const size = pageRef.current;
+    if (!target || !size) return;
+    send({
+      type: 'pick',
+      action,
+      ...toPagePoint({ x: event.clientX, y: event.clientY }, target.getBoundingClientRect(), size),
+    });
+  };
 
   const message = (action: 'move' | 'down' | 'up', event: Pointer) => {
     const target = canvas.current;
@@ -131,7 +170,8 @@ export function PageStage({
       event,
       frame: requestAnimationFrame(() => {
         move.current = null;
-        message('move', queued.event);
+        if (pickingRef.current) pickAt('hover', queued.event);
+        else message('move', queued.event);
       }),
     };
     move.current = queued;
@@ -208,17 +248,22 @@ export function PageStage({
         tabIndex={0}
         aria-label={tab.title || 'Page'}
         style={drawn}
-        className={
+        className={`${
           fill
             ? 'absolute inset-0 size-full bg-white outline-none'
             : 'flex-none rounded-3xl bg-white ring-8 ring-neutral-900 outline-none'
-        }
+        } ${picking ? 'cursor-crosshair' : ''}`}
         onFocus={() => send({ type: 'focus' })}
         onContextMenu={(event) => event.preventDefault()}
         onMouseMove={(event) => {
           if (!dragging.current) queueMove(event);
         }}
         onMouseDown={(event) => {
+          if (picking) {
+            event.preventDefault();
+            if (event.button === 0) pickAt('click', event);
+            return;
+          }
           message('down', event);
           dragging.current = true;
           // A drag that leaves the page goes on, and its release is the page's.
@@ -233,18 +278,24 @@ export function PageStage({
           window.addEventListener('mouseup', release);
         }}
         onKeyDown={(event) => {
+          // While picking, keys do not reach the page; Escape leaves pick mode.
+          if (picking) {
+            event.preventDefault();
+            return;
+          }
           // A paste arrives as its own event, with the text.
           if (isPasteShortcut(event)) return;
           event.preventDefault();
           send(keyMessage('down', event));
         }}
         onKeyUp={(event) => {
-          if (isPasteShortcut(event)) return;
+          if (picking || isPasteShortcut(event)) return;
           event.preventDefault();
           send(keyMessage('up', event));
         }}
         onPaste={(event) => {
           event.preventDefault();
+          if (picking) return;
           const text = event.clipboardData.getData('text/plain');
           if (text) send({ type: 'text', text: text.slice(0, 100_000) });
         }}
