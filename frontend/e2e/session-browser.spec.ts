@@ -413,3 +413,30 @@ test("a server a process starts opens its page in the Browser panel, and the lis
   const list = panel.getByRole('list', { name: 'Local servers' });
   await expect(list.getByRole('listitem')).toHaveCount(1);
 });
+
+test('opening a server a tab already shows reloads that tab instead of adding one (11a, 13)', async ({
+  page,
+  request,
+}) => {
+  needsChrome();
+  const id = await newSession(request);
+  await openSession(page, id);
+  const script =
+    "require('node:http').createServer((_q, r) => { r.setHeader('content-type', 'text/html'); r.end('<title>Reuse app</title><p>up</p>'); }).listen(0, '127.0.0.1')";
+  const started = await request.post(api(`/sessions/${id}/processes`), {
+    headers: auth,
+    data: { name: 'web', command: `node -e "${script}"` },
+  });
+  expect(started.ok()).toBe(true);
+
+  const panel = page.getByRole('complementary', { name: 'Browser' });
+  await expect(panel.getByRole('tab', { name: /Reuse app/ })).toBeVisible({ timeout: 30_000 });
+  await panel.getByRole('button', { name: 'New tab' }).click();
+  await panel
+    .getByRole('list', { name: 'Local servers' })
+    .getByRole('button', { name: /Open/ })
+    .click();
+  // The page loads in the tab that already showed it; the blank tab stays blank.
+  await expect(panel.getByRole('tab', { name: /Reuse app/ })).toHaveCount(1);
+  await expect(panel.getByRole('tab', { name: /Reuse app/ })).toHaveAttribute('aria-selected', 'true');
+});

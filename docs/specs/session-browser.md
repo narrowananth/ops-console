@@ -60,7 +60,7 @@ adds the same to a Session.
     process owns, such as one started with `nohup` that outlived its terminal, shows a Stop button. Stop ends that process
     and what it started (by parent links, never by process group).
 11a. When a process started while the Session is open begins listening, its page opens in the Browser panel with no
-    click: the panel opens, and the page goes in the blank tab or a new one. A server already listening when the Session
+    click: the panel opens, and the page goes in the tab already on that site, which reloads, else the blank tab or a new one. A server already listening when the Session
     opened is not opened, and each port opens once. A process that listens but serves no page, such as a database, opens a
     tab that shows the error; the operator closes it.
 
@@ -68,7 +68,8 @@ adds the same to a Session.
 
 13. A `http` or `https` link in a transcript, an Approval or an Agent's message to a loopback host opens in the panel when
     the Session has a Browser button. Any other link opens in the operator's own browser. Cmd-click, Ctrl-click and the
-    middle button always go there. There is no setting for it.
+    middle button always go there. There is no setting for it. An address whose site (scheme, host and port) a tab
+    already shows loads in that tab, which reloads, instead of a new tab.
 14. Files the Session wrote (the viewer's HTML preview) are unchanged: no script, no network.
 
 ### Session processes

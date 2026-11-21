@@ -21,7 +21,7 @@ import { openInspector } from './inspector-window';
 import { LocalServers } from './local-servers';
 import { PageStage } from './page-stage';
 import { TabStrip } from './tab-strip';
-import { blankTabFor, isBlank } from './tabs';
+import { blankTabFor, isBlank, tabOnSite } from './tabs';
 import { Toolbar } from './toolbar';
 import { usePopOuts } from './use-pop-outs';
 
@@ -65,14 +65,17 @@ export function BrowserPanel({
   const active = tabs.find((tab) => tab.id === picked) ?? tabs[0];
   const missing = state.data?.chrome === ChromeState.Missing;
 
-  /** An address goes in the blank tab, else in a new one. The daemon's refusal shows under the toolbar. */
+  /**
+   * An address goes in the tab already on that site (it reloads there), else the blank tab, else a new one. The
+   * daemon's refusal shows under the toolbar.
+   */
   const open = (address: string) => {
     setRefused(null);
     const fail = (error: Error) => setRefused(error.message);
-    const blank = blankTabFor(tabs, active);
-    if (blank) {
-      setPicked(blank.id);
-      patch.mutate({ tabId: blank.id, body: { url: address } }, { onError: fail });
+    const target = tabOnSite(tabs, active, address) ?? blankTabFor(tabs, active);
+    if (target) {
+      setPicked(target.id);
+      patch.mutate({ tabId: target.id, body: { url: address } }, { onError: fail });
     } else create.mutate({ url: address }, { onSuccess: (tab) => setPicked(tab.id), onError: fail });
   };
 
