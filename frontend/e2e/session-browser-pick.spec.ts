@@ -70,6 +70,17 @@ async function newSession(request: APIRequestContext): Promise<string> {
 
 const browserButton = (page: Page) => page.getByRole('button', { name: /^Browser( :\d+)?$/ });
 
+/**
+ * The canvas has the pixels of its stage at the screen's pixel ratio: the daemon has applied the viewer's size and the
+ * page's frame at that size has been drawn. A click before that is mapped with the page's old size and lands elsewhere.
+ */
+const drawnAtStageSize = (canvas: Locator) =>
+  canvas.evaluate(
+    (node: HTMLCanvasElement) =>
+      node.width === Math.round(node.clientWidth * devicePixelRatio) &&
+      node.height === Math.round(node.clientHeight * devicePixelRatio),
+  );
+
 async function openPanel(page: Page, request: APIRequestContext) {
   const id = await newSession(request);
   await page.goto(`${daemon.url}/workspace?session=${id}#token=${daemon.token}`);
@@ -79,6 +90,7 @@ async function openPanel(page: Page, request: APIRequestContext) {
   await panel.getByRole('textbox', { name: 'Address' }).press('Enter');
   await expect(panel.getByRole('tab', { name: /Pick page/ })).toBeVisible({ timeout: 30_000 });
   await expect(panel.locator('canvas')).toBeVisible();
+  await expect.poll(() => drawnAtStageSize(panel.locator('canvas')), { timeout: 30_000 }).toBe(true);
   return { id, panel };
 }
 
@@ -95,6 +107,7 @@ async function onPage(canvas: Locator, x: number, y: number) {
  */
 async function pickAt(page: Page, panel: Locator, x: number, y: number, arm = true) {
   const canvas = panel.locator('canvas');
+  await expect.poll(() => drawnAtStageSize(canvas), { timeout: 30_000 }).toBe(true);
   // A page still settling (a resize, a reload) changes the canvas by itself: take the baseline once it holds still.
   let quiet = await canvas.screenshot();
   await expect(async () => {
@@ -418,12 +431,6 @@ function needsDevtools(): void {
   if (process.env.CI) throw new Error('DevTools are not built: run pnpm devtools-frontend.');
   test.skip(true, 'needs pnpm devtools-frontend');
 }
-
-/** The canvas has the pixels of its stage at the screen's pixel ratio: the page's frame at the stage's size. */
-const drawnAtStageSize = (canvas: Locator) =>
-  canvas.evaluate(
-    (node: HTMLCanvasElement) => node.width === node.clientWidth * 2 && node.height === node.clientHeight * 2,
-  );
 
 /** The canvas holds the frame's own pixels: the stage's CSS size times the screen's pixel ratio. */
 const steadySize = (canvas: Locator) =>
