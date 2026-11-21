@@ -3,8 +3,8 @@ import { ago } from './scan-scope';
 
 const WARNING = 'rounded-full bg-accent-100 px-2 py-px text-accent-700';
 
-/** How long since a Scan read the Alert's Service, as a warning once a Scan was missed. */
-export function FreshnessNote({ alert }: { alert: AlertListItem }) {
+/** How long since a Scan read the Alert's Service, as a warning once a Scan was missed. `warningOnly` leaves out the plain note, for a list row. */
+export function FreshnessNote({ alert, warningOnly = false }: { alert: AlertListItem; warningOnly?: boolean }) {
   if (alert.last_scanned_at === null) {
     return (
       <span className={WARNING} title="No Scan has read this Service since the console began recording Scans.">
@@ -14,6 +14,7 @@ export function FreshnessNote({ alert }: { alert: AlertListItem }) {
   }
   const text = `last scanned ${ago(alert.last_scanned_at)}`;
   if (!alert.scan_overdue) {
+    if (warningOnly) return null;
     return (
       <span className="text-neutral-700" title="When the newest finished Scan read this Service.">
         {text}

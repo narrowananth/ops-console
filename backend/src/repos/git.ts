@@ -227,6 +227,44 @@ export class Git {
     return [...new Set((out ?? '').split('\0').filter(Boolean))];
   }
 
+  /**
+   * The tracked files of `dir` that hold `literal` as written, with tests, specs, docs and lockfiles left out: where
+   * a Route's path is served, not where it is called or described. Empty when nothing matches or git refuses.
+   */
+  async filesHolding(dir: string, literal: string): Promise<string[]> {
+    try {
+      const { stdout } = await run(
+        this.bin,
+        [
+          ...NO_PROGRAMS,
+          '-C',
+          dir,
+          'grep',
+          '-l',
+          '-F',
+          '-I',
+          '--no-color',
+          '-e',
+          literal,
+          '--',
+          '.',
+          ':(exclude,glob)**/*test*',
+          ':(exclude,glob)**/*spec*',
+          ':(exclude,glob)**/__tests__/**',
+          ':(exclude,glob)**/*.md',
+          ':(exclude,glob)**/*.lock',
+          ':(exclude,glob)**/package-lock.json',
+          ':(exclude,glob)**/node_modules/**',
+          ':(exclude,glob)**/dist/**',
+        ],
+        { maxBuffer: 1024 * 1024, timeout: 10_000 },
+      );
+      return stdout.split('\n').filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
   /** Clones `url` into `dir`, which must be empty or missing. Throws with git's first line when it refuses. */
   async clone(url: string, dir: string): Promise<void> {
     try {

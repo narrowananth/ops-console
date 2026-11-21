@@ -1862,6 +1862,32 @@ test('Retry from step and Skip step on a failed Verification are the same size',
   );
 });
 
+test('Retry and Skip follow the Report version shown: the newest has them, an older one says so', async ({ page }) => {
+  const newest = {
+    ...report(
+      'a11',
+      'failed',
+      jobPlaybook(null, 'Verify (built-in)', [['Trace', 'failed', 'stopped by the operator']]),
+    ),
+    version: 2,
+  };
+  const older = { ...newest, id: 'rep-a11-old', version: 1 };
+  const failed = alert('a11', 'open', newest);
+  await routeAlerts(page, [failed]);
+  await page.route('**/api/alerts/a11/reports', (route) => route.fulfill({ json: { data: [newest, older] } }));
+  await page.goto(`${daemon.url}/monitor?service=checkout-api&alert=a11#token=${daemon.token}`);
+  await expect(page.getByRole('button', { name: 'Retry from step 1' })).toBeVisible();
+
+  await page.getByRole('button', { name: /^Report version/ }).click();
+  await page.getByRole('option', { name: /^v1/ }).click();
+  await expect(page.getByRole('button', { name: 'Retry from step 1' })).toHaveCount(0);
+  await expect(page.getByText('You are reading an older version. Retry and Skip run on the newest, v2.')).toBeVisible();
+
+  await page.getByRole('button', { name: /^Report version/ }).click();
+  await page.getByRole('option', { name: /^v2/ }).click();
+  await expect(page.getByRole('button', { name: 'Retry from step 1' })).toBeVisible();
+});
+
 const session = (id: string, kind: string, playbook: { id: string; name: string } | null) => ({
   id,
   kind,
@@ -1936,9 +1962,7 @@ test('the Agent Review folds to its header from the chevron, and stays folded af
   await expect(card.getByText('Ready once the cache has a TTL.')).toBeVisible();
 });
 
-test('the Monitor search keeps the logs whose words match, and the Services panel folds to a rail', async ({
-  page,
-}) => {
+test('the Monitor search keeps the logs whose words match', async ({ page }) => {
   const a1 = alert('a1', 'open', report('a1', 'ready', null));
   const a2 = {
     ...alert('a2', 'open', report('a2', 'ready', null)),
@@ -1950,9 +1974,11 @@ test('the Monitor search keeps the logs whose words match, and the Services pane
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
 
   const logs = page
-    .getByRole('list', { name: 'Logs' })
-    .getByRole('listitem')
+    .getByRole('table', { name: 'Logs' })
+    .getByRole('row')
     .filter({ has: page.getByRole('button') });
+  // Needs attention is the default view; the search runs across all tiers.
+  await page.getByRole('tab', { name: /^All \d/ }).click();
   await expect(logs).toHaveCount(2);
   const search = page.getByRole('searchbox', { name: 'Search logs' });
   await search.fill('carts 404');
@@ -1961,11 +1987,4 @@ test('the Monitor search keeps the logs whose words match, and the Services pane
   await search.fill('nothing like this');
   await expect(page.getByText('No logs match “nothing like this”.')).toBeVisible();
   await search.fill('');
-
-  await page.getByRole('button', { name: 'Collapse the Services panel' }).click();
-  await expect(page.getByRole('list', { name: 'Services' })).toHaveCount(0);
-  await page.reload();
-  const rail = page.getByRole('navigation', { name: 'Services panel' });
-  await rail.getByRole('button', { name: 'Open the Services panel' }).click();
-  await expect(page.getByRole('list', { name: 'Services' })).toBeVisible();
 });

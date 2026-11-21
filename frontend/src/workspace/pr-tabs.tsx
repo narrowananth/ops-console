@@ -2,12 +2,14 @@ import { type KeyboardEvent, type ReactNode, useRef } from 'react';
 
 export type PrTab = { id: string; label: string; icon: ReactNode; count?: number };
 
-/** The pull request's tabs, in the segmented look of Accounts and Usage; arrow keys, Home and End move between them. */
+/** Tabs in the segmented look of Accounts and Usage, the pull request's by default; arrow keys, Home and End move between them. */
 export function PrTabs<T extends string>({
   tabs,
   value,
   onChange,
+  label = 'Pull request',
 }: {
+  label?: string;
   tabs: (PrTab & { id: T })[];
   value: T;
   onChange: (id: T) => void;
@@ -34,7 +36,7 @@ export function PrTabs<T extends string>({
   return (
     <div
       role="tablist"
-      aria-label="Pull request"
+      aria-label={label}
       onKeyDown={onKeyDown}
       className="flex w-max gap-1 rounded-xl bg-neutral-200 p-1"
     >

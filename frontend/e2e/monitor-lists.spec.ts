@@ -7,6 +7,10 @@ const HOUR = 3_600_000;
 const ago = (hours: number) => new Date(Date.now() - hours * HOUR).toISOString();
 const list = (data: unknown[]) => ({ json: { data, meta: { next_cursor: null } } });
 
+/** Opens the Services menu in the toolbar. */
+const openServices = (page: Page) =>
+  page.getByRole('button', { name: /^\d+ Services/, description: /^The Services in / }).click();
+
 const NAMES = ['api-analytics', 'api-nxt', 'apis', 'cron-nxt', 'forwarder', 'js-sdk', 'push-nxt', 'webhook', 'zeta'];
 
 const alertOf = (id: string, severity: string, path: string, extra: Record<string, unknown> = {}) => ({
@@ -102,10 +106,11 @@ test('Services show tick boxes on hover, count ticks above the list, and Scan re
   await routeMonitor(page);
   const started = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/scans'));
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  await expect(page.getByRole('button', { name: /^Scan 9 Services · 1h|^Scan 9 Services · 24h/ })).toBeVisible();
+  await openServices(page);
   const services = page.getByRole('list', { name: 'Services' });
   await expect(services.getByRole('listitem')).toHaveCount(NAMES.length);
   await expect(page.getByText('Tick Services to Scan')).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Scan 9 Services · 1h|^Scan 9 Services · 24h/ })).toBeVisible();
 
   // Hidden until hover, and no "Untick" line under the button.
   const box = page.getByRole('checkbox', { name: 'Scan apis' });
@@ -116,44 +121,51 @@ test('Services show tick boxes on hover, count ticks above the list, and Scan re
   await box.check();
   await page.getByRole('checkbox', { name: 'Scan webhook' }).check();
   await expect(page.locator('strong', { hasText: '2 ticked' })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Scan 2 ticked/ })).toBeVisible();
   await expect(page.getByText(/Untick/)).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: /^Scan 2 ticked/ })).toBeVisible();
 
   await page.getByRole('button', { name: /^Scan 2 ticked/ }).click();
   expect((await started).postDataJSON().services).toEqual(['apis', 'webhook']);
 
+  await openServices(page);
   await page.getByRole('button', { name: 'Clear', exact: true }).click();
   await expect(page.getByText('Tick Services to Scan')).toBeVisible();
   await page.getByRole('button', { name: 'Tick all' }).click();
   await expect(page.locator('strong', { hasText: `${NAMES.length} ticked` })).toBeVisible();
 });
 
-test('the last Scan is one line, and its Services show only when opened', async ({ page }) => {
+test('the last Scan is one line with no Service list to open', async ({ page }) => {
   await routeMonitor(page);
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
-  await expect(page.getByText(/^Last Scan \d+m ago$/)).toBeVisible();
-  // The names are not printed until the line is opened.
-  await expect(page.getByRole('listitem').filter({ hasText: /^forwarder$/ })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Services', description: 'What the last Scan read' }).click();
-  await expect(page.getByRole('listitem').filter({ hasText: /^forwarder$/ })).toBeVisible();
-  await expect(page.getByText('HTTP 400+').first()).toBeVisible();
+  await expect(page.getByText(/^Last Scan \d+m ago$/).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Services', description: 'What the last Scan read' })).toHaveCount(0);
 });
 
-test('logs group under High, Medium and Low on All, titled by Route, and a tier tab drops the groups', async ({
+test('logs list as a table titled by Route, Low ones wait behind a row, and a tier tab shows one tier', async ({
   page,
 }) => {
   await routeMonitor(page);
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
-  const logs = page.getByRole('list', { name: 'Logs' });
-  const heads = logs.getByRole('listitem').filter({ hasNot: page.getByRole('button') });
-  await expect(heads).toHaveText(['High2', 'Medium1', 'Low1']);
+  const logs = page.getByRole('table', { name: 'Logs' });
+  const routes = logs.getByRole('button', { name: /\/v1\// });
+  // Needs attention is the default: High and Medium, with the Low one behind a row.
+  await expect(page.getByRole('tab', { name: /^Needs attention/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(routes).toHaveCount(3);
+  await expect(logs.getByRole('button', { name: /\/v1\/low/ })).toHaveCount(0);
   await expect(logs.getByRole('button', { name: /\/v1\/orders/ })).toBeVisible();
   // Open stays unlabelled; a verified Alert says so.
   await expect(logs.getByRole('button', { name: /\/v1\/events.*verified/ })).toBeVisible();
 
+  await page.getByRole('tab', { name: /^All \d/ }).click();
+  await expect(routes).toHaveCount(4);
   await page.getByRole('tab', { name: /^High/ }).click();
-  await expect(logs.getByRole('button')).toHaveCount(2);
-  await expect(heads).toHaveCount(0);
+  await expect(routes).toHaveCount(2);
+
+  await page.getByRole('tab', { name: /^Needs attention/ }).click();
+  await logs.getByRole('button', { name: /^Show 1 Low alert/ }).click();
+  await expect(routes).toHaveCount(1);
+  await expect(logs.getByRole('button', { name: /\/v1\/low/ })).toBeVisible();
 });
 
 test('a pull request row says how long ago it opened, and a Session row how long since it was active', async ({
@@ -419,18 +431,22 @@ test('each Alert and Service names its source, and the source filter keeps one s
 }) => {
   await routeSources(page);
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
-  const logs = page.getByRole('list', { name: 'Logs' });
+  const logs = page.getByRole('table', { name: 'Logs' });
   const services = page.getByRole('list', { name: 'Services' });
-  await expect(logs.getByRole('button', { name: /\/v1\/orders/ })).toContainText('Datadog');
-  await expect(logs.getByRole('button', { name: /POST \/orders/ })).toContainText('OpenTelemetry');
-  await expect(services.getByRole('listitem').filter({ hasText: 'Datadog' })).toHaveCount(1);
-  await expect(services.getByRole('listitem').filter({ hasText: 'OpenTelemetry' })).toHaveCount(1);
+  await expect(logs.getByRole('row').filter({ hasText: /\/v1\/orders/ })).toContainText('Datadog');
+  await expect(logs.getByRole('row').filter({ hasText: /POST\/orders/ })).toContainText('OpenTelemetry');
+  await openServices(page);
+  await expect(services.getByRole('button', { name: 'Datadog, 1 Service' })).toBeVisible();
+  await expect(services.getByRole('button', { name: 'OpenTelemetry, 1 Service' })).toBeVisible();
+  await page.keyboard.press('Escape');
 
   await page.getByRole('tab', { name: 'OpenTelemetry' }).click();
   await expect(logs.getByRole('button')).toHaveCount(1);
   await expect(logs.getByRole('button')).toContainText('/orders');
+  await openServices(page);
   await expect(services.getByRole('listitem')).toHaveCount(1);
-  await expect(services.getByRole('listitem')).toContainText('OpenTelemetry');
+  await expect(services.getByRole('button', { name: 'OpenTelemetry, 1 Service' })).toBeVisible();
+  await page.keyboard.press('Escape');
 
   await page.reload();
   await expect(page.getByRole('tab', { name: 'OpenTelemetry' })).toHaveAttribute('aria-selected', 'true');
@@ -439,18 +455,46 @@ test('each Alert and Service names its source, and the source filter keeps one s
   await expect(logs.getByRole('button')).toHaveCount(2);
 });
 
+test('Services list under their source, and a source folds and opens from its arrow', async ({ page }) => {
+  await routeSources(page);
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  await openServices(page);
+  const services = page.getByRole('list', { name: 'Services' });
+  await expect(services.getByRole('listitem')).toHaveCount(2);
+  const datadog = services.getByRole('button', { name: 'Datadog, 1 Service' });
+  await expect(datadog).toHaveAttribute('aria-expanded', 'true');
+  await datadog.click();
+  await expect(datadog).toHaveAttribute('aria-expanded', 'false');
+  await expect(services.getByRole('listitem')).toHaveCount(1);
+  await datadog.click();
+  await expect(services.getByRole('listitem')).toHaveCount(2);
+});
+
+test('the HTTP status codes group by class, and a class folds and opens from its arrow', async ({ page }) => {
+  await routeMonitor(page);
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  await page.getByRole('button', { name: 'Status', exact: true }).click();
+  const codes = page.getByRole('group', { name: 'HTTP status codes to read' });
+  await expect(codes.getByText('Bad Request')).toBeVisible();
+  await codes.getByRole('button', { name: /^Hide 4xx/ }).click();
+  await expect(codes.getByText('Bad Request')).toHaveCount(0);
+  await expect(codes.getByText('Internal Server Error')).toBeVisible();
+  await codes.getByRole('button', { name: /^Show 4xx/ }).click();
+  await expect(codes.getByText('Bad Request')).toBeVisible();
+});
+
 test('a source that is down shows a notice naming it, and the other source keeps its Alerts', async ({ page }) => {
   await routeSources(page, { otel: ['fail', 'Folder not found'] });
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
   const notice = page.getByRole('status').filter({ hasText: 'OpenTelemetry' });
   await expect(notice).toContainText('is down: Folder not found');
-  await expect(page.getByRole('list', { name: 'Logs' }).getByRole('button', { name: /\/v1\/orders/ })).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Logs' }).getByRole('button', { name: /\/v1\/orders/ })).toBeVisible();
 });
 
 test('no notice shows while both sources are connected', async ({ page }) => {
   await routeSources(page);
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
-  await expect(page.getByRole('list', { name: 'Logs' }).getByRole('button')).toHaveCount(2);
+  await expect(page.getByRole('table', { name: 'Logs' }).getByRole('button')).toHaveCount(2);
   await expect(page.getByText('is down')).toHaveCount(0);
 });
 
@@ -475,9 +519,9 @@ test('Scan works with only OpenTelemetry connected and asks no Datadog read', as
   const read = await routeSources(page, { datadog: ['off', null] });
   const started = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/scans'));
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
-  await expect(page.getByText('Failing requests in OpenTelemetry logs, every env')).toBeVisible();
   const scan = page.getByRole('button', { name: /^Scan 1 Services/ });
   await expect(scan).toBeEnabled();
+  await expect(scan).toHaveAttribute('title', /OpenTelemetry logs/);
   await scan.click();
   expect((await started).postDataJSON().connector).toBeUndefined();
   expect(read.datadog).toBe(0);
@@ -503,12 +547,14 @@ test('an OpenTelemetry Alert shows its filter as a line and never names Datadog;
   await routeSources(page);
   await page.goto(`${daemon.url}/monitor?alert=o1#token=${daemon.token}`);
   const detail = page.locator('article');
+  await page.getByRole('tab', { name: 'Query' }).click();
   await expect(detail).toContainText('OpenTelemetry');
   await expect(detail).toContainText('service api, env prod, 500 POST /orders');
   await expect(detail).not.toContainText('Datadog');
   await expect(detail.locator('[title*="Datadog"]')).toHaveCount(0);
 
   await page.goto(`${daemon.url}/monitor?alert=a1#token=${daemon.token}`);
+  await page.getByRole('tab', { name: 'Query' }).click();
   await expect(detail).toContainText('service:apis');
   await expect(detail).toContainText('Datadog');
 });
@@ -516,41 +562,39 @@ test('an OpenTelemetry Alert shows its filter as a line and never names Datadog;
 test('five sources share one list, and the source filter offers all five and keeps one', async ({ page }) => {
   await routeSources(page, { cloudwatch: ['ok', null], loki: ['ok', null], newRelic: ['ok', null] });
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
-  const logs = page.getByRole('list', { name: 'Logs' });
+  const logs = page.getByRole('table', { name: 'Logs' });
   const services = page.getByRole('list', { name: 'Services' });
   await expect(logs.getByRole('button')).toHaveCount(5);
-  await expect(logs.getByRole('button', { name: /POST \/checkout/ })).toContainText('CloudWatch');
-  await expect(logs.getByRole('button', { name: /POST \/cart/ })).toContainText('Loki');
-  await expect(services.getByRole('listitem').filter({ hasText: 'CloudWatch' })).toHaveCount(1);
-  await expect(services.getByRole('listitem').filter({ hasText: 'Loki' })).toHaveCount(1);
-  await expect(logs.getByRole('button', { name: /POST \/basket/ })).toContainText('New Relic');
-  await expect(services.getByRole('listitem').filter({ hasText: 'New Relic' })).toHaveCount(1);
-  await expect(page.getByRole('tablist', { name: 'Source' }).getByRole('tab')).toHaveText([
-    'All',
-    'Datadog',
-    'OpenTelemetry',
-    'CloudWatch',
-    'Loki',
-    'New Relic',
-  ]);
+  await expect(logs.getByRole('row').filter({ hasText: /POST\/checkout/ })).toContainText('CloudWatch');
+  await expect(logs.getByRole('row').filter({ hasText: /POST\/cart/ })).toContainText('Loki');
+  await expect(logs.getByRole('row').filter({ hasText: /POST\/basket/ })).toContainText('New Relic');
+  await openServices(page);
+  await expect(services.getByRole('button', { name: 'CloudWatch, 1 Service' })).toBeVisible();
+  await expect(services.getByRole('button', { name: 'Loki, 1 Service' })).toBeVisible();
+  await expect(services.getByRole('button', { name: 'New Relic, 1 Service' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  const tabs = page.getByRole('tablist', { name: 'Source' }).getByRole('tab');
+  await expect(tabs).toHaveCount(6);
+  for (const name of ['All sources', 'Datadog', 'OpenTelemetry', 'CloudWatch', 'Loki', 'New Relic']) {
+    await expect(page.getByRole('tab', { name, exact: true })).toBeVisible();
+  }
 
-  await page.getByRole('tab', { name: 'CloudWatch' }).click();
-  await expect(logs.getByRole('button')).toHaveCount(1);
-  await expect(logs.getByRole('button')).toContainText('/checkout');
-  await expect(services.getByRole('listitem')).toHaveCount(1);
-  await expect(page.getByText('Failing requests in CloudWatch logs, every env')).toBeVisible();
-
-  await page.getByRole('tab', { name: 'Loki' }).click();
-  await expect(logs.getByRole('button')).toHaveCount(1);
-  await expect(logs.getByRole('button')).toContainText('/cart');
-  await expect(services.getByRole('listitem')).toHaveCount(1);
-  await expect(page.getByText('Failing requests in Loki logs, every env')).toBeVisible();
-
-  await page.getByRole('tab', { name: 'New Relic' }).click();
-  await expect(logs.getByRole('button')).toHaveCount(1);
-  await expect(logs.getByRole('button')).toContainText('/basket');
-  await expect(services.getByRole('listitem')).toHaveCount(1);
-  await expect(page.getByText('Failing requests in New Relic logs, every env')).toBeVisible();
+  for (const [tab, path] of [
+    ['CloudWatch', '/checkout'],
+    ['Loki', '/cart'],
+    ['New Relic', '/basket'],
+  ] as const) {
+    await page.getByRole('tab', { name: tab, exact: true }).click();
+    await expect(logs.getByRole('button')).toHaveCount(1);
+    await expect(logs.getByRole('button')).toContainText(path);
+    await openServices(page);
+    await expect(services.getByRole('listitem')).toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: /^Scan 1 Services/ })).toHaveAttribute(
+      'title',
+      new RegExp(`${tab} logs`),
+    );
+  }
 });
 
 test('a down New Relic source shows a notice naming it, and the other sources keep their Alerts', async ({ page }) => {
@@ -565,7 +609,7 @@ test('a down New Relic source shows a notice naming it, and the other sources ke
   await expect(notice).toContainText('New Relic is down: New Relic refused the key.');
   await expect(notice).toContainText('Scans skip it');
   await expect(page.getByRole('status').filter({ hasText: 'OpenTelemetry is down' })).toHaveCount(0);
-  const logs = page.getByRole('list', { name: 'Logs' });
+  const logs = page.getByRole('table', { name: 'Logs' });
   await expect(logs.getByRole('button', { name: /\/v1\/orders/ })).toBeVisible();
   await expect(logs.getByRole('button', { name: /POST \/orders/ })).toBeVisible();
 });
@@ -574,6 +618,7 @@ test('a New Relic Alert shows its filter as a line and never names Datadog', asy
   await routeSources(page, { newRelic: ['ok', null] });
   await page.goto(`${daemon.url}/monitor?alert=n1#token=${daemon.token}`);
   const detail = page.locator('article');
+  await page.getByRole('tab', { name: 'Query' }).click();
   await expect(detail).toContainText('New Relic');
   await expect(detail).toContainText('service basket, env prod, 504 PUT /basket');
   await expect(detail).not.toContainText('Datadog');
@@ -589,7 +634,7 @@ test('a down Loki source shows a notice naming it, and the other sources keep th
   await expect(notice).toContainText('Loki is down: Could not reach Grafana: connection refused.');
   await expect(notice).toContainText('Scans skip it');
   await expect(page.getByRole('status').filter({ hasText: 'OpenTelemetry is down' })).toHaveCount(0);
-  const logs = page.getByRole('list', { name: 'Logs' });
+  const logs = page.getByRole('table', { name: 'Logs' });
   await expect(logs.getByRole('button', { name: /\/v1\/orders/ })).toBeVisible();
   await expect(logs.getByRole('button', { name: /POST \/orders/ })).toBeVisible();
 });
@@ -609,6 +654,7 @@ test('a Loki Scan shows its notes, and a Loki Alert shows its filter as a line a
     'cart has more than 5,000 failing lines; its counts come from the newest 5,000',
   ]);
   const detail = page.locator('article');
+  await page.getByRole('tab', { name: 'Query' }).click();
   await expect(detail).toContainText('Loki');
   await expect(detail).toContainText('service cart, env prod, 503 POST /cart');
   await expect(detail).not.toContainText('Datadog');
@@ -624,7 +670,7 @@ test('a down CloudWatch source shows a notice naming it, and the other sources k
   await expect(notice).toContainText('CloudWatch is down: AWS profile shop-ro is signed out.');
   await expect(notice).toContainText('then Connect again. Scans skip it');
   await expect(page.getByRole('status').filter({ hasText: 'OpenTelemetry is down' })).toHaveCount(0);
-  const logs = page.getByRole('list', { name: 'Logs' });
+  const logs = page.getByRole('table', { name: 'Logs' });
   await expect(logs.getByRole('button', { name: /\/v1\/orders/ })).toBeVisible();
   await expect(logs.getByRole('button', { name: /POST \/orders/ })).toBeVisible();
 });
@@ -652,6 +698,7 @@ test('a CloudWatch Alert shows its filter as a line and never names Datadog or t
   await routeSources(page, { cloudwatch: ['ok', null] });
   await page.goto(`${daemon.url}/monitor?alert=c1#token=${daemon.token}`);
   const detail = page.locator('article');
+  await page.getByRole('tab', { name: 'Query' }).click();
   await expect(detail).toContainText('CloudWatch');
   await expect(detail).toContainText('log group /ecs/shop-api, 502 POST /checkout');
   await expect(detail).not.toContainText('Datadog');

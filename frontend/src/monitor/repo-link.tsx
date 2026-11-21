@@ -1,5 +1,5 @@
 import { ConnectorId, type LogSource } from '@ops-console/shared';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Button } from '../components/ui/button';
 import { Dropdown } from '../components/ui/dropdown';
 import { useFindCode, usePatchService, useRepos } from '../lib/queries';
@@ -22,20 +22,19 @@ export function CodeSource({ service, source }: { service: ServiceRef; source: L
   const patch = usePatchService();
   const find = useFindCode();
   const unlinked = service.repo_id === null && service.repo_url === null;
+  // No local Repo yet: look for the one whose source serves this Service's Routes, once per page.
+  const noLocal = service.repo_id === null;
   const { mutate } = find;
   useEffect(() => {
-    if (!unlinked || looked.has(service.id)) return;
+    if (!noLocal || looked.has(service.id)) return;
     looked.add(service.id);
     mutate(service.id);
-  }, [unlinked, service.id, mutate]);
-  const [url, setUrl] = useState(service.repo_url ?? '');
+  }, [noLocal, service.id, mutate]);
   const list = ascending(repos.data?.data ?? [], (repo) => repo.name);
   const options = [
-    { value: NONE, label: 'No local Repo', description: 'Verify and Fix clone the Git URL instead' },
+    { value: NONE, label: 'No local Repo', description: 'No code linked for this Service' },
     ...list.map((repo) => ({ value: repo.id, label: repo.name, description: repo.path })),
   ];
-  const changed = url.trim() !== (service.repo_url ?? '');
-  const save = () => patch.mutate({ id: service.id, repo_url: url.trim() === '' ? null : url.trim() });
 
   return (
     <section
@@ -49,6 +48,7 @@ export function CodeSource({ service, source }: { service: ServiceRef; source: L
           caption="Repo"
           opens="down"
           heading={`Code for ${service.name}`}
+          searchable
           className="w-64"
           listClassName="w-80"
           value={service.repo_id ?? NONE}
@@ -57,36 +57,14 @@ export function CodeSource({ service, source }: { service: ServiceRef; source: L
           onChange={(value) => patch.mutate({ id: service.id, repo_id: value === NONE ? null : value })}
         />
       </div>
-      <form
-        className="flex flex-wrap items-center gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (changed) save();
-        }}
-      >
-        <label htmlFor={`repo-url-${service.id}`} className="w-20 flex-none text-xs font-semibold">
-          Git URL
-        </label>
-        <input
-          id={`repo-url-${service.id}`}
-          value={url}
-          onChange={(event) => setUrl(event.target.value)}
-          placeholder="github.com/owner/repo"
-          spellCheck={false}
-          className="min-w-0 flex-1 rounded-md border border-divider bg-bg px-2.5 py-1.5 font-mono text-xs text-text outline-none focus:border-accent-400"
-        />
-        <Button type="submit" className="px-2.5 py-1 text-xs" disabled={!changed || patch.isPending}>
-          Save
-        </Button>
-      </form>
       <p className="m-0 text-xs text-neutral-700">
         {service.repo_id
           ? 'The agent works in the local Repo.'
-          : service.repo_url
-            ? 'No local Repo: the agent clones the Git URL into an anonymous Session.'
-            : find.isPending
-              ? `Looking for ${service.name}'s code…`
-              : `Not found by itself. Pick the local Repo with ${service.name}'s code, or give its Git URL once; it is kept.`}
+          : find.isPending
+            ? `Looking for the local Repo that serves ${service.name}'s Routes…`
+            : service.repo_url
+              ? "No local Repo found: the agent clones the Service's Git repo into an anonymous Session. Pick one above to use it."
+              : `No imported Repo serves ${service.name}'s Routes. Pick the local Repo with its code.`}
       </p>
       {unlinked && find.data && find.data.tried.length > 0 && (
         <details className="text-xs text-neutral-700">
