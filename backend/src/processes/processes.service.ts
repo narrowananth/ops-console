@@ -36,6 +36,8 @@ const STOP_GRACE_MS = 1500;
 const RESTART_GRACE_MS = 500;
 const MAX_OUTPUT_LINES = 500;
 /** A started server needs a moment before it listens: the scanner is asked this often, for this long. */
+/** Claude Code's own process: it runs the Run sandbox's filtering proxy on a loopback port, which serves no page. */
+const AGENT_PROCESS = 'claude';
 const LISTEN_POLL_MS = 500;
 const LISTEN_WATCH_MS = 30_000;
 /** A scan or process table this old is reused by a read. */
@@ -303,6 +305,7 @@ export class ProcessesService implements OnModuleInit, OnModuleDestroy {
       .map(([id, live]) => ({ id, pids: familyOf(table, live.pid) }));
     const servers: LocalServer[] = [];
     for (const server of listening) {
+      if (server.process === AGENT_PROCESS) continue;
       const owner = families.find((family) => family.pids.has(server.pid));
       const inFolders = server.folder !== '' && roots.some((root) => inside(server.folder, root));
       if (!owner && !inFolders) continue;
