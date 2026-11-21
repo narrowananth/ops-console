@@ -284,12 +284,11 @@ export class BrowserTab {
       // A screenshot with a clip, such as an element pick's crop, resizes the view while it is taken, and Chrome sends a
       // frame of that size. Drawn under the page's size it would show as the crop, magnified. The frame's own pixels
       // tell, since its metadata can lag the view on a slow machine: only a frame at the page's size goes out.
-      // A pixel of tolerance: Chrome rounds a fractional size its own way.
+      // Chrome scales a frame by its own rounding, a few pixels off the page's size (1277 for 1280); a crop is far off.
       const pixels = jpegSize(data);
       const { width, height, scale } = this.size;
-      const ofPage =
-        pixels === null ||
-        (Math.abs(pixels.width - width * scale) <= 1 && Math.abs(pixels.height - height * scale) <= 1);
+      const near = (got: number, want: number) => Math.abs(got - want) <= Math.max(2, want * 0.02);
+      const ofPage = pixels === null || (near(pixels.width, width * scale) && near(pixels.height, height * scale));
       // Chrome sends the next frame after this ack, so a slow viewer slows the page down instead of queueing frames.
       void (ofPage ? this.sendFrame(data) : Promise.resolve())
         .then(() => this.cdp.send('Page.screencastFrameAck', { sessionId }))
