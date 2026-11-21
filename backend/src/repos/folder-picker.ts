@@ -10,14 +10,18 @@ export const FOLDER_PICKER = Symbol('FOLDER_PICKER');
 /** The operating system's own folder dialog, opened on this machine. Tests replace it. */
 export interface FolderPicker {
   /** The chosen folders, one or more; empty when the operator closes the dialog. */
-  pick(): Promise<string[]>;
+  pick(options?: PickOptions): Promise<string[]>;
 }
 
+/** The dialog asks for several git repositories unless told otherwise. */
+export type PickOptions = { prompt?: string; multiple?: boolean };
+
 /** One folder path per line: a path can hold any character but a line break. */
-const SCRIPT = [
+const script = ({ prompt = 'Choose one or more git repositories', multiple = true }: PickOptions) => [
   'tell application "System Events" to activate',
-  'set picked to choose folder with prompt "Choose one or more git repositories" with multiple selections allowed',
+  `set picked to choose folder with prompt ${JSON.stringify(prompt)}${multiple ? ' with multiple selections allowed' : ''}`,
   'set out to ""',
+  'if class of picked is not list then set picked to {picked}',
   'repeat with folder_ in picked',
   'set out to out & POSIX path of folder_ & linefeed',
   'end repeat',
@@ -26,14 +30,14 @@ const SCRIPT = [
 
 /** The Finder's folder dialog through `osascript`. The daemon is local-only (ADR 0003), so the dialog is on the operator's screen. */
 export class MacFolderPicker implements FolderPicker {
-  async pick(): Promise<string[]> {
+  async pick(options: PickOptions = {}): Promise<string[]> {
     if (process.platform !== 'darwin') {
       throw new ApiError(409, ErrorCode.InvalidState, 'The folder dialog needs macOS: type the path instead');
     }
     try {
       const { stdout } = await run(
         'osascript',
-        SCRIPT.flatMap((line) => ['-e', line]),
+        script(options).flatMap((line) => ['-e', line]),
         { timeout: 10 * 60_000 },
       );
       return stdout

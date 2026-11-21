@@ -160,21 +160,33 @@ test('the Connectors page lists sixteen Connectors and has OpenTelemetry logs, C
     'the section shows a log line',
   );
   assert.match(section, /per GB scanned/);
+  assert.match(section, /Choose the Profile/);
+  assert.match(section, /<code>aws login<\/code>/);
+  assert.match(section, /<code>aws sso login<\/code>/);
+  assert.match(section, /2\.32\.0/);
+  assert.match(section, /<code>brew upgrade awscli<\/code>/);
+  const [otel] = page.match(/<h2 id="opentelemetry-logs">OpenTelemetry logs<\/h2>[\s\S]*?(?=<h2 )/) ?? [];
+  assert.match(otel, /Choose folder/);
+  assert.match(otel, /no files were found/);
   assert.match(table, /<td>Loki logs<\/td>/);
   const [loki] = page.match(/<h2 id="loki-logs">Loki logs<\/h2>[\s\S]*?(?=<h2 )/) ?? [];
   assert.ok(loki, 'the page has a Loki logs section');
-  assert.match(loki, /brew install logcli/);
-  assert.match(loki, /<code>logs:read<\/code>/);
+  assert.match(loki, /Grafana Cloud/);
+  assert.match(loki, /self-hosted URL is no longer read/);
+  assert.match(loki, /picker with their names/);
   assert.match(loki, /<code>service_name<\/code>/);
   assert.match(loki, /<code>deployment_environment_name<\/code>/);
   assert.match(loki, /<code>http_status_code<\/code>/, 'the section lists the log fields');
   assert.match(loki, /<pre><code>[\s\S]*&quot;status&quot;:502[\s\S]*<\/code><\/pre>/, 'the section shows a log line');
   assert.match(loki, /Keychain/);
+  assert.match(loki, /5,000/);
+  assert.match(loki, /only the server's read tools/);
+  assert.doesNotMatch(loki, /brew install logcli/);
   assert.match(table, /<td>New Relic logs<\/td>/);
   const [newRelic] = page.match(/<h2 id="new-relic-logs">New Relic logs<\/h2>[\s\S]*?(?=<h2 )/) ?? [];
   assert.ok(newRelic, 'the page has a New Relic logs section');
-  assert.match(newRelic, /brew install newrelic-cli/);
-  assert.match(newRelic, /<code>NRAK-<\/code>/);
+  assert.match(newRelic, /US, EU or JP/);
+  assert.match(newRelic, /login password once/);
   assert.match(newRelic, /<code>service\.name<\/code>/);
   assert.match(newRelic, /<code>environment<\/code>/);
   assert.match(newRelic, /<code>http\.response\.status_code<\/code>/, 'the section lists the log fields');
@@ -183,10 +195,9 @@ test('the Connectors page lists sixteen Connectors and has OpenTelemetry logs, C
     /<pre><code>[\s\S]*&quot;http\.response\.status_code&quot;:502[\s\S]*<\/code><\/pre>/,
     'the section shows a log event',
   );
-  assert.match(newRelic, /Keychain/);
-  assert.match(newRelic, /US, EU or JP/);
   assert.match(newRelic, /5,000/);
-  assert.match(newRelic, /read-only role/);
+  assert.match(newRelic, /only the server's read tools/);
+  assert.doesNotMatch(newRelic, /brew install newrelic-cli|NRAK-/);
 });
 
 test('the data-flow page puts the Log folder on the Mac and its records in a prompt only as Samples', async () => {
@@ -208,25 +219,22 @@ test('the data-flow page says the daemon calls the AWS CLI and CloudWatch events
   assert.match(row, /only as Samples in a prompt or as the agent's tool output/);
 });
 
-test('the data-flow page puts logcli in the CLI group and says Loki lines reach Anthropic only as Samples or tool output', async () => {
+test('the data-flow page keeps logcli and newrelic out of the CLI group and says Loki lines and New Relic events reach Anthropic only as Samples or tool output', async () => {
   await build();
   const page = await readFile(path.join(dist, 'docs', 'data-flow', 'index.html'), 'utf8');
-  const [row] = page.match(/<tr><td>CLI the daemon calls<\/td>[\s\S]*?<\/tr>/) ?? [];
-  assert.ok(row, 'the By route table has the CLI row');
-  assert.match(row, /Loki logs \(<code>logcli<\/code>\)/);
-  assert.match(row, /runs <code>logcli<\/code> as you/);
-  assert.match(row, /Loki lines reach Anthropic only as Samples in a prompt or as the agent's tool output/);
-});
-
-test('the data-flow page puts newrelic in the CLI group and says New Relic events reach Anthropic only as Samples or tool output', async () => {
-  await build();
-  const page = await readFile(path.join(dist, 'docs', 'data-flow', 'index.html'), 'utf8');
-  const [row] = page.match(/<tr><td>CLI the daemon calls<\/td>[\s\S]*?<\/tr>/) ?? [];
-  assert.ok(row, 'the By route table has the CLI row');
-  assert.match(row, /New Relic logs \(<code>newrelic<\/code>\)/);
-  assert.match(row, /runs <code>newrelic<\/code> as you/);
-  assert.match(row, /run_integration/);
-  assert.match(row, /New Relic events reach Anthropic only as Samples in a prompt or as the agent's tool output/);
+  const [cli] = page.match(/<tr><td>CLI the daemon calls<\/td>[\s\S]*?<\/tr>/) ?? [];
+  assert.ok(cli, 'the By route table has the CLI row');
+  assert.doesNotMatch(cli, /logcli|newrelic/);
+  const [row] = page.match(/<tr><td>Hosted MCP server<\/td>[\s\S]*?<\/tr>/) ?? [];
+  assert.ok(row, 'the By route table has a hosted MCP server row');
+  assert.match(row, /Loki logs, New Relic logs/);
+  assert.match(row, /token it holds in your Keychain/);
+  assert.match(row, /never writes or refreshes/);
+  assert.match(row, /no model turn/);
+  assert.match(
+    row,
+    /Loki lines and New Relic events reach Anthropic only as Samples in a prompt or as the agent's tool output/,
+  );
 });
 
 test('the install page has the Homebrew trust step between tap and install', async () => {

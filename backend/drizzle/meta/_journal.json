@@ -330,6 +330,13 @@
       "when": 1795395870296,
       "tag": "0046_session_pull_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1795495870296,
+      "tag": "0047_one_click_log_sources",
+      "breakpoints": true
     }
   ]
 }

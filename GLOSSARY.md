@@ -63,7 +63,7 @@ The operator's yes or no on one agent action that needs it: a PROD write, or an 
 a mode that asks.
 
 **Integration command**:
-A `pup`, `gh`, `glab`, `bkt`, `slashdocs`, `logcli` or `newrelic` command the agent asks the console to run through its `run_integration` tool. The daemon runs it outside the Run sandbox, as the operator. A read runs at once; a write needs an Approval, unless the Session's Access mode is full or the operator chose "Don't ask again this Session" for that CLI, which holds until the Session is deleted; sign-in, tokens and merges are refused whatever the choice.
+A `pup`, `gh`, `glab`, `bkt` or `slashdocs` command the agent asks the console to run through its `run_integration` tool. The daemon runs it outside the Run sandbox, as the operator. A read runs at once; a write needs an Approval, unless the Session's Access mode is full or the operator chose "Don't ask again this Session" for that CLI, which holds until the Session is deleted; sign-in, tokens and merges are refused whatever the choice.
 
 **Opened Repo**:
 An imported Repo, other than the Session's own, that the operator ticked in the composer's Repos chip. The operator's own runs in that Session write and read its checkout and run `git` there, inside the Run sandbox. The agent never pushes from it.
@@ -192,9 +192,15 @@ One read of the Alert's log source for its query over the last hour, made when a
 model turn. It says whether the failure is still happening.
 
 **Log source**:
-Where a Scan reads failing requests from: Datadog, a Log folder, CloudWatch logs, Loki or New Relic. Each is a Connector, and a Service, an Alert and a
+Where a Scan reads failing requests from: Datadog, a Log folder, CloudWatch logs, Loki or New Relic. Loki means Grafana Cloud's Loki. Each is a Connector, and a Service, an Alert and a
 Scan belong to one source.
 _Avoid_: log provider, backend
+
+**Loki data source**:
+One Loki in a Grafana stack that the Loki logs Connector reads. The operator picks it when the stack has several.
+
+**Daemon sign-in**:
+A sign-in the console performs itself, with its own client, and keeps in the Keychain. Grafana Cloud uses one. Every other MCP sign-in belongs to Claude Code.
 
 **Log folder**:
 The folder the OpenTelemetry logs Connector reads: OTLP JSON log files a Collector's `file` exporter writes on this Mac.
@@ -384,7 +390,7 @@ A short Agent SDK session that reads which MCP Servers connect and which tools t
 stops before the model runs.
 
 **Connector**:
-An outside service the operator signs in to, or a Log folder, an AWS profile, a Loki URL or a New Relic account it reads logs with: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets, Google Drive, OpenTelemetry logs, CloudWatch logs, Loki logs, New Relic logs. It holds the sign-in, folder, profile, URL or account and registers the service's MCP Server when it has one. Each service is reached through a CLI or an MCP Server, and the daemon reads a Log folder. All are connected, checked and disconnected in Integrations, the one place a source is connected.
+An outside service the operator signs in to, or a Log folder, an AWS profile, a Loki data source or a New Relic account it reads logs with: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets, Google Drive, OpenTelemetry logs, CloudWatch logs, Loki logs, New Relic logs. It holds the sign-in, folder, profile, data source or account and registers the service's MCP Server when it has one. Each service is reached through a CLI or an MCP Server, and the daemon reads a Log folder. Loki logs and New Relic logs are read by the daemon through the hosted MCP Servers of Grafana Cloud and New Relic. All are connected, checked and disconnected in Integrations, the one place a source is connected.
 
 **Google bridge**:
 The stdio MCP Server the console registers for a Google Connector. It keeps nothing on disk: the launcher hands it the Connector's refresh token from the Keychain, and it mints access tokens and answers each tool call from the product's REST API. One Google sign-in serves every Claude account and CLIProxy.

@@ -237,6 +237,133 @@ describe('migration that moves the opened pull request into a list', () => {
   });
 });
 
+type Json = Record<string, unknown>;
+type Migrated = { id: string; status: string; status_detail: string | null; config: Json };
+
+describe('migration that drops the typed log source fields', () => {
+  const OLD_LOKI = {
+    url: 'https://loki.example.com',
+    org_id: 'tenant-1',
+    auth: 'bearer',
+    username: '',
+    service_label: 'service_name',
+    env_label: 'deployment_environment_name',
+    selector: 'cluster="prod-1"',
+    format: 'json',
+    environments: ['prod', 'staging'],
+    daily_scan_time: '06:30',
+    default_interval: '12h',
+    rapid_errors_per_10m: 50,
+    failing_errors_per_hour: 3,
+    ignore: [{ kind: 'route', value: '/health' }],
+    reports_folder: 'reports',
+  };
+  const OLD_NEW_RELIC = {
+    account_id: '1234567',
+    region: 'EU',
+    service_attribute: 'service.name',
+    env_attribute: 'environment',
+    filter: "cluster = 'prod-1'",
+    environments: ['prod'],
+    daily_scan_time: '09:00',
+    default_interval: '24h',
+    rapid_errors_per_10m: 100,
+    failing_errors_per_hour: 5,
+    ignore: [],
+    reports_folder: 'reports',
+  };
+
+  /** A state.db at migration 0046 with the two log source rows set as `loki` and `newRelic` say, then migrated. */
+  async function migrated(
+    loki: { status: string; config: Json },
+    newRelic: { status: string; config: Json },
+  ): Promise<Record<string, Migrated>> {
+    const before = await tempDir('migrations-');
+    await cp(MIGRATIONS_DIR, before, { recursive: true });
+    const journalFile = path.join(before, 'meta', '_journal.json');
+    const journal = JSON.parse(await readFile(journalFile, 'utf8')) as { entries: { tag: string }[] };
+    const index = journal.entries.findIndex((entry) => entry.tag === '0047_one_click_log_sources');
+    journal.entries.length = index;
+    await writeFile(journalFile, JSON.stringify(journal));
+    const db = openSqlite(await tempDir());
+    applyMigrations(db, before, () => {});
+    const set = db.prepare('UPDATE connectors SET status = ?, status_detail = NULL, config = ? WHERE id = ?');
+    set.run(loki.status, JSON.stringify(loki.config), 'loki_logs');
+    set.run(newRelic.status, JSON.stringify(newRelic.config), 'new_relic_logs');
+    applyMigrations(db, MIGRATIONS_DIR, () => {});
+    const rows = db
+      .prepare("SELECT id, status, status_detail, config FROM connectors WHERE id IN ('loki_logs', 'new_relic_logs')")
+      .all() as {
+      id: string;
+      status: string;
+      status_detail: string | null;
+      config: string;
+    }[];
+    db.close();
+    return Object.fromEntries(rows.map((row) => [row.id, { ...row, config: JSON.parse(row.config) }]));
+  }
+
+  it('moves a connected Grafana Cloud Loki and a connected New Relic to needs auth, and keeps their other settings', async () => {
+    const rows = await migrated(
+      { status: 'ok', config: { ...OLD_LOKI, url: 'https://logs-prod-012.grafana.net' } },
+      { status: 'ok', config: OLD_NEW_RELIC },
+    );
+    expect(rows.loki_logs).toMatchObject({ status: 'auth', status_detail: 'Sign in again to use Grafana Cloud.' });
+    expect(rows.loki_logs?.config).toEqual({
+      datasource_uid: '',
+      environments: ['prod', 'staging'],
+      daily_scan_time: '06:30',
+      default_interval: '12h',
+      rapid_errors_per_10m: 50,
+      failing_errors_per_hour: 3,
+      ignore: [{ kind: 'route', value: '/health' }],
+      reports_folder: 'reports',
+    });
+    expect(rows.new_relic_logs).toMatchObject({
+      status: 'auth',
+      status_detail: 'Sign in again to use the New Relic MCP server.',
+    });
+    expect(rows.new_relic_logs?.config).toEqual({
+      account_id: '1234567',
+      region: 'EU',
+      environments: ['prod'],
+      daily_scan_time: '09:00',
+      default_interval: '24h',
+      rapid_errors_per_10m: 100,
+      failing_errors_per_hour: 5,
+      ignore: [],
+      reports_folder: 'reports',
+    });
+  });
+
+  it('says a Loki that held a self-hosted URL reads Grafana Cloud only, and treats a never-set URL like Grafana Cloud', async () => {
+    const hosted = await migrated({ status: 'fail', config: OLD_LOKI }, { status: 'off', config: OLD_NEW_RELIC });
+    expect(hosted.loki_logs).toMatchObject({
+      status: 'auth',
+      status_detail: 'Loki on Grafana Cloud only: the self-hosted URL is no longer read.',
+    });
+    const unset = await migrated(
+      { status: 'auth', config: { ...OLD_LOKI, url: '' } },
+      { status: 'off', config: OLD_NEW_RELIC },
+    );
+    expect(unset.loki_logs).toMatchObject({ status: 'auth', status_detail: 'Sign in again to use Grafana Cloud.' });
+  });
+
+  it('reads a Loki row with no url key like one with an empty url', async () => {
+    const { url: _url, ...noUrl } = OLD_LOKI;
+    const rows = await migrated({ status: 'ok', config: noUrl }, { status: 'off', config: OLD_NEW_RELIC });
+    expect(rows.loki_logs).toMatchObject({ status: 'auth', status_detail: 'Sign in again to use Grafana Cloud.' });
+  });
+
+  it('leaves a Connector that is off off, and still drops its typed fields so the config reads', async () => {
+    const rows = await migrated({ status: 'off', config: OLD_LOKI }, { status: 'off', config: OLD_NEW_RELIC });
+    expect(rows.loki_logs).toMatchObject({ status: 'off', status_detail: null });
+    expect(rows.new_relic_logs).toMatchObject({ status: 'off', status_detail: null });
+    expect(Object.keys(rows.loki_logs?.config as Json)).not.toContain('url');
+    expect(Object.keys(rows.new_relic_logs?.config as Json)).not.toContain('filter');
+  });
+});
+
 describe('start-up recovery', () => {
   it('runs every registered function in order, before the port opens', async () => {
     const order: string[] = [];

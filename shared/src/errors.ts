@@ -27,6 +27,8 @@ export enum ErrorCode {
   ToolMissing = 'tool_missing',
   LogGroupNotFound = 'log_group_not_found',
   DuplicateService = 'duplicate_service',
+  /** A Connector signed in sees several accounts or data sources and none is picked. */
+  PickRequired = 'pick_required',
 }
 
 export const errorBodySchema = z.object({

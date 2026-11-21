@@ -11,6 +11,8 @@ import {
   FixStatus,
   HealthStatus,
   type LogSource,
+  McpTransport,
+  NEW_RELIC_MCP_URLS,
   PlaybookStepStatus,
   PlaybookTrigger,
   PrState,
@@ -25,6 +27,7 @@ import { desc, eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
+import type { HostedHosts } from '../src/connectors/hosted-servers';
 import {
   alertEvents,
   alerts,
@@ -41,14 +44,11 @@ import {
 } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
+import { McpServersService } from '../src/mcp/mcp-servers.service';
 import type { CloudWatchOptions } from '../src/monitor/cloudwatch-logs';
 import { fingerprint, maskSignature, normalizePath } from '../src/monitor/fingerprint';
 import { NO_TICKET_IN_PLAYBOOK } from '../src/monitor/fixes.service';
-import { LOKI_SECRET_KEY } from '../src/monitor/loki-access';
-import type { LokiOptions } from '../src/monitor/loki-logs';
 import { MonitorModule } from '../src/monitor/monitor.module';
-import { NEW_RELIC_KEY } from '../src/monitor/new-relic-access';
-import type { NewRelicOptions } from '../src/monitor/new-relic-logs';
 import { MonitorRetention } from '../src/monitor/retention';
 import { latestSlot, nextSlot, ScansService } from '../src/monitor/scans.service';
 import { ReposModule } from '../src/repos/repos.module';
@@ -56,12 +56,13 @@ import { WorkspaceModule } from '../src/workspace/workspace.module';
 import { type AgentDaemon, api, gate, listen, startAgentDaemon, stepTurns, until } from './agent-fixtures';
 import type { Step } from './fakes/agent-sdk';
 import { AWS_BIN, FakeAws } from './fakes/aws-logs';
+import { FakeClaudeCredentials } from './fakes/claude-credentials';
 import { FakeCodeHosts } from './fakes/code-hosts';
 import { FakeConnectorTools } from './fakes/connector-tools';
 import { FakeDatadog, route, samples, service } from './fakes/datadog';
 import { FakeGitHost, hostPr } from './fakes/git-host';
 import { FakeKeychain } from './fakes/keychain';
-import { FakeLogcli } from './fakes/loki-logs';
+import { FakeGrafana } from './fakes/loki-logs';
 import { FakeNewRelic } from './fakes/new-relic-logs';
 import { type OtelRecord, otlpLine, writeLogFile } from './fakes/otlp';
 import { FakeProbe } from './fakes/probe';
@@ -81,11 +82,15 @@ async function drain(daemon: AgentDaemon): Promise<void> {
   await until(busy, (count) => count === 0, 'runs to end').catch(() => {});
 }
 
+/** The stand-ins for hosted servers a test started. */
+const hosted: { close(): Promise<void> }[] = [];
+
 afterEach(async () => {
   for (const daemon of running.splice(0)) {
     await drain(daemon);
     await daemon.stop();
   }
+  for (const server of hosted.splice(0)) await server.close();
 });
 
 const git = (cwd: string, ...args: string[]) =>
@@ -128,9 +133,12 @@ async function start(
     connected?: boolean;
     otelReadLimit?: number;
     cloudWatch?: CloudWatchOptions;
-    loki?: LokiOptions;
-    newRelic?: NewRelicOptions;
     keychain?: FakeKeychain;
+    /** Where Grafana and New Relic are: the stand-ins a test started. */
+    hosts?: HostedHosts;
+    /** What Claude Code stored for its MCP servers. */
+    claudeCredentials?: FakeClaudeCredentials;
+    probe?: FakeProbe;
   } = {},
 ): Promise<Ctx> {
   const datadog = options.datadog ?? new FakeDatadog();
@@ -141,8 +149,12 @@ async function start(
     dataDir: options.dataDir,
     keychain: options.keychain,
     modules: [
-      McpServersModule.forRoot({ probe: new FakeProbe(), launcher: '/opt/ops-console' }),
-      ConnectorsModule.forRoot({ tools: new FakeConnectorTools() }),
+      McpServersModule.forRoot({ probe: options.probe ?? new FakeProbe(), launcher: '/opt/ops-console' }),
+      ConnectorsModule.forRoot({
+        tools: new FakeConnectorTools(),
+        hosts: options.hosts,
+        claudeCredentials: options.claudeCredentials,
+      }),
       ReposModule.forRoot(),
       WorkspaceModule.forRoot({ hosts: host }),
       MonitorModule.forRoot({
@@ -150,8 +162,6 @@ async function start(
         codeHosts,
         otelReadLimit: options.otelReadLimit,
         cloudWatch: { bin: AWS_BIN, pollMs: 10, ...options.cloudWatch },
-        loki: options.loki,
-        newRelic: options.newRelic,
       }),
     ],
   });
@@ -3594,16 +3604,32 @@ describe('Loki logs', () => {
     line: { ...LINE, ...extra },
   });
 
-  /** Points the Loki source at the fake, as a Connector the operator connected. */
+  /** Marks the Loki Connector connected to the stand-in's data source, as the operator left it. */
   function connectLoki(ctx: Ctx, config: Record<string, unknown> = {}) {
     setConnector(ctx.store, ConnectorId.LokiLogs, {
       status: HealthStatus.Ok,
       config: JSON.stringify({
         ...DEFAULT_CONNECTOR_CONFIG[ConnectorId.LokiLogs],
-        url: 'https://loki.example.com',
+        datasource_uid: 'loki-main',
         ...config,
       }),
     });
+  }
+
+  /** A daemon signed in to a stand-in for Grafana Cloud that `arrange` sets up, with the Loki Connector connected. */
+  async function withGrafana(
+    arrange: (grafana: FakeGrafana) => void = () => {},
+    config: Record<string, unknown> = {},
+    extra: { probe?: FakeProbe } = {},
+  ) {
+    const grafana = await FakeGrafana.start();
+    hosted.push(grafana);
+    arrange(grafana);
+    const keychain = new FakeKeychain();
+    await grafana.signedIn(keychain);
+    const ctx = await start({ hosts: { grafana: grafana.url }, keychain, ...extra });
+    connectLoki(ctx, config);
+    return { ctx, grafana };
   }
 
   async function scanLoki(ctx: Ctx, body: Record<string, unknown> = {}) {
@@ -3621,12 +3647,9 @@ describe('Loki logs', () => {
     entries: { at: number; line: string | object }[],
     options: { labels?: Record<string, string>; config?: Record<string, unknown>; body?: Record<string, unknown> } = {},
   ) {
-    const logcli = await FakeLogcli.create();
-    logcli.stream(options.labels ?? SHOP, entries);
-    const ctx = await start({ loki: { bin: logcli.bin } });
-    connectLoki(ctx, options.config);
+    const { ctx, grafana } = await withGrafana((one) => one.stream(options.labels ?? SHOP, entries), options.config);
     const ended = await scanLoki(ctx, options.body);
-    return { ctx, logcli, ended };
+    return { ctx, grafana, ended };
   }
 
   describe('the read', () => {
@@ -3662,101 +3685,38 @@ describe('Loki logs', () => {
       expect(Math.abs(Date.parse(detail.samples[0].timestamp) - minutesAgo(5))).toBeLessThan(MINUTE);
     });
 
-    it('calls logcli as the Connector says, with the address, tenant and secret in its environment and none on the command line', async () => {
-      const keychain = new FakeKeychain();
-      keychain.values.set(LOKI_SECRET_KEY, 'glc_example_secret');
-      const logcli = await FakeLogcli.create();
-      logcli
-        .stream(SHOP, [failure(5)])
-        .requires({ basic: { username: '123456', password: 'glc_example_secret' } }, 'tenant-1');
-      const ctx = await start({ loki: { bin: logcli.bin }, keychain });
-      connectLoki(ctx, { auth: 'basic', username: '123456', org_id: 'tenant-1' });
-      process.env.LOKI_ADDR = 'https://ambient.example.com';
-      process.env.LOKI_BEARER_TOKEN = 'ambient-token';
-      try {
-        expect(await scanLoki(ctx)).toMatchObject({ status: 'ok' });
-      } finally {
-        delete process.env.LOKI_ADDR;
-        delete process.env.LOKI_BEARER_TOKEN;
-      }
-      expect(logcli.calls().length).toBeGreaterThan(0);
-      for (const call of logcli.calls()) {
-        expect(call.env).toEqual({
-          LOKI_ADDR: 'https://loki.example.com',
-          LOKI_ORG_ID: 'tenant-1',
-          LOKI_USERNAME: '123456',
-          LOKI_PASSWORD: 'glc_example_secret',
-        });
-        expect(call.args.join(' ')).not.toContain('glc_example_secret');
-      }
-    });
-
-    it('sends a bearer token as LOKI_BEARER_TOKEN alone', async () => {
-      const keychain = new FakeKeychain();
-      keychain.values.set(LOKI_SECRET_KEY, 'glc_example_bearer');
-      const logcli = await FakeLogcli.create();
-      logcli.stream(SHOP, [failure(5)]).requires({ bearer: 'glc_example_bearer' });
-      const ctx = await start({ loki: { bin: logcli.bin }, keychain });
-      connectLoki(ctx, { auth: 'bearer' });
+    it('calls Grafana with the console’s own token and no model turn, and nothing else of the console’s reaches it', async () => {
+      const { ctx, grafana } = await withGrafana((one) => one.stream(SHOP, [failure(5)]));
+      const turns = ctx.daemon.sdk.calls.length;
       expect(await scanLoki(ctx)).toMatchObject({ status: 'ok' });
-      expect(logcli.calls()[0]?.env).toEqual({
-        LOKI_ADDR: 'https://loki.example.com',
-        LOKI_BEARER_TOKEN: 'glc_example_bearer',
-      });
+      expect(grafana.calls().length).toBeGreaterThan(0);
+      for (const call of grafana.calls()) {
+        expect(grafana.accepted.has(call.token ?? '')).toBe(true);
+        expect(call.args.datasourceUid ?? 'loki-main').toBe('loki-main');
+      }
+      expect(new Set(grafana.commands())).toEqual(new Set(['query_loki_logs']));
+      expect(ctx.daemon.sdk.calls.length).toBe(turns);
     });
 
-    it('finds the Services from the service label inside the selector, and reads a stream with no env label as no env', async () => {
-      const logcli = await FakeLogcli.create();
-      logcli
-        .stream({ app: 'shop-api', env: 'prod', cluster: 'prod-1' }, [failure(5)])
-        .stream({ app: 'shop-api', cluster: 'prod-1' }, [failure(6, { message: 'no env failure' })])
-        .stream({ app: 'billing-api', env: 'prod', cluster: 'prod-2' }, [failure(7)])
-        .stream({ job: 'cron', env: 'prod', cluster: 'prod-1' }, [failure(8)]);
-      const ctx = await start({ loki: { bin: logcli.bin } });
-      connectLoki(ctx, { service_label: 'app', env_label: 'env', selector: 'cluster="prod-1"' });
-      expect((await ctx.http.get('/monitor/envs?connector=loki_logs')).body.data).toEqual([
-        { name: 'prod', configured: true },
-        { name: 'no env', configured: false },
-      ]);
-      expect(await scanLoki(ctx, { envs: ['prod', 'no env'] })).toMatchObject({ status: 'ok' });
-      const rows = ctx.store.db.select().from(services).where(eq(services.connector, ConnectorId.LokiLogs)).all();
-      expect(rows.map((row) => [row.name, row.env]).sort()).toEqual([
-        ['shop-api', 'no env'],
-        ['shop-api', 'prod'],
-      ]);
-      expect(await alertList(ctx)).toHaveLength(2);
+    it('reads the Services from the labels service_name and deployment_environment_name, a stream with no env label as no env, and says which name it found no Services under', async () => {
+      const { ctx, ended } = await scanned([failure(5)], { labels: { service_name: 'shop-api' } });
+      expect(ended).toMatchObject({ status: 'ok' });
+      expect((await ctx.http.get('/services')).body.data).toMatchObject([{ name: 'shop-api', env: 'no env' }]);
+      const named = await withGrafana((one) => one.stream({ app: 'shop-api', env: 'prod' }, [failure(5)]));
+      const noLabel = await scanLoki(named.ctx, { envs: ['prod', 'no env'] });
+      expect(noLabel).toMatchObject({ status: 'ok' });
+      expect(noLabel.notes).toContain('Loki logs: no Services found under the label service_name');
+      expect(await alertList(named.ctx)).toEqual([]);
     });
 
     it('reads only the Services of the env the Scan names', async () => {
-      const logcli = await FakeLogcli.create();
-      logcli
-        .stream({ ...SHOP }, [failure(5)])
-        .stream({ service_name: 'shop-api', deployment_environment_name: 'staging' }, [failure(5)]);
-      const ctx = await start({ loki: { bin: logcli.bin } });
-      connectLoki(ctx);
+      const { ctx } = await withGrafana((grafana) =>
+        grafana
+          .stream({ ...SHOP }, [failure(5)])
+          .stream({ service_name: 'shop-api', deployment_environment_name: 'staging' }, [failure(5)]),
+      );
       await scanLoki(ctx, { envs: ['staging'] });
       expect((await ctx.http.get('/services')).body.data).toMatchObject([{ env: 'staging' }]);
-    });
-
-    it('reads logfmt lines when the Connector names that format, and skips JSON lines', async () => {
-      const { ctx } = await scanned(
-        [
-          {
-            at: minutesAgo(5),
-            line: 'level=error method=POST path=/orders status=500 msg="NullPointerException in OrderService"',
-          },
-          failure(6),
-        ],
-        { config: { format: 'logfmt' } },
-      );
-      const [listed] = await alertList(ctx);
-      expect(await alertList(ctx)).toHaveLength(1);
-      expect(listed).toMatchObject({
-        http_status: 500,
-        route: { method: 'POST', path: '/orders' },
-        log_line: 'NullPointerException in OrderService',
-        event_count: 1,
-      });
     });
 
     it('takes each field from the first of its names present, nested keys joined with an underscore', async () => {
@@ -3888,6 +3848,21 @@ describe('Loki logs', () => {
       expect((await ctx.http.get(`/alerts/${alert.id}`)).body.data.samples).toHaveLength(25);
     });
 
+    it('keeps paging while a page comes back full, though the server says nothing of truncation, and notes the cap from what it read', async () => {
+      const many = Array.from({ length: 5_050 }, (_, index) => ({
+        at: Date.now() - 60_000 - index * 10,
+        line: { ...LINE, message: 'NullPointerException in OrderService' },
+      }));
+      const { ctx, grafana, ended } = await withGrafana((one) => one.saysNothingOfTruncation().stream(SHOP, many)).then(
+        async ({ ctx, grafana }) => ({ ctx, grafana, ended: await scanLoki(ctx) }),
+      );
+      expect(ended.status).toBe('ok');
+      expect(ended.notes).toContain('shop-api: read the newest 5,000 failing lines only');
+      const reads = grafana.calls().filter((call) => call.args.queryType === undefined);
+      expect(reads.length).toBeGreaterThan(40);
+      expect((await alertList(ctx))[0].event_count).toBe(5_050);
+    });
+
     it('counts message groups of one Route from the lines read when the Route has several', async () => {
       const lines = (message: string, count: number) =>
         Array.from({ length: count }, (_, index) => ({
@@ -3945,11 +3920,8 @@ describe('Loki logs', () => {
     });
 
     it('puts the source in the Fingerprint, and leaves the other sources Fingerprints alone', async () => {
-      const logcli = await FakeLogcli.create();
-      logcli.stream(SHOP, [failure(5)]);
-      const looped = await start({ loki: { bin: logcli.bin } });
+      const { ctx: looped } = await withGrafana((grafana) => grafana.stream(SHOP, [failure(5)]));
       looped.datadog.readings = [service('shop-api', [route('POST', '/orders', 4)])];
-      connectLoki(looped);
       await scan(looped);
       await scanLoki(looped);
       const rows = looped.store.db.select().from(alerts).all();
@@ -3980,62 +3952,68 @@ describe('Loki logs', () => {
   });
 
   describe('failures', () => {
-    const outcome = async (arrange: (logcli: FakeLogcli) => void) => {
-      const logcli = await FakeLogcli.create();
-      logcli.stream(SHOP, [failure(5)]);
-      arrange(logcli);
-      const ctx = await start({ loki: { bin: logcli.bin } });
-      connectLoki(ctx);
+    const outcome = async (arrange: (grafana: FakeGrafana) => void) => {
+      const { ctx } = await withGrafana((grafana) => {
+        grafana.stream(SHOP, [failure(5)]);
+        arrange(grafana);
+      });
       return scanLoki(ctx, { envs: ['prod'] });
     };
 
-    it('shows Loki’s reason when a query limit refuses the read', async () => {
+    it('shows the server’s own words when it refuses a query', async () => {
       const reason = 'maximum of series (500) reached for a single query';
-      expect(await outcome((logcli) => logcli.rejectQueries(reason))).toMatchObject({
+      expect(await outcome((grafana) => grafana.rejectQueries(reason))).toMatchObject({
         status: 'failed',
         error_code: 'upstream_failed',
-        error_message: `Loki refused the query: ${reason}`,
+        error_message: expect.stringContaining(reason),
       });
     });
 
-    it('shows Loki’s reason when logcli prints its error line with a capital E', async () => {
-      const reason = 'maximum of series (500) reached for a single query';
-      expect(await outcome((logcli) => logcli.printsCapitalized().rejectQueries(reason))).toMatchObject({
-        status: 'failed',
-        error_message: `Loki refused the query: ${reason}`,
-      });
-    });
-
-    it('ends a rate limit rate limited', async () => {
-      expect(await outcome((logcli) => logcli.behave('throttle'))).toMatchObject({
+    it('ends a rate limit the server names rate limited', async () => {
+      expect(await outcome((grafana) => grafana.behave('throttle'))).toMatchObject({
         status: 'rate_limited',
         error_code: 'rate_limited',
       });
     });
 
-    it('ends a refused secret and an unreachable URL upstream failed, with no Loki text in the message', async () => {
-      for (const behavior of ['unauthorized', 'forbidden', 'unreachable'] as const) {
-        expect(await outcome((logcli) => logcli.behave(behavior)), behavior).toMatchObject({
-          status: 'failed',
-          error_code: 'upstream_failed',
-          error_message: '`logcli series` failed',
-        });
+    it('ends an answer the console cannot read, a server that does not answer and a server that refuses to page upstream failed', async () => {
+      for (const arrange of [
+        (grafana: FakeGrafana) => grafana.behave('unreadable'),
+        (grafana: FakeGrafana) => grafana.behave('unreachable'),
+        (grafana: FakeGrafana) =>
+          grafana
+            .maxLinesPerCall(1)
+            .neverPages()
+            .stream(SHOP, [failure(6), failure(7)]),
+      ]) {
+        expect(await outcome(arrange)).toMatchObject({ status: 'failed', error_code: 'upstream_failed' });
       }
     });
 
-    it('kills the running logcli when the operator stops the Scan', async () => {
-      const logcli = await FakeLogcli.create();
-      logcli
-        .stream(SHOP, [failure(5)])
-        .behaveOn('samples', 'hang')
-        .behaveOn('counts', 'hang');
-      const ctx = await start({ loki: { bin: logcli.bin } });
-      connectLoki(ctx);
+    it('reads a refused sign-in as upstream failed and the Connector as needs auth, and a server without the tool as failed with its message', async () => {
+      const { ctx } = await withGrafana((grafana) => grafana.stream(SHOP, [failure(5)]).behave('unauthorized'));
+      expect(await scanLoki(ctx, { envs: ['prod'] })).toMatchObject({
+        status: 'failed',
+        error_code: 'upstream_failed',
+      });
+      expect(
+        (await ctx.http.get('/connectors')).body.data.find((row: { id: string }) => row.id === 'loki_logs'),
+      ).toMatchObject({
+        status: 'auth',
+      });
+      const odd = await withGrafana((grafana) => grafana.stream(SHOP, [failure(5)]).behave('unknownTool'));
+      const ended = await scanLoki(odd.ctx, { envs: ['prod'] });
+      expect(ended).toMatchObject({ status: 'failed', error_code: 'upstream_failed' });
+      expect(ended.error_message).toMatch(/query_loki_logs/);
+    });
+
+    it('stops its calls when the operator stops the Scan', async () => {
+      const { ctx, grafana } = await withGrafana((one) => one.stream(SHOP, [failure(5)]).behaveOn('samples', 'hang'));
       const started = await ctx.http.post('/scans', { service_id: null, connector: 'loki_logs', envs: ['prod'] });
       await until(
-        () => logcli.commands().filter((command) => command === 'query').length,
-        (asked) => asked >= 2,
-        'both queries to be running',
+        () => grafana.queries().length,
+        (asked) => asked >= 3,
+        'the queries to be running',
       );
       expect((await ctx.http.post(`/scans/${started.body.data.id}/cancel`)).status).toBe(204);
       await until(
@@ -4043,25 +4021,11 @@ describe('Loki logs', () => {
         (status) => status === 'cancelled',
         'the Scan to be cancelled',
       );
-      const pids = logcli
-        .calls()
-        .filter((call) => call.args.includes('query'))
-        .map((call) => call.pid);
-      for (const pid of pids) {
-        await until(
-          () => alive(pid),
-          (running) => !running,
-          'the query to be killed',
-        );
-      }
     });
 
     it('does not stop another source Scan when Loki is down, and shows the others Alerts', async () => {
-      const logcli = await FakeLogcli.create();
-      logcli.stream(SHOP, [failure(5)]).behave('unreachable');
-      const ctx = await start({ loki: { bin: logcli.bin } });
+      const { ctx } = await withGrafana((grafana) => grafana.stream(SHOP, [failure(5)]).behave('unreachable'));
       ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 4)])];
-      connectLoki(ctx);
       expect((await ctx.http.post('/scans', { service_id: null })).status).toBe(202);
       const all = await until(
         () => ctx.http.get('/scans').then((res) => res.body.data),
@@ -4078,12 +4042,14 @@ describe('Loki logs', () => {
   });
 
   it('reads five sources at once into one Alert list, filterable by source, with the down source named by its failed Scan', async () => {
-    const logcli = await FakeLogcli.create();
-    logcli.stream(SHOP, [failure(5)]);
+    const grafana = await FakeGrafana.start();
+    hosted.push(grafana);
+    grafana.stream(SHOP, [failure(5)]);
     const aws = await FakeAws.create();
     aws.group('/ecs/shop-api', [{ at: minutesAgo(5), message: LINE }]);
-    const newrelic = await FakeNewRelic.create();
-    newrelic.events({
+    const newrelic = await FakeNewRelic.start();
+    hosted.push(newrelic);
+    newrelic.grant('nr-token').events({
       at: minutesAgo(5),
       attrs: {
         'service.name': 'shop-api',
@@ -4095,7 +4061,15 @@ describe('Loki logs', () => {
         message: 'NullPointerException in OrderService',
       },
     });
-    const ctx = await start({ loki: { bin: logcli.bin }, newRelic: { bin: newrelic.bin } });
+    const claude = new FakeClaudeCredentials();
+    claude.hold('newrelic', 'nr-token');
+    const keychain = new FakeKeychain();
+    await grafana.signedIn(keychain);
+    const ctx = await start({
+      keychain,
+      claudeCredentials: claude,
+      hosts: { grafana: grafana.url, newRelic: { US: newrelic.url } },
+    });
     ctx.datadog.readings = [service('shop-api', [route('POST', '/orders', 4)])];
     await writeLogFile(ctx.logs, 'logs.jsonl', [
       otlpLine({
@@ -4122,7 +4096,7 @@ describe('Loki logs', () => {
       status: HealthStatus.Ok,
       config: JSON.stringify({ ...DEFAULT_CONNECTOR_CONFIG[ConnectorId.NewRelicLogs], account_id: '1234567' }),
     });
-    logcli.behave('unreachable');
+    grafana.behave('unreachable');
     expect((await ctx.http.post('/scans', { service_id: null })).status).toBe(202);
     const all = await until(
       () => ctx.http.get('/scans').then((res) => res.body.data),
@@ -4143,7 +4117,7 @@ describe('Loki logs', () => {
       'new_relic_logs',
       'otel_logs',
     ]);
-    logcli.behave(null);
+    grafana.behave(null);
     await scanLoki(ctx);
     expect((await alertList(ctx)).map((alert: { connector: string }) => alert.connector).sort()).toEqual([
       'cloudwatch_logs',
@@ -4168,11 +4142,10 @@ describe('Loki logs', () => {
   });
 
   it('links an imported Repo with the Service name, as any Service is', async () => {
-    const logcli = await FakeLogcli.create();
-    logcli.stream({ ...SHOP, service_name: 'orders-api' }, [failure(5)]);
-    const ctx = await start({ loki: { bin: logcli.bin } });
+    const { ctx } = await withGrafana((grafana) =>
+      grafana.stream({ ...SHOP, service_name: 'orders-api' }, [failure(5)]),
+    );
     const repo = (await ctx.http.post('/repos', { path: await makeRepo() })).body.data;
-    connectLoki(ctx);
     await scanLoki(ctx);
     const linked = await until(
       () => ctx.http.get('/services').then((res) => res.body.data[0]),
@@ -4184,12 +4157,13 @@ describe('Loki logs', () => {
 
   describe('Services and the schedule', () => {
     it('lists the Services and envs with their failing counts and status codes', async () => {
-      const logcli = await FakeLogcli.create();
-      logcli
-        .stream(SHOP, [failure(5), failure(6), failure(7, { status: 404 })])
-        .stream({ service_name: 'billing-api', deployment_environment_name: 'staging' }, [failure(5, { status: 502 })]);
-      const ctx = await start({ loki: { bin: logcli.bin } });
-      connectLoki(ctx);
+      const { ctx } = await withGrafana((grafana) => {
+        grafana
+          .stream(SHOP, [failure(5), failure(6), failure(7, { status: 404 })])
+          .stream({ service_name: 'billing-api', deployment_environment_name: 'staging' }, [
+            failure(5, { status: 502 }),
+          ]);
+      });
       expect((await ctx.http.get('/monitor/envs?connector=loki_logs')).body.data).toEqual([
         { name: 'prod', configured: true },
         { name: 'staging', configured: false },
@@ -4207,10 +4181,9 @@ describe('Loki logs', () => {
     });
 
     it('runs on its own interval, and skips the source when it is not connected', async () => {
-      const logcli = await FakeLogcli.create();
-      logcli.stream(SHOP, [failure(5)]);
-      const ctx = await start({ loki: { bin: logcli.bin } });
-      connectLoki(ctx);
+      const { ctx } = await withGrafana((grafana) => {
+        grafana.stream(SHOP, [failure(5)]);
+      });
       await ctx.http.patch('/connectors/loki_logs', { config: { default_interval: '12h' } });
       const monitor = ctx.daemon.app.get(ScansService);
       const scheduled = () =>
@@ -4232,11 +4205,10 @@ describe('Loki logs', () => {
     });
 
     it('keeps each source Scans through retention, per Service', async () => {
-      const logcli = await FakeLogcli.create();
-      logcli.stream(SHOP, [failure(5)]);
-      const ctx = await start({ loki: { bin: logcli.bin } });
+      const { ctx } = await withGrafana((grafana) => {
+        grafana.stream(SHOP, [failure(5)]);
+      });
       ctx.datadog.readings = [service('shop-api', [route('POST', '/orders', 4)])];
-      connectLoki(ctx);
       for (let round = 0; round < 2; round++) {
         await scan(ctx);
         await scanLoki(ctx);
@@ -4266,23 +4238,22 @@ describe('Loki logs', () => {
       });
 
     async function failingLoki(entries = [failure(5), failure(8)]) {
-      const logcli = await FakeLogcli.create();
-      logcli.stream(SHOP, entries);
-      const ctx = await start({ loki: { bin: logcli.bin } });
-      connectLoki(ctx);
+      const { ctx, grafana } = await withGrafana((grafana) => {
+        grafana.stream(SHOP, entries);
+      });
       await scanLoki(ctx);
       const [alert] = await alertList(ctx);
       await linkRepo(ctx, alert.service.id);
-      return { ctx, logcli, alert };
+      return { ctx, grafana, alert };
     }
 
     it('counts the Alert’s lines for the last hour through its filter, before the agent starts', async () => {
-      const { ctx, logcli, alert } = await failingLoki();
+      const { ctx, grafana, alert } = await failingLoki();
       const report = await verify(ctx, alert.id);
       const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
       expect(recheckOf(stored)).toEqual({ kind: 'result', text: 'Loki logs recheck, last hour: still failing' });
       expect(ctx.datadog.rechecks).toEqual([]);
-      expect(logcli.commands().at(-1)).toBe('instant-query');
+      expect(grafana.calls().at(-1)?.args.queryType).toBe('instant');
       expect(stored.status).toBe('ready');
     });
 
@@ -4295,15 +4266,15 @@ describe('Loki logs', () => {
     });
 
     it('writes why a Recheck failed, and goes on', async () => {
-      const { ctx, logcli, alert } = await failingLoki();
-      logcli.behave('throttle');
+      const { ctx, grafana, alert } = await failingLoki();
+      grafana.behave('throttle');
       const report = await verify(ctx, alert.id);
       const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
-      expect(recheckOf(stored)).toEqual({ kind: 'warning', text: 'Recheck failed: Loki rate limit reached' });
+      expect(recheckOf(stored)).toEqual({ kind: 'warning', text: 'Recheck failed: Loki logs rate limit reached' });
       expect(stored.status).toBe('ready');
     });
 
-    it('briefs the agent with the source, the Samples and the filter, and tells it to use no pup, no Datadog server, and logcli through run_integration', async () => {
+    it('briefs the agent with the source, the Samples and the filter, and tells it to use no pup, no Datadog server, and Grafana’s MCP server in place of a CLI', async () => {
       const { ctx, alert } = await failingLoki([failure(5)]);
       const before = ctx.daemon.sdk.calls.length;
       await verify(ctx, alert.id);
@@ -4312,7 +4283,8 @@ describe('Loki logs', () => {
       expect(brief).toContain('NullPointerException in OrderService');
       expect(brief).toContain('Loki logs filter: {"service":"shop-api","env":"prod"');
       expect(brief).toMatch(/no `pup` and no Datadog MCP Server/);
-      expect(brief).toMatch(/`logcli` through the `run_integration` tool/);
+      expect(brief).toMatch(/Grafana MCP Server's Loki tools/);
+      expect(brief).not.toMatch(/logcli|run_integration/);
       expect(brief).not.toContain('Datadog query');
       expect(brief).not.toContain('failure Datadog logged');
       expect(deniedSince(ctx, before)).toContain('datadog-pup');
@@ -4349,7 +4321,7 @@ describe('New Relic logs', () => {
     level: 'error',
     message: 'NullPointerException in OrderService',
   };
-  const KEY = 'NRAK-EXAMPLE';
+  const TOKEN = 'nr-token-example';
   /** A failing event of `SHOP`, `minutes` ago; an attribute set to undefined is left out. */
   const failure = (minutes: number, extra: Record<string, unknown> = {}) => ({
     at: minutesAgo(minutes),
@@ -4368,7 +4340,7 @@ describe('New Relic logs', () => {
     message: undefined,
   };
 
-  /** Points the New Relic source at the fake, as a Connector the operator connected. */
+  /** Marks the New Relic Connector connected to account 1234567, as the operator left it. */
   function connectNewRelic(ctx: Ctx, config: Record<string, unknown> = {}) {
     setConnector(ctx.store, ConnectorId.NewRelicLogs, {
       status: HealthStatus.Ok,
@@ -4379,6 +4351,33 @@ describe('New Relic logs', () => {
       }),
     });
   }
+
+  /** A daemon whose Claude Code holds a sign-in for a stand-in for New Relic that `arrange` sets up, with the Connector connected. */
+  async function withNewRelic(
+    arrange: (newrelic: FakeNewRelic) => void = () => {},
+    config: Record<string, unknown> = {},
+    extra: { probe?: FakeProbe; claude?: FakeClaudeCredentials } = {},
+  ) {
+    const newrelic = await FakeNewRelic.start();
+    hosted.push(newrelic);
+    arrange(newrelic);
+    const claude = extra.claude ?? new FakeClaudeCredentials();
+    newrelic.grant(TOKEN);
+    claude.hold('newrelic', TOKEN);
+    const ctx = await start({
+      hosts: { newRelic: { US: newrelic.url, EU: newrelic.url, JP: newrelic.url } },
+      claudeCredentials: claude,
+      probe: extra.probe,
+    });
+    connectNewRelic(ctx, config);
+    return { ctx, newrelic, claude };
+  }
+
+  /** Connect registered New Relic's server with Claude Code; a reconnect asks for that server. */
+  const registerNewRelic = (ctx: Ctx) =>
+    ctx.daemon.app
+      .get(McpServersService)
+      .ensureRegistered({ name: 'newrelic', transport: McpTransport.Http, target: NEW_RELIC_MCP_URLS.US });
 
   async function scanNewRelic(ctx: Ctx, body: Record<string, unknown> = {}) {
     const started = await ctx.http.post('/scans', { service_id: null, connector: 'new_relic_logs', ...body });
@@ -4395,10 +4394,7 @@ describe('New Relic logs', () => {
     events: { at: number; attrs: Record<string, unknown> }[],
     options: { config?: Record<string, unknown>; body?: Record<string, unknown> } = {},
   ) {
-    const newrelic = await FakeNewRelic.create();
-    newrelic.events(...events);
-    const ctx = await start({ newRelic: { bin: newrelic.bin } });
-    connectNewRelic(ctx, options.config);
+    const { ctx, newrelic } = await withNewRelic((one) => one.events(...events), options.config);
     const ended = await scanNewRelic(ctx, options.body);
     return { ctx, newrelic, ended };
   }
@@ -4444,58 +4440,39 @@ describe('New Relic logs', () => {
       expect(Math.abs(Date.parse(detail.samples[0].timestamp) - minutesAgo(5))).toBeLessThan(MINUTE);
     });
 
-    it('calls newrelic with the Connector’s key, account and region in its environment and none on the command line, over any NEW_RELIC_ variable of the operator’s shell', async () => {
-      const keychain = new FakeKeychain();
-      keychain.values.set(NEW_RELIC_KEY, KEY);
-      const newrelic = await FakeNewRelic.create();
-      newrelic.events(failure(5)).requires({ apiKey: KEY, accountId: '1234567', region: 'EU' });
-      const ctx = await start({ newRelic: { bin: newrelic.bin }, keychain });
-      connectNewRelic(ctx, { region: 'EU' });
-      process.env.NEW_RELIC_API_KEY = 'NRAK-AMBIENT';
-      process.env.NEW_RELIC_ACCOUNT_ID = '999';
-      process.env.NEW_RELIC_REGION = 'JP';
-      try {
-        expect(await scanNewRelic(ctx)).toMatchObject({ status: 'ok' });
-      } finally {
-        delete process.env.NEW_RELIC_API_KEY;
-        delete process.env.NEW_RELIC_ACCOUNT_ID;
-        delete process.env.NEW_RELIC_REGION;
-      }
+    it('calls New Relic with the token Claude Code stored, for the account and Region the Connector holds, and takes no model turn', async () => {
+      const { ctx, newrelic, claude } = await withNewRelic((one) => one.events(failure(5)), { region: 'EU' });
+      const turns = ctx.daemon.sdk.calls.length;
+      expect(await scanNewRelic(ctx)).toMatchObject({ status: 'ok' });
       expect(newrelic.calls().length).toBeGreaterThan(0);
       for (const call of newrelic.calls()) {
-        expect(call.env).toEqual({
-          NEW_RELIC_API_KEY: KEY,
-          NEW_RELIC_ACCOUNT_ID: '1234567',
-          NEW_RELIC_REGION: 'EU',
-        });
-        expect(call.args.join(' ')).not.toContain(KEY);
-        expect(call.args.slice(0, 2)).toEqual(['nrql', 'query']);
+        expect(call.token).toBe(TOKEN);
+        if (call.tool === 'execute_nrql_query') expect(call.args.account_id).toBe(1234567);
       }
+      // Reads only: the console sends no write tool call to New Relic.
+      expect(new Set(newrelic.calls().map((call) => call.tool))).toEqual(new Set(['execute_nrql_query']));
+      expect(claude.reads.length).toBeGreaterThan(0);
+      for (const read of claude.reads)
+        expect(read).toEqual({ name: 'newrelic', url: 'https://mcp.eu.newrelic.com/mcp/' });
+      expect(ctx.daemon.sdk.calls.length).toBe(turns);
     });
 
-    it('finds the Services from the service attribute inside the filter, and reads an event with no env attribute as no env', async () => {
-      const newrelic = await FakeNewRelic.create();
-      const at = (minutes: number, attrs: Record<string, unknown>) => ({ at: minutesAgo(minutes), attrs });
-      const base = { ...EVENT, 'service.name': undefined };
-      newrelic.events(
-        at(5, { ...base, app: 'shop-api', env: 'prod', cluster: 'prod-1' }),
-        at(6, { ...base, app: 'shop-api', cluster: 'prod-1', message: 'no env failure' }),
-        at(7, { ...base, app: 'billing-api', env: 'prod', cluster: 'prod-2' }),
-        at(8, { ...base, job: 'cron', env: 'prod', cluster: 'prod-1' }),
+    it('reads the Services from the attributes service.name and environment, an event with no env as no env, and says which name it found no Services under', async () => {
+      const { ctx } = await withNewRelic((one) =>
+        one.events(failure(5, { environment: undefined }), {
+          at: minutesAgo(6),
+          attrs: { ...EVENT, app: 'billing-api', env: 'prod' },
+        }),
       );
-      const ctx = await start({ newRelic: { bin: newrelic.bin } });
-      connectNewRelic(ctx, { service_attribute: 'app', env_attribute: 'env', filter: "cluster = 'prod-1'" });
-      expect((await ctx.http.get('/monitor/envs?connector=new_relic_logs')).body.data).toEqual([
-        { name: 'prod', configured: true },
-        { name: 'no env', configured: false },
-      ]);
-      expect(await scanNewRelic(ctx, { envs: ['prod', 'no env'] })).toMatchObject({ status: 'ok' });
-      const rows = ctx.store.db.select().from(services).where(eq(services.connector, ConnectorId.NewRelicLogs)).all();
-      expect(rows.map((row) => [row.name, row.env]).sort()).toEqual([
-        ['shop-api', 'no env'],
-        ['shop-api', 'prod'],
-      ]);
-      expect(await alertList(ctx)).toHaveLength(2);
+      expect(await scanNewRelic(ctx, { envs: ['no env'] })).toMatchObject({ status: 'ok' });
+      expect((await ctx.http.get('/services')).body.data).toMatchObject([{ name: 'shop-api', env: 'no env' }]);
+      const named = await withNewRelic((one) =>
+        one.events({ at: minutesAgo(6), attrs: { ...EVENT, app: 'billing-api', env: 'prod' } }),
+      );
+      const ended = await scanNewRelic(named.ctx, { envs: ['prod', 'no env'] });
+      expect(ended).toMatchObject({ status: 'ok' });
+      expect(ended.notes).toContain('New Relic logs: no Services found under the attribute service.name');
+      expect(await alertList(named.ctx)).toEqual([]);
     });
 
     it('reads only the Services of the env the Scan names', async () => {
@@ -4714,10 +4691,9 @@ describe('New Relic logs', () => {
     });
 
     it('reads a FACET answer that names its values by attribute', async () => {
-      const newrelic = await FakeNewRelic.create();
-      newrelic.events(failure(5), failure(6)).facetsByName();
-      const ctx = await start({ newRelic: { bin: newrelic.bin } });
-      connectNewRelic(ctx);
+      const { ctx } = await withNewRelic((newrelic) => {
+        newrelic.events(failure(5), failure(6)).facetsByName();
+      });
       await scanNewRelic(ctx);
       expect(await alertList(ctx)).toMatchObject([
         { http_status: 500, route: { method: 'POST', path: '/orders' }, event_count: 2 },
@@ -4763,11 +4739,10 @@ describe('New Relic logs', () => {
     });
 
     it('puts the source in the Fingerprint, and leaves the other sources Fingerprints alone', async () => {
-      const newrelic = await FakeNewRelic.create();
-      newrelic.events(failure(5));
-      const looped = await start({ newRelic: { bin: newrelic.bin } });
+      const { ctx: looped } = await withNewRelic((newrelic) => {
+        newrelic.events(failure(5));
+      });
       looped.datadog.readings = [service('shop-api', [route('POST', '/orders', 4)])];
-      connectNewRelic(looped);
       await scan(looped);
       await scanNewRelic(looped);
       const rows = looped.store.db.select().from(alerts).all();
@@ -4799,15 +4774,14 @@ describe('New Relic logs', () => {
 
   describe('failures', () => {
     const outcome = async (arrange: (newrelic: FakeNewRelic) => void) => {
-      const newrelic = await FakeNewRelic.create();
-      newrelic.events(failure(5));
-      arrange(newrelic);
-      const ctx = await start({ newRelic: { bin: newrelic.bin } });
-      connectNewRelic(ctx);
+      const { ctx } = await withNewRelic((newrelic) => {
+        newrelic.events(failure(5));
+        arrange(newrelic);
+      });
       return scanNewRelic(ctx, { envs: ['prod'] });
     };
 
-    it('shows New Relic’s reason when it rejects a query or gives up on one', async () => {
+    it('shows the server’s own words when it rejects a query or gives up on one', async () => {
       for (const reason of [
         "NRQL Syntax Error: Error at line 1 position 20, unexpected 'FORM'",
         'NRQL query timed out: it took longer than 60 seconds',
@@ -4815,50 +4789,92 @@ describe('New Relic logs', () => {
         expect(await outcome((newrelic) => newrelic.rejectQueries(reason)), reason).toMatchObject({
           status: 'failed',
           error_code: 'upstream_failed',
-          error_message: `New Relic refused the query: ${reason}`,
+          error_message: expect.stringContaining(reason),
         });
       }
     });
 
-    it('cuts the key from New Relic’s reason before the Scan error shows it', async () => {
-      const keychain = new FakeKeychain();
-      keychain.values.set(NEW_RELIC_KEY, KEY);
-      const newrelic = await FakeNewRelic.create();
-      newrelic.events(failure(5)).rejectQueries(`NRQL Syntax Error: unexpected '${KEY}'`);
-      const ctx = await start({ newRelic: { bin: newrelic.bin }, keychain });
-      connectNewRelic(ctx);
-      const ended = await scanNewRelic(ctx, { envs: ['prod'] });
-      expect(ended).toMatchObject({ status: 'failed', error_message: expect.stringContaining('[redacted]') });
-      expect(JSON.stringify(ended)).not.toContain(KEY);
-    });
-
-    it('ends a timeout New Relic names as one, and a rate limit as rate limited', async () => {
-      expect(await outcome((newrelic) => newrelic.behave('timeout'))).toMatchObject({
-        status: 'failed',
-        error_code: 'upstream_failed',
-        error_message: expect.stringContaining('New Relic refused the query'),
-      });
+    it('ends a rate limit the server names rate limited', async () => {
       expect(await outcome((newrelic) => newrelic.behave('throttle'))).toMatchObject({
         status: 'rate_limited',
         error_code: 'rate_limited',
       });
     });
 
-    it('ends a rejected key and an unreachable address upstream failed, with no New Relic text in the message', async () => {
-      for (const behavior of ['unauthorized', 'forbidden', 'unreachable'] as const) {
-        expect(await outcome((newrelic) => newrelic.behave(behavior)), behavior).toMatchObject({
-          status: 'failed',
-          error_code: 'upstream_failed',
-          error_message: '`newrelic nrql` failed',
-        });
+    it('ends an answer the console cannot read, a result cut by the server’s row limit, and a server that does not answer upstream failed', async () => {
+      for (const arrange of [
+        (newrelic: FakeNewRelic) => newrelic.behave('unreadable'),
+        (newrelic: FakeNewRelic) => newrelic.truncatedAfter(1).events(failure(6, { 'http.route': '/other' })),
+        (newrelic: FakeNewRelic) => newrelic.behave('unreachable'),
+      ]) {
+        expect(await outcome(arrange)).toMatchObject({ status: 'failed', error_code: 'upstream_failed' });
       }
     });
 
-    it('kills the running newrelic when the operator stops the Scan', async () => {
-      const newrelic = await FakeNewRelic.create();
-      newrelic.events(failure(5)).behaveOn('samples', 'hang').behaveOn('counts', 'hang');
-      const ctx = await start({ newRelic: { bin: newrelic.bin } });
-      connectNewRelic(ctx);
+    it('reads the answers of a server that names a result differently: a bare array of rows', async () => {
+      const { ctx } = await withNewRelic((newrelic) => newrelic.answerAsArray().events(failure(5)));
+      expect(await scanNewRelic(ctx, { envs: ['prod'] })).toMatchObject({ status: 'ok' });
+      expect(await alertList(ctx)).toHaveLength(1);
+    });
+
+    it('reads a server without the tool as failed with its message, not as needs auth', async () => {
+      const { ctx } = await withNewRelic((newrelic) => newrelic.events(failure(5)).behave('unknownTool'));
+      const ended = await scanNewRelic(ctx, { envs: ['prod'] });
+      expect(ended).toMatchObject({ status: 'failed', error_code: 'upstream_failed' });
+      expect(ended.error_message).toMatch(/execute_nrql_query|unknown tool|not found/i);
+      expect(
+        (await ctx.http.get('/connectors')).body.data.find((row: { id: string }) => row.id === 'new_relic_logs'),
+      ).toMatchObject({ status: 'ok' });
+    });
+
+    it('asks Claude Code to reconnect the one server with no model turn when the token has ended, reads the new token, and goes on', async () => {
+      for (const ended of ['by its time', 'by New Relic']) {
+        const probe = new FakeProbe();
+        const claude = new FakeClaudeCredentials();
+        const { ctx, newrelic } = await withNewRelic((one) => one.events(failure(5)), {}, { probe, claude });
+        await registerNewRelic(ctx);
+        // Claude Code holds a token that ended, and refreshes it when the server is reconnected.
+        if (ended === 'by its time') claude.hold('newrelic', 'old-token', Date.now() - 1_000);
+        else claude.hold('newrelic', 'unknown-to-new-relic');
+        probe.afterProbe = () => claude.hold('newrelic', TOKEN);
+        const turns = ctx.daemon.sdk.calls.length;
+        expect(await scanNewRelic(ctx, { envs: ['prod'] }), ended).toMatchObject({ status: 'ok' });
+        expect(probe.runs + probe.ones, ended).toBeGreaterThan(0);
+        expect(
+          newrelic.calls().every((call) => call.token === TOKEN),
+          ended,
+        ).toBe(true);
+        expect(ctx.daemon.sdk.calls.length, ended).toBe(turns);
+      }
+    });
+
+    it('reads the Connector as needs auth when the reconnect does not give a token New Relic accepts, and when macOS refuses the read', async () => {
+      const probe = new FakeProbe();
+      const { ctx, claude } = await withNewRelic((one) => one.events(failure(5)), {}, { probe });
+      await registerNewRelic(ctx);
+      claude.hold('newrelic', 'unknown-to-new-relic');
+      expect(await scanNewRelic(ctx, { envs: ['prod'] })).toMatchObject({
+        status: 'failed',
+        error_code: 'upstream_failed',
+      });
+      const row = () =>
+        ctx.http
+          .get('/connectors')
+          .then((res) => res.body.data.find((one: { id: string }) => one.id === 'new_relic_logs'));
+      expect(await row()).toMatchObject({ status: 'auth' });
+      setConnector(ctx.store, ConnectorId.NewRelicLogs, { status: HealthStatus.Ok });
+      claude.refused = true;
+      expect(await scanNewRelic(ctx, { envs: ['prod'] })).toMatchObject({
+        status: 'failed',
+        error_code: 'upstream_failed',
+      });
+      expect(await row()).toMatchObject({ status: 'auth' });
+    });
+
+    it('stops its calls when the operator stops the Scan', async () => {
+      const { ctx, newrelic } = await withNewRelic((one) => {
+        one.events(failure(5)).behaveOn('samples', 'hang').behaveOn('counts', 'hang');
+      });
       const started = await ctx.http.post('/scans', { service_id: null, connector: 'new_relic_logs', envs: ['prod'] });
       await until(
         () => newrelic.queries().filter((query) => query.includes('TIMESERIES') || query.startsWith('SELECT *')).length,
@@ -4871,24 +4887,13 @@ describe('New Relic logs', () => {
         (status) => status === 'cancelled',
         'the Scan to be cancelled',
       );
-      const asked = newrelic
-        .calls()
-        .filter((call) => call.args.some((arg) => arg.includes('TIMESERIES') || arg.startsWith('SELECT *')));
-      for (const { pid } of asked) {
-        await until(
-          () => alive(pid),
-          (running) => !running,
-          'the query to be killed',
-        );
-      }
     });
 
     it('does not stop another source Scan when New Relic is down, and shows the others Alerts', async () => {
-      const newrelic = await FakeNewRelic.create();
-      newrelic.events(failure(5)).behave('unreachable');
-      const ctx = await start({ newRelic: { bin: newrelic.bin } });
+      const { ctx } = await withNewRelic((newrelic) => {
+        newrelic.events(failure(5)).behave('unreachable');
+      });
       ctx.datadog.readings = [service('orders-api', [route('POST', '/orders', 4)])];
-      connectNewRelic(ctx);
       expect((await ctx.http.post('/scans', { service_id: null })).status).toBe(202);
       const all = await until(
         () => ctx.http.get('/scans').then((res) => res.body.data),
@@ -4913,11 +4918,10 @@ describe('New Relic logs', () => {
   });
 
   it('links an imported Repo with the Service name, as any Service is', async () => {
-    const newrelic = await FakeNewRelic.create();
-    newrelic.events(failure(5, { 'service.name': 'orders-api' }));
-    const ctx = await start({ newRelic: { bin: newrelic.bin } });
+    const { ctx } = await withNewRelic((newrelic) => {
+      newrelic.events(failure(5, { 'service.name': 'orders-api' }));
+    });
     const repo = (await ctx.http.post('/repos', { path: await makeRepo() })).body.data;
-    connectNewRelic(ctx);
     await scanNewRelic(ctx);
     const linked = await until(
       () => ctx.http.get('/services').then((res) => res.body.data[0]),
@@ -4929,16 +4933,20 @@ describe('New Relic logs', () => {
 
   describe('Services and the schedule', () => {
     it('lists the Services and envs with their failing counts and status codes', async () => {
-      const newrelic = await FakeNewRelic.create();
-      newrelic.events(
-        failure(5),
-        failure(6),
-        failure(7, { 'http.response.status_code': 404 }),
-        failure(5, { 'service.name': 'billing-api', environment: 'staging', 'http.response.status_code': 502 }),
-        failure(5, { 'service.name': 'cron', environment: undefined, 'http.response.status_code': 200, level: 'info' }),
-      );
-      const ctx = await start({ newRelic: { bin: newrelic.bin } });
-      connectNewRelic(ctx);
+      const { ctx } = await withNewRelic((newrelic) => {
+        newrelic.events(
+          failure(5),
+          failure(6),
+          failure(7, { 'http.response.status_code': 404 }),
+          failure(5, { 'service.name': 'billing-api', environment: 'staging', 'http.response.status_code': 502 }),
+          failure(5, {
+            'service.name': 'cron',
+            environment: undefined,
+            'http.response.status_code': 200,
+            level: 'info',
+          }),
+        );
+      });
       expect((await ctx.http.get('/monitor/envs?connector=new_relic_logs')).body.data).toEqual([
         { name: 'prod', configured: true },
         { name: 'staging', configured: false },
@@ -4956,18 +4964,17 @@ describe('New Relic logs', () => {
     });
 
     it('lists more than ten Services, envs and status codes', async () => {
-      const newrelic = await FakeNewRelic.create();
-      newrelic.events(
-        ...Array.from({ length: 12 }, (_, index) =>
-          failure(5, {
-            'service.name': `api-${index}`,
-            environment: `env-${index}`,
-            'http.response.status_code': 500 + index,
-          }),
-        ),
-      );
-      const ctx = await start({ newRelic: { bin: newrelic.bin } });
-      connectNewRelic(ctx);
+      const { ctx } = await withNewRelic((newrelic) => {
+        newrelic.events(
+          ...Array.from({ length: 12 }, (_, index) =>
+            failure(5, {
+              'service.name': `api-${index}`,
+              environment: `env-${index}`,
+              'http.response.status_code': 500 + index,
+            }),
+          ),
+        );
+      });
       expect((await ctx.http.get('/monitor/envs?connector=new_relic_logs')).body.data).toHaveLength(14);
       expect((await ctx.http.get('/monitor/log-services?connector=new_relic_logs&window=24h')).body.data).toHaveLength(
         12,
@@ -4978,10 +4985,9 @@ describe('New Relic logs', () => {
     });
 
     it('runs on its own interval, and skips the source when it is not connected', async () => {
-      const newrelic = await FakeNewRelic.create();
-      newrelic.events(failure(5));
-      const ctx = await start({ newRelic: { bin: newrelic.bin } });
-      connectNewRelic(ctx);
+      const { ctx } = await withNewRelic((newrelic) => {
+        newrelic.events(failure(5));
+      });
       await ctx.http.patch('/connectors/new_relic_logs', { config: { default_interval: '12h' } });
       const monitor = ctx.daemon.app.get(ScansService);
       const scheduled = () =>
@@ -5003,11 +5009,10 @@ describe('New Relic logs', () => {
     });
 
     it('keeps each source Scans through retention, per Service', async () => {
-      const newrelic = await FakeNewRelic.create();
-      newrelic.events(failure(5));
-      const ctx = await start({ newRelic: { bin: newrelic.bin } });
+      const { ctx } = await withNewRelic((newrelic) => {
+        newrelic.events(failure(5));
+      });
       ctx.datadog.readings = [service('shop-api', [route('POST', '/orders', 4)])];
-      connectNewRelic(ctx);
       for (let round = 0; round < 2; round++) {
         await scan(ctx);
         await scanNewRelic(ctx);
@@ -5044,10 +5049,9 @@ describe('New Relic logs', () => {
       });
 
     async function failingNewRelic(events = [failure(5), failure(8)]) {
-      const newrelic = await FakeNewRelic.create();
-      newrelic.events(...events);
-      const ctx = await start({ newRelic: { bin: newrelic.bin } });
-      connectNewRelic(ctx);
+      const { ctx, newrelic } = await withNewRelic((newrelic) => {
+        newrelic.events(...events);
+      });
       await scanNewRelic(ctx);
       const [alert] = await alertList(ctx);
       await linkRepo(ctx, alert.service.id);
@@ -5077,11 +5081,11 @@ describe('New Relic logs', () => {
       newrelic.behave('throttle');
       const report = await verify(ctx, alert.id);
       const stored = (await ctx.http.get(`/reports/${report.id}`)).body.data;
-      expect(recheckOf(stored)).toEqual({ kind: 'warning', text: 'Recheck failed: New Relic rate limit reached' });
+      expect(recheckOf(stored)).toEqual({ kind: 'warning', text: 'Recheck failed: New Relic logs rate limit reached' });
       expect(stored.status).toBe('ready');
     });
 
-    it('briefs the agent with the source, the Samples and the filter, and tells it to use no pup, no Datadog server, and newrelic through run_integration', async () => {
+    it('briefs the agent with the source, the Samples and the filter, and tells it to use no pup, no Datadog server, and New Relic’s MCP server in place of a CLI', async () => {
       const { ctx, alert } = await failingNewRelic([failure(5)]);
       const before = ctx.daemon.sdk.calls.length;
       await verify(ctx, alert.id);
@@ -5090,7 +5094,8 @@ describe('New Relic logs', () => {
       expect(brief).toContain('NullPointerException in OrderService');
       expect(brief).toContain('New Relic logs filter: {"service":"shop-api","env":"prod"');
       expect(brief).toMatch(/no `pup` and no Datadog MCP Server/);
-      expect(brief).toMatch(/`newrelic` through the `run_integration` tool/);
+      expect(brief).toMatch(/New Relic MCP Server's NRQL query tool/);
+      expect(brief).not.toMatch(/newrelic|run_integration/);
       expect(brief).not.toContain('Datadog query');
       expect(brief).not.toContain('failure Datadog logged');
       expect(deniedSince(ctx, before)).toContain('datadog-pup');
@@ -5115,13 +5120,3 @@ describe('New Relic logs', () => {
     });
   });
 });
-
-/** Whether the process still runs. */
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}

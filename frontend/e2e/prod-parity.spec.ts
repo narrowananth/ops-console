@@ -87,6 +87,7 @@ async function routeMonitor(page: Page, alert: ReturnType<typeof alertOf>, repor
     config: {},
     last_checked_at: ago(1),
     sign_in: null,
+    pick: null,
   };
   await page.route('**/api/connectors', (route) =>
     route.fulfill({ json: { data: [datadog], meta: { next_cursor: null } } }),

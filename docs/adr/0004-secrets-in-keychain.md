@@ -2,8 +2,8 @@
 
 Connection passwords, tokens and service-account keys live in the macOS Keychain under the service
 `ops-console`, keyed `connection:<id>`; an MCP Server's env vars are keyed `mcp:<name>`, the GitHub
-Connector's `gh` token included; the Loki logs Connector's secret is keyed `connection:loki_logs`; the New Relic logs
-Connector's API key is keyed `connection:new_relic_logs`; the CLIProxy API key is `cliproxy:api-key`. `state.db` holds only the Connection's non-secret fields. Secrets are read at the moment of use and never reach the database,
+Connector's `gh` token included; the Loki logs Connector's own Grafana sign-in, the client the console registered and its tokens, is one item keyed
+`connection:loki_logs_oauth`; the CLIProxy API key is `cliproxy:api-key`. `state.db` holds only the Connection's non-secret fields. Secrets are read at the moment of use and never reach the database,
 logs, WebSocket payloads or the browser.
 
 Each ad hoc release is a new app, and macOS asks for the login password once per Keychain item an app did not
@@ -18,6 +18,11 @@ items stay where they are. The check keeps a planted or damaged bundle from hand
 choosing. It does not stop someone who can already replace the installed app. It pins the team and never a `cdhash`,
 which changes with every Node. The previous app's version is its folder's name, as trustworthy as whoever can write
 there.
+
+The daemon reads one item it did not create: Claude Code's own, `Claude Code-credentials`, for the access token Claude Code
+stored for New Relic's MCP server. The token is held in memory for the call. The console never writes it to the
+database, a log, a response or the browser, and never refreshes it, so Claude Code stays the only one that does. macOS
+asks for the Mac's login password the first time, and a refusal reads needs auth.
 
 The exception is the headers of an http or sse MCP Server. Claude Code sends them itself, so it
 keeps them in its own config file in plain text. The console cannot hold them while Claude Code
@@ -43,3 +48,8 @@ clean up leaves the folder for macOS to clear from the temp directory.
   identifier could hand over items, so the team rule replaced it.
 - **Re-entering every secret at the first signed release**: no handover code to change, but a worse upgrade than a
   handover that already works.
+- **A typed secret for Loki and New Relic**, a Loki bearer token or password and a New Relic User API key, kept as
+  `connection:loki_logs` and `connection:new_relic_logs` for the `logcli` and `newrelic` CLIs: the operator had to create a
+  key on each service and paste it in, and the CLIs had to be installed. The hosted servers' browser sign-ins replaced it.
+- **A New Relic token of the console's own**: New Relic's server takes a client registered for known MCP hosts, so the
+  console could not sign in itself. It reads the one Claude Code stored.

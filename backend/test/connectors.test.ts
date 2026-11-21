@@ -2,12 +2,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { CONNECTOR_ORDER, ConnectorId, ErrorCode, type WsEvent } from '@ops-console/shared';
+import { CONNECTOR_ORDER, ConnectorId, ErrorCode, HealthStatus, type WsEvent } from '@ops-console/shared';
 import Database from 'better-sqlite3';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ApiError } from '../src/common/errors';
-import { CliConnectorTools } from '../src/connectors/connector-tools';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
 import { ConnectorsService } from '../src/connectors/connectors.service';
 import { LoopbackGoogleAuth } from '../src/connectors/google-auth';
@@ -17,18 +16,23 @@ import { KEYCHAIN } from '../src/keychain/keychain';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { McpServersService } from '../src/mcp/mcp-servers.service';
 import { type AgentDaemon, api, listen, signIn, startAgentDaemon, until } from './agent-fixtures';
+import { FakeClaudeCredentials } from './fakes/claude-credentials';
 import { FakeConnectorTools } from './fakes/connector-tools';
+import { FakeFolderPicker } from './fakes/folder-picker';
 import { FakeGoogle } from './fakes/google';
 import { FakeKeychain } from './fakes/keychain';
-import { FakeLogcli } from './fakes/loki-logs';
+import { FakeGrafana } from './fakes/loki-logs';
 import { FakeNewRelic } from './fakes/new-relic-logs';
 import { FakeProbe } from './fakes/probe';
 
 const running: AgentDaemon[] = [];
 const googles: FakeGoogle[] = [];
+/** The stand-ins for hosted servers a test started. */
+const hostedServers: { close(): Promise<void> }[] = [];
 afterEach(async () => {
   for (const daemon of running.splice(0)) await daemon.stop();
   for (const google of googles.splice(0)) await google.close().catch(() => {});
+  for (const server of hostedServers.splice(0)) await server.close().catch(() => {});
 });
 
 type Ctx = {
@@ -39,11 +43,19 @@ type Ctx = {
   dirs: string[];
   /** The stand-in for Google, when the test asked for one. */
   google: FakeGoogle | null;
+  /** What Claude Code stored for its MCP servers, and the folder dialog. */
+  claude: FakeClaudeCredentials;
+  folder: FakeFolderPicker;
+  /** The stand-ins for Grafana Cloud and New Relic, when the test asked for them. */
+  grafana: FakeGrafana;
+  newrelic: FakeNewRelic;
 };
 type Row = Record<string, unknown> & { id: string; status: string };
 
 /** `google`: Google is the stand-in, with a client the build ships or with none; `signInMs` shortens the wait for a sign-in. */
-async function start(options: { google?: 'shipped' | 'none'; signInMs?: number } = {}): Promise<Ctx> {
+async function start(
+  options: { google?: 'shipped' | 'none'; signInMs?: number; keychain?: FakeKeychain } = {},
+): Promise<Ctx> {
   const tools = new FakeConnectorTools();
   const probe = new FakeProbe();
   const google = options.google === undefined ? null : await FakeGoogle.start();
@@ -51,10 +63,23 @@ async function start(options: { google?: 'shipped' | 'none'; signInMs?: number }
   const auth = google
     ? new LoopbackGoogleAuth(options.google === 'shipped' ? google.client : null, google.endpoints, options.signInMs)
     : undefined;
+  const claude = new FakeClaudeCredentials();
+  const folder = new FakeFolderPicker();
+  const grafana = await FakeGrafana.start();
+  const newrelic = await FakeNewRelic.start();
+  hostedServers.push(grafana, newrelic);
   const daemon = await startAgentDaemon({
+    ...(options.keychain ? { keychain: options.keychain } : {}),
     modules: [
       McpServersModule.forRoot({ probe, launcher: '/opt/ops-console' }),
-      ConnectorsModule.forRoot({ tools, google: auth }),
+      ConnectorsModule.forRoot({
+        tools,
+        google: auth,
+        claudeCredentials: claude,
+        folderPicker: folder,
+        hosts: { grafana: grafana.url, newRelic: { US: newrelic.url, EU: newrelic.url, JP: newrelic.url } },
+        grafanaSignInMs: options.signInMs,
+      }),
     ],
   });
   running.push(daemon);
@@ -69,6 +94,10 @@ async function start(options: { google?: 'shipped' | 'none'; signInMs?: number }
     keychain: daemon.app.get<FakeKeychain>(KEYCHAIN),
     dirs: [daemon.home, second],
     google,
+    claude,
+    folder,
+    grafana,
+    newrelic,
   };
 }
 
@@ -1028,6 +1057,20 @@ describe('OpenTelemetry logs Connector', () => {
     ]);
   });
 
+  it('opens the folder dialog the Repos page uses, and answers the folder chosen or none, storing nothing', async () => {
+    const ctx = await start();
+    const logs = await folder();
+    ctx.folder.next = [logs];
+    const chosen = await api(ctx.daemon).post('/connectors/otel_logs/pick-folder');
+    expect([chosen.status, chosen.body.data]).toEqual([200, { path: logs }]);
+    expect(await one(ctx, 'otel_logs')).toMatchObject({ status: 'off', config: { folder: '' } });
+    ctx.folder.next = [];
+    expect((await api(ctx.daemon).post('/connectors/otel_logs/pick-folder')).body.data).toEqual({ path: null });
+    ctx.folder.next = [logs];
+    await connect(ctx, { folder: (await api(ctx.daemon).post('/connectors/otel_logs/pick-folder')).body.data.path });
+    expect(await one(ctx, 'otel_logs')).toMatchObject({ status: 'ok', config: { folder: logs } });
+  });
+
   it('connects at once to a folder that exists and can be read, with no sign-in, empty or not', async () => {
     const ctx = await start();
     const logs = await folder();
@@ -1208,7 +1251,7 @@ describe('CloudWatch logs Connector', () => {
     ctx.tools.awsSignedInProfiles.clear();
     expect(await check()).toMatchObject({
       status: 'auth',
-      status_detail: 'AWS profile ops is signed out. Run `aws login --profile ops`, then Connect again.',
+      status_detail: 'AWS profile ops is signed out. Connect to sign in again.',
     });
     ctx.tools.awsSsoProfiles.add('ops');
     expect(await check()).toMatchObject({
@@ -1235,6 +1278,10 @@ describe('CloudWatch logs Connector', () => {
       'the waiting sign-in',
     );
     expect(ctx.tools.awsLogins).toEqual(['ops']);
+    expect(ctx.tools.awsLoginKinds).toEqual(['sso']);
+    // A second Connect during the wait changes nothing.
+    expect((await connect(ctx, body)).status).toBe(202);
+    expect(ctx.tools.awsLogins).toEqual(['ops']);
     // Cancel leaves the Connector as it was before Connect, with the choices kept.
     const cancelled = await api(ctx.daemon).delete('/connectors/cloudwatch_logs/sign-in');
     expect(cancelled.body.data).toMatchObject({ status: 'off', sign_in: null, config: { profile: 'ops' } });
@@ -1249,17 +1296,83 @@ describe('CloudWatch logs Connector', () => {
     expect(registered(ctx).every((entry) => entry !== undefined)).toBe(true);
   });
 
-  it('tells the operator to run aws login for a profile that does not use Identity Center', async () => {
+  it('signs a profile with no Identity Center session in with aws login, in the region chosen, and connects after', async () => {
     const ctx = await start();
-    await connect(ctx, { profile: 'ops', region: 'us-east-1', log_groups: [GROUPS[0]] });
-    const row = await until(
+    ctx.tools.awsGroups = ['/ecs/shop-api'];
+    expect((await connect(ctx, { profile: 'ops', region: 'us-east-1', log_groups: [GROUPS[0]] })).status).toBe(202);
+    await until(
       () => one(ctx, 'cloudwatch_logs'),
-      (found) => found.status === 'auth' && found.sign_in === null,
-      'the answer',
+      (row) => row.status === 'ok' && row.sign_in === null,
+      'the sign-in',
     );
-    expect(row.status_detail).toBe('AWS profile ops is signed out. Run `aws login --profile ops`, then Connect again.');
+    expect(ctx.tools.awsLogins).toEqual(['ops']);
+    expect(ctx.tools.awsLoginKinds).toEqual(['console']);
+    expect(ctx.tools.awsLoginRegions).toEqual(['us-east-1']);
+    expect(registered(ctx).every((entry) => entry !== undefined)).toBe(true);
+  });
+
+  it('stops Connect and names the version and the update command when the AWS CLI is too old for aws login, starting nothing', async () => {
+    const ctx = await start();
+    ctx.tools.awsCliVersion = '2.31.9';
+    const refused = await connect(ctx, { profile: 'ops', region: 'us-east-1' });
+    expect([refused.status, refused.body.error.code]).toEqual([409, ErrorCode.InvalidState]);
+    expect(refused.body.error.message).toContain('2.31.9');
+    expect(refused.body.error.message).toContain('brew upgrade awscli');
     expect(ctx.tools.awsLogins).toEqual([]);
-    expect(registered(ctx).every((entry) => entry === undefined)).toBe(true);
+    expect(await one(ctx, 'cloudwatch_logs')).toMatchObject({ status: 'off', sign_in: null });
+    // An Identity Center profile signs in with aws sso login, which an old CLI has.
+    ctx.tools.awsSsoProfiles.add('ops');
+    expect((await connect(ctx, { profile: 'ops', region: 'us-east-1' })).status).toBe(202);
+    await until(
+      () => ctx.tools.awsLogins.length,
+      (count) => count === 1,
+      'aws sso login',
+    );
+  });
+
+  it('creates the default profile through the sign-in when none exists, and takes the region of the profile chosen', async () => {
+    const ctx = await start();
+    ctx.tools.awsGroups = [];
+    expect((await connect(ctx, { region: 'eu-west-1' })).status).toBe(202);
+    await until(
+      () => one(ctx, 'cloudwatch_logs'),
+      (row) => row.status === 'ok',
+      'the sign-in',
+    );
+    expect(ctx.tools.awsLogins).toEqual(['default']);
+    expect(await one(ctx, 'cloudwatch_logs')).toMatchObject({ config: { profile: 'default', region: 'eu-west-1' } });
+
+    const other = await start();
+    other.tools.awsConfigured = [{ name: 'ops', region: 'ap-south-1' }];
+    expect((await connect(other, { profile: 'ops' })).status).toBe(202);
+    await until(
+      () => one(other, 'cloudwatch_logs'),
+      (row) => row.status === 'ok',
+      'the sign-in',
+    );
+    expect(await one(other, 'cloudwatch_logs')).toMatchObject({ config: { profile: 'ops', region: 'ap-south-1' } });
+    const noRegion = await start();
+    const refused = await connect(noRegion, { profile: 'ops' });
+    expect(refused.status).toBe(400);
+  });
+
+  it('lists the AWS profiles on this Mac with their regions, and says when aws is missing', async () => {
+    const ctx = await start();
+    ctx.tools.awsConfigured = [
+      { name: 'default', region: null },
+      { name: 'ops', region: 'us-east-1' },
+    ];
+    const listed = await api(ctx.daemon).get('/connectors/cloudwatch_logs/profiles');
+    expect(listed.body).toEqual({
+      data: [
+        { name: 'default', region: null },
+        { name: 'ops', region: 'us-east-1' },
+      ],
+      meta: { next_cursor: null },
+    });
+    ctx.tools.missing = new Set(['aws']);
+    const missing = await api(ctx.daemon).get('/connectors/cloudwatch_logs/profiles');
+    expect([missing.status, missing.body.error.code]).toEqual([422, ErrorCode.ToolMissing]);
   });
 
   it('reads down with the reason when a picked group is gone after the sign-in', async () => {
@@ -1360,22 +1473,31 @@ describe('CloudWatch logs Connector', () => {
 });
 
 describe('Loki logs Connector', () => {
-  const connect = (ctx: Ctx, body: Record<string, unknown>) =>
+  const connect = (ctx: Ctx, body: Record<string, unknown> = {}) =>
     api(ctx.daemon).post('/connectors/loki_logs/connect', body);
   const status = (ctx: Ctx, want: string) =>
     until(
       () => one(ctx, 'loki_logs'),
-      (row) => row.status === want,
+      (row) => row.status === want && row.sign_in === null,
       `Loki logs to read ${want}`,
     );
-  const SECRET = 'glc_example_secret';
-  const URL = 'https://loki.example.com';
+  /** The Grafana sign-in page the pane shows, and the operator finishing it in the browser. */
+  const page = async (ctx: Ctx): Promise<string> =>
+    (
+      (
+        await until(
+          () => one(ctx, 'loki_logs'),
+          (row) => (row.sign_in as { url: string | null } | null)?.url != null,
+          'the sign-in page',
+        )
+      ).sign_in as { url: string }
+    ).url;
+  const finish = async (ctx: Ctx) => ctx.grafana.visit(await page(ctx));
   const registered = (ctx: Ctx) =>
     ctx.dirs.flatMap((dir) => {
       const file = path.join(dir, '.claude.json');
       return existsSync(file) ? Object.keys(JSON.parse(readFileSync(file, 'utf8')).mcpServers ?? {}) : [];
     });
-  const stored = (ctx: Ctx) => ctx.keychain.values.get('connection:loki_logs');
   /** Everything the daemon says or keeps outside the Keychain. */
   const everywhere = async (ctx: Ctx, events: WsEvent[]) =>
     JSON.stringify([
@@ -1387,22 +1509,15 @@ describe('Loki logs Connector', () => {
         .all(),
     ]);
 
-  it('is listed last, off, with its default config and no secret', async () => {
+  it('is listed last but one, off, with only a data source in its config and no sign-in', async () => {
     const ctx = await start();
     expect(await one(ctx, 'loki_logs')).toMatchObject({
       name: 'Loki logs',
-      via: 'logcli CLI',
+      via: 'Grafana Cloud MCP',
       status: 'off',
       sign_in: null,
       config: {
-        url: '',
-        org_id: '',
-        auth: 'none',
-        username: '',
-        service_label: 'service_name',
-        env_label: 'deployment_environment_name',
-        selector: '',
-        format: 'json',
+        datasource_uid: '',
         environments: ['prod'],
         daily_scan_time: '09:00',
         default_interval: '24h',
@@ -1412,531 +1527,477 @@ describe('Loki logs Connector', () => {
         reports_folder: 'reports',
       },
     });
+    expect(Object.keys((await one(ctx, 'loki_logs')).config as object).sort()).toEqual([
+      'daily_scan_time',
+      'datasource_uid',
+      'default_interval',
+      'environments',
+      'failing_errors_per_hour',
+      'ignore',
+      'rapid_errors_per_10m',
+      'reports_folder',
+    ]);
     expect(ctx.keychain.values.size).toBe(0);
   });
 
-  it('connects with no auth: answers 202, checks the URL through logcli, and registers no MCP server', async () => {
+  it('signs in to Grafana Cloud through the daemon, shows the page, reads the one Loki data source, and registers Grafana’s server for the agent', async () => {
     const ctx = await start();
-    const before = registered(ctx);
-    const connected = await connect(ctx, { url: URL });
-    expect(connected.status).toBe(202);
-    expect(await status(ctx, 'ok')).toMatchObject({ status_detail: null, account_label: URL, config: { url: URL } });
-    expect(ctx.tools.lokiCalls).toEqual([{ LOKI_ADDR: URL }]);
-    expect(registered(ctx)).toEqual(before);
-    expect(ctx.keychain.values.size).toBe(0);
-  });
-
-  it('connects with a bearer token and with basic auth, each passing the credentials in the environment of its checks', async () => {
-    const ctx = await start();
-    await connect(ctx, { url: URL, auth: 'bearer', secret: SECRET });
-    await status(ctx, 'ok');
-    expect(ctx.tools.lokiCalls.at(-1)).toEqual({ LOKI_ADDR: URL, LOKI_BEARER_TOKEN: SECRET });
-    await connect(ctx, {
-      url: URL,
-      auth: 'basic',
-      username: '123456',
-      org_id: 'tenant-1',
-      secret: 'glc_example_basic',
+    expect((await connect(ctx)).status).toBe(202);
+    const waiting = await page(ctx);
+    expect((await one(ctx, 'loki_logs')).sign_in).toEqual({ code: null, url: waiting });
+    expect(ctx.tools.opened).toEqual([waiting]);
+    const redirect = new URL(new URL(waiting).searchParams.get('redirect_uri') as string);
+    expect(redirect.hostname).toBe('127.0.0.1');
+    // A request that does not carry the state is not the sign-in coming back.
+    expect((await fetch(`${redirect}?code=forged&state=wrong`)).status).toBe(404);
+    expect((await one(ctx, 'loki_logs')).sign_in).not.toBeNull();
+    expect(await ctx.grafana.visit(waiting)).toBe(200);
+    expect(await status(ctx, 'ok')).toMatchObject({
+      status_detail: null,
+      account_label: 'Loki (prod)',
+      config: { datasource_uid: 'loki-main' },
     });
-    await until(
-      () => ctx.tools.lokiCalls.at(-1),
-      (call) => call?.LOKI_PASSWORD === 'glc_example_basic',
-      'the basic check',
+    // The listener ended with the callback.
+    await expect(fetch(redirect)).rejects.toThrow();
+    expect([...ctx.keychain.values.keys()]).toEqual(['connection:loki_logs_oauth']);
+    expect(registered(ctx)).toContain('grafana');
+    const server = await api(ctx.daemon).get('/mcp-servers');
+    expect(server.body.data.find((one: Row) => one.name === 'grafana')).toMatchObject({
+      transport: 'http',
+      target: 'https://mcp.grafana.com/mcp',
+    });
+  });
+
+  it('answers only the first valid callback: a replay of it is refused', async () => {
+    const ctx = await start();
+    await connect(ctx);
+    const authorize = await fetch(await page(ctx), { redirect: 'manual' });
+    const back = authorize.headers.get('location') as string;
+    const answers = await Promise.all(
+      [fetch(back), fetch(back)].map((one) =>
+        one.then(
+          (r) => r.status,
+          () => 0,
+        ),
+      ),
     );
-    expect(ctx.tools.lokiCalls.at(-1)).toEqual({
-      LOKI_ADDR: URL,
-      LOKI_ORG_ID: 'tenant-1',
-      LOKI_USERNAME: '123456',
-      LOKI_PASSWORD: 'glc_example_basic',
-    });
-    expect(await one(ctx, 'loki_logs')).toMatchObject({
-      config: { auth: 'basic', username: '123456', org_id: 'tenant-1' },
-    });
+    expect(answers.filter((status) => status === 200)).toHaveLength(1);
+    expect(await status(ctx, 'ok')).toMatchObject({ account_label: 'Loki (prod)' });
   });
 
-  it('keeps the secret only in the Keychain: in no response, event, log or database row', async () => {
+  it('keeps the tokens only in the Keychain: in no response, event, log or database row', async () => {
     const ctx = await start();
     const { events, close } = await listen(ctx.daemon);
-    const connected = await connect(ctx, { url: URL, auth: 'bearer', secret: SECRET });
+    await connect(ctx);
+    await finish(ctx);
     await status(ctx, 'ok');
-    const checked = await api(ctx.daemon).post('/connectors/loki_logs/checks');
+    await api(ctx.daemon).post('/connectors/loki_logs/checks');
     close();
-    expect(stored(ctx)).toBe(SECRET);
-    expect(JSON.stringify([connected.body, checked.body])).not.toContain(SECRET);
-    expect(await everywhere(ctx, events)).not.toContain(SECRET);
+    const tokens = [...ctx.grafana.accepted];
+    expect(tokens.length).toBeGreaterThan(0);
+    const saved = ctx.keychain.values.get('connection:loki_logs_oauth') as string;
+    expect(saved).toContain(tokens[0]);
+    const everything = await everywhere(ctx, events);
+    for (const token of tokens) expect(everything).not.toContain(token);
+    expect(everything).not.toMatch(/refresh-/);
   });
 
-  it('keeps the stored secret when Connect leaves it out, replaces it when one is typed, and removes it on Disconnect', async () => {
+  it('asks which data source to read when the stack has several, finishes when one is picked, and keeps the pick for the next Connect', async () => {
     const ctx = await start();
-    await connect(ctx, { url: URL, auth: 'bearer', secret: SECRET });
-    await status(ctx, 'ok');
-    await connect(ctx, { url: URL, auth: 'bearer', org_id: 'tenant-2' });
-    await until(
-      () => ctx.tools.lokiCalls.at(-1),
-      (call) => call?.LOKI_ORG_ID === 'tenant-2',
-      'the second check',
-    );
-    expect(stored(ctx)).toBe(SECRET);
-    expect(ctx.tools.lokiCalls.at(-1)).toMatchObject({ LOKI_BEARER_TOKEN: SECRET });
-    await connect(ctx, { url: URL, auth: 'bearer', secret: 'glc_example_new' });
-    await until(
-      () => stored(ctx),
-      (value) => value === 'glc_example_new',
-      'the new secret',
-    );
-    const disconnected = await api(ctx.daemon).delete('/connectors/loki_logs/credentials');
-    expect(disconnected.body.data).toMatchObject({ status: 'off', config: { url: URL } });
-    expect(ctx.keychain.values.size).toBe(0);
-  });
-
-  it('clears a field the operator emptied, which a blank in a PATCH would keep', async () => {
-    const ctx = await start();
-    await connect(ctx, { url: URL, org_id: 'tenant-1', selector: 'cluster="prod-1"' });
-    await status(ctx, 'ok');
-    await connect(ctx, { url: URL, org_id: '', selector: '' });
-    await until(
-      () => one(ctx, 'loki_logs'),
-      (row) => (row.config as { org_id: string }).org_id === '',
-      'the cleared config',
-    );
-    expect(await one(ctx, 'loki_logs')).toMatchObject({ config: { org_id: '', selector: '' } });
-  });
-
-  it('refuses a bad config with validation_failed and stores nothing', async () => {
-    const ctx = await start();
-    const refused: [Record<string, unknown>, string][] = [
-      [{ url: 'not a url' }, 'a URL that is not one'],
-      [{ url: 'ftp://loki.example.com' }, 'a URL that is not http or https'],
-      [{ url: 'https://user:tok@loki.example.com' }, 'a URL with credentials in it'],
-      [{ url: 'https://tok@loki.example.com' }, 'a URL with a user in it'],
-      [{}, 'no URL'],
-      [{ url: URL, auth: 'basic', secret: SECRET }, 'basic with no username'],
-      [{ url: URL, auth: 'bearer' }, 'bearer with no secret'],
-      [{ url: URL, auth: 'basic', username: 'u' }, 'basic with no secret'],
-      [{ url: URL, service_label: 'service-name' }, 'a service label that is not a label name'],
-      [{ url: URL, env_label: 'a"}|' }, 'an env label that is not a label name'],
-      [{ url: URL, selector: 'cluster=prod' }, 'a selector value with no quotes'],
-      [{ url: URL, selector: 'cluster="a"} | json | {x="b"' }, 'a selector that closes itself'],
-      [{ url: URL, format: 'plain' }, 'a format that is neither json nor logfmt'],
-    ];
-    for (const [body, why] of refused) {
-      const response = await connect(ctx, body);
-      expect([response.status, response.body.error?.code], why).toEqual([422, ErrorCode.ValidationFailed]);
-    }
-    expect(await one(ctx, 'loki_logs')).toMatchObject({ status: 'off', config: { url: '', auth: 'none' } });
-    expect(ctx.keychain.values.size).toBe(0);
-    expect(ctx.tools.lokiCalls).toEqual([]);
-  });
-
-  it('tells the operator that credentials belong in the secret field when the URL holds some', async () => {
-    const ctx = await start();
-    const response = await connect(ctx, { url: 'https://user:tok@loki.example.com' });
-    expect(response.body.error.message).toContain('secret field');
-    expect(response.body.error.message).not.toContain('tok@');
-  });
-
-  it('accepts selectors of several matchers and regular expressions', async () => {
-    const ctx = await start();
-    const selector = 'cluster="prod-1", namespace=~"shop.*", team!="legacy"';
-    expect((await connect(ctx, { url: URL, selector })).status).toBe(202);
-    expect(await status(ctx, 'ok')).toMatchObject({ config: { selector } });
-  });
-
-  it('stops and names logcli and its install command when it is not on the PATH, and installs nothing', async () => {
-    const ctx = await start();
-    ctx.tools.missing.add('logcli');
-    const refused = await connect(ctx, { url: URL });
-    expect([refused.status, refused.body.error.code]).toEqual([422, ErrorCode.ToolMissing]);
-    expect(refused.body.error.message).toContain('logcli');
-    expect(refused.body.error.message).toContain('brew install logcli');
-    expect(ctx.tools.brewCalls).toEqual([]);
-    expect(await one(ctx, 'loki_logs')).toMatchObject({ status: 'off', config: { url: '' } });
-  });
-
-  it('reads needs auth, with what to check, when Loki answers 401 or 403', async () => {
-    const ctx = await start();
-    ctx.tools.loki = { status: 'auth' };
-    await connect(ctx, { url: URL, auth: 'bearer', secret: SECRET });
-    const row = await status(ctx, 'auth');
-    expect(row.status_detail).toContain('Check the secret');
-    expect(row.status_detail).toContain('logs:read');
-  });
-
-  it('reads down, with the reason, when the URL does not answer', async () => {
-    const ctx = await start();
-    ctx.tools.loki = { status: 'down', reason: 'the connection was refused' };
-    await connect(ctx, { url: URL });
-    const row = await status(ctx, 'fail');
-    expect(row.status_detail).toBe(`Could not reach ${URL}: the connection was refused`);
-  });
-
-  it('reads down when logcli leaves the PATH after Connect, and connected again when it returns', async () => {
-    const ctx = await start();
-    await connect(ctx, { url: URL });
-    await status(ctx, 'ok');
-    ctx.tools.missing.add('logcli');
-    const down = await api(ctx.daemon).post('/connectors/loki_logs/checks');
-    expect(down.body.data).toMatchObject({ status: 'fail' });
-    expect(down.body.data.status_detail).toContain('brew install logcli');
-    ctx.tools.missing.delete('logcli');
-    expect((await api(ctx.daemon).post('/connectors/loki_logs/checks')).body.data.status).toBe('ok');
-  });
-
-  describe('the logcli health check', () => {
-    const tools = async (logcli: FakeLogcli) =>
-      new CliConnectorTools({
-        pup: 'pup',
-        gh: 'gh',
-        glab: 'glab',
-        bkt: 'bkt',
-        slashdocs: 'slashdocs',
-        aws: 'aws',
-        logcli: logcli.bin,
-        newrelic: 'newrelic',
-      });
-    const ENV = { LOKI_ADDR: URL };
-
-    it('reads connected for a Loki that answers, with streams or none yet', async () => {
-      const logcli = await FakeLogcli.create();
-      expect(await (await tools(logcli)).lokiCheck(ENV)).toEqual({ status: 'ok' });
-      logcli.stream({ service_name: 'shop-api' }, [{ at: Date.now() - 60_000, line: 'x' }]);
-      expect(await (await tools(logcli)).lokiCheck(ENV)).toEqual({ status: 'ok' });
+    ctx.grafana.datasource('loki-eu', 'Loki (eu)').datasource('prom-main', 'Prometheus', 'prometheus');
+    await connect(ctx);
+    await finish(ctx);
+    expect(await status(ctx, 'auth')).toMatchObject({
+      status_detail: 'Choose a Loki data source to finish connecting.',
+      config: { datasource_uid: '' },
+      pick: 'data_source',
     });
+    const listed = await api(ctx.daemon).get('/connectors/loki_logs/datasources');
+    expect(listed.body).toEqual({
+      data: [
+        { id: 'loki-main', name: 'Loki (prod)' },
+        { id: 'loki-eu', name: 'Loki (eu)' },
+      ],
+      meta: { next_cursor: null },
+    });
+    const none = await connect(ctx);
+    expect([none.status, none.body.error.code]).toEqual([409, ErrorCode.PickRequired]);
+    const wrong = await connect(ctx, { datasource_uid: 'prom-main' });
+    expect([wrong.status, wrong.body.error.code]).toEqual([422, ErrorCode.ValidationFailed]);
+    const opened = ctx.tools.opened.length;
+    expect((await connect(ctx, { datasource_uid: 'loki-eu' })).status).toBe(202);
+    expect(await status(ctx, 'ok')).toMatchObject({
+      account_label: 'Loki (eu)',
+      config: { datasource_uid: 'loki-eu' },
+    });
+    // The pick used the sign-in already held: no second browser step.
+    expect(ctx.tools.opened).toHaveLength(opened);
 
-    it('reads needs auth for a refused secret, with each auth mode, and connected for the right one', async () => {
-      const logcli = await FakeLogcli.create();
-      logcli.requires({ basic: { username: '123456', password: SECRET } }, 'tenant-1');
-      const check = async (env: Record<string, string>) => (await tools(logcli)).lokiCheck(env);
-      expect(await check({ ...ENV, LOKI_ORG_ID: 'tenant-1', LOKI_USERNAME: '123456', LOKI_PASSWORD: 'wrong' })).toEqual(
-        {
-          status: 'auth',
-        },
+    await api(ctx.daemon).delete('/connectors/loki_logs/credentials');
+    await connect(ctx);
+    await finish(ctx);
+    expect(await status(ctx, 'ok')).toMatchObject({
+      account_label: 'Loki (eu)',
+      config: { datasource_uid: 'loki-eu' },
+    });
+  });
+
+  it('says so and stays needs auth when the stack has no Loki data source', async () => {
+    const ctx = await start();
+    ctx.grafana.datasources([]);
+    await connect(ctx);
+    await finish(ctx);
+    expect(await status(ctx, 'auth')).toMatchObject({
+      status_detail: expect.stringContaining('no Loki data source'),
+    });
+  });
+
+  it('refuses a pick and the picker list while the Connector is not signed in', async () => {
+    const ctx = await start();
+    const listed = await api(ctx.daemon).get('/connectors/loki_logs/datasources');
+    expect([listed.status, listed.body.error.code]).toEqual([409, ErrorCode.InvalidState]);
+    const picked = await connect(ctx, { datasource_uid: 'loki-main' });
+    expect([picked.status, picked.body.error.code]).toEqual([409, ErrorCode.InvalidState]);
+  });
+
+  it('leaves a second Connect during the wait alone, and Cancel ends the wait and the listener, keeping the status it had', async () => {
+    const ctx = await start();
+    await connect(ctx);
+    const waiting = await page(ctx);
+    expect((await connect(ctx)).status).toBe(202);
+    expect(ctx.tools.opened).toEqual([waiting]);
+    expect((await one(ctx, 'loki_logs')).sign_in).toEqual({ code: null, url: waiting });
+    const redirect = new URL(waiting).searchParams.get('redirect_uri') as string;
+    const cancelled = await api(ctx.daemon).delete('/connectors/loki_logs/sign-in');
+    expect(cancelled.body.data).toMatchObject({ status: 'off', sign_in: null });
+    await expect(fetch(redirect)).rejects.toThrow();
+    expect(ctx.keychain.values.size).toBe(0);
+  });
+
+  it('ends needs auth with the reason when the operator declines, and when the wait runs out', async () => {
+    const ctx = await start({ signInMs: 300 });
+    ctx.grafana.deny = true;
+    await connect(ctx);
+    await finish(ctx);
+    expect(await status(ctx, 'auth')).toMatchObject({ status_detail: 'Grafana did not sign you in' });
+    ctx.grafana.deny = false;
+    await connect(ctx);
+    expect(await status(ctx, 'auth')).toMatchObject({
+      status_detail: 'Grafana sign-in did not finish within 5 minutes',
+    });
+    expect(ctx.keychain.values.size).toBe(0);
+  });
+
+  it('has no pick pending on a row that needs a sign-in: one migrated to auth with no data source, and one whose first Connect failed', async () => {
+    const ctx = await start();
+    ctx.daemon.app
+      .get<Store>(STORE)
+      .write((tx) =>
+        tx
+          .update(connectors)
+          .set({ status: HealthStatus.Auth, statusDetail: 'Sign in again to use Grafana Cloud.' })
+          .where(eq(connectors.id, ConnectorId.LokiLogs))
+          .run(),
       );
-      expect(await check({ ...ENV, LOKI_ORG_ID: 'tenant-1', LOKI_USERNAME: '123456', LOKI_PASSWORD: SECRET })).toEqual({
-        status: 'ok',
-      });
-      for (const behavior of ['unauthorized', 'forbidden'] as const) {
-        logcli.behave(behavior);
-        expect(await check(ENV), behavior).toEqual({ status: 'auth' });
-      }
+    expect(await one(ctx, 'loki_logs')).toMatchObject({ status: 'auth', config: { datasource_uid: '' }, pick: null });
+    ctx.grafana.deny = true;
+    await connect(ctx);
+    await finish(ctx);
+    expect(await status(ctx, 'auth')).toMatchObject({ pick: null });
+  });
+
+  it('keeps the note a self-hosted Loki was left with until Reconnect connects Grafana Cloud, history and settings kept', async () => {
+    const ctx = await start();
+    const note = 'Loki on Grafana Cloud only: the self-hosted URL is no longer read.';
+    ctx.daemon.app
+      .get<Store>(STORE)
+      .write((tx) =>
+        tx
+          .update(connectors)
+          .set({ status: HealthStatus.Auth, statusDetail: note })
+          .where(eq(connectors.id, ConnectorId.LokiLogs))
+          .run(),
+      );
+    const checked = (await api(ctx.daemon).post('/connectors/loki_logs/checks')).body.data;
+    expect([checked.status, checked.status_detail]).toEqual(['auth', note]);
+    await connect(ctx);
+    await finish(ctx);
+    expect(await status(ctx, 'ok')).toMatchObject({ status_detail: null, account_label: 'Loki (prod)' });
+  });
+
+  it('removes the console’s token and Grafana’s server on Disconnect, and keeps the data source for the next Connect', async () => {
+    const ctx = await start();
+    await connect(ctx);
+    await finish(ctx);
+    await status(ctx, 'ok');
+    const off = await api(ctx.daemon).delete('/connectors/loki_logs/credentials');
+    expect(off.body.data).toMatchObject({ status: 'off', config: { datasource_uid: 'loki-main' } });
+    expect(ctx.keychain.values.size).toBe(0);
+    await ctx.daemon.app.get(McpServersService).settled();
+    expect(registered(ctx)).not.toContain('grafana');
+  });
+
+  describe('the health check', () => {
+    const check = async (ctx: Ctx) => (await api(ctx.daemon).post('/connectors/loki_logs/checks')).body.data;
+    const connected = async () => {
+      const ctx = await start();
+      await connect(ctx);
+      await finish(ctx);
+      await status(ctx, 'ok');
+      return ctx;
+    };
+
+    it('reads connected through the hosted server, with the data source’s name', async () => {
+      const ctx = await connected();
+      expect(await check(ctx)).toMatchObject({ status: 'ok', account_label: 'Loki (prod)' });
+      expect(ctx.grafana.commands().at(-1)).toBe('list_datasources');
     });
 
-    it('reads down with the reason for an unreachable URL, and down for any other failure', async () => {
-      const logcli = await FakeLogcli.create();
-      logcli.behave('unreachable');
-      expect(await (await tools(logcli)).lokiCheck(ENV)).toEqual({
-        status: 'down',
-        reason: 'the connection was refused',
-      });
-      logcli.behave('throttle');
-      expect(await (await tools(logcli)).lokiCheck(ENV)).toEqual({
-        status: 'down',
-        reason: 'it answered with an error',
-      });
+    it('refreshes an expired access token itself and keeps the new tokens in the Keychain', async () => {
+      const ctx = await connected();
+      const before = ctx.keychain.values.get('connection:loki_logs_oauth');
+      ctx.grafana.expireAccessTokens();
+      expect(await check(ctx)).toMatchObject({ status: 'ok' });
+      expect(ctx.keychain.values.get('connection:loki_logs_oauth')).not.toBe(before);
     });
 
-    it('passes nothing of the secret on the command line, and no ambient LOKI_ variable of the daemon', async () => {
-      const logcli = await FakeLogcli.create();
-      process.env.LOKI_ADDR = 'https://ambient.example.com';
-      process.env.LOKI_PASSWORD = 'ambient-password';
-      try {
-        await (await tools(logcli)).lokiCheck({ ...ENV, LOKI_USERNAME: 'u', LOKI_PASSWORD: SECRET });
-      } finally {
-        delete process.env.LOKI_ADDR;
-        delete process.env.LOKI_PASSWORD;
-      }
-      const [call] = logcli.calls();
-      expect(call?.env).toEqual({ ...ENV, LOKI_USERNAME: 'u', LOKI_PASSWORD: SECRET });
-      expect(call?.args.join(' ')).not.toContain(SECRET);
+    it('reads needs auth when the sign-in is refused and cannot be refreshed', async () => {
+      const ctx = await connected();
+      ctx.grafana.expireAccessTokens();
+      ctx.grafana.revokeRefreshTokens();
+      expect(await check(ctx)).toMatchObject({ status: 'auth' });
+      ctx.keychain.values.clear();
+      expect(await check(ctx)).toMatchObject({ status: 'auth', status_detail: 'Sign in again to use Grafana Cloud.' });
+    });
+
+    it('reads down with the reason when the server does not answer, and failed with its message for an unknown tool', async () => {
+      const ctx = await connected();
+      ctx.grafana.behave('unreachable');
+      expect(await check(ctx)).toMatchObject({
+        status: 'fail',
+        status_detail: expect.stringContaining('Could not reach'),
+      });
+      ctx.grafana.behave('unknownTool');
+      const odd = await check(ctx);
+      expect(odd.status).toBe('fail');
+      expect(odd.status_detail).toMatch(/list_datasources|unknown tool|not found/i);
+    });
+
+    it('reads down when the picked data source is gone from the stack', async () => {
+      const ctx = await connected();
+      ctx.grafana.datasources([{ uid: 'other', name: 'Other', type: 'loki' }]);
+      expect(await check(ctx)).toMatchObject({
+        status: 'fail',
+        status_detail: expect.stringContaining('not in this Grafana stack'),
+      });
     });
   });
 });
 
 describe('New Relic logs Connector', () => {
-  const connect = (ctx: Ctx, body: Record<string, unknown>) =>
+  const connect = (ctx: Ctx, body: Record<string, unknown> = {}) =>
     api(ctx.daemon).post('/connectors/new_relic_logs/connect', body);
   const status = (ctx: Ctx, want: string) =>
     until(
       () => one(ctx, 'new_relic_logs'),
-      (row) => row.status === want,
+      (row) => row.status === want && row.sign_in === null,
       `New Relic logs to read ${want}`,
     );
-  const KEY = 'NRAK-EXAMPLE';
-  const ACCOUNT = '1234567';
-  const BODY = { account_id: ACCOUNT, region: 'US', secret: KEY };
-  const ENV = { NEW_RELIC_API_KEY: KEY, NEW_RELIC_ACCOUNT_ID: ACCOUNT, NEW_RELIC_REGION: 'US' };
-  const registered = (ctx: Ctx) =>
-    ctx.dirs.flatMap((dir) => {
+  const TOKEN = 'nr-token-example';
+  /** Claude Code's MCP sign-in for the server needs the operator; the stand-in finishes it as `claude mcp login` does. */
+  const needsSignIn = (ctx: Ctx) => {
+    for (const dir of ctx.dirs) ctx.probe.set(dir, 'newrelic', { status: 'needs-auth' });
+    ctx.newrelic.grant(TOKEN);
+    ctx.claude.hold('newrelic', TOKEN);
+  };
+  const registeredServer = (ctx: Ctx): ({ type: string; url: string } | undefined)[] =>
+    ctx.dirs.map((dir) => {
       const file = path.join(dir, '.claude.json');
-      return existsSync(file) ? Object.keys(JSON.parse(readFileSync(file, 'utf8')).mcpServers ?? {}) : [];
+      return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).mcpServers?.newrelic : undefined;
     });
-  const stored = (ctx: Ctx) => ctx.keychain.values.get('connection:new_relic_logs');
-  /** Everything the daemon says or keeps outside the Keychain. */
-  const everywhere = async (ctx: Ctx, events: WsEvent[]) =>
-    JSON.stringify([
-      await list(ctx),
-      events,
-      ctx.daemon.log,
-      new Database(path.join(ctx.daemon.dataDir, 'state.db'), { readonly: true })
-        .prepare('SELECT * FROM connectors')
-        .all(),
-    ]);
 
-  it('is listed last, off, with its default config and no key', async () => {
+  it('is listed last, off, with only the Region and the account in its config', async () => {
     const ctx = await start();
     expect(await one(ctx, 'new_relic_logs')).toMatchObject({
       name: 'New Relic logs',
-      via: 'newrelic CLI',
+      via: 'New Relic MCP',
       status: 'off',
       sign_in: null,
-      config: {
-        account_id: '',
-        region: 'US',
-        service_attribute: 'service.name',
-        env_attribute: 'environment',
-        filter: '',
-        environments: ['prod'],
-        daily_scan_time: '09:00',
-        default_interval: '24h',
-        rapid_errors_per_10m: 100,
-        failing_errors_per_hour: 5,
-        ignore: [],
-        reports_folder: 'reports',
-      },
+      config: { account_id: '', region: 'US', environments: ['prod'], daily_scan_time: '09:00' },
     });
+    expect(Object.keys((await one(ctx, 'new_relic_logs')).config as object).sort()).toEqual([
+      'account_id',
+      'daily_scan_time',
+      'default_interval',
+      'environments',
+      'failing_errors_per_hour',
+      'ignore',
+      'rapid_errors_per_10m',
+      'region',
+      'reports_folder',
+    ]);
     expect((await list(ctx)).at(-1)?.id).toBe('new_relic_logs');
-    expect(ctx.keychain.values.size).toBe(0);
   });
 
-  it('connects with the key, account and region in the CLI’s environment, and registers no MCP server', async () => {
+  it('signs in through Claude Code with the Region’s address, reads the one account, and never signs in itself', async () => {
     const ctx = await start();
-    const before = registered(ctx);
-    const connected = await connect(ctx, { ...BODY, region: 'EU' });
-    expect(connected.status).toBe(202);
+    needsSignIn(ctx);
+    expect((await connect(ctx, { region: 'EU' })).status).toBe(202);
     expect(await status(ctx, 'ok')).toMatchObject({
       status_detail: null,
-      account_label: ACCOUNT,
-      config: { account_id: ACCOUNT, region: 'EU' },
+      account_label: 'Example Prod (1234567)',
+      config: { account_id: '1234567', region: 'EU' },
     });
-    expect(ctx.tools.newRelicCalls).toEqual([{ ...ENV, NEW_RELIC_REGION: 'EU' }]);
-    expect(registered(ctx)).toEqual(before);
-  });
-
-  it('keeps the key only in the Keychain: in no response, event, log or database row', async () => {
-    const ctx = await start();
-    const { events, close } = await listen(ctx.daemon);
-    const connected = await connect(ctx, BODY);
-    await status(ctx, 'ok');
-    const checked = await api(ctx.daemon).post('/connectors/new_relic_logs/checks');
-    close();
-    expect(stored(ctx)).toBe(KEY);
-    expect(JSON.stringify([connected.body, checked.body])).not.toContain(KEY);
-    expect(await everywhere(ctx, events)).not.toContain(KEY);
-  });
-
-  it('keeps the key when Connect omits it, replaces it, and removes it on Disconnect', async () => {
-    const ctx = await start();
-    await connect(ctx, BODY);
-    await status(ctx, 'ok');
-    await connect(ctx, { account_id: '7654321', region: 'US' });
-    await until(
-      () => ctx.tools.newRelicCalls.at(-1),
-      (call) => call?.NEW_RELIC_ACCOUNT_ID === '7654321',
-      'the second check',
-    );
-    expect(stored(ctx)).toBe(KEY);
-    expect(ctx.tools.newRelicCalls.at(-1)).toMatchObject({ NEW_RELIC_API_KEY: KEY });
-    await connect(ctx, { ...BODY, secret: 'NRAK-EXAMPLE-NEW' });
-    await until(
-      () => stored(ctx),
-      (value) => value === 'NRAK-EXAMPLE-NEW',
-      'the new key',
-    );
-    const disconnected = await api(ctx.daemon).delete('/connectors/new_relic_logs/credentials');
-    expect(disconnected.body.data).toMatchObject({ status: 'off', config: { account_id: ACCOUNT } });
-    expect(ctx.keychain.values.size).toBe(0);
-  });
-
-  it('clears a field the operator emptied, which a blank in a PATCH would keep', async () => {
-    const ctx = await start();
-    await connect(ctx, { ...BODY, filter: "cluster = 'prod-1'" });
-    await status(ctx, 'ok');
-    await connect(ctx, { account_id: ACCOUNT, filter: '' });
-    await until(
-      () => one(ctx, 'new_relic_logs'),
-      (row) => (row.config as { filter: string }).filter === '',
-      'the cleared config',
-    );
-  });
-
-  it('refuses a bad config with validation_failed and stores nothing', async () => {
-    const ctx = await start();
-    const refused: [Record<string, unknown>, string][] = [
-      [{ ...BODY, account_id: '12ab' }, 'an account ID that is not digits'],
-      [{ ...BODY, account_id: '' }, 'no account ID'],
-      [{ account_id: ACCOUNT }, 'no key on a first Connect'],
-      [{ ...BODY, secret: '' }, 'an empty key on a first Connect'],
-      [{ ...BODY, region: 'AP' }, 'a region that is not US, EU or JP'],
-      [{ ...BODY, service_attribute: 'service name' }, 'a service attribute with a space'],
-      [{ ...BODY, env_attribute: 'env`; DROP' }, 'an env attribute that is not a plain name'],
-      [{ ...BODY, service_attribute: '' }, 'an empty service attribute'],
-      ...[
-        'SINCE 1 day ago',
-        'until now',
-        'LIMIT 1',
-        'FACET a',
-        'TimeSeries',
-        'order  by x',
-        'COMPARE WITH 1 day ago',
-        'slide  by 1 minute',
-        'OFFSET 5',
-        "WITH TIMEZONE 'UTC'",
-        'extrapolate',
-      ].map((clause): [Record<string, unknown>, string] => [
-        { ...BODY, filter: `a = 'b' ${clause}` },
-        `a filter with ${clause}`,
-      ]),
-      [{ ...BODY, filter: "a = 'b'; SELECT 1" }, 'a filter with a semicolon'],
-      [{ ...BODY, filter: "a = 'b" }, 'a filter with an open quote'],
-      [{ ...BODY, filter: 'a = "b' }, 'a filter with an open double quote'],
-      [{ ...BODY, filter: 'a=1) OR (1=1' }, 'a filter that closes the clause the reader opens'],
-      [{ ...BODY, filter: '(a = 1' }, 'a filter with an open parenthesis'],
-    ];
-    for (const [body, why] of refused) {
-      const response = await connect(ctx, body);
-      expect([response.status, response.body.error?.code], why).toEqual([422, ErrorCode.ValidationFailed]);
+    for (const entry of registeredServer(ctx)) {
+      expect(entry).toMatchObject({ type: 'http', url: 'https://mcp.eu.newrelic.com/mcp/' });
     }
-    expect(await one(ctx, 'new_relic_logs')).toMatchObject({ status: 'off', config: { account_id: '' } });
+    // Claude Code's browser step, only the active account's.
+    const [active, other] = ctx.dirs as [string, string];
+    expect(existsSync(path.join(active, 'fake-mcp-auth.json'))).toBe(true);
+    expect(existsSync(path.join(other, 'fake-mcp-auth.json'))).toBe(false);
+    // The console opened no page of its own and keeps nothing in the Keychain.
+    expect(ctx.tools.opened).toEqual([]);
     expect(ctx.keychain.values.size).toBe(0);
-    expect(ctx.tools.newRelicCalls).toEqual([]);
+    expect(ctx.claude.reads.length).toBeGreaterThan(0);
   });
 
-  it('accepts a filter of one condition, with quotes, parentheses, and a clause word inside a longer one', async () => {
+  it('asks which account to read when the sign-in sees several, and finishes when one is picked', async () => {
     const ctx = await start();
-    for (const filter of [
-      "cluster = 'prod-1'",
-      "(a = 'b' OR a = 'it\\'s') AND c IS NOT NULL",
-      "host LIKE 'untilly%'",
-      "message = 'a) b ('",
-    ]) {
-      expect((await connect(ctx, { ...BODY, filter })).status, filter).toBe(202);
-    }
+    needsSignIn(ctx);
+    ctx.newrelic.accounts([
+      { id: 1234567, name: 'Example Prod' },
+      { id: 7654321, name: 'Example Staging' },
+    ]);
+    await connect(ctx);
+    expect(await status(ctx, 'auth')).toMatchObject({
+      status_detail: 'Choose a New Relic account to finish connecting.',
+      config: { account_id: '' },
+      pick: 'account',
+    });
+    const listed = await api(ctx.daemon).get('/connectors/new_relic_logs/accounts');
+    expect(listed.body).toEqual({
+      data: [
+        { id: '1234567', name: 'Example Prod' },
+        { id: '7654321', name: 'Example Staging' },
+      ],
+      meta: { next_cursor: null },
+    });
+    const none = await connect(ctx);
+    expect([none.status, none.body.error.code]).toEqual([409, ErrorCode.PickRequired]);
+    const wrong = await connect(ctx, { account_id: '999' });
+    expect([wrong.status, wrong.body.error.code]).toEqual([422, ErrorCode.ValidationFailed]);
+    expect((await connect(ctx, { account_id: '7654321' })).status).toBe(202);
+    expect(await status(ctx, 'ok')).toMatchObject({
+      account_label: 'Example Staging (7654321)',
+      config: { account_id: '7654321' },
+      pick: null,
+    });
   });
 
-  it('names the install command when newrelic is missing, and installs nothing', async () => {
+  it('refuses a Region outside US, EU and JP, and registers the server again at the address of a new Region', async () => {
     const ctx = await start();
-    ctx.tools.missing.add('newrelic');
-    const refused = await connect(ctx, BODY);
-    expect([refused.status, refused.body.error.code]).toEqual([422, ErrorCode.ToolMissing]);
-    expect(refused.body.error.message).toContain('newrelic');
-    expect(refused.body.error.message).toContain('brew install newrelic-cli');
-    expect(ctx.tools.brewCalls).toEqual([]);
-    expect(ctx.keychain.values.size).toBe(0);
-    expect(await one(ctx, 'new_relic_logs')).toMatchObject({ status: 'off', config: { account_id: '' } });
-  });
-
-  it('reads needs auth, with what to check, when New Relic answers 401 or 403', async () => {
-    const ctx = await start();
-    ctx.tools.newRelic = { status: 'auth' };
-    await connect(ctx, BODY);
-    const row = await status(ctx, 'auth');
-    expect(row.status_detail).toMatch(/check the key/i);
-    expect(row.status_detail).toContain('one region');
-  });
-
-  it('reads down, with the reason, when New Relic does not answer', async () => {
-    const ctx = await start();
-    ctx.tools.newRelic = { status: 'down', reason: 'the host name was not found' };
-    await connect(ctx, BODY);
-    const row = await status(ctx, 'fail');
-    expect(row.status_detail).toContain('the host name was not found');
-  });
-
-  it('reads down while newrelic is off the PATH, and connected when it returns', async () => {
-    const ctx = await start();
-    await connect(ctx, BODY);
+    needsSignIn(ctx);
+    const refused = await connect(ctx, { region: 'AU' });
+    expect([refused.status, refused.body.error.code]).toEqual([422, ErrorCode.ValidationFailed]);
+    expect(registeredServer(ctx).every((entry) => entry === undefined)).toBe(true);
+    await connect(ctx, { region: 'JP' });
     await status(ctx, 'ok');
-    ctx.tools.missing.add('newrelic');
-    const down = await api(ctx.daemon).post('/connectors/new_relic_logs/checks');
-    expect(down.body.data).toMatchObject({ status: 'fail' });
-    expect(down.body.data.status_detail).toContain('brew install newrelic-cli');
-    ctx.tools.missing.delete('newrelic');
-    expect((await api(ctx.daemon).post('/connectors/new_relic_logs/checks')).body.data.status).toBe('ok');
+    for (const entry of registeredServer(ctx)) expect(entry?.url).toBe('https://mcp.jp.newrelic.com/mcp/');
+    await connect(ctx, { region: 'US' });
+    await until(
+      () => registeredServer(ctx),
+      (entries) => entries.every((entry) => entry?.url === 'https://mcp.newrelic.com/mcp/'),
+      'the server at the US address',
+    );
   });
 
-  it('does not read connected after Disconnect, and runs no query without a key', async () => {
+  it('reads needs auth when macOS refuses the read of Claude Code’s sign-in, or Claude Code holds none', async () => {
     const ctx = await start();
-    await connect(ctx, BODY);
-    await status(ctx, 'ok');
-    await api(ctx.daemon).delete('/connectors/new_relic_logs/credentials');
-    const calls = ctx.tools.newRelicCalls.length;
-    const checked = await api(ctx.daemon).post('/connectors/new_relic_logs/checks');
-    expect(checked.body.data.status).not.toBe('ok');
-    expect(ctx.tools.newRelicCalls).toHaveLength(calls);
+    needsSignIn(ctx);
+    ctx.claude.refused = true;
+    await connect(ctx);
+    expect(await status(ctx, 'auth')).toMatchObject({ status_detail: expect.stringContaining('macOS'), pick: null });
+    expect(ctx.newrelic.calls()).toEqual([]);
   });
 
-  describe('the newrelic health check', () => {
-    const tools = async (newrelic: FakeNewRelic) =>
-      new CliConnectorTools({
-        pup: 'pup',
-        gh: 'gh',
-        glab: 'glab',
-        bkt: 'bkt',
-        slashdocs: 'slashdocs',
-        aws: 'aws',
-        logcli: 'logcli',
-        newrelic: newrelic.bin,
+  it('removes the server on Disconnect and keeps the Region and the account for the next Connect', async () => {
+    const ctx = await start();
+    needsSignIn(ctx);
+    await connect(ctx, { region: 'EU' });
+    await status(ctx, 'ok');
+    const off = await api(ctx.daemon).delete('/connectors/new_relic_logs/credentials');
+    expect(off.body.data).toMatchObject({ status: 'off', config: { region: 'EU', account_id: '1234567' } });
+    await ctx.daemon.app.get(McpServersService).settled();
+    expect(registeredServer(ctx).every((entry) => entry === undefined)).toBe(true);
+  });
+
+  describe('the health check', () => {
+    const check = async (ctx: Ctx) => (await api(ctx.daemon).post('/connectors/new_relic_logs/checks')).body.data;
+    const connected = async () => {
+      const ctx = await start();
+      needsSignIn(ctx);
+      await connect(ctx);
+      await status(ctx, 'ok');
+      return ctx;
+    };
+
+    it('reads connected through the hosted server, with the account', async () => {
+      const ctx = await connected();
+      expect(await check(ctx)).toMatchObject({ status: 'ok', account_label: 'Example Prod (1234567)' });
+    });
+
+    it('asks Claude Code to reconnect the one server when the token ended, reads again, and reads needs auth when that fails too', async () => {
+      const ctx = await connected();
+      ctx.claude.hold('newrelic', 'ended-token', Date.now() - 1_000);
+      ctx.probe.afterProbe = () => ctx.claude.hold('newrelic', TOKEN);
+      expect(await check(ctx)).toMatchObject({ status: 'ok' });
+      expect(ctx.probe.ones + ctx.probe.runs).toBeGreaterThan(0);
+      ctx.probe.afterProbe = null;
+      ctx.claude.hold('newrelic', 'ended-token', Date.now() - 1_000);
+      expect(await check(ctx)).toMatchObject({ status: 'auth' });
+    });
+
+    it('reads down with the reason when the server does not answer, and failed with its message for an unknown tool', async () => {
+      const ctx = await connected();
+      ctx.newrelic.behave('unreachable');
+      expect(await check(ctx)).toMatchObject({
+        status: 'fail',
+        status_detail: expect.stringContaining('Could not reach'),
       });
-
-    it('reads connected for an account that answers, with logs or none yet', async () => {
-      const newrelic = await FakeNewRelic.create();
-      expect(await (await tools(newrelic)).newRelicCheck(ENV)).toEqual({ status: 'ok' });
-      newrelic.events({ at: Date.now() - 60_000, attrs: { message: 'x' } });
-      expect(await (await tools(newrelic)).newRelicCheck(ENV)).toEqual({ status: 'ok' });
+      ctx.newrelic.behave('unknownTool');
+      const odd = await check(ctx);
+      expect(odd.status).toBe('fail');
+      expect(odd.status_detail).toMatch(/list_available_new_relic_accounts|unknown tool|not found/i);
     });
 
-    it('reads needs auth for a refused key, account or region', async () => {
-      const newrelic = await FakeNewRelic.create();
-      newrelic.requires({ apiKey: KEY, accountId: ACCOUNT, region: 'EU' });
-      const check = async (env: Record<string, string>) => (await tools(newrelic)).newRelicCheck(env);
-      expect(await check({ ...ENV, NEW_RELIC_API_KEY: 'wrong' })).toEqual({ status: 'auth' });
-      expect(await check(ENV)).toEqual({ status: 'auth' });
-      expect(await check({ ...ENV, NEW_RELIC_REGION: 'EU' })).toEqual({ status: 'ok' });
-      for (const behavior of ['unauthorized', 'forbidden'] as const) {
-        newrelic.behave(behavior);
-        expect(await check(ENV), behavior).toEqual({ status: 'auth' });
-      }
+    it('reads down when the sign-in cannot read the account any more', async () => {
+      const ctx = await connected();
+      ctx.newrelic.accounts([{ id: 7654321, name: 'Other' }]);
+      expect(await check(ctx)).toMatchObject({ status: 'fail', status_detail: expect.stringContaining('cannot read') });
     });
+  });
+});
 
-    it('reads down for an address that does not answer, and for any other failure', async () => {
-      const newrelic = await FakeNewRelic.create();
-      newrelic.behave('unreachable');
-      expect(await (await tools(newrelic)).newRelicCheck(ENV)).toMatchObject({
-        status: 'down',
-        reason: expect.stringContaining('host name'),
-      });
-      newrelic.behave('throttle');
-      expect(await (await tools(newrelic)).newRelicCheck(ENV)).toMatchObject({
-        status: 'down',
-        reason: expect.stringContaining('error'),
-      });
+describe('first start after the typed forms', () => {
+  it('deletes the old Loki and New Relic Keychain items once, and does nothing when neither is there', async () => {
+    const keychain = new FakeKeychain();
+    keychain.values.set('connection:loki_logs', 'glc_example_secret');
+    keychain.values.set('connection:new_relic_logs', 'NRAK-EXAMPLE');
+    keychain.values.set('connection:datadog', 'kept');
+    const ctx = await start({ keychain });
+    expect([...ctx.keychain.values.keys()]).toEqual(['connection:datadog']);
+    const dataDir = ctx.daemon.dataDir;
+    await ctx.daemon.stop();
+    running.splice(running.indexOf(ctx.daemon), 1);
+    const again = await startAgentDaemon({
+      dataDir,
+      keychain,
+      modules: [
+        McpServersModule.forRoot({ probe: new FakeProbe(), launcher: '/opt/ops-console' }),
+        ConnectorsModule.forRoot({ tools: new FakeConnectorTools() }),
+      ],
     });
-
-    it('keeps the key off the command line and ambient NEW_RELIC_ variables out', async () => {
-      const newrelic = await FakeNewRelic.create();
-      process.env.NEW_RELIC_API_KEY = 'NRAK-AMBIENT';
-      process.env.NEW_RELIC_REGION = 'JP';
-      process.env.NEW_RELIC_LICENSE_KEY = 'ambient-license';
-      try {
-        await (await tools(newrelic)).newRelicCheck(ENV);
-      } finally {
-        delete process.env.NEW_RELIC_API_KEY;
-        delete process.env.NEW_RELIC_REGION;
-        delete process.env.NEW_RELIC_LICENSE_KEY;
-      }
-      const [call] = newrelic.calls();
-      expect(call?.env).toEqual(ENV);
-      expect(call?.args.join(' ')).not.toContain(KEY);
-    });
+    running.push(again);
+    expect([...keychain.values.keys()]).toEqual(['connection:datadog']);
   });
 });

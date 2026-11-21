@@ -2,11 +2,13 @@ import { opendir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import {
+  type AwsProfile,
   CheckTarget,
   CONNECTOR_NAMES,
   CONNECTOR_ORDER,
   CONNECTOR_SERVERS,
   CONNECTOR_VIA,
+  type ConnectBody,
   type Connector,
   type ConnectorCheck,
   ConnectorId,
@@ -16,25 +18,37 @@ import {
   HealthStatus,
   isGoogleConnector,
   type LogGroupPick,
-  type lokiConnectBodySchema,
   type McpServer,
-  type newRelicConnectBodySchema,
+  NEW_RELIC_MCP_URLS,
+  NEW_RELIC_REGIONS,
+  type Pickable,
 } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { bounded } from '../common/bounded';
 import { ApiError, validationFailed } from '../common/errors';
 import { mergeConfig } from '../common/merge-config';
+import { StartupRecovery } from '../common/recovery';
 import { connectors } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { KEYCHAIN, type Keychain } from '../keychain/keychain';
 import { GOOGLE_ENV } from '../mcp/google-bridge';
 import { McpServersService } from '../mcp/mcp-servers.service';
 import { cloudWatchLogsConfig, lokiLogsConfig, newRelicLogsConfig, otelLogsConfig } from '../monitor/log-source-config';
-import { LOKI_SECRET_KEY, lokiAccess } from '../monitor/loki-access';
-import { NEW_RELIC_KEY, newRelicAccess } from '../monitor/new-relic-access';
+import { FOLDER_PICKER, type FolderPicker } from '../repos/folder-picker';
 import { CONNECTOR_TOOLS, type ConnectorTools, type SignInPrompt } from './connector-tools';
 import { GOOGLE_AUTH, type GoogleAuth, GoogleSignInError } from './google-auth';
+import { LOKI_OAUTH_KEY } from './grafana-auth';
+import {
+  HostedAuthError,
+  HostedFailed,
+  HostedRateLimited,
+  HostedUnreachable,
+  HostedUnreadable,
+  readFailure,
+} from './hosted-mcp';
+import { HostedServers } from './hosted-servers';
+import { NEW_RELIC_SERVER, newRelicTools } from './new-relic-mcp';
 
 type Row = typeof connectors.$inferSelect;
 
@@ -55,6 +69,8 @@ export class ConnectorsService implements OnModuleDestroy {
   private readonly rechecking = new Set<ConnectorId>();
   /** Every sign-in still running, stopped or not: shutdown waits for them to let go of the store. */
   private readonly running = new Set<Promise<void>>();
+  /** Connectors signed in that wait on the operator's choice of a data source or an account. */
+  private readonly picks = new Map<ConnectorId, 'data source' | 'account'>();
   private stopping = false;
 
   constructor(
@@ -63,7 +79,12 @@ export class ConnectorsService implements OnModuleDestroy {
     @Inject(GOOGLE_AUTH) private readonly google: GoogleAuth,
     @Inject(McpServersService) private readonly mcp: McpServersService,
     @Inject(KEYCHAIN) private readonly keychain: Keychain,
-  ) {}
+    @Inject(HostedServers) private readonly hosted: HostedServers,
+    @Inject(FOLDER_PICKER) private readonly picker: FolderPicker,
+    @Inject(StartupRecovery) recovery: StartupRecovery,
+  ) {
+    recovery.register('remove retired log source Keychain items', () => this.dropRetiredKeys());
+  }
 
   async onModuleDestroy(): Promise<void> {
     this.stopping = true;
@@ -143,17 +164,16 @@ export class ConnectorsService implements OnModuleDestroy {
   async connect(id: ConnectorId, input: ConnectInput = {}): Promise<void> {
     // The Log folder has no sign-in: choosing it connects, or is refused, before this answers.
     if (id === ConnectorId.OtelLogs) return this.chooseFolder(input.folder);
-    // Loki logs has no sign-in either: the typed config is checked and stored before this answers, its health after.
-    if (id === ConnectorId.LokiLogs) return this.connectLoki(input);
-    // New Relic logs is the same: a typed account and key, checked and stored before this answers.
-    if (id === ConnectorId.NewRelicLogs) return this.connectNewRelic(input);
+    // A second Connect during the wait of a log source's sign-in changes nothing.
+    if (LOG_SIGN_INS.includes(id) && this.signIns.has(id)) return;
+    if (id === ConnectorId.LokiLogs || id === ConnectorId.NewRelicLogs) await this.prepareHosted(id, input);
     // A profile that is already signed in connects before this answers; any other waits on its sign-in below.
     if (id === ConnectorId.CloudWatchLogs && (await this.prepareCloudWatch(input))) return;
     this.signIns.get(id)?.abort();
     const abort = new AbortController();
     this.signIns.set(id, abort);
     this.prompt(id, { code: null, url: null });
-    const run = this.signIn(id, abort.signal)
+    const run = this.signIn(id, abort.signal, input)
       .catch((error) => {
         if (!abort.signal.aborted) this.fail(id, error);
       })
@@ -219,8 +239,9 @@ export class ConnectorsService implements OnModuleDestroy {
       // A read of the list that no longer holds the server means it is already gone: Disconnect goes on.
       if (found?.registered) await this.mcp.remove(server.name).catch(ignoreMissing);
     }
-    if (id === ConnectorId.LokiLogs) await this.keychain.delete(LOKI_SECRET_KEY);
-    if (id === ConnectorId.NewRelicLogs) await this.keychain.delete(NEW_RELIC_KEY);
+    // The console's own Grafana sign-in leaves with it; New Relic's belongs to Claude Code and goes with the server.
+    if (id === ConnectorId.LokiLogs) await this.keychain.delete(LOKI_OAUTH_KEY);
+    this.picks.delete(id);
     this.store.write((tx) => {
       tx.update(connectors)
         .set({ status: HealthStatus.Off, statusDetail: null, accountLabel: null, login: null })
@@ -277,15 +298,20 @@ export class ConnectorsService implements OnModuleDestroy {
   private async prepareCloudWatch(input: ConnectInput): Promise<boolean> {
     await this.requireTools(['aws', 'uvx']);
     const stored = cloudWatchLogsConfig(this.store.db);
-    const profile = input.profile?.trim() || stored.profile;
-    const region = input.region?.trim() || stored.region;
-    if (profile === '') throw validationFailed('an AWS profile is required');
+    // With no profile on this Mac, the sign-in creates `default`.
+    const profile = input.profile?.trim() || stored.profile || 'default';
+    const region =
+      input.region?.trim() ||
+      stored.region ||
+      (await this.tools.awsProfiles()).find((found) => found.name === profile)?.region ||
+      '';
     if (region === '') throw validationFailed('an AWS region is required');
     this.assertAwsNames(profile, region);
     const picked = input.log_groups ?? stored.log_groups;
     assertUniqueServices(picked);
     const signedIn = await this.tools.awsSignedIn(profile);
     if (signedIn) await this.assertGroupsExist(profile, region, picked);
+    else if (!(await this.tools.awsIsSso(profile))) await this.assertLoginCli();
     await this.update(ConnectorId.CloudWatchLogs, { profile, region, log_groups: picked });
     if (!signedIn) return false;
     await this.registerCloudWatch({ profile, region });
@@ -294,74 +320,29 @@ export class ConnectorsService implements OnModuleDestroy {
   }
 
   /**
-   * Stores the pane's Loki config and secret after the checks that need no network, then reads the health in the
-   * background. A field the body leaves out keeps its value; an empty one clears it. The secret goes only to the Keychain.
+   * Loki and New Relic: stores the Region, and refuses what could not finish. A pick needs the sign-in it chooses from,
+   * and a sign-in that waits on a choice is answered with `pick_required` until one comes.
    */
-  private async connectLoki(input: ConnectInput): Promise<void> {
-    await this.requireTools(['logcli']);
-    const { secret } = input;
-    const config = this.typedConfig(ConnectorId.LokiLogs, input, LOKI_FIELDS, lokiLogsConfig(this.store.db));
-    if (config.url === '') throw invalidConfig('a Loki URL is required');
-    if (config.auth === 'basic' && config.username === '') throw invalidConfig('basic auth needs a username');
-    const typedSecret = secret === undefined || secret === '' ? null : secret;
-    if (config.auth !== 'none' && typedSecret === null && (await this.keychain.get(LOKI_SECRET_KEY)) === null) {
-      throw invalidConfig(`${config.auth} auth needs a secret`);
+  private async prepareHosted(id: ConnectorId.LokiLogs | ConnectorId.NewRelicLogs, input: ConnectInput): Promise<void> {
+    if (id === ConnectorId.NewRelicLogs && input.region !== undefined) {
+      if (!NEW_RELIC_REGIONS.includes(input.region as (typeof NEW_RELIC_REGIONS)[number])) {
+        throw invalidConfig(`region must be one of ${NEW_RELIC_REGIONS.join(', ')}`);
+      }
+      await this.update(id, { region: input.region });
     }
-    if (config.auth !== 'none' && typedSecret !== null) await this.keychain.set(LOKI_SECRET_KEY, typedSecret);
-    this.storeAndCheck(ConnectorId.LokiLogs, config);
-  }
-
-  /** Stores the pane's New Relic config and key like Loki's: the key only in the Keychain, the health in the background. */
-  private async connectNewRelic(input: ConnectInput): Promise<void> {
-    await this.requireTools(['newrelic']);
-    const { secret } = input;
-    const config = this.typedConfig(
-      ConnectorId.NewRelicLogs,
-      input,
-      NEW_RELIC_FIELDS,
-      newRelicLogsConfig(this.store.db),
-    );
-    if (config.account_id === '') throw invalidConfig('an account ID is required');
-    const typedKey = secret === undefined || secret === '' ? null : secret;
-    if (typedKey === null && (await this.keychain.get(NEW_RELIC_KEY)) === null) {
-      throw invalidConfig('an API key is required');
+    const pick = id === ConnectorId.LokiLogs ? input.datasource_uid : input.account_id;
+    if (pick === undefined || pick === '') {
+      const waiting = this.picks.get(id);
+      if (waiting) throw new ApiError(409, ErrorCode.PickRequired, `Choose a ${waiting} to finish connecting`);
+      return;
     }
-    if (typedKey !== null) await this.keychain.set(NEW_RELIC_KEY, typedKey);
-    this.storeAndCheck(ConnectorId.NewRelicLogs, config);
-  }
-
-  /** The Connector's stored config with the fields `input` names laid over it, checked against its schema. */
-  private typedConfig<Id extends ConnectorId.LokiLogs | ConnectorId.NewRelicLogs>(
-    id: Id,
-    input: ConnectInput,
-    fields: string[],
-    stored: Record<string, unknown>,
-  ) {
-    const edited = Object.fromEntries(Object.entries(input).filter(([name]) => fields.includes(name)));
-    const parsed = connectorConfigSchemas[id].safeParse({ ...stored, ...edited });
-    if (!parsed.success) {
-      const problems = new Set(
-        parsed.error.issues.map((issue) => `${issue.path.join('.') || 'config'}: ${issue.message}`),
+    // The pick is checked against what the sign-in reads now, before Connect answers.
+    const options = id === ConnectorId.LokiLogs ? await this.lokiDatasources() : await this.newRelicAccountList();
+    if (!options.some((option) => option.id === pick)) {
+      throw invalidConfig(
+        `${pick} is not a ${id === ConnectorId.LokiLogs ? 'data source' : 'account'} this sign-in can read`,
       );
-      throw invalidConfig(`invalid config: ${[...problems].join('; ')}`);
     }
-    return parsed.data as z.infer<(typeof connectorConfigSchemas)[Id]>;
-  }
-
-  /** Saves the config, then checks the Connector's health in the background. */
-  private storeAndCheck(id: ConnectorId, config: unknown): void {
-    this.store.write((tx) => {
-      tx.update(connectors)
-        .set({ config: JSON.stringify(config) })
-        .where(eq(connectors.id, id))
-        .run();
-    });
-    this.record(id, { status: HealthStatus.Checking, detail: null, accountLabel: null, login: null });
-    const run = this.check(id)
-      .then(() => {})
-      .catch((error) => this.logger.warn(`checking ${id} failed: ${String(error)}`))
-      .finally(() => this.running.delete(run));
-    this.running.add(run);
   }
 
   /** Connects the Log folder: `folder`, or the one kept from before. Refused with `folder_not_found`, nothing stored. */
@@ -387,7 +368,7 @@ export class ConnectorsService implements OnModuleDestroy {
     );
   }
 
-  private async signIn(id: ConnectorId, signal: AbortSignal): Promise<void> {
+  private async signIn(id: ConnectorId, signal: AbortSignal, input: ConnectInput): Promise<void> {
     const config = JSON.parse(this.row(id).config) as Record<string, string>;
     const onPrompt = (prompt: SignInPrompt) => {
       if (!signal.aborted) this.prompt(id, prompt);
@@ -482,10 +463,9 @@ export class ConnectorsService implements OnModuleDestroy {
       }
       case ConnectorId.CloudWatchLogs: {
         const settings = cloudWatchLogsConfig(this.store.db);
-        // Only an Identity Center profile has a browser sign-in; any other one is signed in with `aws login`.
-        if (!(await this.tools.awsIsSso(settings.profile)))
-          throw new ApiError(409, ErrorCode.InvalidState, signedOutDetail(settings.profile));
-        await this.tools.awsLogin(settings.profile, signal, onPrompt);
+        // An Identity Center profile signs in with `aws sso login`; any other with `aws login`.
+        const kind = (await this.tools.awsIsSso(settings.profile)) ? 'sso' : 'console';
+        await this.tools.awsLogin(settings.profile, settings.region, kind, signal, onPrompt);
         if (signal.aborted) return;
         if (!(await this.tools.awsSignedIn(settings.profile))) {
           throw new ApiError(409, ErrorCode.InvalidState, 'AWS did not finish signing in');
@@ -495,6 +475,10 @@ export class ConnectorsService implements OnModuleDestroy {
         await this.registerCloudWatch(settings);
         return this.landed(id, signal, cloudWatchReading(settings.profile));
       }
+      case ConnectorId.LokiLogs:
+        return this.signInLoki(signal, onPrompt, input);
+      case ConnectorId.NewRelicLogs:
+        return this.signInNewRelic(signal, input);
       case ConnectorId.GoogleDocs:
       case ConnectorId.GoogleSheets:
       case ConnectorId.GoogleDrive: {
@@ -542,6 +526,196 @@ export class ConnectorsService implements OnModuleDestroy {
       }
     }
     await this.landed(id, signal);
+  }
+
+  /** Grafana's sign-in for the console, then the data source the Connector reads, then the stack's server for the agent. */
+  private async signInLoki(
+    signal: AbortSignal,
+    onPrompt: (prompt: SignInPrompt) => void,
+    input: ConnectInput,
+  ): Promise<void> {
+    const id = ConnectorId.LokiLogs;
+    const asked = input.datasource_uid || undefined;
+    // A pick is made with the sign-in already held; any other Connect signs in again.
+    if (asked === undefined || !(await this.hosted.grafanaSignIn.signedIn())) {
+      await this.hosted.grafanaSignIn.signIn(signal, (url) => {
+        onPrompt({ code: null, url });
+        void this.tools.openPage(url).catch(() => {
+          // The page link stays in the pane.
+        });
+      });
+    }
+    if (signal.aborted) return;
+    const server = CONNECTOR_SERVERS[id] as McpSpec;
+    const added = await this.mcp.ensureRegistered(server);
+    const sources = await this.lokiSources().catch((error) => {
+      throw readFailure(error, 'Grafana');
+    });
+    if (sources.length === 0) {
+      this.picks.delete(id);
+      return this.landed(id, signal, {
+        status: HealthStatus.Auth,
+        detail: 'This Grafana stack has no Loki data source. Reconnect with a stack that has one.',
+        accountLabel: null,
+        login: null,
+      });
+    }
+    const chosen = this.choose('data source', sources, lokiLogsConfig(this.store.db).datasource_uid, asked);
+    if (chosen === null) return this.landedPick(id, signal, 'data source');
+    await this.update(id, { datasource_uid: chosen.id });
+    this.picks.delete(id);
+    await this.landed(id, signal, { status: HealthStatus.Ok, detail: null, accountLabel: chosen.name, login: null });
+    // Grafana's server for the agent signs in on its own, usually in one click; the Connector reads connected without it.
+    await this.mcp.authenticateAndCheck(server.name, { signal, added }).catch((error) => {
+      this.logger.warn(`the agent's sign-in to ${server.name} did not finish: ${String(error)}`);
+    });
+  }
+
+  /** New Relic's server through Claude Code's sign-in, then the account the Connector reads. */
+  private async signInNewRelic(signal: AbortSignal, input: ConnectInput): Promise<void> {
+    const id = ConnectorId.NewRelicLogs;
+    const { region, account_id: stored } = newRelicLogsConfig(this.store.db);
+    const server = { ...(CONNECTOR_SERVERS[id] as McpSpec), target: NEW_RELIC_MCP_URLS[region] };
+    const found = await this.mcp.find(server.name);
+    // A server registered for another Region is registered again for this one.
+    if (found?.registered && found.target !== server.target) {
+      await this.mcp.remove(server.name).catch(ignoreMissing);
+      await this.mcp.settled();
+    }
+    const added = await this.mcp.ensureRegistered(server);
+    const signedIn = await this.mcp.authenticateAndCheck(server.name, { signal, added });
+    if (signal.aborted) return;
+    if (signedIn.status !== HealthStatus.Ok) return this.landed(id, signal, serverReading(signedIn, {}));
+    const accounts = await this.newRelicAccounts(region).catch((error) => {
+      if (error instanceof HostedAuthError) throw new ApiError(409, ErrorCode.InvalidState, error.message);
+      throw readFailure(error, 'New Relic');
+    });
+    if (accounts.length === 0) {
+      this.picks.delete(id);
+      return this.landed(id, signal, {
+        status: HealthStatus.Auth,
+        detail: 'This New Relic sign-in can read no account. Reconnect with a user that can.',
+        accountLabel: null,
+        login: null,
+      });
+    }
+    const chosen = this.choose('account', accounts, stored, input.account_id || undefined);
+    if (chosen === null) return this.landedPick(id, signal, 'account');
+    await this.update(id, { account_id: chosen.id });
+    this.picks.delete(id);
+    return this.landed(id, signal, {
+      status: HealthStatus.Ok,
+      detail: null,
+      accountLabel: accountLabelOf(chosen),
+      login: null,
+    });
+  }
+
+  /** The one of `options` the Connector reads: the one asked for, the only one, or the stored one still there. Null when the operator must choose. */
+  private choose(
+    kind: 'data source' | 'account',
+    options: Pickable[],
+    stored: string,
+    asked: string | undefined,
+  ): Pickable | null {
+    if (asked !== undefined) {
+      const found = options.find((option) => option.id === asked);
+      if (!found) throw invalidConfig(`${asked} is not a ${kind} this sign-in can read`);
+      return found;
+    }
+    if (options.length === 1) return options[0] ?? null;
+    return options.find((option) => option.id === stored) ?? null;
+  }
+
+  /** Signed in, with several to choose from: the pane shows the picker and Connect finishes when the operator picks. */
+  private landedPick(id: ConnectorId, signal: AbortSignal, kind: 'data source' | 'account'): Promise<void> {
+    this.picks.set(id, kind);
+    return this.landed(id, signal, {
+      status: HealthStatus.Auth,
+      detail: kind === 'data source' ? LOKI_PICK_DETAIL : NEW_RELIC_PICK_DETAIL,
+      accountLabel: null,
+      login: null,
+    });
+  }
+
+  /** The Loki data sources of the stack the sign-in belongs to. Throws the hosted errors. */
+  private async lokiSources(): Promise<Pickable[]> {
+    const answer = await this.hosted.grafana()((tools) =>
+      tools.callJson('list_datasources', { type: 'loki', limit: 100 }, datasourcesAnswer),
+    );
+    return answer.datasources
+      .filter((source) => source.type.toLowerCase() === 'loki')
+      .map(({ uid, name }) => ({ id: uid, name }));
+  }
+
+  /** The accounts the New Relic sign-in can read. Throws the hosted errors. */
+  private newRelicAccounts(region: (typeof NEW_RELIC_REGIONS)[number]): Promise<Pickable[]> {
+    return this.hosted.newRelic(region)(async (tools) => (await newRelicTools(tools)).accounts());
+  }
+
+  /** For the picker: the Loki data sources of the signed-in stack; 409 `invalid_state` when the Connector is not signed in. */
+  async lokiDatasources(): Promise<Pickable[]> {
+    if (!(await this.hosted.grafanaSignIn.signedIn())) {
+      throw new ApiError(409, ErrorCode.InvalidState, 'Loki logs is not signed in');
+    }
+    return this.lokiSources().catch((error) => {
+      throw pickerFailure(error, 'Grafana', 'Loki logs');
+    });
+  }
+
+  /** For the picker: the accounts of the New Relic sign-in; 409 `invalid_state` when it is not signed in. */
+  async newRelicAccountList(): Promise<Pickable[]> {
+    if (!(await this.mcp.find(NEW_RELIC_SERVER))?.registered) {
+      throw new ApiError(409, ErrorCode.InvalidState, 'New Relic logs is not signed in');
+    }
+    return this.newRelicAccounts(newRelicLogsConfig(this.store.db).region).catch((error) => {
+      throw pickerFailure(error, 'New Relic', 'New Relic logs');
+    });
+  }
+
+  /** For the picker: the AWS profiles on this Mac. */
+  async awsProfileList(): Promise<AwsProfile[]> {
+    await this.requireTools(['aws']);
+    return this.tools.awsProfiles();
+  }
+
+  /** The folder dialog for the Log folder: the one folder chosen, or null when the operator closes it. */
+  async pickLogFolder(): Promise<string | null> {
+    const [chosen] = await this.picker.pick({
+      prompt: 'Choose the folder the Collector writes logs to',
+      multiple: false,
+    });
+    return chosen ?? null;
+  }
+
+  /** A hosted server refused the sign-in during a read: the row reads needs auth, and the pane offers Reconnect. */
+  needsSignIn(id: ConnectorId): void {
+    this.record(id, {
+      status: HealthStatus.Auth,
+      detail: `${CONNECTOR_NAMES[id]} needs signing in again.`,
+      accountLabel: null,
+      login: null,
+    });
+  }
+
+  /** Deletes the Keychain items of `RETIRED_KEYS`; one that is not there is left as it is. */
+  private async dropRetiredKeys(): Promise<void> {
+    for (const key of RETIRED_KEYS) {
+      await this.keychain.delete(key).catch((error) => {
+        this.logger.warn(`could not delete the Keychain item ${key}: ${String(error)}`);
+      });
+    }
+  }
+
+  /** The one wrong step of a CloudWatch Connect: an AWS CLI too old for `aws login`. */
+  private async assertLoginCli(): Promise<void> {
+    const version = await this.tools.awsVersion();
+    if (version !== null && atLeast(version, AWS_LOGIN_VERSION)) return;
+    throw new ApiError(
+      409,
+      ErrorCode.InvalidState,
+      `AWS CLI ${version ?? '(version unknown)'} is too old for \`aws login\`: it needs ${AWS_LOGIN_VERSION}. Update it with \`brew upgrade awscli\`, then Connect again.`,
+    );
   }
 
   /**
@@ -618,25 +792,37 @@ export class ConnectorsService implements OnModuleDestroy {
         );
       }
       case ConnectorId.LokiLogs: {
-        if (!(await this.tools.installed('logcli'))) return down(missingToolMessage('logcli'));
-        const { config, childEnv } = await lokiAccess(this.store.db, this.keychain);
-        if (config.url === '') return down('No Loki URL chosen');
-        const health = await this.tools.lokiCheck(childEnv);
-        if (health.status === 'auth') return signedOut(LOKI_AUTH_DETAIL);
-        if (health.status === 'down') return down(`Could not reach ${config.url}: ${health.reason}`);
-        return { status: HealthStatus.Ok, detail: null, accountLabel: config.url, login: null };
+        if (!(await this.hosted.grafanaSignIn.signedIn())) {
+          // The self-hosted note stays until the operator signs in to Grafana Cloud.
+          return signedOut(row.statusDetail === LOKI_SELF_HOSTED_DETAIL ? row.statusDetail : LOKI_SIGN_IN_DETAIL);
+        }
+        let sources: Pickable[];
+        try {
+          sources = await this.lokiSources();
+        } catch (error) {
+          return hostedReading(error, 'Grafana');
+        }
+        const uid = lokiLogsConfig(this.store.db).datasource_uid;
+        if (uid === '') return signedOut(LOKI_PICK_DETAIL);
+        const source = sources.find((found) => found.id === uid);
+        return source
+          ? { status: HealthStatus.Ok, detail: null, accountLabel: source.name, login: null }
+          : down('The Loki data source is not in this Grafana stack any more. Reconnect to choose another.');
       }
       case ConnectorId.NewRelicLogs: {
-        if (!(await this.tools.installed('newrelic'))) return down(missingToolMessage('newrelic'));
-        const { config: account, childEnv } = await newRelicAccess(this.store.db, this.keychain);
-        if (account.account_id === '') return down('No New Relic account ID chosen');
-        // With no key the CLI would fall back to the operator's own ~/.newrelic profile and read connected.
-        if (childEnv.NEW_RELIC_API_KEY === undefined)
-          return signedOut('No New Relic API key is stored. Connect to add one.');
-        const health = await this.tools.newRelicCheck(childEnv);
-        if (health.status === 'auth') return signedOut(NEW_RELIC_AUTH_DETAIL);
-        if (health.status === 'down') return down(`Could not reach New Relic: ${health.reason}`);
-        return { status: HealthStatus.Ok, detail: null, accountLabel: account.account_id, login: null };
+        const { region, account_id: accountId } = newRelicLogsConfig(this.store.db);
+        if (!(await this.mcp.find(NEW_RELIC_SERVER))?.registered) return signedOut(NEW_RELIC_SIGN_IN_DETAIL);
+        let accounts: Pickable[];
+        try {
+          accounts = await this.newRelicAccounts(region);
+        } catch (error) {
+          return hostedReading(error, 'New Relic');
+        }
+        if (accountId === '') return signedOut(NEW_RELIC_PICK_DETAIL);
+        const account = accounts.find((found) => found.id === accountId);
+        return account
+          ? { status: HealthStatus.Ok, detail: null, accountLabel: accountLabelOf(account), login: null }
+          : down('This sign-in cannot read the New Relic account any more. Reconnect to choose another.');
       }
       case ConnectorId.Github: {
         const login = await this.tools.githubUser();
@@ -756,6 +942,7 @@ export class ConnectorsService implements OnModuleDestroy {
       config: JSON.parse(row.config) as Record<string, unknown>,
       last_checked_at: row.lastCheckedAt,
       sign_in: this.prompts.get(row.id) ?? null,
+      pick: pickOf(row),
     };
   }
 
@@ -828,36 +1015,75 @@ async function folderReading(folder: string): Promise<Reading> {
 
 type CloudWatchConfig = ReturnType<typeof cloudWatchLogsConfig>;
 
-/**
- * What the pane's Connect sends. The Log folder takes `folder`; CloudWatch logs takes `profile`, `region` and
- * `log_groups`; Loki logs and New Relic logs take their config fields and the secret.
- */
-export type ConnectInput = {
-  folder?: string;
-  profile?: string;
-  log_groups?: LogGroupPick[];
-} & z.infer<typeof lokiConnectBodySchema> &
-  z.infer<typeof newRelicConnectBodySchema>;
+/** What the pane's Connect sends. */
+export type ConnectInput = ConnectBody;
 
-/** The config fields of the Loki pane: the only ones a Connect may set. */
-const LOKI_FIELDS = ['url', 'org_id', 'auth', 'username', 'service_label', 'env_label', 'selector', 'format'];
+/** The log Connectors whose Connect waits on a sign-in; a second Connect during the wait changes nothing. */
+const LOG_SIGN_INS = [ConnectorId.LokiLogs, ConnectorId.NewRelicLogs, ConnectorId.CloudWatchLogs];
 
-const LOKI_AUTH_DETAIL =
-  'Loki refused the secret. Check the secret, and for Grafana Cloud that the access-policy token has the `logs:read` scope.';
+const LOKI_SIGN_IN_DETAIL = 'Sign in again to use Grafana Cloud.';
+const LOKI_PICK_DETAIL = 'Choose a Loki data source to finish connecting.';
+const NEW_RELIC_PICK_DETAIL = 'Choose a New Relic account to finish connecting.';
+const LOKI_SELF_HOSTED_DETAIL = 'Loki on Grafana Cloud only: the self-hosted URL is no longer read.';
+const NEW_RELIC_SIGN_IN_DETAIL = 'Sign in again to use the New Relic MCP server.';
 
-/** The config fields of the New Relic pane: the only ones a Connect may set. */
-const NEW_RELIC_FIELDS = ['account_id', 'region', 'service_attribute', 'env_attribute', 'filter'];
+/** Keychain items of Loki logs and New Relic logs that nothing reads; removed at start. */
+const RETIRED_KEYS = [`connection:${ConnectorId.LokiLogs}`, `connection:${ConnectorId.NewRelicLogs}`];
 
-const NEW_RELIC_AUTH_DETAIL =
-  'New Relic refused the key. Check the key, and that a key belongs to one region: choose the region of the account.';
+/** The first AWS CLI with `aws login`. */
+const AWS_LOGIN_VERSION = '2.32.0';
+
+/** Whether dotted version `have` is at least `want`. */
+function atLeast(have: string, want: string): boolean {
+  const a = have.split('.').map(Number);
+  const b = want.split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const difference = (a[i] ?? 0) - (b[i] ?? 0);
+    if (difference !== 0) return difference > 0;
+  }
+  return true;
+}
+
+const datasourcesAnswer = z.looseObject({
+  datasources: z.array(z.looseObject({ uid: z.string(), name: z.string(), type: z.string() })),
+});
+
+/** The pick a Connector waits on: its sign-in finished and the data source or account is still to choose. */
+function pickOf(row: Row): Connector['pick'] {
+  if (row.status !== HealthStatus.Auth) return null;
+  if (row.id === ConnectorId.LokiLogs && row.statusDetail === LOKI_PICK_DETAIL) return 'data_source';
+  if (row.id === ConnectorId.NewRelicLogs && row.statusDetail === NEW_RELIC_PICK_DETAIL) return 'account';
+  return null;
+}
+
+const accountLabelOf = (account: Pickable): string => `${account.name} (${account.id})`;
 
 const invalidConfig = (message: string) => new ApiError(422, ErrorCode.ValidationFailed, message);
+
+/** A hosted server's failure as a picker's error: a refused sign-in is `invalid_state`, any other the server's words. */
+function pickerFailure(error: unknown, who: string, connector: string): ApiError {
+  if (error instanceof HostedAuthError) {
+    return new ApiError(409, ErrorCode.InvalidState, `${connector} is not signed in`);
+  }
+  return readFailure(error, who);
+}
+
+/** A hosted server's failure as the health check reads it (Behavior 13). */
+function hostedReading(error: unknown, who: string): Reading {
+  const fail = (status: HealthStatus, detail: string): Reading => ({ status, detail, accountLabel: null, login: null });
+  if (error instanceof HostedAuthError)
+    return fail(HealthStatus.Auth, `${who} needs signing in again: ${error.message}`);
+  if (error instanceof HostedUnreachable) return fail(HealthStatus.Fail, `Could not reach ${who}: ${error.reason}`);
+  if (error instanceof HostedRateLimited) return fail(HealthStatus.Fail, `${who} rate limit reached`);
+  if (error instanceof HostedFailed || error instanceof HostedUnreadable) {
+    return fail(HealthStatus.Fail, error.message.slice(0, 300));
+  }
+  throw error;
+}
 
 const INSTALL = {
   aws: 'the AWS CLI with `brew install awscli`',
   uvx: 'uv with `brew install uv`',
-  logcli: 'the Loki CLI with `brew install logcli`',
-  newrelic: 'the New Relic CLI with `brew install newrelic-cli`',
 };
 
 function missingToolMessage(command: keyof typeof INSTALL): string {
@@ -865,7 +1091,7 @@ function missingToolMessage(command: keyof typeof INSTALL): string {
 }
 
 function signedOutDetail(profile: string): string {
-  return `AWS profile ${profile} is signed out. Run \`aws login --profile ${profile}\`, then Connect again.`;
+  return `AWS profile ${profile} is signed out. Connect to sign in again.`;
 }
 
 const cloudWatchReading = (profile: string): Reading => ({

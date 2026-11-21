@@ -1,10 +1,18 @@
-import { type Connector, HealthStatus, type LogGroupPick, logGroupSchema } from '@ops-console/shared';
+import {
+  AWS_REGIONS,
+  type AwsProfile,
+  type Connector,
+  HealthStatus,
+  type LogGroupPick,
+  logGroupSchema,
+} from '@ops-console/shared';
 import { useState } from 'react';
 import { z } from 'zod';
 import { Button, Spinner } from '../components/ui/button';
-import { useLogGroups } from '../lib/queries';
+import { Dropdown } from '../components/ui/dropdown';
+import { useAwsProfiles, useLogGroups } from '../lib/queries';
 import { ascending } from '../lib/sort';
-import { SignInHandoff } from './sign-in-handoff';
+import { ChoiceCard, type ConnectPane, SignInStep } from './sign-in-step';
 
 const savedSchema = z.object({
   profile: z.string().catch(''),
@@ -43,26 +51,139 @@ const trimmed = (pick: LogGroupPick): LogGroupPick => ({
 
 const FIELD = 'w-full border border-divider bg-card px-2 py-1.5 font-mono text-[13px] text-text';
 
+/** The profiles on this Mac for the picker: `default` first, the rest A to Z. */
+const profileOrder = (profiles: AwsProfile[]): AwsProfile[] => [
+  ...profiles.filter((profile) => profile.name === 'default'),
+  ...ascending(
+    profiles.filter((profile) => profile.name !== 'default'),
+    (profile) => profile.name,
+  ),
+];
+
 /**
- * The AWS profile, the region and the log groups to read. Each picked group is one Service, named by its last path
- * segment in prod until the operator edits it. Connect signs the profile in when it needs it.
+ * The AWS profile and region to sign in with, then the log groups to read. Each picked group is one Service, named by
+ * its last path segment in prod until the operator edits it. Connect signs the profile in when it needs it.
  */
-export function LogGroupsStep({
+export function CloudWatchStep({ connector, pending, cancelling, onConnect, onCancel }: ConnectPane) {
+  const saved = savedCloudWatch(connector);
+  const profiles = useAwsProfiles();
+  const [profilePick, setProfilePick] = useState<string | null>(null);
+  const [regionPick, setRegionPick] = useState<string | null>(null);
+  const found = profileOrder(profiles.data ?? []);
+  const profile = profilePick ?? (saved.profile || found[0]?.name || 'default');
+  // A profile with a region of its own brings it; the region the Connector kept stays while its profile does.
+  const region =
+    regionPick ??
+    (profile === saved.profile && saved.region !== ''
+      ? saved.region
+      : (found.find((one) => one.name === profile)?.region ?? ''));
+  const regions = ascending(
+    AWS_REGIONS.includes(region as (typeof AWS_REGIONS)[number]) || region === ''
+      ? AWS_REGIONS
+      : [...AWS_REGIONS, region],
+    (name) => name,
+  );
+  const waiting = connector.sign_in !== null;
+  return (
+    <>
+      <ChoiceCard label="AWS profile and region">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1 text-xs">
+            <span
+              className="font-semibold"
+              title="The AWS CLI profile Connect signs in and the console reads logs with."
+            >
+              AWS profile
+            </span>
+            {profiles.isPending && (
+              <p role="status" className="m-0 text-neutral-700">
+                Reading profiles…
+              </p>
+            )}
+            {profiles.isError && (
+              <p role="alert" className="m-0 text-accent-700">
+                {profiles.error.message}
+              </p>
+            )}
+            {profiles.isSuccess && found.length === 0 && (
+              <p className="m-0 text-neutral-700">No AWS profile on this Mac. Connect creates `default`.</p>
+            )}
+            {found.length > 0 && (
+              <Dropdown
+                label="AWS profile"
+                value={profile}
+                disabled={waiting}
+                options={found.map((one) => ({
+                  value: one.name,
+                  label: one.name,
+                  description: one.region ?? undefined,
+                }))}
+                onChange={(name) => {
+                  setProfilePick(name);
+                  setRegionPick(null);
+                }}
+              />
+            )}
+          </div>
+          <div className="flex flex-col gap-1 text-xs">
+            <span className="font-semibold" title="The one AWS region the log groups are in.">
+              Region
+            </span>
+            <Dropdown
+              label="Region"
+              value={region}
+              disabled={waiting}
+              options={[
+                ...(region === '' ? [{ value: '', label: 'Choose a region' }] : []),
+                ...regions.map((name) => ({ value: name, label: name })),
+              ]}
+              onChange={setRegionPick}
+            />
+          </div>
+        </div>
+        <p className="m-0 text-xs text-neutral-700">
+          Use a profile with the <code className="font-mono">CloudWatchLogsReadOnlyAccess</code> policy. The console
+          only reads logs.
+        </p>
+      </ChoiceCard>
+      <SignInStep
+        connector={connector}
+        pending={pending}
+        cancelling={cancelling}
+        onConnect={() => onConnect({ profile, region })}
+        onCancel={onCancel}
+        blocked={
+          profiles.isPending ? 'Reading the AWS profiles' : region === '' ? 'Choose the region first' : undefined
+        }
+      />
+      {connector.status !== HealthStatus.Off && (
+        <LogGroupsStep
+          connector={connector}
+          profile={profile}
+          region={region}
+          pending={pending}
+          onConnect={(log_groups) => onConnect({ profile, region, log_groups })}
+        />
+      )}
+    </>
+  );
+}
+
+/** The log groups the profile sees in the region, picked here and read once the Connector is signed in. */
+function LogGroupsStep({
   connector,
+  profile,
+  region,
   pending,
-  cancelling,
   onConnect,
-  onCancel,
 }: {
   connector: Connector;
+  profile: string;
+  region: string;
   pending: boolean;
-  cancelling: boolean;
-  onConnect: (body: { profile: string; region: string; log_groups: LogGroupPick[] }) => void;
-  onCancel: () => void;
+  onConnect: (logGroups: LogGroupPick[]) => void;
 }) {
   const saved = savedCloudWatch(connector);
-  const [profile, setProfile] = useState(saved.profile);
-  const [region, setRegion] = useState(saved.region);
   const [picks, setPicks] = useState<LogGroupPick[]>(saved.log_groups);
   const [asked, setAsked] = useState<{ profile: string; region: string } | null>(null);
   const [needle, setNeedle] = useState('');
@@ -70,15 +191,14 @@ export function LogGroupsStep({
   const signIn = connector.sign_in;
   const connected = connector.status === HealthStatus.Ok;
   const checking = connector.status === HealthStatus.Checking;
-  const named = profile.trim() !== '' && region.trim() !== '';
+  const named = profile !== '' && region !== '';
   const twice = repeated(picks);
   const blank = picks.some((pick) => pick.service.trim() === '' || pick.env.trim() === '');
   const ready = named && picks.length > 0 && !twice && !blank;
   const looking = groups.isFetching;
   const find = () => {
-    const next = { profile: profile.trim(), region: region.trim() };
-    if (asked?.profile === next.profile && asked.region === next.region) void groups.refetch();
-    else setAsked(next);
+    if (asked?.profile === profile && asked.region === region) void groups.refetch();
+    else setAsked({ profile, region });
   };
   const edit = (name: string, change: Partial<LogGroupPick>) =>
     setPicks(picks.map((pick) => (pick.name === name ? { ...pick, ...change } : pick)));
@@ -91,58 +211,13 @@ export function LogGroupsStep({
     (groups.data ?? []).filter((name) => name.toLowerCase().includes(lookup)),
     (name) => name,
   );
-  const detail = signIn
-    ? 'Finish in the browser tab that opened. This updates on its own.'
-    : connected
-      ? `Reading ${picks.length} ${picks.length === 1 ? 'log group' : 'log groups'} in ${saved.region} as ${saved.profile}.`
-      : 'The console stores no AWS key: the AWS CLI keeps the sign-in. Connect signs the profile in when it needs to.';
+  const detail = connected
+    ? `Reading ${saved.log_groups.length} ${saved.log_groups.length === 1 ? 'log group' : 'log groups'} in ${saved.region} as ${saved.profile}.`
+    : 'Pick the log groups to read once the profile is signed in.';
 
   return (
-    <section
-      aria-label="AWS profile and log groups"
-      className="flex flex-col gap-3 rounded-lg border border-line bg-card px-4 py-3.5 shadow-sm"
-    >
-      <form
-        className="flex flex-col gap-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (ready && !pending && !checking && !signIn)
-            onConnect({ profile: profile.trim(), region: region.trim(), log_groups: picks.map(trimmed) });
-        }}
-      >
-        <div className="grid grid-cols-2 gap-2">
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="font-semibold" title="The AWS CLI profile the console reads logs with.">
-              AWS profile
-            </span>
-            <input
-              value={profile}
-              onChange={(event) => setProfile(event.target.value)}
-              placeholder="shop-readonly"
-              spellCheck={false}
-              disabled={signIn !== null}
-              className={FIELD}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="font-semibold" title="The one AWS region the log groups are in.">
-              Region
-            </span>
-            <input
-              value={region}
-              onChange={(event) => setRegion(event.target.value)}
-              placeholder="us-east-1"
-              spellCheck={false}
-              disabled={signIn !== null}
-              className={FIELD}
-            />
-          </label>
-        </div>
-        <p className="m-0 text-xs text-neutral-700">
-          Use a profile with the <code className="font-mono">CloudWatchLogsReadOnlyAccess</code> policy. The console
-          only reads logs.
-        </p>
-
+    <ChoiceCard label="Log groups to read">
+      <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold">Log groups</span>
@@ -255,38 +330,20 @@ export function LogGroupsStep({
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1 text-xs text-neutral-700">{detail}</div>
           <Button
-            type="submit"
-            variant={connected ? 'secondary' : 'primary'}
+            variant="primary"
             className="shrink-0"
             title={
-              signIn
-                ? 'Finish signing in, in the browser tab that opened'
-                : ready
-                  ? 'Check the profile and the log groups, and start reading them'
-                  : 'Needs a profile, a region and at least one log group'
+              ready
+                ? 'Check the profile and the log groups, and start reading them'
+                : 'Needs at least one log group, each with its own Service name and env'
             }
             disabled={pending || checking || signIn !== null || !ready}
+            onClick={() => onConnect(picks.map(trimmed))}
           >
-            {signIn ? 'Waiting…' : connector.status === HealthStatus.Off ? 'Connect' : 'Reconnect'}
+            Read these log groups
           </Button>
-          {signIn && (
-            <Button
-              className="shrink-0"
-              title="Stop waiting for this sign-in. Connect starts it again."
-              disabled={cancelling}
-              onClick={onCancel}
-            >
-              Cancel
-            </Button>
-          )}
         </div>
-      </form>
-      {signIn && <SignInHandoff signIn={signIn} label={connector.name} />}
-      {connector.status_detail && connector.status !== HealthStatus.Off && !signIn && (
-        <div role="alert" className="text-xs text-accent-700">
-          {connector.status_detail}
-        </div>
-      )}
-    </section>
+      </div>
+    </ChoiceCard>
   );
 }

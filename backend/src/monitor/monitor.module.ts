@@ -1,7 +1,8 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { ConnectorId } from '@ops-console/shared';
+import { ConnectorsService } from '../connectors/connectors.service';
+import { HostedServers } from '../connectors/hosted-servers';
 import { STORE, type Store } from '../db/store';
-import { KEYCHAIN, type Keychain } from '../keychain/keychain';
 import { AlertSessions } from './alert-sessions';
 import { AlertsService } from './alerts.service';
 import { CloudWatchLogs, type CloudWatchOptions } from './cloudwatch-logs';
@@ -9,12 +10,10 @@ import { CliCodeHosts, CODE_HOSTS, CodeFinder, type CodeHosts } from './code-fin
 import { PupDatadog } from './datadog';
 import { FixesService } from './fixes.service';
 import { LOG_READERS, type LogReader, type LogReaders } from './log-reader';
-import { cloudWatchLogsConfig, otelLogsConfig } from './log-source-config';
-import { lokiAccess } from './loki-access';
-import { LokiLogs, type LokiOptions } from './loki-logs';
+import { cloudWatchLogsConfig, lokiLogsConfig, newRelicLogsConfig, otelLogsConfig } from './log-source-config';
+import { LokiLogs } from './loki-logs';
 import { MonitorController } from './monitor.controller';
-import { newRelicAccess } from './new-relic-access';
-import { NewRelicLogs, type NewRelicOptions } from './new-relic-logs';
+import { NewRelicLogs } from './new-relic-logs';
 import { OtelLogFolder } from './otel-logs';
 import { MonitorRetention } from './retention';
 import { ReviewsService } from './reviews.service';
@@ -33,10 +32,6 @@ export class MonitorModule {
       otelReadLimit?: number;
       /** How the CloudWatch source calls the `aws` CLI. */
       cloudWatch?: CloudWatchOptions;
-      /** How the Loki source calls the `logcli` CLI. */
-      loki?: LokiOptions;
-      /** How the New Relic source calls the `newrelic` CLI. */
-      newRelic?: NewRelicOptions;
     } = {},
   ): DynamicModule {
     return {
@@ -46,16 +41,27 @@ export class MonitorModule {
       providers: [
         {
           provide: LOG_READERS,
-          inject: [STORE, KEYCHAIN],
-          useFactory: (store: Store, keychain: Keychain): LogReaders => ({
+          inject: [STORE, HostedServers, ConnectorsService],
+          useFactory: (store: Store, hosted: HostedServers, connectors: ConnectorsService): LogReaders => ({
             [ConnectorId.Datadog]: config.datadog ?? new PupDatadog(),
             [ConnectorId.OtelLogs]: new OtelLogFolder(() => otelLogsConfig(store.db).folder, config.otelReadLimit),
             [ConnectorId.CloudWatchLogs]: new CloudWatchLogs(() => {
               const { profile, region, log_groups } = cloudWatchLogsConfig(store.db);
               return { profile, region, log_groups };
             }, config.cloudWatch),
-            [ConnectorId.LokiLogs]: new LokiLogs(() => lokiAccess(store.db, keychain), config.loki),
-            [ConnectorId.NewRelicLogs]: new NewRelicLogs(() => newRelicAccess(store.db, keychain), config.newRelic),
+            [ConnectorId.LokiLogs]: new LokiLogs(
+              () => lokiLogsConfig(store.db).datasource_uid,
+              hosted.grafana(),
+              () => connectors.needsSignIn(ConnectorId.LokiLogs),
+            ),
+            [ConnectorId.NewRelicLogs]: new NewRelicLogs(
+              () => {
+                const { account_id, region } = newRelicLogsConfig(store.db);
+                return { accountId: account_id, region };
+              },
+              (region) => hosted.newRelic(region),
+              () => connectors.needsSignIn(ConnectorId.NewRelicLogs),
+            ),
           }),
         },
         { provide: CODE_HOSTS, useValue: config.codeHosts ?? new CliCodeHosts() },

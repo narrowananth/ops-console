@@ -397,6 +397,7 @@ const github = {
   config: {},
   last_checked_at: ago(3),
   sign_in: null,
+  pick: null,
 };
 
 async function integrations(page: Page, items: unknown[]) {

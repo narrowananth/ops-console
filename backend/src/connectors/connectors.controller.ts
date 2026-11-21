@@ -1,11 +1,11 @@
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query } from '@nestjs/common';
 import {
+  type AwsProfile,
   type Connector,
   type ConnectorCheck,
   ConnectorId,
-  logGroupSchema,
-  lokiConnectBodySchema,
-  newRelicConnectBodySchema,
+  connectBodySchema,
+  type Pickable,
   updateConnectorSchema,
 } from '@ops-console/shared';
 import { z } from 'zod';
@@ -13,15 +13,6 @@ import { parseInput } from '../common/errors';
 import { ConnectorsService } from './connectors.service';
 
 const idParams = z.object({ id: z.enum(ConnectorId) });
-/**
- * The Log folder Connector takes its folder; CloudWatch logs its profile, region and picked groups; Loki logs its
- * address, auth and labels; New Relic logs its account, region, attributes, filter and key.
- */
-const connectBody = lokiConnectBodySchema.extend(newRelicConnectBodySchema.shape).extend({
-  folder: z.string().optional(),
-  profile: z.string().optional(),
-  log_groups: z.array(logGroupSchema).optional(),
-});
 const logGroupsQuery = z.object({ profile: z.string().optional(), region: z.string().optional() });
 
 @Controller('connectors')
@@ -40,6 +31,31 @@ export class ConnectorsController {
     return { data: names.map((name) => ({ name })), meta: { next_cursor: null } };
   }
 
+  /** The Loki data sources of the signed-in stack, for the picker. */
+  @Get('loki_logs/datasources')
+  async lokiDatasources(): Promise<{ data: Pickable[]; meta: { next_cursor: null } }> {
+    return { data: await this.connectors.lokiDatasources(), meta: { next_cursor: null } };
+  }
+
+  /** The New Relic accounts the sign-in can read, for the picker. */
+  @Get('new_relic_logs/accounts')
+  async newRelicAccounts(): Promise<{ data: Pickable[]; meta: { next_cursor: null } }> {
+    return { data: await this.connectors.newRelicAccountList(), meta: { next_cursor: null } };
+  }
+
+  /** The AWS profiles on this Mac, for the CloudWatch picker. */
+  @Get('cloudwatch_logs/profiles')
+  async awsProfiles(): Promise<{ data: AwsProfile[]; meta: { next_cursor: null } }> {
+    return { data: await this.connectors.awsProfileList(), meta: { next_cursor: null } };
+  }
+
+  /** Opens the folder dialog for the Log folder. Nothing is stored: the path goes back to the pane, and Connect uses it. */
+  @Post('otel_logs/pick-folder')
+  @HttpCode(200)
+  async pickFolder(): Promise<{ data: { path: string | null } }> {
+    return { data: { path: await this.connectors.pickLogFolder() } };
+  }
+
   @Patch(':id')
   async update(@Param() params: unknown, @Body() body: unknown): Promise<{ data: Connector }> {
     const { id } = parseInput(idParams, params, 'params');
@@ -51,7 +67,7 @@ export class ConnectorsController {
   async connect(@Param() params: unknown, @Body() body: unknown): Promise<void> {
     await this.connectors.connect(
       parseInput(idParams, params, 'params').id,
-      parseInput(connectBody, body ?? {}, 'body'),
+      parseInput(connectBodySchema, body ?? {}, 'body'),
     );
   }
 
