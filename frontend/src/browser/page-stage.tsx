@@ -1,14 +1,13 @@
 import type { BrowserServerMessage, ElementCapture, Tab } from '@ops-console/shared';
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useChooseFiles } from '../lib/queries';
-import { createPainter } from './frame-painter';
+import { createPainter, frameCache } from './frame-painter';
 import { clampRatio, fillSize, fitScale, isFill, type Size, toPagePoint } from './geometry';
 import { buttonName, isPasteShortcut, keyMessage, modifiersOf, wheelPixels } from './input';
 import { usePageStream } from './use-page-stream';
 
 /** Room kept around a device-sized page for its bezel. */
 const BEZEL = 20;
-const RESIZE_WAIT_MS = 120;
 const NOTICE_MS = 8000;
 
 type Pointer = {
@@ -55,6 +54,8 @@ export function PageStage({
   const choose = useChooseFiles();
   const picker = useRef<HTMLInputElement>(null);
 
+  const fillRef = useRef(fill);
+  fillRef.current = fill;
   const paint = useMemo(
     () =>
       createPainter(
@@ -63,7 +64,14 @@ export function PageStage({
       ),
     [],
   );
-  const { connected, send } = usePageStream(
+  // The size the daemon was last asked for, so a stage that changes in a way that leaves it the same sends nothing.
+  const asked = useRef<string | null>(null);
+  const stageSize = () => {
+    const node = stage.current;
+    const size = node && fillSize({ width: node.clientWidth, height: node.clientHeight });
+    return size ? { ...size, dpr: clampRatio(window.devicePixelRatio) } : null;
+  };
+  const { connected, lost, send } = usePageStream(
     tab.id,
     (message: BrowserServerMessage) => {
       if (message.type === 'tab') onTab(message.tab);
@@ -72,13 +80,45 @@ export function PageStage({
       else if (message.type === 'pick_failed') setNotice(message.message);
       else onClosed();
     },
-    paint,
+    (frame) => {
+      frameCache.remember(tab.id, frame);
+      paint(frame);
+    },
+    () => {
+      const size = fillRef.current ? stageSize() : null;
+      asked.current = size ? `${size.width}x${size.height}x${size.dpr}` : null;
+      return size;
+    },
   );
 
+  // A tab watched a moment ago draws its last frame at once, before the browser's first paint of the stage, when that
+  // frame is the stage's size; the stream's first frame replaces it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once, when the stage first shows
+  useLayoutEffect(() => {
+    const last = frameCache.recall(tab.id);
+    const node = stage.current;
+    if (!last || !node) return;
+    if (!fillRef.current || (last.width === node.clientWidth && last.height === node.clientHeight)) paint(last);
+  }, []);
+
+  // Fill asks the daemon for the stage's own size at each change: the observer fires once per frame drawn, and the
+  // daemon takes the newest of what arrives while it works, so a drag is followed and not waited out.
+  const askFill = useRef(() => {});
+  askFill.current = () => {
+    const size = fillRef.current ? stageSize() : null;
+    if (!size) return;
+    const key = `${size.width}x${size.height}x${size.dpr}`;
+    if (asked.current === key) return;
+    asked.current = key;
+    send({ type: 'resize', ...size });
+  };
   useEffect(() => {
     const node = stage.current;
     if (!node) return;
-    const observer = new ResizeObserver(() => setBox({ width: node.clientWidth, height: node.clientHeight }));
+    const observer = new ResizeObserver(() => {
+      setBox({ width: node.clientWidth, height: node.clientHeight });
+      askFill.current();
+    });
     observer.observe(node);
     setBox({ width: node.clientWidth, height: node.clientHeight });
     return () => observer.disconnect();
@@ -90,17 +130,12 @@ export function PageStage({
     return () => clearTimeout(timer);
   }, [notice]);
 
-  // Fill asks the daemon for the stage's own size, once it settles.
+  // A connect, or a switch to Fill from a device, asks for the stage's size again; the socket's own address carried it once.
   useEffect(() => {
-    if (!connected || !fill) return;
-    const size = fillSize({ width: box.width, height: box.height });
-    if (!size) return;
-    const timer = setTimeout(
-      () => send({ type: 'resize', ...size, dpr: clampRatio(window.devicePixelRatio) }),
-      RESIZE_WAIT_MS,
-    );
-    return () => clearTimeout(timer);
-  }, [connected, fill, box.width, box.height, send]);
+    if (!connected) return;
+    if (!fill) asked.current = null;
+    askFill.current();
+  }, [connected, fill]);
 
   const pickEnd = useRef(onPickEnd);
   pickEnd.current = onPickEnd;
@@ -248,9 +283,10 @@ export function PageStage({
         tabIndex={0}
         aria-label={tab.title || 'Page'}
         style={drawn}
+        // Nothing shows before the first frame: an empty canvas would flash white.
         className={`${
           fill
-            ? 'absolute inset-0 size-full bg-white outline-none'
+            ? `absolute inset-0 size-full outline-none ${framePage === null ? 'invisible' : ''}`
             : 'flex-none rounded-3xl bg-white ring-8 ring-neutral-900 outline-none'
         } ${picking ? 'cursor-crosshair' : ''}`}
         onFocus={() => send({ type: 'focus' })}
@@ -360,7 +396,7 @@ export function PageStage({
           {choose.isError && <span role="alert">{choose.error.message}</span>}
         </div>
       )}
-      {framePage !== null && !connected && (
+      {framePage !== null && lost && (
         <div
           role="status"
           className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 rounded-full bg-neutral-900 px-3.5 py-1.5 text-xs text-bg shadow-md"
