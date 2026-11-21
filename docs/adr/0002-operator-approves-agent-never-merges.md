@@ -33,7 +33,7 @@ or opens one itself: its commands hold no git credentials and `git push` stays d
 The agent saves a file outside its folders the same way. The sandbox keeps a run's commands from writing anywhere but its
 working folder, its Session's output folder, temp and the package-tool caches, so a file for the operator goes in the
 output folder, where the console shows it. To put one in another folder, such as `~/Downloads`, the agent calls the
-console's `save_file` tool with a file name from that folder and an absolute folder path. The tool raises an Approval
+console's `save_file` tool with a file or folder name from that folder and an absolute folder path. A folder is copied as a new folder of that name, with one Approval that lists its files. The tool raises an Approval
 in every Access mode but full that shows the file, its size and the destination, and only the operator's yes has the
 daemon, outside the sandbox, copy the file. A Session in full access copies it at once. A no is final: the agent does not retry by a command or ask the operator to run `mv`.
 
@@ -100,8 +100,9 @@ A Session in full access can have the daemon run an integration write as the ope
 sandbox, move into a Repo, start a batch of Sessions or save a file outside its folders with no click. Steered by text it
 read, it could do any of these; the operator who set Full access chose that, and a PROD write still asks.
 
-An approved `save_file` writes where the operator was shown: the daemon replaces a file of that name in the destination
-and checks nothing but that the folder exists. The operator reads the path on the card.
+An approved `save_file` writes where the operator was shown: the daemon replaces a file of that name in the destination,
+which the card says, refuses a folder whose name is taken, and checks nothing else about the destination but that it
+exists. The operator reads the path on the card.
 
 A fix waits for the operator. The console shows how long each verified Alert has waited for its
 Review. A run steered by log text can execute local commands in the scratch copy; the safety lines,

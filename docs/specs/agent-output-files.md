@@ -29,18 +29,26 @@ the agent can only print an `mv` command.
 10. An output file is kept as long as its Session. Deleting the Session deletes its output folder.
 11. A Session with no output files has no chip. A run that fails mid-way still shows the files it wrote before it
     failed.
-12. The operator tells the agent to save an Output file in a folder, such as `~/Downloads`. The agent calls the console's
-    `save_file` tool with the file's name and the folder's path, absolute or under `~/`. The tool raises an Approval in every Access
-    mode. It shows the file, its size and the full destination path.
-13. On the operator's yes, the daemon copies the file to the folder under the same name and the tool answers with the
-    path it wrote. The Output file stays in the output folder, so its chip still opens.
+12. The operator tells the agent to save an Output file in a folder, such as `~/Downloads`, or to make a folder with
+    files in it somewhere, such as a project in `~/Documents`. The agent builds a folder like that in the output folder
+    first. It calls the console's `save_file` tool with the name of the file or folder and the destination folder's path,
+    absolute or under `~/`. The tool raises an Approval in every Access mode but full, where it copies at once. For a
+    file the card shows the file, its size and the full destination path. For a folder it shows the folder's name, the
+    number of files, their total size and every file's path inside it, one per line, and the full destination path.
+13. On the operator's yes, the daemon copies the file to the destination under the same name. For a folder it makes a
+    new folder of that name in the destination and copies the tree into it. The tool answers with the path it wrote. The
+    Output file stays in the output folder, so its chip still opens.
 14. On the operator's no, nothing is copied and the tool tells the agent it was denied. The agent does not retry another
     way, such as a command, and does not ask the operator to run `mv`.
-15. A folder that does not exist, a path that is a file, a relative path, or a symlink at the destination name gives the agent an error and raises no
-    Approval. The daemon never makes a folder. A file of the same name in the folder is replaced; the card shows the
-    destination, not whether the name is taken.
-16. The tool takes only a name from the Session's output folder. A path, `..` or a file elsewhere on this Mac is refused.
-    The agent saves a file it wrote elsewhere by writing it in the output folder first.
+15. A destination folder that does not exist, a path that is a file, a relative path, or a symlink at the destination
+    name gives the agent an error and raises no Approval. The daemon never makes the destination folder itself, only
+    the new folder of a folder save inside it. A file of the same name in the destination is replaced, and the card
+    says so. A folder of that name already there is refused, never merged into, and nothing in it changes.
+16. The tool takes only a bare name from the Session's output folder. A path, `..`, a leading dot or a file elsewhere
+    on this Mac is refused. A folder holds plain files and folders, at any depth. One link, a file with a second hard
+    link or anything that is not a plain file refuses the whole folder, and so does a folder with no file in it. A copy
+    that fails part way removes the folder it made. The agent saves a file it wrote elsewhere by writing it in the
+    output folder first.
 17. A run the operator started offers `save_file`. A job the console starts, a review of pull request text and a thread
     answer have no output folder and offer none.
 18. An Approval waits like any other: the run shows Waiting for approval, the Agent runs page counts it under needs you,
@@ -53,6 +61,12 @@ the agent can only print an `mv` command.
 - **Which files**: only the Session's output folder. The console serves no other path on this Mac.
 - **Save where**: anywhere the operator names, through an Approval. The sandbox's write list does not grow; the daemon,
   outside the sandbox, does the copy, as it does for pushes and pull requests (ADR 0006).
+- **Full access does not unsandbox the run**: it only skips the Approval. The agent still writes `~/Documents` through
+  `save_file`, never with a command, and macOS Full Disk Access of the app lets the daemon write there.
+- **A folder is one save**: one Approval lists every file, so the operator reads the whole copy once. One call per file
+  would ask per file.
+- **No merge**: a folder save into a name that exists is refused. The agent renames the folder in the output folder or
+  the operator picks another destination.
 - **Copy, not move**: the file stays in the output folder. A move would break the chip and the history.
 - **Type**: the viewer's existing rule decides how a file shows: image and PDF as themselves, text as text, everything
   else as bytes to download.
@@ -66,6 +80,10 @@ the agent can only print an `mv` command.
   output folder.
 - **Cleanup when a Repo is removed.** The Sessions it takes with it leave their output folders in the data folder.
 - **Subfolders.** A file in a subfolder of the output folder gets no chip.
+- **Making missing destination folders** such as `~/Documents/a/b`. The agent builds `a/b` in the output folder and saves `a`.
+- **A size or file-count limit** on a folder save. The card shows both and the operator decides.
+- **Refusing destinations** such as `~/Library` or `~/.ssh`. The operator reads the path on the card; in full access
+  there is no card.
 - **Live chips** while a turn runs. They appear when the turn ends.
 
 ## Safety
@@ -105,7 +123,7 @@ symlink, is `not_found`.
 
 ### Approval for `save_file`
 
-A `command` Approval of the existing list and decision endpoints. Its summary reads `Save <name> (<size>) to <folder>/`.
+A `command` Approval of the existing list and decision endpoints. Its summary reads `Save <name> (<size>) to <folder>/`, with ` (replaces the file of that name there)` after it when one is there. For a folder it reads `Save <name>/ (<n> files, <size>) to <folder>/` and a line per file path.
 
 ## UI
 
@@ -130,8 +148,8 @@ the viewer's error line.
 - **Output file**: a file the agent wrote in its Session's output folder for the operator, shown in the transcript and
   opened in the console, never launched on this Mac.
 
-- **Save file**: the Approval of a tool that copies an Output file to a folder the operator names, from the agent's
-  `save_file` call.
+- **Save file**: the Approval of a tool that copies an Output file, or a folder of them, to a folder the operator names,
+  from the agent's `save_file` call.
 
 ## ADR
 
