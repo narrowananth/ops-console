@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import path from 'node:path';
 import { type APIRequestContext, expect, type Locator, type Page, test } from '@playwright/test';
 import { DAEMON_FILE } from './global-setup';
 
@@ -40,7 +41,12 @@ function needsChrome(): void {
 let dev: Server;
 let origin: string;
 test.beforeAll(async () => {
-  dev = createServer((_req, res) => void res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE));
+  dev = createServer(
+    (req, res) =>
+      void res
+        .writeHead(200, { 'content-type': 'text/html' })
+        .end(req.url === '/dash' ? PAGE.replace('Pick page', 'Dashboard') : PAGE),
+  );
   await new Promise<void>((resolve) => dev.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${(dev.address() as AddressInfo).port}`;
 });
@@ -89,8 +95,14 @@ async function onPage(canvas: Locator, x: number, y: number) {
  */
 async function pickAt(page: Page, panel: Locator, x: number, y: number, arm = true) {
   const canvas = panel.locator('canvas');
-  // Away from the point first, so the outline under it is drawn again after the last pick.
-  const quiet = await canvas.screenshot();
+  // A page still settling (a resize, a reload) changes the canvas by itself: take the baseline once it holds still.
+  let quiet = await canvas.screenshot();
+  await expect(async () => {
+    const next = await canvas.screenshot();
+    const held = next.equals(quiet);
+    quiet = next;
+    expect(held).toBe(true);
+  }).toPass({ intervals: [300], timeout: 15_000 });
   if (arm) await panel.getByRole('button', { name: 'Pick an element' }).click();
   const at = await onPage(canvas, x, y);
   await expect(async () => {
@@ -371,5 +383,214 @@ test.describe('picking an element', () => {
     // The window has the icons and no menu.
     await expect(popup.getByRole('button', { name: 'Open in your browser' })).toBeVisible();
     await expect(popup.getByRole('button', { name: 'Browser menu' })).toHaveCount(0);
+  });
+});
+
+// Every size the page canvas takes, kept by the page itself: a frame that is not the page's own, drawn for a moment,
+// shows here whether or not anything was on screen long enough to see.
+type Sized = { __canvasSizes: string[] };
+async function watchCanvasSizes(page: Page) {
+  await page.context().addInitScript(() => {
+    const sizes: string[] = [];
+    (window as unknown as Sized).__canvasSizes = sizes;
+    for (const side of ['width', 'height'] as const) {
+      const own = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, side);
+      if (!own?.set) continue;
+      const set = own.set;
+      Object.defineProperty(HTMLCanvasElement.prototype, side, {
+        ...own,
+        set(this: HTMLCanvasElement, value: number) {
+          set.call(this, value);
+          // The painter sets the width, then the height: the size is whole after the height.
+          if (side === 'height') sizes.push(`${this.width}x${this.height}`);
+        },
+      });
+    }
+  });
+}
+const forgetSizes = (page: Page) => page.evaluate(() => ((window as unknown as Sized).__canvasSizes.length = 0));
+const sizesSince = (page: Page) => page.evaluate(() => [...new Set((window as unknown as Sized).__canvasSizes)]);
+/** The sizes the canvas took that are not `steady`: none, when only the page's own frames were drawn. */
+const strays = async (page: Page, steady: string) => (await sizesSince(page)).filter((size) => size !== steady);
+
+function needsDevtools(): void {
+  if (existsSync(path.join(import.meta.dirname, '../public/devtools-frontend/PIN'))) return;
+  if (process.env.CI) throw new Error('DevTools are not built: run pnpm devtools-frontend.');
+  test.skip(true, 'needs pnpm devtools-frontend');
+}
+
+/** The canvas has the pixels of its stage at the screen's pixel ratio: the page's frame at the stage's size. */
+const drawnAtStageSize = (canvas: Locator) =>
+  canvas.evaluate(
+    (node: HTMLCanvasElement) => node.width === node.clientWidth * 2 && node.height === node.clientHeight * 2,
+  );
+
+/** The canvas holds the frame's own pixels: the stage's CSS size times the screen's pixel ratio. */
+const steadySize = (canvas: Locator) =>
+  canvas.evaluate((node: HTMLCanvasElement) => `${node.clientWidth * 2}x${node.clientHeight * 2}`);
+
+test.describe('the streamed page after picks, on a Retina screen', () => {
+  test.use({ deviceScaleFactor: 2 });
+
+  test('eight picks in a row leave the page at its own size, and Escape takes the outline away (pick)', async ({
+    page,
+    request,
+  }) => {
+    needsChrome();
+    await watchCanvasSizes(page);
+    const { panel } = await openPanel(page, request);
+    const canvas = panel.locator('canvas');
+    // The settled page, before any pick.
+    await expect.poll(() => drawnAtStageSize(canvas)).toBe(true);
+    const steady = await steadySize(canvas);
+    const baseline = await canvas.screenshot();
+    await forgetSizes(page);
+
+    const points: [number, number][] = [
+      [100, 60],
+      [100, 150],
+      [40, 210],
+      [100, 60],
+      [100, 150],
+      [40, 210],
+      [100, 60],
+      [100, 150],
+    ];
+    let first = true;
+    for (const [x, y] of points) {
+      await (await pickAt(page, panel, x, y, first))();
+      first = false;
+    }
+    await expect(page.getByRole('list', { name: 'Picked elements' }).getByRole('listitem')).toHaveCount(8, {
+      timeout: 15_000,
+    });
+    await shoot(panel, 'eight-picks-page');
+    // Only the page's own size was ever drawn.
+    expect(await strays(page, steady)).toEqual([]);
+
+    // The outline is under the pointer; Escape takes it, and the page is what it was.
+    const over = await onPage(canvas, 100, 60);
+    await page.mouse.move(over.x + 2, over.y);
+    await page.mouse.move(over.x, over.y);
+    await expect.poll(async () => (await canvas.screenshot()).equals(baseline), { timeout: 15_000 }).toBe(false);
+    await page.keyboard.press('Escape');
+    await expect(panel.getByRole('button', { name: 'Pick an element' })).toHaveAttribute('aria-pressed', 'false');
+    await expect.poll(async () => (await canvas.screenshot()).equals(baseline), { timeout: 15_000 }).toBe(true);
+    expect(await strays(page, steady)).toEqual([]);
+  });
+
+  test('turning pick mode on and off ten times leaves nothing on the page (pick)', async ({ page, request }) => {
+    needsChrome();
+    await watchCanvasSizes(page);
+    const { panel } = await openPanel(page, request);
+    const canvas = panel.locator('canvas');
+    await expect.poll(() => drawnAtStageSize(canvas)).toBe(true);
+    const baseline = await canvas.screenshot();
+    const steady = await steadySize(canvas);
+    await forgetSizes(page);
+    const pick = panel.getByRole('button', { name: 'Pick an element' });
+    const over = await onPage(canvas, 100, 60);
+    for (let n = 0; n < 10; n++) {
+      await pick.click();
+      await page.mouse.move(over.x + (n % 2), over.y);
+      await pick.click();
+    }
+    await expect(pick).toHaveAttribute('aria-pressed', 'false');
+    await expect.poll(async () => (await canvas.screenshot()).equals(baseline), { timeout: 15_000 }).toBe(true);
+    expect(await strays(page, steady)).toEqual([]);
+    // A click reaches the page again.
+    await expect(async () => {
+      await page.mouse.click(over.x, over.y);
+      await expect(panel.getByRole('tab', { name: 'clicked' })).toBeVisible({ timeout: 2000 });
+    }).toPass({ timeout: 20_000 });
+  });
+
+  test('switching tabs right after picks draws each tab at its own size, and the mode belongs to the tab (pick)', async ({
+    page,
+    request,
+  }) => {
+    needsChrome();
+    await watchCanvasSizes(page);
+    const { panel } = await openPanel(page, request);
+    await panel.getByRole('button', { name: 'New tab' }).click();
+    await panel.getByRole('textbox', { name: 'Address' }).fill(`${origin}/dash`);
+    await panel.getByRole('textbox', { name: 'Address' }).press('Enter');
+    await expect(panel.getByRole('tab', { name: /Dashboard/ })).toBeVisible({ timeout: 30_000 });
+    const canvas = panel.locator('canvas');
+    await expect.poll(() => drawnAtStageSize(canvas)).toBe(true);
+    const steady = await steadySize(canvas);
+
+    await panel.getByRole('tab', { name: /Pick page/ }).click();
+    await expect.poll(() => drawnAtStageSize(canvas)).toBe(true);
+    await forgetSizes(page);
+    await (await pickAt(page, panel, 100, 60))();
+    await (await pickAt(page, panel, 100, 150, false))();
+    // Straight to the other tab, with a crop just taken.
+    await panel.getByRole('tab', { name: /Dashboard/ }).click();
+    const pick = panel.getByRole('button', { name: 'Pick an element' });
+    await expect(pick).toHaveAttribute('aria-pressed', 'false');
+    await expect.poll(() => drawnAtStageSize(canvas)).toBe(true);
+    // The Dashboard picks too, and its chip comes after the first tab's two.
+    await (await pickAt(page, panel, 40, 210))();
+    await expect(page.getByRole('list', { name: 'Picked elements' }).getByRole('listitem')).toHaveCount(3, {
+      timeout: 15_000,
+    });
+    await panel.getByRole('tab', { name: /Pick page/ }).click();
+    await expect(pick).toHaveAttribute('aria-pressed', 'false');
+    expect(await strays(page, steady)).toEqual([]);
+  });
+
+  test('a reload while picking keeps the mode on and keeps picking on the reloaded page (pick)', async ({
+    page,
+    request,
+  }) => {
+    needsChrome();
+    const { panel } = await openPanel(page, request);
+    const canvas = panel.locator('canvas');
+    await (await pickAt(page, panel, 100, 60))();
+    await panel.getByRole('button', { name: 'Reload' }).click();
+    await expect(panel.getByRole('button', { name: 'Pick an element' })).toHaveAttribute('aria-pressed', 'true');
+    await expect.poll(() => drawnAtStageSize(canvas)).toBe(true);
+    await (await pickAt(page, panel, 40, 210, false))();
+    await expect(page.getByRole('list', { name: 'Picked elements' }).getByRole('listitem')).toHaveCount(2, {
+      timeout: 15_000,
+    });
+  });
+
+  test('DevTools docked and closed while picking, and the panel resized, keep the page at its size (pick)', async ({
+    page,
+    request,
+  }) => {
+    needsChrome();
+    needsDevtools();
+    await watchCanvasSizes(page);
+    const { panel } = await openPanel(page, request);
+    const canvas = panel.locator('canvas');
+    await expect.poll(() => drawnAtStageSize(canvas)).toBe(true);
+    await (await pickAt(page, panel, 100, 60))();
+
+    await panel.getByRole('button', { name: 'Inspect' }).click();
+    await expect(
+      panel.getByRole('region', { name: 'DevTools' }).or(panel.getByLabel('DevTools')).first(),
+    ).toBeVisible();
+    await expect.poll(() => drawnAtStageSize(canvas)).toBe(true);
+    await forgetSizes(page);
+    await (await pickAt(page, panel, 100, 150, false))();
+    await panel.getByRole('button', { name: 'Close DevTools' }).click();
+    await expect.poll(() => drawnAtStageSize(canvas)).toBe(true);
+
+    // The splitter between the conversation and the panel, by keyboard, with the mode still on.
+    await page.getByRole('separator', { name: 'Resize the browser' }).focus();
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(() => drawnAtStageSize(canvas)).toBe(true);
+    await expect(panel.getByRole('button', { name: 'Pick an element' })).toHaveAttribute('aria-pressed', 'true');
+    await forgetSizes(page);
+    await (await pickAt(page, panel, 40, 210, false))();
+    const settled = await steadySize(canvas);
+    expect(await strays(page, settled)).toEqual([]);
+    await expect(page.getByRole('list', { name: 'Picked elements' }).getByRole('listitem')).toHaveCount(3, {
+      timeout: 15_000,
+    });
   });
 });

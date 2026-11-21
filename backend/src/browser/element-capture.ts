@@ -144,7 +144,8 @@ export async function elementAt(cdp: CDPSession, x: number, y: number): Promise<
   return hit.backendNodeId;
 }
 
-function within<T>(work: Promise<T>): Promise<T> {
+/** Rejects when Chrome does not answer: a page that navigates under a call leaves it pending. */
+export function within<T>(work: Promise<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('The page did not answer')), READ_WAIT_MS);
     work.then(

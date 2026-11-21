@@ -7,6 +7,7 @@ import {
   type ElementCapture,
   readFrameHeader,
   type Tab,
+  TabAction,
   WS_PROTOCOL,
 } from '@ops-console/shared';
 import { chromium } from 'playwright-core';
@@ -45,6 +46,8 @@ document.getElementById('user').value = 'typed-in-value-7777';
 document.getElementById('note').value = 'typed-note-6666';
 </script></body></html>`;
 
+const NEXT = `<!doctype html><title>Next</title><button id="other" style="position:absolute;left:10px;top:10px;width:120px;height:40px">Other</button>`;
+
 let dev: Server;
 const running: AgentDaemon[] = [];
 
@@ -55,9 +58,9 @@ afterEach(async () => {
 });
 
 async function start() {
-  dev = createServer((_req, res) => {
+  dev = createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'text/html' });
-    res.end(PAGE);
+    res.end(req.url === '/next' ? NEXT : PAGE);
   });
   await new Promise<void>((resolve) => dev.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${(dev.address() as AddressInfo).port}`;
@@ -76,11 +79,11 @@ async function start() {
   const socket = new WebSocket(`${daemon.url.replace('http', 'ws')}/browser/${tabId}`, [WS_PROTOCOL, daemon.token]);
   daemon.sockets.add(socket);
   const messages: BrowserServerMessage[] = [];
-  const frames: { width: number; height: number }[] = [];
+  const frames: { width: number; height: number; jpeg: Uint8Array }[] = [];
   socket.on('message', (raw, binary) => {
     if (!binary) return void messages.push(browserServerMessageSchema.parse(JSON.parse(String(raw))));
     const frame = readFrameHeader(Uint8Array.from(raw as Buffer).buffer);
-    if (frame) frames.push(frame);
+    if (frame) frames.push({ ...frame, jpeg: Uint8Array.from(frame.jpeg) });
   });
   await new Promise((resolve, reject) => {
     socket.once('open', resolve);
@@ -128,7 +131,7 @@ async function start() {
     };
     return { x: box.x + box.width / 2, y: box.y + box.height / 2, box };
   };
-  return { daemon, send, shot, pick, taken, centre, evaluate, messages, base };
+  return { daemon, send, shot, pick, taken, centre, evaluate, messages, base, frames, tab: browser.tab(tabId) };
 }
 
 /** Width and height from a JPEG's first start-of-frame marker. */
@@ -305,6 +308,98 @@ describe.runIf(chromePath)('element pick over the page stream', () => {
     expect(capture.box.y).toBe(box.y);
     const size = jpegSize(Buffer.from(capture.crop ?? '', 'base64'));
     expect(size).toEqual({ width: Math.round(box.width), height: Math.round(box.height) });
+  });
+
+  it('keeps picking on the page the tab navigates to while pick mode is on', async () => {
+    const h = await start();
+    const { x, y } = await h.centre('buy');
+    await h.taken(x, y);
+    h.send({ type: 'pick', action: 'hover', x, y });
+    await h.evaluate(`setTimeout(() => (location.href = '/next'), 0)`);
+    await until(
+      () => h.evaluate('document.title').catch(() => ''),
+      (title) => title === 'Next',
+      'the next page',
+    );
+    const next = await h.pick(70, 30);
+    expect(next.type).toBe('picked');
+    if (next.type === 'picked') expect(next.capture.id).toBe('other');
+    // And the outline works on the new page.
+    const plain = await h.shot();
+    h.send({ type: 'pick', action: 'hover', x: 70, y: 30 });
+    await until(
+      () => h.shot(),
+      (now) => now !== plain,
+      'the outline on the new page',
+    );
+    h.send({ type: 'pick', action: 'end' });
+    await until(
+      () => h.shot(),
+      (now) => now === plain,
+      'the outline to go',
+    );
+  });
+
+  it('outlines the same element again after the page reloads in pick mode', async () => {
+    const h = await start();
+    const plain = await h.shot();
+    const { x, y } = await h.centre('buy');
+    h.send({ type: 'pick', action: 'start' });
+    h.send({ type: 'pick', action: 'hover', x, y });
+    await until(
+      () => h.shot(),
+      (now) => now !== plain,
+      'the outline',
+    );
+    // The new document numbers its nodes again, so the element under the pointer has the id the outline had.
+    await h.evaluate('setTimeout(() => location.reload(), 0)');
+    await until(
+      () => h.evaluate('document.readyState').catch(() => ''),
+      (state) => state === 'complete',
+      'the reload',
+    );
+    await until(
+      () => h.shot().catch(() => ''),
+      (now) => now === plain,
+      'the reloaded page without an outline',
+    );
+    h.send({ type: 'pick', action: 'hover', x, y });
+    await until(
+      () => h.shot(),
+      (now) => now !== plain,
+      'the outline on the reloaded page',
+    );
+  });
+
+  it('ends a pick when the page reloads while its crop is taken, and the stream goes on', async () => {
+    const h = await start();
+    const { x, y } = await h.centre('buy');
+    h.send({ type: 'pick', action: 'start' });
+    const before = h.messages.length;
+    const started = Date.now();
+    h.send({ type: 'pick', action: 'click', x, y });
+    // The reload lands while the daemon is taking the crop.
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    await h.tab.act(TabAction.Reload);
+    await until(
+      async () => h.messages.slice(before).find((m) => m.type === 'picked' || m.type === 'pick_failed'),
+      (m) => m !== undefined,
+      'the pick to end',
+    );
+    expect(Date.now() - started).toBeLessThan(8000);
+    // Frames still come: the outline of the reloaded page reaches the viewer.
+    await until(
+      () => h.evaluate('document.readyState').catch(() => ''),
+      (state) => state === 'complete',
+      'the reload',
+    );
+    const count = h.frames.length;
+    h.send({ type: 'pick', action: 'hover', x, y });
+    await until(
+      async () => h.frames.length,
+      (n) => n > count,
+      'a frame after the reload',
+    );
   });
 
   it('ignores a click on the page body and a pick from a viewer that is not in pick mode', async () => {

@@ -279,9 +279,12 @@ export class BrowserTab {
       }
       this.hooks.closed(this, this.closing);
     });
-    this.cdp.on('Page.screencastFrame', ({ data, sessionId }) => {
+    this.cdp.on('Page.screencastFrame', ({ data, sessionId, metadata }) => {
+      // A screenshot with a clip, such as an element pick's crop, resizes the view while it is taken, and Chrome sends a
+      // frame of that size. Drawn under the page's size it would show as the crop, magnified: only the page's own size goes out.
+      const ofPage = metadata.deviceWidth === this.size.width && metadata.deviceHeight === this.size.height;
       // Chrome sends the next frame after this ack, so a slow viewer slows the page down instead of queueing frames.
-      void this.sendFrame(data)
+      void (ofPage ? this.sendFrame(data) : Promise.resolve())
         .then(() => this.cdp.send('Page.screencastFrameAck', { sessionId }))
         .catch(() => {});
     });

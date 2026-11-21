@@ -1,7 +1,7 @@
 import type { ElementCapture } from '@ops-console/shared';
 import type { CDPSession } from 'playwright-core';
 import type { WebSocket } from 'ws';
-import { captureElement, elementAt, scrolled } from './element-capture';
+import { captureElement, elementAt, scrolled, within } from './element-capture';
 
 const CROP_QUALITY = 70;
 const HIGHLIGHT = {
@@ -90,7 +90,7 @@ export class ElementPicker {
     await this.moving?.catch(() => {});
     const node = await elementAt(this.host.cdp, x, y);
     if (node === null) return null;
-    // The highlight is part of the page's pixels, so it goes before the crop is taken; the next hover draws it again.
+    // The outline is part of the page's pixels, so it goes before the crop is taken; the next hover draws it again.
     await this.hide();
     return captureElement(this.host.cdp, node, (clip, scale) => this.crop(clip, scale), this.host.size());
   }
@@ -99,11 +99,13 @@ export class ElementPicker {
     return this.host.turn(async () => {
       // The page is drawn at its device scale; the crop is read at one pixel per CSS pixel, or fewer for a large element.
       const at = await scrolled(this.host.cdp);
-      const { data } = await this.host.cdp.send('Page.captureScreenshot', {
-        format: 'jpeg',
-        quality: CROP_QUALITY,
-        clip: { ...clip, x: clip.x + at.x, y: clip.y + at.y, scale: scale / this.host.size().scale },
-      });
+      const { data } = await within(
+        this.host.cdp.send('Page.captureScreenshot', {
+          format: 'jpeg',
+          quality: CROP_QUALITY,
+          clip: { ...clip, x: clip.x + at.x, y: clip.y + at.y, scale: scale / this.host.size().scale },
+        }),
+      );
       return data;
     });
   }

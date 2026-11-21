@@ -193,7 +193,9 @@ adds the same to a Session.
 46. In pick mode the pointer is a crosshair and the element under it is outlined by Chrome's own overlay (a box with a card of its tag,
     size, accessible name and role), drawn into the page, so every viewer of the tab sees it. A click, a key and a paste do not reach the page; the
     wheel still scrolls it. A click on the page's own `html` or `body` picks nothing. The outline goes before the crop is
-    taken, follows the pointer again after the click, and goes when the mode ends.
+    taken, follows the pointer again after the click, and goes when the mode ends. The streamed page keeps its size and scale through every pick: the
+    crop is taken by a screenshot that briefly resizes the view, and the frame Chrome sends for that size is never sent on. A crop that Chrome
+    does not answer within three seconds, such as when the page reloads under it, is left out and the pick still completes.
 47. A click takes the element at the point: its tag, a CSS selector path that finds it (an id or `data-testid` where one is
     unique, else the tags and `:nth-of-type` from `body`), its id and up to eight classes, its role and accessible name from
     Chrome's accessibility tree, its visible text (300 characters), its `href`, `src`, `alt`, `title`, `type`, `name`,
