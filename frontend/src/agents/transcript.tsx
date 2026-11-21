@@ -7,18 +7,21 @@ import {
   splitAttachments,
   splitElementPicks,
 } from '@ops-console/shared';
-import { memo, useState } from 'react';
-import { AttachmentViewer, outputAddress, PaperClip, size, type Viewed } from '../components/ui/attachment-viewer';
+import { memo, type ReactNode, useState } from 'react';
+import { AttachmentViewer, outputAddress, size, type Viewed } from '../components/ui/attachment-viewer';
 import { Button, Spinner } from '../components/ui/button';
 import { CodeBlock } from '../components/ui/code-block';
 import { DiffLines } from '../components/ui/diff';
 import { Elapsed } from '../components/ui/elapsed';
+import { FileKindIcon, kindOf } from '../components/ui/file-kind';
 import { Markdown } from '../components/ui/markdown';
 import type { PathwayState } from '../components/ui/pathway';
 import { ComparisonView, ResultView } from '../devtools/result-tables';
 import { COPY_FAILED, copyLabel, useCopy } from '../lib/clipboard';
 import { when } from '../monitor/scan-scope';
 import { KindBadge } from '../skills/kind-badge';
+import { MentionChip } from '../workspace/mention-chip';
+import { mentionsIn } from '../workspace/mentions';
 import { InlineText } from './inline-text';
 import { asReport, ReportDocument } from './report-document';
 import { SpawnCard } from './spawn-card';
@@ -251,10 +254,11 @@ function SentText({ text }: { text: string }) {
   const placed = new Set(namesInText(sent.text).filter((name) => byName.has(name)));
   const open = (file: { name: string; path: string }) => setViewed({ name: file.name, path: file.path });
   const rest = sent.attachments.filter((file) => !placed.has(file.name));
+  const mentioned = mentionsIn(sent.text).length > 0;
   return (
     <>
       {sent.text &&
-        (placed.size === 0 ? (
+        (placed.size === 0 && !mentioned ? (
           <Markdown source={sent.text} />
         ) : (
           <p className="m-0 text-sm leading-relaxed break-words whitespace-pre-wrap">
@@ -266,7 +270,7 @@ function SentText({ text }: { text: string }) {
                 <FileChip key={`${file.path}-${index}`} name={file.name} onOpen={() => open(file)} />
               ) : (
                 // biome-ignore lint/suspicious/noArrayIndexKey: pieces sit by position and never reorder
-                <InlineText key={index} text={piece} />
+                <MentionedText key={index} text={piece} />
               );
             })}
           </p>
@@ -290,7 +294,7 @@ function SentText({ text }: { text: string }) {
         <ul aria-label="Attached files" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
           {rest.map((file) => (
             <li key={file.path}>
-              <FileChip name={file.name} onOpen={() => open(file)} />
+              <FileChip name={file.name} size={file.sizeLabel} onOpen={() => open(file)} />
             </li>
           ))}
         </ul>
@@ -339,16 +343,33 @@ export function outputsByMessage(messages: Message[], files: OutputFile[]): Map<
   return byMessage;
 }
 
-function FileChip({ name, onOpen }: { name: string; onOpen: () => void }) {
+/** Text with a chip for each `$skill` and `@file` mention in it. */
+function MentionedText({ text }: { text: string }) {
+  const nodes: ReactNode[] = [];
+  let at = 0;
+  for (const { raw, start, end } of mentionsIn(text)) {
+    if (start > at) nodes.push(<InlineText key={`t${at}`} text={text.slice(at, start)} />);
+    nodes.push(<MentionChip key={`m${start}`} raw={raw} />);
+    at = end;
+  }
+  if (at < text.length) nodes.push(<InlineText key={`t${at}`} text={text.slice(at)} />);
+  return nodes;
+}
+
+function FileChip({ name, size: sizeLabel, onOpen }: { name: string; size?: string; onOpen: () => void }) {
+  const kind = kindOf(name);
   return (
     <button
       type="button"
+      data-file={name}
+      data-kind={kind}
       title={`Open ${name}`}
       onClick={onOpen}
       className="mx-0.5 inline-flex max-w-72 cursor-pointer items-center gap-1.5 rounded-md border border-line bg-bg px-1.5 py-0.5 align-middle font-mono text-xs text-neutral-800 hover:border-accent-300 hover:text-text"
     >
-      <PaperClip />
+      <FileKindIcon kind={kind} size={14} />
       <span className="min-w-0 truncate">{name}</span>
+      {sizeLabel && <span className="flex-none text-[11px] text-neutral-700">{sizeLabel}</span>}
     </button>
   );
 }

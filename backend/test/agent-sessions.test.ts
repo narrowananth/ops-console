@@ -312,11 +312,14 @@ describe('attachments', () => {
       .send(Buffer.from('png bytes'));
     expect(saved.status).toBe(201);
     const folder = path.join(daemon.dataDir, 'attachments', id);
-    expect(saved.body.data).toMatchObject({ name: 'shot one.png', size: 9 });
+    expect(saved.body.data).toMatchObject({ name: 'shot one.png', size: 9, type: 'image/png' });
     expect(path.dirname(saved.body.data.path)).toBe(folder);
     expect(await readFile(saved.body.data.path, 'utf8')).toBe('png bytes');
 
     const text = withAttachments('why does this page break?', [saved.body.data]);
+    expect(text).toBe(
+      `why does this page break?\n\nAttached files (open each with the Read tool):\n- shot one.png: ${saved.body.data.path} (image/png, 9 B)`,
+    );
     await converse(daemon, id, text);
     expect(daemon.sdk.calls[0]).toMatchObject({ prompt: text });
     expect(daemon.sdk.calls[0]?.options.additionalDirectories).toEqual([
@@ -326,7 +329,7 @@ describe('attachments', () => {
     const messages = await api(daemon).get(`/sessions/${id}/messages`);
     expect(splitAttachments(messages.body.data[0].parts[0].text)).toEqual({
       text: 'why does this page break?',
-      attachments: [{ name: 'shot one.png', path: saved.body.data.path }],
+      attachments: [{ name: 'shot one.png', path: saved.body.data.path, type: 'image/png', sizeLabel: '9 B' }],
     });
 
     const missing = await request(daemon.url)
@@ -335,6 +338,39 @@ describe('attachments', () => {
       .set('Content-Type', 'application/octet-stream')
       .send(Buffer.from('x'));
     expect(missing.status).toBe(404);
+  });
+
+  it('tells the agent the type of each file, and refuses an empty one', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    const upload = (name: string, body: Buffer) =>
+      request(daemon.url)
+        .post(`/api/sessions/${id}/attachments?name=${encodeURIComponent(name)}`)
+        .set(daemon.auth)
+        .set('Content-Type', 'application/octet-stream')
+        .send(body);
+    const types: Record<string, string> = {
+      'clip.mp4': 'video/mp4',
+      'voice.m4a': 'audio/mp4',
+      'plan.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'sheet.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'data.csv': 'text/csv',
+      'notes.md': 'text/markdown',
+      'bundle.zip': 'application/zip',
+      'blob.xyz': 'application/octet-stream',
+    };
+    for (const [name, type] of Object.entries(types)) {
+      const saved = await upload(name, Buffer.from('x'));
+      expect(saved.status).toBe(201);
+      expect(saved.body.data.type).toBe(type);
+    }
+
+    const empty = await upload('empty.txt', Buffer.alloc(0));
+    expect(empty.status).toBe(400);
+    expect(empty.body.error).toEqual({ code: 'validation_failed', message: 'empty.txt is empty: nothing to attach' });
+    // The refused file is not left in the Session's folder.
+    const left = await readdir(path.join(daemon.dataDir, 'attachments', id));
+    expect(left).toHaveLength(Object.keys(types).length);
   });
 
   it('serves a saved file back for the console to open, and nothing outside the Session folder', async () => {

@@ -112,8 +112,8 @@ export const LaptopIcon = () => (
   </Icon>
 );
 
-export const FolderIcon = () => (
-  <Icon>
+export const FolderIcon = ({ size }: { size?: number }) => (
+  <Icon size={size}>
     <path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2.5h8A1.5 1.5 0 0 1 20.5 10v7.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5v-10Z" />
   </Icon>
 );

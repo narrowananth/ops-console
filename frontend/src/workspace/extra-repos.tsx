@@ -81,7 +81,7 @@ export function ExtraRepos({ session, repos }: { session: Session; repos: Repo[]
         aria-label={`Repos: ${choice}`}
         title={`Repos: ${choice}. Other Repos this Session's agent may read, edit and commit in, as in its own. Applies from its next run.`}
         onClick={toggle}
-        className={`relative flex size-7.5 cursor-pointer items-center justify-center rounded-full border text-neutral-700 hover:border-accent-300 hover:text-text ${
+        className={`relative flex size-9 cursor-pointer items-center justify-center rounded-full border text-neutral-700 hover:border-accent-300 hover:text-text ${
           open
             ? 'border-divider bg-neutral-200'
             : picked.length > 0
@@ -89,7 +89,7 @@ export function ExtraRepos({ session, repos }: { session: Session; repos: Repo[]
               : 'border-line bg-card'
         }`}
       >
-        <FolderIcon />
+        <FolderIcon size={19} />
         {picked.length > 0 && (
           <span className="absolute -top-1 -right-1 min-w-4 rounded-full bg-accent px-1 text-center text-[10px] leading-4 font-semibold text-white">
             {picked.length}

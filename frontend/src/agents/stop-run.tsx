@@ -39,7 +39,7 @@ export function StopRun({
           title={title}
           disabled={stop.isPending}
           onClick={() => stop.mutate(undefined, { onSuccess: onStopped })}
-          className="flex size-9 flex-none cursor-pointer items-center justify-center rounded-full border-0 bg-accent text-white shadow-sm hover:bg-accent-600 disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex size-10 flex-none cursor-pointer items-center justify-center rounded-full border-0 bg-accent text-white shadow-sm hover:bg-accent-600 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {stop.isPending ? <Spinner /> : <StopIcon />}
         </button>

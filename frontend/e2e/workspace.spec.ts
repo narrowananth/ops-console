@@ -353,7 +353,7 @@ test('every message the operator sent copies; the last one edits, reverts the fi
   await expect(box).toHaveCount(0);
 });
 
-test('files picked, pasted or dropped on the message box upload, show as chips and go with the message', async ({
+test('files picked, pasted or dropped on the message box upload, show as chips above it and go with the message', async ({
   page,
 }) => {
   const uploads: string[] = [];
@@ -369,7 +369,14 @@ test('files picked, pasted or dropped on the message box upload, show as chips a
     uploads.push(name);
     return route.fulfill({
       status: 201,
-      json: { data: { name, path: `/data/attachments/s1/${uploads.length}.bin`, size: 2048 } },
+      json: {
+        data: {
+          name,
+          path: `/data/attachments/s1/${uploads.length}.bin`,
+          size: 2048,
+          type: TYPE_OF[name] ?? 'text/plain',
+        },
+      },
     });
   });
   await page.route('**/api/sessions/s1/messages', (route) => {
@@ -396,11 +403,14 @@ test('files picked, pasted or dropped on the message box upload, show as chips a
     element.dispatchEvent(new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true }));
     element.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
   });
-  // Each file sits in the text as a chip where it was added.
-  const chip = (name: string) => box.locator(`[data-file="${name}"]`);
+  // Each file is a chip in the row above the text, in the order it was added.
+  const row = page.getByRole('list', { name: 'Files to send' });
+  const chip = (name: string) => row.locator(`[data-file="${name}"]`);
+  await expect(row.getByRole('listitem')).toHaveCount(3);
   await expect(chip('app.log')).toContainText('2 KB');
   await expect(chip('shot.png')).toBeVisible();
   await expect(chip('order.json')).toBeVisible();
+  await expect(box.locator('[data-file]')).toHaveCount(0);
   expect(uploads).toEqual(['app.log', 'shot.png', 'order.json']);
 
   // Files stay with the Session through a reload.
@@ -409,23 +419,157 @@ test('files picked, pasted or dropped on the message box upload, show as chips a
 
   await chip('order.json').getByRole('button', { name: 'Remove order.json' }).click();
   await expect(chip('order.json')).toHaveCount(0);
-  // The cursor after the chips, as a click past them puts it.
-  await box.evaluate((element) => {
-    element.focus();
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    range.collapse(false);
-    document.getSelection()?.removeAllRanges();
-    document.getSelection()?.addRange(range);
-  });
+  await box.click();
   await box.pressSequentially('why does this fail?');
   await box.press('Enter');
   await expect
     .poll(() => sent?.text)
     .toBe(
-      '[📎 app.log] [📎 shot.png] why does this fail?\n\nAttached files (open each with the Read tool):\n- app.log: /data/attachments/s1/1.bin\n- shot.png: /data/attachments/s1/2.bin',
+      'why does this fail?\n\nAttached files (open each with the Read tool):\n- app.log: /data/attachments/s1/1.bin (text/plain, 2 KB)\n- shot.png: /data/attachments/s1/2.bin (image/png, 2 KB)',
     );
-  await expect(box.locator('[data-file]')).toHaveCount(0);
+  await expect(row).toHaveCount(0);
+});
+
+const TYPE_OF: Record<string, string> = {
+  'shot.png': 'image/png',
+  'clip.mp4': 'video/mp4',
+  'voice.mp3': 'audio/mpeg',
+  'report.pdf': 'application/pdf',
+  'plan.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'data.csv': 'text/csv',
+  'bundle.zip': 'application/zip',
+  'blob.xyz': 'application/octet-stream',
+};
+
+test('every kind of file attaches as its own chip; a file that fails or is empty leaves the others alone', async ({
+  page,
+}) => {
+  const uploads: string[] = [];
+  let sent: { text: string } | null = null;
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform')] } }),
+  );
+  await page.route(/\/api\/sessions\/s1\/attachments\?/, (route) => {
+    const name = new URL(route.request().url()).searchParams.get('name') ?? '';
+    uploads.push(name);
+    if (name === 'bad.log') {
+      return route.fulfill({
+        status: 500,
+        json: { error: { code: 'internal', message: 'The data folder is full' } },
+      });
+    }
+    return route.fulfill({
+      status: 201,
+      json: { data: { name, path: `/data/attachments/s1/${uploads.length}.bin`, size: 3000, type: TYPE_OF[name] } },
+    });
+  });
+  await page.route('**/api/sessions/s1/messages', (route) => {
+    if (route.request().method() === 'POST') {
+      sent = route.request().postDataJSON();
+      return route.fulfill({ status: 202, json: { data: { message_id: 'm1' } } });
+    }
+    return route.fulfill({ json: { data: [] } });
+  });
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const kinds: [string, string][] = [
+    ['shot.png', 'image'],
+    ['clip.mp4', 'video'],
+    ['voice.mp3', 'audio'],
+    ['report.pdf', 'document'],
+    ['plan.docx', 'document'],
+    ['data.csv', 'text'],
+    ['bundle.zip', 'archive'],
+    ['blob.xyz', 'file'],
+  ];
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  await page.locator('input[type=file]').setInputFiles([
+    ...kinds.map(([name]) => ({
+      name,
+      mimeType: TYPE_OF[name] ?? 'application/octet-stream',
+      buffer: name === 'shot.png' ? png : Buffer.from('bytes'),
+    })),
+    { name: 'bad.log', mimeType: 'text/plain', buffer: Buffer.from('boom') },
+    { name: 'empty.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) },
+  ]);
+
+  const row = page.getByRole('list', { name: 'Files to send' });
+  for (const [name, kind] of kinds) {
+    const chip = row.locator(`[data-file="${name}"]`);
+    await expect(chip).toHaveAttribute('data-kind', kind);
+    await expect(chip).toContainText('3 KB');
+    await expect(chip.getByRole('button', { name: `Remove ${name}` })).toBeVisible();
+  }
+  // The image shows its own picture.
+  await expect(row.locator('[data-file="shot.png"] img')).toBeVisible();
+  // A failed upload says why in its chip, an empty file is refused without going to the daemon.
+  await expect(row.locator('[data-file="bad.log"]')).toContainText('The data folder is full');
+  await expect(row.locator('[data-file="empty.txt"]')).toContainText('empty');
+  expect(uploads).not.toContain('empty.txt');
+
+  await row.locator('[data-file="bad.log"]').getByRole('button', { name: 'Remove bad.log' }).click();
+  await row.locator('[data-file="empty.txt"]').getByRole('button', { name: 'Remove empty.txt' }).click();
+  await page.getByRole('textbox', { name: 'Message' }).click();
+  await page.keyboard.type('read these');
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(() => sent?.text)
+    .toBe(
+      [
+        'read these',
+        '',
+        'Attached files (open each with the Read tool):',
+        '- shot.png: /data/attachments/s1/1.bin (image/png, 3 KB)',
+        '- clip.mp4: /data/attachments/s1/2.bin (video/mp4, 3 KB)',
+        '- voice.mp3: /data/attachments/s1/3.bin (audio/mpeg, 3 KB)',
+        '- report.pdf: /data/attachments/s1/4.bin (application/pdf, 3 KB)',
+        '- plan.docx: /data/attachments/s1/5.bin (application/vnd.openxmlformats-officedocument.wordprocessingml.document, 3 KB)',
+        '- data.csv: /data/attachments/s1/6.bin (text/csv, 3 KB)',
+        '- bundle.zip: /data/attachments/s1/7.bin (application/zip, 3 KB)',
+        '- blob.xyz: /data/attachments/s1/8.bin (application/octet-stream, 3 KB)',
+      ].join('\n'),
+    );
+});
+
+test('a sent message shows its attached files as chips with their size', async ({ page }) => {
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'engage platform')] } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          {
+            id: 'm1',
+            role: 'user',
+            status: 'done',
+            created_at: NOW,
+            parts: [
+              {
+                kind: 'text',
+                text: 'read these\n\nAttached files (open each with the Read tool):\n- clip.mp4: /data/attachments/s1/a.mp4 (video/mp4, 3 KB)\n- report.pdf: /data/attachments/s1/b.pdf (application/pdf, 1.2 MB)',
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  const files = page.getByRole('listitem', { name: 'Your message' }).getByRole('list', { name: 'Attached files' });
+  await expect(files.getByRole('listitem')).toHaveCount(2);
+  await expect(files.locator('[data-file="clip.mp4"]')).toContainText('3 KB');
+  await expect(files.locator('[data-file="clip.mp4"]')).toHaveAttribute('data-kind', 'video');
+  await expect(files.locator('[data-file="report.pdf"]')).toContainText('1.2 MB');
 });
 
 test('a long paste attaches as a .txt file, typing goes on, and a paste scrolls to its end', async ({ page }) => {
@@ -453,12 +597,12 @@ test('a long paste attaches as a .txt file, typing goes on, and a paste scrolls 
 
   // Past the limit the text is not drawn: it is a file, shown as a chip the operator can open.
   await paste('line of log\n'.repeat(5000));
-  await expect(box.locator('[data-file="pasted-text.txt"]')).toBeVisible();
+  await expect(page.locator('[data-file="pasted-text.txt"]')).toBeVisible();
   // Only the card's first lines are in the box, not the 60,000 characters.
   expect(await box.evaluate((element) => element.textContent?.length ?? 0)).toBeLessThan(300);
   // The card shows the first lines, a PASTED badge and the size.
-  await expect(box.locator('[data-file="pasted-text.txt"]')).toContainText('line of log line of log');
-  await expect(box.locator('[data-file="pasted-text.txt"]')).toContainText('Pasted');
+  await expect(page.locator('[data-file="pasted-text.txt"]')).toContainText('line of log line of log');
+  await expect(page.locator('[data-file="pasted-text.txt"]')).toContainText('Pasted');
   await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled();
 
   // Within the limit it is text, and the box scrolls to the cursor after it.
@@ -506,7 +650,7 @@ test('a pasted text card edits in a dialog, saves under the same name, and clear
     data.setData('text/plain', 'old text '.repeat(500));
     element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
   });
-  const card = box.locator('[data-file="pasted-text.txt"]');
+  const card = page.locator('[data-file="pasted-text.txt"]');
   await expect(card).toContainText('Pasted');
   await card.getByRole('button', { name: 'Edit pasted-text.txt' }).click();
   const dialog = page.getByRole('dialog', { name: 'Edit pasted-text.txt' });
@@ -580,7 +724,7 @@ test('a file chip opens the file over the page, in the message box and in the co
     data.items.add(new File(['hello there'], 'note.txt', { type: 'text/plain' }));
     element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
   });
-  await box.locator('[data-file="note.txt"]').click();
+  await page.locator('[data-file="note.txt"] button').first().click();
   await expect(page.getByRole('dialog', { name: 'note.txt' })).toContainText('hello there');
 });
 
@@ -632,7 +776,7 @@ test('the Repos icon beside Attach opens other Repos to the Session, A to Z, wit
 
 /** A Session whose PATCHes the test reads; the reply is the Session with the change applied. */
 async function routePatches(page: Page): Promise<unknown[]> {
-  await repoRoutes(page, [repo('r1', 'apis', 1)], [session('s1', 'r1', 'engage platform')]);
+  await repoRoutes(page, [repo('r1', 'apis', 1), repo('r2', 'admin-panel')], [session('s1', 'r1', 'engage platform')]);
   await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
   const patches: unknown[] = [];
   let current = session('s1', 'r1', 'engage platform');
@@ -652,6 +796,14 @@ test('one pill holds Model, Effort and Access, and no row under the message box 
 
   const pill = page.getByRole('button', { name: 'Model, effort and access' });
   await expect(pill).toHaveText('Opus 5.5 Medium');
+  // The toolbar's controls are 36 to 40 px, and the pill's text 14 px.
+  const side = async (name: string | RegExp) => (await page.getByRole('button', { name }).boundingBox())?.width ?? 0;
+  expect(await side('Attach files')).toBeGreaterThanOrEqual(36);
+  expect(await side(/^Repos:/)).toBeGreaterThanOrEqual(36);
+  expect(await pill.boundingBox().then((box) => box?.height ?? 0)).toBeGreaterThanOrEqual(36);
+  expect(await pill.evaluate((node) => getComputedStyle(node).fontSize)).toBe('14px');
+  await page.getByRole('textbox', { name: 'Message' }).fill('hi');
+  expect(await side('Send')).toBeGreaterThanOrEqual(40);
   await expect(page.getByRole('button', { name: /^Access/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Effort', exact: true })).toHaveCount(0);
 

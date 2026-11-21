@@ -1,9 +1,6 @@
 import {
   type EditedMessage,
-  FILE_TOKEN,
-  fileToken,
   type Message,
-  namesInText,
   type Repo,
   type Session,
   SessionKind,
@@ -22,11 +19,13 @@ import { useIncomingPicks } from '../browser/element-picks';
 import { AttachmentViewer, type Viewed } from '../components/ui/attachment-viewer';
 import { useRunQueue, useSendMessage, warmSession } from '../lib/queries';
 import { useStored } from '../lib/remember';
+import { AttachmentChips } from './attachment-chips';
 import { AttachButton, filesIn, useAttachments } from './attachments';
 import { type ComposerCommand, useComposerMenus } from './composer-menus';
 import { ComposerSettings } from './composer-settings';
 import { ExtraRepos } from './extra-repos';
 import { sessionDraftKey } from './links';
+import type { Token } from './mentions';
 import { MessageEditor, type MessageEditorHandle } from './message-editor';
 import { type PastedText, PastedTextEditor } from './pasted-text-editor';
 import { PickedChips, useElementPicks } from './picked-elements';
@@ -61,7 +60,10 @@ export function SessionComposer({
   // operator stops the run, which holds it for Send now.
   const queue = useRunQueue(id);
   const [text, setText] = useStored(sessionDraftKey(id), z.string(), '', 'typing');
-  const [picked, setPicked] = useState<SkillRef | null>(null);
+  // The skills picked from the menu: one runs when the message opens with its name.
+  const [picked, setPicked] = useState<SkillRef[]>([]);
+  // The `$`, `@` or `/` word before the cursor, which a menu is open for.
+  const [token, setToken] = useState<Token | null>(null);
   const attachments = useAttachments(id);
   const elements = useElementPicks(id, attachments);
   const editor = useRef<MessageEditorHandle>(null);
@@ -75,20 +77,18 @@ export function SessionComposer({
   const queued = session.queued_message;
   // A question waiting on the operator still holds the run: the next message answers it.
   const busy = running || session.state === SessionState.WaitingInput;
-  // The files whose chips sit in the message and the crops of the picked elements, and those saved so far.
-  const placed = namesInText(text);
+  // Every attached file goes with the message; the crops of picked elements show in the picks' own row.
   const crops = elements.picks.flatMap((pick) => (pick.crop ? [pick.crop] : []));
-  const attached = [...placed, ...crops];
+  const attached = attachments.items.map((item) => item.name);
   const files = attachments.saved(attached);
   const uploading = attachments.uploading(attached);
-  const typed = text.replace(FILE_TOKEN, '');
-  const empty = typed.trim() === '' && files.length === 0 && elements.picks.length === 0;
-  // Takes a file out of the message: its file, and its card in the text.
-  const clearPasted = (name: string) => {
-    attachments.remove([name]);
-    setText((now) => now.split(fileToken(name)).join('').replace(/ {2,}/g, ' '));
+  const empty = text.trim() === '' && files.length === 0 && elements.picks.length === 0;
+  const addFiles = (dropped: File[]) => attachments.add(dropped);
+  const openFile = (name: string) => {
+    const item = attachments.find(name);
+    if (item?.file) setViewed({ name, file: item.file });
+    else if (item?.saved) setViewed({ name, path: item.saved.path });
   };
-  const addFiles = (picked: File[]) => editor.current?.insertFiles(attachments.add(picked));
   // An element picked in the Browser panel or a tab's window lands here with its crop attached.
   useIncomingPicks(id, (captures) => {
     elements.add(captures);
@@ -100,21 +100,17 @@ export function SessionComposer({
       : [];
   const commands: ComposerCommand[] = [
     ...sessionCommands,
-    { name: 'skills', description: 'Pick a skill to run', run: () => setText('$') },
-    { name: 'files', description: 'Search files to mention', run: () => setText('@') },
+    { name: 'skills', description: 'Pick a skill to run', run: () => editor.current?.insertText('$') },
+    { name: 'files', description: 'Search files to mention', run: () => editor.current?.insertText('@') },
   ];
   const composerMenus = useComposerMenus({
     sessionId: id,
-    text,
+    token,
     enabled: session.kind === SessionKind.Repo || session.kind === SessionKind.Anonymous,
     commands,
-    setText,
-    onSkill: (chosen) => {
-      setText(`$${chosen.name} ${text.replace(/^[$/]\S*\s?/, '')}`);
-      setPicked({ kind: chosen.kind, name: chosen.name });
-      editor.current?.focusEnd();
-    },
-    focusEnd: () => editor.current?.focusEnd(),
+    replaceToken: (raw) => editor.current?.replaceToken(raw),
+    onSkill: (chosen) =>
+      setPicked((now) => [...now.filter((one) => one.name !== chosen.name), { kind: chosen.kind, name: chosen.name }]),
   });
   // The box empties at the click; a message the daemon refused comes back, in front of anything typed since.
   const putBack = (draft: string) => setText((now) => (now.trim() === '' ? draft : `${draft}\n\n${now}`));
@@ -123,7 +119,7 @@ export function SessionComposer({
     onSent();
     const draft = text;
     const sentPicks = elements.picks;
-    const message = withAttachments(withElementPicks(text, elements.forMessage()), files);
+    const message = withAttachments(withElementPicks(text.trim(), elements.forMessage()), files);
     const sent = () => {
       attachments.remove(attached);
       elements.drop(sentPicks.map((pick) => pick.id));
@@ -136,11 +132,11 @@ export function SessionComposer({
       });
       return;
     }
-    // The pick holds only while the text still opens with exactly that name: `$pre` is not the picked `pr`.
+    // A pick holds only while the text still opens with exactly that name: `$pre` is not the picked `pr`.
     const first = text.split(/\s/, 1)[0];
-    const skill = picked && (first === `$${picked.name}` || first === `/${picked.name}`) ? picked : undefined;
+    const skill = picked.find((one) => first === `$${one.name}` || first === `/${one.name}`);
     const kept = picked;
-    setPicked(null);
+    setPicked([]);
     send.mutate(
       { text: message, ...(skill ? { skill } : {}) },
       {
@@ -217,33 +213,31 @@ export function SessionComposer({
             }}
             onRemove={elements.remove}
           />
+          <AttachmentChips
+            items={attachments.items.filter((item) => !crops.includes(item.name))}
+            onOpen={openFile}
+            onEdit={(name) => {
+              const item = attachments.find(name);
+              if (item?.file) setEditing({ name, file: item.file });
+              else if (item?.saved) setEditing({ name, path: item.saved.path });
+            }}
+            onRemove={(name) => attachments.remove([name])}
+          />
           <MessageEditor
             ref={editor}
             label="Message"
             value={text}
+            onToken={setToken}
+            activeId={composerMenus.activeId}
             placeholder={
               running
                 ? 'The agent is working. Type the next message: it sends when the run ends.'
                 : 'Ask anything. @ files, $ skills, / commands'
             }
             onChange={(next) => {
-              // A chip taken out of the text takes its file with it.
-              const gone = placed.filter((name) => !next.includes(fileToken(name)));
-              if (gone.length > 0) attachments.remove(gone);
               // The first key is the operator's turn to speak: the agent can start up meanwhile.
               if (text === '' && next !== '') warmSession(id);
               setText(next);
-            }}
-            find={attachments.find}
-            onOpen={(name) => {
-              const item = attachments.find(name);
-              if (item?.file) setViewed({ name, file: item.file });
-              else if (item?.saved) setViewed({ name, path: item.saved.path });
-            }}
-            onEdit={(name) => {
-              const item = attachments.find(name);
-              if (item?.file) setEditing({ name, file: item.file });
-              else if (item?.saved) setEditing({ name, path: item.saved.path });
             }}
             onPasteFiles={addFiles}
             onSubmit={submit}
@@ -274,11 +268,11 @@ export function SessionComposer({
                   }
                   disabled={empty || queued !== null || uploading || send.isPending || queue.queue.isPending}
                   onClick={submit}
-                  className="flex size-9 flex-none cursor-pointer items-center justify-center rounded-full border-0 bg-accent text-white shadow-sm transition-colors hover:bg-accent-600 disabled:cursor-not-allowed disabled:bg-neutral-300 disabled:text-neutral-600 disabled:shadow-none"
+                  className="flex size-10 flex-none cursor-pointer items-center justify-center rounded-full border-0 bg-accent text-white shadow-sm transition-colors hover:bg-accent-600 disabled:cursor-not-allowed disabled:bg-neutral-300 disabled:text-neutral-600 disabled:shadow-none"
                 >
                   <svg
-                    width="16"
-                    height="16"
+                    width="20"
+                    height="20"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -302,12 +296,12 @@ export function SessionComposer({
           onClose={() => setEditing(null)}
           onSave={(next) => {
             // Nothing left to send: the file goes, and its card with it.
-            if (next.trim() === '') clearPasted(editing.name);
+            if (next.trim() === '') attachments.remove([editing.name]);
             else attachments.rewrite(editing.name, next);
             setEditing(null);
           }}
           onClear={() => {
-            clearPasted(editing.name);
+            attachments.remove([editing.name]);
             setEditing(null);
           }}
         />
