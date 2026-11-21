@@ -432,10 +432,7 @@ test('opening a server a tab already shows reloads that tab instead of adding on
   const panel = page.getByRole('complementary', { name: 'Browser' });
   await expect(panel.getByRole('tab', { name: /Reuse app/ })).toBeVisible({ timeout: 30_000 });
   await panel.getByRole('button', { name: 'New tab' }).click();
-  await panel
-    .getByRole('list', { name: 'Local servers' })
-    .getByRole('button', { name: /Open/ })
-    .click();
+  await panel.getByRole('list', { name: 'Local servers' }).getByRole('button', { name: /Open/ }).click();
   // The page loads in the tab that already showed it; the blank tab stays blank.
   await expect(panel.getByRole('tab', { name: /Reuse app/ })).toHaveCount(1);
   await expect(panel.getByRole('tab', { name: /Reuse app/ })).toHaveAttribute('aria-selected', 'true');
