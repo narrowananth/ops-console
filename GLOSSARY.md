@@ -66,7 +66,7 @@ a mode that asks.
 A `pup`, `gh`, `glab`, `bkt` or `slashdocs` command the agent asks the console to run through its `run_integration` tool. The daemon runs it outside the Run sandbox, as the operator. A read runs at once; a write needs an Approval, unless the Session's Access mode is full or the operator chose "Don't ask again this Session" for that CLI, which holds until the Session is deleted; sign-in, tokens and merges are refused whatever the choice.
 
 **Opened Repo**:
-An imported Repo, other than the Session's own, that the operator ticked in the composer's Repos chip. The operator's own runs in that Session write and read its checkout and run `git` there, inside the Run sandbox. The agent never pushes from it.
+An imported Repo, other than the Session's own, that the operator ticked in the composer's Repos icon. The operator's own runs in that Session write and read its checkout and run `git` there, inside the Run sandbox. The agent never pushes from it.
 
 **Run sandbox**:
 The operating-system limit on an agent run's commands: writes only in the run's working folder, the Session's output folder, its Opened Repos, temp and package-tool caches, no reads of

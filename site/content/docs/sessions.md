@@ -27,7 +27,7 @@ A write to a PROD Connection asks in every mode. When the agent asks, you get an
 - **The Terminals dock** runs shells and Session processes. A server a process starts opens its page in the Browser panel.
 - **Output files** are files the agent writes for you, kept in a folder per Session. To put a file in another folder, such as Downloads, the agent calls `save_file`, and you approve the destination.
 - **Pull requests** open through the console, never through the agent. You press the button, or the agent asks the console to open one, and the console pushes the branch with your git access and never forces it.
-- **Repos** you open from the composer's Repos chip become part of the Session. The agent writes in them as it does in its own folder, and still never pushes.
+- **Repos** you open from the composer's Repos icon become part of the Session. The agent writes in them as it does in its own folder, and still never pushes.
 
 ## Pull request review
 

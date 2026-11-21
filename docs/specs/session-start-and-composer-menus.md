@@ -1,7 +1,7 @@
 # Session start on any branch, and composer menus
 
 **Status:** shipped
-**Design:** none. The New Session card and the Session composer keep their layout; the menus follow the skills menu that was already above the composer.
+**Design:** none. The New Session card keeps its layout. The composer's toolbar holds one settings pill; the design's Workspace screen is not redrawn.
 
 ## Problem
 
@@ -39,6 +39,20 @@ In the composer, files could not be mentioned from the keyboard, and the placeho
     in quotes when it holds a space.
 13. Arrows move, Enter or Tab picks, Escape closes until the text changes, in all three menus. With no row, Enter sends.
 14. The menus show only in a Repo Session and an Anonymous Session. A `pr_review` or dev-tools Session shows none.
+15. The composer's toolbar holds Attach and the Repos icon on the left, and on the right one settings pill, then Send
+    (Stop and Queue as before). A second row under the message box does not exist.
+16. The pill reads the model's short name and the effort, such as `Sonnet 5.5 High`, with the Claude mark. It opens one
+    popover over the message box, no wider than the box except in a very narrow Session column, which it still fits.
+17. The popover has a search box (focused on open) over the model list, the effort list under `Reasoning`, and a footer chip
+    that names the Session's Access mode. The chip opens four icon buttons in order of trust: lock for Supervised, pencil for
+    Auto-accept edits, sparkle for Auto, shield-off for Full access. The picked mode's name and description show under them,
+    worded as the terminal's Access dropdown words them.
+18. A pick saves at once and applies from the Session's next run. The popover stays open for the next pick.
+19. Typing narrows the models; Enter picks the first match. Down arrow leaves the search box for the list, arrows walk a
+    list, Escape or a click outside closes the popover and returns the focus to the pill.
+20. The Repos icon shows a count when other Repos are open to the Session. Its tooltip names the choice: `Repos: this one`
+    or `Repos: this one, admin-panel`. It opens the same list as before.
+21. The pill shows no context-used chip: the console holds no per-Session context usage.
 
 ## Settled
 
@@ -74,15 +88,20 @@ list for a Session kind with no menu.
 
 ## UI
 
-The New Session card's branch list and the composer's three menus. States: reading, error, no match.
+The New Session card's branch list, the composer's three menus and its settings popover. States: reading, error, no match.
 
 ## Rejected
 
 - **A commands list in the daemon**: the commands are actions of the page the Session is on, so they live in the page.
 - **Refusing a branch the folder holds, with advice**: the operator's goal is a Session, not a lesson in worktrees.
+- **A provider rail in the popover**: Claude is the only provider, so a rail would hold one icon that does nothing.
+- **Model, Effort and Access as separate chips with a second row under the box**: three menus and two rows of chrome for
+  settings the operator changes a few times a day.
 
 ## Seams
 
 - **Backend + SQLite** (`workspace.test.ts`): 1 to 5, 10 to 12.
 - **Backend + SQLite** (`skill-kinds.test.ts`): 8.
 - **Browser** (`skill-kinds.spec.ts`): 8, 9, 10, 13.
+- **Browser** (`workspace.spec.ts`): 15 to 20.
+- **Browser** (`session-card.spec.ts`): 16, at a wide and a narrow window.

@@ -584,7 +584,9 @@ test('a file chip opens the file over the page, in the message box and in the co
   await expect(page.getByRole('dialog', { name: 'note.txt' })).toContainText('hello there');
 });
 
-test('the Repos chip opens other Repos to the Session, A to Z, without its own Repo', async ({ page }) => {
+test('the Repos icon beside Attach opens other Repos to the Session, A to Z, without its own Repo', async ({
+  page,
+}) => {
   await page.route('**/api/repos', (route) =>
     route.fulfill({
       json: {
@@ -606,18 +608,111 @@ test('the Repos chip opens other Repos to the Session, A to Z, without its own R
   });
   await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
 
-  const chip = page.getByRole('button', { name: 'Other Repos' });
-  await expect(chip).toContainText('this one');
+  const chip = page.getByRole('button', { name: /^Repos:/ });
+  await expect(chip).toHaveAccessibleName('Repos: this one');
+  // The icon sits in the toolbar beside Attach; no row under the message box carries a Repos label.
+  const toolbar = page.getByRole('button', { name: 'Attach files' }).locator('xpath=..');
+  await expect(toolbar.getByRole('button', { name: /^Repos:/ })).toBeVisible();
+  const box = page
+    .getByRole('textbox', { name: 'Message' })
+    .locator('xpath=ancestor::div[contains(@class,"rounded-3xl")][1]');
+  await expect(box.locator('xpath=following-sibling::*')).toHaveCount(0);
   await chip.click();
   const picker = page.locator('[data-extra-repos]');
   const names = picker.getByRole('button', { pressed: false }).filter({ hasText: /^(admin-panel|artemis|apis)/ });
   await expect(names).toHaveText([/^admin-panel/, /^artemis/]);
   await picker.getByRole('button', { name: /^admin-panel/ }).click();
   await expect.poll(() => patches).toEqual([{ extra_repo_ids: ['r2'] }]);
-  await expect(chip).toContainText('+1');
+  await expect(chip).toHaveAccessibleName('Repos: this one, admin-panel');
+  await expect(chip).toContainText('1');
   await picker.getByRole('button', { name: /^admin-panel/ }).click();
   await expect.poll(() => patches.at(-1)).toEqual({ extra_repo_ids: [] });
-  await expect(chip).toContainText('this one');
+  await expect(chip).toHaveAccessibleName('Repos: this one');
+});
+
+/** A Session whose PATCHes the test reads; the reply is the Session with the change applied. */
+async function routePatches(page: Page): Promise<unknown[]> {
+  await repoRoutes(page, [repo('r1', 'apis', 1)], [session('s1', 'r1', 'engage platform')]);
+  await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
+  const patches: unknown[] = [];
+  let current = session('s1', 'r1', 'engage platform');
+  await page.route('**/api/sessions/s1', (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback();
+    const body = route.request().postDataJSON();
+    patches.push(body);
+    current = { ...current, ...body };
+    return route.fulfill({ json: { data: current } });
+  });
+  return patches;
+}
+
+test('one pill holds Model, Effort and Access, and no row under the message box is left', async ({ page }) => {
+  const patches = await routePatches(page);
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const pill = page.getByRole('button', { name: 'Model, effort and access' });
+  await expect(pill).toHaveText('Opus 5.5 Medium');
+  await expect(page.getByRole('button', { name: /^Access/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Effort', exact: true })).toHaveCount(0);
+
+  await pill.click();
+  const popover = page.getByRole('dialog', { name: 'Model, effort and access' });
+  const search = popover.getByRole('searchbox', { name: 'Search models' });
+  await expect(search).toBeFocused();
+  await search.fill('son');
+  await expect(popover.getByRole('option')).toHaveText([/Sonnet 5\.5/]);
+  await search.press('Enter');
+  await expect.poll(() => patches).toEqual([{ model: 'claude-sonnet-5-5' }]);
+  await expect(pill).toHaveText('Sonnet 5.5 Medium');
+
+  await search.fill('');
+  await expect(popover.getByRole('option')).toHaveText([/Opus/, /Sonnet/, /Haiku/, /Fable/]);
+  await popover.getByRole('radiogroup', { name: 'Reasoning' }).getByRole('radio', { name: 'Low' }).click();
+  await expect.poll(() => patches.at(-1)).toEqual({ effort: 'low' });
+  await expect(pill).toHaveText('Sonnet 5.5 Low');
+
+  // Access: the footer chip names the mode and opens four icon buttons, least trust first, with the mode's words.
+  const chip = popover.getByRole('button', { name: /^Access/ });
+  await expect(chip).toContainText('Auto');
+  await chip.click();
+  const modes = popover.getByRole('radiogroup', { name: 'Access' });
+  const radios = modes.getByRole('radio');
+  await expect(radios).toHaveCount(4);
+  for (const [at, name] of ['Supervised', 'Auto-accept edits', 'Auto', 'Full access'].entries()) {
+    await expect(radios.nth(at)).toHaveAccessibleName(name);
+  }
+  await expect(popover).toContainText('Runs edits and safe commands; asks for risky ones');
+  await radios.nth(3).click();
+  await expect.poll(() => patches.at(-1)).toEqual({ access_mode: 'full' });
+  await expect(popover).toContainText('Edits and runs commands without asking');
+  await expect(chip).toContainText('Full access');
+});
+
+test('the Model popover works from the keyboard and gives the focus back', async ({ page }) => {
+  const patches = await routePatches(page);
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  const pill = page.getByRole('button', { name: 'Model, effort and access' });
+  await pill.focus();
+  await page.keyboard.press('Enter');
+  const popover = page.getByRole('dialog', { name: 'Model, effort and access' });
+  await expect(popover).toBeVisible();
+  // Typing narrows the models, Enter picks the first match.
+  await page.keyboard.type('fab');
+  await expect(popover.getByRole('option')).toHaveText([/^Fable 5\.1/]);
+  await page.keyboard.press('Enter');
+  await expect.poll(() => patches).toEqual([{ model: 'claude-fable-5-1' }]);
+  // Down arrows leave the search box and walk the list.
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => patches.at(-1)).toEqual({ model: 'claude-haiku-5-5' });
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  await expect(pill).toBeFocused();
 });
 
 test('a Session opens at its newest message', async ({ page }) => {
