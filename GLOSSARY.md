@@ -286,6 +286,10 @@ opens only loopback pages in it.
 One tab of the Browser panel in a popup window of the operator's own browser, with the toolbar and the page. The panel
 shows a placeholder for that tab until the window closes.
 
+**Inspector window**:
+One tab's Chrome DevTools in a popup window of the operator's own browser, opened by Inspect. It reads and edits the tab's
+page through the daemon, which passes DevTools' own requests and refuses the rest.
+
 **Local server**:
 A Session's process listening on a loopback port, with its port, name and folder: one a Session process started, or one
 running in the Session's folders. Other listeners on the Mac are not shown.

@@ -20,8 +20,8 @@ const ROUND =
   'flex size-7 flex-none cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-0 text-sm text-neutral-700 hover:bg-neutral-200 hover:text-text disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent';
 
 /**
- * Back, forward and reload (stop while loading), the address field, the device menu, the window button, External and
- * the menu with the link setting. With no tab, only the address field works: an address makes the first tab. A tab's own
+ * Back, forward and reload (stop while loading), the address field, the device menu, the window button, Inspect, External
+ * and the menu with the link setting. With no tab, only the address field works: an address makes the first tab. A tab's own
  * window passes neither `onWindow` nor `onClear`: it has no window button, and the menu (link setting, cookies) stays
  * the panel's.
  */
@@ -33,6 +33,7 @@ export function Toolbar({
   onAddress,
   onViewport,
   onWindow,
+  onInspect,
   onExternal,
   onClear,
 }: {
@@ -44,6 +45,7 @@ export function Toolbar({
   onAddress: (text: string) => void;
   onViewport: (viewport: Viewport) => void;
   onWindow?: () => void;
+  onInspect: () => void;
   onExternal: () => void;
   onClear?: () => void;
 }) {
@@ -144,6 +146,16 @@ export function Toolbar({
             ⛶
           </button>
         )}
+        <button
+          type="button"
+          aria-label="Inspect"
+          title="Inspect this page: Chrome's DevTools in a window of their own"
+          disabled={blank}
+          onClick={onInspect}
+          className={`${ROUND} font-mono text-[11px] font-semibold`}
+        >
+          {'</>'}
+        </button>
         <button
           type="button"
           title={blank ? 'Nothing is loaded yet' : 'Open this address in your own browser'}

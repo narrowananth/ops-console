@@ -12,3 +12,7 @@ test-results/
 .vite/
 .data/
 out/
+
+# The DevTools frontend scripts/devtools-frontend.mjs builds
+frontend/public/devtools-frontend/
+.cache/

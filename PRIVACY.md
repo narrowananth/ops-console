@@ -55,7 +55,7 @@ Ops Console sends nothing to the project. These things go elsewhere, because you
 | The services you connect: Datadog, GitHub, GitLab, Bitbucket and Atlassian, Slack, Sentry, Shopify, slashdocs, Google, AWS CloudWatch, Grafana Cloud, New Relic | Requests the console or the agent makes with your sign-in, and what they return | When you connect, check or use the service, or the agent calls one of its tools |
 | Your databases and other servers added as Connections or MCP Servers | Queries the agent runs and what they return | When the agent uses them. The Access Level and PROD tag of a Connection limit what it may do. |
 | GitHub | A request for the latest release, and the download of an update | When you run `ops-console update`, and when the console checks for a new version |
-| Websites | The pages you or the agent open in a Session's Browser panel | When a page is opened |
+| Websites | The pages you or the agent open in a Session's Browser panel | When a page is opened. The Inspector window (Chrome's DevTools) comes with the console and calls no other host, not even Google's field-data and module hosts |
 | npm and other package sources | Package downloads for tools such as an MCP Server that starts with `npx` | When that server starts |
 
 Rows the agent reads from a production database are part of what goes to the AI provider. Decide which Connections the agent may read before you give it one.

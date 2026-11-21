@@ -84,6 +84,11 @@ asks for Full Disk Access under that name, not the terminal's. The console's Key
 of the app, so it reads them without asking. Its log streams into the `pnpm dev` terminal, and Ctrl+C stops it.
 `OPS_CONSOLE_DEV_INLINE=1 pnpm dev` runs it in the terminal instead; macOS then asks for each Keychain item.
 
+The Browser panel's Inspect button opens Chrome's DevTools, which `pnpm devtools-frontend` builds from the revision pinned
+in `scripts/devtools-frontend.json` into `frontend/public/devtools-frontend`: a 3.4 GB download of build tools and 8 to 19
+minutes the first time, then nothing until the pin changes. `pnpm package` and CI run it themselves; without it Inspect
+opens an empty window in dev.
+
 ## Check
 
 ```

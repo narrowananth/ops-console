@@ -26,7 +26,7 @@ adds the same to a Session.
 2. The panel holds tabs, one page each. A new panel has one blank tab with the address field focused and the Local
    servers list below it (Behavior 11).
 3. The toolbar has back, forward, reload (stop while loading), an address field, a device menu, "Open in a window" (35),
-   "Open in external browser" and a close for the tab. The tab shows the page's title and favicon when it has them.
+   "Inspect" (39), "Open in external browser" and a close for the tab. The tab shows the page's title and favicon when it has them.
 4. The operator's address field takes any `http` or `https` URL, `localhost:5173`, `127.0.0.1:3000/path` or a bare port
    (read as `localhost:<port>`). Other schemes (`file:`, `chrome:`, `javascript:`) are refused.
 5. "Open in external browser" opens the current address in the operator's own browser, through the daemon, so it works the
@@ -146,6 +146,31 @@ adds the same to a Session.
 38. A window whose tab was closed says "This tab was closed.", and one whose Session was deleted says "This Session was
     deleted."
 
+### Inspecting a page
+
+39. The toolbar's "Inspect" button opens Chrome's DevTools for the current tab in a popup window of its own, at
+    `/devtools-frontend/devtools_app.html?ws=<host>/browser/<tab id>/devtools`. The address holds no token: a script
+    that runs in the window ahead of DevTools adds it from local storage when DevTools opens its socket. The button is
+    disabled with no page, a second click brings the window forward, and a browser that blocks the popup shows "The
+    browser blocked the window. Allow pop-ups for this page." under the toolbar. A tab's own window (35) has the button
+    too. It works on any tab, loopback or not, as the address field does.
+40. The window is Chrome's own DevTools frontend, built from a pinned revision of its repository and served by the
+    daemon, not an imitation. Elements, Console, Sources, Network, Application, Memory and Security work on the tab's
+    page: the DOM and styles, the console and a prompt that runs in the page, the page's scripts and breakpoints, its
+    requests, cookies, storage and service workers. The panel goes on drawing the page and taking input while the window is
+    open. Closing the window ends its session on the page, and a pause it left in the debugger lifts.
+41. The window asks Chrome for nothing that drives the tab or reaches past it. A request for `Browser`, `Target`
+    (except the page's own info), `Fetch`, `Tracing`, `Input`, `Emulation`, `Security` (except its events), `SystemInfo`,
+    `Autofill`, or for `Page` navigation, screencast or scripts, and for `DOM.setFileInputFiles` and
+    `Network.setRequestInterception`, gets an error reply, and the window stays open. Panels that need those do not work:
+    device toolbar and the Rendering emulations, Performance recording, Lighthouse, Recorder, local overrides. DevTools
+    sees the tab's page only: a frame that runs in another Chrome process and a worker are not inspected.
+42. A tab takes three Inspector windows at once; a fourth is refused. A window closes when its tab closes, when its
+    Session is deleted, when Chrome stops and when the daemon stops.
+43. Nothing leaves the Mac for DevTools: it loads only files the daemon serves, and its page policy allows no other host,
+    so the field data and remote modules it would otherwise fetch from Google are never asked for. The agent has no tool
+    for the window.
+
 ### Must not regress
 
 33. A run's commands still reach only the Network allowlist, and a run's sandbox is unchanged: no host is added by the
@@ -183,6 +208,17 @@ adds the same to a Session.
 - **Link setting**: a per-browser pick in the panel's menu, not a daemon Setting.
 - **Environment of a process**: HOME, PATH, the login shell's variables (read once from the shell and kept until an rc file
   changes, ADR 0007) and the Repo's own `.env` files as the project loads them. The daemon's own environment, the session token and the Keychain are not handed on, as for `run_integration`.
+- **DevTools is Chrome's own frontend, built from source at a pinned revision**: the tab is a headless Chrome page streamed to
+  a canvas, so Chrome's real DevTools frontend talks to it over the protocol. The daemon builds `ChromeDevTools/devtools-frontend`
+  at a pinned tag with its own tools (`scripts/devtools-frontend.mjs`, pin and tree hash in
+  `scripts/devtools-frontend.json`) and ships the files Chrome itself embeds, 862 files, 33 MB, 6.8 MB compressed. The
+  build must reproduce the pinned hash. BSD-3-Clause, with the licences of its bundled packages in
+  `devtools-frontend/LICENSES.txt` and `NOTICE`.
+- **A relay with an allowlist, not a debugging port**: Chrome is never started with `--remote-debugging-port` or
+  `--remote-debugging-address`, so no other process reaches the Session's Chrome. Each window gets a CDP session of its
+  own through Playwright, behind the token, and the relay forwards the DevTools domains and refuses the rest.
+- **Child targets stay out**: Playwright's session reaches one page, so the relay answers `Target.setAutoAttach` with an
+  empty result and sends nothing on. DevTools then has one target, the tab's page.
 - **T3 Code**: the design follows T3 Code's web mode (MIT, T3 Tools Inc.): a Chrome in the daemon, a streamed page, a port scan,
   agent browser tools. No code is copied, so `NOTICE` is unchanged.
 
@@ -213,6 +249,16 @@ adds the same to a Session.
 - The page may call any host, so a page the agent wrote can send what it reads to one. Accepted in the ADR: the operator
   reads the code in the Diff and runs the page.
 - The stream and terminal endpoints take the session token and listen on `127.0.0.1` only (ADR 0003).
+- The Inspector window reaches the page as the operator's own DevTools would: it runs script in the page, reads and
+  edits its DOM, storage and cookies (the Session's profile holds those of every site it visited) and sets breakpoints.
+  That is the operator's reach. The relay refuses what drives the tab or reaches past the page (41), including a file read
+  through `DOM.setFileInputFiles`. The agent is not given the window.
+- The relay is the only way in: a WebSocket route `/browser/:tabId/devtools` behind the same token check as
+  `/browser/:tabId`, on `127.0.0.1` only, so ADR 0003 holds. Chrome has no debugging port, so a sandboxed agent run or
+  any other local process cannot drive the Session's Chrome and its cookies around the mediated `browser_*` tools.
+- DevTools runs on the console's origin and reads the token from local storage to open its socket. A flaw in DevTools that
+  a hostile page could trigger would reach that token. Accepted in ADR 0007: the page is one the operator opened and
+  chose to inspect, and the frontend is Chrome's own, at a pinned revision.
 - A tab's window adds no route to the daemon and no dependency: `/browser-window/...` is a client route of the shipped UI,
   and the window reads the token from local storage and streams from the same `/browser/:tabId` socket. The token never
   enters the address.
@@ -294,6 +340,14 @@ those sizes times the page's device scale), `tab` (a changed `tab`; it carries `
 Client to server: `input` (pointer, key, wheel, text), `resize` (`width`, `height`, and `dpr`, 1 to 3, default 1: the viewer's
 pixels per CSS pixel, which a Fill page takes as its device scale), `focus`. `closed` then the socket closes.
 
+### WebSocket `/browser/:tabId/devtools`
+
+Behind the token, as `/browser/:tabId`. The Chrome DevTools protocol as JSON text: requests `{ id, method, params }` from
+the window, replies `{ id, result }` or `{ id, error: { code, message } }` and events `{ method, params }` from the
+page. Refused: 404 for an unknown tab, 409 for a tab whose Chrome stopped, 429 when the tab has three windows. A method
+the relay does not allow gets error `-32601` and the socket stays open; a request with a `sessionId`, or not a request,
+gets `-32600`. The socket closes with `tab_closed` when the tab goes.
+
 ### WebSocket `/processes/:id`
 
 Behind the token. Client to server: `input` (raw data), `resize` (cols, rows). Server to client: `output` (the replay, then live
@@ -308,10 +362,10 @@ process }`), `process.removed` (`{ session_id, process_id }`), so the Browser bu
 
 The Browser panel, a tab's window (the toolbar and the page, no sidebar), the Terminals dock, the Browser and Terminals buttons in the Session header (Workspace). States: no
 Chrome, loading, blank tab with the Local servers list, no server for the Session, called hosts, crashed, "Agent is using this tab",
-the page stream lost (a notice over the last frame while the panel reconnects), a tab in a window ("This tab is open in its own window."), a window whose tab or Session is gone;
+the page stream lost (a notice over the last frame while the panel reconnects), a tab in a window ("This tab is open in its own window."), a window whose tab or Session is gone, the Inspect button with no page and with a blocked popup;
 the dock with no process, a running one, an exited one, an Approval card for the agent's `start_process`. The link menu holds
 "In the console" and "In the external browser". Departure: neither design file has a browser or a dock, so the mock is new
-(`design/session-browser.html`), and the window and its panel placeholder are not in it.
+(`design/session-browser.html`), and the window, its panel placeholder and the Inspect button are not in it.
 
 ## Rejected
 
@@ -326,6 +380,13 @@ the dock with no process, a running one, an exited one, an Approval card for the
   Network allowlist, and the servers end with the run, so no project stays up.
 - **An Approval on every browser tool call**: it would stop the agent on every click. The reach is a loopback page the
   operator can watch. Only `browser_evaluate` asks.
+- **Starting Chrome with a remote debugging port for DevTools**: any process on the Mac, the sandboxed agent included,
+  could then drive the Session's Chrome and read its cookies around the `browser_*` tools.
+- **An inspector of our own** (a DOM tree and a console): it would cover a fraction of DevTools.
+- **`devtools-frontend-prebuilt` from npm**: a 2021 build by one person, with no licence file and an old protocol.
+- **The `chrome-devtools-frontend` npm package**: 68 MB of source, no built files and no build files.
+- **Files fetched from `chrome-devtools-frontend.appspot.com`**: served one file at a time with no list and no hash to
+  pin, and the release would wait on Google's host.
 - **A daemon Setting for the link target**: the daemon would hold a per-browser preference no other code reads.
 
 ## Glossary
@@ -336,6 +397,8 @@ the dock with no process, a running one, an exited one, an Approval card for the
 - **Session process**: A command the daemon runs for a Session, as the operator and outside the Run sandbox, in the
   Session's worktree: a dev server, a database, a test watch, a shell. The operator starts it, or approves the agent's
   `start_process`. It runs until stopped, the Session is deleted or the daemon exits. Shown in the Terminals dock.
+- **Inspector window**: One tab's Chrome DevTools in a popup window of the operator's own browser, opened by Inspect. It
+  reads and edits the tab's page through the daemon, which allows DevTools' own requests and refuses the rest.
 - **Link target**: Where a link opens: "In the console", the Browser panel, or "In the external browser". Set per browser.
 
 ## ADR
@@ -345,7 +408,8 @@ the dock with no process, a running one, an exited one, an Approval card for the
   command. The Network allowlist (ADR 0006) covers a run's commands, not what these two reach. The agent stays on loopback
   pages, and only the operator's click or yes starts a process. Hard to reverse because chats and Playbooks come to rely on
   it; surprising because the daemon runs a browser and long-lived processes; a real trade-off against the sandbox. ADR 0006
-  records the exception.
+  records the exception. It also records the Inspector window: Chrome's own DevTools, reached through a relay on the
+  console's token.
 
 ## Seams
 
@@ -357,12 +421,15 @@ the dock with no process, a running one, an exited one, an Approval card for the
 - **Browser** (`frontend/e2e/session-browser.spec.ts`, a real daemon and Chrome): 1 to 3, 5, 6, 8, 11 (Stop), 15 to 17 (Run menu, Restart, Stop, Close), 21, 26, 27, 28, 32, and the PROD warning of 17.
 - **Browser** (`frontend/e2e/skill-kinds.spec.ts` pattern): 13's setting and Cmd-click.
 - **Browser** (`frontend/e2e/session-browser-window.spec.ts`, a real daemon and Chrome, a popup of the test's browser): 35 to 38.
+- **Backend + SQLite** (`browser-inspector.test.ts`, a real Chrome): 41, 42 and the relay of 40: an allowed round trip and events, the
+  refused methods, one window to one tab, the pause lifted on close, closing with the tab, the Session and the daemon.
+- **Browser** (`frontend/e2e/session-browser-inspect.spec.ts`, a real daemon, Chrome and the built DevTools): 39 and 40, with
+  the Elements panel showing the page and `1+1` answering 2 in the Console.
 
 ## Out of scope
 
-- Inspecting the page (elements, console and network, as Chrome's DevTools shows them): waits on where the DevTools
-  frontend comes from. The official `chrome-devtools-frontend` package is source that needs Chromium's own build tools,
-  and the prebuilt packages are an unmaintained repackaging with no licence file.
+- Performance recording, Lighthouse, the device toolbar and local overrides in the Inspector window: they need `Tracing`,
+  `Emulation` and `Fetch`, which the relay refuses (41).
 - Recording, annotation, element picking and picture-in-picture: a later spec, from T3 Code's `Annotation` and `Recording`.
 - A Run button that detects a Repo's full stack (frontend, backend, database) and starts all at once: the operator picks
   scripts, or the agent starts them, one Approval each.
