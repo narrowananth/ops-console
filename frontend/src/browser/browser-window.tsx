@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Empty } from '../components/ui/empty';
 import { ApiError } from '../lib/api';
 import { useBrowserState, useOpenExternal, usePatchTab, useStoreTab } from '../lib/queries';
+import { InspectorLayout } from './inspector-dock';
 import { openInspector } from './inspector-window';
 import { PageStage } from './page-stage';
 import { Toolbar } from './toolbar';
@@ -19,6 +20,7 @@ export function BrowserWindow({ sessionId, tabId }: { sessionId: string; tabId: 
   const external = useOpenExternal();
   const storeTab = useStoreTab(sessionId);
   const [refused, setRefused] = useState<string | null>(null);
+  const [docked, setDocked] = useState(false);
 
   useEffect(() => {
     document.title = tab?.title || 'Ops Console browser';
@@ -44,9 +46,10 @@ export function BrowserWindow({ sessionId, tabId }: { sessionId: string; tabId: 
         onAction={(action) => change({ action })}
         onAddress={(url) => change({ url })}
         onViewport={(viewport) => change({ viewport })}
+        inspecting={docked}
         onInspect={() => {
           setRefused(null);
-          if (!openInspector(tabId)) setRefused('The browser blocked the window. Allow pop-ups for this page.');
+          setDocked((now) => !now);
         }}
         onExternal={() => external.mutate(tabId)}
       />
@@ -55,7 +58,16 @@ export function BrowserWindow({ sessionId, tabId }: { sessionId: string; tabId: 
           {external.error.message}
         </p>
       )}
-      <PageStage tab={tab} onTab={storeTab} onClosed={() => void state.refetch()} />
+      <InspectorLayout
+        inspecting={docked ? tabId : null}
+        onClose={() => setDocked(false)}
+        onWindow={() => {
+          if (openInspector(tabId)) setDocked(false);
+          else setRefused('The browser blocked the window. Allow pop-ups for this page.');
+        }}
+      >
+        <PageStage tab={tab} onTab={storeTab} onClosed={() => void state.refetch()} />
+      </InspectorLayout>
     </section>
   );
 }

@@ -15,6 +15,7 @@ import {
   useStopServer,
   useStoreTab,
 } from '../lib/queries';
+import { InspectorLayout, useDockedTabs } from './inspector-dock';
 import { openInspector } from './inspector-window';
 import { LocalServers } from './local-servers';
 import { PageStage } from './page-stage';
@@ -95,10 +96,18 @@ export function BrowserPanel({
       setRefused('The browser blocked the window. Allow pop-ups for this page.');
   };
 
+  const dock = useDockedTabs();
+  const inspecting = active !== undefined && dock.docked.has(active.id) ? active.id : null;
   const inspect = () => {
     if (!active) return;
     setRefused(null);
-    if (!openInspector(active.id)) setRefused('The browser blocked the window. Allow pop-ups for this page.');
+    dock.toggle(active.id);
+  };
+  /** DevTools leave the panel for a window of their own; a window the browser refuses leaves them docked. */
+  const inspectInWindow = () => {
+    if (!active) return;
+    if (openInspector(active.id)) dock.close(active.id);
+    else setRefused('The browser blocked the window. Allow pop-ups for this page.');
   };
 
   let body: ReactNode;
@@ -179,6 +188,7 @@ export function BrowserPanel({
         onAddress={open}
         onViewport={(viewport) => act({ viewport })}
         onWindow={openWindow}
+        inspecting={inspecting !== null}
         onInspect={inspect}
         onExternal={() => active && external.mutate(active.id)}
         onClear={() => setClearing(true)}
@@ -188,7 +198,13 @@ export function BrowserPanel({
           {external.error.message}
         </p>
       )}
-      {body}
+      <InspectorLayout
+        inspecting={inspecting}
+        onClose={() => active && dock.close(active.id)}
+        onWindow={inspectInWindow}
+      >
+        {body}
+      </InspectorLayout>
       {clearing && (
         <ConfirmDialog
           title="Clear this Session's cookies?"
