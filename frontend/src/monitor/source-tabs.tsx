@@ -3,7 +3,6 @@ import {
   CONNECTOR_NAMES,
   LOG_SOURCES,
   type LogSource,
-  ScanStatus,
   SEVERITIES,
   type Severity,
 } from '@ops-console/shared';
@@ -12,6 +11,7 @@ import { useAlerts, useScans } from '../lib/queries';
 import { CLOSED } from './alert-status';
 import { SOURCE_LABEL, type SourceFilter } from './log-source';
 import { ago, shown as inMonitor } from './scan-scope';
+import { sourceState } from './scan-summary';
 
 const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 const TIER_TEXT: Record<Severity, string> = {
@@ -132,15 +132,20 @@ export function SourceTabs({
         {present.map((one) => {
           const mine = open.filter((alert) => alert.connector === one);
           const gone = down.find((entry) => entry.source === one);
-          const newest = scans.data?.find((row) => row.connector === one);
-          const scanning = newest?.status === ScanStatus.Running;
+          const health = sourceState(one, scans.data ?? [], down);
+          const scanning = health.kind === 'running';
+          const failed = health.kind === 'failed' || health.kind === 'stopped';
           const state = gone
             ? gone.reason?.replace(/\.$/, '') || 'Not answering'
             : scanning
               ? 'Scanning…'
-              : newest?.finished_at
-                ? `Last Scan ${ago(newest.finished_at)}`
-                : 'No Scan yet';
+              : failed
+                ? health.kind === 'stopped'
+                  ? 'Last Scan stopped'
+                  : 'Last Scan failed'
+                : health.finishedAt
+                  ? `Last Scan ${ago(health.finishedAt)}`
+                  : 'No Scan yet';
           return (
             <button
               key={one}
@@ -159,13 +164,24 @@ export function SourceTabs({
               <span className="flex items-center gap-2 text-[13px] font-semibold">
                 <BrandIcon brand={CONNECTOR_BRAND[one]} size="sm" />
                 <span className="min-w-0 truncate">{SOURCE_LABEL[one]}</span>
+                {health.kind === 'notes' && (
+                  <span
+                    aria-hidden
+                    title={health.notes.join('\n')}
+                    className="ml-auto inline-flex size-4 flex-none items-center justify-center rounded-full bg-warn/15 text-[10px] font-bold text-warn"
+                  >
+                    !
+                  </span>
+                )}
                 <span
                   aria-hidden
-                  className={`ml-auto size-2 flex-none rounded-full ${gone ? 'bg-accent shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-accent)_20%,transparent)]' : scanning ? 'animate-pulse bg-info' : 'bg-ok'}`}
+                  className={`${health.kind === 'notes' ? '' : 'ml-auto '}size-2 flex-none rounded-full ${gone || failed ? 'bg-accent shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-accent)_20%,transparent)]' : scanning ? 'animate-pulse bg-info' : 'bg-ok'}`}
                 />
               </span>
               <Counts alerts={mine} />
-              <span className={`truncate text-[11px] ${gone ? 'font-semibold text-accent-700' : 'text-neutral-600'}`}>
+              <span
+                className={`truncate text-[11px] ${gone || failed ? 'font-semibold text-accent-700' : 'text-neutral-600'}`}
+              >
                 {state}
               </span>
             </button>

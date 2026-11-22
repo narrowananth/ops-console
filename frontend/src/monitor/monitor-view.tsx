@@ -54,7 +54,7 @@ export function MonitorView() {
   }
   return (
     <div ref={setBox} className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <MonitorHeader data={data} source={source} scope={scope} selected={service} ticked={ticked} />
+      <MonitorHeader data={data} source={source} scope={scope} selected={service} ticked={ticked} down={down} />
       <SourceTabs sources={sources} down={down} source={source} onSource={pickSource} codes={scope.codes} />
       <AlertsTable
         service={service}
@@ -62,7 +62,6 @@ export function MonitorView() {
         range={scope.range}
         selected={alertId}
         onSelect={(id) => setAddress({ alert: id })}
-        down={down}
         source={source}
         trends={trends}
         servicesMenu={

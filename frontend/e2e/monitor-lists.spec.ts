@@ -426,6 +426,10 @@ async function routeSources(
   return read;
 }
 
+/** The one status line under the title, and its button when a source has detail to open. */
+const statusLine = (page: Page) => page.getByRole('status').filter({ hasText: /Scan|down/ });
+const scanDetails = (page: Page) => page.getByRole('region', { name: 'Scan details' });
+
 test('each Alert and Service names its source, and the source filter keeps one source and survives a reload', async ({
   page,
 }) => {
@@ -486,8 +490,9 @@ test('the HTTP status codes group by class, and a class folds and opens from its
 test('a source that is down shows a notice naming it, and the other source keeps its Alerts', async ({ page }) => {
   await routeSources(page, { otel: ['fail', 'Folder not found'] });
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
-  const notice = page.getByRole('status').filter({ hasText: 'OpenTelemetry' });
-  await expect(notice).toContainText('is down: Folder not found');
+  await expect(statusLine(page)).toContainText('OpenTelemetry is down');
+  await statusLine(page).getByRole('button').click();
+  await expect(scanDetails(page)).toContainText('OpenTelemetry is down: Folder not found');
   await expect(page.getByRole('table', { name: 'Logs' }).getByRole('button', { name: /\/v1\/orders/ })).toBeVisible();
 });
 
@@ -496,9 +501,10 @@ test('no notice shows while both sources are connected', async ({ page }) => {
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
   await expect(page.getByRole('table', { name: 'Logs' }).getByRole('button')).toHaveCount(2);
   await expect(page.getByText('is down')).toHaveCount(0);
+  await expect(statusLine(page).getByRole('button')).toHaveCount(0);
 });
 
-test('a Scan that skipped lines or hit the read cap lists its notes under the last Scan', async ({ page }) => {
+test('a Scan that skipped lines or hit the read cap lists its notes in the status line details', async ({ page }) => {
   await routeSources(page, {
     scans: [
       scanOf('otel_logs', ['Read the newest 100 MB only', '3 lines were not log records and were skipped']),
@@ -506,13 +512,106 @@ test('a Scan that skipped lines or hit the read cap lists its notes under the la
     ],
   });
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
-  const notes = page.getByRole('list', { name: 'Scan notes' });
-  await expect(notes.getByRole('listitem')).toHaveText([
+  await expect(statusLine(page)).toContainText('OpenTelemetry left notes');
+  await statusLine(page).getByRole('button').click();
+  await expect(scanDetails(page).getByRole('list', { name: 'OpenTelemetry notes' }).getByRole('listitem')).toHaveText([
     'Read the newest 100 MB only',
     '3 lines were not log records and were skipped',
   ]);
-  await expect(page.getByText(/^OpenTelemetry · Last Scan \d+m ago$/)).toBeVisible();
-  await expect(page.getByText(/^Datadog · Last Scan \d+m ago$/)).toBeVisible();
+  await expect(scanDetails(page)).not.toContainText('Datadog');
+  await expect(page.getByRole('tab', { name: 'OpenTelemetry' })).toContainText('Last Scan');
+});
+
+const ALL_FIVE = { cloudwatch: ['ok', null], loki: ['ok', null], newRelic: ['ok', null] } satisfies Sources;
+
+/** The header's box and the Alerts table's top, to see how much room the status takes. */
+async function headerBoxes(page: Page) {
+  const header = await page
+    .locator('header', { has: page.getByRole('heading', { name: 'Monitor', level: 2 }) })
+    .boundingBox();
+  const table = await page.getByRole('table', { name: 'Logs' }).boundingBox();
+  const status = await page.getByRole('status').filter({ hasText: /Scan/ }).boundingBox();
+  const scan = await page.getByRole('button', { name: /^Scan \d+ Services/ }).boundingBox();
+  const title = await page.getByRole('heading', { name: 'Monitor', level: 2 }).boundingBox();
+  if (!header || !table || !status || !scan || !title) throw new Error('The Monitor header did not render');
+  return { header, table, status, scan, title };
+}
+
+test('five sources that all scanned fine read as one short line on the title row', async ({ page }) => {
+  await routeSources(page, {
+    ...ALL_FIVE,
+    scans: ['datadog', 'otel_logs', 'cloudwatch_logs', 'loki_logs', 'new_relic_logs'].map((id) => scanOf(id)),
+  });
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  const line = statusLine(page);
+  await expect(line).toHaveText(/^All 5 sources scanned · last Scan \d+m ago$/);
+  // Nothing to open, and no line per source.
+  await expect(line.getByRole('button')).toHaveCount(0);
+  await expect(page.getByText(/^(Datadog|OpenTelemetry|CloudWatch|Loki|New Relic) · Last Scan/)).toHaveCount(0);
+  const { header, table, status, scan, title } = await headerBoxes(page);
+  expect(header.height).toBeLessThan(90);
+  expect(status.height).toBeLessThan(24);
+  // Title, status and Scan button share one row.
+  expect(Math.abs(status.y - title.y)).toBeLessThan(30);
+  expect(Math.abs(scan.y - title.y)).toBeLessThan(30);
+  // Title row, source tabs and toolbar sit above the table.
+  expect(table.y).toBeLessThan(330);
+});
+
+test('a source with notes keeps the status to one line and opens its notes with one click, without moving the table', async ({
+  page,
+}) => {
+  await routeSources(page, {
+    ...ALL_FIVE,
+    scans: [
+      scanOf('datadog'),
+      scanOf('otel_logs'),
+      scanOf('cloudwatch_logs'),
+      scanOf('loki_logs', ['Loki logs: no Services found under the label service_name']),
+      scanOf('new_relic_logs', ['New Relic logs: no Services found under the attribute service.name']),
+    ],
+  });
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  const line = statusLine(page);
+  await expect(line).toContainText('All 5 sources scanned');
+  await expect(line).toContainText('Loki and New Relic left notes');
+  const before = await headerBoxes(page);
+  expect(before.header.height).toBeLessThan(90);
+  expect(before.status.height).toBeLessThan(24);
+  expect(before.table.y).toBeLessThan(330);
+  // The notes are not lines in the page; the Loki and New Relic cards carry a mark instead.
+  await expect(page.getByText('no Services found under the label service_name')).toBeHidden();
+  await expect(page.getByRole('tab', { name: 'Loki' }).locator('[title*="no Services found"]')).toHaveCount(1);
+
+  await line.getByRole('button').click();
+  await expect(scanDetails(page).getByRole('list', { name: 'Loki notes' }).getByRole('listitem')).toHaveText([
+    'Loki logs: no Services found under the label service_name',
+  ]);
+  await expect(scanDetails(page).getByRole('list', { name: 'New Relic notes' }).getByRole('listitem')).toHaveText([
+    'New Relic logs: no Services found under the attribute service.name',
+  ]);
+  const open = await headerBoxes(page);
+  expect(open.table.y).toBe(before.table.y);
+  await page.keyboard.press('Escape');
+  await expect(scanDetails(page)).toHaveCount(0);
+});
+
+test('a failed Scan stays in the status line in colour, with the reason one click away', async ({ page }) => {
+  await routeSources(page, {
+    scans: [
+      { ...scanOf('datadog'), status: 'failed', error_code: 'upstream', error_message: 'No' },
+      scanOf('otel_logs'),
+    ],
+  });
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  const line = statusLine(page);
+  await expect(line).toContainText('1 of 2 sources scanned');
+  const failed = line.getByText('Scan failed for Datadog');
+  await expect(failed).toBeVisible();
+  await expect(failed).toHaveCSS('font-weight', '600');
+  await line.getByRole('button').click();
+  await expect(scanDetails(page)).toContainText('The last Scan could not read Datadog. No good Scan yet.');
+  await expect(page.getByRole('tab', { name: 'Datadog' })).toContainText('Last Scan failed');
 });
 
 test('Scan works with only OpenTelemetry connected and asks no Datadog read', async ({ page }) => {
@@ -605,10 +704,11 @@ test('a down New Relic source shows a notice naming it, and the other sources ke
     ],
   });
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
-  const notice = page.getByRole('status').filter({ hasText: 'New Relic' });
-  await expect(notice).toContainText('New Relic is down: New Relic refused the key.');
-  await expect(notice).toContainText('Scans skip it');
-  await expect(page.getByRole('status').filter({ hasText: 'OpenTelemetry is down' })).toHaveCount(0);
+  await expect(statusLine(page)).toContainText('New Relic is down');
+  await expect(statusLine(page)).not.toContainText('OpenTelemetry is down');
+  await statusLine(page).getByRole('button').click();
+  await expect(scanDetails(page)).toContainText('New Relic is down: New Relic refused the key.');
+  await expect(scanDetails(page)).toContainText('Scans skip it');
   const logs = page.getByRole('table', { name: 'Logs' });
   await expect(logs.getByRole('button', { name: /\/v1\/orders/ })).toBeVisible();
   await expect(logs.getByRole('button', { name: /POST \/orders/ })).toBeVisible();
@@ -630,10 +730,11 @@ test('a down Loki source shows a notice naming it, and the other sources keep th
     loki: ['fail', 'Could not reach Grafana: connection refused'],
   });
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
-  const notice = page.getByRole('status').filter({ hasText: 'Loki' });
-  await expect(notice).toContainText('Loki is down: Could not reach Grafana: connection refused.');
-  await expect(notice).toContainText('Scans skip it');
-  await expect(page.getByRole('status').filter({ hasText: 'OpenTelemetry is down' })).toHaveCount(0);
+  await expect(statusLine(page)).toContainText('Loki is down');
+  await expect(statusLine(page)).not.toContainText('OpenTelemetry is down');
+  await statusLine(page).getByRole('button').click();
+  await expect(scanDetails(page)).toContainText('Loki is down: Could not reach Grafana: connection refused.');
+  await expect(scanDetails(page)).toContainText('Scans skip it');
   const logs = page.getByRole('table', { name: 'Logs' });
   await expect(logs.getByRole('button', { name: /\/v1\/orders/ })).toBeVisible();
   await expect(logs.getByRole('button', { name: /POST \/orders/ })).toBeVisible();
@@ -649,10 +750,12 @@ test('a Loki Scan shows its notes, and a Loki Alert shows its filter as a line a
       scanOf('datadog'),
     ],
   });
-  await page.goto(`${daemon.url}/monitor?alert=l1#token=${daemon.token}`);
-  await expect(page.getByRole('list', { name: 'Scan notes' }).getByRole('listitem')).toHaveText([
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  await statusLine(page).getByRole('button').click();
+  await expect(scanDetails(page).getByRole('list', { name: 'Loki notes' }).getByRole('listitem')).toHaveText([
     'cart has more than 5,000 failing lines; its counts come from the newest 5,000',
   ]);
+  await page.goto(`${daemon.url}/monitor?alert=l1#token=${daemon.token}`);
   const detail = page.locator('article');
   await page.getByRole('tab', { name: 'Query' }).click();
   await expect(detail).toContainText('Loki');
@@ -666,10 +769,11 @@ test('a down CloudWatch source shows a notice naming it, and the other sources k
     cloudwatch: ['auth', 'AWS profile shop-ro is signed out. Run `aws login --profile shop-ro`, then Connect again.'],
   });
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
-  const notice = page.getByRole('status').filter({ hasText: 'CloudWatch' });
-  await expect(notice).toContainText('CloudWatch is down: AWS profile shop-ro is signed out.');
-  await expect(notice).toContainText('then Connect again. Scans skip it');
-  await expect(page.getByRole('status').filter({ hasText: 'OpenTelemetry is down' })).toHaveCount(0);
+  await expect(statusLine(page)).toContainText('CloudWatch is down');
+  await expect(statusLine(page)).not.toContainText('OpenTelemetry is down');
+  await statusLine(page).getByRole('button').click();
+  await expect(scanDetails(page)).toContainText('CloudWatch is down: AWS profile shop-ro is signed out.');
+  await expect(scanDetails(page)).toContainText('then Connect again. Scans skip it');
   const logs = page.getByRole('table', { name: 'Logs' });
   await expect(logs.getByRole('button', { name: /\/v1\/orders/ })).toBeVisible();
   await expect(logs.getByRole('button', { name: /POST \/orders/ })).toBeVisible();
@@ -687,11 +791,11 @@ test('a CloudWatch Scan lists the bytes it scanned and the groups it left unread
     ],
   });
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
-  await expect(page.getByRole('list', { name: 'Scan notes' }).getByRole('listitem')).toHaveText([
+  await statusLine(page).getByRole('button').click();
+  await expect(scanDetails(page).getByRole('list', { name: 'CloudWatch notes' }).getByRole('listitem')).toHaveText([
     'Logs Insights scanned 1.2 GB',
     '/ecs/shop-api was not read: the query took over 5 minutes',
   ]);
-  await expect(page.getByText(/^CloudWatch · Last Scan \d+m ago$/)).toBeVisible();
 });
 
 test('a CloudWatch Alert shows its filter as a line and never names Datadog or the Log folder', async ({ page }) => {
