@@ -18,6 +18,7 @@ import { watchLoopLag } from './common/loop-lag';
 import { StartupRecovery } from './common/recovery';
 import { Session } from './common/session';
 import { timeShutdownHooks } from './common/shutdown-timing';
+import { StartupQueue, type StartupTiming } from './common/startup-queue';
 import { WsHub } from './common/ws-hub';
 import { applyMigrations } from './db/migrate';
 import { openSqlite } from './db/open';
@@ -44,6 +45,8 @@ export type DaemonOptions = {
   /** Whether the start refused the Keychain handover; give the one the handover reports to. */
   keychainHandover?: KeychainHandoverTracker;
   claudeBin?: string;
+  /** When background start-up work begins and how it is paced; none by default, so tests run it at once. */
+  startup?: StartupTiming;
 };
 
 export type Daemon = {
@@ -82,6 +85,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     const session = new Session(options.version);
     const hub = new WsHub(session);
     const address = new DaemonAddress();
+    const startup = new StartupQueue();
+    cleanups.push(function stopStartupQueue() {
+      startup.stop();
+    });
     const keychainWait = options.keychainWait ?? new KeychainWaitTracker();
     cleanups.push(function closeHub() {
       hub.close();
@@ -93,6 +100,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         session,
         store: new Store(sqlite, hub),
         hub,
+        startup,
         keychain: options.keychain ?? new LoginKeychain(undefined, undefined, { wait: keychainWait }),
         keychainWait,
         keychainHandover: options.keychainHandover ?? new KeychainHandoverTracker(),
@@ -120,6 +128,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 
     const scheduler = app.get(Scheduler);
     await scheduler.start();
+    startup.open(options.startup ?? { delayMs: 0, gapMs: 0 });
     cleanups.push(function stopScheduler() {
       scheduler.stop();
     });

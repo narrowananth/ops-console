@@ -12,7 +12,7 @@ import {
   type StagedFile,
   TabOpener,
 } from '@ops-console/shared';
-import { type BrowserContext, chromium, type Page } from 'playwright-core';
+import type { BrowserContext, Page } from 'playwright-core';
 import type { WebSocket } from 'ws';
 import { SessionsService } from '../agent/sessions.service';
 import { DATA_DIR } from '../common/data-dir';
@@ -193,15 +193,18 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
     return fresh;
   }
 
+  /** Playwright loads with the first tab: its code takes over 100 ms of the daemon's thread to read. */
   private launch(slot: Slot): Promise<BrowserContext> {
-    return chromium
-      .launchPersistentContext(slot.profile, {
-        executablePath: findChrome(this.options.chromePath) ?? undefined,
-        headless: true,
-        acceptDownloads: false,
-        viewport: null,
-        args: LAUNCH_ARGS,
-      })
+    return import('playwright-core')
+      .then(({ chromium }) =>
+        chromium.launchPersistentContext(slot.profile, {
+          executablePath: findChrome(this.options.chromePath) ?? undefined,
+          headless: true,
+          acceptDownloads: false,
+          viewport: null,
+          args: LAUNCH_ARGS,
+        }),
+      )
       .then((context) => {
         slot.crashed = false;
         slot.spare = context.pages()[0];

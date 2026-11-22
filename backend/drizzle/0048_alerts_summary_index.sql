@@ -1,0 +1,1 @@
+CREATE INDEX `alerts_summary_idx` ON `alerts` (`status`,`http_status`);

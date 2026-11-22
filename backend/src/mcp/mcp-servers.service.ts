@@ -28,6 +28,7 @@ import { CLAUDE_CLI, type ClaudeCli, type McpServerToAdd, type McpTarget } from 
 import { bounded } from '../common/bounded';
 import { DATA_DIR } from '../common/data-dir';
 import { ApiError } from '../common/errors';
+import { StartupQueue } from '../common/startup-queue';
 import { disabledMcpServers, removedMcpServers } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { KEYCHAIN_HANDOVER, type KeychainHandoverTracker } from '../keychain/handover-state';
@@ -116,12 +117,15 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     @Inject(DATA_DIR) private readonly dataDir: string,
     @Inject(ConnectionServers) private readonly connectionServers: ConnectionServers,
     @Inject(KEYCHAIN_HANDOVER) private readonly handover: KeychainHandoverTracker,
+    @Inject(StartupQueue) private readonly startup: StartupQueue,
     @Optional() @Inject(ReposService) private readonly repos?: ReposService,
   ) {}
 
   /** Starts the first Probe, so the list has a reading before Settings opens; it waits for the Keychain handover. */
   onApplicationBootstrap(): void {
-    void this.servers().catch((error) => this.logger.warn(`first Probe failed: ${String(error)}`));
+    this.startup.add('first Probe', () =>
+      this.servers().catch((error) => this.logger.warn(`first Probe failed: ${String(error)}`)),
+    );
   }
 
   async onModuleDestroy(): Promise<void> {
