@@ -1,4 +1,5 @@
-import { Logger } from '@nestjs/common';
+import { Inject, Logger, Optional } from '@nestjs/common';
+import { StartupQueue } from '../common/startup-queue';
 
 export type Job = {
   name: string;
@@ -15,12 +16,17 @@ export function everyMinutes(minutes: number): (after: Date) => Date {
   return (after) => new Date((Math.floor(after.getTime() / step) + 1) * step);
 }
 
-/** In-process timers, no queue. A missed slot runs once at start, however many slots were missed. */
+/**
+ * In-process timers. A missed slot runs once at start, however many slots were missed, in the start-up queue when the
+ * daemon has one: two at a time, after the page's first requests.
+ */
 export class Scheduler {
   private readonly logger = new Logger('scheduler');
   private readonly jobs: Job[] = [];
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private started = false;
+
+  constructor(@Optional() @Inject(StartupQueue) private readonly startup?: StartupQueue) {}
 
   register(job: Job): void {
     if (this.jobs.some((existing) => existing.name === job.name))
@@ -35,7 +41,10 @@ export class Scheduler {
     for (const job of this.jobs) {
       const last = await job.lastRunAt();
       // Runs in the background so a slow catch-up does not hold up the daemon's start.
-      if (last !== null && job.nextSlot(last) <= now) void this.runOnce(job);
+      if (last !== null && job.nextSlot(last) <= now) {
+        if (this.startup) this.startup.add(`catch-up of ${job.name}`, () => this.runOnce(job));
+        else void this.runOnce(job);
+      }
       this.arm(job, now);
     }
   }

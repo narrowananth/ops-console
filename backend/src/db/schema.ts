@@ -689,6 +689,8 @@ export const alerts = sqliteTable(
   (table) => [
     index('alerts_status_idx').on(table.status, sql`${table.lastSeenAt} DESC`),
     index('alerts_route_idx').on(table.routeId),
+    // The sidebar badge counts open Alerts from this index alone, with no walk over the Alerts' Samples.
+    index('alerts_summary_idx').on(table.status, table.httpStatus),
     check(
       'alerts_samples_json',
       sql`json_valid(${table.samples}) AND json_type(${table.samples}) = 'array' AND json_array_length(${table.samples}) <= 25`,

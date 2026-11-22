@@ -55,6 +55,9 @@ type ScanRow = typeof scans.$inferSelect;
 /** The finest interval; every slot of a longer interval is also one of these. */
 const GRID_HOURS = 6;
 
+/** Failure groups stored per transaction: a Service with hundreds of Routes yields the thread between slices. */
+const GROUPS_PER_TRANSACTION = 25;
+
 /** An `ok` Scan keeps its notes, one to a line, where a failed one keeps its error message. */
 const NOTE_SEPARATOR = '\n';
 
@@ -537,10 +540,10 @@ export class ScansService {
   }
 
   /**
-   * Stores what the Scan read, one transaction per Service with a turn of the event loop between, so a Scan of
-   * hundreds of Services never holds the daemon's one thread for long; then the Routes and Alerts it did not see, and
-   * the Scan's end, in the last transaction. A Scan that stops part way keeps the Services stored so far and ends
-   * `failed` through the start-up recovery.
+   * Stores what the Scan read, a transaction per slice of a Service's failure groups with a turn of the event loop
+   * between, so a Scan of hundreds of Services or Routes never holds the daemon's one thread for long; then the
+   * Routes and Alerts it did not see, and the Scan's end, in the last transaction. A Scan that stops part way keeps
+   * what is stored so far and ends `failed` through the start-up recovery.
    */
   private async apply(
     scan: ScanRow,
@@ -551,8 +554,16 @@ export class ScansService {
     const now = new Date().toISOString();
     const seenRoutes = new Set<string>();
     for (const reading of readings) {
-      this.store.write((tx, emit) => this.applyReading(tx, emit, scan, config, reading, now, seenRoutes));
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      // Several kinds of failure can share a Route; its result is their sum, across the slices of one Service.
+      const results = new Map<string, { errors: number; rapid: boolean }>();
+      for (let from = 0; from === 0 || from < reading.groups.length; from += GROUPS_PER_TRANSACTION) {
+        const last = from + GROUPS_PER_TRANSACTION >= reading.groups.length;
+        const slice = { ...reading, groups: reading.groups.slice(from, from + GROUPS_PER_TRANSACTION) };
+        this.store.write((tx, emit) =>
+          this.applyReading(tx, emit, scan, config, slice, now, seenRoutes, results, last),
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
     }
     this.store.write((tx, emit) => {
       this.clearUnseen(tx, scan, config, now, seenRoutes);
@@ -568,6 +579,8 @@ export class ScansService {
     reading: ServiceReading,
     now: string,
     seenRoutes: Set<string>,
+    results: Map<string, { errors: number; rapid: boolean }>,
+    last: boolean,
   ): void {
     let service = tx
       .select()
@@ -591,8 +604,6 @@ export class ScansService {
         .returning()
         .get() as ServiceRow;
     }
-    // Several kinds of failure can share a Route; its result is their sum.
-    const results = new Map<string, { errors: number; rapid: boolean }>();
     for (const group of reading.groups) {
       if (group.errors === 0) continue;
       const route = this.upsertRoute(tx, service, group.method ? group : NO_ROUTE);
@@ -607,6 +618,7 @@ export class ScansService {
       result.rapid ||= group.peakPer10m >= config.rapid_errors_per_10m;
       results.set(route.id, result);
     }
+    if (!last) return;
     for (const [routeId, result] of results) {
       seenRoutes.add(routeId);
       const state = result.rapid ? RouteState.Rapid : RouteState.Failing;

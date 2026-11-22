@@ -7,6 +7,7 @@ import {
   ErrorCode,
 } from '@ops-console/shared';
 import { ApiError } from '../common/errors';
+import { StartupQueue } from '../common/startup-queue';
 import { KEYCHAIN, type Keychain } from '../keychain/keychain';
 import { SettingsRegistry } from '../settings/settings.registry';
 import { SettingsService } from '../settings/settings.service';
@@ -34,6 +35,7 @@ export class CliProxyService implements OnApplicationBootstrap {
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(KEYCHAIN) private readonly keychain: Keychain,
     @Inject(SettingsRegistry) registry: SettingsRegistry,
+    @Inject(StartupQueue) private readonly startup: StartupQueue,
   ) {
     registry.register({
       key: CLIPROXY,
@@ -45,7 +47,7 @@ export class CliProxyService implements OnApplicationBootstrap {
   }
 
   onApplicationBootstrap(): void {
-    void this.check().catch(() => {});
+    this.startup.add('first CLIProxy check', () => this.check().catch(() => {}));
   }
 
   setting(): CliProxySetting {

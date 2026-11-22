@@ -8,6 +8,7 @@ import { ErrorFilter } from './common/error.filter';
 import { HealthController } from './common/health.controller';
 import { StartupRecovery } from './common/recovery';
 import { SESSION, type Session } from './common/session';
+import { StartupQueue } from './common/startup-queue';
 import { WsHub } from './common/ws-hub';
 import { STORE, type Store } from './db/store';
 import type { KeychainHandoverTracker } from './keychain/handover-state';
@@ -23,6 +24,7 @@ export type AppParts = {
   session: Session;
   store: Store;
   hub: WsHub;
+  startup: StartupQueue;
   keychain: Keychain;
   keychainWait: KeychainWaitTracker;
   keychainHandover: KeychainHandoverTracker;
@@ -53,9 +55,10 @@ export class AppModule {
         { provide: STORE, useValue: parts.store },
         { provide: WsHub, useValue: parts.hub },
         StartupRecovery,
+        { provide: StartupQueue, useValue: parts.startup },
         { provide: APP_FILTER, useClass: ErrorFilter },
       ],
-      exports: [DATA_DIR, DAEMON_ADDRESS, SESSION, STORE, WsHub, StartupRecovery],
+      exports: [DATA_DIR, DAEMON_ADDRESS, SESSION, STORE, WsHub, StartupRecovery, StartupQueue],
     };
   }
 }
