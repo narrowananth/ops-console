@@ -116,6 +116,31 @@ async function start() {
       .then((v) => v as unknown[]);
     return value;
   };
+  /**
+   * How much of the page two screenshots show differently, 0 to 1. Chrome draws the same page in two slightly different
+   * ways from one run to the next (text edges), so the bytes of two JPEGs of an unchanged page can differ: the pixels
+   * are compared, and only a pixel that moved a lot counts.
+   */
+  const differ = async (a: string, b: string): Promise<number> =>
+    (await browser.tab(tabId).page.evaluate(`(async () => {
+      const read = async (base64) => {
+        const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const context = canvas.getContext('2d');
+        context.drawImage(bitmap, 0, 0);
+        return context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+      };
+      const [x, y] = [await read(${JSON.stringify(a)}), await read(${JSON.stringify(b)})];
+      if (x.length !== y.length) return 1;
+      let moved = 0;
+      for (let i = 0; i < x.length; i += 4) {
+        if (Math.max(Math.abs(x[i] - y[i]), Math.abs(x[i + 1] - y[i + 1]), Math.abs(x[i + 2] - y[i + 2])) > 48) moved += 1;
+      }
+      return moved / (x.length / 4);
+    })()`)) as number;
+  /** Two screenshots of one page, as far as the eye can tell. */
+  const alike = async (a: string, b: string) => (await differ(a, b)) < 0.002;
   const taken = async (x: number, y: number): Promise<ElementCapture> => {
     send({ type: 'pick', action: 'start' });
     const reply = await pick(x, y);
@@ -131,7 +156,21 @@ async function start() {
     };
     return { x: box.x + box.width / 2, y: box.y + box.height / 2, box };
   };
-  return { daemon, send, shot, pick, taken, centre, evaluate, messages, base, frames, tab: browser.tab(tabId) };
+  return {
+    daemon,
+    send,
+    shot,
+    differ,
+    alike,
+    pick,
+    taken,
+    centre,
+    evaluate,
+    messages,
+    base,
+    frames,
+    tab: browser.tab(tabId),
+  };
 }
 
 /** Width and height from a JPEG's first start-of-frame marker. */
@@ -157,16 +196,20 @@ describe.runIf(chromePath)('element pick over the page stream', () => {
     h.send({ type: 'pick', action: 'start' });
     h.send({ type: 'pick', action: 'hover', x, y });
     const lit = await until(
-      () => h.shot(),
-      (now) => now !== plain,
+      async () => {
+        const now = await h.shot();
+        return { now, moved: await h.differ(now, plain) };
+      },
+      (seen) => seen.moved >= 0.002,
       'the highlight to show in the page',
     );
-    expect(lit).not.toBe(plain);
+    // The check can fail: a lit page is far from the plain one.
+    expect(lit.moved).toBeGreaterThan(0.004);
 
     h.send({ type: 'pick', action: 'end' });
     await until(
-      () => h.shot(),
-      (now) => now === plain,
+      async () => ({ moved: await h.differ(await h.shot(), plain) }),
+      (seen) => seen.moved < 0.002,
       'the highlight to go',
     );
   });
@@ -210,7 +253,7 @@ describe.runIf(chromePath)('element pick over the page stream', () => {
 
     // The page saw no click, and the highlight is gone from it.
     expect(await h.evaluate('document.title')).toBe('Pick me');
-    expect(await h.shot()).toBe(plain);
+    expect(await h.alike(await h.shot(), plain)).toBe(true);
 
     // Pick mode stays on after a pick: the next click picks again, and the outline follows the pointer again.
     const again = await h.pick(x, y);
