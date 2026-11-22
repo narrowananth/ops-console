@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>Ops Console · Monitor (source tabs, table, drawer)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* Tokens match frontend/src/styles/theme.css */
+:root{
+  --bg:#f3f2f2;--surface:#ebe9e8;--card:#fbfafa;--text:#201e1d;--accent:#ec3013;
+  --divider:color-mix(in srgb,#201e1d 18%,transparent);--line:color-mix(in srgb,#201e1d 11%,transparent);
+  --ok:#2f7d3b;--warn:#b26b00;--info:#2a5db0;
+  --n100:#f8f4f4;--n200:#eae7e7;--n300:#d7d3d3;--n400:#bab6b6;--n500:#9b9797;--n600:#7d7979;--n700:#605d5d;--n800:#444141;--n900:#2d2b2b;
+  --a100:#fff2ef;--a200:#ffe0d9;--a600:#dd2b0f;--a700:#ae1800;
+  --sh-sm:0 1px 2px color-mix(in srgb,#2d2b2b 8%,transparent),0 1px 1px color-mix(in srgb,#2d2b2b 4%,transparent);
+  --sh-md:0 4px 14px color-mix(in srgb,#2d2b2b 10%,transparent);
+  --sh-lg:0 12px 32px color-mix(in srgb,#2d2b2b 22%,transparent);
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,system-ui,sans-serif;
+}
+[data-theme=dark]{
+  color-scheme:dark;
+  --bg:#181716;--surface:#141312;--card:#1f1d1c;--text:#ecebea;
+  --divider:color-mix(in srgb,#ecebea 16%,transparent);--line:color-mix(in srgb,#ecebea 10%,transparent);
+  --ok:#6cc47a;--warn:#f0a940;--info:#7aa7f0;
+  --n100:#232120;--n200:#2d2b2a;--n300:#3b3837;--n400:#55514f;--n500:#76726f;--n600:#969290;--n700:#b4b0ae;--n800:#d1cdcb;--n900:#efebea;
+  --a100:#3a140d;--a200:#561b10;--a600:#ff6c55;--a700:#ff8c77;
+  --sh-sm:0 1px 2px #0006;--sh-md:0 4px 14px #0007;--sh-lg:0 12px 32px #000a;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--surface);color:var(--text);font:13px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}
+svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.muted{color:var(--n700)}
+
+/* page chrome (not part of the app) */
+.stage{padding:20px 24px 40px;display:flex;flex-direction:column;gap:14px;align-items:center}
+.bar{display:flex;gap:8px;align-items:center;width:100%;max-width:1480px}
+.bar h2{margin:0 auto 0 0;font-size:14px}
+.bar button{border:1px solid var(--divider);background:var(--card);border-radius:9999px;padding:5px 12px;font-size:12px}
+.bar button[aria-pressed=true]{background:var(--text);color:var(--bg);border-color:var(--text)}
+.frame-wrap{width:100%;display:flex;justify-content:center}
+.frame{container-type:inline-size;width:1440px;max-width:100%;height:880px;border-radius:14px;overflow:hidden;box-shadow:var(--sh-lg);border:1px solid var(--divider);background:var(--bg);transition:width .2s;position:relative}
+.notes{width:100%;max-width:1440px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.notes div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.notes h3{margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--n700)}
+.notes ul{margin:0;padding-left:16px}.notes li{margin:2px 0}
+
+/* shell */
+.app{display:grid;grid-template-columns:64px minmax(0,1fr);grid-template-rows:minmax(0,1fr);height:100%}
+.app.wide-side{grid-template-columns:224px minmax(0,1fr)}
+.side{background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:12px 10px;gap:2px;overflow:auto;align-items:center}
+.brand{display:flex;align-items:center;gap:9px;padding:2px 0 12px;font:800 17px/1 "Archivo",var(--sans)}
+.brand b{width:30px;height:30px;border-radius:9px;background:var(--accent);display:grid;place-items:center;color:#fff}
+.brand span,.nav .t2,.nav .n,.grp,.usage,.side-foot{display:none}
+.nav{display:flex;align-items:center;gap:10px;width:42px;height:38px;justify-content:center;border-radius:11px;border:0;background:none;color:var(--n800);position:relative}
+.nav:hover{background:color-mix(in srgb,var(--text) 7%,transparent)}
+.nav.on{background:var(--card);box-shadow:var(--sh-sm);color:var(--accent)}
+.nav .badge{position:absolute;top:-2px;right:-4px;background:var(--accent);color:#fff;border-radius:9999px;padding:0 5px;font-size:10px;font-weight:700;line-height:15px}
+.sep{height:1px;width:26px;background:var(--line);margin:8px 0}
+.spacer{flex:1}
+.app.wide-side .side{align-items:stretch;padding:14px 10px}
+.app.wide-side .brand span,.app.wide-side .nav .t2,.app.wide-side .nav .n,.app.wide-side .grp,.app.wide-side .usage,.app.wide-side .side-foot{display:revert}
+.app.wide-side .brand{padding:2px 8px 14px}
+.app.wide-side .nav{width:100%;justify-content:flex-start;padding:0 10px}
+.app.wide-side .sep{display:none}
+.app.wide-side .nav .badge{position:static;margin-left:auto;font-size:11px;line-height:18px;padding:0 7px}
+.app.wide-side .nav .n{margin-left:auto;font-size:11px;color:var(--n600)}
+.grp{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--n600);padding:14px 10px 4px;font-weight:600}
+.usage{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 11px;font-size:11.5px}
+.side-foot{font-size:11px;color:var(--n600);padding:8px 8px 0}
+.t2{white-space:nowrap}
+
+.main{display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
+
+/* header */
+.head{display:flex;align-items:center;gap:14px;padding:18px 28px 14px;flex-wrap:wrap}
+.head h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.01em}
+.head .sub{color:var(--n700);font-size:12.5px;display:flex;align-items:center;gap:7px}
+.dot{width:7px;height:7px;border-radius:9px;background:var(--ok);display:inline-block}
+.grow{flex:1}
+.seg{display:inline-flex;background:var(--surface);border-radius:9999px;padding:3px;gap:2px}
+.seg button{border:0;background:none;border-radius:9999px;padding:4px 12px;font-size:12px;color:var(--n700);white-space:nowrap}
+.seg button.on{background:var(--card);color:var(--text);font-weight:600;box-shadow:var(--sh-sm)}
+.chip-btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--divider);background:var(--card);border-radius:9999px;padding:5px 12px;font-size:12px;white-space:nowrap}
+.chip-btn svg{width:13px;height:13px;color:var(--n600)}
+.btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--divider);background:var(--card);border-radius:10px;padding:8px 15px;font-weight:600;white-space:nowrap}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:var(--sh-sm)}
+.btn.primary:hover{background:var(--a600)}
+.split{display:inline-flex}.split .btn:first-child{border-radius:10px 0 0 10px}.split .btn+.btn{border-radius:0 10px 10px 0;padding:8px 9px;border-left:1px solid #ffffff55}
+
+/* source tabs */
+.tabs-wrap{position:relative;padding:0 28px}
+.srcs{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 12px;scrollbar-width:none}
+.srcs::-webkit-scrollbar{display:none}
+.st{flex:1 0 148px;max-width:200px;border:1px solid var(--line);background:var(--card);border-radius:14px;padding:10px 12px;text-align:left;display:flex;flex-direction:column;gap:3px;position:relative;box-shadow:var(--sh-sm)}
+.st:hover{border-color:var(--divider)}
+.st.on{border-color:var(--text);box-shadow:0 0 0 1px var(--text),var(--sh-md)}
+.st .r1{display:flex;align-items:center;gap:8px;font-weight:650}
+.st .r1 .s{margin-left:auto;width:8px;height:8px;border-radius:9px;background:var(--ok)}
+.st.err .r1 .s{background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent)}
+.st.run .r1 .s{background:var(--info);animation:pu 1.2s ease-in-out infinite}
+@keyframes pu{50%{opacity:.3}}
+.st .r2{font:11.5px var(--mono);color:var(--n700);display:flex;gap:7px;align-items:baseline;font-variant-numeric:tabular-nums;min-height:17px}
+.st .r2 em{font-style:normal;color:var(--accent);font-weight:700}.st .r2 s{text-decoration:none;color:var(--warn);font-weight:700}
+.st .r2.t{font-family:var(--sans);font-size:11.5px}
+.st .r2 .bad{color:var(--a600);font-weight:600;font-family:var(--sans)}
+.st .r3{font-size:10.5px;color:var(--n600)}
+.st.all .lg{background:var(--text);color:var(--bg)}
+.prog{height:3px;border-radius:9px;background:var(--n200);overflow:hidden;margin-top:2px}.prog u{display:block;height:100%;width:44%;background:var(--info);border-radius:9px}
+.lg{width:24px;height:24px;border-radius:8px;display:grid;place-items:center;font:800 11px var(--sans);color:#fff;background:var(--h,var(--n600));flex:none}
+.lg.sm{width:18px;height:18px;border-radius:6px;font-size:9.5px}
+.lg+.lg.sm{margin-left:-3px;box-shadow:0 0 0 2px var(--card)}
+.fade{position:absolute;right:28px;top:0;bottom:12px;width:30px;background:linear-gradient(90deg,transparent,var(--bg));pointer-events:none;display:none}
+
+/* toolbar */
+.tool{display:flex;align-items:center;gap:10px;padding:0 28px 12px;flex-wrap:wrap}
+.search{display:flex;align-items:center;gap:7px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px 11px;color:var(--n600);width:260px}
+.search input{border:0;outline:0;background:none;color:var(--text);font:inherit;width:100%;min-width:0}
+.toggle{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:6px 11px;font-size:12px;white-space:nowrap}
+.toggle i{width:22px;height:13px;border-radius:9px;background:var(--n300);position:relative}
+.toggle i::after{content:"";position:absolute;top:2px;left:2px;width:9px;height:9px;border-radius:9px;background:#fff;transition:.15s}
+.toggle[aria-pressed=true] i{background:var(--accent)}.toggle[aria-pressed=true] i::after{left:11px}
+.seg .n{font:11px var(--mono);margin-left:5px;opacity:.7}
+.seg button.hi .n{color:var(--accent);opacity:1;font-weight:700}
+
+/* table */
+.tbl{flex:1;min-height:0;overflow:auto;margin:0 28px 20px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--sh-sm)}
+table{width:100%;border-collapse:separate;border-spacing:0}
+th{position:sticky;top:0;background:var(--card);z-index:2;text-align:left;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--n600);font-weight:600;padding:11px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:12px;border-bottom:1px solid var(--line);vertical-align:middle;white-space:nowrap}
+tr.r{cursor:pointer}
+tr.r:hover td{background:color-mix(in srgb,var(--text) 3%,transparent)}
+tr.r.on td{background:var(--a100)}
+tr.r.on td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+td.sv{width:10px;padding:0}
+.sevd{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.sevd i{width:8px;height:8px;border-radius:9px;background:var(--c)}
+.rt{display:flex;align-items:baseline;gap:8px;min-width:0}
+.m{font:700 10px var(--mono);color:var(--n700);background:var(--surface);border-radius:5px;padding:1px 5px}
+.p{font:600 13px var(--mono);overflow:hidden;text-overflow:ellipsis}
+.msg{display:block;font:11.5px var(--mono);color:var(--n600);margin-top:2px;overflow:hidden;text-overflow:ellipsis;max-width:380px}
+.code{font:700 11px var(--mono);border-radius:6px;padding:1px 7px;background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.code.e5{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
+.num{font:600 12.5px var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+.spk{width:84px;height:24px;display:block}
+.ls{color:var(--n700);font-size:12px}
+.srcl{display:flex;align-items:center;padding-left:6px}
+.lowrow td{padding:14px 12px;color:var(--n700);text-align:center;background:var(--bg)}
+.lowrow button{border:0;background:none;color:var(--text);font-weight:600}
+.cell-svc{color:var(--n800)}
+
+/* drawer */
+.scrim{position:absolute;inset:0;background:color-mix(in srgb,#000 22%,transparent);opacity:0;pointer-events:none;transition:.2s;z-index:30}
+.drawer{position:absolute;top:0;right:0;bottom:0;width:560px;max-width:92%;background:var(--bg);border-left:1px solid var(--divider);box-shadow:var(--sh-lg);transform:translateX(102%);transition:transform .22s ease;z-index:31;display:flex;flex-direction:column}
+.open .scrim{opacity:1;pointer-events:auto}
+.open .drawer{transform:none}
+.dh{padding:16px 22px 0;display:flex;flex-direction:column;gap:8px}
+.dtop{display:flex;align-items:center;gap:8px}
+.pill{border-radius:9999px;padding:0 9px;line-height:19px;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#fff;background:var(--c)}
+.icon-btn{border:1px solid var(--line);background:var(--card);border-radius:9px;width:30px;height:30px;display:grid;place-items:center}
+.dh h2{margin:0;font-size:19px;line-height:1.25;display:flex;gap:9px;align-items:baseline;flex-wrap:wrap}
+.dh h2 .m{font-size:12px;padding:2px 7px}
+.dsub{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--n700);flex-wrap:wrap}
+.dsub b{color:var(--text)}
+.dtabs{display:flex;gap:4px;margin:6px -22px 0;padding:0 22px;border-bottom:1px solid var(--line)}
+.dtab{border:0;background:none;padding:9px 10px;font-size:12.5px;color:var(--n700);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.dtab.on{color:var(--text);font-weight:700;border-bottom-color:var(--accent)}
+.dtab em{font-style:normal;color:var(--n600);font-weight:400;margin-left:3px}
+.db{flex:1;min-height:0;overflow:auto;padding:16px 22px 20px;display:flex;flex-direction:column;gap:14px}
+.tp{display:none;flex-direction:column;gap:14px}.tp.on{display:flex}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--sh-sm)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr)}
+.stat{padding:12px 14px;border-right:1px solid var(--line)}.stat:last-child{border-right:0}
+.stat .l{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--n600);font-weight:600}
+.stat .v{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.35}
+.stat .v small{font-size:11px;font-weight:400;color:var(--n700);display:block;line-height:1.2}
+.sec{padding:12px 16px;border-top:1px solid var(--line)}
+.sec h4{margin:0 0 8px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--n600);font-weight:700;display:flex;justify-content:space-between}
+.seen{display:flex;flex-direction:column;gap:7px}
+.seen .o{display:grid;grid-template-columns:24px 110px 1fr auto;gap:8px;align-items:center;font-size:12px}
+.seen .bar2{height:6px;border-radius:9px;background:var(--n200);overflow:hidden}.seen .bar2 u{display:block;height:100%;background:var(--h);border-radius:9px}
+.seen .c{font:600 12px var(--mono)}
+#bigspark{width:100%;height:64px;display:block}
+.ax{display:flex;justify-content:space-between;font:10px var(--mono);color:var(--n600);padding-top:2px}
+.log{width:100%;border-collapse:collapse;font:11.5px var(--mono)}
+.log th{position:static;font:600 10.5px var(--sans);padding:9px 14px 6px}
+.log td{padding:7px 14px;border-top:1px solid var(--line);max-width:210px;overflow:hidden;text-overflow:ellipsis}
+.lvl{color:var(--warn);font-weight:700}
+pre.q{margin:0;padding:14px 16px;font:12px/1.6 var(--mono);background:var(--n900);color:var(--n100);border-radius:12px;white-space:pre-wrap;word-break:break-all}
+[data-theme=dark] pre.q{background:#0f0e0d;color:#ecebea}
+.qs{display:flex;justify-content:space-between;align-items:center}
+.tl{list-style:none;margin:0;padding:6px 16px 12px;font:12px var(--mono)}.tl li{display:flex;gap:12px;padding:5px 0}.tl time{color:var(--n600);min-width:132px}
+.field{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--n700);font-weight:600;flex:1}
+.field .in{display:flex;align-items:center;border:1px solid var(--divider);background:var(--bg);border-radius:10px;padding:7px 10px;font-weight:400;font-size:12.5px;color:var(--text);min-height:34px}
+.field .in.ph{color:var(--n500);font-family:var(--mono);font-size:12px}
+.linkrow{display:flex;gap:10px;align-items:flex-end;padding:0 16px 16px}
+.steps{display:flex;align-items:center;padding:14px 16px 4px}
+.step{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--n600);white-space:nowrap}
+.step b{width:20px;height:20px;border-radius:9px;display:grid;place-items:center;font-size:11px;border:1.5px solid var(--n400)}
+.step.now{color:var(--text);font-weight:700}.step.now b{background:var(--accent);border-color:var(--accent);color:#fff}
+.step+.step::before{content:"";width:18px;height:1.5px;background:var(--n300);margin:0 7px}
+.ntitle{padding:6px 16px 10px}.ntitle h3{margin:0;font-size:14px}.ntitle p{margin:2px 0 0;color:var(--n700);font-size:12px}
+.dfoot{border-top:1px solid var(--line);background:var(--card);padding:12px 22px;display:flex;align-items:center;gap:12px}
+.dfoot small{color:var(--n700);flex:1}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.link{border:0;background:none;color:var(--accent);padding:0;font-weight:600}
+
+/* pops */
+.relpos{position:relative}
+.pop{display:none;position:absolute;z-index:20;top:100%;left:0;margin-top:6px;width:290px;background:var(--card);border:1px solid var(--divider);border-radius:14px;box-shadow:var(--sh-lg);padding:6px 0;max-height:380px;overflow:auto}
+.pop.open{display:block}
+.pop .search{margin:6px 10px;width:auto}
+.opt{display:flex;align-items:center;gap:8px;padding:5px 12px;font-size:12.5px}.opt:hover{background:color-mix(in srgb,var(--text) 5%,transparent)}
+.opt i{width:14px;height:14px;border:1.5px solid var(--n400);border-radius:4px;background:var(--card);flex:none}.opt i.on{background:var(--accent);border-color:var(--accent)}
+.opt-h{padding:8px 12px 2px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--n600);font-weight:700;display:flex;align-items:center;gap:6px}
+
+/* narrow */
+@container (max-width:1180px){
+  .head{padding:16px 18px 12px}.tabs-wrap{padding:0 18px}.tool{padding:0 18px 10px}.tbl{margin:0 18px 16px}
+  .fade{display:block;right:18px}
+  .hide-n{display:none}
+  .st{flex-basis:150px}
+  .search{width:150px}
+  .drawer{width:500px}
+}
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="bar">
+    <h2>Monitor · source tabs, one alerts table, detail in a drawer</h2>
+    <span class="muted">Viewport</span>
+    <button data-w="1440" aria-pressed="true">Desktop 1440</button>
+    <button data-w="1000" aria-pressed="false">Laptop 1000</button>
+    <span class="muted" style="margin-left:10px">Sidebar</span>
+    <button id="side" aria-pressed="false">Expand</button>
+    <span class="muted" style="margin-left:10px">Theme</span>
+    <button id="theme" aria-pressed="false">Dark</button>
+  </div>
+
+  <div class="frame-wrap"><div class="frame" id="frame">
+  <div class="app" id="app">
+    <aside class="side">
+      <div class="brand"><b><svg class="i" style="stroke:#fff"><use href="#i-term"/></svg></b><span>Ops Console</span></div>
+      <div class="grp">Operate</div>
+      <button class="nav on" title="Monitor"><svg class="i"><use href="#i-pulse"/></svg><span class="t2">Monitor</span><span class="badge">6</span></button>
+      <button class="nav" title="Workspace"><svg class="i"><use href="#i-grid"/></svg><span class="t2">Workspace</span></button>
+      <button class="nav" title="Dev tools"><svg class="i"><use href="#i-db"/></svg><span class="t2">Dev tools</span></button>
+      <div class="sep"></div><div class="grp">Connect</div>
+      <button class="nav" title="Integrations"><svg class="i"><use href="#i-plug"/></svg><span class="t2">Integrations</span></button>
+      <button class="nav" title="Connections"><svg class="i"><use href="#i-list"/></svg><span class="t2">Connections</span><span class="n">12</span></button>
+      <button class="nav" title="Repos"><svg class="i"><use href="#i-branch"/></svg><span class="t2">Repos</span><span class="n">33</span></button>
+      <button class="nav" title="Setup agent"><svg class="i"><use href="#i-term2"/></svg><span class="t2">Setup agent</span></button>
+      <button class="nav" title="Permissions"><svg class="i"><use href="#i-shield"/></svg><span class="t2">Permissions</span></button>
+      <div class="sep"></div><div class="grp">Claude</div>
+      <button class="nav" title="Accounts &amp; Usage"><svg class="i"><use href="#i-user"/></svg><span class="t2">Accounts &amp; Usage</span></button>
+      <button class="nav" title="Agent runs"><svg class="i"><use href="#i-pulse"/></svg><span class="t2">Agent runs</span></button>
+      <div class="spacer"></div>
+      <div class="usage"><b>5-hour</b> 6% · <b>Weekly</b> 15%</div>
+      <div class="side-foot"><span style="font-family:var(--mono)">v0.1.65</span> · <span style="color:var(--ok)">✓ Up to date</span></div>
+    </aside>
+
+    <main class="main" id="main">
+      <header class="head">
+        <h1>Monitor</h1>
+        <div class="sub"><span class="dot"></span>Last full scan 3m ago · 5 of 7 sources ok</div>
+        <span class="grow"></span>
+        <div class="seg"><button>1h</button><button>4h</button><button class="on">24h</button><button>7d</button></div>
+        <button class="chip-btn">HTTP <b style="font-family:var(--mono)">400+</b><svg class="i"><use href="#i-chev"/></svg></button>
+        <div class="split"><button class="btn primary"><svg class="i"><use href="#i-scan"/></svg>Scan all sources</button><button class="btn primary" title="Scan only…"><svg class="i"><use href="#i-chev"/></svg></button></div>
+      </header>
+
+      <div class="tabs-wrap"><div class="srcs" id="srcs"></div><span class="fade"></span></div>
+
+      <div class="tool">
+        <div class="seg" id="sevSeg"></div>
+        <label class="search"><svg class="i"><use href="#i-search"/></svg><input placeholder="Route, message, code"></label>
+        <span class="relpos"><button class="chip-btn" id="svcF"><svg class="i"><use href="#i-layers"/></svg>29 Services<svg class="i"><use href="#i-chev"/></svg></button><div class="pop" id="svcPop"></div></span>
+        <button class="toggle" aria-pressed="false" id="closedT"><i></i>Closed</button>
+        <span class="grow"></span>
+        <span class="muted" id="count"></span>
+      </div>
+
+      <div class="tbl"><table>
+        <thead><tr><th style="width:8px;padding:0"></th><th>Severity</th><th>Route</th><th class="hide-n">Service</th><th>Status</th><th>Sources</th><th style="text-align:right">Events</th><th class="hide-n">24h</th><th>Last seen</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table></div>
+
+      <div class="scrim" id="scrim"></div>
+      <aside class="drawer" id="drawer">
+        <div class="dh">
+          <div class="dtop"><span class="pill" id="dPill">High</span><span id="dSrc" style="display:flex;align-items:center"></span><span class="muted" id="dOpen">open · last scanned 3m ago</span><span class="grow"></span>
+            <button class="icon-btn" title="More: Open in source, Ignore this Route, Close, Copy link"><svg class="i"><use href="#i-more"/></svg></button>
+            <button class="icon-btn" id="dClose" title="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+          <h2 id="dTitle"></h2>
+          <div class="dsub" id="dSub"></div>
+          <div class="dtabs" id="dtabs">
+            <button class="dtab on" data-t="ov">Overview</button>
+            <button class="dtab" data-t="samples">Samples<em>25</em></button>
+            <button class="dtab" data-t="query">Query</button>
+            <button class="dtab" data-t="history">History<em>3</em></button>
+          </div>
+        </div>
+        <div class="db">
+          <div class="tp on" id="t-ov">
+            <div class="card">
+              <div class="steps">
+                <div class="step now"><b>1</b>Link code</div><div class="step"><b>2</b>Verify</div><div class="step"><b>3</b>Review</div><div class="step"><b>4</b>Fix &amp; PR</div>
+              </div>
+              <div class="ntitle"><h3 id="nTitle"></h3><p>The agent reproduces this Route locally first. Nothing changes until you review.</p></div>
+              <div class="linkrow">
+                <label class="field">Local Repo<span class="in">No local Repo<span style="margin-left:auto"><svg class="i"><use href="#i-chev"/></svg></span></span></label>
+                <span class="muted" style="padding-bottom:9px">or</span>
+                <label class="field">Git URL<span class="in ph">github.com/owner/repo</span></label>
+              </div>
+            </div>
+            <div class="card">
+              <div class="stats">
+                <div class="stat"><div class="l">Events</div><div class="v" id="sEv"></div></div>
+                <div class="stat"><div class="l">Status</div><div class="v" id="sCode"></div></div>
+                <div class="stat"><div class="l">First seen</div><div class="v">Nov 21<small>12:43 PM</small></div></div>
+                <div class="stat"><div class="l">Last seen</div><div class="v">Nov 22<small>1:41 AM</small></div></div>
+              </div>
+              <div class="sec"><h4><span>Events per hour</span><span style="font-family:var(--mono);text-transform:none;letter-spacing:0">peak 214 / h</span></h4>
+                <svg id="bigspark" viewBox="0 0 480 64" preserveAspectRatio="none"></svg>
+                <div class="ax"><span>-24h</span><span>-18h</span><span>-12h</span><span>-6h</span><span>now</span></div></div>
+              <div class="sec"><h4><span id="seenT">Seen in sources</span><span style="text-transform:none;letter-spacing:0;font-weight:400">same Route, status and error = one Alert</span></h4><div class="seen" id="seen"></div></div>
+            </div>
+          </div>
+          <div class="tp" id="t-samples"><div class="card" style="overflow:hidden"><table class="log"><thead><tr><th>Time</th><th>Src</th><th>Lvl</th><th>Request id</th><th>Fwd</th></tr></thead><tbody id="sampleRows"></tbody></table><div style="padding:8px 14px 12px"><button class="link">Show all 25</button></div></div></div>
+          <div class="tp" id="t-query"><div class="qs"><div class="seg" id="qseg"></div><button class="chip-btn" id="openSrc">Open in source</button></div><pre class="q" id="qpre"></pre></div>
+          <div class="tp" id="t-history"><div class="card"><ol class="tl">
+            <li><time>Nov 22, 01:41 AM</time>seen again · scan</li><li><time>Nov 21, 02:00 PM</time>severity raised to high · scan</li><li><time>Nov 21, 12:43 PM</time>opened · scan</li></ol></div></div>
+        </div>
+        <div class="dfoot"><small id="fNote">Step 1 of 4 · link the code to start.</small><button class="btn primary" disabled><svg class="i"><use href="#i-spark"/></svg>Verify with agent</button></div>
+      </aside>
+    </main>
+  </div></div></div>
+
+  <div class="notes">
+    <div><h3>Less crowded</h3><ul>
+      <li>Two surfaces, not four columns: one table, and the detail in a drawer that takes the width when you need it.</li>
+      <li>Sidebar is an icon rail by default (Expand toggle above). Scan controls sit in one header row.</li>
+      <li>Default view is Needs attention (High and Medium). The 3,936 Low alerts stay one click away.</li>
+    </ul></div>
+    <div><h3>Sources clear</h3><ul>
+      <li>One tab per source: health dot, High / Medium / Low counts, and its own state: ok, scanning with progress, or sign-in expired.</li>
+      <li>"All sources" is the first tab. 5 to 7 tabs fit at 1440. More scroll sideways with a fade.</li>
+      <li>Rows show stacked source logos. An Alert seen in several sources lists each count in the drawer.</li>
+    </ul></div>
+    <div><h3>Drawer</h3><ul>
+      <li>Header: severity, sources, Route, Service, env. Tabs: Overview, Samples, Query, History.</li>
+      <li>Overview leads with the four-step strip and the link-code form. A pinned footer holds the one primary action.</li>
+      <li>Query tab switches syntax per source of the Alert. Esc or the scrim closes the drawer.</li>
+    </ul></div>
+  </div>
+</div>
+
+<svg width="0" height="0" style="position:absolute"><defs>
+  <symbol id="i-term" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 18h7"/></symbol>
+  <symbol id="i-term2" viewBox="0 0 24 24"><path d="M4 6l6 6-6 6M12 19h8"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></symbol>
+  <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 01-12 0zM12 17v4"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 5-8 3-12 7"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-scan" viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3M4 12h16"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5"/></symbol>
+</defs></svg>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const ic=n=>`<svg class="i"><use href="#i-${n}"/></svg>`;
+
+/* Sources: 5 to 7 log sources, each scanned and failing on its own. Placeholder data only. */
+const SRC={dd:['Datadog','#7b4bd8','D'],ot:['OpenTelemetry','#2f7fe0','O'],cw:['CloudWatch','#d97a1a','C'],lk:['Loki','#c58a00','L'],nr:['New Relic','#1aa089','N'],se:['Sentry','#6b52b8','S'],sl:['Slack alerts','#4a8a5c','#']};
+const lgo=k=>`<span class="lg sm" style="--h:${SRC[k][1]}" title="${SRC[k][0]}">${SRC[k][2]}</span>`;
+const SOURCES=[
+ ['dd','ok',[3,2,'1.2k'],'3m ago · 12 Services'],['ot','ok',[1,0,880],'3m ago · 6 Services'],
+ ['cw','err',[1,1,640],'6h stale'],['lk','ok',[1,1,902],'9m ago · 8 Services'],
+ ['nr','run',null,'4 of 9 Services'],['se','ok',[0,0,310],'1h ago · 3 projects'],['sl','ok',[0,0,0],'Idle · 2 channels']];
+let sSel=null;
+function renderTabs(){
+ const all=`<button class="st all ${sSel===null?'on':''}" data-k=""><div class="r1"><span class="lg">∑</span>All sources<span class="s"></span></div><div class="r2"><em>6</em><s>4</s><span>3,936</span></div><div class="r3">5 of 7 ok</div></button>`;
+ $('#srcs').innerHTML=all+SOURCES.map(([k,state,c,t])=>{
+  const r2=state==='run'?'Scanning…':state==='err'?'<span class="bad">Sign-in expired</span>':`${c[0]?`<em>${c[0]}</em>`:''}${c[1]?`<s>${c[1]}</s>`:''}<span>${c[2]}</span>`;
+  return `<button class="st ${state} ${sSel===k?'on':''}" data-k="${k}"><div class="r1"><span class="lg" style="--h:${SRC[k][1]}">${SRC[k][2]}</span>${SRC[k][0]}<span class="s"></span></div>
+  <div class="r2 ${state==='run'?'t':''}">${r2}</div>${state==='run'?'<div class="prog"><u></u></div>':`<div class="r3">${t}</div>`}</button>`}).join('');
+ $$('.st').forEach(b=>b.onclick=()=>{sSel=b.dataset.k||null;renderTabs();renderRows()});
+}
+
+/* Alerts: [sev, method, path, service, code, events, last seen, sources, message] */
+const A=[
+ ['hi','GET','/api/v1/reviews','reviews-api',400,2135,'3m',['dd','ot','lk'],'status=400 request_id=7d733fe9… fwd=203.0.113.18'],
+ ['hi','POST','/webhook/orderupdate','webhook-gateway',401,2130,'3m',['dd'],'status=401 signature invalid'],
+ ['hi','POST','/api/events','event-dispatch',400,14470,'3m',['ot'],'status=400 request_id=94847827…'],
+ ['hi','POST','/v4/analytics/record','analytics-api',600,447,'3m',['dd'],'status=200 appid=25599'],
+ ['hi','GET','/api/v1/orders','orders-api',502,389,'9m',['lk'],'upstream connect error'],
+ ['hi','POST','/checkout/confirm','checkout-api',504,96,'6h',['cw'],'task timed out after 29s'],
+ ['me','GET','/api/v1/products','catalog-api',404,312,'12m',['dd'],'product not found id=…'],
+ ['me','POST','/graphql','payments-api',500,84,'41m',['dd'],'resolver timeout after 5000ms'],
+ ['me','GET','/health/ready','analytics-api',503,41,'1h',['lk'],'dependency redis unavailable'],
+ ['me','POST','/login','auth-api',429,73,'6h',['cw'],'rate limit exceeded']
+];
+const C={hi:'var(--accent)',me:'var(--warn)',lo:'var(--n500)'},L={hi:'High',me:'Medium',lo:'Low'};
+let sev='att',sel=0;
+function spark(seed){let x=seed*9301+49297,b='';for(let i=0;i<16;i++){x=(x*9301+49297)%233280;const h=3+((x/233280)*16)+(i>11?4:0);b+=`<rect x="${i*5.2}" y="${24-h}" width="3.6" height="${h}" rx="1" fill="currentColor" opacity="${i>11?1:.45}"/>`}return `<svg class="spk" viewBox="0 0 84 24">${b}</svg>`}
+function renderSev(){
+ const items=[['att','Needs attention',10],['hi','High',6,'hi'],['me','Medium',4],['lo','Low','3,936'],['all','All','3,946']];
+ $('#sevSeg').innerHTML=items.map(([k,l,n,c])=>`<button class="${c||''} ${sev===k?'on':''}" data-k="${k}">${l}<span class="n">${n}</span></button>`).join('');
+ $$('#sevSeg button').forEach(b=>b.onclick=()=>{sev=b.dataset.k;renderSev();renderRows()});
+}
+function renderRows(){
+ let h='';let n=0;
+ A.forEach((a,i)=>{
+  if(sSel&&!a[7].includes(sSel))return;
+  if(sev==='hi'&&a[0]!=='hi')return;if(sev==='me'&&a[0]!=='me')return;if(sev==='lo')return;
+  n++;
+  h+=`<tr class="r ${i===sel&&$('#main').classList.contains('open')?'on':''}" data-i="${i}">
+   <td class="sv"></td><td><span class="sevd" style="--c:${C[a[0]]}"><i></i>${L[a[0]]}</span></td>
+   <td><div class="rt"><span class="m">${a[1]}</span><span class="p">${a[2]}</span></div><span class="msg hide-n">${a[8]}</span></td>
+   <td class="cell-svc hide-n">${a[3]}</td><td><span class="code ${a[4]>=500?'e5':''}">${a[4]}</span></td>
+   <td><span class="srcl">${a[7].map(lgo).join('')}</span></td><td class="num">${a[5].toLocaleString()}</td>
+   <td class="hide-n" style="color:${C[a[0]]}">${spark(i+2)}</td><td class="ls">${a[6]} ago</td></tr>`;
+ });
+ if(sev==='att'||sev==='all'){h+=`<tr class="lowrow"><td colspan="9"><button>Show 3,936 Low alerts</button> <span class="muted">· mostly one-off 4xx from bots and scanners</span></td></tr>`}
+ if(!n)h=`<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--n700)">No alerts here.</td></tr>`;
+ $('#rows').innerHTML=h;
+ $('#count').textContent=`${n} alerts · ${sSel?SRC[sSel][0]:'all sources'}`;
+ $$('tr.r').forEach(r=>r.onclick=()=>openDrawer(+r.dataset.i));
+}
+
+/* Drawer */
+const QT={
+ dd:a=>`env:prod service:${a[3]} @http.status_code:${a[4]}\n@http.method:${a[1]} @http.url_details.path:${a[2]}`,
+ ot:a=>`service.name = "${a[3]}" AND deployment.environment = "prod"\nAND http.response.status_code = ${a[4]}\nAND http.request.method = "${a[1]}" AND url.path = "${a[2]}"`,
+ lk:a=>`{service="${a[3]}", env="prod"} |= "status=${a[4]}"\n| logfmt | method="${a[1]}" | url=~"${a[2]}.*"`,
+ cw:a=>`fields @timestamp, @message\n| filter service = "${a[3]}" and status = ${a[4]} and path = "${a[2]}"\n| sort @timestamp desc | limit 25`,
+ nr:a=>`SELECT * FROM Log WHERE service.name = '${a[3]}' AND http.statusCode = ${a[4]} SINCE 24 hours ago`};
+function openDrawer(i){
+ sel=i;const a=A[i];
+ $('#dPill').textContent=L[a[0]];$('#dPill').style.setProperty('--c',C[a[0]]);
+ $('#dSrc').innerHTML=a[7].map(lgo).join('');
+ $('#dTitle').innerHTML=`<span class="m">${a[1]}</span>${a[2]} returns ${a[4]}`;
+ $('#dSub').innerHTML=`<b>${a[3]}</b> · prod · ${a[5].toLocaleString()} events in 24h`;
+ $('#nTitle').textContent=`Link the code for ${a[3]}`;
+ $('#sEv').textContent=a[5].toLocaleString();$('#sCode').innerHTML=`<span class="code ${a[4]>=500?'e5':''}" style="font-size:14px;padding:2px 9px">${a[4]}</span>`;
+ const tot=a[7].length;$('#seenT').textContent=`Seen in ${tot} source${tot>1?'s':''}`;
+ $('#seen').innerHTML=a[7].map((k,j)=>{const c=Math.round(a[5]*(1-j*.07));return `<div class="o">${lgo(k)}<span>${SRC[k][0]}</span><span class="bar2" style="--h:${SRC[k][1]}"><u style="width:${100-j*8}%"></u></span><span class="c">${c.toLocaleString()}</span></div>`}).join('');
+ $('#sampleRows').innerHTML=['01:40:36','01:40:34','01:40:28','01:40:16','01:40:07','01:40:03'].map((t,j)=>`<tr><td>${t}</td><td>${lgo(a[7][j%tot])}</td><td class="lvl">warn</td><td>${['7d733fe9-53f1-4ee2','c52436b9-653f-499a','050d7a38-fd5a-4b92','f84ce905-1229-4e26','1282de7a-a88d-4135','15960d56-5f16-4176'][j]}</td><td>203.0.113.${[18,18,18,9,18,18][j]}</td></tr>`).join('');
+ $('#qseg').innerHTML=a[7].map((k,j)=>`<button class="${j?'':'on'}" data-q="${k}">${SRC[k][0]}</button>`).join('');
+ const setQ=k=>{$('#qpre').textContent=QT[k](a);$$('#qseg button').forEach(b=>b.classList.toggle('on',b.dataset.q===k));$('#openSrc').textContent='Open in '+SRC[k][0]};
+ $$('#qseg button').forEach(b=>b.onclick=()=>setQ(b.dataset.q));setQ(a[7][0]);
+ $('#bigspark').innerHTML=[3,2,2,4,6,5,3,2,4,8,12,9,7,10,14,11,9,13,16,12,10,18,14,9].map((v,j)=>{const w=20,h=v/18*58+3;return `<rect x="${j*w+2}" y="${64-h}" width="${w-4}" height="${h}" rx="3" fill="${j>=18?C[a[0]]:'var(--n400)'}" opacity="${j>=18?1:.7}"/>`}).join('');
+ $('#main').classList.add('open');renderRows();
+}
+const closeDrawer=()=>{$('#main').classList.remove('open');renderRows()};
+$('#scrim').onclick=closeDrawer;$('#dClose').onclick=closeDrawer;
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer()});
+$$('.dtab').forEach(t=>t.onclick=()=>{$$('.dtab').forEach(x=>x.classList.toggle('on',x===t));$$('.tp').forEach(p=>p.classList.toggle('on',p.id==='t-'+t.dataset.t))});
+
+/* Services filter */
+const SV=[['dd',['payments-api','reviews-api','webhook-gateway','analytics-api','catalog-api']],['ot',['event-dispatch','search-api']],['lk',['orders-api','analytics-api']],['cw',['checkout-api','auth-api']]];
+$('#svcPop').innerHTML=`<label class="search"><svg class="i"><use href="#i-search"/></svg><input placeholder="Filter 29 Services"></label>`+SV.map(([k,l])=>`<div class="opt-h">${lgo(k)}${SRC[k][0]}</div>`+l.map(n=>`<div class="opt"><i class="on"></i>${n}</div>`).join('')).join('')+`<div style="border-top:1px solid var(--line);margin-top:6px;padding:8px 12px;display:flex"><span class="muted">29 selected</span><span style="margin-left:auto"><button class="link">Clear</button></span></div>`;
+$('#svcF').onclick=e=>{e.stopPropagation();$('#svcPop').classList.toggle('open')};
+document.addEventListener('click',e=>{if(!e.target.closest('#svcPop')&&!e.target.closest('#svcF'))$('#svcPop').classList.remove('open')});
+$('#closedT').onclick=e=>{const t=e.currentTarget;t.setAttribute('aria-pressed',t.getAttribute('aria-pressed')!=='true')};
+
+renderTabs();renderSev();renderRows();
+if(!location.hash.includes('closed'))openDrawer(0);
+
+/* Page chrome */
+$$('[data-w]').forEach(b=>b.onclick=()=>{$('#frame').style.width=b.dataset.w+'px';$$('[data-w]').forEach(x=>x.setAttribute('aria-pressed',x===b))});
+$('#theme').onclick=e=>{const d=document.documentElement;const dark=d.dataset.theme!=='dark';d.dataset.theme=dark?'dark':'light';e.currentTarget.setAttribute('aria-pressed',dark);e.currentTarget.textContent=dark?'Light':'Dark'};
+$('#side').onclick=e=>{const w=$('#app').classList.toggle('wide-side');e.currentTarget.setAttribute('aria-pressed',w);e.currentTarget.textContent=w?'Collapse':'Expand'};
+</script>
+</body>
+</html>

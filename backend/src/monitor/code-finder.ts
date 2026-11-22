@@ -8,7 +8,7 @@ import { eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { mapLimit } from '../common/map-limit';
 import { asBackground, hostCliPool } from '../common/spawn-pool';
-import { connectors, repos, services } from '../db/schema';
+import { connectors, repos, routes, services } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { GIT, Git } from '../repos/git';
 import { ReposService } from '../repos/repos.service';
@@ -133,12 +133,34 @@ export class CliCodeHosts implements CodeHosts {
 
 export type FindResult = { found: 'repo' | 'url' | null; tried: string[] };
 
+/** Routes of a Service searched for in the imported Repos. */
+const ROUTES_SEARCHED = 8;
+
+/**
+ * The text of a Route's path to search a codebase for: the path with no query, cut before its first dynamic segment
+ * (`:id`, `{id}`, a number or a uuid). Null for a path too bare to say anything, such as `/` or `/api`, and for a probe
+ * of a file no Service serves (`/.env`, `/favicon.ico`).
+ */
+export function searchablePath(routePath: string): string | null {
+  const segments = (routePath.split('?')[0] ?? '').split('/').filter(Boolean);
+  if (segments.some((segment) => segment.startsWith('.')) || /\.[a-z0-9]{1,5}$/i.test(segments.at(-1) ?? ''))
+    return null;
+  const fixed: string[] = [];
+  for (const segment of segments) {
+    if (/^[:{[*]|^\d+$|^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(segment)) break;
+    fixed.push(segment);
+  }
+  const text = `/${fixed.join('/')}`;
+  const long = fixed.filter((segment) => segment.length >= 3);
+  return long.length > 0 && text.length >= 5 ? text : null;
+}
+
 const plain = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 /**
  * Finds a Service's code with no help from the operator, first match wins: an imported Repo of the same name, a git
- * folder of that name next to an imported Repo (imported then), then a repository of that name on a connected Git
- * host, under the Bitbucket workspace, the GitHub login and its organizations, or an owner of an imported Repo.
+ * folder of that name next to an imported Repo (imported then), then the imported Repo whose source holds the
+ * Service's Route paths, then a repository of that name on a connected Git host, under the Bitbucket workspace, the GitHub login and its organizations, or an owner of an imported Repo.
  */
 @Injectable()
 export class CodeFinder {
@@ -201,7 +223,8 @@ export class CodeFinder {
     const service = this.store.db.select().from(services).where(eq(services.id, serviceId)).get();
     if (!service) return { found: null, tried: [] };
     if (service.repoId) return { found: 'repo', tried: [] };
-    if (service.repoUrl) return { found: 'url', tried: [] };
+    // A Git URL alone is a clone; the operator works in a local Repo, so a local one is still looked for.
+    const hasUrl = service.repoUrl !== null;
     const tried: string[] = [];
     const imported = this.store.db.select().from(repos).where(isNull(repos.removedAt)).all();
 
@@ -221,6 +244,10 @@ export class CodeFinder {
       if (repo) return this.link(service, { repoId: repo.id }, 'repo', tried);
     }
 
+    const served = await this.servingRepo(service, imported, tried);
+    if (served) return this.link(service, { repoId: served.id }, 'repo', tried);
+    if (hasUrl) return { found: 'url', tried: [] };
+
     for (const candidate of await this.owners(imported)) {
       const repo = { ...candidate, name: service.name };
       tried.push(`${HOST_NAME[repo.host]}/${repo.owner}/${repo.name}`);
@@ -231,6 +258,46 @@ export class CodeFinder {
       tx.update(services).set({ codeLookedAt: new Date().toISOString() }).where(eq(services.id, service.id)).run(),
     );
     return { found: null, tried };
+  }
+
+  /**
+   * The imported Repo whose code serves the Service's Routes: for up to eight Routes, the Repos whose source holds
+   * the Route's path. The Repo holding the most Routes wins; a tie is left to the operator unless one of the tied
+   * Repos carries the Service's name.
+   */
+  private async servingRepo(
+    service: ServiceRow,
+    imported: (typeof repos.$inferSelect)[],
+    tried: string[],
+  ): Promise<typeof repos.$inferSelect | null> {
+    const paths = [
+      ...new Set(
+        this.store.db
+          .select()
+          .from(routes)
+          .where(eq(routes.serviceId, service.id))
+          .all()
+          .filter((route) => !route.ignored)
+          .map((route) => searchablePath(route.path))
+          .filter((found): found is string => found !== null),
+      ),
+    ].slice(0, ROUTES_SEARCHED);
+    if (paths.length === 0 || imported.length === 0) return null;
+    tried.push(`the Routes of ${service.name} in the imported Repos (${paths.join(', ')})`);
+    const scores = await mapLimit(imported, 4, async (repo) => {
+      const hits = await Promise.all(paths.map((one) => this.git.filesHolding(repo.path, one)));
+      return { repo, score: hits.filter((files) => files.length > 0).length };
+    });
+    const ranked = scores.filter((entry) => entry.score > 0).sort((a, b) => b.score - a.score);
+    const top = ranked[0];
+    if (!top) return null;
+    const tied = ranked.filter((entry) => entry.score === top.score);
+    if (tied.length === 1) return top.repo;
+    const named = tied.filter(
+      (entry) =>
+        plain(entry.repo.name).includes(plain(service.name)) || plain(service.name).includes(plain(entry.repo.name)),
+    );
+    return named.length === 1 ? (named[0]?.repo ?? null) : null;
   }
 
   private link(

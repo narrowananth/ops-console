@@ -63,6 +63,8 @@ export function StatusBadge({ code }: { code: number }) {
 /** The HTTP status codes to read, as one field that opens the codes the log source has, by class, with counts. */
 export function StatusPicker({ known, scope, from }: { known: StatusCodeCount[]; scope: ScanScope; from: string }) {
   const [open, setOpen] = useState(false);
+  // Classes of codes folded away.
+  const [folded, setFolded] = useState<Kind[]>([]);
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => event.key === 'Escape' && setOpen(false);
@@ -119,7 +121,7 @@ export function StatusPicker({ known, scope, from }: { known: StatusCodeCount[];
         </span>
       </button>
       {open && (
-        <fieldset className={`absolute top-full left-0 z-51 m-0 mt-1 max-h-96 w-72 overflow-auto ${menu}`}>
+        <fieldset className={`absolute top-full right-0 z-51 m-0 mt-1 max-h-96 w-72 overflow-auto ${menu}`}>
           <legend className="sr-only">HTTP status codes to read</legend>
           <label className={`flex items-center gap-2.5 px-2.5 py-1.5 ${item(every)}`}>
             <input
@@ -137,38 +139,56 @@ export function StatusPicker({ known, scope, from }: { known: StatusCodeCount[];
             const codes = known.filter((entry) => kindOf(entry.code) === kind);
             if (codes.length === 0) return null;
             const ticked = codes.every((entry) => isOn(entry.code));
+            const isFolded = folded.includes(kind);
             return (
               <div key={kind} className="border-t border-line pt-1">
-                <label className="flex cursor-pointer items-center gap-2.5 px-2.5 py-1 text-xs font-semibold tracking-[0.04em] text-neutral-700 uppercase">
-                  <input
-                    type="checkbox"
-                    checked={ticked}
-                    onChange={() =>
-                      toggle(
-                        codes.map((entry) => entry.code),
-                        !ticked,
-                      )
-                    }
-                    className="size-3.5 flex-none cursor-pointer accent-accent"
-                  />
-                  {label}
-                </label>
-                {codes.map((entry) => (
-                  <label
-                    key={entry.code}
-                    className={`flex items-center gap-2.5 py-1.5 pr-2.5 pl-6 ${item(!every && isOn(entry.code))}`}
-                  >
+                <div className="flex items-center gap-1 pr-1">
+                  <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 px-2.5 py-1 text-xs font-semibold tracking-[0.04em] text-neutral-700 uppercase">
                     <input
                       type="checkbox"
-                      checked={isOn(entry.code)}
-                      onChange={() => toggle([entry.code], !isOn(entry.code))}
+                      checked={ticked}
+                      onChange={() =>
+                        toggle(
+                          codes.map((entry) => entry.code),
+                          !ticked,
+                        )
+                      }
                       className="size-3.5 flex-none cursor-pointer accent-accent"
                     />
-                    <StatusBadge code={entry.code} />
-                    <span className="min-w-0 flex-1 truncate text-xs">{REASON[entry.code] ?? 'Other'}</span>
-                    <span className="flex-none font-mono text-xs text-neutral-700">{compact.format(entry.count)}</span>
+                    {label}
                   </label>
-                ))}
+                  <button
+                    type="button"
+                    aria-expanded={!isFolded}
+                    aria-label={`${isFolded ? 'Show' : 'Hide'} ${label}`}
+                    title={`${isFolded ? 'Show' : 'Hide'} the ${label} codes`}
+                    onClick={() => setFolded(isFolded ? folded.filter((one) => one !== kind) : [...folded, kind])}
+                    className="flex size-6 flex-none cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-neutral-600 hover:bg-neutral-200"
+                  >
+                    <span aria-hidden className={`transition-transform ${isFolded ? '-rotate-90' : ''}`}>
+                      ▾
+                    </span>
+                  </button>
+                </div>
+                {!isFolded &&
+                  codes.map((entry) => (
+                    <label
+                      key={entry.code}
+                      className={`flex items-center gap-2.5 py-1.5 pr-2.5 pl-6 ${item(!every && isOn(entry.code))}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isOn(entry.code)}
+                        onChange={() => toggle([entry.code], !isOn(entry.code))}
+                        className="size-3.5 flex-none cursor-pointer accent-accent"
+                      />
+                      <StatusBadge code={entry.code} />
+                      <span className="min-w-0 flex-1 truncate text-xs">{REASON[entry.code] ?? 'Other'}</span>
+                      <span className="flex-none font-mono text-xs text-neutral-700">
+                        {compact.format(entry.count)}
+                      </span>
+                    </label>
+                  ))}
               </div>
             );
           })}

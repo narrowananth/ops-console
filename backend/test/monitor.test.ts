@@ -50,6 +50,7 @@ import { KEYCHAIN } from '../src/keychain/keychain';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { McpServersService } from '../src/mcp/mcp-servers.service';
 import type { CloudWatchOptions } from '../src/monitor/cloudwatch-logs';
+import { searchablePath } from '../src/monitor/code-finder';
 import { fingerprint, maskSignature, normalizePath } from '../src/monitor/fingerprint';
 import { NO_TICKET_IN_PLAYBOOK } from '../src/monitor/fixes.service';
 import { MonitorModule } from '../src/monitor/monitor.module';
@@ -969,6 +970,16 @@ describe('Verification without a local Repo', () => {
 });
 
 describe('Finding the code', () => {
+  it('searches a Route path only as far as its fixed segments, and never for a file probe', () => {
+    expect(searchablePath('/v3/checkout/pay')).toBe('/v3/checkout/pay');
+    expect(searchablePath('/orders/:id/lines?x=1')).toBe('/orders');
+    expect(searchablePath('/orders/1234/lines')).toBe('/orders');
+    expect(searchablePath('/api')).toBeNull();
+    expect(searchablePath('/')).toBeNull();
+    expect(searchablePath('/.env')).toBeNull();
+    expect(searchablePath('/favicon.ico')).toBeNull();
+  });
+
   it('links an imported Repo with the Service name after a Scan', async () => {
     const ctx = await start();
     const dir = await makeRepo();
@@ -997,6 +1008,48 @@ describe('Finding the code', () => {
     expect(result.found).toBe('repo');
     const repos = (await ctx.http.get('/repos')).body.data;
     expect(repos.find((repo: { id: string }) => repo.id === result.service.repo_id)?.name).toBe('billing-worker');
+  });
+
+  /** A git repo named `name` holding one source file with `content`, as an imported Repo would be. */
+  async function repoHolding(name: string, content: string): Promise<string> {
+    const dir = path.join(await tempDir('ops-console-git-'), name);
+    await mkdir(path.join(dir, 'src'), { recursive: true });
+    git(dir, 'init', '-q', '-b', 'main');
+    await writeFile(path.join(dir, 'src', 'routes.ts'), content);
+    await writeFile(path.join(dir, 'README.md'), `Docs mention /v3/checkout/pay here\n`);
+    git(dir, 'add', '.');
+    git(dir, 'commit', '-q', '-m', 'first');
+    return dir;
+  }
+
+  it('links the imported Repo whose source serves the Routes when no name matches', async () => {
+    const ctx = await start();
+    const other = await repoHolding('storefront', "app.get('/v3/cart/items', handler);\n");
+    const serving = await repoHolding('commerce-core', "app.post('/v3/checkout/pay', handler);\n");
+    await ctx.http.post('/repos', { path: other });
+    const imported = (await ctx.http.post('/repos', { path: serving })).body.data;
+    ctx.datadog.readings = [service('payments-worker', [route('POST', '/v3/checkout/pay', 4)])];
+    await scan(ctx);
+    const linked = await until(
+      () => ctx.http.get('/services').then((res) => res.body.data[0]),
+      (found) => found.repo_id !== null,
+      'the serving Repo to be linked',
+    );
+    expect(linked.repo_id).toBe(imported.id);
+  });
+
+  it('leaves the Service unlinked when two Repos serve its Routes equally', async () => {
+    const ctx = await start();
+    for (const name of ['commerce-core', 'commerce-edge']) {
+      await ctx.http.post('/repos', { path: await repoHolding(name, "app.post('/v3/checkout/pay', handler);\n") });
+    }
+    ctx.datadog.readings = [service('payments-worker', [route('POST', '/v3/checkout/pay', 4)])];
+    await scan(ctx);
+    const [svc] = (await ctx.http.get('/services')).body.data;
+    const result = (await ctx.http.post(`/services/${svc.id}/code`)).body.data;
+    expect(result.found).toBeNull();
+    expect(result.service.repo_id).toBeNull();
+    expect(result.tried).toContain('the Routes of payments-worker in the imported Repos (/v3/checkout/pay)');
   });
 
   it('finds a repository of that name on a connected Git host', async () => {

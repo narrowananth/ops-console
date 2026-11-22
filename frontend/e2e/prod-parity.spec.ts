@@ -118,7 +118,8 @@ test('an Alert row and its header say when a Scan last read the Service', async 
   await routeMonitor(page, alertOf());
   await page.goto(`${daemon.url}/monitor?alert=a1#token=${daemon.token}`);
   await expect(page.getByRole('heading', { name: 'NullPointerException in OrderService' })).toBeVisible();
-  await expect(page.getByText('last scanned 9h ago')).toHaveCount(2);
+  // The list row keeps quiet while a Scan is recent; the Alert's header says it.
+  await expect(page.getByText('last scanned 9h ago')).toHaveCount(1);
   await expect(page.getByText('a Scan was missed')).toHaveCount(0);
 });
 

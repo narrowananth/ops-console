@@ -1,16 +1,18 @@
 import { ErrorCode, LOG_SOURCES } from '@ops-console/shared';
-import { z } from 'zod';
+import { useCallback, useMemo, useState } from 'react';
 import { BrandIcon, CONNECTOR_BRAND } from '../components/ui/brand-icon';
 import { Empty } from '../components/ui/empty';
-import { PanelRail, PanelToggle, RAIL_BUTTON } from '../components/ui/side-panel';
 import { ApiError } from '../lib/api';
 import { useAlert, useConnectors, useServices } from '../lib/queries';
-import { useAddress, useStored } from '../lib/remember';
-import { AlertView } from './alert-view';
+import { useAddress } from '../lib/remember';
+import { AlertDrawer } from './alert-drawer';
+import { AlertsTable } from './alerts-table';
 import { CONNECT_A_SOURCE, connectedSources, downSources, useSourceFilter } from './log-source';
-import { LogsPane } from './logs-pane';
+import { useMonitorData } from './monitor-data';
+import { MonitorHeader } from './monitor-header';
 import { useScanScope } from './scan-scope';
-import { ServicesPane } from './services-pane';
+import { ServicesMenu, useTicked } from './services-menu';
+import { SourceTabs } from './source-tabs';
 
 export function MonitorView() {
   // The picked Service and Alert live in the address: Back steps through them and a reload keeps them.
@@ -26,7 +28,16 @@ export function MonitorView() {
   const down = downSources(connectors.data?.data ?? []);
   const [source, pickSource] = useSourceFilter();
   const scope = useScanScope();
-  const [collapsed, setCollapsed] = useStored('monitor.services-collapsed', z.boolean(), false);
+  const data = useMonitorData(sources, source, scope);
+  const [ticked, setTicked] = useTicked();
+  // The error counts of each Route's last Scans, for the list's trend column.
+  const trends = useMemo(() => {
+    const byRoute = new Map<string, number[]>();
+    for (const one of services.data ?? []) for (const route of one.routes) byRoute.set(route.id, route.trend);
+    return byRoute;
+  }, [services.data]);
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
+  const close = useCallback(() => setAddress({ alert: null }), [setAddress]);
 
   if (connectors.isPending || services.isPending) return <Empty>Reading the Monitor…</Empty>;
   if (sources.length === 0 && (services.data?.length ?? 0) === 0) {
@@ -42,68 +53,30 @@ export function MonitorView() {
     );
   }
   return (
-    <>
-      {collapsed ? (
-        <PanelRail label="Services panel">
-          <PanelToggle open={false} panel="Services panel" onToggle={() => setCollapsed(false)} />
-          <span aria-hidden className="my-1 h-px w-6 bg-line" />
-          <button
-            type="button"
-            aria-label={service ? `Services, ${service} picked` : 'Services'}
-            title={service ? `Services: ${service} picked. Open the panel.` : 'Services. Open the panel.'}
-            onClick={() => setCollapsed(false)}
-            className={`relative ${RAIL_BUTTON} ${service ? 'bg-card text-text shadow-sm' : ''}`}
-          >
-            <ServicesIcon />
-          </button>
-        </PanelRail>
-      ) : (
-        <aside className="flex w-68 flex-none flex-col border-r border-line">
-          <ServicesPane
-            connected={sources}
-            source={source}
-            scope={scope}
+    <div ref={setBox} className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <MonitorHeader data={data} source={source} scope={scope} selected={service} ticked={ticked} />
+      <SourceTabs sources={sources} down={down} source={source} onSource={pickSource} codes={scope.codes} />
+      <AlertsTable
+        service={service}
+        codes={scope.codes}
+        range={scope.range}
+        selected={alertId}
+        onSelect={(id) => setAddress({ alert: id })}
+        down={down}
+        source={source}
+        trends={trends}
+        servicesMenu={
+          <ServicesMenu
+            data={data}
+            range={scope.range}
             selected={service}
             onSelect={(name) => setAddress({ service: name, alert: null })}
-            onCollapse={() => setCollapsed(true)}
+            ticked={ticked}
+            onTick={setTicked}
           />
-        </aside>
-      )}
-      <aside className="flex w-100 flex-none flex-col border-r border-line">
-        <LogsPane
-          service={service}
-          codes={scope.codes}
-          range={scope.range}
-          selected={alertId}
-          onSelect={(id) => setAddress({ alert: id })}
-          sources={sources}
-          down={down}
-          source={source}
-          onSource={pickSource}
-        />
-      </aside>
-      <section className="min-w-0 flex-1 overflow-y-auto">
-        {alertId ? <AlertView key={alertId} id={alertId} /> : <Empty>Pick a log to see it and verify it.</Empty>}
-      </section>
-    </>
-  );
-}
-
-function ServicesIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <rect x="2.5" y="2.5" width="11" height="4" rx="1" />
-      <rect x="2.5" y="9.5" width="11" height="4" rx="1" />
-      <path d="M5 4.5h.01M5 11.5h.01" strokeLinecap="round" strokeWidth="2" />
-    </svg>
+        }
+      />
+      <AlertDrawer id={alertId} container={box} onClose={close} />
+    </div>
   );
 }
