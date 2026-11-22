@@ -1,10 +1,13 @@
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
-import { cp, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const repo = path.resolve(import.meta.dirname, '../..');
-export const DAEMON_FILE = path.join(tmpdir(), 'ops-console-e2e-daemon.json');
+// One file per run: another run on this Mac (a second checkout, a CI job on a shared runner) would otherwise overwrite
+// the address the specs read, and their requests would go to a daemon that has stopped. The workers inherit the name.
+process.env.OC_E2E_DAEMON_FILE ??= path.join(tmpdir(), `ops-console-e2e-daemon-${process.pid}.json`);
+export const DAEMON_FILE = process.env.OC_E2E_DAEMON_FILE;
 
 function build(dir: string, args: string[]): void {
   const result = spawnSync(args[0] ?? '', args.slice(1), { cwd: path.join(repo, dir), stdio: 'inherit' });
@@ -45,5 +48,6 @@ export default async function setup(): Promise<() => Promise<void>> {
   return async () => {
     daemon.kill('SIGTERM');
     await new Promise((resolve) => daemon.once('exit', resolve));
+    await rm(DAEMON_FILE, { force: true });
   };
 }

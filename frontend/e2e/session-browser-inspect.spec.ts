@@ -83,6 +83,10 @@ function watchResizes(page: Page) {
   const sizes: { width: number; height: number }[] = [];
   page.on('websocket', (socket) => {
     if (!socket.url().includes('/browser/')) return;
+    // A stream that opens again carries the size in its address instead of sending a message.
+    const query = new URL(socket.url()).searchParams;
+    const [w, h] = [Number(query.get('w')), Number(query.get('h'))];
+    if (w > 0 && h > 0) sizes.push({ width: w, height: h });
     socket.on('framesent', (frame) => {
       const message = JSON.parse(String(frame.payload)) as { type: string; width?: number; height?: number };
       if (message.type === 'resize' && message.width && message.height) {
@@ -112,8 +116,8 @@ test('Inspect docks Chrome DevTools under the page, which keeps the area that is
   const canvas = panel.locator('canvas');
   await expect(inspect(panel)).toHaveAttribute('aria-pressed', 'false');
   const before = await area(canvas);
-  await expect.poll(() => resizes.last()?.height).toBeGreaterThan(before.height * 0.9);
-  const asked = resizes.last()?.height ?? 0;
+  // The first size travels in the stream's address, so the page already has it and no resize message is sent.
+  const asked = before.height;
 
   // DevTools asks no other host for anything (43): every request it makes goes to the daemon.
   const hosts = new Set<string>();
@@ -179,8 +183,8 @@ test('DevTools dock at the bottom or the right, and the side is kept, the splitt
   const { panel } = await openPanelOn(page, request, `${origin}/`);
   const canvas = panel.locator('canvas');
   const before = await area(canvas);
-  await expect.poll(() => resizes.last()?.width).toBeGreaterThan(before.width * 0.9);
-  const asked = resizes.last()?.width ?? 0;
+  // The first size travels in the stream's address, so the page already has it and no resize message is sent.
+  const asked = before.width;
   await inspect(panel).click();
   const frame = devtoolsFrame(panel);
   await expect(frame).toBeVisible();

@@ -22,3 +22,21 @@ export function stateTone(process: SessionProcess): 'ok' | 'failed' | 'idle' {
   if (process.state === ProcessState.Exited && process.exit_code !== 0) return 'failed';
   return 'idle';
 }
+
+/** `just now`, `42s ago`, `5m ago`, `3h ago`, `2d ago`. */
+export function ago(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
+}
+
+/** The selected process in a sentence: `Running · started 2m ago`, `Exited with code 1`, `Stopped`. */
+export function stateSentence(process: SessionProcess, now: number): string {
+  if (process.state === ProcessState.Running) return `Running · started ${ago(now - Date.parse(process.started_at))}`;
+  if (process.state === ProcessState.Exited) return `Exited with code ${process.exit_code ?? '?'}`;
+  return 'Stopped';
+}

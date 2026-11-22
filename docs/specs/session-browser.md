@@ -1,7 +1,7 @@
 # Session browser and processes
 
 **Status:** shipped
-**Design:** `design/session-browser.html`: the Browser panel in six states and the Terminals dock with the agent's Approval. It departs from every screen: neither `design/ops-console.html` nor `design/ops-console-sidebar.html` has a browser or a process panel.
+**Design:** `design/session-browser.html`: the Browser panel in six states, the Terminals dock in its states and the agent's Approval. It departs from every screen: neither `design/ops-console.html` nor `design/ops-console-sidebar.html` has a browser or a process panel.
 
 ## Problem
 
@@ -76,15 +76,26 @@ adds the same to a Session.
 ### Session processes
 
 15. A Session of kind `repo` or `anonymous` has a Terminals dock under the conversation and the panel. It opens from the
-    header's Terminals button. The dock holds one terminal per process, each with its name, command, state (running, or
-    exited with its code) and output, in the look of the Setup agent's terminal.
-16. A Run menu in the dock lists the `scripts` of the worktree's `package.json` (`dev`, `start`, `test`, `build`, ...) and
-    "New terminal". A script starts as `pnpm`, `npm`, `yarn` or `bun run <script>`, whichever lockfile the Repo has; a new
-    terminal is a shell the operator types in.
+    header's Terminals button. Its header names it "Terminals" and holds, left to right, one tab per process (a status dot,
+    the name, and "running", "exited 1" or "stopped"), a "New terminal" button, a script menu when the folder has scripts
+    (16), the folder menu (17) when the Session has Opened Repos, and one "×" with the tooltip "Hide terminals. Processes
+    keep running." The "×" hides the dock and ends nothing; Stop is the one way to end a process. The Terminals button in the Session
+    panel says the same. A dock under 448 px wide puts the tabs on their own row; under 384 px New terminal is a "+", and under 512 px
+    Stop, Restart and Remove are icons. Each keeps its tooltip and accessible name.
+    Under the header, the selected process has a line with its state in words ("Running · started 2m ago", "Exited with
+    code 1", "Stopped"), its command and its folder, then its output, in the look of the Setup agent's terminal. The
+    buttons for it sit at the right of that line: Stop (a square) while it runs, Remove (a bin) once it has exited or been
+    stopped, and Restart (a turning arrow) always. A Session with no process shows "No terminals yet", one line on what a
+    terminal is for and that it keeps running when the dock is hidden, a primary "New terminal" button, and the example
+    "e.g. run your dev server. Its page opens in the Browser panel."
+16. "New terminal" starts a shell the operator types in, and is never inside a menu. A "Run a script" menu opens upward
+    from the header and lists the `scripts` of the worktree's `package.json` (`dev`, `start`, `test`, `build`, ...) and the
+    other tools' commands the folder has. It appears only once the folder lists one; a folder with none shows no menu. A
+    script starts as `pnpm`, `npm`, `yarn` or `bun run <script>`, whichever lockfile the Repo has.
 17. The daemon runs each process as the operator, in the Session's worktree (or an Opened Repo's folder, picked in the
-    Run menu), with the operator's login environment and PATH, outside the Run sandbox, as the Setup agent's terminal does.
+    dock's folder menu, which names the folder new terminals and scripts run in), with the operator's login environment and PATH, outside the Run sandbox, as the Setup agent's terminal does.
     It runs until the operator stops it, the Session is deleted, or the daemon exits. When the folder's `.env` files name the host of a PROD Connection, the dock shows "This folder's .env names the PROD Connection <name>" over the process, and the agent's Approval says the same and shows as PROD. A process that exits stays listed with
-    its code and its last output until closed. Restart starts the same command again.
+    its code and its last output until the operator removes it. Restart starts the same command again.
 18. Any number of processes run at once, so the frontend, the backend and the database of one project run side by side.
     There is no cap. Processes of different Sessions never share a folder, since each Session has its own worktree.
 19. The terminal takes input, paste and resize. The daemon keeps the last 256 KB of each process's output, which the dock replays to a browser that opens late.
@@ -229,6 +240,20 @@ adds the same to a Session.
     to read a pick or to turn the mode on.
 53. Two viewers of one tab share the outline. The capture goes back to the viewer that clicked, and each viewer ends its own pick mode.
 
+### The page keeps up
+
+54. The page follows a resize. A Fill page is asked for the stage's size at every change, at most once per frame drawn, and
+    the daemon takes the newest size when Chrome is free for it. Dragging the splitter beside the conversation, the DevTools
+    splitter or a window's edge shows the page laid out again as it goes, with frames at nearly every step. A frame that has
+    not caught up is at most a few steps out of shape, never the whole drag, and the page is at the stage's size within a
+    frame or two of the drag ending.
+55. The first frame is at the viewer's size and pixel ratio: the stream's address carries them (`?w=&h=&dpr=`), so a new tab
+    or a window is not drawn at a default size and then again. Nothing is drawn before the first frame, so the stage never
+    flashes a white canvas. A tab the panel showed a moment ago draws its last frame at once, when that frame is the stage's
+    size, and the stream's first frame replaces it.
+56. Hover, typing and scroll show on the canvas about as soon as in a Chrome driven over its own debugging port: a hover or
+    a key within 50 ms on an idle Mac, the end of a trackpad swipe within 100 ms of the last wheel event.
+
 ### Must not regress
 
 33. A run's commands still reach only the Network allowlist, and a run's sandbox is unchanged: no host is added by the
@@ -256,6 +281,11 @@ adds the same to a Session.
 - **Sharp frames**: Chrome's screencast makes no frame with more pixels than its screen has, and a headless screen is 1x.
   Chrome starts with `--force-device-scale-factor=2`, so a Retina panel gets 2x frames. Each tab sets its own device scale,
   so a page still lays out at its CSS size and a 1x viewer's frames stay at 1x.
+- **Resize**: Chrome's screencast sends no frame for a page that has stopped changing, so a new size restarts it, and the
+  restart sends the first frame of that size within about 30 ms. Sizes that arrive while one is applied replace each other, and
+  the next waits for the frame of the last. Setting a size on every message, or never restarting the screencast, gave 13
+  frames over a 40-step drag, or none; one size per frame gives about one frame per step. A screenshot of the page covers
+  the case where no frame comes within 150 ms.
 - **Frame rate**: the installed daemon runs under launchd, and Chrome inherits its priority. With no `ProcessType` in the
   plist, a panel page ran at 20 to 30 frames a second with gaps over 50 ms; with `Interactive` it runs at 57 to 60, the
   same as the daemon started from a terminal. Chrome's flags (GPU, frame-rate limit, backgrounding) and the screencast's
@@ -410,7 +440,7 @@ Stops the server on `port` when it is this Session's. 204. 404 `not_found` for a
 
 ### WebSocket `/browser/:tabId`
 
-Raw stream behind the token. Server to client: a binary message per frame (the page's CSS width and height as two big-endian uint32, then the JPEG, which has
+Raw stream behind the token. The address may carry `w`, `h` and `dpr`, the viewer's size, so its first frame is taken at it. Server to client: a binary message per frame (the page's CSS width and height as two big-endian uint32, then the JPEG, which has
 those sizes times the page's device scale), `tab` (a changed `tab`; it carries `called_hosts` and `agent_active`), `dialog`.
 Client to server: `input` (pointer, key, wheel, text), `resize` (`width`, `height`, and `dpr`, 1 to 3, default 1: the viewer's
 pixels per CSS pixel, which a Fill page takes as its device scale), `focus`, `pick` (`action` is `start`, `end`, `hover` or `click`; the last two carry `x` and `y`
@@ -441,7 +471,7 @@ process }`), `process.removed` (`{ session_id, process_id }`), so the Browser bu
 The Browser panel, a tab's window (the toolbar and the page, no sidebar), the Terminals dock, the Browser and Terminals buttons in the Session header (Workspace). States: no
 Chrome, loading, blank tab with the Local servers list, no server for the Session, called hosts, crashed, "Agent is using this tab",
 the page stream lost (a notice over the last frame while the panel reconnects), a tab in a window ("This tab is open in its own window."), a window whose tab or Session is gone, the Inspect button with no page, pressed, and with a blocked popup; DevTools docked at the bottom and at the right;
-the dock with no process, a running one, an exited one, an Approval card for the agent's `start_process`; pick mode with an element
+the dock with no process, a running one, an exited one, the Run a script menu, a folder with no scripts, a narrow dock, an Approval card for the agent's `start_process`; pick mode with an element
 outlined, and the composer with picked-element chips. Departure: neither design file has a browser or a dock, so the mock is new
 (`design/session-browser.html`). The window, its panel placeholder, the Pick, Inspect, Open in your browser and Clear cookies icons and
 the DevTools dock are not in it, and the mock still shows the old External button and "..." menu.
@@ -502,7 +532,7 @@ the DevTools dock are not in it, and the mock still shows the old External butto
   no Chrome. `browser-orphans.test.ts`: 29.
 - **Backend + SQLite** (`session-processes.test.ts`, real child processes): 15 to 20, 26, 33; `process-prod-env.test.ts`: 17 and 26's PROD line; `process-hangup.test.ts`: 20; with `local-servers.test.ts`
   (a real listening socket): 11, 12, and the Stop of a leftover server.
-- **Browser** (`frontend/e2e/session-browser.spec.ts`, a real daemon and Chrome): 1 to 3, 5, 6, 8, 11 (Stop), 15 to 17 (Run menu, Restart, Stop, Close), 21, 26, 27, 28, 32, and the PROD warning of 17.
+- **Browser** (`frontend/e2e/session-browser.spec.ts`, a real daemon and Chrome): 1 to 3, 5, 6, 8, 11 (Stop), 15 to 17 (the empty state, New terminal, Run a script, Hide, Stop, Restart, Remove, an exited process), 21, 26, 27, 28, 32, and the PROD warning of 17.
 - **Browser** (`frontend/e2e/session-browser-pick.spec.ts`, a real daemon and Chrome): 3 (the icons and their names, no "..." menu, a
   narrow panel), 13, and 45 to 51 (the outline, a click that does not reach the page, the chips, several picks, send with the block
   and the crop, Escape, a tab's window).

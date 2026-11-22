@@ -14,37 +14,48 @@ const RECONNECT_MAX_MS = 5000;
 /** A page frame: the page's CSS size and its JPEG, which has more pixels than that on a sharp screen. */
 export type PageFrame = { width: number; height: number; jpeg: Uint8Array<ArrayBuffer> };
 
+/** The size a viewer asks the page for, in CSS pixels, and its device pixel ratio. */
+export type ViewerSize = { width: number; height: number; dpr: number };
+
 /**
  * The page stream of one tab: JSON messages go to `onMessage`, binary frames to `onFrame`, and `send` carries input
  * back. A dropped socket opens again after a wait that doubles to a cap; `closed` from the daemon ends it. `connected`
- * is true while open.
+ * is true while open, and `lost` once an open socket has dropped. `size` is read at each connect and goes in the
+ * address, so the daemon takes the first frame at the viewer's size.
  */
 export function usePageStream(
   tabId: string,
   onMessage: (message: BrowserServerMessage) => void,
   onFrame: (frame: PageFrame) => void,
+  size: () => ViewerSize | null = () => null,
 ) {
   const socket = useRef<WebSocket | null>(null);
   const latest = useRef(onMessage);
   latest.current = onMessage;
   const latestFrame = useRef(onFrame);
   latestFrame.current = onFrame;
+  const sizeNow = useRef(size);
+  sizeNow.current = size;
   const [connected, setConnected] = useState(false);
+  const [lost, setLost] = useState(false);
 
   useEffect(() => {
     const token = sessionToken();
     if (token === null) return;
-    const url = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/browser/${tabId}`;
+    const base = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/browser/${tabId}`;
     let ended = false;
     let wait = RECONNECT_MIN_MS;
     let reopen: ReturnType<typeof setTimeout> | null = null;
     const connect = () => {
+      const at = sizeNow.current();
+      const url = at ? `${base}?w=${at.width}&h=${at.height}&dpr=${at.dpr}` : base;
       const ws = new WebSocket(url, [WS_PROTOCOL, token]);
       ws.binaryType = 'arraybuffer';
       socket.current = ws;
       ws.addEventListener('open', () => {
         wait = RECONNECT_MIN_MS;
         setConnected(true);
+        setLost(false);
       });
       ws.addEventListener('message', (event) => {
         // A frame is binary and goes straight to the painter; only the small JSON messages are checked.
@@ -62,6 +73,7 @@ export function usePageStream(
         if (socket.current === ws) socket.current = null;
         setConnected(false);
         if (ended) return;
+        setLost(true);
         reopen = setTimeout(connect, wait);
         wait = Math.min(wait * 2, RECONNECT_MAX_MS);
       });
@@ -73,13 +85,17 @@ export function usePageStream(
       socket.current?.close();
       socket.current = null;
       setConnected(false);
+      setLost(false);
     };
   }, [tabId]);
 
-  const send = useCallback((message: BrowserClientMessage) => {
+  /** True when the message went out: a socket that is not open yet takes nothing. */
+  const send = useCallback((message: BrowserClientMessage): boolean => {
     const ws = socket.current;
-    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+    if (ws?.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(message));
+    return true;
   }, []);
 
-  return { connected, send };
+  return { connected, lost, send };
 }

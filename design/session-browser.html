@@ -134,15 +134,38 @@
 
   .col2 { flex:1; min-width:0; display:flex; flex-direction:column; }
   .col2 .split { min-height:0; }
-  .dock { height:228px; flex:none; border-top:1px solid var(--divider); background:#1c1b1a; color:#e8e6e5; display:flex; flex-direction:column; }
-  .dock .dt { display:flex; align-items:center; gap:6px; padding:6px 10px; background:#262524; font-size:12px; }
-  .dock .pt { display:flex; align-items:center; gap:7px; padding:4px 10px; border-radius:8px; color:#a8a4a3; }
-  .dock .pt.on { background:#3a3837; color:#fff; font-weight:600; }
-  .dock .pt em { font:normal 10px var(--mono); color:#8f8b8a; }
-  .dock .run { margin-left:auto; display:flex; gap:6px; }
-  .dock .run span { border:1px solid #4a4847; border-radius:8px; padding:3px 10px; color:#e8e6e5; }
-  .dock pre { margin:0; padding:10px 14px; font:12px/1.5 var(--mono); flex:1; overflow:hidden; white-space:pre-wrap; }
+  .dock { height:228px; flex:none; border-top:1px solid var(--divider); background:var(--bg); display:flex; flex-direction:column; font-size:12px; }
+  .dock.tall { height:260px; }
+  .dock .dt { display:flex; align-items:center; gap:6px; padding:6px 10px; background:var(--surface); border-bottom:1px solid var(--line); }
+  .dock .dt h4 { margin:0; font-size:12px; display:flex; align-items:center; gap:6px; padding-right:4px; }
+  .dock .tabs { flex:1; display:flex; gap:4px; min-width:0; overflow:hidden; }
+  .dock .pt { display:flex; align-items:center; gap:7px; padding:4px 10px; border-radius:7px; color:var(--n700); white-space:nowrap; }
+  .dock .pt.on { background:var(--a100); color:#7a1608; font-weight:600; }
+  .dock .pt em { font:normal 10px var(--mono); color:var(--n600); font-weight:400; }
+  .dock .dbtn { display:flex; align-items:center; gap:6px; border:1px solid var(--line); background:var(--card); border-radius:9px; padding:3px 10px; color:var(--text); white-space:nowrap; }
+  .dock .ibtn { width:28px; height:28px; border-radius:50%; display:grid; place-items:center; color:var(--n700); font-size:15px; }
+  .dock .bar { display:flex; align-items:center; gap:12px; padding:6px 12px; border-bottom:1px solid var(--line); }
+  .dock .bar .st { flex:1; min-width:0; }
+  .dock .bar .st b { display:flex; align-items:center; gap:7px; font-weight:600; }
+  .dock .bar .st span { display:block; color:var(--n700); font:11px var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dock .bar .acts { display:flex; gap:6px; }
+  .dock .none { flex:1; display:flex; align-items:center; justify-content:center; gap:12px; padding:12px 16px; }
+  .dock .none .ic { width:36px; height:36px; border-radius:12px; border:1px solid var(--line); background:var(--surface); display:grid; place-items:center; color:var(--n700); flex:none; }
+  .dock .none h5 { margin:0; font-size:13px; }
+  .dock .none p { margin:2px 0 8px; color:var(--n700); max-width:380px; }
+  .dock .none .eg { color:var(--n600); margin:8px 0 0; }
+  .dock .none .btn { font-size:12px; padding:5px 12px; border-radius:9px; }
+  .dock pre { margin:0; padding:10px 14px; font:12px/1.5 var(--mono); flex:1; overflow:hidden; white-space:pre-wrap; background:#1c1b1a; color:#e8e6e5; }
   .dock .g { color:#7bd88f; } .dock .d { color:#8f8b8a; }
+  .dmenu { position:absolute; right:92px; bottom:12px; width:240px; background:var(--card); border:1px solid var(--divider); border-radius:12px; box-shadow:0 8px 24px rgba(0,0,0,.16); padding:6px 0; font-size:13px; }
+  .dmenu h6 { margin:0; padding:6px 10px 3px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--n600); }
+  .dmenu div { padding:5px 10px; display:flex; justify-content:space-between; } .dmenu div em { font:normal 11px var(--mono); color:var(--n600); }
+  .dmenu div.on { background:var(--n200); }
+  .dockframe { width:760px; background:var(--bg); border:1px solid var(--divider); border-radius:10px; overflow:hidden; position:relative; box-shadow:0 6px 24px rgba(0,0,0,.08); }
+  .dockframe.narrow { width:420px; }
+  .dockframe .dock { border-top:0; }
+  .dockrow { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; }
+  .dockrow figure { margin:0; } .dockrow figcaption { color:var(--n700); margin:0 0 6px; font-size:12px; }
   .apr { border:1px solid var(--accent); background:var(--a100); border-radius:12px; padding:10px 12px; font-size:12px; display:flex; flex-direction:column; gap:6px; }
   .apr code { font:12px var(--mono); background:var(--card); border:1px solid var(--line); border-radius:7px; padding:5px 8px; display:block; }
   .apr .r { display:flex; gap:8px; align-items:center; }
@@ -218,7 +241,7 @@
   <div class="tool">▸ Ran pnpm dev → listening on :5173</div>
   <div class="tool">▸ browser_open localhost:5173/settings<br>▸ browser_click "Dark mode" · browser_screenshot</div>
   <div class="msg">The switch works and the page repaints. The sidebar keeps its light background: fixing that next.</div></div>
-  <div class="comp">Ask anything. @ files, $ skills, / commands <b>Send</b></div></div><section class="bp" style="display:none"></section></div></div></div><div class="variant"><h2>7 · Run the project: Terminals dock and the agent asking to start a process</h2><p class="why">The dock runs the Session's processes as you (api, web, db side by side); package.json scripts sit in Run. The agent asks once per command, with the exact command and "Runs as you, outside the sandbox". The browser opens the web app and the agent drives it while you watch.</p><div class="frame"><div class="app"><div class="logo"></div><i>◉</i><i class="on">▤</i><i>⌘</i><i>⚙</i></div><aside class="sess"><div class="grp">Needs you <em>1</em></div>
+  <div class="comp">Ask anything. @ files, $ skills, / commands <b>Send</b></div></div><section class="bp" style="display:none"></section></div></div></div><div class="variant"><h2>7 · Run the project: Terminals dock and the agent asking to start a process</h2><p class="why">The dock runs the Session's processes as you (api, web, db side by side); package.json scripts sit in Run a script. The agent asks once per command, with the exact command and "Runs as you, outside the sandbox". The browser opens the web app and the agent drives it while you watch.</p><div class="frame"><div class="app"><div class="logo"></div><i>◉</i><i class="on">▤</i><i>⌘</i><i>⚙</i></div><aside class="sess"><div class="grp">Needs you <em>1</em></div>
   <div class="row"><div class="t"><span class="dot d-need"></span><span class="n">Fix checkout webhook auth</span><span class="sub">approval</span></div><div class="m"><span>storefront-api</span><span class="br">fix/webhook-auth</span></div></div>
   <div class="grp">Running <em>1</em></div>
   <div class="row sel"><div class="t"><span class="dot d-run"></span><span class="n">Add dark mode to settings</span><span class="sub">2m</span></div><div class="m"><span>web</span><span class="br">feat/dark-mode</span></div></div>
@@ -228,9 +251,30 @@
  <div class="conv"><div class="msg me">Run the whole project and test the login flow. I will watch.</div>
  <div class="msg">I need the API and the web app up. Starting the API first.</div>
  <div class="apr"><b>Start a process? <span class="sub">Approval</span></b><span class="sub">Runs as you, outside the sandbox, with this Repo's environment.</span><code>pnpm --filter api dev</code><span class="sub">in …/session-worktrees/shop/feat/login</span><div class="r"><button class="btn" style="padding:3px 12px">Deny</button><button class="btn pri" style="padding:3px 12px">Start</button></div></div></div>
- <div class="comp">Ask anything. @ files, $ skills, / commands <b>Send</b></div></div><section class="bp" style="position:relative"><div class="btabs"><div class="bt on"><span class="fav"></span><span class="t">Sign in · Shop</span><span class="ag">agent</span><span class="x">×</span></div><div class="bt"><span class="fav b"></span><span class="t">Storybook</span><span class="x">×</span></div><div class="bt plus">+</div></div><div class="btool"><button class="ib">←</button><button class="ib off">→</button><button class="ib">↻</button><div class="addr"><span class="lk">●</span>localhost:5173/login</div><button class="dev">▭ Fill ▾</button><button class="ext" title="Open in external browser">↗ External</button><button class="ib" title="Menu">⋯</button></div><div class="stage"><div class="page"><div class="nav"><b>Shop</b><span>Cart</span></div><div class="hero"><h2>Sign in</h2><p class="p">Email and password.</p><div style="border:1px solid #d6d9e0;border-radius:8px;padding:8px 10px;margin-bottom:8px;width:260px;color:#5b6272">sam@example.com</div><div style="border:1px solid #d6d9e0;border-radius:8px;padding:8px 10px;margin-bottom:12px;width:260px;color:#5b6272">••••••••</div><span class="btnp">Sign in</span></div></div><div class="badge"><span class="dot"></span>Agent is using this tab</div></div></section></div><div class="dock"><div class="dt"><div class="pt on"><span class="dot d-run"></span>api <em>pnpm --filter api dev</em></div><div class="pt"><span class="dot d-run"></span>web <em>pnpm --filter web dev</em></div><div class="pt"><span class="dot d-idle"></span>db <em>exited 0</em></div><div class="run"><span>Run ▾</span><span>Stop</span><span>Restart</span></div></div>
-<pre><span class="d">$ pnpm --filter api dev</span>
+ <div class="comp">Ask anything. @ files, $ skills, / commands <b>Send</b></div></div><section class="bp" style="position:relative"><div class="btabs"><div class="bt on"><span class="fav"></span><span class="t">Sign in · Shop</span><span class="ag">agent</span><span class="x">×</span></div><div class="bt"><span class="fav b"></span><span class="t">Storybook</span><span class="x">×</span></div><div class="bt plus">+</div></div><div class="btool"><button class="ib">←</button><button class="ib off">→</button><button class="ib">↻</button><div class="addr"><span class="lk">●</span>localhost:5173/login</div><button class="dev">▭ Fill ▾</button><button class="ext" title="Open in external browser">↗ External</button><button class="ib" title="Menu">⋯</button></div><div class="stage"><div class="page"><div class="nav"><b>Shop</b><span>Cart</span></div><div class="hero"><h2>Sign in</h2><p class="p">Email and password.</p><div style="border:1px solid #d6d9e0;border-radius:8px;padding:8px 10px;margin-bottom:8px;width:260px;color:#5b6272">sam@example.com</div><div style="border:1px solid #d6d9e0;border-radius:8px;padding:8px 10px;margin-bottom:12px;width:260px;color:#5b6272">••••••••</div><span class="btnp">Sign in</span></div></div><div class="badge"><span class="dot"></span>Agent is using this tab</div></div></section></div><div class="dock tall"><div class="dt"><h4>▭ Terminals</h4><div class="tabs"><div class="pt on"><span class="dot d-run"></span>api <em>running</em></div><div class="pt"><span class="dot d-run"></span>web <em>running</em></div><div class="pt"><span class="dot d-idle"></span>db <em>exited 0</em></div></div><span class="dbtn">＋ New terminal</span><span class="dbtn">Run a script ▾</span><span class="ibtn" title="Hide terminals. Processes keep running.">×</span></div><div class="bar"><div class="st"><b><span class="dot d-run"></span>Running · started 2m ago</b><span>pnpm --filter api dev in /work/shop</span></div><div class="acts"><span class="dbtn">■ Stop</span><span class="dbtn">↻ Restart</span></div></div><pre><span class="d">$ pnpm --filter api dev</span>
 <span class="g">[api]</span> connected to postgres://localhost:5432/shop_dev
 <span class="g">[api]</span> migrations up to date
 <span class="g">[api]</span> listening on http://localhost:4000
-<span class="g">[api]</span> POST /auth/login 200 41ms</pre></div></div></div></div></body></html>
+<span class="g">[api]</span> POST /auth/login 200 41ms</pre></div></div></div></div><div class="variant"><h2>8 · Terminals dock: what a first-time user sees</h2><p class="why">A header that names the dock, one tab per process, a New terminal button that is always there, Run a script only when the folder has scripts, and one × that hides the dock (processes keep running). Under the tabs, the selected process says what it runs, where, and its state in words; Stop shows while it runs, Remove once it has ended. In a narrow dock New terminal, Stop, Restart and Remove lose their words (below 384 px for New terminal, 512 px for the others) and keep their tooltips.</p>
+<div class="dockrow">
+<figure><figcaption>No terminals yet</figcaption><div class="dockframe"><div class="dock"><div class="dt"><h4>▭ Terminals</h4><div class="tabs"></div><span class="dbtn">＋ New terminal</span><span class="ibtn" title="Hide terminals. Processes keep running.">×</span></div><div class="none"><div class="ic">▭</div><div><h5>No terminals yet</h5><p>A terminal runs a command for this Session: a dev server, a test watch or a shell. It keeps running when you hide this panel.</p><span class="btn pri">＋ New terminal</span><p class="eg">e.g. run your dev server. Its page opens in the Browser panel.</p></div></div></div></div></figure>
+<figure><figcaption>Running, with scripts in the folder</figcaption><div class="dockframe"><div class="dock"><div class="dt"><h4>▭ Terminals</h4><div class="tabs"><div class="pt on"><span class="dot d-run"></span>api <em>running</em></div><div class="pt"><span class="dot d-run"></span>web <em>running</em></div><div class="pt"><span class="dot d-idle"></span>db <em>exited 0</em></div></div><span class="dbtn">＋ New terminal</span><span class="dbtn">Run a script ▾</span><span class="ibtn" title="Hide terminals. Processes keep running.">×</span></div><div class="bar"><div class="st"><b><span class="dot d-run"></span>Running · started 2m ago</b><span>pnpm --filter api dev in /work/shop</span></div><div class="acts"><span class="dbtn">■ Stop</span><span class="dbtn">↻ Restart</span></div></div><pre><span class="d">$ pnpm --filter api dev</span>
+<span class="g">[api]</span> connected to postgres://localhost:5432/shop_dev
+<span class="g">[api]</span> migrations up to date
+<span class="g">[api]</span> listening on http://localhost:4000
+<span class="g">[api]</span> POST /auth/login 200 41ms</pre></div></div></figure>
+<figure><figcaption>Exited with a code</figcaption><div class="dockframe"><div class="dock"><div class="dt"><h4>▭ Terminals</h4><div class="tabs"><div class="pt on"><span class="dot d-need"></span>build <em>exited 1</em></div><div class="pt"><span class="dot d-run"></span>api <em>running</em></div></div><span class="dbtn">＋ New terminal</span><span class="dbtn">Run a script ▾</span><span class="ibtn" title="Hide terminals. Processes keep running.">×</span></div><div class="bar"><div class="st"><b><span class="dot d-need"></span>Exited with code 1</b><span>pnpm build in /work/shop</span></div><div class="acts"><span class="dbtn">🗑 Remove</span><span class="dbtn">↻ Restart</span></div></div><pre><span class="d">$ pnpm build</span>
+src/cart.ts:41:7 - error TS2304: Cannot find name 'total'.
+<span class="d">Found 1 error.</span></pre></div></div></figure>
+<figure><figcaption>Run a script menu</figcaption><div class="dockframe"><div class="dock"><div class="dt"><h4>▭ Terminals</h4><div class="tabs"><div class="pt on"><span class="dot d-run"></span>api <em>running</em></div><div class="pt"><span class="dot d-run"></span>web <em>running</em></div><div class="pt"><span class="dot d-idle"></span>db <em>exited 0</em></div></div><span class="dbtn">＋ New terminal</span><span class="dbtn">Run a script ▾</span><span class="ibtn" title="Hide terminals. Processes keep running.">×</span></div><div class="bar"><div class="st"><b><span class="dot d-run"></span>Running · started 2m ago</b><span>pnpm --filter api dev in /work/shop</span></div><div class="acts"><span class="dbtn">■ Stop</span><span class="dbtn">↻ Restart</span></div></div><pre><span class="d">$ pnpm --filter api dev</span>
+<span class="g">[api]</span> connected to postgres://localhost:5432/shop_dev
+<span class="g">[api]</span> migrations up to date
+<span class="g">[api]</span> listening on http://localhost:4000
+<span class="g">[api]</span> POST /auth/login 200 41ms</pre></div><div class="dmenu"><h6>pnpm</h6><div class="on">dev <em>pnpm run dev</em></div><div>build <em>pnpm run build</em></div><div>test <em>pnpm run test</em></div></div></div></figure>
+<figure><figcaption>Folder with no scripts: no script menu</figcaption><div class="dockframe"><div class="dock"><div class="dt"><h4>▭ Terminals</h4><div class="tabs"><div class="pt on"><span class="dot d-run"></span>shell <em>running</em></div></div><span class="dbtn">＋ New terminal</span><span class="ibtn" title="Hide terminals. Processes keep running.">×</span></div><div class="bar"><div class="st"><b><span class="dot d-run"></span>Running · started just now</b><span>shell in /work/shop</span></div><div class="acts"><span class="dbtn">■ Stop</span><span class="dbtn">↻ Restart</span></div></div><pre><span class="d">$ </span></pre></div></div></figure>
+<figure><figcaption>Narrow</figcaption><div class="dockframe narrow"><div class="dock"><div class="dt"><h4>▭ Terminals</h4><div class="tabs"></div><span class="dbtn">＋</span><span class="ibtn" title="Hide terminals. Processes keep running.">×</span></div><div class="bar"><div class="st"><b><span class="dot d-run"></span>Running · started 2m ago</b><span>pnpm dev in /work/shop</span></div><div class="acts"><span class="dbtn">■</span><span class="dbtn">↻</span></div></div><pre><span class="d">$ pnpm --filter api dev</span>
+<span class="g">[api]</span> connected to postgres://localhost:5432/shop_dev
+<span class="g">[api]</span> migrations up to date
+<span class="g">[api]</span> listening on http://localhost:4000
+<span class="g">[api]</span> POST /auth/login 200 41ms</pre></div></div></figure>
+</div></div></body></html>

@@ -221,34 +221,77 @@ test('a port with no server says so (8)', async ({ page, request }) => {
   await expect(panel.getByText(`Nothing is listening on :${unused}`)).toBeVisible();
 });
 
-test('the Terminals dock runs a shell the operator types in, and stops it (15, 16, 17)', async ({ page, request }) => {
+test('the Terminals dock explains itself when empty, runs a shell the operator types in, and stops it (15, 16, 17)', async ({
+  page,
+  request,
+}) => {
   const id = await newSession(request);
   await openSession(page, id);
   await page.getByRole('button', { name: 'Terminals' }).click();
   const dock = page.getByRole('region', { name: 'Terminals' });
-  await expect(dock.getByText('No process. Run a script or open a terminal.')).toBeVisible();
+  await expect(dock.getByRole('heading', { name: 'No terminals yet' })).toBeVisible();
+  await expect(dock.getByText(/keeps running when you hide this panel/)).toBeVisible();
+  await expect(dock.getByText(/Its page opens in the Browser panel/)).toBeVisible();
+  // A folder with no scripts has no script menu to puzzle over.
+  await expect(dock.getByRole('button', { name: 'Run a script' })).toHaveCount(0);
 
-  await dock.getByRole('button', { name: 'Run', exact: true }).click();
-  await page.getByRole('menuitem', { name: /New terminal/ }).click();
+  // The empty state's own button and the header's both make a terminal.
+  await dock.getByRole('button', { name: 'New terminal' }).last().click();
   await expect(dock.getByRole('tab', { name: /shell/ })).toBeVisible();
+  await expect(dock.getByText('Running · started')).toBeVisible();
+  await expect(dock.getByRole('heading', { name: 'No terminals yet' })).toHaveCount(0);
   await dock.locator('.xterm-helper-textarea').focus();
   await page.keyboard.type('echo dock-says-$((20 + 22))\n');
   await expect(dock.locator('.xterm-rows:visible')).toContainText('dock-says-42');
 
   // A second terminal comes in front; the first keeps its screen, mounted behind it.
-  await dock.getByRole('button', { name: 'Run', exact: true }).click();
-  await page.getByRole('menuitem', { name: /New terminal/ }).click();
+  await dock.getByRole('button', { name: 'New terminal' }).first().click();
   await expect(dock.getByRole('tab', { name: /shell-2/ })).toBeVisible();
   await expect(dock.locator('.xterm-rows:visible')).not.toContainText('dock-says-42');
   await expect(dock.locator('.xterm')).toHaveCount(2);
   await dock.getByRole('tab', { name: /shell(?!-2)/ }).click();
   await expect(dock.locator('.xterm-rows:visible')).toContainText('dock-says-42');
+
+  // Hiding the dock ends nothing.
+  await dock.getByRole('button', { name: 'Hide terminals' }).click();
+  await expect(dock).toHaveCount(0);
+  expect((await processesOf(request, id)).map((p) => p.state)).toEqual(['running', 'running']);
+  await page.getByRole('button', { name: 'Terminals' }).click();
+
+  // Stop is the one way to end a process; Remove takes its place once it has ended.
+  await expect(dock.getByRole('button', { name: 'Remove' })).toHaveCount(0);
   await dock.getByRole('button', { name: 'Stop' }).click();
-  await expect(dock.getByRole('button', { name: 'Close', exact: true })).toBeEnabled();
+  await expect(dock.getByRole('button', { name: 'Remove' })).toBeEnabled();
   await dock.getByRole('tab', { name: /shell-2/ }).click();
   await dock.getByRole('button', { name: 'Stop' }).click();
-  await expect(dock.getByRole('button', { name: 'Close', exact: true })).toBeEnabled();
+  await expect(dock.getByRole('button', { name: 'Remove' })).toBeEnabled();
   await expect.poll(async () => (await processesOf(request, id)).map((p) => p.state)).toEqual(['stopped', 'stopped']);
+});
+
+test('an exited process shows its code, can be restarted or removed, and the empty state returns (17)', async ({
+  page,
+  request,
+}) => {
+  const id = await newSession(request);
+  const failing = await request.post(api(`/sessions/${id}/processes`), {
+    headers: auth,
+    data: { name: 'build', command: 'echo build-failed; exit 3' },
+  });
+  expect(failing.status()).toBe(201);
+  await expect.poll(async () => (await processesOf(request, id))[0]?.state).toBe('exited');
+
+  await openSession(page, id);
+  await page.getByRole('button', { name: 'Terminals' }).click();
+  const dock = page.getByRole('region', { name: 'Terminals' });
+  await expect(dock.getByText('Exited with code 3')).toBeVisible();
+  await expect(dock.getByRole('tab', { name: /build.*exited 3/ })).toBeVisible();
+  await expect(dock.locator('.xterm-rows:visible')).toContainText('build-failed');
+  await expect(dock.getByRole('button', { name: 'Stop' })).toHaveCount(0);
+  await expect(dock.getByRole('button', { name: 'Restart' })).toBeEnabled();
+
+  await dock.getByRole('button', { name: 'Remove' }).click();
+  await expect(dock.getByRole('heading', { name: 'No terminals yet' })).toBeVisible();
+  await expect.poll(async () => (await processesOf(request, id)).length).toBe(0);
 });
 
 test('a file the page asks for is chosen in the panel and handed to the page by its name (6)', async ({
@@ -325,7 +368,7 @@ test("Run lists the folder's package.json scripts and starts one; Restart runs i
   await openSession(page, id);
   await page.getByRole('button', { name: 'Terminals' }).click();
   const dock = page.getByRole('region', { name: 'Terminals' });
-  await dock.getByRole('button', { name: 'Run', exact: true }).click();
+  await dock.getByRole('button', { name: 'Run a script' }).click();
   await expect(page.getByRole('menuitem', { name: /hello/ })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: /quick/ })).toBeVisible();
   await page.getByRole('menuitem', { name: /hello/ }).click();
@@ -345,8 +388,8 @@ test("Run lists the folder's package.json scripts and starts one; Restart runs i
   await expect
     .poll(async () => (await processesOf(request, id)).find((p) => p.name === 'hello')?.state)
     .toBe('stopped');
-  await expect(dock.getByRole('button', { name: 'Close', exact: true })).toBeEnabled();
-  await dock.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(dock.getByRole('button', { name: 'Remove' })).toBeEnabled();
+  await dock.getByRole('button', { name: 'Remove' }).click();
   await expect.poll(async () => (await processesOf(request, id)).some((p) => p.name === 'hello')).toBe(false);
 });
 

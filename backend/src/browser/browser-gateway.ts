@@ -56,7 +56,7 @@ export class BrowserGateway implements OnModuleInit, OnModuleDestroy {
           // A message that is not valid, or for a tab that closed, is dropped.
           if (parsed.success) void this.browser.input(id, client, parsed.data).catch(() => {});
         });
-        void this.browser.attach(id, client).catch(() => client.close(1011, 'tab_unavailable'));
+        void this.browser.attach(id, client, sizeOf(request.url)).catch(() => client.close(1011, 'tab_unavailable'));
       });
     });
   }
@@ -66,6 +66,18 @@ export class BrowserGateway implements OnModuleInit, OnModuleDestroy {
     this.server.close();
     this.inspectors.close();
   }
+}
+
+/** The size a viewer names in the address (`?w=&h=&dpr=`), so its first frame is taken at it. */
+function sizeOf(address: string | undefined) {
+  const query = new URL(address ?? '/', 'http://localhost').searchParams;
+  const parsed = browserClientMessageSchema.safeParse({
+    type: 'resize',
+    width: Number(query.get('w')),
+    height: Number(query.get('h')),
+    dpr: Number(query.get('dpr') ?? 1),
+  });
+  return parsed.success && parsed.data.type === 'resize' ? parsed.data : undefined;
 }
 
 function parseJson(text: string): unknown {
