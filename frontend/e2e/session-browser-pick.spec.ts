@@ -73,13 +73,16 @@ const browserButton = (page: Page) => page.getByRole('button', { name: /^Browser
 /**
  * The canvas has the pixels of its stage at the screen's pixel ratio: the daemon has applied the viewer's size and the
  * page's frame at that size has been drawn. A click before that is mapped with the page's old size and lands elsewhere.
+ * Chrome rounds a frame's size its own way and sometimes sends one a pixel short (554 for 555); a still page sends no
+ * other, so a pixel or two off still counts.
  */
 const drawnAtStageSize = (canvas: Locator) =>
-  canvas.evaluate(
-    (node: HTMLCanvasElement) =>
-      node.width === Math.round(node.clientWidth * devicePixelRatio) &&
-      node.height === Math.round(node.clientHeight * devicePixelRatio),
-  );
+  canvas.evaluate((node: HTMLCanvasElement) => {
+    const near = (got: number, want: number) => Math.abs(got - want) <= Math.max(2, want * 0.01);
+    return (
+      near(node.width, node.clientWidth * devicePixelRatio) && near(node.height, node.clientHeight * devicePixelRatio)
+    );
+  });
 
 async function openPanel(page: Page, request: APIRequestContext) {
   const id = await newSession(request);
