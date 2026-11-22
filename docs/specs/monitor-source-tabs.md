@@ -10,8 +10,9 @@ The Monitor spreads four columns across a window about 1000 px wide: the sidebar
 ## Behavior
 
 1. The Monitor is a header, a row of source tabs, a toolbar and one table of Alerts. The Alert opens in a drawer on the right and covers part of the table; Esc, the close button or a click on the dimmed area closes it. The picked Alert stays in the address, so Back and a reload keep the drawer open.
-2. The header holds the range buttons, the `HTTP` status picker and the Scan button. The status picker groups codes by class (4xx, 5xx, other), and each class has an arrow that folds and opens it. The Scan button reads as before: "Scan checkout-api · 24h", "Scan 3 ticked · 24h" or "Scan 12 Services · 24h". While a Scan runs it reads "Scanning…" and a Stop button shows. The newest Scan of each source in view keeps its status line under the title, with its notes; a failed Scan keeps its warning.
-3. Source tabs sit under the header: "All sources", then one tab per log source that is connected, down or has Alerts. A tab shows the source's logo and name, its open High, Medium and Low counts, and one line of state: "Last Scan 3m ago", "Scanning…", or why the source is down. The tab of a source that is down carries a red dot and the notice the logs list showed before. One source shows no tabs.
+2. The header is one row: the title, one sentence of status, the range buttons, the `HTTP` status picker and the Scan button. The row wraps only when the window is too narrow for all of it. The status picker groups codes by class (4xx, 5xx, other), and each class has an arrow that folds and opens it. The Scan button reads as before: "Scan checkout-api · 24h", "Scan 3 ticked · 24h" or "Scan 12 Services · 24h". While a Scan runs it reads "Scanning…" and a Stop button shows.
+   The status sentence covers the sources in view and never runs to a second line. When all went well it reads "All 5 sources scanned · last Scan 6h ago"; with one source, "Last Scan 6h ago". Something the operator must act on joins it in red: "Scan failed for Datadog", "Scan stopped for Loki", "Loki is down", "Scan overdue for apis and zeta". Scan notes join it in amber: "Loki and New Relic left notes". A sentence with a red or amber part is a button with an arrow; one click opens a box under it with each source's reason and notes, and Esc or a click outside closes it. A sentence with nothing to open is plain text. Per-source times stay on the tabs.
+3. Source tabs sit under the header: "All sources", then one tab per log source that is connected, down or has Alerts. A tab shows the source's logo and name, its open High, Medium and Low counts, and one line of state: "Last Scan 3m ago", "Scanning…", "Last Scan failed", or why the source is down. The tab of a source that is down or whose Scan failed carries a red dot and red text. A tab whose Scan left notes carries an amber mark that shows the notes on hover. One source shows no tabs.
 4. Picking a tab lists only that source's Alerts and makes the Scan button read only that source. The pick survives a reload.
 5. The toolbar holds a severity switch, the search box, a Services menu and the Closed switch. The switch reads "Needs attention" (High and Medium), High, Medium, Low and All, each with its count. "Needs attention" is the default.
 6. On "Needs attention" and All a row under the Alerts reads "Show N Low alerts" while Low Alerts are hidden; on "Needs attention" it opens the Low tab.
@@ -46,7 +47,7 @@ Follows `design/monitor-redesign.html`. Loading, empty and error states of the l
 
 ## Seams
 
-- **Browser** (`frontend/e2e/monitor-lists.spec.ts`): 1 to 10.
+- **Browser** (`frontend/e2e/monitor-lists.spec.ts`): 1 to 10. The header test measures the status line and the table's top.
 
 ## Out of scope
 
