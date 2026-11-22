@@ -18,6 +18,7 @@ import { Transcripts } from '../agent/transcripts';
 import { type AuthLogin, CLAUDE_CLI, type ClaudeCli, LOGIN_TIMEOUT_MS } from '../claude-cli/claude-cli';
 import { DATA_DIR } from '../common/data-dir';
 import { ApiError } from '../common/errors';
+import { StartupQueue } from '../common/startup-queue';
 import { claudeAccounts, nowIso, sessions } from '../db/schema';
 import { type Emit, STORE, type Store, type Tx } from '../db/store';
 import { SettingsRegistry } from '../settings/settings.registry';
@@ -146,6 +147,7 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
     @Inject(SettingsRegistry) registry: SettingsRegistry,
     @Inject(USAGE_SOURCE) private readonly usageSource: UsageSource,
     @Inject(CliProxyService) private readonly cliProxy: CliProxyService,
+    @Inject(StartupQueue) private readonly startup: StartupQueue,
   ) {
     registry.register({
       key: AGENT_ACCOUNTS,
@@ -156,7 +158,7 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
   }
 
   onApplicationBootstrap(): void {
-    void this.pollUsage(true);
+    this.startup.add('first usage read', () => this.pollUsage(true));
     this.usageTimer = setInterval(() => void this.pollUsage(true), USAGE_POLL_MS);
     this.usageTimer.unref();
   }

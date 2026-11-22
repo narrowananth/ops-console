@@ -77,7 +77,7 @@ Keychain, from `app/mcp-exec.js`, a bundle of the Keychain and the launcher alon
 and `mcp-setup`, the Setup agent's MCP Server, from the daemon bundle.
 
 On start the daemon takes the data folder lock, applies pending migrations in one transaction, runs
-start-up recovery, opens the port, starts the scheduler and writes the runtime file. On stop it logs how long each
+start-up recovery, opens the port, starts the scheduler, opens the start-up queue and writes the runtime file. On stop it logs how long each
 provider's `onModuleDestroy` took; Probes and `claude` calls under way are aborted, and a registration or sign-in still
 running after 5 seconds is left for the next start.
 
@@ -106,11 +106,11 @@ agent Session.
 
 | Module | Owns |
 |---|---|
-| `common` | Config, logger, error envelope, paging, session token, daemon address, `/health`, start-up recovery, `/ws` hub |
+| `common` | Config, logger, error envelope, paging, session token, daemon address, `/health`, start-up recovery, the start-up queue, `/ws` hub |
 | `db` | SQLite file, migrations, `Store.write` (transaction, then WebSocket events) |
 | `auth` | Session token check on every `/api` route |
 | `settings` | Registered keys with schema and default; `GET` and `PATCH /api/settings` |
-| `scheduler` | Jobs with slots; a missed slot runs once at start |
+| `scheduler` | Jobs with slots; a missed slot runs once at start, in the start-up queue |
 | `keychain` | `set`, `get`, `delete` in the login Keychain, each bounded at 60 seconds and failing `keychain_timeout`, two native calls at a time, values kept in memory; the handover of items from the previous version's app, per key, which a read waits for (at most 90 seconds) and which refuses an app that fails its check (`codesign`, real path, bundle identifier); the Keychain wait shown after 10, and a call made while it shows fails at once |
 | `claude-cli` | `claude mcp add`, `remove`, `list`, `get`, `login`, and Claude account sign-in in this browser or by link and code, parsed with Zod |
 | `mcp` | Servers registered in every Claude account (`.claude.json`: `claude mcp` in the active account, the entry copied into the others) and a Repo's `.mcp.json`; Probe of the active account, kept 5 minutes (another account's when it becomes active, or after 10), after the Keychain handover; add, edit, reconnect (one server alone), disable, remove; the `mcp-exec` launcher |
@@ -182,6 +182,14 @@ query refetches, batched over 40 ms. A `session.output` event puts its part into
 fails (`interrupted` for all but the Agent Review); a failed Report, Reply check or Comment pass keeps its scratch copy, and a Reply check or
 Comment pass with one can retry.
 
+**Start-up queue.** The daemon is one thread, so work a start would begin all at once waits its turn: the first MCP
+Probe, the first usage read and CLIProxy check, the sweep of leftover Skill folders and the scans and jobs a stopped
+daemon missed. Each service adds its task in `onApplicationBootstrap`. Three seconds after the port opens the queue runs
+them in the order added, two at a time with a second's rest after each, so the page's first requests are answered
+before any of it begins. A task that fails logs a warning and the rest go on. Tests open the queue at once.
+Playwright loads with the first browser tab, not at start. The sidebar badge counts open Alerts from the
+`alerts_summary_idx` index alone.
+
 **Scheduler.** `monitor-scan` runs on a 6-hour grid from each log source Connector's daily scan time and
 starts a Scan of every Service of that source for each Check interval whose slot came due. `monitor-pr-watch` reads
 the PR of every `pr_open` Fix every 5 minutes and after each pull request list refresh: merged resolves the Alert,
@@ -189,7 +197,7 @@ closed abandons the Fix. Claude account usage is read at start and every 5 minut
 check runs on its own timer too (`UpdatesModule`). `monitor-retention` runs daily and after a Scan, at most hourly (see Monitor).
 
 **Monitor.** A Scan reads failing logs through `pup`, from the OpenTelemetry Log folder's OTLP JSON files (read only, 100 MB per Scan, newest first), from CloudWatch Log groups through `aws` and Logs Insights (JSON lines only, at most 10,000 Samples per Log group, 5 minutes per query), from Loki through Grafana Cloud's MCP server (JSON lines, 100 lines per call, paged to at most 5,000 Samples per Service), or from New Relic through its MCP server and NRQL (at most 5,000 Samples per Service), groups them by Fingerprint into Alerts with up
-to 25 redacted Samples, and records each Route's state. The Scan is stored one Service at a time, with a turn of the event loop between, so a large Scan never holds the daemon. After a Scan the code finder looks, two Services at a time, for
+to 25 redacted Samples, and records each Route's state. The Scan is stored 25 failure groups at a time, with a turn of the event loop between, so a large Scan never holds the daemon. After a Scan the code finder looks, two Services at a time, for
 each Service with no code it did not look for in the last week (`services.code_looked_at`): an imported Repo of the same name, a git folder of that name next to one,
 then the imported Repo whose tracked source holds the Service's Route paths (`git grep`, tests and docs left out; a tie is left unlinked), then a repository of that name on a connected Git host, read from one list of the Bitbucket workspace's repositories rather than one `git ls-remote` each. The operator starts a Verification; it runs in
 the Alert's Session, a `repo` Session in the Service's Repo or an `anonymous` Session holding a

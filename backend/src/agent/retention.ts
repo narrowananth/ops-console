@@ -3,6 +3,7 @@ import path from 'node:path';
 import { Inject, Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { AccountsService } from '../accounts/accounts.service';
+import { StartupQueue } from '../common/startup-queue';
 import { sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import { skillRunsDir } from './skill-plugin';
@@ -54,10 +55,11 @@ export class Retention implements OnApplicationBootstrap, OnModuleDestroy {
     @Inject(STORE) private readonly store: Store,
     @Inject(Transcripts) private readonly transcripts: Transcripts,
     @Inject(AccountsService) private readonly accounts: AccountsService,
+    @Inject(StartupQueue) private readonly startup: StartupQueue,
   ) {}
 
   onApplicationBootstrap(): void {
-    void this.sweepSkillFolders().catch(this.failed);
+    this.startup.add('sweep of Skill folders', () => this.sweepSkillFolders().catch(this.failed));
     const sweep = () => void Promise.all([this.run(), this.sweepTranscripts()]).catch(this.failed);
     const first = setTimeout(sweep, FIRST_CHECK_MS);
     const daily = setInterval(sweep, CHECK_EVERY_MS);

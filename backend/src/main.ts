@@ -149,6 +149,8 @@ const daemon = await startDaemon({
   keychainHandover,
   uiDir: existsSync(uiDir) ? uiDir : null,
   migrationsDir: path.join(appDir, 'drizzle'),
+  // The page's first requests come before the probes, polls and catch-up scans of a start.
+  startup: { delayMs: 3000, gapMs: 1000 },
   writeLog: (line) => process.stdout.write(`${line}\n`),
   modules: [
     AgentModule.forRoot({ sdk: new ClaudeAgentSdk(), usage: new SdkUsageSource() }),

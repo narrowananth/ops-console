@@ -1,11 +1,4 @@
-import {
-  type AlertListItem,
-  AlertStatus,
-  type LogSource,
-  type ScanWindow,
-  SEVERITIES,
-  Severity,
-} from '@ops-console/shared';
+import { type AlertListItem, AlertStatus, type ScanWindow, SEVERITIES, Severity } from '@ops-console/shared';
 import { z } from 'zod';
 import { BrandIcon, CONNECTOR_BRAND } from '../components/ui/brand-icon';
 import { Empty } from '../components/ui/empty';
@@ -206,7 +199,6 @@ export function AlertsTable({
   range,
   selected,
   onSelect,
-  down,
   source,
   trends,
   servicesMenu,
@@ -216,8 +208,6 @@ export function AlertsTable({
   range: ScanWindow;
   selected: string | null;
   onSelect: (alertId: string) => void;
-  /** The log sources that stopped answering, with the check's reason. */
-  down: { source: LogSource; reason: string | null }[];
   source: SourceFilter;
   /** The error counts of each Route's last Scans, by Route id. */
   trends: Map<string, number[]>;
@@ -344,19 +334,6 @@ export function AlertsTable({
           {codes.length > 0 ? codes.join(', ') : '400+'}
         </span>
       </div>
-
-      {down
-        .filter((gone) => source === 'all' || gone.source === source)
-        .map((gone) => (
-          <p
-            key={gone.source}
-            role="status"
-            className="mx-7 mt-0 mb-3 rounded-lg border border-accent-200 bg-accent-100 px-3.5 py-2 text-xs text-accent-900 max-[1180px]:mx-5"
-          >
-            {SOURCE_LABEL[gone.source]} is down{gone.reason ? `: ${gone.reason.replace(/\.$/, '')}` : ''}. Scans skip it
-            until a check passes; its Alerts stay.
-          </p>
-        ))}
 
       <div className="mx-7 mb-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-card shadow-sm max-[1180px]:mx-5 max-[1180px]:mb-4">
         <div className="min-h-0 flex-1 overflow-auto">
