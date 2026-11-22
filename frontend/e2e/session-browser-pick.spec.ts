@@ -426,8 +426,18 @@ async function watchCanvasSizes(page: Page) {
 }
 const forgetSizes = (page: Page) => page.evaluate(() => ((window as unknown as Sized).__canvasSizes.length = 0));
 const sizesSince = (page: Page) => page.evaluate(() => [...new Set((window as unknown as Sized).__canvasSizes)]);
-/** The sizes the canvas took that are not `steady`: none, when only the page's own frames were drawn. */
-const strays = async (page: Page, steady: string) => (await sizesSince(page)).filter((size) => size !== steady);
+/**
+ * The sizes the canvas took that are not `steady`: none, when only the page's own frames were drawn. Chrome rounds a
+ * frame a pixel or two short of the stage now and then (1106 for 1108); a crop or a stale frame is far from it.
+ */
+const strays = async (page: Page, steady: string) => {
+  const [w = 0, h = 0] = steady.split('x').map(Number);
+  const near = (got: number, want: number) => Math.abs(got - want) <= Math.max(3, want * 0.01);
+  return (await sizesSince(page)).filter((size) => {
+    const [gw = 0, gh = 0] = size.split('x').map(Number);
+    return !(near(gw, w) && near(gh, h));
+  });
+};
 
 function needsDevtools(): void {
   if (existsSync(path.join(import.meta.dirname, '../public/devtools-frontend/PIN'))) return;
