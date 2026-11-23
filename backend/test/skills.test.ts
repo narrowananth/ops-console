@@ -146,7 +146,7 @@ describe('Skills in a run', () => {
     return playbook;
   }
 
-  it('hands the run its Skills as a plugin the sandbox can read, and removes it when the run ends (Behavior 11, 16)', async () => {
+  it('hands the run its Skills as a plugin, and removes it when the run ends (Behavior 11, 16)', async () => {
     const { daemon, http } = await start();
     const first = await createSkill(http, 'debugging', { description: 'Use it: "quoted" and\nmultiline.' });
     const second = await createSkill(http, 'review');
@@ -167,9 +167,6 @@ describe('Skills in a run', () => {
     expect(plugin).toMatchObject({ type: 'local' });
     const folder = (plugin as { path: string }).path;
     expect(options?.skills).toEqual(['ops-console-skills:debugging', 'ops-console-skills:review']);
-    expect(
-      (options?.sandbox as { filesystem?: { allowRead?: string[] } } | undefined)?.filesystem?.allowRead,
-    ).toContain(folder);
     expect(JSON.parse(await readFile(path.join(folder, '.claude-plugin', 'plugin.json'), 'utf8'))).toMatchObject({
       name: 'ops-console-skills',
     });

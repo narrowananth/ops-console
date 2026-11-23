@@ -60,7 +60,6 @@ const LISTS = [
   '/connections',
   '/mcp-servers',
   '/agent-accounts',
-  '/network-allowlist',
 ];
 
 let daemon: AgentDaemon;

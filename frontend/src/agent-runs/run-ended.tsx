@@ -2,7 +2,7 @@ import { type AgentRun, type Failure, FailureKind } from '@ops-console/shared';
 import { Spinner } from '../components/ui/button';
 import { CodeBlock } from '../components/ui/code-block';
 import { duration } from '../components/ui/elapsed';
-import { useActivateAccount, useAddNetworkDomain, useAgentAccounts, useRunControls } from '../lib/queries';
+import { useActivateAccount, useAgentAccounts, useRunControls } from '../lib/queries';
 import { Pill, PillLink } from './run-controls';
 import { clock, FAILURE_LABEL, failureTone } from './run-look';
 import { Heading } from './run-parts';
@@ -36,7 +36,6 @@ export function resetText(iso: string, now = Date.now()): string {
 /** Why the run ended: what happened, the likely cause, what to do, the raw error, and the buttons that act on it. */
 export function FailureBox({ failure, run }: { failure: Failure; run: AgentRun }) {
   const controls = useRunControls(run.session.id);
-  const allow = useAddNetworkDomain();
   const activate = useActivateAccount();
   const accounts = useAgentAccounts().data?.data ?? [];
   const tone = failureTone(failure);
@@ -53,7 +52,7 @@ export function FailureBox({ failure, run }: { failure: Failure; run: AgentRun }
     .filter((one) => one.signed_in && one.id !== own?.id)
     .sort((a, b) => (a.five_hour_pct ?? 0) - (b.five_hour_pct ?? 0))[0];
   const likely = limited && name ? failure.likely_cause.replace(/^The (Claude )?account/, name) : failure.likely_cause;
-  const error = [controls.resume, allow, activate].find((one) => one.isError)?.error;
+  const error = [controls.resume, activate].find((one) => one.isError)?.error;
   return (
     <section className={`mb-5 rounded-xl border p-4 ${tone.box}`}>
       <Heading note={FAILURE_LABEL[failure.kind]}>
@@ -95,24 +94,15 @@ export function FailureBox({ failure, run }: { failure: Failure; run: AgentRun }
             Switch account and Retry
           </Pill>
         )}
-        {failure.blocked_host && run.can_retry && (
-          <Pill
-            dark
-            disabled={allow.isPending || controls.resume.isPending}
-            onClick={() => allow.mutate(failure.blocked_host as string, { onSuccess: () => controls.resume.mutate() })}
-          >
-            Allow {failure.blocked_host} and Retry
-          </Pill>
-        )}
         {run.can_retry && (limited || !needsAccount) && (
           <Pill
-            dark={!failure.blocked_host && !needsAccount}
+            dark={!needsAccount}
             disabled={controls.resume.isPending || waitsForReset}
             title={waitsForReset && resetsAt ? resetText(resetsAt) : undefined}
             onClick={() => controls.resume.mutate()}
           >
             {controls.resume.isPending ? <Spinner /> : null}
-            {limited ? 'Retry after reset' : failure.blocked_host ? 'Retry only' : 'Retry'}
+            {limited ? 'Retry after reset' : 'Retry'}
           </Pill>
         )}
         {run.can_retry && failure.kind === FailureKind.SignedOut && (

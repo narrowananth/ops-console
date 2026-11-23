@@ -116,7 +116,7 @@ including full. The operator reads the path on the card.
 A fix waits for the operator. The console shows how long each verified Alert has waited for its
 Review. A run steered by log text can execute local commands in the scratch copy; the safety lines,
 the Alert Session's Access mode, the scratch copy's folder and the Run sandbox ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md))
-bound that. The sandbox keeps those commands from writing outside the run's folder and from reading the session token. A reviewer can steer a
+bound that. The sandbox closes only the Keychain to those commands: they can read the session token and call the console's API, so a steered run can approve its own Approval. The merge denials, the console's own pushing and the PROD write rule still hold. A reviewer can steer a
 PR action Session's code change through a comment the operator ticked; the operator's tick, the
 worktree and the one pushed commit, never forced, bound that. On a teammate's pull request the
 commit lands on their branch under the operator's git identity, for the teammate to see. A PR action Session may run the

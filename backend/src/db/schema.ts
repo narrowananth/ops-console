@@ -149,7 +149,6 @@ export const sessions = sqliteTable(
     /** JSON array of the last run's `Subagent`s. */
     runSubagents: text('run_subagents'),
     /** JSON array of the hosts the Run sandbox refused the last run, in the order it first met them. */
-    runBlockedHosts: text('run_blocked_hosts'),
     /** When the last run began to wait on the account's usage limit, and when the window resets (ISO). */
     runLimitSince: text('run_limit_since'),
     runLimitResetsAt: text('run_limit_resets_at'),
@@ -418,12 +417,6 @@ export const repos = sqliteTable('repos', {
   createdAt: text('created_at').notNull().default(nowIso),
   /** Set when the operator removed it and kept its Sessions; importing the folder again clears it. */
   removedAt: text('removed_at'),
-});
-
-/** Hosts the operator added to the Network allowlist: a hostname, or `*.` and a hostname, lowercase. */
-export const networkDomains = sqliteTable('network_domains', {
-  domain: text().primaryKey().notNull(),
-  createdAt: text('created_at').notNull().default(nowIso),
 });
 
 /** The agent's submitted review of a pull request, tied to the commit it read. Written once `submit_review` succeeds. */

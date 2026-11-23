@@ -73,9 +73,10 @@ A `pup`, `gh`, `glab`, `bkt` or `slashdocs` command the agent asks the console t
 An imported Repo, other than the Session's own, that the operator ticked in the composer's Repos icon. The operator's own runs in that Session write and read its checkout and run `git` there, inside the Run sandbox. The agent never pushes from it.
 
 **Run sandbox**:
-The operating-system limit on an agent run's commands: writes only in the run's working folder, the Session's output folder, its Opened Repos, temp and package-tool caches, no reads of
-the console's data folder or the operator's cloud and login credentials, and no writes to git hooks or config. Package-tool caches under the home folder stay writable so a repo's commit hooks and builds run. It applies in every Access mode, and a run
-fails when the sandbox is unavailable. The agent's file tools write only in the same folders; the console checks their paths.
+The operating-system limit on an agent run's commands, closed to the login Keychain folder, the installed app and the
+git control files the daemon's `git` reads, and open to everything else: writes anywhere, any host, `localhost`, servers
+and Unix sockets. A read-only run may not change its working folder. It applies in every Access mode, and a run fails
+when the sandbox is unavailable. The agent's file tools are held to the same closed paths; the console checks them.
 
 **Output file**:
 A file the agent wrote in its Session's output folder for the operator: a PDF, a spreadsheet, a chart, an archive. It shows
@@ -90,15 +91,6 @@ Approval's command, a raw error, a step's output, a request or a text file.
 **File change row**:
 One line in the transcript for a file the agent wrote or edited: its type, name, verb and added and removed line counts. The
 lines themselves show only when the operator opens the row.
-
-**Network allowlist**:
-The hosts an agent run's commands may reach, built when the run starts from the built-in hosts, the hosts of the
-Repos' remotes, the hosts of the Connections the agent may use and the operator's own domains. Any other host is refused.
-
-**Loopback**:
-The Run sandbox's one operator switch, on Permissions, for a chat run (a message the operator sent in a Session): when on,
-the run's commands can start servers and reach every service on this Mac's `localhost`. Off by default; turning it on asks
-first. A Playbook step, a Verification, a Fix, a review, a read-only run, a PR action Session's run and an agent-started turn never get it.
 
 ### Playbooks
 

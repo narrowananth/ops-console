@@ -106,12 +106,11 @@ describe('healthOf', () => {
 });
 
 describe('diagnoseSlow', () => {
-  it('ties a network command to the Run sandbox and finds the host to allow', () => {
+  it('says a network command may be waiting on a host', () => {
     const open = [step({ summary: '$ curl -s https://api.example.com/v1/items', startedAt: 0 })];
     const result = diagnoseSlow({ steps: open, history: new Map(), now: 8 * MIN, queued: true });
     expect(result?.right_now).toContain('has run 8m 00s');
     expect(result?.likely_cause).toContain('reaches the network');
-    expect(result?.blocked_host).toBe('api.example.com');
     expect(result?.also).toContain('queued');
   });
 
@@ -165,14 +164,14 @@ describe('classifyFailure resume and reset', () => {
 describe('classifyFailure', () => {
   const failed = (summary: string, error: string) => [step({ summary, startedAt: 0, finishedAt: 1, ok: false, error })];
 
-  it('finds the host the Run sandbox refused', () => {
+  it('says the command could not reach a host', () => {
     const result = classifyFailure({
       outcome: RunOutcome.Failed,
       lastError: null,
-      steps: failed('$ pnpm install', 'ERR_PNPM_FETCH_403 GET https://registry.example.com/left-pad: Forbidden'),
+      steps: failed('$ pnpm install', 'getaddrinfo ENOTFOUND registry.example.com'),
     });
-    expect(result).toMatchObject({ kind: FailureKind.NetworkBlocked, blocked_host: 'registry.example.com' });
-    expect(result?.what_to_do).toContain('Allow registry.example.com');
+    expect(result).toMatchObject({ kind: FailureKind.NetworkBlocked });
+    expect(result?.likely_cause).toContain('could not reach a host');
   });
 
   it('names a failed commit hook and does not tell the agent to skip it', () => {

@@ -2,29 +2,16 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  AccessLevel,
-  AccessMode,
-  BUILT_IN_NETWORK_DOMAINS,
-  CONNECTOR_SERVERS,
-  ConnectionEnv,
-  ConnectionType,
-  ConnectorId,
-  GitHost,
-  PrAction,
-  RunPurpose,
-  StepBlock,
-} from '@ops-console/shared';
+import { AccessMode, CONNECTOR_SERVERS, ConnectorId, GitHost, RunPurpose, StepBlock } from '@ops-console/shared';
 import { sql } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runSandbox, worktreeGitDirs } from '../src/agent/run-sandbox';
-import { isOperatorChat } from '../src/agent/runs';
 import { AgentRuntime, HOST_WRITE_DENIALS } from '../src/agent/runtime';
-import { connections, repos } from '../src/db/schema';
+import { repos } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { KEYCHAIN, type Keychain } from '../src/keychain/keychain';
 import { JobSteps } from '../src/playbooks/job-steps';
-import { type AgentDaemon, api, converse, gate, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
+import { type AgentDaemon, api, converse, startAgentDaemon, WORKING_DIR } from './agent-fixtures';
 import { tempDir } from './helpers';
 
 const running: AgentDaemon[] = [];
@@ -39,7 +26,6 @@ async function start(dataDir?: string) {
 }
 
 const home = os.homedir();
-const BUILT_IN = [...BUILT_IN_NETWORK_DOMAINS];
 
 /** A git folder the console knows as a Repo, with `origin` at `origin` or none. */
 async function addRepo(daemon: AgentDaemon, name: string, origin: string | null, removedAt: string | null = null) {
@@ -63,57 +49,28 @@ const sandboxOf = (daemon: AgentDaemon, call = -1) => {
 };
 
 describe('Run sandbox on agent runs', () => {
-  it('lets every run reach the SheetJS CDN, its npm mirror and Google Docs without an entry of the operator (Network Behavior 7)', () => {
-    expect(BUILT_IN).toEqual(expect.arrayContaining(['cdn.sheetjs.com', 'npm.apkg.io', 'docs.google.com']));
-  });
-
-  it('sandboxes a run in every Access mode, full included (Behavior 1; Network Behavior 1, 3, 7)', async () => {
+  it('sandboxes a run in every Access mode, full included, and closes only the Keychain and what reaches it (Behavior 1, 2)', async () => {
     const daemon = await start();
     for (const mode of Object.values(AccessMode)) {
       const id = daemon.createSession({ access_mode: mode });
       await converse(daemon, id, 'go');
       expect(sandboxOf(daemon)).toMatchObject({ enabled: true, allowUnsandboxedCommands: false });
-      // The shell reaches the built-in hosts only, and the agent's own web tools, which the filter does not cover, are denied.
-      expect(sandboxOf(daemon).network).toEqual({ allowedDomains: BUILT_IN, strictAllowlist: true });
-      expect(daemon.sdk.calls.at(-1)?.options.disallowedTools).toEqual(
-        expect.arrayContaining(['WebFetch', 'WebSearch']),
-      );
+      // Commands write anywhere, reach any host and localhost, and use any Unix socket.
+      expect(sandboxOf(daemon).network).toEqual({
+        allowedDomains: ['*'],
+        allowAllUnixSockets: true,
+        allowLocalBinding: true,
+      });
+      expect(sandboxOf(daemon).filesystem?.allowWrite).toEqual(['/']);
+      expect(sandboxOf(daemon).filesystem?.denyRead).toEqual([
+        path.join(home, '.ops-console'),
+        path.join(home, 'Library', 'Keychains'),
+      ]);
+      // The agent's own web tools are open too.
+      expect(daemon.sdk.calls.at(-1)?.options.disallowedTools).not.toContain('WebFetch');
+      expect(daemon.sdk.calls.at(-1)?.options.disallowedTools).not.toContain('WebSearch');
     }
     expect(daemon.sdk.calls).toHaveLength(Object.values(AccessMode).length);
-  });
-
-  it('denies the data folder the daemon runs on and writes in the Session’s folder (Behavior 2, 3)', async () => {
-    const daemon = await start();
-    await converse(daemon, daemon.createSession(), 'go');
-    const { filesystem } = sandboxOf(daemon);
-    expect(filesystem?.allowWrite?.slice(0, 3)).toEqual([WORKING_DIR, '/tmp', '/private/tmp']);
-    // Tool caches are writable so commit hooks and builds can fetch; a folder on PATH never is.
-    expect(filesystem?.allowWrite).toEqual(
-      expect.arrayContaining([
-        path.join(home, '.cargo', 'registry'),
-        path.join(home, 'go', 'pkg'),
-        path.join(home, '.m2', 'repository'),
-      ]),
-    );
-    expect(filesystem?.allowWrite).not.toContain(path.join(home, '.cargo', 'bin'));
-    expect(filesystem?.allowWrite).not.toContain(path.join(home, 'go', 'bin'));
-    expect(filesystem?.allowWrite).not.toContain(home);
-    expect(filesystem?.denyRead).toContain(daemon.dataDir);
-    expect(filesystem?.denyRead).toContain(path.join(home, '.ssh'));
-    expect(filesystem?.allowRead).toContain(WORKING_DIR);
-  });
-
-  it('gives two runs at once each their own folder only (Behavior 6)', async () => {
-    const daemon = await start();
-    const [a, b] = [await tempDir('scratch-a-'), await tempDir('scratch-b-')];
-    const runtime = daemon.app.get(AgentRuntime);
-    const first = runtime.runFor(daemon.createSession(), 'one', null, { cwd: a });
-    const second = runtime.runFor(daemon.createSession(), 'two', null, { cwd: b });
-    await Promise.all([first.finished, second.finished]);
-    const writes = daemon.sdk.calls.map((call) => call.options.sandbox?.filesystem?.allowWrite);
-    expect(writes.map((folders) => folders?.[0]).toSorted()).toEqual([a, b].toSorted());
-    // The working folder is the only one that differs between the two.
-    expect(writes[0]?.slice(1)).toEqual(writes[1]?.slice(1));
   });
 
   it('sandboxes a resumed conversation too (Behavior 7)', async () => {
@@ -169,21 +126,7 @@ describe('Run sandbox on agent runs', () => {
     for (const call of daemon.sdk.calls) expect(call.options.sandbox).toMatchObject({ enabled: true });
   });
 
-  it('adds the host of each Repo’s origin, in either form, and nothing for a Repo without one or with a remote that is no domain (Network Behavior 8)', async () => {
-    const daemon = await start();
-    await addRepo(daemon, 'billing', 'https://gitlab.example.com/acme/billing.git');
-    await addRepo(daemon, 'orders', 'git@git.example.org:acme/orders.git');
-    await addRepo(daemon, 'scratch', null);
-    await addRepo(daemon, 'mirror', '/srv/git/mirror.git');
-    await addRepo(daemon, 'odd', 'https://*/acme/odd.git');
-    await addRepo(daemon, 'old', 'https://old.example.net/acme/old.git', '2026-01-01T00:00:00.000Z');
-    await converse(daemon, daemon.createSession(), 'go');
-    expect(sandboxOf(daemon).network?.allowedDomains?.toSorted()).toEqual(
-      [...BUILT_IN, 'gitlab.example.com', 'git.example.org'].toSorted(),
-    );
-  });
-
-  it('opens the Repos the operator picked to the Session: writable, readable, git control closed, and the agent told', async () => {
+  it('tells the agent about the Repos the operator picked to the Session, and closes their git control files', async () => {
     const daemon = await start();
     const id = daemon.createSession();
     const billing = await addRepo(daemon, 'billing', null);
@@ -193,9 +136,6 @@ describe('Run sandbox on agent runs', () => {
     });
     await converse(daemon, id, 'go');
     const { filesystem } = sandboxOf(daemon);
-    expect(filesystem?.allowWrite).toContain(billing.dir);
-    expect(filesystem?.allowWrite).not.toContain(orders.dir);
-    expect(filesystem?.allowRead).toContain(billing.dir);
     expect(filesystem?.denyWrite).toEqual(
       expect.arrayContaining([path.join(billing.dir, '.git', 'hooks'), path.join(billing.dir, '.git', 'config')]),
     );
@@ -206,16 +146,9 @@ describe('Run sandbox on agent runs', () => {
     // Repos picked later reach the next run only.
     await api(daemon).patch(`/sessions/${id}`, { extra_repo_ids: [billing.id, orders.id] });
     await converse(daemon, id, 'again');
-    expect(sandboxOf(daemon).filesystem?.allowWrite).toEqual(expect.arrayContaining([billing.dir, orders.dir]));
-  });
-
-  it('opens an extra Repo to the operator’s own runs only, never to a read-only run', async () => {
-    const daemon = await start();
-    const id = daemon.createSession();
-    const billing = await addRepo(daemon, 'billing', null);
-    await api(daemon).patch(`/sessions/${id}`, { extra_repo_ids: [billing.id] });
-    await daemon.app.get(AgentRuntime).runFor(id, 'read', null, { readOnly: true }).finished;
-    expect(sandboxOf(daemon).filesystem?.allowWrite).not.toContain(billing.dir);
+    expect(sandboxOf(daemon).filesystem?.denyWrite).toEqual(
+      expect.arrayContaining([path.join(orders.dir, '.git', 'hooks')]),
+    );
   });
 
   it('refuses a Repo the console does not know or has removed, and keeps a repeated one once, and never lists the Session’s own Repo', async () => {
@@ -262,19 +195,17 @@ describe('Run sandbox on agent runs', () => {
 describe('Run sandbox: what a run cannot change or read (ADR 0006)', () => {
   it('denies writes to the git control files the daemon’s git later reads, and the gitfile of a worktree', () => {
     const wd = '/work/repo';
-    expect(runSandbox({ workingDir: wd, dataDir: '/data', networkDomains: [] }).filesystem?.denyWrite).toEqual([
+    expect(runSandbox({ workingDir: wd }).filesystem?.denyWrite).toEqual([
       '/work/repo/.git/hooks',
       '/work/repo/.git/config',
       '/work/repo/.git/config.worktree',
       '/work/repo/.git/commondir',
       '/work/repo/.git/gitdir',
     ]);
-    expect(
-      runSandbox({ workingDir: wd, dataDir: '/data', networkDomains: [], gitFile: true }).filesystem?.denyWrite,
-    ).toEqual(['/work/repo/.git']);
+    expect(runSandbox({ workingDir: wd, gitFile: true }).filesystem?.denyWrite).toEqual(['/work/repo/.git']);
   });
 
-  it("lets a Session's own worktree commit into the Repo's git folder, and closes its hooks, config and pointers", async () => {
+  it("closes a Session's own worktree's hooks, config and pointers, whose commits go into the Repo's git folder", async () => {
     const repo = await tempDir('ops-console-wt-');
     execFileSync('git', ['init', '-q', '-b', 'main', repo]);
     execFileSync(
@@ -290,14 +221,7 @@ describe('Run sandbox: what a run cannot change or read (ADR 0006)', () => {
     const common = await realpath(path.join(repo, '.git'));
     expect(dirs && (await realpath(dirs.common))).toBe(common);
 
-    const fs = runSandbox({
-      workingDir: wd,
-      dataDir: '/data',
-      networkDomains: [],
-      gitFile: true,
-      gitDirs: dirs,
-    }).filesystem;
-    expect(fs?.allowWrite).toContain(dirs?.common);
+    const fs = runSandbox({ workingDir: wd, gitFile: true, gitDirs: dirs }).filesystem;
     expect(fs?.denyWrite).toEqual(
       expect.arrayContaining([
         path.join(wd, '.git'),
@@ -307,82 +231,54 @@ describe('Run sandbox: what a run cannot change or read (ADR 0006)', () => {
         path.join(dirs?.admin ?? '', 'commondir'),
       ]),
     );
-    // A scratch copy has no git folder to write, and nothing else gives one.
-    expect(
-      runSandbox({ workingDir: wd, dataDir: '/data', networkDomains: [], gitFile: true }).filesystem?.allowWrite,
-    ).not.toContain(dirs?.common);
     expect(worktreeGitDirs(repo)).toBeNull();
   });
 
-  it('lets a run write and read its output folder, and no other folder under the data folder', () => {
-    const fs = runSandbox({
-      workingDir: '/work/repo',
-      dataDir: '/data',
-      networkDomains: [],
-      writable: ['/data/outputs/s1'],
-    }).filesystem;
-    expect(fs?.allowWrite).toContain('/data/outputs/s1');
-    expect(fs?.allowRead).toContain('/data/outputs/s1');
-    expect(fs?.allowWrite).not.toContain('/data');
-    expect(fs?.denyRead).toContain('/data');
+  it('denies reading the installed app and the login Keychain folder, and nothing else', () => {
+    const fs = runSandbox({ workingDir: '/work/repo', home: '/home/op' }).filesystem;
+    expect(fs?.denyRead).toEqual(['/home/op/.ops-console', '/home/op/Library/Keychains']);
   });
 
-  it('denies reading the installed app, whose bundled node macOS may trust with the Keychain items', () => {
+  it('closes the git control files of an extra Repo like the working folder', () => {
     const fs = runSandbox({
       workingDir: '/work/repo',
-      dataDir: '/data',
-      networkDomains: [],
-      home: '/home/op',
-    }).filesystem;
-    expect(fs?.denyRead).toContain('/home/op/.ops-console');
-  });
-
-  it('writes and reads an extra Repo like the working folder, and closes its git control files', () => {
-    const fs = runSandbox({
-      workingDir: '/work/repo',
-      dataDir: '/data',
-      networkDomains: [],
       repos: [
         { path: '/work/billing', gitFile: false },
         { path: '/work/wt', gitFile: true },
       ],
     }).filesystem;
-    expect(fs?.allowWrite).toEqual(expect.arrayContaining(['/work/billing', '/work/wt']));
-    expect(fs?.allowRead).toEqual(expect.arrayContaining(['/work/billing', '/work/wt']));
     expect(fs?.denyWrite).toEqual(
       expect.arrayContaining(['/work/billing/.git/hooks', '/work/billing/.git/config', '/work/wt/.git']),
     );
   });
 
-  it('leaves the working folder out of the writable folders of a read-only run', () => {
-    const open = runSandbox({ workingDir: '/work/repo', dataDir: '/data', networkDomains: [] });
-    const readOnly = runSandbox({ workingDir: '/work/repo', dataDir: '/data', networkDomains: [], readOnly: true });
-    expect(open.filesystem?.allowWrite).toContain('/work/repo');
-    expect(readOnly.filesystem?.allowWrite).not.toContain('/work/repo');
-    expect(readOnly.filesystem?.allowWrite).toEqual(expect.arrayContaining(['/tmp', '/private/tmp']));
-    // It still reads its folder.
-    expect(readOnly.filesystem?.allowRead).toContain('/work/repo');
+  it('closes the working folder and the Repo’s git folder to a read-only run', () => {
+    const open = runSandbox({ workingDir: '/work/repo' });
+    const readOnly = runSandbox({
+      workingDir: '/work/repo',
+      readOnly: true,
+      gitDirs: { common: '/repo/.git', admin: '/repo/.git/worktrees/wt' },
+    });
+    expect(open.filesystem?.denyWrite).not.toContain('/work/repo');
+    expect(readOnly.filesystem?.denyWrite).toEqual(expect.arrayContaining(['/work/repo', '/repo/.git']));
   });
 
-  it('denies the file tools the data folder’s secrets, the credential folders and the git control files, in every Access mode', async () => {
+  it('denies the file tools the Keychain folder, the installed app and the git control files, in every Access mode', async () => {
     const daemon = await start();
     for (const mode of Object.values(AccessMode)) {
       await converse(daemon, daemon.createSession({ access_mode: mode }), 'go');
       const denied = daemon.sdk.calls.at(-1)?.options.disallowedTools ?? [];
-      const data = daemon.dataDir;
       expect(denied).toEqual(
         expect.arrayContaining([
-          `Read(/${path.join(data, 'runtime.json')})`,
-          `Edit(/${path.join(data, 'runtime.json')})`,
-          `Read(/${path.join(data, 'accounts', '**')})`,
-          `Read(/${path.join(home, '.ssh', '**')})`,
-          `Read(/${path.join(home, '.aws', '**')})`,
+          `Read(/${path.join(home, 'Library', 'Keychains', '**')})`,
+          `Read(/${path.join(home, '.ops-console', '**')})`,
           `Edit(/${path.join(WORKING_DIR, '.git', 'config')})`,
           `Edit(/${path.join(WORKING_DIR, '.git', 'hooks')})`,
         ]),
       );
-      // The data folder is not denied as a whole: a scratch copy sits inside it and the run reads it.
-      expect(denied).not.toContain(`Read(/${path.join(data, '**')})`);
+      // The credential folders and the data folder are no longer closed to the file tools.
+      expect(denied).not.toContain(`Read(/${path.join(home, '.ssh', '**')})`);
+      expect(denied).not.toContain(`Read(/${path.join(daemon.dataDir, 'runtime.json')})`);
     }
   });
 
@@ -422,7 +318,7 @@ describe('Run sandbox: what a run cannot change or read (ADR 0006)', () => {
     expect(daemon.sdk.calls.at(-1)?.options.disallowedTools).not.toContain('Bash(git push:*)');
   });
 
-  it('makes a read-only run read-only: no edit tools and no writable working folder', async () => {
+  it('makes a read-only run read-only: no edit tools and a closed working folder', async () => {
     const daemon = await start();
     const runtime = daemon.app.get(AgentRuntime);
     await runtime.runFor(daemon.createSession(), 'answer', null, { readOnly: true }).finished;
@@ -430,346 +326,6 @@ describe('Run sandbox: what a run cannot change or read (ADR 0006)', () => {
     expect(call?.options.disallowedTools).toEqual(
       expect.arrayContaining(['Edit', 'MultiEdit', 'NotebookEdit', 'Write']),
     );
-    expect(call?.options.sandbox?.filesystem?.allowWrite).not.toContain(WORKING_DIR);
-  });
-});
-
-describe('Network allowlist on Permissions', () => {
-  const read = async (daemon: AgentDaemon) => (await api(daemon).get('/network-allowlist')).body.data;
-
-  it('lists the four groups, with the Repo that has each host (Network Behavior 12)', async () => {
-    const daemon = await start();
-    expect(await read(daemon)).toEqual({ built_in: BUILT_IN, from_repos: [], from_connections: [], added: [] });
-    await addRepo(daemon, 'billing', 'https://gitlab.example.com/acme/billing.git');
-    await addRepo(daemon, 'ledger', 'git@gitlab.example.com:acme/ledger.git');
-    await addRepo(daemon, 'scratch', null);
-    expect((await read(daemon)).from_repos).toEqual([{ domain: 'gitlab.example.com', repo: 'billing' }]);
-  });
-
-  it('adds the host of each Connection the agent may use, and the next run reaches it', async () => {
-    const daemon = await start();
-    const store = daemon.app.get<Store>(STORE);
-    const save = (name: string, type: ConnectionType, access: AccessLevel, config: object) =>
-      store.write((tx) =>
-        tx
-          .insert(connections)
-          .values({
-            id: crypto.randomUUID(),
-            name,
-            type,
-            env: ConnectionEnv.Prod,
-            access,
-            config: JSON.stringify(config),
-          })
-          .run(),
-      );
-    save('orders-db', ConnectionType.Postgres, AccessLevel.Read, {
-      host: 'db.example.com',
-      port: 5432,
-      database: 'orders',
-      user: 'ro',
-    });
-    save('cache', ConnectionType.Redis, AccessLevel.Write, { host: '10.0.0.5', port: 6379, db_index: 0 });
-    save('local-pg', ConnectionType.Postgres, AccessLevel.Read, {
-      host: 'localhost',
-      port: 5432,
-      database: 'x',
-      user: 'u',
-    });
-    save('unused', ConnectionType.Clickhouse, AccessLevel.None, {
-      host: 'ch.example.com',
-      http_port: 8123,
-      database: 'd',
-      user: 'u',
-    });
-    expect((await read(daemon)).from_connections).toEqual([{ domain: 'db.example.com', connection: 'orders-db' }]);
-    await converse(daemon, daemon.createSession(), 'hello');
-    expect(sandboxOf(daemon).network?.allowedDomains).toContain('db.example.com');
-  });
-
-  it('saves a domain trimmed and lowercased, and the next run reaches it (Network Behavior 6, 10, 13)', async () => {
-    const daemon = await start();
-    const added = await api(daemon).post('/network-allowlist/domains', { domain: '  NPM.Example.com ' });
-    expect(added.status).toBe(201);
-    expect(added.body.data).toEqual({ domain: 'npm.example.com' });
-    // A wildcard covers subdomains only, so the apex is its own entry.
-    for (const domain of ['*.example.com', 'example.com']) {
-      expect((await api(daemon).post('/network-allowlist/domains', { domain })).status).toBe(201);
-    }
-    expect((await read(daemon)).added).toEqual(['*.example.com', 'example.com', 'npm.example.com']);
-    await converse(daemon, daemon.createSession(), 'go');
-    expect(sandboxOf(daemon).network?.allowedDomains).toEqual([
-      ...BUILT_IN,
-      '*.example.com',
-      'example.com',
-      'npm.example.com',
-    ]);
-  });
-
-  it.each([
-    ['', 'empty'],
-    ['   ', 'blank'],
-    ['*', 'a bare wildcard'],
-    ['*.com', 'a wildcard over one label'],
-    ['https://npm.example.com', 'a scheme'],
-    ['npm.example.com/v1', 'a path'],
-    ['npm.example.com:8080', 'a port'],
-    ['npm example.com', 'a space'],
-    ['npm.example.com.', 'a trailing dot'],
-    ['10.0.0.1', 'an IP address'],
-    [`${'a'.repeat(250)}.example.com`, 'a name over 253 characters'],
-  ])('refuses %j (%s) and saves nothing (Network Behavior 14)', async (domain) => {
-    const daemon = await start();
-    const refused = await api(daemon).post('/network-allowlist/domains', { domain });
-    expect(refused.status).toBe(400);
-    expect(refused.body.error.code).toBe('validation_failed');
-    expect(refused.body.error.message).toEqual(expect.any(String));
-    expect((await read(daemon)).added).toEqual([]);
-  });
-
-  it('accepts a domain already on the list and changes nothing (Network Behavior 15)', async () => {
-    const daemon = await start();
-    await addRepo(daemon, 'billing', 'https://gitlab.example.com/acme/billing.git');
-    await api(daemon).post('/network-allowlist/domains', { domain: 'npm.example.com' });
-    for (const domain of ['github.com', 'gitlab.example.com', 'npm.example.com']) {
-      const again = await api(daemon).post('/network-allowlist/domains', { domain });
-      expect(again.status).toBe(200);
-      expect(again.body.data).toEqual({ domain });
-    }
-    expect((await read(daemon)).added).toEqual(['npm.example.com']);
-  });
-
-  it('removes a domain from the next run and keeps it in a run that already started (Network Behavior 11, 16)', async () => {
-    const daemon = await start();
-    await api(daemon).post('/network-allowlist/domains', { domain: 'npm.example.com' });
-    let release = () => {};
-    daemon.sdk.script({ wait: new Promise((resolve) => (release = () => resolve(null))) });
-    const running = daemon.app.get(AgentRuntime).runFor(daemon.createSession(), 'one', null, {});
-    await until(
-      () => daemon.sdk.calls.length,
-      (calls) => calls === 1,
-      'the first run to start',
-    );
-
-    expect((await api(daemon).delete('/network-allowlist/domains/npm.example.com')).status).toBe(204);
-    await api(daemon).post('/network-allowlist/domains', { domain: 'pkg.example.com' });
-    await converse(daemon, daemon.createSession(), 'two');
-    release();
-    await running.finished;
-
-    const [first, second] = daemon.sdk.calls.map((call) => call.options.sandbox?.network?.allowedDomains);
-    expect(first).toEqual([...BUILT_IN, 'npm.example.com']);
-    expect(second).toEqual([...BUILT_IN, 'pkg.example.com']);
-  });
-
-  it('removes a domain by its name, wildcard or not and whatever the case (Network Behavior 16)', async () => {
-    const daemon = await start();
-    for (const domain of ['*.example.com', 'npm.example.com']) {
-      await api(daemon).post('/network-allowlist/domains', { domain });
-    }
-    for (const name of ['*.example.com', 'NPM.Example.com']) {
-      expect((await api(daemon).delete(`/network-allowlist/domains/${encodeURIComponent(name)}`)).status).toBe(204);
-    }
-    expect((await read(daemon)).added).toEqual([]);
-  });
-
-  it('answers 404 when the domain is not in Added by you (Network Behavior 16)', async () => {
-    const daemon = await start();
-    const missing = await api(daemon).delete('/network-allowlist/domains/github.com');
-    expect(missing.status).toBe(404);
-    expect(missing.body.error.code).toBe('not_found');
-  });
-
-  it('builds a new list when a resumed conversation starts its next turn (Network Behavior 11)', async () => {
-    const daemon = await start();
-    const id = daemon.createSession();
-    await converse(daemon, id, 'first');
-    await api(daemon).post('/network-allowlist/domains', { domain: 'npm.example.com' });
-    await converse(daemon, id, 'second');
-    expect(daemon.sdk.calls[1]?.options.resume).toBeTruthy();
-    expect(daemon.sdk.calls.map((call) => call.options.sandbox?.network?.allowedDomains)).toEqual([
-      BUILT_IN,
-      [...BUILT_IN, 'npm.example.com'],
-    ]);
-  });
-
-  it('keeps Added by you across a daemon restart, and a run after it has them (Network Behavior 11, 17)', async () => {
-    const first = await start();
-    await api(first).post('/network-allowlist/domains', { domain: 'npm.example.com' });
-    const dataDir = first.dataDir;
-    await running.pop()?.stop();
-    const again = await start(dataDir);
-    expect((await read(again)).added).toEqual(['npm.example.com']);
-    await converse(again, again.createSession(), 'go');
-    expect(sandboxOf(again).network?.allowedDomains).toContain('npm.example.com');
-  });
-});
-
-describe('Run sandbox loopback (run-sandbox-loopback)', () => {
-  const setSwitch = (daemon: AgentDaemon, value: unknown) =>
-    api(daemon).patch('/settings', { run_sandbox_loopback: value });
-  const networkOf = (daemon: AgentDaemon) => daemon.sdk.calls.at(-1)?.options.sandbox?.network;
-  const withoutLoopback = (daemon: AgentDaemon) => {
-    const sandbox = structuredClone(sandboxOf(daemon));
-    if (sandbox.network) delete sandbox.network.allowLocalBinding;
-    return sandbox;
-  };
-
-  it('is off on a new install, and a chat run then has no local binding (Behavior 1, 2)', async () => {
-    const daemon = await start();
-    expect((await api(daemon).get('/settings')).body.data.run_sandbox_loopback).toBe(false);
-    await converse(daemon, daemon.createSession(), 'go');
-    expect(networkOf(daemon)).not.toHaveProperty('allowLocalBinding');
-    expect(networkOf(daemon)).toMatchObject({ strictAllowlist: true });
-  });
-
-  it('opens local binding for the next chat run once it is on, closes it when off, and changes nothing else (Behavior 3, 4, 7, 9, 10)', async () => {
-    const daemon = await start();
-    const id = daemon.createSession();
-    await converse(daemon, id, 'closed');
-    const closed = sandboxOf(daemon);
-    expect((await setSwitch(daemon, true)).status).toBe(200);
-    expect((await api(daemon).get('/settings')).body.data.run_sandbox_loopback).toBe(true);
-    await converse(daemon, id, 'open');
-    expect(networkOf(daemon)).toMatchObject({ allowLocalBinding: true, strictAllowlist: true });
-    // Same sandbox but for the one flag: the data folder stays unreadable, the file rules and the allowlist as they were.
-    expect(withoutLoopback(daemon)).toEqual(closed);
-    expect(sandboxOf(daemon).filesystem?.denyRead).toContain(daemon.dataDir);
-    expect((await setSwitch(daemon, false)).status).toBe(200);
-    await converse(daemon, id, 'closed again');
-    expect(networkOf(daemon)).not.toHaveProperty('allowLocalBinding');
-  });
-
-  it.each([['yes'], [1], [null]])('refuses %j and saves nothing (Behavior 10)', async (value) => {
-    const daemon = await start();
-    const refused = await setSwitch(daemon, value);
-    expect(refused.status).toBe(400);
-    expect(refused.body.error.code).toBe('validation_failed');
-    expect((await api(daemon).get('/settings')).body.data.run_sandbox_loopback).toBe(false);
-  });
-
-  it('survives a daemon restart, and the run after it has loopback (Behavior 6, 10)', async () => {
-    const first = await start();
-    await setSwitch(first, true);
-    const dataDir = first.dataDir;
-    await first.stop();
-    const second = await start(dataDir);
-    expect((await api(second).get('/settings')).body.data.run_sandbox_loopback).toBe(true);
-    await converse(second, second.createSession(), 'go');
-    expect(networkOf(second)).toMatchObject({ allowLocalBinding: true });
-  });
-
-  it('keeps its own value in each data folder, as a dev build does (Behavior 11)', async () => {
-    const installed = await start();
-    const dev = await start();
-    await setSwitch(installed, true);
-    expect((await api(dev).get('/settings')).body.data.run_sandbox_loopback).toBe(false);
-    await converse(dev, dev.createSession(), 'go');
-    expect(networkOf(dev)).not.toHaveProperty('allowLocalBinding');
-  });
-
-  it('gives it to the operator’s own chat run and to no other kind of run (Behavior 5)', () => {
-    const chat = { onFinish: null, purpose: RunPurpose.Chat, readOnly: false, prAction: null };
-    expect(isOperatorChat(chat)).toBe(true);
-    expect(isOperatorChat({ ...chat, readOnly: true })).toBe(false);
-    // A PR action Session works on someone else's pull request code.
-    expect(isOperatorChat({ ...chat, prAction: PrAction.CheckReplies })).toBe(false);
-    expect(isOperatorChat({ ...chat, onFinish: () => {} })).toBe(false);
-    for (const purpose of Object.values(RunPurpose).filter((one) => one !== RunPurpose.Chat)) {
-      expect(isOperatorChat({ ...chat, purpose }), purpose).toBe(false);
-    }
-  });
-
-  it('never gives it to a read-only run, a Verification, a Fix or a Playbook step, with the switch on (Behavior 5)', async () => {
-    const daemon = await start();
-    await setSwitch(daemon, true);
-    const runtime = daemon.app.get(AgentRuntime);
-    await runtime.runFor(daemon.createSession(), 'read', null, { readOnly: true }).finished;
-    expect(networkOf(daemon)).not.toHaveProperty('allowLocalBinding');
-    for (const purpose of [RunPurpose.Verify, RunPurpose.Fix, RunPurpose.CommentPass, RunPurpose.AgentReview]) {
-      await runtime.runFor(daemon.createSession(), 'work', null, { purpose }).finished;
-      expect(networkOf(daemon), purpose).not.toHaveProperty('allowLocalBinding');
-    }
-    const id = daemon.createSession();
-    const steps = daemon.app.get(JobSteps);
-    const job = { kind: 'report', id: 'job-1' } as const;
-    const store = daemon.app.get<Store>(STORE);
-    store.db.run(sql`pragma foreign_keys = off`);
-    store.write((tx) =>
-      steps.seed(tx, job, [{ block: StepBlock.TraceLog, title: 'One', instructions: 'first', writes: false }]),
-    );
-    await steps.run({ job, sessionId: id, brief: 'brief', rules: null });
-    expect(networkOf(daemon)).not.toHaveProperty('allowLocalBinding');
-  });
-
-  it('gives a resumed conversation the switch as it is when Play is pressed (Behavior 6)', async () => {
-    const daemon = await start();
-    const id = daemon.createSession();
-    const stateIs = (state: string) =>
-      until(
-        async () => (await api(daemon).get(`/sessions/${id}`)).body.data.state,
-        (now) => now === state,
-        `the ${state} state`,
-      );
-    const networkFor = (prompt: string) =>
-      daemon.sdk.calls.findLast((call) => call.prompt === prompt)?.options.sandbox?.network;
-    // The run that gets stopped started with the switch off.
-    daemon.sdk.script({ wait: gate().promise });
-    await api(daemon).post(`/sessions/${id}/messages`, { text: 'long' });
-    await stateIs('working');
-    await api(daemon).post(`/sessions/${id}/stop`, {});
-    await stateIs('idle');
-    // Play reads the switch again: the resumed run has loopback though the stopped one did not.
-    await setSwitch(daemon, true);
-    expect((await api(daemon).post(`/sessions/${id}/resume`, {})).status).toBe(202);
-    await stateIs('idle');
-    await until(
-      () => networkFor('Carry on from where you stopped.'),
-      (network) => network !== undefined,
-      'the resumed run',
-    );
-    expect(networkFor('Carry on from where you stopped.')).toMatchObject({ allowLocalBinding: true });
-  });
-
-  it('keeps the value a run started with, and shows the chip only while it goes (Behavior 6, 13, 14)', async () => {
-    const daemon = await start();
-    const id = daemon.createSession();
-    await setSwitch(daemon, true);
-    const held = gate();
-    daemon.sdk.script({ wait: held.promise }, { text: 'Done.' });
-    expect((await api(daemon).post(`/sessions/${id}/messages`, { text: 'go' })).status).toBe(202);
-    await until(
-      async () => (await api(daemon).get(`/sessions/${id}`)).body.data.loopback,
-      (on) => on === true,
-      'the chip',
-    );
-    // The switch goes off while the run goes: this run keeps it, and the Running tray says so too.
-    await setSwitch(daemon, false);
-    expect((await api(daemon).get(`/sessions/${id}`)).body.data.loopback).toBe(true);
-    const tray = (await api(daemon).get('/agent-runs')).body.data as { session: { id: string; loopback: boolean } }[];
-    expect(tray.find((run) => run.session.id === id)?.session.loopback).toBe(true);
-    held.open();
-    await until(
-      async () => (await api(daemon).get(`/sessions/${id}`)).body.data,
-      (session) => session.state === 'idle',
-      'the run to end',
-    );
-    expect((await api(daemon).get(`/sessions/${id}`)).body.data.loopback).toBe(false);
-    expect(networkOf(daemon)).toMatchObject({ allowLocalBinding: true });
-  });
-
-  it('shows no chip on a run that started with the switch off (Behavior 13)', async () => {
-    const daemon = await start();
-    const id = daemon.createSession();
-    const held = gate();
-    daemon.sdk.script({ wait: held.promise }, { text: 'Done.' });
-    await api(daemon).post(`/sessions/${id}/messages`, { text: 'go' });
-    await until(
-      async () => (await api(daemon).get(`/sessions/${id}`)).body.data.state,
-      (state) => state === 'working',
-      'the run',
-    );
-    expect((await api(daemon).get(`/sessions/${id}`)).body.data.loopback).toBe(false);
-    held.open();
+    expect(call?.options.sandbox?.filesystem?.denyWrite).toContain(WORKING_DIR);
   });
 });

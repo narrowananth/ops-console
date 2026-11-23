@@ -31,9 +31,11 @@ async function migrationsWith(extra: { tag: string; sql: string }): Promise<stri
   return dir;
 }
 
-/** A later migration gives `sessions` the columns of a PR action Session. */
+/** Later migrations give `sessions` the columns of a PR action Session and drop `run_blocked_hosts`. */
 const withoutPrAction = (row: Row): Row =>
-  Object.fromEntries(Object.entries(row).filter(([name]) => !name.startsWith('pr_action')));
+  Object.fromEntries(
+    Object.entries(row).filter(([name]) => !name.startsWith('pr_action') && name !== 'run_blocked_hosts'),
+  );
 
 describe('state.db migrations', () => {
   it('creates state.db with every migration on an empty folder, and keeps rows on a later start', async () => {
@@ -165,9 +167,9 @@ describe('migration that drops the connector CHECK', () => {
       'action_log',
     ];
     const rows = Object.fromEntries(tables.map((table) => [table, dump(db, table)]));
-    // A later migration moves these columns out of `sessions`.
+    // A later migration moves these columns out of `sessions`, and another drops `run_blocked_hosts`.
     rows.sessions = (rows.sessions as Row[]).map(
-      ({ opened_pr_number, opened_pr_url, opened_pr_branch, ...rest }) => rest,
+      ({ opened_pr_number, opened_pr_url, opened_pr_branch, run_blocked_hosts, ...rest }) => rest,
     );
 
     applyMigrations(db, MIGRATIONS_DIR, () => {});
@@ -231,7 +233,7 @@ describe('migration that moves the opened pull request into a list', () => {
         created_at: '2026-10-01T10:00:00.000Z',
       },
     ]);
-    const dropped = ['opened_pr_number', 'opened_pr_url', 'opened_pr_branch'];
+    const dropped = ['opened_pr_number', 'opened_pr_url', 'opened_pr_branch', 'run_blocked_hosts'];
     const sessionsAfter = (db.prepare('SELECT * FROM sessions ORDER BY id').all() as Row[]).map(withoutPrAction);
     expect(sessionsAfter).toEqual(
       sessionsBefore.map((row) => Object.fromEntries(Object.entries(row).filter(([name]) => !dropped.includes(name)))),

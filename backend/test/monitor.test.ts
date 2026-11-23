@@ -1214,12 +1214,12 @@ describe('Fix', () => {
     expect(prompts).toHaveLength(fix.playbook.steps.length + 1);
     expect(prompts.some((prompt) => prompt.includes('Atlassian'))).toBe(false);
     expect(prompts.at(-1)).toContain('- Confirm the root cause and look for an existing fix: the root cause holds');
-    // No run reads ~/.ssh, a Fix's included: the console pushes and opens the pull request (console-opens-pull-request 4, 16).
-    const ssh = path.join(os.homedir(), '.ssh');
+    // No run reads the login Keychain folder, a Fix's included: the console pushes and opens the pull request.
+    const keychain = path.join(os.homedir(), 'Library', 'Keychains');
     const denied = (call: { options: { sandbox?: { filesystem?: { denyRead?: string[] } } } }) =>
       call.options.sandbox?.filesystem?.denyRead ?? [];
     expect(before).toBeGreaterThan(0);
-    expect(ctx.daemon.sdk.calls.every((call) => denied(call).includes(ssh))).toBe(true);
+    expect(ctx.daemon.sdk.calls.every((call) => denied(call).includes(keychain))).toBe(true);
     // The agent only wrote the description. The console pushed the branch and opened the pull request.
     expect(prompts.at(-1)).toContain('Do not push and do not open a pull request');
     expect(ctx.host.opened).toEqual([

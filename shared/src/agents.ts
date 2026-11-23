@@ -297,8 +297,6 @@ export const sessionSchema = z.object({
   spawned: z.array(spawnedSessionSchema),
   /** The subagents the Session's latest run started, oldest first: working while the run waits on them. */
   subagents: z.array(subagentSchema),
-  /** The run going now can start servers and reach every service on `localhost` (the Loopback switch, when it started). */
-  loopback: z.boolean().default(false),
 });
 
 export type Session = z.infer<typeof sessionSchema>;
@@ -372,8 +370,6 @@ export const agentRunSchema = z.object({
   usage: runUsageSchema.nullable(),
   /** The usage limit the run waits on or ended on; null otherwise. */
   limit: runLimitSchema.nullable(),
-  /** Hosts the Run sandbox refused the run's commands that are still not on the Network allowlist, first met first. */
-  blocked_hosts: z.array(z.string()),
   /** Milliseconds per phase over the run, in `RunPhase` order. */
   split: z.array(z.object({ phase: z.enum(RunPhase), ms: z.number().int() })),
 });
@@ -405,8 +401,6 @@ export const slowDiagnosisSchema = z.object({
   likely_cause: z.string(),
   also: z.string().nullable(),
   suggestion: z.string(),
-  /** A host the Run sandbox refused, when the run's errors name one. */
-  blocked_host: z.string().nullable(),
 });
 
 /** Why a run ended badly: what happened, the likely cause and what to do, with the raw error under it. */
@@ -416,8 +410,6 @@ export const failureSchema = z.object({
   likely_cause: z.string(),
   what_to_do: z.string(),
   raw: z.string().nullable(),
-  /** The host to allow, for `network_blocked`. */
-  blocked_host: z.string().nullable(),
   /** When the usage window resets, for `rate_limited`, when known. */
   resets_at: z.string().nullable(),
   /** What a Retry carries on with: the subagent or step the run stopped at. Null when nothing is known. */

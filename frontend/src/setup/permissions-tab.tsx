@@ -11,8 +11,6 @@ import {
   useRunSandbox,
   useStartAtLogin,
 } from '../lib/queries';
-import { LoopbackRow } from './loopback-row';
-import { NetworkAllowlistRow } from './network-allowlist-row';
 
 /** What macOS lets the console do, and what an agent run's commands can reach: one row each with where it stands. */
 export function PermissionsTab() {
@@ -30,8 +28,6 @@ export function PermissionsTab() {
         >
           <ul className="m-0 flex list-none flex-col gap-2 p-0">
             <RunSandboxRow />
-            <NetworkAllowlistRow />
-            <LoopbackRow />
           </ul>
         </Card>
       </section>
@@ -135,7 +131,7 @@ function RunSandboxRow() {
       ? {
           glyph: '● on',
           className: 'bg-ok/12 text-ok',
-          tip: 'Agent runs write only in their working folder and read nothing of the console or your cloud credentials.',
+          tip: 'Agent runs cannot read the login Keychain folder, and nothing else is closed to them.',
         }
       : {
           glyph: '✕ unavailable',
@@ -150,7 +146,10 @@ function RunSandboxRow() {
           {look.glyph}
         </span>
       </div>
-      <span className="text-neutral-700">Limits what an agent run's commands can write and read.</span>
+      <span className="text-neutral-700">
+        Keeps an agent run's commands out of the login Keychain. They write anywhere, reach any host and use localhost,
+        as in your terminal.
+      </span>
       {state?.status === 'unavailable' && <span className="text-accent-700">{state.reason}</span>}
       {sandbox.error && (
         <span role="alert" className="text-accent-700">

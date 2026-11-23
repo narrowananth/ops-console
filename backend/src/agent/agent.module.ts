@@ -7,9 +7,6 @@ import { USAGE_SOURCE } from '../accounts/usage-source';
 import { ActionLogController, ApprovalsController } from '../action-log/action-log.controller';
 import { ActionLogService } from '../action-log/action-log.service';
 import { ApprovalsService } from '../action-log/approvals.service';
-import { NetworkAllowlistController } from '../network/network-allowlist.controller';
-import { NetworkAllowlistService } from '../network/network-allowlist.service';
-import { RunLoopback } from '../network/run-loopback.service';
 import { JobSteps } from '../playbooks/job-steps';
 import { PlaybooksController } from '../playbooks/playbooks.controller';
 import { PlaybooksService } from '../playbooks/playbooks.service';
@@ -56,7 +53,6 @@ export class AgentModule {
         SkillsController,
         SkillPacksController,
         SkillMenuController,
-        NetworkAllowlistController,
       ],
       providers: [
         { provide: AGENT_CONFIG, useValue: config },
@@ -78,8 +74,6 @@ export class AgentModule {
         Retention,
         RunInsights,
         AccountUsage,
-        NetworkAllowlistService,
-        RunLoopback,
         AgentRuntime,
         PlaybooksService,
         SkillsService,
