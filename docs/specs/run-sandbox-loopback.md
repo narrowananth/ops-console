@@ -18,7 +18,7 @@ A run's commands cannot start a server or call one, even on this Mac's own `loca
 
 ### Which runs
 
-5. The switch applies to a run the operator started in a Session's chat: a message they sent, and a conversation they resume or an edited message they send. A Playbook step, a Verification, a Fix, a pull request review or Comment pass, a read-only run, the first turn of a Session an agent started with `spawn_sessions`, and the Setup agent's terminal never get loopback, whatever the switch says.
+5. The switch applies to a run the operator started in a Session's chat: a message they sent, and a conversation they resume or an edited message they send. A Playbook step, a Verification, a Fix, a pull request review or Comment pass, a read-only run, a PR action Session's run, the first turn of a Session an agent started with `spawn_sessions`, and the Setup agent's terminal never get loopback, whatever the switch says.
 6. A run keeps the value the switch had when it started. A change reaches the next run. A resumed conversation, a retried step and a run after a daemon restart read the switch again when they start. Two runs started on either side of a change can differ.
 7. A run cannot change the switch: it cannot read the data folder or call the console's API as the operator.
 
@@ -46,7 +46,7 @@ A run's commands cannot start a server or call one, even on this Mac's own `loca
 - **One switch, not two**: the OS rule opens binding and reaching together, and cannot limit a command to its own server. "Its own servers only" is not offered.
 - **Scope**: one console-wide switch, off by default, for chat runs only.
 - **Stored as**: one Setting, `run_sandbox_loopback`, a JSON boolean. No table.
-- **Chat run**: a message the operator sent in a Session, not a job's step, a review, a reply or a turn an agent started. It is the run that has an output folder, Opened Repos and the browser and process tools, and one test decides all of them. A Session an agent spawned runs its first turn without loopback; the operator's later messages in it get it.
+- **Chat run**: a message the operator sent in a Session, not a job's step, a review, a reply or a turn an agent started. It is the run that has the browser and process tools, and one test decides both. A PR action Session's run, which works on pull request code, is not one. A Session an agent spawned runs its first turn without loopback; the operator's later messages in it get it.
 - **Confirm**: on asks, off does not.
 - **Chip**: shown while the run goes, read from the run, not stored.
 - **ADR 0006**: edited in place.

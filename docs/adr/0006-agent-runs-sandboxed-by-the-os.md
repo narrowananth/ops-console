@@ -41,7 +41,7 @@ refused. `WebFetch` and `WebSearch` run outside the filter, so every run denies 
 
 A run's commands cannot start a server or reach `localhost` either. One operator switch, Loopback on Permissions, opens
 that for the runs the operator starts in a Session's chat (the SDK's `allowLocalBinding`). It is off by default, asks before
-it turns on, and never reaches a Playbook step, a Verification, a Fix, a review, a read-only run or the first turn of a Session an agent spawned. The OS rule opens
+it turns on, and never reaches a Playbook step, a Verification, a Fix, a review, a read-only run, a PR action Session's run or the first turn of a Session an agent spawned. The OS rule opens
 binding and reaching together: a run cannot be limited to its own server, so with the switch on it reaches every service on
 the Mac's `localhost` (a database tunnel, local Postgres or Redis, the CLIProxy gateway) and may listen on every address.
 The console's API still needs the session token, which a run cannot read. Unix sockets stay refused.

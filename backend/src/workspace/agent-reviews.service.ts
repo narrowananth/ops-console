@@ -2,53 +2,27 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   ActionKind,
   ActionOutcome,
-  AgentReviewStatus,
-  checklistItemSchema,
-  ErrorCode,
   type Finding,
   FindingSeverity,
-  PlaybookTrigger,
   type PrAgentReview,
   type PrComment,
   type PrFile,
   ReviewVerdict,
   RunPurpose,
-  toolUseSchema,
+  SessionKind,
 } from '@ops-console/shared';
 import { and, desc, eq } from 'drizzle-orm';
-import { z } from 'zod';
 import { ActionLogService } from '../action-log/action-log.service';
-import type { RunSummary } from '../agent/runs';
+import type { ReviewOutput } from '../agent/pull-request-tool';
 import { AgentRuntime, HOST_WRITE_DENIALS } from '../agent/runtime';
-import { SessionsService } from '../agent/sessions.service';
-import { ApiError } from '../common/errors';
+import { type SessionRow, SessionsService } from '../agent/sessions.service';
 import { mapLimit } from '../common/map-limit';
-import { StartupRecovery } from '../common/recovery';
-import { agentComments, prAgentReviews } from '../db/schema';
+import { agentComments, prAgentReviews, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
-import { JobSteps, jobPlaybook } from '../playbooks/job-steps';
 import { PlaybooksService } from '../playbooks/playbooks.service';
-import { parseSkillCopies, skillCopiesJson } from '../playbooks/skills.service';
-import { GIT, Git, GitFailed } from '../repos/git';
 import type { HostComment, HostPullRequest } from './git-host';
-import { JobFailed, POST_PARALLEL, PrJobs } from './pr-jobs';
+import { POST_PARALLEL, PrHostWrites } from './pr-host-writes';
 import { PullRequestsService, toAgentReview } from './pull-requests.service';
-
-const outputSchema = z.object({
-  decision: z.enum(ReviewVerdict),
-  verdict: z.string(),
-  findings: z.array(
-    z.object({
-      severity: z.enum(FindingSeverity),
-      file: z.string().nullish(),
-      line: z.number().int().nullish(),
-      text: z.string().min(1),
-    }),
-  ),
-  checklist: z.array(checklistItemSchema).default([]),
-  tools: z.array(toolUseSchema).default([]),
-  report: z.string().default(''),
-});
 
 /** Patches past this size are left out of the prompt; the agent still has the file list. */
 const PATCH_BUDGET = 60_000;
@@ -72,8 +46,6 @@ const SEVERITY_LABEL: Record<FindingSeverity, string> = {
 
 /** Where the review reads the code, and what it compares the change with. */
 export type ReviewPlace = {
-  /** The scratch copy at the head commit; null when the Playbook has no step tagged "scratch copy". */
-  scratch: string | null;
   /** The target branch and the commit it was at when the review started; null when it could not be fetched. */
   base: { branch: string; sha: string } | null;
   /** The Repo's default branch and the commit it was at when the review started, when it is not the target branch. */
@@ -118,7 +90,7 @@ export function reviewBrief(
   files: PrFile[],
   comments: HostComment[] = [],
   ours: Set<string> = new Set(),
-  place: ReviewPlace = { scratch: null, base: null, production: null },
+  place: ReviewPlace = { base: null, production: null },
   note: string | null = null,
 ): string {
   let budget = PATCH_BUDGET;
@@ -138,9 +110,7 @@ export function reviewBrief(
     place.production && place.production.branch !== pr.base_branch
       ? ` The production branch ${place.production.branch} is at ${place.production.sha}, fetched now and not the target branch: where they differ, review against both.`
       : '';
-  const folder = place.scratch
-    ? `This folder is a scratch copy at commit ${pr.head_sha}. Steps tagged "scratch copy" may build, run tests and write mocks here; nothing here is pushed.`
-    : 'There is no scratch copy: read only, and list the tests as not run.';
+  const folder = `This folder is a worktree at commit ${pr.head_sha}. You may build, run tests and write mocks here; nothing in it is pushed or posted.`;
   const focus = note?.trim()
     ? `\n\nThe operator added this note for the review:
 ${note.trim()}
@@ -156,45 +126,22 @@ ${pr.body || '(no description)'}
 
 ${patches.join('\n\n')}${openThreads(comments, ours)}
 
-Do not commit, push or post comments: the console posts your findings and the summary. The console sends the review as steps, one per turn.`;
+Do not commit, push or post comments. When the review is done, call the submit_review tool once: the console posts your findings on their lines and the summary on the pull request.`;
 }
 
-/** The console's closing turn: verdict, findings, checklist, Connections and the full report, in the shape it posts. */
-export const REVIEW_PROMPT = `Write your review of this pull request from what you found. Answer with one JSON block and nothing after it:
-
-\`\`\`json
-{
-  "decision": "approve | request_changes | comment",
-  "verdict": "one sentence: the decision and why",
-  "findings": [{ "severity": "critical | high | medium | low | info", "file": "path or null", "line": 0, "text": "what is wrong; why it happens; the scenario it occurs in; the production impact; the recommended correction" }],
-  "checklist": [{ "item": "PROD readiness check", "status": "pass | warn | fail | na", "note": "short" }],
-  "tools": [{ "connection": "name", "query": "what you inspected or ran", "result": "what it showed, and whether it was verified, mocked or unavailable" }],
-  "report": "the full review as Markdown"
-}
-\`\`\`
-
+/** What the agent is told about the review it submits: the decision, the severities, and what the report holds. */
+export const REVIEW_GUIDE = `Write your review of this pull request from what you found, then call submit_review once with:
 - decision: approve only with no blocking finding and PROD readiness met; request_changes for any actionable defect or production risk; comment for non-blocking observations only. Passing tests alone never mean approve.
-- severity: critical for security holes, data corruption or a major production failure; high for a significant functional failure, a breaking change or a serious regression; medium for wrong behaviour in specific scenarios; low for minor issues; info for non-blocking suggestions.
-- findings: only actionable ones backed by code or execution evidence, one root cause each. Put a finding on a changed line when it belongs to one; leave file and line null for a cross-service or architectural one.
-- checklist: Functional correctness, Security, Database safety, API compatibility, Performance, Logging and monitoring, Deployment dependencies, Rollback considerations.
-- tools: every Connection and repository you actually used: source repository, Datadog, databases, Shopify, dependent repositories, external services. Leave out any you did not use.
-- report: the sections Review summary (repository, branches, PR commit, production baseline commit, verdict), PR description verification, Code review findings, Production impact, Regression and compatibility, Testing results (tests run and their results, failed, not run, mocked, unverified), PROD readiness checklist, Connections used, Final verdict. Never present a mocked scenario as run end to end.`;
-export function parseReview(text: string): z.infer<typeof outputSchema> | null {
-  const fenced = [...text.matchAll(/```json\s*([\s\S]*?)```/g)].at(-1)?.[1];
-  const candidate = fenced ?? text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
-  try {
-    const parsed = outputSchema.safeParse(JSON.parse(candidate));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
+- verdict: one sentence, the decision and why.
+- severity of each finding: critical for security holes, data corruption or a major production failure; high for a significant functional failure, a breaking change or a serious regression; medium for wrong behaviour in specific scenarios; low for minor issues; info for non-blocking suggestions.
+- findings: only actionable ones backed by code or execution evidence, one root cause each. Each says what is wrong, why it happens, the scenario it occurs in, the production impact and the recommended correction. Put a finding on a changed line when it belongs to one; leave file and line out for a cross-service or architectural one.
+- report: the full review as Markdown, with the sections Review summary (repository, branches, PR commit, production baseline commit, verdict), PR description verification, Code review findings, Production impact, Regression and compatibility, Testing results (tests run and their results, failed, not run, mocked, unverified), PROD readiness checklist, Connections used, Final verdict. Never present a mocked scenario as run end to end.`;
 
 const findingText = (finding: { severity: FindingSeverity; text: string }) =>
   `**${SEVERITY_LABEL[finding.severity]}**: ${finding.text}`;
 
 /** The summary the console posts on the pull request: the verdict, counts per severity, then the report. */
-export function summaryText(output: z.infer<typeof outputSchema>, headSha: string): string {
+export function summaryText(output: ReviewOutput, headSha: string): string {
   const counts = Object.values(FindingSeverity)
     .map((severity) => [severity, output.findings.filter((finding) => finding.severity === severity).length] as const)
     .filter(([, count]) => count > 0)
@@ -205,8 +152,8 @@ export function summaryText(output: z.infer<typeof outputSchema>, headSha: strin
 ${output.verdict}${output.report.trim() ? `\n\n${output.report.trim()}` : ''}`;
 }
 
-/** The pull request as the host gave it when the review started. */
-type PrRead = { pr: HostPullRequest; files: PrFile[]; comments: HostComment[] };
+/** What the review's Session keeps from when it started: the operator's note and the baseline it compared with. */
+export type ReviewStart = { note: string | null; base_branch: string | null; base_sha: string | null };
 
 @Injectable()
 export class AgentReviewsService {
@@ -219,25 +166,8 @@ export class AgentReviewsService {
     @Inject(AgentRuntime) private readonly runtime: AgentRuntime,
     @Inject(ActionLogService) private readonly actionLog: ActionLogService,
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
-    @Inject(JobSteps) private readonly steps: JobSteps,
-    @Inject(PrJobs) private readonly jobs: PrJobs,
-    @Inject(GIT) private readonly git: Git,
-    @Inject(StartupRecovery) recovery: StartupRecovery,
-  ) {
-    recovery.register('pull request agent reviews', () => this.recover());
-  }
-
-  /** Start-up recovery: a review the last daemon left `running` did not finish; it would block the next one. */
-  private recover(): void {
-    const running = this.store.db
-      .select()
-      .from(prAgentReviews)
-      .where(eq(prAgentReviews.status, AgentReviewStatus.Running))
-      .all();
-    for (const review of running) {
-      this.finish(review.id, review.repoId, review.prNumber, { status: AgentReviewStatus.Failed }, 0, 0);
-    }
-  }
+    @Inject(PrHostWrites) private readonly writes: PrHostWrites,
+  ) {}
 
   async list(repoId: string, number: number): Promise<PrAgentReview[]> {
     const repo = this.pulls.hosted(repoId);
@@ -248,167 +178,37 @@ export class AgentReviewsService {
       .where(and(eq(prAgentReviews.repoId, repoId), eq(prAgentReviews.prNumber, number)))
       .orderBy(desc(prAgentReviews.createdAt), desc(prAgentReviews.id))
       .all()
-      .map((row) => toAgentReview(row, pr.head_sha, jobPlaybook(this.store.db, 'agent_review', row)));
+      .map((row) => toAgentReview(row, pr.head_sha));
   }
 
-  /**
-   * Stores a `running` review and answers; the agent runs on, and `pull_request.reviewed` reports the end. A commit
-   * already reviewed is not reviewed again: its findings are on the host.
-   */
-  async start(repoId: string, number: number, note?: string): Promise<PrAgentReview> {
-    const repo = this.pulls.hosted(repoId);
-    const slug = repo.remoteSlug as string;
-    const { pr, files, comments } = await this.pulls.recent(repo, number);
-    const reviewed = this.store.db
-      .select({ id: prAgentReviews.id })
-      .from(prAgentReviews)
-      .where(
-        and(
-          eq(prAgentReviews.repoId, repoId),
-          eq(prAgentReviews.prNumber, number),
-          eq(prAgentReviews.headSha, pr.head_sha),
-          eq(prAgentReviews.status, AgentReviewStatus.Ready),
-        ),
-      )
+  /** A commit already reviewed is not reviewed again: its findings are on the host. */
+  reviewed(repoId: string, number: number, headSha: string): boolean {
+    return (
+      this.store.db
+        .select({ id: prAgentReviews.id })
+        .from(prAgentReviews)
+        .where(
+          and(
+            eq(prAgentReviews.repoId, repoId),
+            eq(prAgentReviews.prNumber, number),
+            eq(prAgentReviews.headSha, headSha),
+          ),
+        )
+        .get() !== undefined
+    );
+  }
+
+  /** The pull request's `pr_review` Session, which only answers the operator's replies in threads the agent started. */
+  private threadSession(repoId: string, repoName: string, number: number): string {
+    const existing = this.store.db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(and(eq(sessions.repoId, repoId), eq(sessions.prNumber, number), eq(sessions.kind, SessionKind.PrReview)))
       .get();
-    if (reviewed)
-      throw new ApiError(
-        409,
-        ErrorCode.InvalidState,
-        'The agent already reviewed this commit; push a change to review again',
-      );
-    const session = this.jobs.requireIdle(repo, number);
-    const copy = this.playbooks.copyFor(PlaybookTrigger.ReviewPr);
-    const row = this.store.write((tx) => {
-      const created = tx
-        .insert(prAgentReviews)
-        .values({
-          id: crypto.randomUUID(),
-          repoId,
-          prNumber: number,
-          headSha: pr.head_sha,
-          playbookId: copy.id,
-          playbookName: copy.name,
-          playbookRules: copy.rules,
-          playbookSkills: skillCopiesJson(copy.skills),
-          note: note || null,
-        })
-        .returning()
-        .get();
-      this.steps.seed(tx, { kind: 'agent_review', id: created.id }, copy.steps);
-      return created;
-    });
-    this.launch(row, session, slug, { pr, files, comments });
-    return toAgentReview(row, pr.head_sha, jobPlaybook(this.store.db, 'agent_review', row));
-  }
-
-  /**
-   * A failed review runs again in its Session from its failed step, or only its closing turn when no step failed.
-   * `skip` passes over the failed step. A pull request with new commits is reviewed afresh instead.
-   */
-  async retry(id: string, skip = false): Promise<PrAgentReview> {
-    const row = this.store.db.select().from(prAgentReviews).where(eq(prAgentReviews.id, id)).get();
-    if (!row) throw new ApiError(404, ErrorCode.NotFound, 'no such Agent Review');
-    if (row.status !== AgentReviewStatus.Failed) {
-      throw new ApiError(409, ErrorCode.InvalidState, 'Only a failed Agent Review can run again');
-    }
-    const repo = this.pulls.hosted(row.repoId);
-    const slug = repo.remoteSlug as string;
-    const { pr, files, comments } = await this.pulls.recent(repo, row.prNumber);
-    if (pr.head_sha !== row.headSha) {
-      throw new ApiError(409, ErrorCode.InvalidState, 'The pull request has new commits; review it again');
-    }
-    const session = this.jobs.requireIdle(repo, row.prNumber);
-    const job = { kind: 'agent_review', id } as const;
-    const updated = this.store.write((tx, emit) => {
-      if (skip) this.steps.skip(tx, emit, job);
-      this.steps.reset(tx, emit, job);
-      return tx
-        .update(prAgentReviews)
-        .set({ status: AgentReviewStatus.Running, error: null, startedAt: new Date().toISOString(), finishedAt: null })
-        .where(eq(prAgentReviews.id, id))
-        .returning()
-        .get() as typeof row;
-    });
-    this.launch(updated, session, slug, { pr, files, comments });
-    return toAgentReview(updated, pr.head_sha, jobPlaybook(this.store.db, 'agent_review', updated));
-  }
-
-  private launch(row: typeof prAgentReviews.$inferSelect, session: string, slug: string, read: PrRead) {
-    void this.execute(row, session, slug, read).catch((error) => {
-      const message = error instanceof JobFailed ? error.message : null;
-      if (!message) this.logger.error(`review ${row.id} failed: ${error instanceof Error ? error.message : error}`);
-      this.finish(row.id, row.repoId, row.prNumber, { status: AgentReviewStatus.Failed, error: message }, 0, 0);
-    });
-  }
-
-  /**
-   * The Playbook's steps, one turn each, then the closing turn the console posts from (Behavior 16). A Playbook with a
-   * step tagged "scratch copy" gets a scratch copy at the head commit for them; it goes when the review ends.
-   */
-  private async execute(
-    row: typeof prAgentReviews.$inferSelect,
-    sessionId: string,
-    slug: string,
-    read: PrRead,
-  ): Promise<void> {
-    const job = { kind: 'agent_review', id: row.id } as const;
-    const steps = this.steps.rows(job);
-    const repo = this.pulls.repoRow(row.repoId);
-    const writes = steps.some((step) => step.writes);
-    // The branch, the target and the production branch come in one `git fetch`; when that fails, each is asked alone.
-    const production = await this.git.defaultBranch(repo.path).catch(() => null);
-    const wanted = [read.pr.branch, read.pr.base_branch, ...(production ? [production] : [])];
-    const heads = await this.git.remoteHeads(repo.path, wanted).catch(() => null);
-    const scratch = writes
-      ? await this.jobs.makeScratch(repo, read.pr.branch, row.headSha, `review-${row.id}`, heads !== null)
-      : null;
-    try {
-      const place: ReviewPlace = {
-        scratch,
-        base: await this.base(repo.path, read.pr.base_branch, heads),
-        production:
-          production && production !== read.pr.base_branch ? await this.base(repo.path, production, heads) : null,
-      };
-      this.store.write((tx) =>
-        tx
-          .update(prAgentReviews)
-          .set({ baseBranch: place.base?.branch ?? read.pr.base_branch, baseSha: place.base?.sha ?? null })
-          .where(eq(prAgentReviews.id, row.id))
-          .run(),
-      );
-      const ours = this.jobs.agentCommentIds(row.repoId, row.prNumber);
-      const brief = reviewBrief(slug, read.pr, read.files, read.comments, ours, place, row.note);
-      const rules = row.playbookRules ?? '';
-      const skills = parseSkillCopies(row.playbookSkills);
-      // The pull request's text and code steer this run: it never loads the folder's own settings, and with no scratch
-      // copy it cannot write in the operator's checkout (ADR 0002).
-      const reach = {
-        rules,
-        skills,
-        ...(scratch ? { cwd: scratch } : { readOnly: true }),
-        deny: HOST_WRITE_DENIALS,
-        projectSettings: false,
-        purpose: RunPurpose.AgentReview,
-      };
-      const failure = await this.steps.run({ job, sessionId, brief, ...reach });
-      if (failure) throw new JobFailed(failure, true);
-      const closing = steps.length > 0 ? REVIEW_PROMPT : `${brief}\n\n${REVIEW_PROMPT}`;
-      const summary = await this.runtime.runFor(sessionId, closing, null, reach).finished;
-      await this.complete(row.id, sessionId, slug, row.headSha, summary);
-    } finally {
-      await this.jobs.dropScratch(scratch);
-    }
-  }
-
-  /** The target branch's commit, fetched from `origin`; null when it cannot be read. */
-  private async base(dir: string, branch: string, fetched: Map<string, string> | null): Promise<ReviewPlace['base']> {
-    try {
-      return { branch, sha: fetched?.get(branch) ?? (await this.git.remoteHead(dir, branch)) };
-    } catch (error) {
-      this.logger.warn(`base ${branch} not read: ${error instanceof GitFailed ? error.message : String(error)}`);
-      return null;
-    }
+    if (existing) return existing.id;
+    const created = this.sessions.create({ kind: SessionKind.PrReview, repoId, prNumber: number });
+    this.sessions.update(created.id, { title: `${repoName} #${number} review` });
+    return created.id;
   }
 
   /** After the operator posts a reply: a thread the agent started wakes the agent. */
@@ -426,8 +226,9 @@ export class AgentReviewsService {
     const { pr, comments } = await this.pulls.adapter(repo).get(slug, number);
     const thread = comments.filter((comment) => comment.id === root || comment.parent_id === root);
     const rootComment = thread.find((comment) => comment.id === root);
-    // A job on the pull request holds its Session between steps; the answer waits for it to end.
-    const session = await this.jobs.whenIdle(repo, number);
+    const session = this.threadSession(repoId, repo.name, number);
+    // One answer at a time in this Session.
+    while (this.runtime.busy(session)) await new Promise((resolve) => setTimeout(resolve, 1000));
     const { rules, skills } = this.playbooks.forSession(this.sessions.get(session));
     const text = `The operator replied in a review thread you started on pull request #${number} of ${slug}${
       rootComment?.file_path ? `, on ${rootComment.file_path}${rootComment.line ? `:${rootComment.line}` : ''}` : ''
@@ -468,22 +269,22 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
     }
   }
 
-  private async complete(
-    reviewId: string,
-    sessionId: string,
-    slug: string,
-    headSha: string,
-    summary: RunSummary,
-  ): Promise<void> {
-    const review = this.store.db.select().from(prAgentReviews).where(eq(prAgentReviews.id, reviewId)).get();
-    if (!review) return;
-    if (summary.stopped) throw new JobFailed('The review was stopped before it was written', true);
-    if (summary.failure) throw new JobFailed(summary.failure, true);
-    const output = summary.ok ? parseReview(summary.text) : null;
-    if (!output) throw new JobFailed('The agent did not write the review in a way the console could read', true);
-    const repo = this.pulls.repoRow(review.repoId);
+  /**
+   * `submit_review`: posts each finding on its line and the summary as one comment, then records the review against
+   * the commit the Session read. A finding the host refuses stays in the record with its error.
+   */
+  async submit(
+    session: SessionRow,
+    output: ReviewOutput,
+    start: ReviewStart,
+  ): Promise<{ posted: number; failed: number }> {
+    const repo = this.pulls.repoRow(session.repoId as string);
+    const number = session.prNumber as number;
+    const headSha = session.prActionHeadSha as string;
+    const slug = repo.remoteSlug as string;
     const adapter = this.pulls.adapter(repo);
-    const earlier = await this.openAgentThreads(review.repoId, review.prNumber, slug);
+    const reviewId = crypto.randomUUID();
+    const earlier = await this.openAgentThreads(repo.id, number, slug);
     let posted = 0;
     // A few posts at a time: each is a host round trip. The findings keep the review's order.
     const findings = await mapLimit(output.findings, POST_PARALLEL, async (found): Promise<Finding> => {
@@ -503,116 +304,96 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
         return finding;
       }
       const row = this.actionLog.start({
-        sessionId,
+        sessionId: session.id,
         kind: ActionKind.Pr,
-        target: `${slug}#${review.prNumber}`,
+        target: `${slug}#${number}`,
         command: `comment on ${found.file && found.line ? `${found.file}:${found.line}` : 'the pull request'}`,
         isProd: false,
       });
       try {
-        const comment = await adapter.postComment(slug, review.prNumber, {
+        const comment = await adapter.postComment(slug, number, {
           body: findingText(found),
           head_sha: headSha,
           ...inline,
         });
-        this.record(review.repoId, review.prNumber, comment.id, reviewId);
         finding.comment_id = comment.id;
         posted++;
         this.actionLog.finish(row, ActionOutcome.Ok);
-        this.store.write((_tx, emit) =>
-          emit('pull_request.commented', {
-            repo_id: review.repoId,
-            number: review.prNumber,
-            comment_id: comment.id,
-            by_agent: true,
-          }),
-        );
+        this.store.write((tx, emit) => {
+          tx.insert(agentComments)
+            .values({ repoId: repo.id, prNumber: number, commentId: comment.id, agentReviewId: null })
+            .run();
+          emit('pull_request.commented', { repo_id: repo.id, number, comment_id: comment.id, by_agent: true });
+        });
       } catch (error) {
         finding.post_error = error instanceof Error ? error.message : 'post failed';
         this.actionLog.finish(row, ActionOutcome.Failed, finding.post_error);
       }
       return finding;
     });
-    await this.postSummary(review, sessionId, slug, headSha, output);
-    this.pulls.wrote(review.repoId, review.prNumber);
-    this.finish(
-      reviewId,
-      review.repoId,
-      review.prNumber,
-      {
-        status: AgentReviewStatus.Ready,
-        decision: output.decision,
-        verdict: output.verdict,
-        report: output.report.trim() || null,
-        findings: JSON.stringify(findings),
-        checklist: JSON.stringify(output.checklist),
-        tools: JSON.stringify(output.tools),
-      },
-      posted,
-      findings.length - posted,
-    );
+    const summaryPosted = await this.postSummary(session.id, repo, number, slug, headSha, output);
+    this.pulls.wrote(repo.id, number);
+    this.store.write((tx, emit) => {
+      tx.insert(prAgentReviews)
+        .values({
+          id: reviewId,
+          repoId: repo.id,
+          prNumber: number,
+          headSha,
+          sessionId: session.id,
+          decision: output.decision,
+          verdict: output.verdict,
+          baseBranch: start.base_branch,
+          baseSha: start.base_sha,
+          note: start.note,
+          report: output.report.trim() || null,
+          findings: JSON.stringify(findings),
+        })
+        .run();
+      emit('pull_request.reviewed', {
+        repo_id: repo.id,
+        number,
+        agent_review_id: reviewId,
+        status: 'ready',
+        posted,
+        post_failed: findings.length - posted + (summaryPosted ? 0 : 1),
+      });
+    });
+    return { posted, failed: findings.length - posted };
   }
 
-  /** The verdict, counts and report as one comment on the pull request. A refused post leaves the review ready. */
+  /** The verdict, counts and report as one comment on the pull request. A refused post leaves the review recorded. */
   private async postSummary(
-    review: typeof prAgentReviews.$inferSelect,
     sessionId: string,
+    repo: ReturnType<PullRequestsService['repoRow']>,
+    number: number,
     slug: string,
     headSha: string,
-    output: z.infer<typeof outputSchema>,
-  ): Promise<void> {
+    output: ReviewOutput,
+  ): Promise<boolean> {
     const row = this.actionLog.start({
       sessionId,
       kind: ActionKind.Pr,
-      target: `${slug}#${review.prNumber}`,
+      target: `${slug}#${number}`,
       command: 'comment the review summary on the pull request',
       isProd: false,
     });
     try {
       const comment = await this.pulls
-        .adapter(this.pulls.repoRow(review.repoId))
-        .postComment(slug, review.prNumber, { body: summaryText(output, headSha), head_sha: headSha });
-      this.record(review.repoId, review.prNumber, comment.id, review.id);
+        .adapter(repo)
+        .postComment(slug, number, { body: summaryText(output, headSha), head_sha: headSha });
+      this.record(repo.id, number, comment.id, null);
       this.actionLog.finish(row, ActionOutcome.Ok);
+      return true;
     } catch (error) {
       this.actionLog.finish(row, ActionOutcome.Failed, error instanceof Error ? error.message : 'post failed');
+      return false;
     }
-  }
-
-  private finish(
-    id: string,
-    repoId: string,
-    number: number,
-    values: Partial<typeof prAgentReviews.$inferInsert> & { status: AgentReviewStatus },
-    posted: number,
-    postFailed: number,
-  ): void {
-    this.store.write((tx, emit) => {
-      tx.update(prAgentReviews)
-        .set({ ...values, finishedAt: new Date().toISOString() })
-        .where(eq(prAgentReviews.id, id))
-        .run();
-      emit('pull_request.reviewed', {
-        repo_id: repoId,
-        number,
-        agent_review_id: id,
-        status: values.status === AgentReviewStatus.Ready ? 'ready' : 'failed',
-        posted,
-        post_failed: postFailed,
-      });
-    });
   }
 
   /** `file:line` to the id of an open thread the agent started there. A host that cannot be read gives none. */
   private async openAgentThreads(repoId: string, number: number, slug: string): Promise<Map<string, string>> {
-    const ours = new Set(
-      this.store.db
-        .select({ id: agentComments.commentId })
-        .from(agentComments)
-        .where(and(eq(agentComments.repoId, repoId), eq(agentComments.prNumber, number)))
-        .all()
-        .map((row) => row.id),
-    );
+    const ours = this.writes.agentCommentIds(repoId, number);
     if (ours.size === 0) return new Map();
     try {
       const { comments } = await this.pulls.adapter(this.pulls.repoRow(repoId)).get(slug, number);
@@ -633,18 +414,6 @@ Answer the last message in plain text, in a few sentences. Do not change anythin
   }
 
   private isAgentComment(repoId: string, number: number, commentId: string): boolean {
-    return (
-      this.store.db
-        .select({ id: agentComments.commentId })
-        .from(agentComments)
-        .where(
-          and(
-            eq(agentComments.repoId, repoId),
-            eq(agentComments.prNumber, number),
-            eq(agentComments.commentId, commentId),
-          ),
-        )
-        .get() !== undefined
-    );
+    return this.writes.agentCommentIds(repoId, number).has(commentId);
   }
 }

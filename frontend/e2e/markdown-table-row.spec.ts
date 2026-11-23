@@ -16,6 +16,7 @@ const session = {
   repo_id: null,
   branch: null,
   pr_number: null,
+  pr_action: null,
   connection_ids: null,
   extra_repo_ids: [],
   pull_request: null,

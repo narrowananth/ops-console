@@ -159,7 +159,7 @@ describe('Keychain wait', () => {
     const { daemon, prompt } = await start();
     await cliProxyOn(daemon, prompt);
     const steps = daemon.app.get(JobSteps);
-    const job = { kind: 'reply_check', id: 'job-1' } as const;
+    const job = { kind: 'report', id: 'job-1' } as const;
     const store = daemon.app.get<Store>(STORE);
     // The job rows a real job seeds its steps under are beside the point here.
     store.db.run(sql`pragma foreign_keys = off`);

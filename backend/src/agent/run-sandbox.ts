@@ -80,7 +80,7 @@ export const TOOL_CACHES = [
 ];
 
 /**
- * Git control files the daemon's own `git` later reads outside the sandbox (Pull request opening, Comment passes, the
+ * Git control files the daemon's own `git` later reads outside the sandbox (Pull request opening, PR action Sessions, the
  * Network allowlist). A run's commands may not write them, whatever the SDK's own profile adds.
  */
 export function gitControl(workingDir: string, gitFile: boolean): string[] {

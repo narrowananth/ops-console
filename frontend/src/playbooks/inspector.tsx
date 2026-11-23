@@ -20,7 +20,7 @@ import { KindBadge } from '../skills/kind-badge';
 import type { Draft, DraftStep } from './drafts';
 import type { Sel } from './flow-canvas';
 import { SCRATCH_TIP, ScratchTag } from './job-steps';
-import { holderOf, TRIGGER_GROUPS, TRIGGER_TIPS, triggerOfBuiltin } from './labels';
+import { holderOf, scratchApplies, TRIGGER_GROUPS, TRIGGER_TIPS, triggerKind, triggerOfBuiltin } from './labels';
 import { RulesMeter, SkillsMeter } from './token-meter';
 
 const field =
@@ -100,6 +100,8 @@ export function Inspector(props: {
         <StepPanel
           index={sel.index}
           step={working.steps[sel.index] as DraftStep}
+          scratch={scratchApplies(props.playbook.triggers)}
+          oneTurn={props.playbook.triggers.some((trigger) => triggerKind(trigger) === 'session')}
           readOnly={readOnly}
           onClose={onClose}
           onChange={(patch) =>
@@ -282,6 +284,10 @@ function TriggerPanel({
 function StepPanel(props: {
   index: number;
   step: DraftStep;
+  /** The Playbook runs a job: a step may carry the "scratch copy" tag. */
+  scratch: boolean;
+  /** The Playbook opens a PR action Session: its steps go into one prompt. */
+  oneTurn: boolean;
   readOnly: boolean;
   onClose: () => void;
   onChange: (patch: Partial<DraftStep>) => void;
@@ -296,7 +302,7 @@ function StepPanel(props: {
           {props.index + 1}
         </span>
         <h2 className="m-0 font-heading text-base">Step</h2>
-        {step.writes && <ScratchTag />}
+        {props.scratch && step.writes && <ScratchTag />}
         <Button icon aria-label="Close" title="Close" className="ml-auto size-7.5! text-base" onClick={props.onClose}>
           ×
         </Button>
@@ -331,7 +337,7 @@ function StepPanel(props: {
         className={`${field} min-h-40 flex-1 resize-none overflow-y-auto text-xs leading-relaxed`}
       />
       {paste.over && <PasteLimitError />}
-      {!readOnly && step.block === StepBlock.Custom && (
+      {props.scratch && !readOnly && step.block === StepBlock.Custom && (
         <label title={SCRATCH_TIP} className="flex items-center gap-2 text-xs text-neutral-700">
           <input
             type="checkbox"
@@ -341,7 +347,11 @@ function StepPanel(props: {
           scratch copy: writes files or runs commands
         </label>
       )}
-      <Note>Runs as its own agent turn. Ends done, skipped or failed.</Note>
+      <Note>
+        {props.oneTurn
+          ? "Goes into the Session's opening prompt with the other steps, as one turn."
+          : 'Runs as its own agent turn. Ends done, skipped or failed.'}
+      </Note>
       {!readOnly && (
         <div className="flex">
           <Button

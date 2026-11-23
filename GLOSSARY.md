@@ -98,7 +98,7 @@ Repos' remotes and the operator's own domains. Any other host is refused.
 **Loopback**:
 The Run sandbox's one operator switch, on Permissions, for a chat run (a message the operator sent in a Session): when on,
 the run's commands can start servers and reach every service on this Mac's `localhost`. Off by default; turning it on asks
-first. A Playbook step, a Verification, a Fix, a review, a read-only run and an agent-started turn never get it.
+first. A Playbook step, a Verification, a Fix, a review, a read-only run, a PR action Session's run and an agent-started turn never get it.
 
 ### Playbooks
 
@@ -116,12 +116,12 @@ _Avoid_: default Playbook
 
 **Trigger**:
 A place in a tab that starts the agent: Verify and Fix in Monitor, Review PR, Check reply, Address comments, Reply in
-thread and Session message in Workspace.
+thread and Session message in Workspace. Review PR, Check reply and Address comments open a PR action Session.
 _Avoid_: action (the Action Log means each command the agent runs)
 
 **Job**:
-A Trigger's run that goes through its Playbook steps and then the console's closing turn: a Verification, Fix, Agent
-Review, Reply check or Comment pass. Reply in thread and Session message are chats, not jobs.
+A Trigger's run that goes through its Playbook steps and then the console's closing turn: a Verification or a Fix. Review PR,
+Check reply and Address comments open a PR action Session instead; Reply in thread and Session message are chats.
 
 **Skill**:
 A named instruction document the console keeps and the operator attaches to Playbooks: a name, a description of when to
@@ -156,8 +156,7 @@ A ready-made Playbook step the operator drags or adds into a Playbook and then e
 
 **Scratch copy**:
 A throwaway copy of a Repo's code, at the newest commit of the Playbook's branch for a Verification, fetched from
-origin, or at a pull request's head commit for a
-Reply check, a Comment pass or an Agent Review, where the agent may write files and run local commands. A Playbook step that needs one carries the tag "scratch copy".
+origin, where the agent may write files and run local commands. A Playbook step that needs one carries the tag "scratch copy".
 
 ### Monitor
 
@@ -287,7 +286,8 @@ two minutes per head commit. When git cannot fetch, the check reads "Conflicts n
 One conversation between the operator and the agent, named for its first task. It runs in one Repo on one branch, in a
 Session worktree, except a
 dev-tools Session and an anonymous Session, which have no Repo. A pull request has its own Session for the agent's
-replies, with no composer, and an Alert has one for its Verification and Fix. The agent may start Spawned Sessions from one.
+replies in threads, with no composer, a PR action Session for each time the operator presses one of its three buttons,
+and an Alert has one for its Verification and Fix. The agent may start Spawned Sessions from one.
 _Avoid_: chat, thread
 
 **Browser panel**:
@@ -378,23 +378,19 @@ repository into it. When the operator names an imported Repo, the agent asks to 
 becomes a Session in that Repo. A Verification or Fix for a Service with no local Repo runs in one that holds a clone of the
 Service's Git URL.
 
+**PR action Session**:
+A Session the console opens from Address comments, Check replies or Review with agent, in a detached worktree at the pull
+request's head commit. The Playbook of its Trigger is its opening prompt, and the operator may steer it in the chat. It
+ends in one console tool call that commits, pushes, replies, resolves or posts on the Git host, as the operator. It
+is not submitted until that call has posted everything.
+_Avoid_: job, pass
+
 **Agent Review**:
-The agent's written review of a pull request: a verdict (approve, request changes or comment), findings rated
-critical, high, medium, low or info, a PROD readiness checklist and a full report, tied to the commit it read and the
-target branch commit it compared with. Each finding is posted to the Git host on its line, and the verdict and report
-as one comment. A newer commit makes it stale. The operator may add a **Review note** when starting it: free text the
-agent reads with the pull request, such as where to look or a related pull request to read first. The note narrows the
-review; the Playbook's checks stay.
-
-**Reply check**:
-The agent's check of a pull request thread: whether the code at the head commit does what the thread asked, given
-as fixed, partly fixed or not fixed in a reply. On fixed the thread is resolved. Check replies runs one over every
-unresolved thread that has a reply, as a Comment pass of kind check that changes, commits and pushes nothing.
-
-**Comment pass**:
-The agent's work on the review threads the operator ticked on a pull request, theirs or a teammate's (Address comments): one commit pushed
-to its branch, a reply in each thread, and each done thread on a line or a file resolved.
-_Avoid_: fix (a Fix follows an Alert's Review)
+The record of a review submitted from a PR action Session: a verdict (approve, request changes or comment), findings rated
+critical, high, medium, low or info and a full report, tied to the commit it read and the target branch commit it compared
+with. Each finding is posted to the Git host on its line, and the verdict and report as one comment. A newer commit makes
+it stale. The operator may add a **Review note** when starting it: free text the agent reads with the pull request, such
+as where to look or a related pull request to read first. The note narrows the review; the Playbook's checks stay.
 
 ### Dev tools
 

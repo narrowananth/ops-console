@@ -173,7 +173,7 @@ export const BUILTIN_STEPS: Record<PlaybookTrigger, PlaybookStep[]> = {
       'Production risk: backward compatibility, existing consumers, API contract changes, database compatibility, performance and resource use, thread safety, security and access control, logging and observability, configuration and environment differences, deployment order and dependencies, and impact on unrelated features. Say whether the change could cause a new incident or disturb a production workflow.',
     ]),
     step('Run the tests and build', true, [
-      "In this scratch copy, check whether the existing tests exercise the changed behaviour, then run, with the project's own commands: the relevant unit tests, integration tests where there are any, the regression tests, the build, and formatting, lint and static analysis.",
+      "In this worktree, check whether the existing tests exercise the changed behaviour, then run, with the project's own commands: the relevant unit tests, integration tests where there are any, the regression tests, the build, and formatting, lint and static analysis.",
       'Run the critical paths with mocks where they need external services or database writes; never write to a real database.',
       'Record the tests run and their results, the ones that failed, the ones that could not run and why, what was mocked, and what is left unverified. Answer skipped, with why, when nothing can run here.',
     ]),
@@ -192,7 +192,7 @@ export const BUILTIN_STEPS: Record<PlaybookTrigger, PlaybookStep[]> = {
       '- Any further questions, clarifications or disagreement in the thread, and who wrote the latest reply.',
     ]),
     step('Prepare the code context', false, [
-      "This folder is a scratch copy at the pull request's head commit. Record that commit and the production branch commit (main or master, fetched just now).",
+      "This folder is a worktree at the pull request's head commit. Record that commit and the production branch commit (main or master, fetched just now).",
       "- Do not touch the pull request branch or anyone's working tree.",
       '- Find the files, methods and execution paths the discussion is about, and the diff of any commit a reply names.',
     ]),
@@ -221,7 +221,7 @@ export const BUILTIN_STEPS: Record<PlaybookTrigger, PlaybookStep[]> = {
       '- A general comment on the pull request (not on a file) gets a reply only: never change code for it.',
     ]),
     step('Prepare the code context', false, [
-      "This folder is a scratch copy at the pull request's head commit. Record that commit and the production branch commit (main or master, fetched just now).",
+      "This folder is a worktree at the pull request's head commit. Record that commit and the production branch commit (main or master, fetched just now).",
       "- The developer's changes stay as they are: build on them, never discard them.",
       '- Find the files, methods and paths each thread is about.',
     ]),

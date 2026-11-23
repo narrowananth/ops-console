@@ -1,13 +1,6 @@
 import { z } from 'zod';
-import { AccessMode, Effort, Model, SessionKind, sessionSchema } from './agents';
-import { jobPlaybookSchema } from './playbooks';
+import { AccessMode, Effort, Model, PrAction, SessionKind, sessionSchema } from './agents';
 import { GitHost } from './repos';
-
-export enum AgentReviewStatus {
-  Running = 'running',
-  Ready = 'ready',
-  Failed = 'failed',
-}
 
 /** How much a review finding matters, worst first. */
 export enum FindingSeverity {
@@ -65,21 +58,14 @@ export const findingSchema = z.object({
 
 export type Finding = z.infer<typeof findingSchema>;
 
-export const checklistItemSchema = z.object({
-  item: z.string(),
-  status: z.enum(['pass', 'warn', 'fail', 'na']),
-  note: z.string(),
-});
-
-export const toolUseSchema = z.object({ connection: z.string(), query: z.string(), result: z.string() });
-
+/** The agent's submitted review of a pull request, tied to the commit it read. */
 export const prAgentReviewSchema = z.object({
   id: z.string(),
   repo_id: z.string(),
   pr_number: z.number().int(),
   head_sha: z.string(),
-  status: z.enum(AgentReviewStatus),
-  /** Null until ready, and on reviews from before verdicts. */
+  /** The PR action Session that submitted it; null once that Session is deleted. */
+  session_id: z.string().nullable(),
   decision: z.enum(ReviewVerdict).nullable(),
   /** The verdict in one sentence. */
   verdict: z.string().nullable(),
@@ -88,26 +74,44 @@ export const prAgentReviewSchema = z.object({
   base_sha: z.string().nullable(),
   /** The full review as Markdown; also posted on the pull request. */
   report: z.string().nullable(),
-  /** Why a failed review stopped; null when it gave no reason. */
-  error: z.string().nullable(),
   findings: z.array(findingSchema),
-  checklist: z.array(checklistItemSchema),
-  tools: z.array(toolUseSchema),
   created_at: z.string(),
-  /** When the latest attempt began (a retry starts the clock again) and ended; null while it runs. */
-  started_at: z.string(),
-  finished_at: z.string().nullable(),
   /** The pull request moved on to another commit. */
   stale: z.boolean(),
-  /** Null on Agent Reviews from before Playbooks. */
-  playbook: jobPlaybookSchema.nullable(),
   /** What the operator told the agent when starting: where to look, a related pull request. Null when left empty. */
   note: z.string().nullable(),
 });
 
-export const startAgentReviewSchema = z.object({ note: z.string().trim().optional() }).strict();
+/** `POST .../action-sessions`: which button, the threads Address comments covers, the Review note. */
+export const startPrActionSchema = z
+  .object({
+    action: z.enum(PrAction),
+    comment_ids: z.array(z.string().min(1)).optional(),
+    note: z.string().trim().optional(),
+  })
+  .strict();
 
-export type StartAgentReview = z.infer<typeof startAgentReviewSchema>;
+export type StartPrAction = z.infer<typeof startPrActionSchema>;
+
+/** Where a PR action Session stands: its turn runs, it is idle with nothing posted, or its tool call posted everything. */
+export enum PrActionState {
+  Working = 'working',
+  NotSubmitted = 'not_submitted',
+  Submitted = 'submitted',
+}
+
+export const prActionSessionSchema = z.object({
+  session_id: z.string(),
+  action: z.enum(PrAction),
+  state: z.enum(PrActionState),
+  /** The commit an Address comments Session pushed; null before, and when nothing was committed. */
+  commit_sha: z.string().nullable(),
+  /** The pull request's head moved past the commit the Session started at, or the one it pushed. */
+  stale: z.boolean(),
+  created_at: z.string(),
+});
+
+export type PrActionSession = z.infer<typeof prActionSessionSchema>;
 
 export type PrAgentReview = z.infer<typeof prAgentReviewSchema>;
 
@@ -203,8 +207,8 @@ export const pullRequestSchema = z.object({
 
 export type PullRequest = z.infer<typeof pullRequestSchema>;
 
-/** The latest Agent Review as the list shows it: whether one runs, what it decided and whether the head moved on. */
-export const prAgentReviewBriefSchema = prAgentReviewSchema.pick({ status: true, decision: true, stale: true });
+/** The latest Agent Review as the list shows it: what it decided and whether the head moved on. */
+export const prAgentReviewBriefSchema = prAgentReviewSchema.pick({ decision: true, stale: true });
 
 /** A pull request in a list: no description and only the brief of its latest Agent Review. */
 export const pullRequestSummarySchema = pullRequestSchema
@@ -219,29 +223,6 @@ export enum ReplyVerdict {
   NotFixed = 'not_fixed',
 }
 
-/** One Reply check: the agent's verdict on one thread, posted as a reply. */
-export const replyCheckSchema = z.object({
-  id: z.string(),
-  repo_id: z.string(),
-  pr_number: z.number().int(),
-  /** The thread's root comment. */
-  comment_id: z.string(),
-  head_sha: z.string(),
-  status: z.enum(AgentReviewStatus),
-  verdict: z.enum(ReplyVerdict).nullable(),
-  reply: z.string().nullable(),
-  resolved: z.boolean(),
-  error: z.string().nullable(),
-  can_retry: z.boolean(),
-  created_at: z.string(),
-  /** When the latest attempt began (a retry starts the clock again) and ended; null while it runs. */
-  started_at: z.string(),
-  finished_at: z.string().nullable(),
-  playbook: jobPlaybookSchema.nullable(),
-});
-
-export type ReplyCheck = z.infer<typeof replyCheckSchema>;
-
 export enum ThreadOutcome {
   Pending = 'pending',
   /** Address comments. */
@@ -253,61 +234,12 @@ export enum ThreadOutcome {
   NotFixed = 'not_fixed',
 }
 
-export enum CommentPassKind {
-  /** The agent changes code for the ticked threads; one commit, one push. */
-  Address = 'address',
-  /** The agent checks every replied thread against the head commit and gives each a verdict. Reads only. */
-  Check = 'check',
-}
-
-export const passThreadSchema = z.object({
-  comment_id: z.string(),
-  /** Null for a general comment on the pull request; `line` also for one on a whole file. */
-  file_path: z.string().nullable(),
-  line: z.number().int().nullable(),
-  author: z.string(),
-  /** The first line of the thread's first comment. */
-  excerpt: z.string(),
-  outcome: z.enum(ThreadOutcome),
-  reply: z.string().nullable(),
-  posted: z.boolean(),
-  resolved: z.boolean(),
-});
-
-export type PassThread = z.infer<typeof passThreadSchema>;
-
-/** One Comment pass over the threads the operator ticked on a pull request. */
-export const commentPassSchema = z.object({
-  id: z.string(),
-  repo_id: z.string(),
-  pr_number: z.number().int(),
-  kind: z.enum(CommentPassKind),
-  head_sha: z.string(),
-  status: z.enum(AgentReviewStatus),
-  /** Null until pushed, and when there was nothing to commit. */
-  commit_sha: z.string().nullable(),
-  threads: z.array(passThreadSchema),
-  error: z.string().nullable(),
-  can_retry: z.boolean(),
-  /** The pull request's head is neither the commit it started from nor the one it pushed. */
-  stale: z.boolean(),
-  created_at: z.string(),
-  /** When the latest attempt began (a retry starts the clock again) and ended; null while it runs. */
-  started_at: z.string(),
-  finished_at: z.string().nullable(),
-  playbook: jobPlaybookSchema.nullable(),
-});
-
-export type CommentPass = z.infer<typeof commentPassSchema>;
-
 export const pullRequestDetailSchema = pullRequestSchema.extend({
   repo_id: z.string(),
   files: z.array(prFileSchema),
   comments: z.array(prCommentSchema),
-  /** The newest Reply check of each thread. */
-  reply_checks: z.array(replyCheckSchema),
-  /** Newest first. */
-  comment_passes: z.array(commentPassSchema),
+  /** PR action Sessions on this pull request, newest first. */
+  action_sessions: z.array(prActionSessionSchema),
   /** Oldest first. */
   commits: z.array(prCommitSchema),
   /** Null for a pull request that is not open. */
@@ -486,10 +418,6 @@ export const postCommentSchema = z.object({
 });
 
 export const resolveCommentSchema = z.object({ resolved: z.boolean() });
-
-export const startReplyCheckSchema = z.object({ comment_id: z.string().min(1) });
-
-export const startCommentPassSchema = z.object({ comment_ids: z.array(z.string().min(1)).min(1) });
 
 export const reviewPullRequestSchema = z.object({
   event: z.enum(PrReviewEvent),

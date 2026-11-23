@@ -6,6 +6,8 @@ import { ScratchTag } from './job-steps';
 /** The Step blocks: drag one onto a line of the flow, or press + to add a copy at the end. */
 export function Palette(props: {
   blocks: DraftStep[];
+  /** The Playbook runs a job, so a step may carry the "scratch copy" tag. */
+  scratch: boolean;
   full: boolean;
   drag: Drag | null;
   setDrag: (drag: Drag | null) => void;
@@ -36,7 +38,7 @@ export function Palette(props: {
           >
             <Grip />
             <span className="min-w-0 flex-1 truncate">{block.title}</span>
-            {block.writes && <ScratchTag />}
+            {props.scratch && block.writes && <ScratchTag />}
             <button
               type="button"
               aria-label={`Add ${block.title} to steps`}
@@ -54,9 +56,11 @@ export function Palette(props: {
           </li>
         ))}
       </ul>
-      <p className="m-0 mt-1 px-1 text-xs text-neutral-700">
-        <ScratchTag /> steps write files or run commands in a scratch copy, never in your own checkout.
-      </p>
+      {props.scratch && (
+        <p className="m-0 mt-1 px-1 text-xs text-neutral-700">
+          <ScratchTag /> steps write files or run commands in a scratch copy, never in your own checkout.
+        </p>
+      )}
       <p className="m-0 mt-1 px-1 text-xs text-neutral-700">
         Keyboard: on a focused step, Alt+←/→ moves it and Delete removes it.
       </p>

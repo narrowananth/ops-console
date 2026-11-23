@@ -38,6 +38,7 @@ const SESSION = {
   repo_id: null,
   branch: null,
   pr_number: null,
+  pr_action: null,
   connection_ids: [],
   extra_repo_ids: [],
   pull_request: null,

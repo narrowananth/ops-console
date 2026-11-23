@@ -3,16 +3,14 @@ import { OPEN_PR_BRANCHES } from '../repos/open-pr-branches';
 import { AgentReviewsService } from './agent-reviews.service';
 import { AnonymousSessionsService } from './anonymous-sessions.service';
 import { CliGitHosts } from './cli-git-hosts';
-import { CommentPassesService } from './comment-passes.service';
 import { FileMenuController } from './file-menu.controller';
 import { FileMenuService } from './file-menu.service';
 import { FOLDER_OPENER, type FolderOpener, openFolder } from './folder-opener';
 import { GIT_HOSTS, type GitHosts } from './git-host';
-import { PrJobs } from './pr-jobs';
-import { PrRunRetry } from './pr-run-retry';
+import { PrActionsService } from './pr-actions.service';
+import { PrHostWrites } from './pr-host-writes';
 import { PullRequestOpeningService } from './pull-request-opening.service';
 import { PullRequestsService } from './pull-requests.service';
-import { ReplyChecksService } from './reply-checks.service';
 import { RepoJoinService } from './repo-join.service';
 import { SessionSpawnService } from './session-spawn.service';
 import { PullRequestsController, WorkspaceSessionsController } from './workspace.controller';
@@ -31,16 +29,14 @@ export class WorkspaceModule {
         { provide: FOLDER_OPENER, useValue: config.opener ?? openFolder },
         PullRequestsService,
         AgentReviewsService,
-        PrJobs,
-        ReplyChecksService,
-        CommentPassesService,
+        PrHostWrites,
+        PrActionsService,
         WorkspaceSessionsService,
         FileMenuService,
         PullRequestOpeningService,
         AnonymousSessionsService,
         RepoJoinService,
         SessionSpawnService,
-        PrRunRetry,
         { provide: OPEN_PR_BRANCHES, useExisting: PullRequestsService },
       ],
       exports: [

@@ -31,6 +31,7 @@ const session = (id: string, repoId: string, extra: Record<string, unknown> = {}
   repo_id: repoId,
   branch: 'main',
   pr_number: null,
+  pr_action: null,
   connection_ids: null,
   extra_repo_ids: [],
   pull_request: null,

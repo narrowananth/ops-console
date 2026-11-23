@@ -1,11 +1,11 @@
-import { JOB_TRIGGERS, type Playbook, type PlaybookTrigger, TRIGGER_LABELS } from '@ops-console/shared';
+import { type Playbook, type PlaybookTrigger, TRIGGER_LABELS } from '@ops-console/shared';
 import type { ReactNode } from 'react';
 import { Button } from '../components/ui/button';
 import { Dropdown, type DropdownOption } from '../components/ui/dropdown';
 import { item } from '../components/ui/item';
 import { ascending } from '../lib/sort';
 import type { Draft } from './drafts';
-import { builtinFor, CLOSING_TURN, holderOf, stepCount, TRIGGER_GROUPS, TRIGGER_TIPS } from './labels';
+import { builtinFor, CLOSING_TURN, holderOf, stepCount, TRIGGER_GROUPS, TRIGGER_TIPS, triggerKind } from './labels';
 import { Lock } from './lock';
 
 /** How many steps the small flow shows before "+N more". */
@@ -37,7 +37,8 @@ export function Overview(props: {
   const holder = holderOf(items, selected);
   const running = holder ?? builtin;
   const label = TRIGGER_LABELS[selected].label;
-  const chat = !JOB_TRIGGERS.includes(selected);
+  const kind = triggerKind(selected);
+  const chat = kind === 'chat';
   const closing = CLOSING_TURN[selected];
   const options: DropdownOption<string>[] = [
     { value: BUILT_IN, label: 'Built-in', description: builtin ? stepCount(builtin) : undefined },
@@ -136,7 +137,7 @@ export function Overview(props: {
                 <p className="m-0 mt-1 text-[13px] text-neutral-700">{TRIGGER_TIPS[selected]}</p>
               </div>
               <span className="rounded-full bg-neutral-200 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.04em]">
-                {chat ? 'CHAT' : 'JOB'}
+                {kind.toUpperCase()}
               </span>
             </div>
 
@@ -235,6 +236,12 @@ export function Overview(props: {
                   </li>
                 )}
               </ol>
+              {kind === 'session' && running.steps.length > 0 && (
+                <p className="m-0 text-xs text-neutral-700">
+                  The steps go into the opening prompt of the Session this opens and run as one turn. You can steer the
+                  agent in the Session afterwards.
+                </p>
+              )}
               {running.steps.length === 0 && (
                 <p className="m-0 text-xs text-neutral-700">
                   {chat

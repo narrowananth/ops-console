@@ -5,6 +5,7 @@ import {
   ErrorCode,
   type Model,
   type Page,
+  type PrAction,
   RunOutcome,
   SESSION_DEFAULTS,
   type Session,
@@ -54,6 +55,8 @@ export type NewSession = {
   repoId?: string;
   branch?: string;
   prNumber?: number;
+  /** A PR action Session: the button it was opened from, the pull request's head commit it works at, and what it keeps. */
+  prAction?: { action: PrAction; headSha: string; threads: string | null };
   /** The Session whose agent started this one, and the `spawn_sessions` call that did. */
   spawnedBy?: { sessionId: string; callId: string };
 };
@@ -71,6 +74,7 @@ export function toSession(row: SessionRow, pullRequests: OpenedPullRequest[]): S
     repo_id: row.repoId,
     branch: row.branch,
     pr_number: row.prNumber,
+    pr_action: row.prAction,
     pull_request: pullRequestOnBranch(row, pullRequests),
     pull_requests: pullRequests,
     connection_ids: null,
@@ -173,6 +177,9 @@ export class SessionsService {
           repoId: input.repoId ?? null,
           branch: input.branch ?? null,
           prNumber: input.prNumber ?? null,
+          prAction: input.prAction?.action ?? null,
+          prActionHeadSha: input.prAction?.headSha ?? null,
+          prActionThreads: input.prAction?.threads ?? null,
           spawnedBySessionId: input.spawnedBy?.sessionId ?? null,
           spawnCallId: input.spawnedBy?.callId ?? null,
         })
@@ -406,7 +413,7 @@ export class SessionsService {
 }
 
 /**
- * A `repo` Session has a Repo and a branch; a `pr_review` Session a Repo and a pull request; an `anonymous` Session
+ * A `repo` Session has a Repo and a branch, or, as a PR action Session, a Repo and a pull request; a `pr_review` Session a Repo and a pull request; an `anonymous` Session
  * may have a branch; others none of these.
  */
 function checkKindFields(input: NewSession): void {
@@ -415,7 +422,9 @@ function checkKindFields(input: NewSession): void {
   const hasPr = input.prNumber !== undefined;
   const ok =
     input.kind === SessionKind.Repo
-      ? hasRepo && hasBranch && !hasPr
+      ? input.prAction !== undefined
+        ? hasRepo && hasPr && !hasBranch
+        : hasRepo && hasBranch && !hasPr
       : input.kind === SessionKind.PrReview
         ? hasRepo && hasPr && !hasBranch
         : input.kind === SessionKind.Anonymous

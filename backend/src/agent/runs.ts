@@ -2,6 +2,7 @@ import type { WarmQuery } from '@anthropic-ai/claude-agent-sdk';
 import {
   type AccessMode,
   type Part,
+  type PrAction,
   RunPurpose,
   type SkillCopy,
   type Subagent,
@@ -27,6 +28,8 @@ export type Run = {
   deny: string[];
   /** The run loads the folder's own `.claude` settings, `.mcp.json` and CLAUDE.md; false for a folder that holds pull request code. */
   projectSettings: boolean;
+  /** The button this run's Session was opened from, when it is a PR action Session. */
+  prAction: PrAction | null;
   /** The run may not change its working folder. */
   readOnly: boolean;
   /** What the run is for, kept with its usage. */
@@ -114,11 +117,15 @@ export const failedBecause = (summary: RunSummary): string =>
   summary.stopped ? STOPPED : (summary.failure ?? 'the agent run failed');
 
 /**
- * The operator's own chat run: a message they sent in a Session, not a job's step, a review or a reply. Only this run
- * has an output folder, the browser and process tools and, when the switch is on, Loopback.
+ * The operator's own chat run: a message they sent in a Session, not a job's step, a review, a reply or a PR action
+ * Session's work on pull request code. Only this run has the browser and process tools and, when the switch is on, Loopback.
  */
-export const isOperatorChat = (run: { onFinish: unknown; purpose: RunPurpose; readOnly: boolean }): boolean =>
-  run.onFinish === null && run.purpose === RunPurpose.Chat && !run.readOnly;
+export const isOperatorChat = (run: {
+  onFinish: unknown;
+  purpose: RunPurpose;
+  readOnly: boolean;
+  prAction: PrAction | null;
+}): boolean => run.onFinish === null && run.purpose === RunPurpose.Chat && !run.readOnly && run.prAction === null;
 
 export class RunRegistry {
   private readonly runs = new Map<string, Run>();

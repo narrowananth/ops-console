@@ -8,6 +8,7 @@ import {
   CONNECTOR_SERVERS,
   ConnectorId,
   GitHost,
+  PrAction,
   RunPurpose,
   StepBlock,
 } from '@ops-console/shared';
@@ -152,7 +153,7 @@ describe('Run sandbox on agent runs', () => {
     const daemon = await start();
     const id = daemon.createSession();
     const steps = daemon.app.get(JobSteps);
-    const job = { kind: 'reply_check', id: 'job-1' } as const;
+    const job = { kind: 'report', id: 'job-1' } as const;
     const store = daemon.app.get<Store>(STORE);
     store.db.run(sql`pragma foreign_keys = off`);
     store.write((tx) =>
@@ -624,9 +625,11 @@ describe('Run sandbox loopback (run-sandbox-loopback)', () => {
   });
 
   it('gives it to the operator’s own chat run and to no other kind of run (Behavior 5)', () => {
-    const chat = { onFinish: null, purpose: RunPurpose.Chat, readOnly: false };
+    const chat = { onFinish: null, purpose: RunPurpose.Chat, readOnly: false, prAction: null };
     expect(isOperatorChat(chat)).toBe(true);
     expect(isOperatorChat({ ...chat, readOnly: true })).toBe(false);
+    // A PR action Session works on someone else's pull request code.
+    expect(isOperatorChat({ ...chat, prAction: PrAction.CheckReplies })).toBe(false);
     expect(isOperatorChat({ ...chat, onFinish: () => {} })).toBe(false);
     for (const purpose of Object.values(RunPurpose).filter((one) => one !== RunPurpose.Chat)) {
       expect(isOperatorChat({ ...chat, purpose }), purpose).toBe(false);
@@ -645,7 +648,7 @@ describe('Run sandbox loopback (run-sandbox-loopback)', () => {
     }
     const id = daemon.createSession();
     const steps = daemon.app.get(JobSteps);
-    const job = { kind: 'reply_check', id: 'job-1' } as const;
+    const job = { kind: 'report', id: 'job-1' } as const;
     const store = daemon.app.get<Store>(STORE);
     store.db.run(sql`pragma foreign_keys = off`);
     store.write((tx) =>

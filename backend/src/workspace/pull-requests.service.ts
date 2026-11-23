@@ -9,8 +9,10 @@ import {
   FindingSeverity,
   GitHost,
   HealthStatus,
-  type JobPlaybook,
   PR_HOSTS,
+  type PrAction,
+  type PrActionSession,
+  PrActionState,
   type PrAgentReview,
   PrChecks,
   type PrComment,
@@ -23,23 +25,15 @@ import {
   type PullRequestDetail,
   type PullRequestSummary,
   SessionKind,
+  SessionState,
 } from '@ops-console/shared';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { ActionLogService } from '../action-log/action-log.service';
 import { ApiError, validationFailed } from '../common/errors';
 import { asBackground } from '../common/spawn-pool';
 import { ConnectorsService } from '../connectors/connectors.service';
-import {
-  agentComments,
-  connectors,
-  prAgentReviews,
-  prCommentPasses,
-  prReplyChecks,
-  repos,
-  sessions,
-} from '../db/schema';
+import { agentComments, connectors, prAgentReviews, repos, sessions } from '../db/schema';
 import { STORE, type Store } from '../db/store';
-import { jobPlaybook } from '../playbooks/job-steps';
 import { GIT, Git } from '../repos/git';
 import type { OpenPrBranches } from '../repos/open-pr-branches';
 import {
@@ -50,7 +44,6 @@ import {
   type HostPullRequest,
   type OwnedPullRequest,
 } from './git-host';
-import { toCommentPass, toReplyCheck } from './pr-jobs';
 
 type RepoRow = typeof repos.$inferSelect;
 type ReviewRow = typeof prAgentReviews.$inferSelect;
@@ -125,7 +118,7 @@ const LEGACY_SEVERITY: Record<string, FindingSeverity> = {
   nit: FindingSeverity.Info,
 };
 
-export function toAgentReview(row: ReviewRow, headSha: string | null, playbook: JobPlaybook | null): PrAgentReview {
+export function toAgentReview(row: ReviewRow, headSha: string | null): PrAgentReview {
   const findings = (JSON.parse(row.findings) as Finding[]).map((finding) => ({
     ...finding,
     severity: LEGACY_SEVERITY[finding.severity] ?? finding.severity,
@@ -135,22 +128,37 @@ export function toAgentReview(row: ReviewRow, headSha: string | null, playbook: 
     repo_id: row.repoId,
     pr_number: row.prNumber,
     head_sha: row.headSha,
-    status: row.status,
+    session_id: row.sessionId,
     decision: row.decision,
     verdict: row.verdict,
     base_branch: row.baseBranch,
     base_sha: row.baseSha,
     report: row.report,
-    error: row.error,
     findings,
-    checklist: JSON.parse(row.checklist),
-    tools: JSON.parse(row.tools),
     created_at: row.createdAt,
-    started_at: row.startedAt ?? row.createdAt,
-    finished_at: row.finishedAt,
     stale: headSha !== null && row.headSha !== headSha,
-    playbook,
     note: row.note,
+  };
+}
+
+/** A PR action Session as the pull request view lists it. */
+export function toPrActionSession(row: typeof sessions.$inferSelect, headSha: string | null): PrActionSession {
+  const state =
+    row.prActionSubmittedAt !== null
+      ? PrActionState.Submitted
+      : row.state === SessionState.Working
+        ? PrActionState.Working
+        : PrActionState.NotSubmitted;
+  return {
+    session_id: row.id,
+    action: row.prAction as PrAction,
+    state,
+    commit_sha: row.prActionCommitSha,
+    stale:
+      headSha !== null &&
+      headSha !== row.prActionHeadSha &&
+      (row.prActionCommitSha === null || headSha !== row.prActionCommitSha),
+    created_at: row.createdAt,
   };
 }
 
@@ -414,19 +422,11 @@ export class PullRequestsService implements OpenPrBranches {
   async get(repoId: string, number: number): Promise<PullRequestDetail> {
     const repo = this.hosted(repoId);
     const { pr, files, comments, commits } = await this.detail(repo, number);
-    const checks = this.store.db
+    const actions = this.store.db
       .select()
-      .from(prReplyChecks)
-      .where(and(eq(prReplyChecks.repoId, repo.id), eq(prReplyChecks.prNumber, number)))
-      .orderBy(desc(prReplyChecks.createdAt), desc(prReplyChecks.id))
-      .all();
-    const newest = new Map<string, (typeof checks)[number]>();
-    for (const check of checks) if (!newest.has(check.commentId)) newest.set(check.commentId, check);
-    const passes = this.store.db
-      .select()
-      .from(prCommentPasses)
-      .where(and(eq(prCommentPasses.repoId, repo.id), eq(prCommentPasses.prNumber, number)))
-      .orderBy(desc(prCommentPasses.createdAt), desc(prCommentPasses.id))
+      .from(sessions)
+      .where(and(eq(sessions.repoId, repo.id), eq(sessions.prNumber, number), isNotNull(sessions.prAction)))
+      .orderBy(desc(sessions.createdAt), desc(sessions.id))
       .all();
     const review = this.store.db
       .select()
@@ -437,18 +437,11 @@ export class PullRequestsService implements OpenPrBranches {
     return {
       ...(this.decorate(repo, repo.host, repo.remoteSlug as string, [pr])[0] as PullRequestSummary),
       body: pr.body,
-      latest_agent_review: review
-        ? toAgentReview(review, pr.head_sha, jobPlaybook(this.store.db, 'agent_review', review))
-        : null,
+      latest_agent_review: review ? toAgentReview(review, pr.head_sha) : null,
       repo_id: repo.id,
       files,
       comments: this.markComments(repo.id, number, comments),
-      reply_checks: [...newest.values()].map((row) =>
-        toReplyCheck(row, jobPlaybook(this.store.db, 'reply_check', row)),
-      ),
-      comment_passes: passes.map((row) =>
-        toCommentPass(row, pr.head_sha, jobPlaybook(this.store.db, 'comment_pass', row)),
-      ),
+      action_sessions: actions.map((row) => toPrActionSession(row, pr.head_sha)),
       commits,
       conflicts: this.conflictsOf(repo, pr),
     };
@@ -1152,9 +1145,7 @@ export class PullRequestsService implements OpenPrBranches {
         by_agent: worked.has(pr.branch),
         is_mine: (login !== null && pr.author === login) || worked.has(pr.branch),
         agent_session_id: reviewSession.get(pr.number) ?? null,
-        latest_agent_review: review
-          ? { status: review.status, decision: review.decision, stale: review.headSha !== pr.head_sha }
-          : null,
+        latest_agent_review: review ? { decision: review.decision, stale: review.headSha !== pr.head_sha } : null,
       };
     });
   }
@@ -1164,7 +1155,6 @@ export class PullRequestsService implements OpenPrBranches {
     const ranked = this.store.db
       .select({
         prNumber: prAgentReviews.prNumber,
-        status: prAgentReviews.status,
         decision: prAgentReviews.decision,
         headSha: prAgentReviews.headSha,
         rank: sql<number>`row_number() over (partition by ${prAgentReviews.prNumber} order by ${prAgentReviews.createdAt} desc, ${prAgentReviews.id} desc)`.as(
