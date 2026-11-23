@@ -8,18 +8,20 @@ import {
   CONNECTOR_SERVERS,
   ConnectorId,
   GitHost,
+  PrAction,
   RunPurpose,
   StepBlock,
 } from '@ops-console/shared';
 import { sql } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runSandbox, worktreeGitDirs } from '../src/agent/run-sandbox';
+import { isOperatorChat } from '../src/agent/runs';
 import { AgentRuntime, HOST_WRITE_DENIALS } from '../src/agent/runtime';
 import { repos } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { KEYCHAIN, type Keychain } from '../src/keychain/keychain';
 import { JobSteps } from '../src/playbooks/job-steps';
-import { type AgentDaemon, api, converse, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
+import { type AgentDaemon, api, converse, gate, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
 import { tempDir } from './helpers';
 
 const running: AgentDaemon[] = [];
@@ -556,5 +558,174 @@ describe('Network allowlist on Permissions', () => {
     expect((await read(again)).added).toEqual(['npm.example.com']);
     await converse(again, again.createSession(), 'go');
     expect(sandboxOf(again).network?.allowedDomains).toContain('npm.example.com');
+  });
+});
+
+describe('Run sandbox loopback (run-sandbox-loopback)', () => {
+  const setSwitch = (daemon: AgentDaemon, value: unknown) =>
+    api(daemon).patch('/settings', { run_sandbox_loopback: value });
+  const networkOf = (daemon: AgentDaemon) => daemon.sdk.calls.at(-1)?.options.sandbox?.network;
+  const withoutLoopback = (daemon: AgentDaemon) => {
+    const sandbox = structuredClone(sandboxOf(daemon));
+    if (sandbox.network) delete sandbox.network.allowLocalBinding;
+    return sandbox;
+  };
+
+  it('is off on a new install, and a chat run then has no local binding (Behavior 1, 2)', async () => {
+    const daemon = await start();
+    expect((await api(daemon).get('/settings')).body.data.run_sandbox_loopback).toBe(false);
+    await converse(daemon, daemon.createSession(), 'go');
+    expect(networkOf(daemon)).not.toHaveProperty('allowLocalBinding');
+    expect(networkOf(daemon)).toMatchObject({ strictAllowlist: true });
+  });
+
+  it('opens local binding for the next chat run once it is on, closes it when off, and changes nothing else (Behavior 3, 4, 7, 9, 10)', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    await converse(daemon, id, 'closed');
+    const closed = sandboxOf(daemon);
+    expect((await setSwitch(daemon, true)).status).toBe(200);
+    expect((await api(daemon).get('/settings')).body.data.run_sandbox_loopback).toBe(true);
+    await converse(daemon, id, 'open');
+    expect(networkOf(daemon)).toMatchObject({ allowLocalBinding: true, strictAllowlist: true });
+    // Same sandbox but for the one flag: the data folder stays unreadable, the file rules and the allowlist as they were.
+    expect(withoutLoopback(daemon)).toEqual(closed);
+    expect(sandboxOf(daemon).filesystem?.denyRead).toContain(daemon.dataDir);
+    expect((await setSwitch(daemon, false)).status).toBe(200);
+    await converse(daemon, id, 'closed again');
+    expect(networkOf(daemon)).not.toHaveProperty('allowLocalBinding');
+  });
+
+  it.each([['yes'], [1], [null]])('refuses %j and saves nothing (Behavior 10)', async (value) => {
+    const daemon = await start();
+    const refused = await setSwitch(daemon, value);
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.code).toBe('validation_failed');
+    expect((await api(daemon).get('/settings')).body.data.run_sandbox_loopback).toBe(false);
+  });
+
+  it('survives a daemon restart, and the run after it has loopback (Behavior 6, 10)', async () => {
+    const first = await start();
+    await setSwitch(first, true);
+    const dataDir = first.dataDir;
+    await first.stop();
+    const second = await start(dataDir);
+    expect((await api(second).get('/settings')).body.data.run_sandbox_loopback).toBe(true);
+    await converse(second, second.createSession(), 'go');
+    expect(networkOf(second)).toMatchObject({ allowLocalBinding: true });
+  });
+
+  it('keeps its own value in each data folder, as a dev build does (Behavior 11)', async () => {
+    const installed = await start();
+    const dev = await start();
+    await setSwitch(installed, true);
+    expect((await api(dev).get('/settings')).body.data.run_sandbox_loopback).toBe(false);
+    await converse(dev, dev.createSession(), 'go');
+    expect(networkOf(dev)).not.toHaveProperty('allowLocalBinding');
+  });
+
+  it('gives it to the operator’s own chat run and to no other kind of run (Behavior 5)', () => {
+    const chat = { onFinish: null, purpose: RunPurpose.Chat, readOnly: false, prAction: null };
+    expect(isOperatorChat(chat)).toBe(true);
+    expect(isOperatorChat({ ...chat, readOnly: true })).toBe(false);
+    // A PR action Session works on someone else's pull request code.
+    expect(isOperatorChat({ ...chat, prAction: PrAction.CheckReplies })).toBe(false);
+    expect(isOperatorChat({ ...chat, onFinish: () => {} })).toBe(false);
+    for (const purpose of Object.values(RunPurpose).filter((one) => one !== RunPurpose.Chat)) {
+      expect(isOperatorChat({ ...chat, purpose }), purpose).toBe(false);
+    }
+  });
+
+  it('never gives it to a read-only run, a Verification, a Fix or a Playbook step, with the switch on (Behavior 5)', async () => {
+    const daemon = await start();
+    await setSwitch(daemon, true);
+    const runtime = daemon.app.get(AgentRuntime);
+    await runtime.runFor(daemon.createSession(), 'read', null, { readOnly: true }).finished;
+    expect(networkOf(daemon)).not.toHaveProperty('allowLocalBinding');
+    for (const purpose of [RunPurpose.Verify, RunPurpose.Fix, RunPurpose.CommentPass, RunPurpose.AgentReview]) {
+      await runtime.runFor(daemon.createSession(), 'work', null, { purpose }).finished;
+      expect(networkOf(daemon), purpose).not.toHaveProperty('allowLocalBinding');
+    }
+    const id = daemon.createSession();
+    const steps = daemon.app.get(JobSteps);
+    const job = { kind: 'report', id: 'job-1' } as const;
+    const store = daemon.app.get<Store>(STORE);
+    store.db.run(sql`pragma foreign_keys = off`);
+    store.write((tx) =>
+      steps.seed(tx, job, [{ block: StepBlock.TraceLog, title: 'One', instructions: 'first', writes: false }]),
+    );
+    await steps.run({ job, sessionId: id, brief: 'brief', rules: null });
+    expect(networkOf(daemon)).not.toHaveProperty('allowLocalBinding');
+  });
+
+  it('gives a resumed conversation the switch as it is when Play is pressed (Behavior 6)', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    const stateIs = (state: string) =>
+      until(
+        async () => (await api(daemon).get(`/sessions/${id}`)).body.data.state,
+        (now) => now === state,
+        `the ${state} state`,
+      );
+    const networkFor = (prompt: string) =>
+      daemon.sdk.calls.findLast((call) => call.prompt === prompt)?.options.sandbox?.network;
+    // The run that gets stopped started with the switch off.
+    daemon.sdk.script({ wait: gate().promise });
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'long' });
+    await stateIs('working');
+    await api(daemon).post(`/sessions/${id}/stop`, {});
+    await stateIs('idle');
+    // Play reads the switch again: the resumed run has loopback though the stopped one did not.
+    await setSwitch(daemon, true);
+    expect((await api(daemon).post(`/sessions/${id}/resume`, {})).status).toBe(202);
+    await stateIs('idle');
+    await until(
+      () => networkFor('Carry on from where you stopped.'),
+      (network) => network !== undefined,
+      'the resumed run',
+    );
+    expect(networkFor('Carry on from where you stopped.')).toMatchObject({ allowLocalBinding: true });
+  });
+
+  it('keeps the value a run started with, and shows the chip only while it goes (Behavior 6, 13, 14)', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    await setSwitch(daemon, true);
+    const held = gate();
+    daemon.sdk.script({ wait: held.promise }, { text: 'Done.' });
+    expect((await api(daemon).post(`/sessions/${id}/messages`, { text: 'go' })).status).toBe(202);
+    await until(
+      async () => (await api(daemon).get(`/sessions/${id}`)).body.data.loopback,
+      (on) => on === true,
+      'the chip',
+    );
+    // The switch goes off while the run goes: this run keeps it, and the Running tray says so too.
+    await setSwitch(daemon, false);
+    expect((await api(daemon).get(`/sessions/${id}`)).body.data.loopback).toBe(true);
+    const tray = (await api(daemon).get('/agent-runs')).body.data as { session: { id: string; loopback: boolean } }[];
+    expect(tray.find((run) => run.session.id === id)?.session.loopback).toBe(true);
+    held.open();
+    await until(
+      async () => (await api(daemon).get(`/sessions/${id}`)).body.data,
+      (session) => session.state === 'idle',
+      'the run to end',
+    );
+    expect((await api(daemon).get(`/sessions/${id}`)).body.data.loopback).toBe(false);
+    expect(networkOf(daemon)).toMatchObject({ allowLocalBinding: true });
+  });
+
+  it('shows no chip on a run that started with the switch off (Behavior 13)', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    const held = gate();
+    daemon.sdk.script({ wait: held.promise }, { text: 'Done.' });
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'go' });
+    await until(
+      async () => (await api(daemon).get(`/sessions/${id}`)).body.data.state,
+      (state) => state === 'working',
+      'the run',
+    );
+    expect((await api(daemon).get(`/sessions/${id}`)).body.data.loopback).toBe(false);
+    held.open();
   });
 });

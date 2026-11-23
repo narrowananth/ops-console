@@ -1,5 +1,13 @@
 import type { WarmQuery } from '@anthropic-ai/claude-agent-sdk';
-import type { AccessMode, Part, PrAction, RunPurpose, SkillCopy, Subagent, TokenCounts } from '@ops-console/shared';
+import {
+  type AccessMode,
+  type Part,
+  type PrAction,
+  RunPurpose,
+  type SkillCopy,
+  type Subagent,
+  type TokenCounts,
+} from '@ops-console/shared';
 
 /** A run in progress. It lives in memory only: a daemon restart ends it (Behavior 18). */
 export type Run = {
@@ -84,6 +92,8 @@ export type Run = {
   resumeAt: string | null;
   /** The Network allowlist the run started with; a retry on another account keeps it. */
   networkDomains: string[];
+  /** The run's commands may start servers and reach every service on `localhost`; set when the run starts. */
+  loopback: boolean;
   /** The folders the agent's file tools may write in; set when the run starts. */
   editRoots: string[];
   /** Why the run failed, when the console can say: the Run sandbox is unavailable, or the Keychain did not answer. */
@@ -105,6 +115,17 @@ export const STOPPED = 'stopped by the operator';
 /** Why a run that did not finish failed, in the words a job shows. */
 export const failedBecause = (summary: RunSummary): string =>
   summary.stopped ? STOPPED : (summary.failure ?? 'the agent run failed');
+
+/**
+ * The operator's own chat run: a message they sent in a Session, not a job's step, a review, a reply or a PR action
+ * Session's work on pull request code. Only this run has the browser and process tools and, when the switch is on, Loopback.
+ */
+export const isOperatorChat = (run: {
+  onFinish: unknown;
+  purpose: RunPurpose;
+  readOnly: boolean;
+  prAction: PrAction | null;
+}): boolean => run.onFinish === null && run.purpose === RunPurpose.Chat && !run.readOnly && run.prAction === null;
 
 export class RunRegistry {
   private readonly runs = new Map<string, Run>();

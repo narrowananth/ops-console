@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Button } from '../components/ui/button';
 import { useAddNetworkDomain, useNetworkAllowlist, useRemoveNetworkDomain } from '../lib/queries';
 import { ascending } from '../lib/sort';
+import { Checking, ReadFailed } from './row-states';
 
 /** The hosts an agent run's commands may reach. Built-in is read-only; the operator edits Added by you. */
 export function NetworkAllowlistRow() {
@@ -41,21 +42,10 @@ export function NetworkAllowlistRow() {
         ) : (
           <strong className="flex-1">Network allowlist</strong>
         )}
-        {!list && !read.error && (
-          <span className="rounded-full bg-neutral-200 px-2 py-0.5 font-mono text-xs text-neutral-700">… checking</span>
-        )}
+        {!list && !read.error && <Checking />}
       </div>
       <span className="text-neutral-700">The only hosts an agent run's commands can reach.</span>
-      {read.error && (
-        <div className="flex items-center gap-2">
-          <span role="alert" className="text-accent-700">
-            Could not read the list
-          </span>
-          <Button className="px-3 py-1.25 text-xs" onClick={() => read.refetch()}>
-            Retry
-          </Button>
-        </div>
-      )}
+      {read.error && <ReadFailed message="Could not read the list" onRetry={() => read.refetch()} />}
       {list && open && (
         <div className="flex flex-col gap-3">
           <DomainGroup

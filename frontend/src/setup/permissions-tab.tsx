@@ -11,6 +11,7 @@ import {
   useRunSandbox,
   useStartAtLogin,
 } from '../lib/queries';
+import { LoopbackRow } from './loopback-row';
 import { NetworkAllowlistRow } from './network-allowlist-row';
 
 /** What macOS lets the console do, and what an agent run's commands can reach: one row each with where it stands. */
@@ -30,6 +31,7 @@ export function PermissionsTab() {
           <ul className="m-0 flex list-none flex-col gap-2 p-0">
             <RunSandboxRow />
             <NetworkAllowlistRow />
+            <LoopbackRow />
           </ul>
         </Card>
       </section>

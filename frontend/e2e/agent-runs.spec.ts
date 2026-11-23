@@ -762,3 +762,31 @@ test('Allow all and restart adds every host, pauses the run, waits for it to end
     { domain: 'loox.io' },
   ]);
 });
+
+test('a run going with Loopback shows a chip in the tray and on the page; one without shows none (Loopback 14)', async ({
+  page,
+}) => {
+  await routeRuns(page, [
+    run('open', {}, { loopback: true }),
+    run('shut'),
+    run(
+      'done',
+      { running: false, outcome: 'stopped', finished_at: ago(1), health: 'stopped', health_reason: 'Stopped by you.' },
+      { state: 'idle' },
+    ),
+  ]);
+  await page.goto(`${daemon.url}/agent-runs#token=${daemon.token}`);
+  await page.getByRole('tab', { name: /^All/ }).click();
+  const cards = page.locator('ul > li').filter({ has: page.getByRole('link', { name: /^Session · / }) });
+  await expect(cards).toHaveCount(3);
+  await expect(cards.filter({ hasText: 'task open' }).getByText('Loopback on')).toBeVisible();
+  await expect(cards.filter({ hasText: 'task shut' }).getByText('Loopback on')).toHaveCount(0);
+  await expect(cards.filter({ hasText: 'task done' }).getByText('Loopback on')).toHaveCount(0);
+  await expect(page.getByText('Loopback on')).toHaveCount(1);
+
+  // The Running tray in the sidebar lists the same run with the same chip.
+  await page.getByRole('button', { name: 'Running agents' }).click();
+  const tray = page.getByRole('dialog', { name: 'Agent runs' });
+  await expect(tray.getByText('Loopback on')).toHaveCount(1);
+  await expect(tray.getByText('Loopback on')).toBeVisible();
+});

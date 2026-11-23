@@ -247,6 +247,8 @@ const agentSettingsSchema = z.object({
       agent_accounts: agentAccountsSettingSchema,
       /** Optional so a daemon that does not send it yet still parses. */
       health_checks: healthChecksSettingSchema.optional(),
+      /** The Run sandbox's Loopback switch; absent from a daemon that predates it. */
+      run_sandbox_loopback: z.boolean().optional(),
     })
     .loose(),
 });
@@ -272,6 +274,7 @@ export function usePatchSettings() {
       agent_accounts?: AgentAccountsSetting;
       cliproxy?: CliProxySetting;
       health_checks?: HealthChecksSetting;
+      run_sandbox_loopback?: boolean;
     }) => apiSend('PATCH', '/settings', patch, agentSettingsSchema),
     onMutate: async (patch) => {
       await client.cancelQueries({ queryKey: queryKeys.settings });

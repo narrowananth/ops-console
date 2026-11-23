@@ -65,6 +65,7 @@ import { KEYCHAIN, type Keychain, KeychainTimeout } from '../keychain/keychain';
 import { storedEnvVar } from '../mcp/launcher';
 import { blockedHostsIn } from '../network/blocked-hosts';
 import { NetworkAllowlistService } from '../network/network-allowlist.service';
+import { RunLoopback } from '../network/run-loopback.service';
 import { PlaybooksService } from '../playbooks/playbooks.service';
 import { systemAppend } from '../playbooks/prompts';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
@@ -102,7 +103,7 @@ import {
 import { gitControl, runSandbox, worktreeGitDirs } from './run-sandbox';
 import { DEFAULT_JOB_RUN_LIMIT, RunSlots } from './run-slots';
 import { RunStepsLog } from './run-steps';
-import { type Run, RunRegistry, type RunSummary } from './runs';
+import { isOperatorChat, type Run, RunRegistry, type RunSummary } from './runs';
 import { type SessionKindHandler, SessionKinds } from './session-kinds';
 import { sessionTitle, shortTitle } from './session-title';
 import {
@@ -323,6 +324,8 @@ export type RunOptions = {
   purpose?: RunPurpose;
   /** What the agent gets in place of the message text, for a message that names a skill. */
   prompt?: string;
+  /** The agent started this turn, not the operator: the kick-off message of a Session `spawn_sessions` made. */
+  spawned?: boolean;
 };
 
 type RunResult =
@@ -397,6 +400,7 @@ export class AgentRuntime implements OnModuleDestroy {
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
     @Inject(SkillMenuService) private readonly skillMenu: SkillMenuService,
     @Inject(NetworkAllowlistService) private readonly network: NetworkAllowlistService,
+    @Inject(RunLoopback) private readonly loopback: RunLoopback,
     @Inject(RunStepsLog) private readonly steps: RunStepsLog,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
@@ -595,7 +599,7 @@ export class AgentRuntime implements OnModuleDestroy {
    * Starts a run, or answers the agent's open question. The reply streams as `session.output` under the returned
    * message id.
    */
-  send(sessionId: string, text: string, picked?: SkillRef): { message_id: string } {
+  send(sessionId: string, text: string, picked?: SkillRef, extra: RunOptions = {}): { message_id: string } {
     const session = this.sessions.get(sessionId);
     const kind = this.kinds.get(session.kind);
     if (!kind?.acceptsMessages) {
@@ -607,7 +611,7 @@ export class AgentRuntime implements OnModuleDestroy {
       return { message_id: current.messageId };
     }
     if (this.interceptors.handle(session, text)) return { message_id: crypto.randomUUID() };
-    return { message_id: this.beginMessage(session, text, picked).messageId };
+    return { message_id: this.beginMessage(session, text, picked, extra).messageId };
   }
 
   /**
@@ -818,6 +822,15 @@ export class AgentRuntime implements OnModuleDestroy {
       readOnly: options.readOnly ?? false,
       purpose: options.purpose ?? RunPurpose.Chat,
       networkDomains: this.network.forRun(),
+      loopback:
+        isOperatorChat({
+          onFinish,
+          purpose: options.purpose ?? RunPurpose.Chat,
+          readOnly: options.readOnly ?? false,
+          prAction: session.prAction,
+        }) &&
+        options.spawned !== true &&
+        this.loopback.forRun(),
       editRoots: [],
       failure: null,
       autoTitle: null,
@@ -1259,6 +1272,7 @@ export class AgentRuntime implements OnModuleDestroy {
         writable: outputFolder === null ? [] : [outputFolder],
         repos: repoFolders.map((folder) => ({ path: folder, gitFile: gitFileOf(folder) })),
         networkDomains: run.networkDomains,
+        loopback: run.loopback,
         readOnly: run.readOnly,
         gitFile: gitFileOf(run.workingDir),
         // A Session's own worktree commits into the Repo's git folder, which sits outside it.
@@ -1309,8 +1323,7 @@ export class AgentRuntime implements OnModuleDestroy {
             ? this.spawner
             : null;
         // The browser and the Session's processes: only a chat the operator started, never a job (ADR 0007).
-        const operatorChat =
-          run.onFinish === null && run.purpose === RunPurpose.Chat && !run.readOnly && run.prAction === null;
+        const operatorChat = isOperatorChat(run);
         const browser = operatorChat && this.browserTools?.offers(run.sessionId) ? this.browserTools : null;
         const processes = operatorChat && this.processTools?.offers(run.sessionId) ? this.processTools : null;
         const saver = outputFolder === null ? null : this.outputs;

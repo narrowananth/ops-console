@@ -39,6 +39,13 @@ registries of npm and Yarn, Cargo, Go, Maven, Gradle, PyPI and RubyGems), the ho
 domains the operator added. A raw IP address, a DNS lookup outside the filter and a client that ignores the proxy settings are
 refused. `WebFetch` and `WebSearch` run outside the filter, so every run denies them.
 
+A run's commands cannot start a server or reach `localhost` either. One operator switch, Loopback on Permissions, opens
+that for the runs the operator starts in a Session's chat (the SDK's `allowLocalBinding`). It is off by default, asks before
+it turns on, and never reaches a Playbook step, a Verification, a Fix, a review, a read-only run, a PR action Session's run or the first turn of a Session an agent spawned. The OS rule opens
+binding and reaching together: a run cannot be limited to its own server, so with the switch on it reaches every service on
+the Mac's `localhost` (a database tunnel, local Postgres or Redis, the CLIProxy gateway) and may listen on every address.
+The console's API still needs the session token, which a run cannot read. Unix sockets stay refused.
+
 The integration CLIs (`pup`, `gh`, `glab`, `bkt`, `slashdocs`) keep their sign-in where the sandbox hides it, so a run
 cannot use them itself. Its `run_integration` tool has the daemon run one outside the sandbox, as the operator, in the
 Session's output folder. The agent gives the CLI and an argument list; no shell runs. The console classifies the command
@@ -93,6 +100,10 @@ The agent is told never to skip a hook, and its `PreToolUse` hook refuses `--no-
   proxy, and the GitLab and Bitbucket CLIs keep short-lived tokens in the Keychain, so a run could not open a pull
   request there anyway. The console pushes and opens it in the daemon instead (Pull request opening).
 - **A Git host token handed to the run, as `GH_TOKEN` is**: `bkt` has no token export and refreshes its own OAuth token.
+- **Loopback open by default, for every run, or limited to a run's own server**: the OS rule opens every local port and a
+  listen on every address together, so "its own server only" does not exist, and a Verification or Fix reads PROD logs and
+  runs steered by log text. It lost to a switch that is off by default, asks before it turns on and reaches the operator's
+  own chat runs only.
 
 ## Consequences
 
@@ -106,6 +117,10 @@ write into the package caches, so it could poison a cached package for a later b
 reaches `api.github.com`, so a steered run can still use it there (`gh gist create`, a push to a repo it controls); no
 domain rule stops that. The Connectors' API hosts are on every run's list, so a steered run can send out what it reads to Datadog, Slack, Sentry or Atlassian too, but only to their API hosts, never their ingest or webhook hosts. A command to any other host fails with the host named in its result, and the run goes on. The
 operator adds the host in Permissions and the next run has it.
+
+With Loopback on, a chat run steered by text it read can reach any service on the Mac's `localhost` that needs no secret a
+run cannot read, such as a database tunnel to PROD, and can start a server that others on the network may reach. The
+closed default and the confirm are the guard; the console does not filter ports.
 
 The sandbox blocks the login Keychain, so `gh` signs in through that token in place of its Keychain item, and
 `enableWeakerNetworkIsolation` lets Go programs check certificates through macOS's trust service. `pup` keeps its
