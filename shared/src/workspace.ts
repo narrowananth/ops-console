@@ -227,6 +227,8 @@ export enum ThreadOutcome {
   Pending = 'pending',
   /** Address comments. */
   Done = 'done',
+  /** Address comments: no change needed, the code already settles it. */
+  AlreadyAddressed = 'already_addressed',
   Declined = 'declined',
   /** Check replies: the reply's claim holds, holds in part, or does not. */
   Fixed = 'fixed',

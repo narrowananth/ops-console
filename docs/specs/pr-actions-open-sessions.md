@@ -42,7 +42,7 @@ A normal Session has none of these limits. The operator wants the three buttons 
 
 ### Address comments
 
-18. `submit_thread_results` gives each ticked thread an outcome, done or declined, with a reply. A declined thread's reply gives the reason: the agent disagrees, or the comment is unclear.
+18. `submit_thread_results` gives each ticked thread an outcome, done, already_addressed or declined, with a reply. The console resolves done and already_addressed threads, and starts only a done reply with the new commit. A declined thread's reply gives the reason: the agent disagrees, or the comment is unclear.
 19. The console commits any uncommitted change in the worktree as one commit, `Address review comments on #<n>` followed by one line per done thread, `- <file>:<line>`, or `- <author>'s comment on the pull request` for a general comment. The commit skips the Repo's git hooks, since the worktree has no installed packages for them. Commits the agent made itself stay as they are. The console then pushes `HEAD` to the pull request's branch without force, with an Action Log row before the push.
 20. After the push the console posts each reply in its thread as the agent, and a done reply names the short commit sha. It resolves each done thread on a line or a file. A general comment gets its reply and stays open, since the hosts have no thread to resolve there. Declined threads stay open.
 21. A call that leaves the worktree as it was, or declines every thread, pushes nothing, posts the replies and submits the Session.
