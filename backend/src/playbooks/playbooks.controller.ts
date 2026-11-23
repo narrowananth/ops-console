@@ -15,7 +15,7 @@ import { PlaybooksService } from './playbooks.service';
 const idParams = z.object({ id: z.string().min(1) });
 const triggerParams = z.object({ trigger: z.enum(PlaybookTrigger) });
 const jobParams = z.object({
-  kind: z.enum(['report', 'fix', 'agent_review', 'reply_check', 'comment_pass']),
+  kind: z.enum(['report', 'fix']),
   id: z.string().min(1),
 });
 

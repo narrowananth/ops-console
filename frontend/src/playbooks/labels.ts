@@ -4,6 +4,7 @@ import {
   PLAYBOOK_TRIGGERS,
   type Playbook,
   PlaybookTrigger,
+  PR_ACTION_TRIGGERS,
   TRIGGER_LABELS,
 } from '@ops-console/shared';
 
@@ -14,11 +15,11 @@ export const TRIGGER_TIPS: Record<PlaybookTrigger, string> = {
   [PlaybookTrigger.Fix]:
     'Fix on a Monitor Alert, after you confirm its Report. The agent changes the code on a new branch, pushes it and opens a PR.',
   [PlaybookTrigger.ReviewPr]:
-    'Agent Review on a pull request. The agent posts each finding on its line, then one comment with the verdict and report.',
+    'Review with agent on a pull request. It opens a Session; the agent reviews, and the console posts each finding on its line, then one comment with the verdict and report.',
   [PlaybookTrigger.CheckReply]:
-    'Check reply on a pull request thread. The agent reads the code at the head commit and replies fixed, partly fixed or not fixed.',
+    'Check replies on a pull request. It opens a Session; the agent reads the code at the head commit and gives each reply a verdict: fixed, partly fixed or not fixed.',
   [PlaybookTrigger.AddressComments]:
-    'Address comments on the threads you tick. The agent pushes one commit to the pull request branch and replies in each thread.',
+    'Address comments on the threads you tick. It opens a Session; the agent makes the changes, and the console pushes one commit to the pull request branch and replies in each thread.',
   [PlaybookTrigger.ThreadReply]:
     'Each question you ask the agent in a pull request thread. It answers in the thread and changes no code. Rules only; steps never run.',
   [PlaybookTrigger.SessionMessage]:
@@ -57,18 +58,25 @@ export function freeName(base: string, items: Playbook[]): string {
   }
 }
 
-/** What the console does itself after the last step, per job Trigger. */
+/** What the console does itself after the last step, per job Trigger. A PR action Session has no closing turn. */
 export const CLOSING_TURN: Partial<Record<PlaybookTrigger, string>> = {
   [PlaybookTrigger.Verify]: 'write the Report',
   [PlaybookTrigger.Fix]: 'commit, push and open the PR',
-  [PlaybookTrigger.ReviewPr]: 'write findings, checklist and verdict',
-  [PlaybookTrigger.CheckReply]: 'give the verdict and the reply',
-  [PlaybookTrigger.AddressComments]: 'report each thread done or declined',
 };
+
+/** What a Trigger starts: a job (a turn per step), a PR action Session (the steps in one prompt) or a chat. */
+export type TriggerKind = 'job' | 'session' | 'chat';
+
+export const triggerKind = (trigger: PlaybookTrigger): TriggerKind =>
+  JOB_TRIGGERS.includes(trigger) ? 'job' : PR_ACTION_TRIGGERS.includes(trigger) ? 'session' : 'chat';
 
 /** Held only by chats, which use the rules and never run steps. */
 export const chatOnly = (triggers: PlaybookTrigger[]) =>
-  triggers.length > 0 && triggers.every((trigger) => !JOB_TRIGGERS.includes(trigger));
+  triggers.length > 0 && triggers.every((trigger) => triggerKind(trigger) === 'chat');
+
+/** The "scratch copy" tag means something only for a job: a Playbook held by none, or by a job Trigger. */
+export const scratchApplies = (triggers: PlaybookTrigger[]) =>
+  triggers.length === 0 || triggers.some((trigger) => triggerKind(trigger) === 'job');
 
 /** The tabs that hold Triggers, in page order, each with its Triggers. */
 export const TRIGGER_GROUPS: { tab: string; triggers: PlaybookTrigger[] }[] = [

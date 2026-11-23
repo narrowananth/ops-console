@@ -1,6 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import {
-  type CommentPass,
   type CommittedSession,
   checkoutSchema,
   commitSessionSchema,
@@ -16,26 +15,21 @@ import {
   prFileQuerySchema,
   pullRequestDraftRequestSchema,
   pullRequestQuerySchema,
-  type ReplyCheck,
   refreshPullRequestsSchema,
   resolveCommentSchema,
-  retryJobSchema,
   reviewPullRequestSchema,
   type Session,
   type SessionDiff,
   type SessionPullRequest,
-  startAgentReviewSchema,
-  startCommentPassSchema,
-  startReplyCheckSchema,
+  startPrActionSchema,
 } from '@ops-console/shared';
 import type { Response } from 'express';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
 import { AgentReviewsService } from './agent-reviews.service';
-import { CommentPassesService } from './comment-passes.service';
+import { PrActionsService } from './pr-actions.service';
 import { PullRequestOpeningService } from './pull-request-opening.service';
 import { PullRequestsService } from './pull-requests.service';
-import { ReplyChecksService } from './reply-checks.service';
 import { WorkspaceSessionsService } from './workspace-sessions.service';
 
 const sessionParams = z.object({ id: z.string().min(1) });
@@ -128,8 +122,7 @@ export class PullRequestsController {
   constructor(
     @Inject(PullRequestsService) private readonly pulls: PullRequestsService,
     @Inject(AgentReviewsService) private readonly reviews: AgentReviewsService,
-    @Inject(ReplyChecksService) private readonly checks: ReplyChecksService,
-    @Inject(CommentPassesService) private readonly passes: CommentPassesService,
+    @Inject(PrActionsService) private readonly actions: PrActionsService,
   ) {}
 
   @Get('pull-requests')
@@ -194,65 +187,18 @@ export class PullRequestsController {
     return { data: await this.pulls.merge(repo, number) };
   }
 
-  @Post('repos/:repo/pull-requests/:number/agent-reviews')
-  @HttpCode(202)
-  async startReview(@Param() params: unknown, @Body() body: unknown): Promise<{ data: PrAgentReview }> {
+  /** Address comments, Check replies and Review with agent: each opens a PR action Session. */
+  @Post('repos/:repo/pull-requests/:number/action-sessions')
+  @HttpCode(201)
+  async startAction(@Param() params: unknown, @Body() body: unknown): Promise<{ data: Session }> {
     const { repo, number } = parseInput(pullParams, params, 'params');
-    const { note } = parseInput(startAgentReviewSchema, body ?? {}, 'body');
-    return { data: await this.reviews.start(repo, number, note) };
+    const input = parseInput(startPrActionSchema, body, 'body');
+    return { data: await this.actions.start(repo, number, input) };
   }
 
   @Get('repos/:repo/pull-requests/:number/agent-reviews')
   async listReviews(@Param() params: unknown): Promise<{ data: PrAgentReview[]; meta: { next_cursor: null } }> {
     const { repo, number } = parseInput(pullParams, params, 'params');
     return { data: await this.reviews.list(repo, number), meta: { next_cursor: null } };
-  }
-
-  @Post('agent-reviews/:id/retry')
-  @HttpCode(202)
-  async retryReview(@Param() params: unknown, @Body() body: unknown): Promise<{ data: PrAgentReview }> {
-    const { id } = parseInput(sessionParams, params, 'params');
-    const { skip } = parseInput(retryJobSchema, body ?? {}, 'body');
-    return { data: await this.reviews.retry(id, skip) };
-  }
-
-  @Post('repos/:repo/pull-requests/:number/reply-checks')
-  @HttpCode(202)
-  async startReplyCheck(@Param() params: unknown, @Body() body: unknown): Promise<{ data: ReplyCheck }> {
-    const { repo, number } = parseInput(pullParams, params, 'params');
-    const { comment_id } = parseInput(startReplyCheckSchema, body, 'body');
-    return { data: await this.checks.start(repo, number, comment_id) };
-  }
-
-  @Post('reply-checks/:id/retry')
-  @HttpCode(202)
-  async retryReplyCheck(@Param() params: unknown, @Body() body: unknown): Promise<{ data: ReplyCheck }> {
-    const { id } = parseInput(sessionParams, params, 'params');
-    const { skip } = parseInput(retryJobSchema, body ?? {}, 'body');
-    return { data: await this.checks.retry(id, skip) };
-  }
-
-  @Post('repos/:repo/pull-requests/:number/comment-passes')
-  @HttpCode(202)
-  async startCommentPass(@Param() params: unknown, @Body() body: unknown): Promise<{ data: CommentPass }> {
-    const { repo, number } = parseInput(pullParams, params, 'params');
-    const { comment_ids } = parseInput(startCommentPassSchema, body, 'body');
-    return { data: await this.passes.start(repo, number, comment_ids) };
-  }
-
-  /** Check replies: every replied thread at once. */
-  @Post('repos/:repo/pull-requests/:number/reply-check-passes')
-  @HttpCode(202)
-  async startCheckReplies(@Param() params: unknown): Promise<{ data: CommentPass }> {
-    const { repo, number } = parseInput(pullParams, params, 'params');
-    return { data: await this.passes.startCheck(repo, number) };
-  }
-
-  @Post('comment-passes/:id/retry')
-  @HttpCode(202)
-  async retryCommentPass(@Param() params: unknown, @Body() body: unknown): Promise<{ data: CommentPass }> {
-    const { id } = parseInput(sessionParams, params, 'params');
-    const { skip } = parseInput(retryJobSchema, body ?? {}, 'body');
-    return { data: await this.passes.retry(id, skip) };
   }
 }

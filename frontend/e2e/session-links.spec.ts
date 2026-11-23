@@ -31,6 +31,7 @@ const session = (id: string, extra: Record<string, unknown> = {}) => ({
   repo_id: 'r1',
   branch: 'fix/empty-cart',
   pr_number: null,
+  pr_action: null,
   connection_ids: null,
   extra_repo_ids: [],
   pull_request: null,
@@ -99,7 +100,7 @@ async function routeWorkspace(page: Page, all: unknown[] = [session('s1')]) {
   await page.route('**/api/repos/r1/pull-requests/7', (route) =>
     route.fulfill({
       json: {
-        data: { ...PR, files: [], comments: [], reply_checks: [], comment_passes: [], commits: [], conflicts: null },
+        data: { ...PR, files: [], comments: [], action_sessions: [], commits: [], conflicts: null },
       },
     }),
   );

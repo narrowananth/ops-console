@@ -25,13 +25,10 @@ import { parseSkillCopies } from './skills.service';
 const PURPOSE: Record<JobRef['kind'], RunPurpose> = {
   report: RunPurpose.Verify,
   fix: RunPurpose.Fix,
-  agent_review: RunPurpose.AgentReview,
-  reply_check: RunPurpose.ReplyCheck,
-  comment_pass: RunPurpose.CommentPass,
 };
 
 /** The job a step belongs to. */
-export type JobRef = { kind: 'report' | 'fix' | 'agent_review' | 'reply_check' | 'comment_pass'; id: string };
+export type JobRef = { kind: 'report' | 'fix'; id: string };
 
 type StepRow = typeof playbookSteps.$inferSelect;
 
@@ -46,17 +43,11 @@ export const SKIPPED_WHILE_RUNNING = 'Skipped by the operator while it ran';
 const COLUMN = {
   report: playbookSteps.reportId,
   fix: playbookSteps.fixId,
-  agent_review: playbookSteps.agentReviewId,
-  reply_check: playbookSteps.replyCheckId,
-  comment_pass: playbookSteps.commentPassId,
 } as const;
 
 const KEY = {
   report: 'reportId',
   fix: 'fixId',
-  agent_review: 'agentReviewId',
-  reply_check: 'replyCheckId',
-  comment_pass: 'commentPassId',
 } as const;
 
 type Db = Store['db'];
@@ -293,9 +284,6 @@ export class JobSteps {
     emit('playbook_step.updated', {
       report_id: row.reportId,
       fix_id: row.fixId,
-      agent_review_id: row.agentReviewId,
-      reply_check_id: row.replyCheckId,
-      comment_pass_id: row.commentPassId,
       position: row.position,
       status: row.status,
       summary: row.summary,

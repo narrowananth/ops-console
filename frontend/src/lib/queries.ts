@@ -29,7 +29,6 @@ import {
   checkoutResultSchema,
   claudeAccountSchema,
   cliProxySchema,
-  commentPassSchema,
   committedSessionSchema,
   connectionCheckSchema,
   connectionListSchema,
@@ -74,7 +73,6 @@ import {
   pickableListSchema,
   playbookListSchema,
   playbookSchema,
-  prAgentReviewSchema,
   prCommentSchema,
   prFileContentSchema,
   pullRequestDetailSchema,
@@ -84,7 +82,6 @@ import {
   type RemovedRepoSessions,
   type Repo,
   type ReviewAlert,
-  replyCheckSchema,
   repoListSchema,
   reportSchema,
   repoSchema,
@@ -100,6 +97,7 @@ import {
   SignInVia,
   type SkillPatch,
   type SkillRef,
+  type StartPrAction,
   savedNetworkDomainSchema,
   scanSchema,
   scriptsSchema,
@@ -1565,90 +1563,21 @@ export function useMergePullRequest(repoId: string, number: number) {
   });
 }
 
-export function useStartAgentReview(repoId: string, number: number) {
+/** Starts a PR action Session: Address comments, Check replies or Review with agent. Returns the new Session. */
+export function useStartPrAction(repoId: string, number: number) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (note?: string) =>
+    mutationFn: (input: StartPrAction) =>
       apiSend(
         'POST',
-        `/repos/${repoId}/pull-requests/${number}/agent-reviews`,
-        note ? { note } : undefined,
-        z.object({ data: prAgentReviewSchema }),
-      ),
-    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pulls }),
-  });
-}
-
-export function useStartReplyCheck(repoId: string, number: number) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (commentId: string) =>
-      apiSend(
-        'POST',
-        `/repos/${repoId}/pull-requests/${number}/reply-checks`,
-        { comment_id: commentId },
-        z.object({ data: replyCheckSchema }),
-      ),
-    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
-  });
-}
-
-/** A failed job's retry; `skip` passes over its failed step first. */
-type JobRetry = { id: string; skip?: boolean };
-
-export function useRetryReplyCheck(repoId: string, number: number) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, skip = false }: JobRetry) =>
-      apiSend('POST', `/reply-checks/${id}/retry`, { skip }, z.object({ data: replyCheckSchema })),
-    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
-  });
-}
-
-/** Check replies: one run over every replied thread. */
-export function useCheckReplies(repoId: string, number: number) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: () =>
-      apiSend(
-        'POST',
-        `/repos/${repoId}/pull-requests/${number}/reply-check-passes`,
-        undefined,
-        z.object({ data: commentPassSchema }),
-      ),
-    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
-  });
-}
-
-export function useStartCommentPass(repoId: string, number: number) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (commentIds: string[]) =>
-      apiSend(
-        'POST',
-        `/repos/${repoId}/pull-requests/${number}/comment-passes`,
-        { comment_ids: commentIds },
-        z.object({ data: commentPassSchema }),
-      ),
-    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
-  });
-}
-
-export function useRetryCommentPass(repoId: string, number: number) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, skip = false }: JobRetry) =>
-      apiSend('POST', `/comment-passes/${id}/retry`, { skip }, z.object({ data: commentPassSchema })),
-    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
-  });
-}
-
-export function useRetryAgentReview(repoId: string, number: number) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, skip = false }: JobRetry) =>
-      apiSend('POST', `/agent-reviews/${id}/retry`, { skip }, z.object({ data: prAgentReviewSchema })),
-    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) }),
+        `/repos/${repoId}/pull-requests/${number}/action-sessions`,
+        input,
+        z.object({ data: sessionSchema }),
+      ).then((body) => body.data),
+    onSuccess: (session) => {
+      addSession(client, session);
+      void client.invalidateQueries({ queryKey: queryKeys.pullRequest(repoId, number) });
+    },
   });
 }
 
@@ -1846,7 +1775,7 @@ export function useUndoDismissal(id: string) {
 }
 
 /** The kinds of job whose Playbook steps run one turn each. */
-export type StepJob = 'report' | 'fix' | 'agent_review' | 'reply_check' | 'comment_pass';
+export type StepJob = 'report' | 'fix';
 
 /** Skips the job's running step: its turn stops and the job goes on; `playbook_step.updated` brings the change. */
 export function useSkipRunningStep(kind: StepJob, id: string) {
@@ -1854,6 +1783,9 @@ export function useSkipRunningStep(kind: StepJob, id: string) {
     mutationFn: () => apiSend('POST', `/jobs/${kind}/${id}/skip-step`, undefined, z.undefined()),
   });
 }
+
+/** A failed job's retry; `skip` passes over its failed step first. */
+type JobRetry = { id: string; skip?: boolean };
 
 export function useRetryReport() {
   const client = useQueryClient();

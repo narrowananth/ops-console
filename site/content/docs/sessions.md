@@ -33,6 +33,6 @@ A write to a PROD Connection asks in every mode. When the agent asks, you get an
 
 ## Pull request review
 
-On any open pull request, yours or a teammate's, you can start an Agent Review. The agent reads it and compares it with the target branch, and may run the tests in a scratch copy. The console posts the findings and one summary comment, and the agent never posts.
+On any open pull request, yours or a teammate's, you can start a review with Review with agent. It opens a Session in a worktree at the pull request's head commit, where the agent reads the pull request, compares it with the target branch and may run the tests. You can talk to it while it works. When it is done, the console posts the findings and one summary comment, and the agent never posts. Check replies works the same way: the agent checks each replied thread against the code, and the console posts its verdicts and resolves the fixed threads.
 
-Address comments starts a Comment pass: the agent changes code in a scratch copy for the review comments you ticked, and the console commits and pushes that one branch, never with force. The pull request page lists the Merge checks. Merge stays off until a reviewer approved and while the branch conflicts with its base. Merging is always your button.
+Address comments opens a Session where the agent changes code for the review comments you ticked, and you can steer it in the chat. When it reports each thread done or declined, the console commits and pushes that one branch, never with force, posts the replies and resolves the done threads. The pull request page lists the Merge checks. Merge stays off until a reviewer approved and while the branch conflicts with its base. Merging is always your button.

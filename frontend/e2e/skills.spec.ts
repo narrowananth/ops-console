@@ -3,7 +3,6 @@ import { type APIRequestContext, expect, type Page, test } from '@playwright/tes
 import { DAEMON_FILE } from './global-setup';
 
 const daemon: { url: string; token: string } = JSON.parse(readFileSync(DAEMON_FILE, 'utf8'));
-const NOW = '2026-11-01T09:00:00.000Z';
 const auth = { Authorization: `Bearer ${daemon.token}` };
 const api = (path: string) => `${daemon.url}/api${path}`;
 
@@ -260,85 +259,6 @@ test('a built-in Playbook holds no Skills', async ({ page, request }) => {
   await card.click();
   await expect(skills).toContainText('A built-in Playbook holds no Skills.');
   await expect(skills.getByRole('button', { name: /Add a Skill/ })).toHaveCount(0);
-});
-
-test('an Agent Review card lists the Skills it was offered; a deleted one is plain text', async ({ page }) => {
-  await page.route('**/api/playbooks', (route) => route.fulfill({ json: { data: { items: [], blocks: [] } } }));
-  await page.route('**/api/repos/r1/pull-requests/7', (route) =>
-    route.fulfill({
-      json: {
-        data: {
-          repo_id: 'r1',
-          host: 'github',
-          slug: 'example/checkout-api',
-          number: 7,
-          url: 'https://github.com/example/checkout-api/pull/7',
-          title: 'Guard empty carts',
-          author: 'someone',
-          branch: 'fix/empty-cart',
-          base_branch: 'main',
-          head_sha: '9c1e4b7d00000000000000000000000000000000',
-          state: 'open',
-          review_state: 'none',
-          approved_by: [],
-          checks: 'passed',
-          additions: 3,
-          deletions: 1,
-          body: '',
-          opened_at: NOW,
-          merged_at: null,
-          is_mine: true,
-          by_agent: false,
-          comment_count: 0,
-          resolved_count: 0,
-          agent_session_id: null,
-          latest_agent_review: {
-            id: 'ar1',
-            repo_id: 'r1',
-            pr_number: 7,
-            head_sha: '9c1e4b7d00000000000000000000000000000000',
-            status: 'ready',
-            decision: null,
-            verdict: null,
-            base_branch: null,
-            base_sha: null,
-            report: null,
-            error: null,
-            findings: [],
-            checklist: [],
-            tools: [],
-            created_at: NOW,
-            started_at: NOW,
-            finished_at: NOW,
-            stale: false,
-            note: null,
-            playbook: {
-              id: 'pb-prod',
-              name: 'PROD readiness',
-              skills: [
-                { id: 'sk1', name: 'systematic-debugging' },
-                { id: null, name: 'old-method' },
-              ],
-              steps: [],
-            },
-          },
-          files: [],
-          comments: [],
-          reply_checks: [],
-          comment_passes: [],
-          commits: [],
-          conflicts: null,
-        },
-      },
-    }),
-  );
-  await page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1/7#token=${daemon.token}`);
-
-  const card = page.getByRole('region', { name: 'Agent Review' });
-  await expect(card).toContainText('Skills offered:');
-  await expect(card.getByRole('link', { name: 'systematic-debugging' })).toHaveAttribute('href', '/skills?skill=sk1');
-  await expect(card.getByText('old-method', { exact: true })).toBeVisible();
-  await expect(card.getByRole('link', { name: 'old-method' })).toHaveCount(0);
 });
 
 test('a paste over 5,000 characters is refused with an error, and a shorter one goes in', async ({ page, request }) => {

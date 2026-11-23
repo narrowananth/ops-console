@@ -6,8 +6,6 @@ import { Markdown } from '../components/ui/markdown';
 import { useDeleteComment, usePostComment, useResolveComment } from '../lib/queries';
 import { useStored } from '../lib/remember';
 
-import { ReplyCheckStrip } from './reply-check-strip';
-
 /**
  * A box to write a comment in. ⌘/Ctrl+Enter sends it. `onCancel` adds a Cancel button, for a box opened on a line.
  */
@@ -152,8 +150,7 @@ function CommentMenu({ comment, onDelete, pending }: { comment: PrComment; onDel
 }
 
 /**
- * One comment thread: its comments, Resolve for a thread on a line, ⋯ to delete your own, the
- * thread's running or failed Reply check, and a reply box.
+ * One comment thread: its comments, Resolve for a thread on a line, ⋯ to delete your own, and a reply box.
  */
 export function Thread({
   pr,
@@ -172,7 +169,6 @@ export function Thread({
   const [replying, setReplying] = useStored(`workspace.replying.${repoId}#${number}.${root.id}`, z.boolean(), false);
   const replies = pr.comments.filter((comment) => comment.parent_id === root.id);
   const inline = root.file_path !== null;
-  const check = pr.reply_checks.find((item) => item.comment_id === root.id);
   const error = resolve.error ?? remove.error;
   return (
     <div
@@ -230,7 +226,6 @@ export function Thread({
           <Markdown source={comment.body} className="mt-1.5" />
         </div>
       ))}
-      {check && <ReplyCheckStrip check={check} sessionId={pr.agent_session_id} />}
       <div className="border-t border-line bg-surface px-3 py-2">
         {replying ? (
           <CommentComposer

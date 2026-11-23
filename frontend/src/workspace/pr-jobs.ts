@@ -1,20 +1,31 @@
-import { AgentReviewStatus, type PrComment, type PullRequestDetail } from '@ops-console/shared';
+import { PrAction, PrActionState, type PrComment, type PullRequestDetail } from '@ops-console/shared';
 
-export const BUSY_TITLE = 'The agent is working on this PR';
+export const BUSY_TITLE = 'A Session is already working on this';
 
-/** Hover tips on the pull request's agent buttons: what the agent does when the operator presses one. */
+/** Hover tips on the pull request's agent buttons: what opens when the operator presses one. */
 export const AGENT_REVIEW_TIP =
-  'The agent follows the Review PR Playbook in a Scratch copy at the newest commit, compares the change with the target branch and may run the tests. It posts each finding on its line on the Git host, then one comment with the verdict.';
+  'Opens a Session at the newest commit. The agent follows the Review PR Playbook, compares the change with the target branch and may run the tests. The console posts each finding on its line on the Git host, then one comment with the verdict.';
 export const ADDRESS_TIP =
-  "Pick open threads, yours or a teammate's. The agent makes the changes they ask for, pushes one commit to this branch, replies in each thread and resolves the ones it did.";
+  "Pick open threads, yours or a teammate's. Opens a Session where the agent makes the changes they ask for. The console pushes one commit to this branch, replies in each thread and resolves the ones the agent did.";
 export const CHECK_REPLIES_TIP =
-  'The agent checks every open thread that has a reply, in one run, against the code at the newest commit. It replies fixed, partly fixed or not fixed in each, and resolves the fixed ones. It changes no code.';
+  'Opens a Session where the agent checks every open thread that has a reply against the code at the newest commit. The console posts fixed, partly fixed or not fixed in each, and resolves the fixed ones. Nothing is committed.';
 
-/** An Agent Review, a Reply check or a Comment pass runs: the pull request's Session takes one at a time. */
-export const agentBusy = (pr: PullRequestDetail) =>
-  pr.latest_agent_review?.status === AgentReviewStatus.Running ||
-  pr.reply_checks.some((check) => check.status === AgentReviewStatus.Running) ||
-  pr.comment_passes.some((pass) => pass.status === AgentReviewStatus.Running);
+/** How each PR action reads on a button and in the Sessions rail. */
+export const ACTION_LABEL: Record<PrAction, string> = {
+  [PrAction.AddressComments]: 'Address comments',
+  [PrAction.CheckReplies]: 'Check replies',
+  [PrAction.Review]: 'Agent Review',
+};
+
+export const ACTION_STATE_LABEL: Record<PrActionState, string> = {
+  [PrActionState.Working]: 'working',
+  [PrActionState.NotSubmitted]: 'not submitted',
+  [PrActionState.Submitted]: 'submitted',
+};
+
+/** A PR action Session of this action is not submitted yet: its button waits until it posts or the Session is deleted. */
+export const actionOpen = (pr: PullRequestDetail, action: PrAction) =>
+  pr.action_sessions.some((session) => session.action === action && session.state !== PrActionState.Submitted);
 
 /** The unresolved threads, by their first comment, on a line, a file or the pull request: what Address comments can work on. */
 export const openThreads = (pr: PullRequestDetail) =>
@@ -37,3 +48,14 @@ export const lastOf = (root: PrComment, replies: PrComment[]) =>
 
 /** The first line of a comment, for a list that names it. */
 export const firstLine = (body: string) => body.trim().split('\n')[0] ?? '';
+
+/** The commit's page on the host, from the pull request's own URL; null for a host whose URLs it does not know. */
+export function commitUrl(prUrl: string, sha: string): string | null {
+  const at: [RegExp, string][] = [
+    [/\/pull\/\d+$/, `/commit/${sha}`],
+    [/\/-\/merge_requests\/\d+$/, `/-/commit/${sha}`],
+    [/\/pull-requests\/\d+$/, `/commits/${sha}`],
+  ];
+  for (const [pattern, path] of at) if (pattern.test(prUrl)) return prUrl.replace(pattern, path);
+  return null;
+}

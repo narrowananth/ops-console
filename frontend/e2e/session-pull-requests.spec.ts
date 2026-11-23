@@ -31,6 +31,7 @@ const SESSION = {
   repo_id: 'r1',
   branch: 'fix/retry-5',
   pr_number: null,
+  pr_action: null,
   connection_ids: null,
   extra_repo_ids: [],
   pull_request: null,

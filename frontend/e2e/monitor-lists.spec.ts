@@ -205,6 +205,7 @@ test('a pull request row says how long ago it opened, and a Session row how long
           repo_id: 'r1',
           branch: 'main',
           pr_number: null,
+          pr_action: null,
           connection_ids: null,
           extra_repo_ids: [],
           pull_request: null,

@@ -24,7 +24,7 @@ src/
 ├── playbooks/          # Playbooks, Step blocks, built-ins, job steps
 ├── accounts/           # Claude accounts, usage, Auto-switch, Smart usage, CLIProxy
 ├── action-log/         # Action Log, Approvals, redaction
-├── workspace/          # pull requests, Agent Reviews, Reply checks, Comment passes
+├── workspace/          # pull requests, PR action Sessions, Agent Reviews
 ├── monitor/            # Services, Scans, Alerts, Verification, Fix
 ├── devtools/           # devtools Sessions scoped to Connections
 ├── terminals/          # node-pty terminals, the Setup agent

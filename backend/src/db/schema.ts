@@ -4,7 +4,6 @@ import {
   type ActionActor,
   type ActionKind,
   ActionOutcome,
-  type AgentReviewStatus,
   type AlertActor,
   type AlertEventKind,
   type AlertSource,
@@ -12,7 +11,6 @@ import {
   type ApprovalKind,
   ApprovalStatus,
   type CheckInterval,
-  type CommentPassKind,
   type ConnectionEnv,
   type ConnectionType,
   type ConnectorId,
@@ -27,7 +25,7 @@ import {
   type Model,
   type PlaybookStepStatus,
   type PlaybookTrigger,
-  type ReplyVerdict,
+  type PrAction,
   type ReportKind,
   type ReviewDecision,
   type ReviewVerdict,
@@ -126,6 +124,16 @@ export const sessions = sqliteTable(
     repoId: text('repo_id').references((): AnySQLiteColumn => repos.id, { onDelete: 'restrict' }),
     branch: text(),
     prNumber: integer('pr_number'),
+    /** The button a PR action Session was opened from; null for any other Session. */
+    prAction: text('pr_action').$type<PrAction>(),
+    /** The commit its worktree was made at: the pull request's head then. */
+    prActionHeadSha: text('pr_action_head_sha'),
+    /** JSON of each thread's outcome and what is posted for it, for Address comments and Check replies; for a review, the note and the baseline it compared with. */
+    prActionThreads: text('pr_action_threads'),
+    /** The commit the push made; null before, and when nothing was committed. */
+    prActionCommitSha: text('pr_action_commit_sha'),
+    /** Set once the tool call has posted everything. */
+    prActionSubmittedAt: text('pr_action_submitted_at'),
     /** JSON array of the other Repos' ids the operator opened to this Session's agent; null for none. */
     extraRepoIds: text('extra_repo_ids'),
     /** JSON array of the integration CLIs whose writes the operator stopped being asked about in this Session; null for none. */
@@ -162,6 +170,14 @@ export const sessions = sqliteTable(
     index('sessions_run_outcome_idx').on(table.runOutcome),
     index('sessions_active_idx').on(sql`${table.lastActiveAt} DESC`),
     index('sessions_repo_idx').on(table.repoId, sql`${table.lastActiveAt} DESC`),
+    uniqueIndex('sessions_one_open_pr_action_idx')
+      .on(table.repoId, table.prNumber, table.prAction)
+      .where(sql`${table.prAction} IS NOT NULL AND ${table.prActionSubmittedAt} IS NULL`),
+    check('sessions_pr_action', sql`${table.prAction} IN ('address_comments', 'check_replies', 'review')`),
+    check(
+      'sessions_pr_action_threads_json',
+      sql`${table.prActionThreads} IS NULL OR json_valid(${table.prActionThreads})`,
+    ),
     uniqueIndex('sessions_one_pr_review_idx').on(table.repoId, table.prNumber).where(sql`${table.kind} = 'pr_review'`),
   ],
 );
@@ -410,7 +426,7 @@ export const networkDomains = sqliteTable('network_domains', {
   createdAt: text('created_at').notNull().default(nowIso),
 });
 
-/** The agent's written review of a pull request, tied to the commit it read. */
+/** The agent's submitted review of a pull request, tied to the commit it read. Written once `submit_review` succeeds. */
 export const prAgentReviews = sqliteTable(
   'pr_agent_reviews',
   {
@@ -420,10 +436,7 @@ export const prAgentReviews = sqliteTable(
       .references(() => repos.id, { onDelete: 'cascade' }),
     prNumber: integer('pr_number').notNull(),
     headSha: text('head_sha').notNull(),
-    status: text()
-      .$type<AgentReviewStatus>()
-      .notNull()
-      .default('running' as AgentReviewStatus),
+    sessionId: text('session_id').references((): AnySQLiteColumn => sessions.id, { onDelete: 'set null' }),
     decision: text().$type<ReviewVerdict>(),
     verdict: text(),
     /** The production branch the change was compared with, and its commit then. */
@@ -433,103 +446,12 @@ export const prAgentReviews = sqliteTable(
     note: text(),
     /** The full review as Markdown. */
     report: text(),
-    /** Why a failed review stopped, for the operator. */
-    error: text(),
     findings: text().notNull().default('[]'),
-    checklist: text().notNull().default('[]'),
-    tools: text().notNull().default('[]'),
     createdAt: text('created_at').notNull().default(nowIso),
-    /** When the latest attempt began: a retry starts the clock again. Null until the first retry: then `created_at`. */
-    startedAt: text('started_at'),
-    finishedAt: text('finished_at'),
-    ...jobPlaybookColumns(),
   },
   (table) => [
     index('pr_agent_reviews_pr_idx').on(table.repoId, table.prNumber, sql`${table.createdAt} DESC`),
     check('pr_agent_reviews_findings_json', sql`json_valid(${table.findings})`),
-    check('pr_agent_reviews_checklist_json', sql`json_valid(${table.checklist})`),
-    check('pr_agent_reviews_tools_json', sql`json_valid(${table.tools})`),
-  ],
-);
-
-/** One Reply check: the agent's verdict on one pull request thread. */
-export const prReplyChecks = sqliteTable(
-  'pr_reply_checks',
-  {
-    id: text().primaryKey().notNull(),
-    repoId: text('repo_id')
-      .notNull()
-      .references(() => repos.id, { onDelete: 'cascade' }),
-    prNumber: integer('pr_number').notNull(),
-    /** The thread's root comment on the Git host. */
-    commentId: text('comment_id').notNull(),
-    headSha: text('head_sha').notNull(),
-    status: text()
-      .$type<AgentReviewStatus>()
-      .notNull()
-      .default('running' as AgentReviewStatus),
-    verdict: text().$type<ReplyVerdict>(),
-    reply: text(),
-    /** Set once the reply is on the host; a retry does not post it again. */
-    replyCommentId: text('reply_comment_id'),
-    resolved: bool('resolved').notNull().default(false),
-    error: text(),
-    canRetry: bool('can_retry').notNull().default(false),
-    /** The scratch copy's folder; null once removed. */
-    scratchPath: text('scratch_path'),
-    createdAt: text('created_at').notNull().default(nowIso),
-    /** When the latest attempt began: a retry starts the clock again. Null until the first retry: then `created_at`. */
-    startedAt: text('started_at'),
-    finishedAt: text('finished_at'),
-    ...jobPlaybookColumns(),
-  },
-  (table) => [
-    index('pr_reply_checks_thread_idx').on(table.repoId, table.prNumber, table.commentId, sql`${table.createdAt} DESC`),
-    check('pr_reply_checks_status', sql`${table.status} IN ('running', 'ready', 'failed')`),
-    check('pr_reply_checks_verdict', sql`${table.verdict} IN ('fixed', 'partly_fixed', 'not_fixed')`),
-  ],
-);
-
-/** One Comment pass over the threads the operator ticked on a pull request. */
-export const prCommentPasses = sqliteTable(
-  'pr_comment_passes',
-  {
-    id: text().primaryKey().notNull(),
-    repoId: text('repo_id')
-      .notNull()
-      .references(() => repos.id, { onDelete: 'cascade' }),
-    prNumber: integer('pr_number').notNull(),
-    headSha: text('head_sha').notNull(),
-    branch: text().notNull(),
-    /** Address comments changes code and pushes; Check replies only gives each replied thread a verdict. */
-    kind: text()
-      .$type<CommentPassKind>()
-      .notNull()
-      .default('address' as CommentPassKind),
-    status: text()
-      .$type<AgentReviewStatus>()
-      .notNull()
-      .default('running' as AgentReviewStatus),
-    /** Where a retry picks up: the steps and closing turn, the commit and push, or the replies and resolves. */
-    stage: text().$type<'steps' | 'push' | 'post'>().notNull().default('steps'),
-    /** Null until pushed, and when there was nothing to commit. */
-    commitSha: text('commit_sha'),
-    /** `PassThread[]` without `posted`, plus the reply's comment id once on the host. */
-    threads: text().notNull(),
-    error: text(),
-    canRetry: bool('can_retry').notNull().default(false),
-    scratchPath: text('scratch_path'),
-    createdAt: text('created_at').notNull().default(nowIso),
-    /** When the latest attempt began: a retry starts the clock again. Null until the first retry: then `created_at`. */
-    startedAt: text('started_at'),
-    finishedAt: text('finished_at'),
-    ...jobPlaybookColumns(),
-  },
-  (table) => [
-    index('pr_comment_passes_pr_idx').on(table.repoId, table.prNumber, sql`${table.createdAt} DESC`),
-    check('pr_comment_passes_status', sql`${table.status} IN ('running', 'ready', 'failed')`),
-    check('pr_comment_passes_stage', sql`${table.stage} IN ('steps', 'push', 'post')`),
-    check('pr_comment_passes_threads_json', sql`json_valid(${table.threads})`),
   ],
 );
 
@@ -967,16 +889,13 @@ export const playbookTriggers = sqliteTable(
   ],
 );
 
-/** A job's copy of its Playbook's steps and how each went. Exactly one job column is set. */
+/** A Verification's or Fix's copy of its Playbook's steps and how each went. Exactly one job column is set. */
 export const playbookSteps = sqliteTable(
   'playbook_steps',
   {
     id: text().primaryKey().notNull(),
     reportId: text('report_id').references(() => reports.id, { onDelete: 'cascade' }),
     fixId: text('fix_id').references(() => fixes.id, { onDelete: 'cascade' }),
-    agentReviewId: text('agent_review_id').references(() => prAgentReviews.id, { onDelete: 'cascade' }),
-    replyCheckId: text('reply_check_id').references(() => prReplyChecks.id, { onDelete: 'cascade' }),
-    commentPassId: text('comment_pass_id').references(() => prCommentPasses.id, { onDelete: 'cascade' }),
     position: integer().notNull(),
     title: text().notNull(),
     instructions: text().notNull(),
@@ -994,20 +913,8 @@ export const playbookSteps = sqliteTable(
       .on(table.reportId, table.position)
       .where(sql`${table.reportId} IS NOT NULL`),
     uniqueIndex('playbook_steps_fix_idx').on(table.fixId, table.position).where(sql`${table.fixId} IS NOT NULL`),
-    uniqueIndex('playbook_steps_review_idx')
-      .on(table.agentReviewId, table.position)
-      .where(sql`${table.agentReviewId} IS NOT NULL`),
-    uniqueIndex('playbook_steps_reply_check_idx')
-      .on(table.replyCheckId, table.position)
-      .where(sql`${table.replyCheckId} IS NOT NULL`),
-    uniqueIndex('playbook_steps_comment_pass_idx')
-      .on(table.commentPassId, table.position)
-      .where(sql`${table.commentPassId} IS NOT NULL`),
     check('playbook_steps_status', sql`${table.status} IN ('pending', 'running', 'done', 'skipped', 'failed')`),
-    check(
-      'playbook_steps_one_job',
-      sql`(${table.reportId} IS NOT NULL) + (${table.fixId} IS NOT NULL) + (${table.agentReviewId} IS NOT NULL) + (${table.replyCheckId} IS NOT NULL) + (${table.commentPassId} IS NOT NULL) = 1`,
-    ),
+    check('playbook_steps_one_job', sql`(${table.reportId} IS NOT NULL) + (${table.fixId} IS NOT NULL) = 1`),
     check('playbook_steps_writes_bool', sql`${table.writes} IN (0, 1)`),
   ],
 );

@@ -12,6 +12,13 @@ export enum SessionKind {
   Anonymous = 'anonymous',
 }
 
+/** What a PR action Session was opened for: the console's three buttons on a pull request. */
+export enum PrAction {
+  AddressComments = 'address_comments',
+  CheckReplies = 'check_replies',
+  Review = 'review',
+}
+
 export enum Model {
   Opus = 'claude-opus-5-5',
   Sonnet = 'claude-sonnet-5-5',
@@ -260,8 +267,10 @@ export const sessionSchema = z.object({
   repo_id: z.string().nullable(),
   /** `repo` Sessions: the checked-out branch; `anonymous` Sessions: the branch of the clone, if any. */
   branch: z.string().nullable(),
-  /** `pr_review` Sessions: the pull request in `repo_id`. */
+  /** `pr_review` Sessions and PR action Sessions: the pull request in `repo_id`. */
   pr_number: z.number().int().nullable(),
+  /** The button a PR action Session was opened from; null for any other Session. */
+  pr_action: z.enum(PrAction).nullable(),
   /** `repo` Sessions: the pull request the Session opened from the branch it is on now; null on any other branch. */
   pull_request: z.object({ number: z.number().int(), url: z.string() }).nullable(),
   /** `repo` Sessions: every pull request the console opened for the Session, on any branch of its Repo, newest first. */
