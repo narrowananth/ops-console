@@ -48,7 +48,7 @@ const NEEDS_YOU: SessionState[] = [SessionState.WaitingInput, SessionState.Waiti
 const needsYou = (session: Session) => NEEDS_YOU.includes(session.state);
 const working = (session: Session) => session.state === SessionState.Working;
 
-/** Stop on a busy row, over its time on hover or focus; a button may not sit inside the row's button. */
+/** Stop on a busy row, in the corner of its state and time on hover or focus (they hide); a button may not sit inside the row's button. */
 function RowStop({ session }: { session: Session }) {
   const stop = useStopSession(session.id);
   return (
@@ -324,17 +324,24 @@ function SessionRow({
             >
               {repo ? repo.name : 'No Repo'}
             </span>
-            {session.state === SessionState.Working && <WorkingChip since={runStart} />}
-            {STATE_WORD[session.state] && (
-              <span className="flex-none rounded-sm bg-accent-100 px-1.25 text-[11px] leading-4 font-medium text-accent-700">
-                {STATE_WORD[session.state]}
-              </span>
-            )}
+            {/* On a busy row the Stop button takes this corner while the pointer is on the row or Stop has focus. */}
             <span
-              className="flex-none text-[11px] text-neutral-600 tabular-nums"
-              title={`Started ${new Date(session.created_at).toLocaleString()}, last active ${new Date(session.last_active_at).toLocaleString()}`}
+              className={`flex flex-none items-center gap-1.5 ${
+                isBusy(session) ? "group-hover:invisible group-has-[[aria-label^='Stop']:focus-visible]:invisible" : ''
+              }`}
             >
-              {ago(session.last_active_at)}
+              {session.state === SessionState.Working && <WorkingChip since={runStart} />}
+              {STATE_WORD[session.state] && (
+                <span className="flex-none rounded-sm bg-accent-100 px-1.25 text-[11px] leading-4 font-medium text-accent-700">
+                  {STATE_WORD[session.state]}
+                </span>
+              )}
+              <span
+                className="flex-none text-[11px] text-neutral-600 tabular-nums"
+                title={`Started ${new Date(session.created_at).toLocaleString()}, last active ${new Date(session.last_active_at).toLocaleString()}`}
+              >
+                {ago(session.last_active_at)}
+              </span>
             </span>
           </span>
           <span className="flex items-center gap-2">
