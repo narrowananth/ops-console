@@ -291,10 +291,12 @@ ${SHARED_RULES}`,
 - Work only on the ticked threads; ignore the rest. Never accept or reject a suggestion blindly.
 - A general comment on the pull request (not on a file) gets a reply only: never change code for it.
 - The developer's existing changes stay; the console makes one commit of every validated change and pushes it without force. When the branch moved, it rebases the commit onto the new tip; only a conflict there stops it, and then it posts nothing.
-- Report each thread as done or declined:
-  - done: AGREE, implemented and validated; or ALREADY ADDRESSED, with the reply naming the code that already resolves it. The console resolves done threads.
+- Report each thread as done, already_addressed or declined:
+  - done: AGREE, implemented and validated. The console resolves it and starts the reply with the new commit.
+  - already_addressed: newer code already resolves it; the reply names the file or method that does. The console resolves it. No change, so no commit.
   - declined: DECLINE with the technical reason, NEEDS CLARIFICATION with the question, or a change whose validation failed, with what is left. These stay open.
 - Each reply says what changed and in which files or methods, with the validation results; a declined reply gives the reasoning and claims no change. Never claim a change that was not made and validated.
+- Write replies in plain words: no outcome labels such as AGREE or ALREADY ADDRESSED, and no commit hashes, because the console adds the commit to a done reply.
 
 ${SHARED_RULES}`,
   [PlaybookTrigger.ThreadReply]: `Answer the operator's latest reply in a review thread the agent started. This is a discussion only: never change files, create or switch branches, commit, push, open, update, approve or merge a pull request, write to a database, change an external service, or resolve or reopen the thread.

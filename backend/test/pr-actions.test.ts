@@ -309,6 +309,26 @@ describe('Address comments', () => {
     expect((await detail(ctx)).action_sessions[0]).toMatchObject({ state: 'submitted', commit_sha: null });
   });
 
+  it('resolves an already addressed thread with its plain reply, no commit and no Done prefix', async () => {
+    const ctx = await start();
+    const { body } = await address(ctx, ['c1', 'c3']);
+    await submit(ctx, body.data.id, {
+      threads: [
+        { comment_id: 'c1', outcome: 'already_addressed', reply: 'Config.read() already does this.' },
+        { comment_id: 'c3', outcome: 'declined', reply: 'Which name do you mean?' },
+      ],
+    });
+    expect(git(ctx.dir, 'ls-remote', 'origin', 'refs/heads/feature-1').split('\t')[0]).toBe(ctx.head);
+    expect(ctx.host.posted.map((comment) => [comment.parent_id, comment.body])).toEqual(
+      expect.arrayContaining([
+        ['c1', 'Config.read() already does this.'],
+        ['c3', 'Which name do you mean?'],
+      ]),
+    );
+    expect([thread(ctx, 'c1')?.resolved, thread(ctx, 'c3')?.resolved]).toEqual([true, false]);
+    expect((await detail(ctx)).action_sessions[0]).toMatchObject({ state: 'submitted', commit_sha: null });
+  });
+
   it('refuses a call that leaves a ticked thread out or adds one that was not ticked, and posts nothing', async () => {
     const ctx = await start();
     const { body } = await address(ctx, ['c1', 'c3']);

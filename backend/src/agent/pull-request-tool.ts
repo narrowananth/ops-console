@@ -28,7 +28,7 @@ export const submitThreadResultsInputSchema = z.object({
   threads: z.array(
     z.object({
       comment_id: z.string().min(1),
-      outcome: z.enum([ThreadOutcome.Done, ThreadOutcome.Declined]),
+      outcome: z.enum([ThreadOutcome.Done, ThreadOutcome.AlreadyAddressed, ThreadOutcome.Declined]),
       reply: z.string().trim().min(1),
     }),
   ),
@@ -319,7 +319,7 @@ function submitTool(action: PrAction, tools: PrActionTools, sessionId: string) {
     case PrAction.AddressComments:
       return tool(
         'submit_thread_results',
-        "Reports what you did with each thread the operator ticked, once your work is done. Give every ticked thread's comment_id exactly once, with outcome done or declined and a reply: what you changed (done), or why not (declined). The console then commits your changes in one commit, pushes it to the pull request's branch, posts each reply in its thread and resolves the done ones. Commit nothing and push nothing yourself. A refused call says why; fix it and call again.",
+        "Reports what you did with each thread the operator ticked, once your work is done. Give every ticked thread's comment_id exactly once, with outcome done, already_addressed or declined and a reply: what you changed (done), the code that already settles it (already_addressed), or why not (declined). Write the reply in plain words, without the outcome name and without commit hashes: the console adds the new commit to a done reply. The console then commits your changes in one commit, pushes it to the pull request's branch, posts each reply in its thread and resolves the done and already_addressed ones. Commit nothing and push nothing yourself. A refused call says why; fix it and call again.",
         submitThreadResultsInputSchema.shape,
         run,
       );

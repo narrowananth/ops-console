@@ -332,7 +332,7 @@ export class PrActionsService implements PrActionTools {
         }
       }
       // A general comment has no thread to resolve on the hosts; its reply is the answer.
-      const settled = thread.outcome === ThreadOutcome.Done || thread.outcome === ThreadOutcome.Fixed;
+      const settled = this.settled(thread);
       if (settled && !thread.resolved && thread.file_path !== null) {
         try {
           await this.writes.resolve(repo, number, row.id, thread.comment_id);
@@ -364,7 +364,9 @@ export class PrActionsService implements PrActionTools {
   }
 
   private settled = (thread: StoredThread) =>
-    thread.outcome === ThreadOutcome.Done || thread.outcome === ThreadOutcome.Fixed;
+    thread.outcome === ThreadOutcome.Done ||
+    thread.outcome === ThreadOutcome.AlreadyAddressed ||
+    thread.outcome === ThreadOutcome.Fixed;
 
   /** One commit of every uncommitted change, pushed to the branch without force; null when there is nothing new. */
   private async commitAndPush(
