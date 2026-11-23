@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
 
-/** Agent Review's start dialog: an optional note that narrows the review. Start sends it with the review. */
+/** The Review note dialog: an optional note that narrows the review. Start opens the Session with it. */
 export function AgentReviewDialog({ onStart, onCancel }: { onStart: (note: string) => void; onCancel: () => void }) {
   const [note, setNote] = useState('');
   const field = useRef<HTMLTextAreaElement>(null);
@@ -15,7 +15,7 @@ export function AgentReviewDialog({ onStart, onCancel }: { onStart: (note: strin
     >
       <p className="m-0 mb-2">
         Optional. Tell the agent where to look or what to read first, such as a related pull request this one continues.
-        The agent follows the Review PR Playbook with your note.
+        This opens a Session where the agent follows the Review PR Playbook with your note.
       </p>
       <textarea
         ref={field}

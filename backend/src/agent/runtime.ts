@@ -89,6 +89,8 @@ import {
   joinRepoInputSchema,
   OPEN_PULL_REQUEST_TOOL,
   openPullRequestInputSchema,
+  PR_ACTION_TOOLS,
+  type PrActionTools,
   type PullRequestOpener,
   type RepoJoiner,
   RUN_INTEGRATION_TOOL,
@@ -186,6 +188,9 @@ export const MERGE_DENIALS = [
   'Bash(*enablePullRequestAutoMerge*)',
 ];
 
+/** The integration CLIs that write to a Git host. */
+const GIT_HOST_CLIS = new Set(['gh', 'glab', 'bkt']);
+
 /**
  * The Run sandbox filters a run's commands (ADR 0006), not the agent's own web tools, so a steered run could send out
  * what it reads through them.
@@ -193,8 +198,8 @@ export const MERGE_DENIALS = [
 export const WEB_DENIALS = ['WebFetch', 'WebSearch'];
 
 /**
- * A Reply check or Comment pass hands its outcome to the console, which pushes, replies and resolves; the agent's own
- * tools for that are denied (ADR 0002).
+ * A PR action Session hands its results to the console, which pushes, replies and resolves, and a Verification writes to
+ * no Git host. Both lose the agent's own tools for that (ADR 0002).
  */
 export const HOST_WRITE_DENIALS = [
   'Bash(git push:*)',
@@ -436,6 +441,13 @@ export class AgentRuntime implements OnModuleDestroy {
 
   setPullRequestOpener(opener: PullRequestOpener): void {
     this.opener = opener;
+  }
+
+  /** Who posts a PR action Session's results when its agent calls the submit tool. Set once by the Workspace. */
+  private prActionTools: PrActionTools | null = null;
+
+  setPrActionTools(tools: PrActionTools): void {
+    this.prActionTools = tools;
   }
 
   /** Who moves an Anonymous Session into a Repo when the agent asks. Set once by the Workspace. */
@@ -799,8 +811,10 @@ export class AgentRuntime implements OnModuleDestroy {
       messageUsage: new Map(),
       limitSince: null,
       resumeAt: options.resumeAt ?? null,
-      deny: options.deny ?? [],
-      projectSettings: options.projectSettings ?? true,
+      deny: [...(options.deny ?? []), ...(session.prAction === null ? [] : HOST_WRITE_DENIALS)],
+      // A PR action Session works on pull request code: it loads none of that code's settings, hooks or servers.
+      projectSettings: options.projectSettings ?? session.prAction === null,
+      prAction: session.prAction,
       readOnly: options.readOnly ?? false,
       purpose: options.purpose ?? RunPurpose.Chat,
       networkDomains: this.network.forRun(),
@@ -1280,16 +1294,23 @@ export class AgentRuntime implements OnModuleDestroy {
       abortController: run.abort,
       // The console's own tools: the agent asks, the daemon pushes and opens the pull request as the operator.
       ...(() => {
-        const opener = this.opener?.offers(run.sessionId, run.workingDir) ? this.opener : null;
+        const opener = run.prAction === null && this.opener?.offers(run.sessionId, run.workingDir) ? this.opener : null;
+        // A PR action Session's one tool: the call that posts its results.
+        const prAction =
+          run.prAction !== null && this.prActionTools ? { action: run.prAction, tools: this.prActionTools } : null;
         // Only a run the operator started: a Playbook step or a Verification in an Anonymous Session stays where it is.
         const joiner = run.onFinish === null && this.joiner?.offers(run.sessionId) ? this.joiner : null;
         // A chat the operator started, in a Session no other Session spawned.
         const spawner =
-          run.onFinish === null && run.purpose === RunPurpose.Chat && this.spawner?.offers(run.sessionId)
+          run.onFinish === null &&
+          run.purpose === RunPurpose.Chat &&
+          run.prAction === null &&
+          this.spawner?.offers(run.sessionId)
             ? this.spawner
             : null;
         // The browser and the Session's processes: only a chat the operator started, never a job (ADR 0007).
-        const operatorChat = run.onFinish === null && run.purpose === RunPurpose.Chat && !run.readOnly;
+        const operatorChat =
+          run.onFinish === null && run.purpose === RunPurpose.Chat && !run.readOnly && run.prAction === null;
         const browser = operatorChat && this.browserTools?.offers(run.sessionId) ? this.browserTools : null;
         const processes = operatorChat && this.processTools?.offers(run.sessionId) ? this.processTools : null;
         const saver = outputFolder === null ? null : this.outputs;
@@ -1304,16 +1325,17 @@ export class AgentRuntime implements OnModuleDestroy {
         const newRelic =
           offersNewRelicQuery(run.purpose, logSource) && this.newRelicQuery?.offers() ? this.newRelicQuery : null;
         tools.push(
-          ...Object.entries({ opener, joiner, spawner, saver, integrations, newRelic, browser, processes })
+          ...Object.entries({ opener, prAction, joiner, spawner, saver, integrations, newRelic, browser, processes })
             .filter(([, offered]) => offered)
             .map(([name]) => name),
         );
-        return opener || joiner || spawner || saver || integrations || newRelic || browser || processes
+        return opener || prAction || joiner || spawner || saver || integrations || newRelic || browser || processes
           ? {
               mcpServers: {
                 [CONSOLE_TOOLS_SERVER]: consoleToolsServer(
                   {
                     opener,
+                    prAction,
                     joiner,
                     spawner,
                     spawnCallId: () => run.spawnCallIds.shift() ?? '',
@@ -1671,6 +1693,14 @@ export class AgentRuntime implements OnModuleDestroy {
         };
       }
       if (input.tool_name === OPEN_PULL_REQUEST_TOOL) return this.checkPullRequest(run, toolInput, input.tool_use_id);
+      if (run.prAction !== null && input.tool_name === PR_ACTION_TOOLS[run.prAction]) {
+        // Pressing the button was the approval: the console posts what the call says, with no second prompt.
+        return this.allowLogged(run, input.tool_name, toolInput, input.tool_use_id, {
+          target: 'pull request',
+          command: `submit the results of ${run.prAction.replace('_', ' ')}`,
+          reason: 'The console commits, pushes and posts what this call reports, as the operator.',
+        });
+      }
       if (input.tool_name === JOIN_REPO_TOOL) return this.approveJoinRepo(run, toolInput, input.tool_use_id);
       if (input.tool_name === SPAWN_SESSIONS_TOOL) return this.approveSpawnSessions(run, toolInput, input.tool_use_id);
       if (input.tool_name === SAVE_FILE_TOOL) return this.approveSaveFile(run, toolInput, input.tool_use_id);
@@ -1967,7 +1997,11 @@ export class AgentRuntime implements OnModuleDestroy {
     const file = outsideFile(args, [...run.editRoots, run.workingDir, outputFolder], outputFolder);
     if (file)
       return refuse(`${file} is a file outside your folders: the CLI runs outside the sandbox and may not read it.`);
-    if (verdict.kind === 'write' && run.purpose !== RunPurpose.Chat) {
+    // A PR action Session writes to the Git host only through its tool call, so its host CLIs read only.
+    if (
+      verdict.kind === 'write' &&
+      (run.purpose !== RunPurpose.Chat || (run.prAction !== null && GIT_HOST_CLIS.has(cli)))
+    ) {
       return refuse(`This run reads only: ${cli} ${args.slice(0, 2).join(' ')} changes something.`);
     }
     const command = redact(`${cli} ${args.map((arg) => (/[\s"']/.test(arg) ? JSON.stringify(arg) : arg)).join(' ')}`);

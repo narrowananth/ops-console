@@ -26,6 +26,7 @@ const session = (extra: Record<string, unknown> = {}) => ({
   repo_id: 'r1',
   branch: 'perf/audit',
   pr_number: null,
+  pr_action: null,
   connection_ids: null,
   extra_repo_ids: [],
   pull_request: null,

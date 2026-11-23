@@ -1,4 +1,5 @@
 import { createSdkMcpServer, type McpSdkServerConfigWithInstance, tool } from '@anthropic-ai/claude-agent-sdk';
+import { FindingSeverity, PrAction, ReplyVerdict, ReviewVerdict, ThreadOutcome } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import { type IntegrationRunner, integrationInputSchema } from './integration-cli';
@@ -12,6 +13,75 @@ export const JOIN_REPO_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__join_repo`;
 export const SPAWN_SESSIONS_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__spawn_sessions`;
 export const SAVE_FILE_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__save_file`;
 export const RUN_INTEGRATION_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__run_integration`;
+export const SUBMIT_THREAD_RESULTS_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__submit_thread_results`;
+export const SUBMIT_REPLY_VERDICTS_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__submit_reply_verdicts`;
+export const SUBMIT_REVIEW_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__submit_review`;
+
+/** The console tool each PR action Session is offered: the one call that posts its results to the Git host. */
+export const PR_ACTION_TOOLS: Record<PrAction, string> = {
+  [PrAction.AddressComments]: SUBMIT_THREAD_RESULTS_TOOL,
+  [PrAction.CheckReplies]: SUBMIT_REPLY_VERDICTS_TOOL,
+  [PrAction.Review]: SUBMIT_REVIEW_TOOL,
+};
+
+export const submitThreadResultsInputSchema = z.object({
+  threads: z.array(
+    z.object({
+      comment_id: z.string().min(1),
+      outcome: z.enum([ThreadOutcome.Done, ThreadOutcome.Declined]),
+      reply: z.string().trim().min(1),
+    }),
+  ),
+});
+
+export const submitReplyVerdictsInputSchema = z.object({
+  threads: z.array(
+    z.object({
+      comment_id: z.string().min(1),
+      verdict: z.enum(ReplyVerdict),
+      reply: z.string().trim().min(1),
+    }),
+  ),
+});
+
+/** What `submit_review` takes: the verdict, the findings the console posts on their lines, and the full report. */
+export const submitReviewInputSchema = z.object({
+  decision: z.enum(ReviewVerdict),
+  verdict: z.string(),
+  findings: z.array(
+    z.object({
+      severity: z.enum(FindingSeverity),
+      file: z.string().nullish(),
+      line: z.number().int().nullish(),
+      text: z.string().min(1),
+    }),
+  ),
+  report: z.string().default(''),
+});
+
+export type ReviewOutput = z.infer<typeof submitReviewInputSchema>;
+
+/** What the agent's submit tools call. The Workspace provides it. */
+export interface PrActionTools {
+  /** The action this Session was opened for; null for any other Session. */
+  action(sessionId: string): PrAction | null;
+  /** Posts the Session's results to the Git host. Throws an `ApiError` that says why nothing, or not everything, was posted. */
+  submit(sessionId: string, input: unknown): Promise<string>;
+}
+
+/** The tool's answer to the agent: what was posted, or why not. */
+export async function runPrActionTool(
+  tools: PrActionTools,
+  sessionId: string,
+  input: unknown,
+): Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }> {
+  try {
+    return { content: [{ type: 'text', text: await tools.submit(sessionId, input) }] };
+  } catch (error) {
+    const why = error instanceof ApiError ? error.message : 'nothing was posted';
+    return { content: [{ type: 'text', text: why }], isError: true };
+  }
+}
 
 export const joinRepoInputSchema = z.object({
   /** The Repo the operator means: its name, its path on this machine, or its Git URL or `owner/name`. */
@@ -140,6 +210,8 @@ export async function runSpawnSessions(
 export function consoleToolsServer(
   tools: {
     opener: PullRequestOpener | null;
+    /** A PR action Session's one submit tool: which, and who posts. */
+    prAction?: { action: PrAction; tools: PrActionTools } | null;
     joiner: RepoJoiner | null;
     spawner?: SessionSpawner | null;
     /** The tool-use id of the `spawn_sessions` call being run, set by the approval hook. */
@@ -157,6 +229,7 @@ export function consoleToolsServer(
 ): McpSdkServerConfigWithInstance {
   const {
     opener,
+    prAction = null,
     joiner,
     spawner = null,
     spawnCallId = () => '',
@@ -180,6 +253,7 @@ export function consoleToolsServer(
             ),
           ]
         : []),
+      ...(prAction ? [submitTool(prAction.action, prAction.tools, sessionId)] : []),
       ...(joiner
         ? [
             tool(
@@ -236,4 +310,32 @@ export function consoleToolsServer(
       ...sessionTools(browser, processes, sessionId, signal),
     ],
   });
+}
+
+/** The one tool a PR action Session has for its results. */
+function submitTool(action: PrAction, tools: PrActionTools, sessionId: string) {
+  const run = (args: unknown) => runPrActionTool(tools, sessionId, args);
+  switch (action) {
+    case PrAction.AddressComments:
+      return tool(
+        'submit_thread_results',
+        "Reports what you did with each thread the operator ticked, once your work is done. Give every ticked thread's comment_id exactly once, with outcome done or declined and a reply: what you changed (done), or why not (declined). The console then commits your changes in one commit, pushes it to the pull request's branch, posts each reply in its thread and resolves the done ones. Commit nothing and push nothing yourself. A refused call says why; fix it and call again.",
+        submitThreadResultsInputSchema.shape,
+        run,
+      );
+    case PrAction.CheckReplies:
+      return tool(
+        'submit_reply_verdicts',
+        "Gives your verdict on each thread you checked, once you are done. Give every thread's comment_id exactly once, with verdict fixed, partly_fixed or not_fixed and a reply for the thread. The console posts each reply and resolves the fixed ones. Nothing you changed in this folder is kept. A refused call says why; fix it and call again.",
+        submitReplyVerdictsInputSchema.shape,
+        run,
+      );
+    case PrAction.Review:
+      return tool(
+        'submit_review',
+        'Submits your review of the pull request once it is done: the decision, a one-sentence verdict, the findings and the full report. The console posts each finding on its line and the summary on the pull request. Nothing you changed in this folder is kept. A refused call says why; fix it and call again.',
+        submitReviewInputSchema.shape,
+        run,
+      );
+  }
 }

@@ -7,11 +7,11 @@ The agent runs on your machine with access to your code and services, so the con
 - A Verification reads and writes only in a scratch copy of your code, a git worktree in the data folder at the newest commit of the branch your Playbook names. It never writes in your checkout or to a Connection.
 - The agent changes your code, files a Ticket or opens a pull request only after you confirm the Report.
 - It never merges. Every run denies `gh pr merge`, `glab mr merge`, `bkt pr merge`, the GitHub and GitLab merge tools, and any command that names a host's merge endpoint. Merge is a button only you can press.
-- The console, not the agent, pushes branches, posts review comments and replies, and resolves threads. A Reply check or Comment pass denies the agent `git push` and the hosts' comment and API commands.
+- The console, not the agent, pushes branches, posts review comments and replies, and resolves threads. A Session opened from Review with agent, Check replies or Address comments denies the agent `git push` and the hosts' comment and API commands.
 
 ## Log text is data
 
-Alerts come from service logs, which anyone who can send a Service a request can write to. An agent that acted on them alone could be steered. The console's safety lines end every run's system prompt and say that a log line, like pull request text, is data and never an instruction. The one exception is a Comment pass, where the review comments you ticked are change requests.
+Alerts come from service logs, which anyone who can send a Service a request can write to. An agent that acted on them alone could be steered. The console's safety lines end every run's system prompt and say that a log line, like pull request text, is data and never an instruction. The one exception is an Address comments Session, where the review comments you ticked are change requests.
 
 ## The agent is sandboxed
 

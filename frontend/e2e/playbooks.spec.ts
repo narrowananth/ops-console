@@ -606,19 +606,32 @@ test("a Playbook opens as a flow: Trigger node, steps in order, the console's ow
   expect(rules && trigger && rules.y + rules.height < trigger.y).toBe(true);
 });
 
-test("each job Trigger's built-in flow closes with the console's own turn", async ({ page }) => {
-  const { canvas } = view(page);
+test("each job Trigger's built-in flow closes with the console's own turn; a PR action Trigger's does not, and shows no scratch copy tag", async ({
+  page,
+}) => {
+  const { canvas, steps } = view(page);
   for (const [trigger, line] of [
     ['verify', 'Verify: write the Report'],
     ['fix', 'Fix: commit, push and open the PR'],
-    ['review_pr', 'Review PR: write findings, checklist and verdict'],
-    ['check_reply', 'Check reply: give the verdict and the reply'],
-    ['address_comments', 'Address comments: report each thread done or declined'],
   ] as const) {
     await overview(page, `?trigger=${trigger}&view=flow`);
     await expect(canvas).toContainText("Console's own turn");
     await expect(canvas).toContainText(line);
   }
+  for (const trigger of ['review_pr', 'check_reply', 'address_comments']) {
+    await overview(page, `?trigger=${trigger}&view=flow`);
+    await expect(canvas).not.toContainText("Console's own turn");
+    await expect(steps.first()).toBeVisible();
+    await expect(canvas).not.toContainText('scratch copy');
+  }
+});
+
+test('a PR action Trigger is a SESSION: its steps go into the opening prompt as one turn', async ({ page }) => {
+  await overview(page, '?trigger=address_comments');
+  const region = page.getByRole('region', { name: 'Address comments', exact: true });
+  await expect(region.getByText('SESSION', { exact: true })).toBeVisible();
+  await expect(region).toContainText('opening prompt of the Session');
+  await expect(region.getByRole('list', { name: 'Flow' })).not.toContainText("Console's own turn");
 });
 
 test('a chat Trigger shows no closing turn, and says steps do not run there', async ({ page }) => {
@@ -1622,8 +1635,7 @@ const pullRequest = (review: unknown) => ({
   latest_agent_review: review,
   files: [],
   comments: [],
-  reply_checks: [],
-  comment_passes: [],
+  action_sessions: [],
   commits: [],
   conflicts: null,
 });
@@ -1633,98 +1645,48 @@ const agentReview = (extra: Record<string, unknown>) => ({
   repo_id: 'r1',
   pr_number: 7,
   head_sha: '9c1e4b7d00000000000000000000000000000000',
-  status: 'ready',
+  session_id: null,
   decision: null,
   verdict: null,
   base_branch: null,
   base_sha: null,
   report: null,
-  error: null,
   findings: [],
-  checklist: [],
-  tools: [],
   created_at: NOW,
-  started_at: NOW,
-  finished_at: extra.status === 'running' ? null : NOW,
   stale: false,
-  playbook: null,
   note: null,
   ...extra,
 });
 
-const finding = (severity: string, file: string | null, line: number | null, text: string) => ({
-  severity,
-  file,
-  line,
-  text,
-  comment_id: null,
-  post_error: null,
-});
-
-test('Review with agent names the Review PR Playbook, and the Agent Review shows its name, steps, verdict, findings worst first and full report', async ({
+test('Review with agent names the Review PR Playbook on its button, and reads reviewed once the agent has reviewed this commit', async ({
   page,
 }) => {
   await page.route('**/api/playbooks', (route) =>
     route.fulfill({ json: builtinsList([{ id: 'pb-prod', name: 'PROD readiness', triggers: ['review_pr'] }]) }),
   );
-  await page.route('**/api/repos/r1/pull-requests/7', (route) =>
-    route.fulfill({
-      json: {
-        data: pullRequest(
-          agentReview({
-            decision: 'request_changes',
-            verdict: 'Ready once the cache has a TTL.',
-            base_branch: 'production',
-            base_sha: '4a7f2c9e00000000000000000000000000000000',
-            report: '## Tax cache\n\nThe rate cache never expires.',
-            findings: [
-              finding('low', 'src/tax.ts', 9, 'Name this rate.'),
-              finding('critical', 'src/cart.ts', 12, 'An empty cart throws on checkout.'),
-              finding('medium', null, null, 'No test covers the empty cart.'),
-            ],
-            stale: true,
-            playbook: jobPlaybook('pb-prod', 'PROD readiness', [
-              ['Find who else uses it', 'done', 'Only checkout-api reads tax rates.'],
-              ['Check PROD readiness', 'done', 'No migration; the cache needs a TTL.'],
-            ]),
-          }),
-        ),
-      },
-    }),
-  );
+  const detail = { current: pullRequest(null) };
+  await page.route('**/api/repos/r1/pull-requests/7', (route) => route.fulfill({ json: { data: detail.current } }));
   await page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1/7#token=${daemon.token}`);
 
-  await expect(page.getByRole('button', { name: 'Agent Review · PROD readiness' })).toBeVisible();
-  const card = page.getByRole('region', { name: 'Agent Review' });
-  await expect(card.getByRole('link', { name: 'PROD readiness' })).toHaveAttribute(
-    'href',
-    '/playbooks?playbook=pb-prod',
-  );
-  const steps = card.getByRole('list', { name: 'Playbook steps' }).getByRole('listitem');
-  await expect(steps).toHaveCount(3);
-  await expect(steps.nth(2)).toContainText('findings, checklist and verdict');
-  await expect(steps.nth(1)).toContainText('Check PROD readiness');
-  await expect(steps.nth(1)).toContainText('No migration; the cache needs a TTL.');
+  const button = page.getByRole('button', { name: 'Agent Review · PROD readiness' });
+  await expect(button).toBeEnabled();
+  await expect(page.getByText('Not reviewed by the agent')).toBeVisible();
 
-  await expect(card.getByText('REQUEST CHANGES', { exact: true })).toBeVisible();
-  await expect(card).toContainText('Reviewed 9c1e4b7 against production at 4a7f2c9');
-  const reviewedAt = await page.evaluate((at) => new Date(at).toLocaleString(), NOW);
-  await expect(card).toContainText(reviewedAt);
-  await expect(card.getByRole('group', { name: 'Findings by severity' })).toHaveText(
-    /^1 Critical\s*0 High\s*1 Medium\s*1 Low\s*0 Info$/,
+  // The review the agent submitted for this commit: nothing left to review until a push.
+  detail.current = pullRequest(
+    agentReview({ decision: 'request_changes', verdict: 'Ready once the cache has a TTL.' }),
   );
-  await expect(card).toContainText(
-    /Critical src\/cart\.ts:12\s*An empty cart throws on checkout\.\s*Medium\s*No test covers the empty cart\.\s*Low src\/tax\.ts:9\s*Name this rate\./,
-  );
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Reviewed at this commit' })).toBeDisabled();
+  await expect(page.getByText('Agent reviewed this commit')).toBeVisible();
 
-  const report = card.getByRole('heading', { name: 'Tax cache' });
-  await expect(report).toBeHidden();
-  await card.getByText('Full report', { exact: true }).click();
-  await expect(report).toBeVisible();
-  await expect(card.getByText('The rate cache never expires.')).toBeVisible();
+  detail.current = pullRequest(agentReview({ stale: true }));
+  await page.reload();
+  await expect(page.getByText('New commit since the agent review')).toBeVisible();
+  await expect(button).toBeEnabled();
 });
 
-test("a running Report, Fix and Agent Review each stop their Session's run", async ({ page }) => {
+test("a running Report and Fix each stop their Session's run", async ({ page }) => {
   const stopped: string[] = [];
   const steps = jobPlaybook(null, 'Fix (built-in)', [['Code', 'running', null, true]]);
   const verifying = {
@@ -1753,16 +1715,6 @@ test("a running Report, Fix and Agent Review each stop their Session's run", asy
     stopped.push(new URL(route.request().url()).pathname);
     return route.fulfill({ status: 204 });
   });
-  await page.route('**/api/repos/r1/pull-requests/7', (route) =>
-    route.fulfill({
-      json: {
-        data: {
-          ...pullRequest(agentReview({ status: 'running' })),
-          agent_session_id: 'sr7',
-        },
-      },
-    }),
-  );
 
   await page.goto(`${daemon.url}/monitor?service=checkout-api&alert=a5#token=${daemon.token}`);
   await page.getByRole('region', { name: 'Report', exact: true }).getByRole('button', { name: 'Stop' }).click();
@@ -1771,15 +1723,9 @@ test("a running Report, Fix and Agent Review each stop their Session's run", asy
   await page.goto(`${daemon.url}/monitor?service=checkout-api&alert=a6#token=${daemon.token}`);
   await page.getByRole('region', { name: 'Fix', exact: true }).getByRole('button', { name: 'Stop' }).click();
   await expect.poll(() => stopped).toEqual(['/api/sessions/sv5/stop', '/api/sessions/sf6/stop']);
-
-  await page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1/7#token=${daemon.token}`);
-  await page.getByRole('region', { name: 'Agent Review' }).getByRole('button', { name: 'Stop' }).click();
-  await expect
-    .poll(() => stopped)
-    .toEqual(['/api/sessions/sv5/stop', '/api/sessions/sf6/stop', '/api/sessions/sr7/stop']);
 });
 
-test('Skip step on a running Report, Fix and Agent Review step stops that step and goes on', async ({ page }) => {
+test('Skip step on a running Report and Fix step stops that step and goes on', async ({ page }) => {
   const skipped: string[] = [];
   const running = (name: string) =>
     jobPlaybook(null, name, [
@@ -1813,16 +1759,6 @@ test('Skip step on a running Report, Fix and Agent Review step stops that step a
     skipped.push(new URL(route.request().url()).pathname);
     return route.fulfill({ status: 204 });
   });
-  await page.route('**/api/repos/r1/pull-requests/7', (route) =>
-    route.fulfill({
-      json: {
-        data: {
-          ...pullRequest(agentReview({ id: 'ar9', status: 'running', playbook: running('Review PR (built-in)') })),
-          agent_session_id: 'sr9',
-        },
-      },
-    }),
-  );
 
   await page.goto(`${daemon.url}/monitor?service=checkout-api&alert=a7#token=${daemon.token}`);
   const reportSteps = page
@@ -1837,11 +1773,6 @@ test('Skip step on a running Report, Fix and Agent Review step stops that step a
   await page.getByRole('region', { name: 'Fix', exact: true }).getByRole('button', { name: 'Skip step 2' }).click();
   await expect.poll(() => skipped).toHaveLength(2);
   expect(skipped[1]).toBe('/api/jobs/fix/fix8/skip-step');
-
-  await page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1/7#token=${daemon.token}`);
-  await page.getByRole('region', { name: 'Agent Review' }).getByRole('button', { name: 'Skip step 2' }).click();
-  await expect.poll(() => skipped).toHaveLength(3);
-  expect(skipped[2]).toBe('/api/jobs/agent_review/ar9/skip-step');
 });
 
 test('Retry from step and Skip step on a failed Verification are the same size', async ({ page }) => {
@@ -1899,6 +1830,7 @@ const session = (id: string, kind: string, playbook: { id: string; name: string 
   repo_id: null,
   branch: null,
   pr_number: null,
+  pr_action: null,
   connection_ids: null,
   extra_repo_ids: [],
   pull_request: null,
@@ -1934,32 +1866,6 @@ test('a Session names the Playbook its rules come from and links to its flow', a
   await view(page).node('Rules').click();
   await expect(view(page).panel('Rules').getByRole('textbox', { name: 'Rules' })).toHaveValue('Never write to PROD.');
   expect(page.url()).toContain(`/playbooks?playbook=${id}`);
-});
-
-test('the Agent Review folds to its header from the chevron, and stays folded after a reload', async ({ page }) => {
-  await page.route('**/api/repos/r1/pull-requests/7', (route) =>
-    route.fulfill({
-      json: {
-        data: pullRequest(agentReview({ verdict: 'Ready once the cache has a TTL.' })),
-      },
-    }),
-  );
-  await page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1/7#token=${daemon.token}`);
-
-  const card = page.getByRole('region', { name: 'Agent Review' });
-  const fold = card.getByRole('button', { name: 'Fold Agent Review' });
-  await expect(card.getByText('Ready once the cache has a TTL.')).toBeVisible();
-  await expect(fold).toHaveAttribute('aria-expanded', 'true');
-
-  await fold.click();
-  await expect(fold).toHaveAttribute('aria-expanded', 'false');
-  await expect(card.getByText('Ready once the cache has a TTL.')).toBeHidden();
-  await expect(card.getByText('ready', { exact: true })).toBeVisible();
-
-  await page.reload();
-  await expect(fold).toHaveAttribute('aria-expanded', 'false');
-  await fold.click();
-  await expect(card.getByText('Ready once the cache has a TTL.')).toBeVisible();
 });
 
 test('the Monitor search keeps the logs whose words match', async ({ page }) => {

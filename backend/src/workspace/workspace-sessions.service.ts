@@ -11,6 +11,8 @@ import {
   createRepoSessionSchema,
   ErrorCode,
   type FolderTarget,
+  type PrAction,
+  PrActionState,
   type Session,
   type SessionDiff,
   SessionKind,
@@ -54,18 +56,39 @@ export class WorkspaceSessionsService {
       create: (body) => this.create(parseInput(createRepoSessionSchema, body, 'body')),
       prepare: async (session) => {
         await this.ensure(session);
+        this.announceAction(session.id, PrActionState.Working);
       },
       refresh: (session) => this.refreshDefault(session).catch(() => undefined),
       // A run that worked elsewhere, such as a Verification in its scratch copy, says nothing about the Session's branch.
       afterRun: async (session, run) => {
         if (run.workingDir === this.worktreeDir(session.id)) await this.followBranch(session.id);
+        this.announceAction(session.id);
       },
-      removed: (session) => this.release(session.id),
+      removed: async (session) => {
+        this.announceAction(session.id, PrActionState.NotSubmitted, session);
+        await this.release(session.id);
+      },
     });
     kinds.register(SessionKind.PrReview, {
       workingDir: (session) => this.folder(session.repoId),
       acceptsMessages: false,
     });
+  }
+
+  /** A PR action Session's run began or ended, or the Session was deleted: its state in the pull request view changes. */
+  private announceAction(sessionId: string, started?: PrActionState, removed?: SessionRow): void {
+    const row = removed ?? this.sessions.get(sessionId);
+    if (row.prAction === null || row.repoId === null || row.prNumber === null) return;
+    const state = started ?? (row.prActionSubmittedAt !== null ? PrActionState.Submitted : PrActionState.NotSubmitted);
+    this.store.write((_tx, emit) =>
+      emit('pull_request.action_changed', {
+        repo_id: row.repoId as string,
+        number: row.prNumber as number,
+        action: row.prAction as PrAction,
+        session_id: row.id,
+        state,
+      }),
+    );
   }
 
   /** Where a `repo` Session works. */
@@ -153,6 +176,14 @@ export class WorkspaceSessionsService {
 
   private async make(session: SessionRow, dir: string, fetch: boolean): Promise<string> {
     const repo = this.repo(session.repoId);
+    // A PR action Session works at the pull request's head commit, on no branch of its own.
+    if (session.prActionHeadSha !== null) {
+      const head = session.prActionHeadSha;
+      await this.logged(session.id, repo.path, `git worktree add --detach ${dir} ${head}`, () =>
+        this.git.addWorktree(repo.path, dir, head),
+      );
+      return dir;
+    }
     const branch = session.branch ?? repo.defaultBranch;
     const onDefault = branch === repo.defaultBranch;
     await this.logged(

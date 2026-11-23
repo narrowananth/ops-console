@@ -4,6 +4,7 @@ import {
   ActionOutcome,
   ApprovalKind,
   ApprovalStatus,
+  PrAction,
   partSchema,
   SessionState,
   SwitchReason,
@@ -15,7 +16,7 @@ import { CheckTarget, HealthStatus } from './mcp';
 import { FixStage, FixStatus, ReviewDecision, ScanStatus, Severity } from './monitor';
 import { PlaybookStepStatus } from './playbooks';
 import { UpdateStatus } from './updates';
-import { prRefreshStatus } from './workspace';
+import { PrActionState, prRefreshStatus } from './workspace';
 
 /** First WebSocket subprotocol; the session token is the second. */
 export const WS_PROTOCOL = 'ops-console';
@@ -148,13 +149,13 @@ export const wsEventSchema = z.discriminatedUnion('event', [
     }),
   ),
   event(
-    'pull_request.job_changed',
+    'pull_request.action_changed',
     z.object({
       repo_id: z.string(),
       number: z.number().int(),
-      kind: z.enum(['reply_check', 'comment_pass']),
-      id: z.string(),
-      status: z.enum(['running', 'ready', 'failed']),
+      action: z.enum(PrAction),
+      session_id: z.string(),
+      state: z.enum(PrActionState),
     }),
   ),
   event('scan.started', z.object({ scan_id: z.string(), service_id: z.string().nullable() })),
@@ -208,9 +209,6 @@ export const wsEventSchema = z.discriminatedUnion('event', [
     z.object({
       report_id: z.string().nullable(),
       fix_id: z.string().nullable(),
-      agent_review_id: z.string().nullable(),
-      reply_check_id: z.string().nullable(),
-      comment_pass_id: z.string().nullable(),
       position: z.number().int(),
       status: z.enum(PlaybookStepStatus),
       summary: z.string().nullable(),

@@ -1,5 +1,5 @@
 import type { WarmQuery } from '@anthropic-ai/claude-agent-sdk';
-import type { AccessMode, Part, RunPurpose, SkillCopy, Subagent, TokenCounts } from '@ops-console/shared';
+import type { AccessMode, Part, PrAction, RunPurpose, SkillCopy, Subagent, TokenCounts } from '@ops-console/shared';
 
 /** A run in progress. It lives in memory only: a daemon restart ends it (Behavior 18). */
 export type Run = {
@@ -20,6 +20,8 @@ export type Run = {
   deny: string[];
   /** The run loads the folder's own `.claude` settings, `.mcp.json` and CLAUDE.md; false for a folder that holds pull request code. */
   projectSettings: boolean;
+  /** The button this run's Session was opened from, when it is a PR action Session. */
+  prAction: PrAction | null;
   /** The run may not change its working folder. */
   readOnly: boolean;
   /** What the run is for, kept with its usage. */

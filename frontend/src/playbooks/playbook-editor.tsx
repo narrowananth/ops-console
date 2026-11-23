@@ -9,7 +9,7 @@ import { type Draft, type DraftStep, unfinished } from './drafts';
 import type { Drag } from './drag';
 import { FlowCanvas, type Sel } from './flow-canvas';
 import { Inspector } from './inspector';
-import { holderOf, inWords, triggerOfBuiltin } from './labels';
+import { holderOf, inWords, scratchApplies, triggerOfBuiltin } from './labels';
 import { Lock } from './lock';
 import { Palette } from './palette';
 
@@ -174,7 +174,16 @@ export function PlaybookEditor(props: {
         </p>
       )}
       <div ref={setBody} className="flex min-h-0 flex-1">
-        {!readOnly && <Palette blocks={blocks} full={full} drag={drag} setDrag={setDrag} onAdd={appendStep} />}
+        {!readOnly && (
+          <Palette
+            blocks={blocks}
+            scratch={scratchApplies(playbook.triggers)}
+            full={full}
+            drag={drag}
+            setDrag={setDrag}
+            onAdd={appendStep}
+          />
+        )}
         <FlowCanvas
           playbook={playbook}
           working={working}

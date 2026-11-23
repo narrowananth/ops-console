@@ -18,7 +18,7 @@ import type { Draft, DraftStep } from './drafts';
 import { type Drag, leftFor, startDrag } from './drag';
 import { type FlowNode, layoutFlow, NODE } from './flow-layout';
 import { ScratchTag } from './job-steps';
-import { CLOSING_TURN, chatOnly } from './labels';
+import { CLOSING_TURN, chatOnly, scratchApplies } from './labels';
 import { Lock } from './lock';
 
 /** What the panel on the right shows: the node the operator picked. */
@@ -99,6 +99,7 @@ export function FlowCanvas(props: {
   const steps = working.steps;
   const triggers = playbook.triggers;
   const greyed = chatOnly(triggers);
+  const scratch = scratchApplies(triggers);
   const closing = triggers.filter((trigger) => CLOSING_TURN[trigger]);
   const empty = steps.length === 0 && !readOnly;
   const full = steps.length >= PLAYBOOK_LIMITS.steps;
@@ -312,8 +313,8 @@ export function FlowCanvas(props: {
             {index + 1}
           </span>
           Step
-          {readOnly && !step.writes && <Lock />}
-          {step.writes && (
+          {readOnly && !(scratch && step.writes) && <Lock />}
+          {scratch && step.writes && (
             <span className="ml-auto">
               <ScratchTag />
             </span>
@@ -478,7 +479,7 @@ export function FlowCanvas(props: {
                 >
                   <span className="flex items-center gap-1.5 text-[13px] font-semibold">
                     {block.title}
-                    {block.writes && <ScratchTag />}
+                    {scratch && block.writes && <ScratchTag />}
                   </span>
                   <span className="line-clamp-2 text-xs text-neutral-700">
                     {block.instructions || 'An empty step to write yourself.'}

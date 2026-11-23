@@ -30,8 +30,9 @@ export function AddressCommentsDialog({
       onCancel={onCancel}
     >
       <p className="m-0 mb-2">
-        The agent makes the changes the ticked threads ask for, pushes one commit to {pr.branch}, replies in each thread
-        and resolves the ones it did. A general comment gets a reply only: the host has no thread to resolve.
+        Opens a Session where the agent makes the changes the ticked threads ask for. The console then pushes one commit
+        to {pr.branch}, replies in each thread and resolves the ones the agent did. A general comment gets a reply only:
+        the host has no thread to resolve.
       </p>
       <ul aria-label="Threads" className="m-0 flex max-h-80 list-none flex-col gap-1 overflow-y-auto p-0">
         {threads.map((thread) => (

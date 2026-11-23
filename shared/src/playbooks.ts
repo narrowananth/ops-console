@@ -15,10 +15,11 @@ export enum PlaybookTrigger {
 /** Triggers in the order the Playbooks page lists them. */
 export const PLAYBOOK_TRIGGERS: PlaybookTrigger[] = Object.values(PlaybookTrigger);
 
-/** Triggers that start a job with an end; only these run steps. The rest are chats and use rules only. */
-export const JOB_TRIGGERS: readonly PlaybookTrigger[] = [
-  PlaybookTrigger.Verify,
-  PlaybookTrigger.Fix,
+/** Triggers that start a job with an end; only these run steps, one turn each. */
+export const JOB_TRIGGERS: readonly PlaybookTrigger[] = [PlaybookTrigger.Verify, PlaybookTrigger.Fix];
+
+/** Triggers that open a PR action Session: the Playbook's steps go into its opening prompt as one turn. */
+export const PR_ACTION_TRIGGERS: readonly PlaybookTrigger[] = [
   PlaybookTrigger.ReviewPr,
   PlaybookTrigger.CheckReply,
   PlaybookTrigger.AddressComments,

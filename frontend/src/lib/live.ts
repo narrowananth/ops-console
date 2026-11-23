@@ -25,7 +25,6 @@ const BATCH_MS = 40;
  * whole transcript, and that at most this often. The pull request list, which is heavy for the daemon, also waits.
  */
 const STREAM_MS = 800;
-const LIST_MS = 5000;
 
 /** A run's steps and edits read the run list and the Session's diff (a `git` read) at most this often. */
 const RUNS_MS = 5000;
@@ -161,7 +160,7 @@ export function useLiveEvents(): void {
       ) {
         refetch(queryKeys.monitor);
       }
-      if (event.event === 'pull_request.job_changed') {
+      if (event.event === 'pull_request.action_changed') {
         refetch(queryKeys.pullRequest(event.data.repo_id, event.data.number));
       }
       if (event.event === 'skills.changed') {
@@ -169,15 +168,7 @@ export function useLiveEvents(): void {
         refetch(queryKeys.playbooks);
         refetch(queryKeys.skillPacks);
       }
-      if (event.event === 'playbook_step.updated') {
-        const { agent_review_id, reply_check_id, comment_pass_id } = event.data;
-        if (agent_review_id !== null || reply_check_id !== null || comment_pass_id !== null) {
-          // The open pull request shows its steps; the list, 750 KB across every Repo, only follows.
-          refetch(queryKeys.pullRequestDetails);
-          refetchEvery(queryKeys.pullRequestLists, LIST_MS);
-          refetchEvery(queryKeys.pullRequestRepoLists, LIST_MS);
-        } else refetch(queryKeys.monitor);
-      }
+      if (event.event === 'playbook_step.updated') refetch(queryKeys.monitor);
     };
     const connect = () => {
       const current = sessionToken();

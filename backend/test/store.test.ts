@@ -31,6 +31,10 @@ async function migrationsWith(extra: { tag: string; sql: string }): Promise<stri
   return dir;
 }
 
+/** A later migration gives `sessions` the columns of a PR action Session. */
+const withoutPrAction = (row: Row): Row =>
+  Object.fromEntries(Object.entries(row).filter(([name]) => !name.startsWith('pr_action')));
+
 describe('state.db migrations', () => {
   it('creates state.db with every migration on an empty folder, and keeps rows on a later start', async () => {
     const dataDir = await tempDir();
@@ -168,7 +172,10 @@ describe('migration that drops the connector CHECK', () => {
 
     applyMigrations(db, MIGRATIONS_DIR, () => {});
 
-    for (const table of tables) expect(dump(db, table), table).toEqual(rows[table]);
+    for (const table of tables) {
+      const after = dump(db, table);
+      expect(table === 'sessions' ? (after as Row[]).map(withoutPrAction) : after, table).toEqual(rows[table]);
+    }
     expect(db.pragma('foreign_key_check')).toEqual([]);
     expect(db.pragma('foreign_keys', { simple: true })).toBe(1);
 
@@ -225,7 +232,7 @@ describe('migration that moves the opened pull request into a list', () => {
       },
     ]);
     const dropped = ['opened_pr_number', 'opened_pr_url', 'opened_pr_branch'];
-    const sessionsAfter = db.prepare('SELECT * FROM sessions ORDER BY id').all() as Row[];
+    const sessionsAfter = (db.prepare('SELECT * FROM sessions ORDER BY id').all() as Row[]).map(withoutPrAction);
     expect(sessionsAfter).toEqual(
       sessionsBefore.map((row) => Object.fromEntries(Object.entries(row).filter(([name]) => !dropped.includes(name)))),
     );
@@ -399,5 +406,63 @@ describe('start-up recovery', () => {
     const health = await request(daemon.url).get('/api/health').set('Authorization', `Bearer ${daemon.token}`);
     expect(health.status).toBe(200);
     await daemon.stop();
+  });
+});
+
+describe('migration that ends the pull request jobs', () => {
+  it('drops the old job rows and their steps, and keeps Sessions, comment records and the steps of Verifications and Fixes', async () => {
+    const before = await tempDir('migrations-');
+    await cp(MIGRATIONS_DIR, before, { recursive: true });
+    const journalFile = path.join(before, 'meta', '_journal.json');
+    const journal = JSON.parse(await readFile(journalFile, 'utf8')) as { entries: { tag: string }[] };
+    const index = journal.entries.findIndex((entry) => entry.tag === '0049_rainy_stark_industries');
+    journal.entries.length = index;
+    await writeFile(journalFile, JSON.stringify(journal));
+
+    const db = openSqlite(await tempDir());
+    applyMigrations(db, before, () => {});
+    // The rows these hang off are beside the point here.
+    db.pragma('foreign_keys = OFF');
+    insert(db, 'sessions', { id: 'ses', title: 'Keep me' });
+    insert(db, 'pr_comment_passes', {
+      id: 'cp1',
+      repo_id: 'r1',
+      pr_number: 1,
+      head_sha: 'x',
+      branch: 'b',
+      threads: '[]',
+    });
+    insert(db, 'pr_reply_checks', { id: 'rc1', repo_id: 'r1', pr_number: 1, comment_id: 'c', head_sha: 'x' });
+    insert(db, 'pr_agent_reviews', { id: 'ar1', repo_id: 'r1', pr_number: 1, head_sha: 'x' });
+    insert(db, 'agent_comments', { repo_id: 'r1', pr_number: 1, comment_id: 'c1', agent_review_id: 'ar1' });
+    const step = { position: 0, title: 'Step', instructions: 'Do it' };
+    insert(db, 'playbook_steps', { id: 'kept', report_id: 'rep1', ...step });
+    insert(db, 'playbook_steps', { id: 'gone-pass', comment_pass_id: 'cp1', ...step });
+    insert(db, 'playbook_steps', { id: 'gone-review', agent_review_id: 'ar1', ...step });
+    db.pragma('foreign_keys = ON');
+
+    applyMigrations(db, MIGRATIONS_DIR, () => {});
+
+    const names = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all()
+      .map((row) => (row as { name: string }).name);
+    expect(names).not.toContain('pr_comment_passes');
+    expect(names).not.toContain('pr_reply_checks');
+    expect(db.prepare('SELECT id FROM playbook_steps').all()).toEqual([{ id: 'kept' }]);
+    expect(db.prepare('SELECT id FROM pr_agent_reviews').all()).toEqual([]);
+    expect(db.prepare('SELECT comment_id, agent_review_id FROM agent_comments').all()).toEqual([
+      { comment_id: 'c1', agent_review_id: null },
+    ]);
+    expect(db.prepare('SELECT id, title, pr_action FROM sessions').all()).toEqual([
+      { id: 'ses', title: 'Keep me', pr_action: null },
+    ]);
+    // A pull request has one unsubmitted PR action Session per action.
+    db.pragma('foreign_keys = OFF');
+    insert(db, 'sessions', { id: 'a1', repo_id: 'r1', pr_number: 1, pr_action: 'review' });
+    expect(() => insert(db, 'sessions', { id: 'a2', repo_id: 'r1', pr_number: 1, pr_action: 'review' })).toThrow(
+      /UNIQUE/,
+    );
+    db.close();
   });
 });

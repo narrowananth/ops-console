@@ -1,7 +1,6 @@
 import {
-  AgentReviewStatus,
-  CommentPassKind,
   PlaybookTrigger,
+  PrAction,
   PrMergeState,
   PrReviewEvent,
   PrReviewState,
@@ -9,6 +8,7 @@ import {
   type PullRequestDetail,
 } from '@ops-console/shared';
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Spinner } from '../components/ui/button';
 import { DiffStat } from '../components/ui/diff';
@@ -17,27 +17,24 @@ import { FoldTitle, useFold } from '../components/ui/fold';
 import { item, menu } from '../components/ui/item';
 import { Markdown } from '../components/ui/markdown';
 import {
-  useCheckReplies,
   useMergePullRequest,
   usePostComment,
   usePullRequest,
   useReviewPullRequest,
-  useStartAgentReview,
-  useStartCommentPass,
+  useStartPrAction,
 } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { useTriggerPlaybook } from '../playbooks/job-steps';
 import { withPlaybook } from '../playbooks/labels';
 import { AddressCommentsDialog } from './address-comments';
-import { AgentReviewCard } from './agent-review-card';
 import { AgentReviewDialog } from './agent-review-dialog';
-import { CommentPassCard } from './comment-pass-card';
+import { sessionPath } from './links';
 import { PrFileView, useViewed } from './pr-file';
 import { ConflictBanner, PrCommits } from './pr-history';
 import {
   ADDRESS_TIP,
   AGENT_REVIEW_TIP,
-  agentBusy,
+  actionOpen,
   BUSY_TITLE,
   CHECK_REPLIES_TIP,
   openThreads,
@@ -56,22 +53,24 @@ export function PullRequestView({ repoId, number }: { repoId: string; number: nu
   const pull = usePullRequest(repoId, number);
   const review = useReviewPullRequest(repoId, number);
   const merge = useMergePullRequest(repoId, number);
-  const agent = useStartAgentReview(repoId, number);
-  const address = useStartCommentPass(repoId, number);
+  const start = useStartPrAction(repoId, number);
 
   if (pull.isPending) return <Empty>Reading the pull request…</Empty>;
   if (pull.isError) return <Empty>Could not read the pull request: {pull.error.message}</Empty>;
-  return <Loaded pr={pull.data} review={review} merge={merge} agent={agent} address={address} />;
+  return <Loaded pr={pull.data} review={review} merge={merge} start={start} />;
 }
 
 function Loaded(props: {
   pr: PullRequestDetail;
   review: ReturnType<typeof useReviewPullRequest>;
   merge: ReturnType<typeof useMergePullRequest>;
-  agent: ReturnType<typeof useStartAgentReview>;
-  address: ReturnType<typeof useStartCommentPass>;
+  start: ReturnType<typeof useStartPrAction>;
 }) {
-  const { pr, review, merge, agent, address } = props;
+  const { pr, review, merge, start } = props;
+  const navigate = useNavigate();
+  // Starting opens the new Session, as New Session does.
+  const startAction = (input: Parameters<typeof start.mutate>[0]) =>
+    start.mutate(input, { onSuccess: (session) => navigate(sessionPath(session.id)) });
   const [changes, setChanges] = useStored(
     `workspace.draft.${pr.repo_id}#${pr.number}.changes`,
     z.string().nullable(),
@@ -92,20 +91,17 @@ function Loaded(props: {
   const reviewPlaybook = useTriggerPlaybook(PlaybookTrigger.ReviewPr);
   const addressPlaybook = useTriggerPlaybook(PlaybookTrigger.AddressComments);
   const checkPlaybook = useTriggerPlaybook(PlaybookTrigger.CheckReply);
-  const checkReplies = useCheckReplies(pr.repo_id, pr.number);
   const comment = usePostComment(pr.repo_id, pr.number);
-  const reviewing = pr.latest_agent_review?.status === AgentReviewStatus.Running;
-  const busy = agentBusy(pr);
+  const reviewing = actionOpen(pr, PrAction.Review);
+  const addressing = actionOpen(pr, PrAction.AddressComments);
+  const checking = actionOpen(pr, PrAction.CheckReplies);
   // Its findings are already on the host; the next review waits for a new commit.
-  const reviewed = pr.latest_agent_review?.status === AgentReviewStatus.Ready && !pr.latest_agent_review.stale;
+  const reviewed = pr.latest_agent_review !== null && !pr.latest_agent_review.stale;
   const roots = pr.comments.filter((comment) => comment.parent_id === null);
   const open = pr.state === PrState.Open;
   const canAddress = open && openThreads(pr).length > 0;
   const replied = open ? repliedThreads(pr).length : 0;
-  const checking = pr.comment_passes.some(
-    (pass) => pass.kind === CommentPassKind.Check && pass.status === AgentReviewStatus.Running,
-  );
-  const error = review.error ?? merge.error ?? agent.error ?? address.error ?? checkReplies.error;
+  const error = review.error ?? merge.error ?? start.error;
 
   const BTN = 'px-3 py-1.5 text-xs';
   const approved = pr.review_state === PrReviewState.Approved;
@@ -121,9 +117,9 @@ function Loaded(props: {
     <div className="flex flex-none flex-wrap items-center justify-end gap-1.5">
       <Button
         className={BTN}
-        disabled={agent.isPending || busy || reviewed}
+        disabled={start.isPending || reviewing || reviewed}
         title={
-          busy
+          reviewing
             ? BUSY_TITLE
             : reviewed
               ? 'The agent already reviewed this commit. Push a change to review again.'
@@ -134,7 +130,7 @@ function Loaded(props: {
         {reviewing && <Spinner />}
         {reviewing
           ? 'Agent reviewing…'
-          : agent.isPending
+          : start.isPending && start.variables?.action === PrAction.Review
             ? 'Starting…'
             : reviewed
               ? 'Reviewed at this commit'
@@ -271,8 +267,6 @@ function Loaded(props: {
   const overview = (
     <>
       <ConflictBanner pr={pr} onOpenFile={openFile} />
-      {pr.latest_agent_review && <AgentReviewCard review={pr.latest_agent_review} sessionId={pr.agent_session_id} />}
-      <CommentPassCard passes={pr.comment_passes} prUrl={pr.url} sessionId={pr.agent_session_id} />
 
       <section aria-label="Description" className="flex flex-col gap-1.5">
         <h3 className="m-0 text-sm">
@@ -342,23 +336,24 @@ function Loaded(props: {
             {canAddress && (
               <Button
                 className="justify-center px-3 py-1.5 text-xs"
-                disabled={address.isPending || busy}
-                title={busy ? BUSY_TITLE : ADDRESS_TIP}
+                disabled={start.isPending || addressing}
+                title={addressing ? BUSY_TITLE : ADDRESS_TIP}
                 onClick={() => setPicking(true)}
               >
-                {address.isPending && <Spinner />}
+                {start.isPending && start.variables?.action === PrAction.AddressComments && <Spinner />}
                 {withPlaybook('Address comments', addressPlaybook)}
               </Button>
             )}
             {(replied > 0 || checking) && (
               <Button
                 className="justify-center px-3 py-1.5 text-xs"
-                disabled={checkReplies.isPending || busy}
-                title={busy ? BUSY_TITLE : CHECK_REPLIES_TIP}
-                onClick={() => checkReplies.mutate()}
+                disabled={start.isPending || checking}
+                title={checking ? BUSY_TITLE : CHECK_REPLIES_TIP}
+                onClick={() => startAction({ action: PrAction.CheckReplies })}
               >
-                {(checkReplies.isPending || checking) && <Spinner />}
-                {checking ? 'Checking replies…' : `${withPlaybook('Check replies', checkPlaybook)} · ${replied}`}
+                {start.isPending && start.variables?.action === PrAction.CheckReplies && <Spinner />}
+                {withPlaybook('Check replies', checkPlaybook)}
+                {replied > 0 && ` · ${replied}`}
               </Button>
             )}
           </div>
@@ -451,7 +446,7 @@ function Loaded(props: {
               onCancel={() => setNoting(false)}
               onStart={(note) => {
                 setNoting(false);
-                agent.mutate(note || undefined);
+                startAction({ action: PrAction.Review, ...(note ? { note } : {}) });
               }}
             />
           )}
@@ -461,7 +456,7 @@ function Loaded(props: {
               onCancel={() => setPicking(false)}
               onStart={(commentIds) => {
                 setPicking(false);
-                address.mutate(commentIds);
+                startAction({ action: PrAction.AddressComments, comment_ids: commentIds });
               }}
             />
           )}
