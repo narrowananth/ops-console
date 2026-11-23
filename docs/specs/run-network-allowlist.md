@@ -156,6 +156,6 @@ Permissions: a row "Network allowlist: N domains" under Run sandbox, opening the
 ## Out of scope
 
 - A list of blocked hosts with an Add button on the Session. Own spec, if the transcript proves too slow.
-- `allowLocalBinding`, so a Verification can start a local server. Own spec.
+- `allowLocalBinding`, so a run can start a local server: [run-sandbox-loopback](run-sandbox-loopback.md), for chat runs behind an operator switch.
 - Making Node's `fetch` use the proxy (`NODE_USE_ENV_PROXY=1`). Own spec.
 - Which secrets besides `GH_TOKEN` a run's shell can read, such as the CLIProxy key. Not checked here; `/ship` looks and reports.

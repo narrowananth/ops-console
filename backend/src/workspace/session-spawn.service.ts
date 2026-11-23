@@ -70,7 +70,7 @@ export class SessionSpawnService implements SessionSpawner {
         started.push({ repo: repo.name, sessionId: child.id, error: null });
         try {
           // The task leads, so the Session is named for it.
-          this.runtime.send(child.id, `${task}\n\n${batchNote(parent.title)}`);
+          this.runtime.send(child.id, `${task}\n\n${batchNote(parent.title)}`, undefined, { spawned: true });
         } catch (error) {
           // The Session stays, failed, with the reason on its own page.
           const why = error instanceof Error ? error.message : 'the run did not start';

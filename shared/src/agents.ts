@@ -288,6 +288,8 @@ export const sessionSchema = z.object({
   spawned: z.array(spawnedSessionSchema),
   /** The subagents the Session's latest run started, oldest first: working while the run waits on them. */
   subagents: z.array(subagentSchema),
+  /** The run going now can start servers and reach every service on `localhost` (the Loopback switch, when it started). */
+  loopback: z.boolean().default(false),
 });
 
 export type Session = z.infer<typeof sessionSchema>;

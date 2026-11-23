@@ -1392,3 +1392,28 @@ test('the side panel collapses to a rail that counts Sessions waiting on you, an
   await rail.getByRole('button', { name: 'Open the side panel' }).click();
   await expect(page.getByRole('tab', { name: 'Pull requests' })).toHaveAttribute('aria-selected', 'true');
 });
+
+test('a Session whose run has Loopback shows a chip in its header, and one without shows none (Loopback 13)', async ({
+  page,
+}) => {
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 2)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          { ...session('s1', 'r1', 'engage platform', 'working'), loopback: true },
+          { ...session('s2', 'r1', 'billing check', 'working'), loopback: false },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/sessions/*/messages', (route) => route.fulfill({ json: { data: [] } }));
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  const header = page.getByRole('banner').or(page.locator('header').filter({ hasText: 'engage platform' }));
+  await expect(header.getByText('Loopback on')).toBeVisible();
+  await page.goto(`${daemon.url}/workspace?session=s2#token=${daemon.token}`);
+  await expect(page.locator('header').filter({ hasText: 'billing check' })).toBeVisible();
+  await expect(page.getByText('Loopback on')).toHaveCount(0);
+});

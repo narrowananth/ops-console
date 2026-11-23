@@ -16,6 +16,8 @@ export type SandboxRun = {
   repos?: { path: string; gitFile: boolean }[];
   /** The run's Network allowlist (ADR 0006): the only hosts its commands reach. */
   networkDomains: string[];
+  /** The run's commands may start servers and reach every service on `localhost`: the operator's Loopback switch, for a chat run. */
+  loopback?: boolean;
   /** The run may not change its working folder: a review of pull request text, or an answer in a thread. */
   readOnly?: boolean;
   /** The working folder's `.git` is a file, as in a worktree: the run may not rewrite it. */
@@ -105,7 +107,12 @@ export function runSandbox(run: SandboxRun): SandboxSettings {
     // Go programs such as `gh` check certificates through macOS's trust service, which the sandbox blocks without it.
     // That service only checks certificates; hosts off the allowlist stay refused.
     enableWeakerNetworkIsolation: true,
-    network: { allowedDomains: run.networkDomains, strictAllowlist: true },
+    network: {
+      allowedDomains: run.networkDomains,
+      strictAllowlist: true,
+      // Opens binding and reaching together: the OS rule cannot tell a run's own server from another local service.
+      ...(run.loopback ? { allowLocalBinding: true } : {}),
+    },
     filesystem: {
       allowWrite: [
         ...(run.readOnly ? [] : [run.workingDir]),

@@ -95,6 +95,11 @@ lines themselves show only when the operator opens the row.
 The hosts an agent run's commands may reach, built when the run starts from the built-in hosts, the hosts of the
 Repos' remotes and the operator's own domains. Any other host is refused.
 
+**Loopback**:
+The Run sandbox's one operator switch, on Permissions, for a chat run (a message the operator sent in a Session): when on,
+the run's commands can start servers and reach every service on this Mac's `localhost`. Off by default; turning it on asks
+first. A Playbook step, a Verification, a Fix, a review, a read-only run and an agent-started turn never get it.
+
 ### Playbooks
 
 **Playbook**:

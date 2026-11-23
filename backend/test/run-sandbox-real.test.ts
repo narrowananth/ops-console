@@ -275,6 +275,46 @@ describe.skipIf(process.platform !== 'darwin' || CLAUDE === null)('Run sandbox, 
     ).toContain('ENOTFOUND');
   }, 240_000);
 
+  it('refuses a bind and a connection to a local port while Loopback is off, and allows both once it is on (Loopback Behavior 2, 3)', async () => {
+    writeFileSync(
+      path.join(checkout, 'bind.js'),
+      "const s=require('net').createServer().listen(0,'127.0.0.1',()=>{console.log('bind=ok');s.close()});s.on('error',e=>console.log('bind='+e.code))",
+    );
+    writeFileSync(
+      path.join(checkout, 'self.js'),
+      "const n=require('net');const s=n.createServer(c=>c.end('hi')).listen(0,'127.0.0.1',()=>{n.connect(s.address().port,'127.0.0.1').on('data',()=>{console.log('self=ok');process.exit()}).on('error',e=>{console.log('self='+e.code);process.exit()})});s.on('error',e=>{console.log('self='+e.code);process.exit()})",
+    );
+    writeFileSync(
+      path.join(checkout, 'all.js'),
+      "const s=require('net').createServer().listen(0,'0.0.0.0',()=>{console.log('all=ok');s.close()});s.on('error',e=>console.log('all='+e.code))",
+    );
+    writeFileSync(
+      path.join(checkout, 'unix.js'),
+      "const s=require('net').createServer().listen('/tmp/loopback-'+process.pid+'.sock',()=>{console.log('unix=ok');s.close()});s.on('error',e=>console.log('unix='+e.code))",
+    );
+    const other = `curl -sS -m 6 --noproxy '*' http://127.0.0.1:${port}/ping; echo exit=$?`;
+    const closed = rules(checkout);
+    expect(await run('node bind.js', checkout, closed)).toContain('bind=EPERM');
+    expect(await run('node all.js', checkout, closed)).toContain('all=EPERM');
+    expect(await run('node self.js', checkout, closed)).toContain('self=EPERM');
+    expect(await run(other, checkout, closed)).toContain('exit=7');
+
+    const open = runSandbox({ workingDir: checkout, dataDir: data, home, networkDomains: BUILT_IN, loopback: true });
+    expect(await run('node bind.js', checkout, open)).toContain('bind=ok');
+    expect(await run('node all.js', checkout, open)).toContain('all=ok');
+    expect(await run('node self.js', checkout, open)).toContain('self=ok');
+    // The OS rule opens every local port, not only the run's own server.
+    expect(await run(other, checkout, open)).toContain('exit=0');
+    // Everything else stays shut: a Unix socket, a lookup and a host off the allowlist.
+    expect(await run('node unix.js', checkout, open)).toContain('unix=EPERM');
+    expect(await run("curl -sS -m 8 --noproxy '*' https://example.com; echo exit=$?", checkout, open)).toContain(
+      'Could not resolve host',
+    );
+    expect(await run('curl -sS -m 10 https://example.com; echo finished', checkout, open)).toContain(
+      'deny network-outbound example.com:443 (host is not on the allow list)',
+    );
+  }, 600_000);
+
   it("commits in a Session's own worktree, and still cannot write the Repo's hooks or config", async () => {
     const repo = path.join(path.dirname(data), 'session-repo');
     const worktree = path.join(data, 'session-worktrees', 's1');

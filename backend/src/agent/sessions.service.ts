@@ -79,6 +79,7 @@ export function toSession(row: SessionRow, pullRequests: OpenedPullRequest[]): S
     state: row.state,
     last_message_preview: row.lastMessagePreview,
     last_error: null,
+    loopback: false,
     created_at: row.createdAt,
     last_active_at: row.lastActiveAt,
     playbook: null,
@@ -268,6 +269,7 @@ export class SessionsService {
     return {
       ...toSession(row, pullRequests),
       last_error: this.failures.get(row.id) ?? null,
+      loopback: this.runs.get(row.id)?.loopback === true,
       playbook: this.playbooks.forSession(row).playbook,
       ...this.spawnLinks(row),
       ...this.kinds.get(row.kind)?.view?.(row),

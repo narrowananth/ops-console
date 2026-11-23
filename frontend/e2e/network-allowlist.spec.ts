@@ -22,15 +22,16 @@ type Allowlist = { built_in: string[]; from_repos: { domain: string; repo: strin
 const read = async (): Promise<Allowlist> =>
   ((await (await api('GET', '/network-allowlist')).json()) as { data: Allowlist }).data;
 
-/** The daemon is shared by every spec: leave no domain behind. */
+/** The daemon is shared by every spec: leave no domain behind, and the Loopback switch off. */
 test.afterEach(async () => {
   for (const domain of (await read()).added) {
     await api('DELETE', `/network-allowlist/domains/${encodeURIComponent(domain)}`);
   }
+  await api('PATCH', '/settings', { run_sandbox_loopback: false });
 });
 
 /** The page asks the Mac-only gates too; they are not what these tests check, so they are answered. */
-async function openRow(page: Page) {
+async function openPermissions(page: Page) {
   await page.route('**/api/terminals/run-sandbox', (route) =>
     route.fulfill({ json: { data: { status: 'on', reason: null } } }),
   );
@@ -42,8 +43,11 @@ async function openRow(page: Page) {
   );
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
   await page.getByRole('navigation').getByRole('link', { name: 'Permissions' }).click();
-  return page.getByRole('region', { name: 'Permissions' }).getByRole('listitem', { name: 'Network allowlist' });
+  return page.getByRole('region', { name: 'Permissions' });
 }
+
+const openRow = async (page: Page) =>
+  (await openPermissions(page)).getByRole('listitem', { name: 'Network allowlist' });
 
 test('Permissions counts the allowed domains and shows Built-in and Added by you, with no switch', async ({ page }) => {
   const folder = path.join(mkdtempSync(path.join(tmpdir(), 'e2e-allowlist-')), 'billing');
@@ -136,4 +140,90 @@ test('a list that cannot be read shows the error and reads again on retry', asyn
   failing = false;
   await row.getByRole('button', { name: 'Retry' }).click();
   await expect(row).toContainText(`Network allowlist: ${BUILT_IN} domains`);
+});
+
+const loopbackIs = async (): Promise<boolean> =>
+  ((await (await api('GET', '/settings')).json()) as { data: { run_sandbox_loopback: boolean } }).data
+    .run_sandbox_loopback;
+
+test('Loopback is off, turns on only after the confirm, and Cancel leaves it off and saves nothing (Loopback 1, 8)', async ({
+  page,
+}) => {
+  const row = (await openPermissions(page)).getByRole('listitem', { name: 'Loopback' });
+  await expect(row).toContainText("start servers and reach every service on this Mac's localhost");
+  const toggle = row.getByRole('switch', { name: 'Loopback' });
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+
+  await toggle.click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText(
+    "Commands the agent runs can start servers and reach every service on this Mac's localhost",
+  );
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  expect(await loopbackIs()).toBe(false);
+
+  await toggle.click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Turn on' }).click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  expect(await loopbackIs()).toBe(true);
+});
+
+test('turning Loopback off asks nothing, and the switch survives a reload (Loopback 9, 10)', async ({ page }) => {
+  await api('PATCH', '/settings', { run_sandbox_loopback: true });
+  const permissions = await openPermissions(page);
+  const toggle = permissions.getByRole('listitem', { name: 'Loopback' }).getByRole('switch', { name: 'Loopback' });
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  await page.reload();
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+
+  await toggle.click();
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  expect(await loopbackIs()).toBe(false);
+});
+
+test('Loopback shows a disabled switch while it reads, then says when it cannot read, with a retry (Loopback 12)', async ({
+  page,
+}) => {
+  let fail = true;
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route('**/api/settings', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    await held;
+    return fail
+      ? route.fulfill({ status: 500, json: { error: { code: 'internal', message: 'down' } } })
+      : route.fallback();
+  });
+  const row = (await openPermissions(page)).getByRole('listitem', { name: 'Loopback' });
+  await expect(row.getByRole('switch', { name: 'Loopback' })).toBeDisabled();
+  await expect(row).toContainText('checking');
+  release();
+  await expect(row.getByRole('alert')).toHaveText('Could not read the setting');
+  await expect(row.getByRole('switch')).toHaveCount(0);
+  fail = false;
+  await row.getByRole('button', { name: 'Retry' }).click();
+  await expect(row.getByRole('switch', { name: 'Loopback' })).toHaveAttribute('aria-checked', 'false');
+});
+
+test('a refused save puts the switch back and shows why under the row (Loopback UI)', async ({ page }) => {
+  await page.route('**/api/settings', (route) =>
+    route.request().method() === 'PATCH'
+      ? route.fulfill({
+          status: 400,
+          json: { error: { code: 'validation_failed', message: 'invalid value for setting: run_sandbox_loopback' } },
+        })
+      : route.fallback(),
+  );
+  const row = (await openPermissions(page)).getByRole('listitem', { name: 'Loopback' });
+  const toggle = row.getByRole('switch', { name: 'Loopback' });
+  await toggle.click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Turn on' }).click();
+  await expect(row.getByRole('alert')).toContainText('invalid value for setting');
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  expect(await loopbackIs()).toBe(false);
 });

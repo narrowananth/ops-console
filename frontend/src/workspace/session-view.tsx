@@ -13,6 +13,7 @@ import { MessageView, outputsByMessage } from '../agents/transcript';
 import { BrowserLinksProvider } from '../browser/browser-links';
 import { BROWSER_PANEL, BrowserPanel, type OpenRequest } from '../browser/browser-panel';
 import { freshServers, serverAddress, sessionPort } from '../browser/servers';
+import { LoopbackChip } from '../components/loopback-chip';
 import { Button } from '../components/ui/button';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { Empty } from '../components/ui/empty';
@@ -261,6 +262,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
           <span title={SESSION_STATE_TIP[session.state]} className="flex-none">
             <StatusPill state={SESSION_STATE[session.state]}>{session.state.replace('_', ' ')}</StatusPill>
           </span>
+          <LoopbackChip on={session.loopback} />
           <span className="ml-auto flex flex-none items-center gap-1">
             <Button
               variant="plain"

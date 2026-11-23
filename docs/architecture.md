@@ -319,7 +319,9 @@ Action Log row before every Bash and MCP call and holds a PROD write for an Appr
 access mode. Every run's shell commands run in the Run sandbox (ADR 0006): the SDK's `sandbox` option, built per run
 from its working folder, the data folder in use and the run's kind, which fails the run when it is unavailable. The
 sandbox's `network` block holds the Network allowlist, built when the run starts from the built-in hosts, the host of
-each Repo's `origin` and the `network_domains` rows the operator added; the SDK's proxy refuses any other host.
+each Repo's `origin` and the `network_domains` rows the operator added; the SDK's proxy refuses any other host. A chat run
+the operator started also gets `allowLocalBinding` while the `run_sandbox_loopback` Setting (`RunLoopback`, read when the run
+starts) is on; no other run does.
 `disallowedTools` denies `WebFetch` and `WebSearch`, which the proxy does not cover, and `gh pr merge`, `glab mr merge`, `bkt pr merge`, `bkt pr auto-merge` and the GitHub and GitLab MCP
 merge tools. An Agent Review, Reply check and Comment pass also deny `git push`, the host CLIs' comment, review and `api`
 commands and the host MCP comment tools, since the console pushes, replies and resolves. Permission prompts in `supervised` mode, and the agent's questions, reach `canUseTool`
