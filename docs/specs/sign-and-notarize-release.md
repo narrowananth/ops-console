@@ -1,6 +1,6 @@
 # Sign and notarize the release
 
-**Status:** draft
+**Status:** draft, on hold until an Apple Developer Program membership exists (see Blocker). Nothing in it is built: releases are ad hoc signed.
 **Design:** none. Permissions page: no change. Follows no design screen.
 
 ## Problem

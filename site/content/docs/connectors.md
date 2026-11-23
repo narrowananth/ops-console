@@ -128,7 +128,7 @@ Use a profile with the `CloudWatchLogsReadOnlyAccess` policy. The console cannot
 
 Connect registers AWS's CloudWatch MCP server with Claude Code in every Claude account, started with `uvx` and your profile. It starts for a Verification of a CloudWatch Alert and for a chat with no Alert. It does not start for a Fix, a pull request job or a review. The agent may use only its four log tools: list Log groups, run a Logs Insights query, read the results and cancel the query.
 
-That server runs outside the Run sandbox, as Claude Code starts it, and it has the rights the profile has. The sandbox's block on `~/.aws` does not apply to it.
+That server is started by Claude Code, outside the Run sandbox, and it has the rights the profile has.
 
 Alerts and Services from this source carry a CloudWatch label in Monitor. A Verification or a Fix of a CloudWatch Alert starts with a Recheck of its Log group for the last hour, and the Report's evidence section is headed "Log evidence". Disconnect removes the MCP server and leaves the AWS profile and the account as they are.
 
@@ -258,7 +258,7 @@ Alerts and Services from this source carry a New Relic label in Monitor. Disconn
 
 ## Checks and Disconnect
 
-The console checks each connected Connector in the background, and again when its last check is older than 10 minutes. A failing check shows why, and recovering shows too.
+The console checks every Connector, MCP Server and Connection on a schedule, with no browser open. Integrations checks every hour and Connections every two hours unless you change it to 30 minutes, 2, 6, 12 or 24 hours, or off. A list read also checks a connected Connector whose last check is older than 10 minutes, and Check now starts a run at once. A failing item shows why and since when, a red count appears on the sidebar entry, and an item that answers again reads Recovered for an hour. With the alert switch on in Notifications, a desktop alert tells you when one breaks.
 
 Disconnect stops the console using the service, deletes its token from your Keychain and, where the service allows it, takes the access back at the service. The Connector then reads off.
 

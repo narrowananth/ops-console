@@ -2,7 +2,7 @@
   <div class="wrap">
     <span class="eyebrow">Open source · macOS</span>
     <h1>A local console on top of Claude Code.</h1>
-    <p class="lead">Ops Console watches how your services are doing in Datadog. When a route fails, the agent reproduces it in a scratch copy of your code and writes a report. You review it. Only then does the agent fix the code and open a pull request. It never merges.</p>
+    <p class="lead">Ops Console watches how your services are doing in Datadog, OpenTelemetry logs, CloudWatch, Loki or New Relic. When a route fails, the agent reproduces it in a scratch copy of your code and writes a report. You review it. Only then does the agent fix the code and open a pull request. It never merges.</p>
     <div class="install">
       <code>curl -fsSL https://raw.githubusercontent.com/narrowananth/ops-console/main/install.sh | sh</code>
       <button type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/narrowananth/ops-console/main/install.sh | sh">Copy</button>
@@ -21,8 +21,8 @@
     <h2>From a failing route to a pull request</h2>
     <p class="sub">The agent does the legwork. You decide at each step that changes something.</p>
     <ol class="steps">
-      <li><h3>Watch</h3><p>Monitor scans each Service's logs through Datadog and raises an Alert for every kind of failure it finds.</p></li>
-      <li><h3>Verify</h3><p>You start a Verification. The agent follows the log through the code, replays the request and tests with mock data, in a scratch copy. Your checkout stays untouched.</p></li>
+      <li><h3>Watch</h3><p>Monitor scans each Service's logs in Datadog, an OpenTelemetry Log folder, CloudWatch, Loki or New Relic and raises an Alert for every kind of failure it finds.</p></li>
+      <li><h3>Verify</h3><p>You start a Verification. The agent follows the log through the code, replays the request and tests with mock data, in a scratch copy of your code, never your checkout.</p></li>
       <li><h3>Review</h3><p>You read the Report: the steps, the replayed request, the root cause and the proposed fix. Confirm it or dismiss it.</p></li>
       <li><h3>Fix</h3><p>After you confirm, the agent changes the code on a branch and runs the tests. The console pushes the branch and opens the pull request. You merge.</p></li>
     </ol>
@@ -34,11 +34,11 @@
     <h2>What's in it</h2>
     <p class="sub">One local app instead of a dozen tabs and terminals.</p>
     <div class="grid">
-      <div class="card"><h3>Monitor</h3><p>Datadog health for each Service, its Alerts, and the Verifications and Fixes that follow.</p></div>
-      <div class="card"><h3>Workspace</h3><p>Sessions with the agent, each in its own git worktree. A Browser panel, a Terminals dock, pull request review and the files the agent wrote for you.</p></div>
+      <div class="card"><h3>Monitor</h3><p>Log health for each Service from five log sources, its Alerts, and the Verifications and Fixes that follow.</p></div>
+      <div class="card"><h3>Workspace</h3><p>Sessions with the agent, each in its own git worktree. A Browser panel with DevTools, a Terminals dock, pull request actions and the files the agent wrote for you.</p></div>
       <div class="card"><h3>Playbooks</h3><p>Write the rules and ordered steps the agent follows for each task. The built-in Playbooks are read-only, and you can copy and edit them.</p></div>
       <div class="card"><h3>Connections</h3><p>Databases the agent may use, each with an Access Level that is enforced when its server launches. PROD is always marked.</p></div>
-      <div class="card"><h3>Claude accounts</h3><p>Add several Claude accounts, see each one's usage, and let the console switch when one nears its limit. CLIProxy works too.</p></div>
+      <div class="card"><h3>Claude accounts</h3><p>Add several Claude accounts, see each one's usage, and let the console switch when one nears its limit. CLIProxy works too. The Agent runs page shows how each run went.</p></div>
       <div class="card"><h3>Dev tools</h3><p>Ask a question in plain words and have the agent query your databases and queues, scoped to the Connections you choose.</p></div>
     </div>
   </div>
@@ -50,7 +50,7 @@
       <h2>Connect once, sign in in your browser</h2>
       <p class="sub">Each Connector signs in on its own and keeps its token in the macOS Keychain.</p>
       <ul class="chips">
-        <li>Datadog</li><li>Jira</li><li>GitHub</li><li>GitLab</li><li>Bitbucket</li><li>Slack</li><li>Sentry</li><li>Shopify</li><li>slashdocs</li><li>Google Docs</li><li>Google Sheets</li><li>Google Drive</li>
+        <li>Datadog</li><li>OpenTelemetry logs</li><li>CloudWatch logs</li><li>Loki logs</li><li>New Relic logs</li><li>Jira</li><li>GitHub</li><li>GitLab</li><li>Bitbucket</li><li>Slack</li><li>Sentry</li><li>Shopify</li><li>slashdocs</li><li>Google Docs</li><li>Google Sheets</li><li>Google Drive</li>
       </ul>
       <p class="note"><a href="/docs/connectors/">How Connectors work</a></p>
     </div>
@@ -67,8 +67,8 @@
       <h2>Built so the agent can't surprise you</h2>
       <ul class="checks">
         <li>It never merges a pull request. Every run denies the merge commands and tools.</li>
-        <li>A Verification writes only in a scratch copy. Nothing reaches your checkout or a database.</li>
-        <li>Every run's commands go through the macOS sandbox, which has no switch to turn it off.</li>
+        <li>A Verification works in a scratch copy of your code and writes to no Git host and no database.</li>
+        <li>Every run's commands go through the macOS sandbox, which has no switch to turn it off. It keeps the login Keychain, the installed app and git's control files out of reach and leaves the rest open, so builds and tests run.</li>
         <li>PROD Connections are read-only for the agent, and a write to PROD asks for your approval in every Access mode.</li>
         <li>Log text is data, never an instruction.</li>
         <li>The server listens on 127.0.0.1 only, and secrets stay in the Keychain. Nothing goes to a server the project runs: see the <a href="/docs/data-flow/">data flow</a>.</li>

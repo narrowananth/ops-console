@@ -1,6 +1,7 @@
 # Playbook Skills
 
 **Status:** shipped
+**Changed since:** Skill packs and Built-in skills, the Discover and Yours tabs (`skill-kinds-in-session`); PR actions open Sessions (`pr-actions-open-sessions`). Read Behavior 10, 11 and the Database, API and UI sections as edited below.
 **Design:** Playbooks in `design/ops-console-sidebar.html` (sidebar item under Claude, after Playbooks; the Skills card
 and panel of an open Playbook). The Skills page and the Skills line on a job card are in `design/ops-console.html`.
 
@@ -16,11 +17,12 @@ methods once, attach them to the Playbooks that need them, and let the agent pic
 
 ### Skills page
 
-1. The sidebar lists Skills under Claude, after Playbooks. The page lists the operator's Skills A to Z, each with the
-   number of Playbooks that hold it, and the open Skill beside the list. With none, it shows an empty state and
-   "New Skill".
+1. The sidebar lists Skills under Claude, after Playbooks. The page has a Discover tab and a Yours tab
+   (`skill-kinds-in-session`). Yours lists the operator's Custom Skills A to Z, each with the number of Playbooks that
+   hold it, and the open Skill beside the list. With none, it says "No Skills yet." and the header's New Skill starts
+   the first.
 2. A Skill has a name, a description and instructions. The name is lowercase letters, digits and hyphens, at most 64
-   characters, and unique among Skills ignoring case. The description says when the agent should use the Skill, at most
+   characters, and unique among Skills ignoring case; it cannot be the name of a Built-in skill. The description says when the agent should use the Skill, at most
    1024 characters. The instructions are Markdown, at most 20000 characters. All three are required.
 3. New Skill, edit and delete save like the Playbook editor: a save bar appears on unsaved edits, Discard puts the
    saved text back. A name already taken, or a field over its limit, refuses the save and says which field.
@@ -31,9 +33,9 @@ methods once, attach them to the Playbooks that need them, and let the agent pic
 
 ### Attaching to a Playbook
 
-6. The open Playbook shows a Skills section under Rules, with a count out of 8 and a picker of the Skills not yet held.
-   Adding and removing are edits that save with the Playbook. A ninth Skill is refused.
-7. Each held Skill shows its name and description, and links to its page. A Skill removed from a Playbook is not
+6. The open Playbook shows a Skills section under Rules, with a count out of 8 and a picker of the Skills not yet held,
+   Custom and Built-in. Adding and removing are edits that save with the Playbook. A ninth Skill is refused.
+7. Each held Skill shows its name, its kind badge and its description, and links to its page. A Skill removed from a Playbook is not
    deleted.
 8. A Playbook may hold Skills whichever Triggers it is on, including Review PR: a Skill is read-only text and writes
    nothing. Built-in Playbooks hold none and cannot be edited, so a Trigger that runs its built-in offers no Skills.
@@ -42,20 +44,22 @@ methods once, attach them to the Playbooks that need them, and let the agent pic
 
 ### At run time
 
-10. A job (Verification, Fix, Agent Review, Reply check, Comment pass) copies its Playbook's Skills when it starts,
-    as it copies the rules. Editing or deleting a Skill, or taking it off the Playbook, does not change a job already
-    running. A chat (Reply in thread, Session message) reads the Playbook's Skills at each message, so an edit applies
-    from the next message.
-11. The agent sees each held Skill's name and description on every turn, and loads a Skill's full instructions only when
-    it judges a step needs it. The console does not paste Skill text into step prompts. A Skill the Playbook does not
-    hold is not offered, and a Skill file in a Repo's own code does not load in a run that holds Skills.
+10. A job (Verification, Fix) copies its Playbook's Skills when it starts, as it copies the rules. Editing or deleting
+    a Skill, or taking it off the Playbook, does not change a job already running. A PR action Session (Review with
+    agent, Check replies, Address comments) copies its Trigger's Skills into its opening prompt when it opens. A chat
+    (Reply in thread, Session message) reads the Playbook's Skills at each message, so an edit applies from the next
+    message.
+11. In a job and in a chat, the agent sees each held Skill's name and description on every turn, and loads a Skill's
+    full instructions only when it judges a step needs it. The console does not paste Skill text into step prompts. A
+    PR action Session is the exception: its opening prompt holds the full text of each held Skill. A Skill the Playbook
+    does not hold is not offered, and a Skill file in a Repo's own code does not load in a run that holds Skills.
 12. Skills sit under the Playbook's rules: they add method and never relax a rule. The console's safety lines still
     come last and win. A Skill that says to merge, to push, to read a secret or to write to a PROD Connection changes
     nothing: PROD writes still ask for Approval in every Access mode.
 13. A Playbook with no Skills runs as before.
 14. When the agent loads a Skill, the Action Log records it as an action of kind `skill` in that run, with the Skill's
-    name. The transcript shows the step as `Skill <name>`. The job card
-    shows the Skills the job was offered. Nothing in the console counts or scores Skill use.
+    name. The transcript shows the step as `Skill <name>`. The Report and Fix cards of a Monitor Alert show the Skills
+    the job was offered. Nothing in the console counts or scores Skill use.
 15. A run whose Skills cannot be handed to it fails with the reason, the way a run fails when the Run sandbox is
     unavailable. It does not run without them.
 16. Two Sessions that hold the same Skill each get their own copy. A stopped or finished run leaves nothing behind.
@@ -70,12 +74,12 @@ methods once, attach them to the Playbooks that need them, and let the agent pic
 - **Choice at run time**: the agent's, through Claude Code's own skill listing. The console enables only the held
   Skills for the run and does not force one.
 - **Hand-off**: the daemon writes the held Skills to a throwaway folder per run in the temp folder, outside the data
-  folder, readable by the Run sandbox, and loads it as a local plugin with the `skills` option listing them. It
-  removes the folder when the run ends; a folder a crash leaves is the operating system's to clear.
+  folder, and loads it as a local plugin with the `skills` option listing them. It removes the folder when the run
+  ends; a folder a crash leaves is the operating system's to clear.
 - **New Skill**: saves at once with placeholder text the operator then edits.
-- **Limits**: 8 Skills per Playbook; 20000 characters of instructions.
+- **Limits**: 8 Skills per Playbook, Custom and Built-in together; 20000 characters of instructions.
 - **Order**: lists sort A to Z by name, ignoring case.
-- **Job copy**: a job stores a snapshot of the Skills it was offered (id, name, description, instructions) with its
+- **Job copy**: a Verification or Fix stores a snapshot of the Skills it was offered (id, name, description, instructions) with its
   Playbook name and rules, so an edit or delete never changes a job in flight. A chat reads the live Playbook at each
   message; a Session tied to an Alert reads the snapshot of the Alert's latest job, as it does for the rules.
 
@@ -90,8 +94,8 @@ methods once, attach them to the Playbooks that need them, and let the agent pic
 ## Safety
 
 The agent's reach is the same as before: Skills are text the operator wrote, read through the same prompt channel as
-Playbook rules. They add no tool, Connection, command or file access, and the safety lines, the Run sandbox and the
-Network allowlist still apply. The run folder holding the Skills is read-only to the run. A Skill is not a trusted
+Playbook rules. They add no tool, Connection, command or file access, and the safety lines and the Run sandbox still
+apply. A Skill is not a trusted
 instruction source above the safety lines: see Behavior 12.
 
 ## Database
@@ -114,12 +118,12 @@ CREATE TABLE playbook_skills (
 );
 CREATE INDEX playbook_skills_skill_idx ON playbook_skills (skill_id);
 
--- On each job table that holds playbook_name and playbook_rules (reports, fixes, pr_agent_reviews,
--- pr_reply_checks, pr_comment_passes):
+-- On each job table that holds playbook_name and playbook_rules (reports, fixes):
 ALTER TABLE reports ADD COLUMN playbook_skills TEXT; -- JSON array of {id, name, description, instructions}; null for none
 ```
 
-Existing rows keep `playbook_skills` null and no Playbook holds a Skill.
+Existing rows keep `playbook_skills` null and no Playbook holds a Skill. `installed_skill_packs` and
+`playbook_builtin_skills` hold the Built-in side (`skill-kinds-in-session`).
 
 ## API
 
@@ -128,18 +132,19 @@ Existing rows keep `playbook_skills` null and no Playbook holds a Skill.
 `Skill`:
 
 ```json
-{ "id": "…", "name": "systematic-debugging", "description": "…", "instructions": "…", "playbooks": [{ "id": "…", "name": "…" }] }
+{ "id": "…", "kind": "custom", "name": "systematic-debugging", "description": "…", "instructions": "…", "pack": null, "playbooks": [{ "id": "…", "name": "…" }] }
 ```
 
 | Status | Error code | When |
 | ------ | ---------- | ---- |
 | 400 | `validation_failed` | A field is empty, over its limit, or the name has other characters |
 | 404 | `not_found` | No Skill with that id |
-| 409 | `duplicate` | Another Skill has the name, ignoring case |
+| 409 | `duplicate` | Another Skill has the name, ignoring case, or a Built-in skill has it |
+| 409 | `read_only` | `PATCH` or `DELETE` on a Built-in skill |
 
 ### `GET /api/skills`
 
-`{ "data": { "items": Skill[] } }`, sorted A to Z.
+`{ "data": { "items": Skill[] } }`, Custom Skills and the skills of installed packs, sorted A to Z.
 
 ### `POST /api/skills`
 
@@ -156,7 +161,7 @@ Any of the three fields. Returns `{ "data": Skill }`.
 ### `POST /api/playbooks`, `PATCH /api/playbooks/:id`
 
 Add `skill_ids: string[]` (default `[]`, at most 8, no repeats). An unknown id is `404 not_found`; a ninth is
-`400 validation_failed`. `Playbook` gains `skills: { id, name, description }[]`, sorted A to Z.
+`400 validation_failed`. `Playbook` gains `skills: { id, kind, name, description }[]`, sorted A to Z.
 
 ### WebSocket `skills.changed`
 
@@ -164,18 +169,18 @@ Server to client, `{}`. Fires after a Skill is created, edited or deleted. The U
 
 ## UI
 
-- **Skills page**: sidebar item under Claude after Playbooks, route `/skills`. Two columns: list on the left, editor in
-  the middle. States: loading, empty (New Skill), error with retry, unsaved edits (save bar). Departs
-  from the design: new page.
+- **Skills page**: sidebar item under Claude after Playbooks, route `/skills`, with Discover and Yours tabs. Yours has
+  two columns: list on the left, editor beside it. States: loading, empty ("No Skills yet."), error with retry, unsaved
+  edits (save bar).
 - **Playbook editor**: a Skills card beside Rules and Settings, whose panel holds the picker and the count. With no
   Skills, the panel reads "None held. The agent follows the rules and steps only."
-- **Job cards** (Report panel, Fix, Agent Review, Reply check, Comment pass): one line, "Skills offered: a, b", linking to each
+- **Job cards** (Report panel, Fix): one line, "Skills offered: a, b", linking to each
   Skill. Hidden when none. A Skill since deleted shows its name as plain text.
 - No PROD state: a Skill reaches no Connection.
 
 ## Rejected
 
-- **Skills read from `~/.claude/skills`**: ties a run to one Mac's files and the Run sandbox does not read them.
+- **Skills read from `~/.claude/skills`**: ties a run to one Mac's files.
 - **Skill attached per step**: more UI and more state for a choice the agent already makes at run time.
 - **Skill text pasted into every step prompt**: costs tokens on every turn and takes the choice from the agent.
 - **Skill per Trigger**: the Playbook already holds the method for a Trigger; a second place would conflict with it.
@@ -198,7 +203,7 @@ None. Reversible, and it follows ADR 0005: Claude Code's own skill loading is th
 
 - **Skills service** (backend + SQLite): 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 15.
 - **Run options** (unit, over the Agent SDK fake): 11, 12, 14, 16. Asserts the options a run passes: the plugin folder,
-  the `skills` list, the readable folder, and that a run with none changes nothing.
+  the `skills` list, and that a run with none changes nothing.
 - **Skills page and Playbook editor** (browser, Playwright against the built daemon): 1, 2, 3, 4, 6, 7.
 - **Skills offered on a job card** (browser, Playwright with a mocked job payload): 14.
 

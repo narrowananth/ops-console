@@ -19,9 +19,8 @@ one browser tab, so no other view can show it.
 3. Each run is a card, ordered needs you, slow, failed, on track, stopped. It shows title, Repo and branch, subagents,
    one line on why the run has its health, a strip of where its time went, the time elapsed, and Pause, Stop, Play,
    Retry or Dismiss. The title opens the Session, or the pull request for a review. Tabs filter by health or ended.
-   A pull request review takes no messages, so it cannot pause or queue, but Retry runs again the job that failed last
-   on that pull request, from its failed step. Retry all on the failed card does this for every failed run that can,
-   and says how many started and why one did not.
+   A pull request review (a thread answer) takes no messages, so it cannot pause, queue or retry. Retry all on the
+   failed card starts every failed run that can retry, and says how many started and why one did not.
 4. Health is read by the daemon from what it saw. **Needs you**: an Approval or a question waits. **Slow**: a step has
    gone past three times the middle time of that command's earlier runs (at least two minutes), or past five minutes
    for a command seen fewer than three times; time spent waiting on the operator does not count. **Failed** and
@@ -35,15 +34,17 @@ one browser tab, so no other view can show it.
    A stage the run went past with none shows as skipped, and the stage of the newest call shows as now. A run that
    ended early marks the stage it stopped in with why: usage limit, failed or stopped.
 7. **Why this run is slow** gives the step and how long it has run against its usual time, a likely cause, and a
-   suggestion. The cause comes from the command: one that reaches the network or runs tests names the Run sandbox's
-   allowlist as a possible cause; any other says the console cannot see what the step waits on. The console does not
-   guess what the agent thinks. Buttons: Stop the run, Stop and tell the agent to skip it, Allow the host the command
-   names, and a link to the Network allowlist.
+   suggestion. The cause comes from the command: one that reaches the network says a slow or unreachable host can hold
+   it until it times out, and one that runs tests says it may wait on a service or host it calls; any other says the
+   console cannot see what the step waits on. The console does not guess what the agent thinks. Buttons: Stop the run
+   and Stop and tell the agent to skip it.
 8. **Why this run ended** gives what happened, the likely cause and what to do, with the raw error under them. Kinds:
    network blocked, write blocked, usage limit, signed out, commit hook failed, console restarted, unknown. Unknown
    says the console has no more than the error. A commit hook failure tells the operator to fix what the hook reports;
-   it never offers to skip the hook. A blocked host offers Allow and Retry, which adds the host to the Network
-   allowlist and then retries.
+   it never offers to skip the hook. A network error says the command could not reach a host and offers Retry; it
+   names no host. A write error says the Run sandbox closes the Keychain folder and the git control files, and a
+   read-only run cannot change its working folder. A usage limit or a signed-out run offers Switch account and Retry
+   and a link to Accounts & Usage.
 9. The time split gives every millisecond of the main agent's run to one phase: thinking (the gaps between calls),
    reading, editing, commands and tools, subagents (the main agent is blocked on a subagent call), waiting on the
    operator, and waiting on the usage limit. The total equals the elapsed time in the run's header, read from one clock.
@@ -87,9 +88,8 @@ one browser tab, so no other view can show it.
 ## Safety
 
 The page changes no file and runs no command itself. Stop, Pause and Dismiss end or hide a run. Play, Retry and Send
-now send a message in the Session, under its access mode, Approvals and Run sandbox. Allow adds a host to the Network
-allowlist, which the operator already controls on Permissions (`run-network-allowlist`); the button is one click, and
-names the host on its face. Raw errors and step summaries are redacted before they are kept.
+now send a message in the Session, under its access mode, Approvals and Run sandbox. Raw errors and step summaries are
+redacted before they are kept.
 
 ## UI
 

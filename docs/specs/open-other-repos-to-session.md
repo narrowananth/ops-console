@@ -5,8 +5,9 @@
 
 ## Problem
 
-A chat in one Repo often finds the fix in another: a log in `apis` points at a change in `admin-panel`. The Run sandbox
-lets a run write only in its own Repo, so the agent could print a patch and the commands for the operator to run by hand.
+A chat in one Repo often finds the fix in another: a log in `apis` points at a change in `admin-panel`. A checkout
+outside the Session's working folder is none of the run's folders: the agent is not told it exists, and `run_integration` refuses it as a file argument. The operator wants the agent to work in the other Repo as in
+its own.
 
 ## Behavior
 
@@ -15,8 +16,9 @@ lets a run write only in its own Repo, so the agent could print a patch and the 
    no other Repo.
 2. The icon opens a list of the other imported Repos, A to Z, with a search box. It does not list the Session's own Repo.
    The operator ticks and unticks Repos; each click saves.
-3. From the Session's next run, the operator's own runs in that Session (a chat turn) write and read each ticked
-   checkout as they do the working folder: commands and file tools, `git` checkout, branch, add and commit included.
+3. From the Session's next run, the operator's own runs in that Session (a chat turn) work in each ticked checkout as in
+   the working folder. The run adds it as an additional folder, `git` checkout, branch, add and commit run there, and
+   `run_integration` accepts files in it as arguments.
 4. A ticked Repo's git control files (`.git/hooks`, `.git/config` and the rest the working folder closes) stay closed.
    The agent never pushes and `open_pull_request` opens a pull request for the working folder's branch only.
 5. A Playbook step, a Verification, a Fix, an Agent Review and every read-only run get no extra Repo.
@@ -24,11 +26,12 @@ lets a run write only in its own Repo, so the agent could print a patch and the 
    Repo, never a path in a message or a tool call.
 7. A Repo removed from the console drops out of the next run. A Session never lists its own Repo, and the same Repo is
    kept once.
-8. Everything else about the Run sandbox is unchanged: no home folder, no credential folders, the Network allowlist.
+8. Everything else about the Run sandbox is unchanged ([ADR 0006](../adr/0006-agent-runs-sandboxed-by-the-os.md)): the
+   Keychain folder and the installed app stay unreadable, and the Access mode still decides which commands ask.
 
 ## Settled
 
-- **Per Session, by click**: a global list of writable Repos, or a path typed in a message, would let a run steered by
-  log text write where the operator never chose ([ADR 0002](../adr/0002-operator-approves-agent-never-merges.md),
+- **Per Session, by click**: a global list of Repos, or a path typed in a message, would let a run steered by log text
+  take in a folder the operator never chose ([ADR 0002](../adr/0002-operator-approves-agent-never-merges.md),
   [ADR 0006](../adr/0006-agent-runs-sandboxed-by-the-os.md)).
 - **No separate Setting**: the sandbox still has no off switch.

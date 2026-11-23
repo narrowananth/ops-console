@@ -5,18 +5,16 @@
 
 ## Problem
 
-A repo's commit hooks (husky, lefthook, pre-commit, a `core.hooksPath` folder) failed inside an agent run on Node, Java,
-Rust and Go repos. The Run sandbox blocked the caches and registries those tools use, and the agent then committed with
-`--no-verify` and said the check could not run.
+A repo's commit hooks (husky, lefthook, pre-commit, a `core.hooksPath` folder) must run inside an agent run on Node, Java,
+Rust and Go repos. An agent whose hook fails can commit with `--no-verify` and say the check could not run.
 
 ## Behavior
 
-1. A run's commands write in its working folder, the temp folders and these package-tool caches under the home folder:
-   `~/.npm`, `~/.pnpm-store`, `~/.yarn`, `~/.cache`, `~/.cargo/registry`, `~/.cargo/git`, `~/.cargo/.package-cache`,
-   `~/go/pkg`, `~/.m2/repository`, `~/.gradle`, `~/.nuget/packages`, `~/Library/Caches` and `~/Library/pnpm`. No folder
-   on PATH is writable, such as `~/.cargo/bin` or `~/go/bin`.
-2. Every run reaches the registries of npm, Yarn, Cargo, Go, Maven, Gradle, PyPI and RubyGems besides GitHub
-   (`run-network-allowlist` Behavior 7).
+1. A run's commands write the package-tool caches under the home folder (`~/.npm`, `~/.cargo`, `~/go`, `~/.m2`,
+   `~/.gradle` and the rest) and reach every registry, since the Run sandbox limits neither writes nor hosts
+   ([open-run-sandbox](open-run-sandbox.md)).
+2. The sandbox closes the git control files of the working folder (`hooks`, `config`, `config.worktree`, `commondir`,
+   `gitdir`), so a run cannot edit a hook to get past it.
 3. Every run's system prompt tells the agent to let the repo's commit hooks finish, to fix what they report (run the
    repo's formatter or lint fixer, install the documented dependencies, correct the code, including files that came in
    from a merge), and to commit again until they pass. It tells the agent to find the repo's own commands and run them
@@ -30,19 +28,19 @@ Rust and Go repos. The Run sandbox blocked the caches and registries those tools
 
 - **Hooks that need a tool the daemon cannot see**: a run finds `node`, `cargo`, `go` and `java` on the PATH the
   daemon started with.
-- **Daemon commits**: the console's own commit of a Comment pass in its scratch copy still skips hooks, because a
-  scratch copy has no installed packages.
+- **Daemon commits**: the console's own commit of the Changes panel and of a PR action Session's worktree skips hooks,
+  because the daemon runs `git` outside the run and a worktree may have no installed packages.
 - **Cache poisoning**: a run can write a package cache; nothing checks what it wrote.
 
 ## Safety
 
-Widens the Run sandbox (ADR 0006, rewritten). Reads of the data folder, `~/.ssh`, `~/.aws`, `~/.config/gcloud` and the
-Keychain folder stay denied.
+The Run sandbox (ADR 0006) closes the Keychain folder, the installed app and the git control files. A hook runs with
+the operator's rights, as any command in a run does.
 
 ## Seams
 
 - **Daemon** (`backend/test/run-sandbox.test.ts`, `agent-guards.test.ts`): 1 to 4.
-- **Seatbelt** (`backend/test/run-sandbox-real.test.ts`): 1.
+- **Seatbelt** (`backend/test/run-sandbox-real.test.ts`): 2.
 
 ## Out of scope
 

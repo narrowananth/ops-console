@@ -14,7 +14,7 @@ Cellar would break that layout.
 
 1. `brew tap narrowananth/ops-console https://github.com/narrowananth/ops-console`, then `brew trust narrowananth/ops-console` on a
    Homebrew that asks for it, then `brew install ops-console`,
-   installs one command, `ops-console`, into Homebrew's `bin`, and prints that the operator runs `ops-console start`. This is the Brew entry command. The formula's install step
+   installs one command, `ops-console`, into Homebrew's `bin`, and prints `ops-console start && ops-console open` as the way to start the console. This is the Brew entry command. The formula's install step
    installs no app and writes nothing under the home folder.
 2. The Brew entry command with no installed app installs the formula's version from the tarball Homebrew already
    downloaded and checked. The Brew entry command's own messages go to stderr, and the install script's output passes through unchanged.
@@ -48,7 +48,7 @@ Cellar would break that layout.
 14. A failed tap update fails that job and leaves the release published. The owner reruns the job.
 15. The only file the job writes to the repository is `Formula/ops-console.rb`, generated, and the job needs no secret
     beyond the workflow's own token.
-16. Without the Brew entry command's variable set, the install script, the tarball and the checksums work as before.
+16. Without `OPS_CONSOLE_NO_LINK` set, the install script, the tarball and the checksums behave as for a `curl | sh` install.
 17. The README and the docs site show the Homebrew command beside `curl | sh`.
 
 ## Settled
@@ -59,8 +59,8 @@ Cellar would break that layout.
 - **What the formula stages**: the tarball (downloaded without unpacking), a `checksums.txt` line made from its
   sha256, and the install script taken from the tarball, side by side in one folder. The Brew entry command runs that
   script with the release folder set to that folder, as the release workflow's own check does.
-- **Install script variable**: one new variable makes the install script skip the `~/.local/bin` link and the PATH hint.
-  The Brew entry command sets it for the installs it starts. Without it the script behaves as today.
+- **Install script variable**: `OPS_CONSOLE_NO_LINK` makes the install script skip the `~/.local/bin` link and the PATH hint.
+  The Brew entry command sets it for every command it runs. Without it the script links and hints as it does for a `curl | sh` install.
 - **Restart on upgrade**: the old version's `status` tells whether the daemon runs. After the install, the new
   version's `stop` and `start` restart it. The CLI has no restart command, and `start` on a running daemon only reports it.
 - **Tap**: this repository. The formula lives at `Formula/ops-console.rb` on `main`, and the operator taps it with the
@@ -68,7 +68,7 @@ Cellar would break that layout.
   nothing outside this repository, and no token or second repository is needed.
 - **Formula from a template**: this repository holds the template, the Brew entry command's script and the rendering. The
   release job renders them with the version and both sha256 values and commits the result to `main`.
-- **Check before push**: the formula is installed from a local tap (trusted with `brew trust`, which Homebrew now
+- **Check before push**: the formula is installed from a local tap (trusted with `brew trust`, which current Homebrew
   requires) before it reaches the real one, so a broken formula never goes live. The release it points at is already published when the job runs.
 - **Tarball kept in the Cellar**: the first run installs with no second download and no network. The cost is a second
   copy of the app on disk, about the size of one release.
@@ -91,7 +91,7 @@ Cellar would break that layout.
 
 ## Safety
 
-No change. The agent's reach is the same as before. The Brew entry command and the tap run outside any agent run, and no
+No change to the agent's reach. The Brew entry command and the tap run outside any agent run, and no
 Connection is touched.
 
 ## Database
@@ -104,7 +104,7 @@ No change.
 
 ## UI
 
-No change. The in-app update card installs through the install script as before.
+No change. The in-app update card installs through the install script.
 
 ## Rejected
 
@@ -126,7 +126,7 @@ No change. The in-app update card installs through the install script as before.
 
 ## ADR
 
-- **Homebrew installs an entry command around the install script**: the app keeps its home-folder layout, launchd job
+- **Homebrew installs an entry command around the install script** ([ADR 0008](../adr/0008-homebrew-installs-an-entry-command.md)): the app keeps its home-folder layout, launchd job
   and self-update, so a Homebrew install and a script install behave the same after the first run. The trade-off: a
   second copy of the release in the Cellar, an app that updates itself past its formula, and no removal of the app on
   `brew uninstall`. It is hard to undo once operators run the Brew entry command, since a move to the Cellar changes where

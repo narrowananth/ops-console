@@ -78,10 +78,7 @@ secret.
 Next to `keychain-wait`. Answers from daemon memory:
 
 ```json
-{
-  "refused": false,
-  "reason": null
-}
+{ "data": { "refused": false, "reason": null } }
 ```
 
 - `refused`: true once a handover was refused in this daemon's life.

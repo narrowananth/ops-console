@@ -45,8 +45,7 @@ function dataDir(): string {
 }
 
 /**
- * Where those files go: a folder under the data folder, which the Run sandbox denies reading (ADR 0006), not the user
- * temp folder a run's commands can list.
+ * Where those files go: a folder under the data folder, not the user temp folder a run's commands can list.
  */
 export function filesBase(): string {
   return path.join(dataDir(), 'mcp-files');

@@ -13,8 +13,10 @@ other.
 ## Behavior
 
 1. Every block of preformatted text the console draws has a copy icon in its top right corner. The block is one unit:
-   a fenced code block in the agent's text, a code part of the transcript, an Approval's command, a Verification's
-   replay request and response, the raw error of a run, the raw output of a step, and a text file in the viewer.
+   a fenced code block in the agent's text, a code part of the transcript, the details of a page element the
+   operator picked in the Browser panel, an Approval's command, a Verification's replay request and response, a Report's raw Markdown, an
+   Alert's log line, stored query and Sample JSON, the raw error of a run, the raw output of a step, and a text file in
+   the viewer.
 2. The icon sits in the block's corner and stays in view while a long block scrolls. It never covers text: a block
    keeps the room it needs under the icon's width.
 3. The icon shows on hover and on keyboard focus of the block, and always on a touch screen. It is a button with the
@@ -31,7 +33,7 @@ other.
    close or toggle what sits around it.
 9. One block's state is its own: copying one never shows a check on another.
 10. A block of a streaming message copies the text received so far. The icon stays while text arrives.
-11. The terminal in Dev tools is a live shell and gets no icon; its text is the operator's to select.
+11. A terminal pane gets no icon: the Terminals dock and the Setup agent's terminal are live shells, and the Dev tools terminals draw their transcript as terminal lines. Their text is the operator's to select.
 
 ## Settled
 
@@ -52,7 +54,7 @@ No change. The copy runs in the browser on text already shown; it reads nothing 
 ## UI
 
 Every screen that draws a block gets the icon: the Session transcript, a Report, a pull request thread and review, the
-Alert view, the Agent runs page detail, Approvals and the attachment viewer. States: idle, hover or focus, copied,
+Alert drawer and its Sample dialog, the Agent runs page detail, Approvals and the attachment viewer. States: idle, hover or focus, copied,
 not copied. No loading or empty state; PROD changes nothing. The Running tray has no block.
 
 ## Rejected

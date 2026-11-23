@@ -38,7 +38,7 @@
 <text x="126.5" y="303" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">RUN · launchd keeps it up</text>
 <rect x="40" y="516" width="1380" height="132" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
 <rect x="52" y="510" width="351" height="12" rx="2" fill="#f5f5f5"/>
-<text x="227.5" y="519" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">UPDATE · daemon checks GitHub 10 s after start and every minute</text>
+<text x="227.5" y="519" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">UPDATE · daemon checks GitHub 10 s after start and every 10 min</text>
 <rect x="40" y="704" width="1380" height="164" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
 <rect x="52" y="698" width="117" height="12" rx="2" fill="#f5f5f5"/>
 <text x="110.5" y="707" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">EDGE CASES AND TIPS</text>
@@ -129,8 +129,8 @@
 <rect x="1132" y="154" width="41" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-opacity="0.45" stroke-width="0.8"/>
 <text x="1152.5" y="163" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">BUNDLE</text>
 <text x="1240" y="187" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">What the tarball carries</text>
-<text x="1240" y="200" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">daemon · UI · CLI · SDK</text>
-<text x="1240" y="211" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">node-pty · sqlite · keyring</text>
+<text x="1240" y="200" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">UI + DevTools · CLI · SDK</text>
+<text x="1240" y="211" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">daemon · native modules</text>
 <rect x="64" y="340" width="148" height="72" rx="6" fill="#f5f5f5"/>
 <rect x="64" y="340" width="148" height="72" rx="6" fill="rgba(79,93,117,0.10)" stroke="#5a6580" stroke-width="1"/>
 <rect x="72" y="346" width="26" height="12" rx="2" fill="transparent" stroke="#5a6580" stroke-opacity="0.45" stroke-width="0.8"/>
@@ -169,7 +169,7 @@
 <text x="933" y="355" fill="#bf4520" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">KEY</text>
 <text x="986" y="379" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Keychain handover</text>
 <text x="986" y="392" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">old app gives items</text>
-<text x="986" y="403" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">about 30 s, in background</text>
+<text x="986" y="403" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">reads wait up to 90 s</text>
 <circle cx="1056" cy="344" r="8" fill="#2d3142"/>
 <text x="1056" y="347.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
 <rect x="1124" y="340" width="232" height="72" rx="6" fill="#f5f5f5"/>
@@ -218,11 +218,11 @@
 <text x="986" y="615" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">new version, same data</text>
 <circle cx="1056" cy="556" r="8" fill="#2d3142"/>
 <text x="1056" y="559.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">7</text>
-<text x="78" y="740" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">macOS older than 13.5 is refused. A bad or missing checksum aborts and leaves current alone. OPS_CONSOLE_RELEASE_URL tests a local build.</text>
+<text x="78" y="740" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">macOS older than 13.5 is refused. A bad or missing checksum aborts and leaves current alone. OPS_CONSOLE_RELEASE_URL tests a local build, and the Homebrew command uses it for its own tarball.</text>
 <text x="78" y="757" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Node sits inside the app, so macOS names the daemon Ops Console. Releases on one Node keep Keychain and Full Disk Access; a new Node makes a new app.</text>
 <text x="78" y="774" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Switched off under Login Items it does not start at login. OPS_CONSOLE_PORT at start goes into the plist. Dev runs on 4556 with Keychain service ops-console-dev.</text>
-<text x="78" y="791" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Order: data folder lock, migrations in one transaction, start-up recovery, open the port, start the scheduler, write runtime.json.</text>
-<text x="78" y="808" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The daemon Keychain reads wait up to 90 s for the handover, then fail keychain_timeout. A call pending over 10 s shows a banner on every page.</text>
+<text x="78" y="791" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Order: data folder lock, migrations in one transaction, start-up recovery, open the port, start the scheduler, open the start-up queue (first reads, missed scans), write runtime.json.</text>
+<text x="78" y="808" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Keychain reads wait up to 90 s for the handover and each call up to 60 s, then fail keychain_timeout. A call pending over 10 s shows a banner on every page.</text>
 <text x="78" y="825" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Update waits for running agent runs, or installs now if the operator picks it. A restart fails live runs and expires their Approvals.</text>
 <text x="78" y="842" fill="#4f5d75" font-size="8.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Only the newest and previous versions are kept, so a bad release can be rolled back by pointing current at the previous one.</text>
 <circle cx="60" cy="737" r="8" fill="#2d3142"/>

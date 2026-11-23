@@ -13,7 +13,7 @@ owner's read fails. The operator would have to change every folder's `origin` an
 
 1. `git@ssh.bitbucket.org:owner/name.git` and the `altssh.bitbucket.org` form are Bitbucket remotes, as `bitbucket.org`.
 2. When a Repo's `origin` changes to a known host, the stored host and `owner/name` change with it. This is read at
-   start and each time the Repos list is read. A folder that is gone, or an `origin` that names no known host,
+   start and, in the background, when the Repos list is read, at most once a minute. A folder that is gone, or an `origin` that names no known host,
    changes nothing.
 3. A pull request list that holds a repository under an owner no imported Repo has, while exactly one imported Repo
    on that host has the same repository name and no match in the list, stores the host's `owner/name` on that Repo.

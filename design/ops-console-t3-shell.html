@@ -3,11 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ops Console: Session shell (thread sidebar, surfaces panel, subagents)</title>
+<title>Ops Console: Session shell (Session card, Terminals dock, subagents)</title>
 <!--
-  Mockup, not shipped code. Open in a browser. Click the right-panel icons or the "Open a surface" list to switch
-  surfaces; hover "Waiting on 5 subagents"; press T to flip the theme. Tokens come from ops-console-sidebar.html.
-  Structure follows the T3 Code thread screen: thread sidebar, conversation + composer, a surfaces panel and a context card.
+  Mockup, not shipped code. Open in a browser. The Session button in the header shows or hides the Session card;
+  hover "Waiting on 5 subagents"; press T to flip the theme. Tokens come from ops-console-sidebar.html.
+  Structure follows the T3 Code thread screen: thread sidebar, conversation + composer and one Session card. Terminals
+  open in the dock under the conversation.
 -->
 <style>
   :root {
@@ -37,7 +38,7 @@
   svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
   .muted{color:var(--n600)} .tiny{font-size:12px}
 
-  /* Frame: sidebar | thread | surfaces panel, with a terminals dock under the thread. */
+  /* Frame: sidebar | thread | Session card, with a terminals dock under the thread. */
   .app{display:grid;grid-template-columns:var(--side,280px) minmax(0,1fr) var(--panel,420px);height:100vh}
   .app[data-side="closed"]{--side:0px} .app[data-panel="closed"]{--panel:0px}
   .side{background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0;overflow:hidden}
@@ -103,32 +104,45 @@
   .send.stop{background:#e5484d}
   .below{display:flex;gap:12px;max-width:720px;width:calc(100% - 40px);margin:0 auto 10px;color:var(--n600);font-size:12.5px}
 
-  /* Terminals dock */
-  .dock{border-top:1px solid var(--line);background:#000;color:#d1cdcb;font:13px/1.6 var(--mono);padding:10px 14px;height:132px;overflow:auto;position:relative}
-  .dock .tools-r{position:absolute;right:8px;top:6px;display:flex;gap:2px;color:var(--n600)}
-  .dock .repo{color:#4cc2c9;font-weight:700} .dock .br{color:#c678dd;font-weight:700} .dock .nv{color:#4cc38a;font-weight:700}
+  /* Terminals dock: one bar of icons, the terminal, and from the second process on a list at the right */
+  .dock{border-top:1px solid var(--line);background:var(--bg);height:170px;display:flex;flex-direction:column;font-size:12px}
+  .dbar{display:flex;align-items:center;gap:2px;padding:4px 8px;background:var(--surface);border-bottom:1px solid var(--line)}
+  .dbar .dh{display:flex;align-items:center;gap:6px;margin-right:8px;font-weight:600}
+  .dbar .dcur{flex:1;display:flex;align-items:center;justify-content:flex-end;gap:6px;padding-right:6px;color:var(--n700);min-width:0}
+  .ibtn.sm{width:28px;height:28px;border-radius:7px}
+  .dbar .dsep{width:1px;height:16px;background:var(--line);margin:0 4px}
+  .dbody{flex:1;display:flex;min-height:0}
+  .dpane{flex:1;min-width:0;background:#000;color:#d1cdcb;font:13px/1.6 var(--mono);padding:10px 14px;overflow:auto}
+  .dpane .repo{color:#4cc2c9;font-weight:700} .dpane .br{color:#c678dd;font-weight:700} .dpane .nv{color:#4cc38a;font-weight:700}
+  .dlist{width:160px;flex:none;border-left:1px solid var(--line);background:var(--surface);padding:4px 0;display:flex;flex-direction:column;gap:1px}
+  .dpr{display:flex;align-items:center;gap:6px;padding:4px 10px;color:var(--n700);white-space:nowrap}
+  .dpr.on{background:var(--accent-100);color:var(--accent-700);font-weight:600}
+  .dpr .tl{width:10px;flex:none;font:12px var(--mono);color:var(--n500)}
 
-  /* Surfaces panel */
-  .tabs{display:flex;align-items:center;gap:2px;padding:8px 10px;border-bottom:1px solid var(--line)}
-  .tab{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:var(--r);color:var(--n700);max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .tab[aria-selected="true"]{background:var(--n200);color:var(--text)} .tabs .right{margin-left:auto;display:flex}
-  .surface{flex:1;min-height:0;overflow:auto;padding:14px}
-  .open-list{margin:80px auto 0;width:min(300px,100%)} .open-list h4{text-align:center;font-weight:600;margin:0 0 14px}
-  .open-list button{display:flex;align-items:center;gap:12px;width:100%;padding:8px 10px;color:var(--text)} .open-list button:hover{background:var(--n200)}
-  .open-list kbd{margin-left:auto;font:12px var(--mono);color:var(--n500)} .open-list button[disabled]{color:var(--n500);cursor:default}
-  .open-list button[disabled]:hover{background:none}
-
-  /* Context card (floats over the panel's top: machine, branch, PR, servers, lineage) */
+  /* Session card: one card of sections (folder, surfaces, branch and pull request, servers, lineage, delete) */
+  .wrap{flex:1;min-height:0;overflow:auto;padding:12px}
   .ctx{border:1px solid var(--line);background:var(--card);border-radius:var(--r-xl);box-shadow:var(--shadow-md);overflow:hidden}
-  .ctx .sec{padding:6px 0;border-top:1px solid var(--line)} .ctx .sec:first-child{border-top:0}
-  .ctx .item{display:flex;align-items:center;gap:12px;padding:8px 16px;width:100%;text-align:left;border-radius:0}
+  .ctx .top{display:flex;align-items:center;justify-content:space-between;padding:12px 20px 4px}
+  .ctx .top h3{margin:0;font-size:14px;font-weight:600}
+  .ctx .sec{padding:8px;border-top:1px solid var(--line)} .ctx .sec:first-child{border-top:0}
+  .ctx .item{display:flex;align-items:center;gap:12px;padding:8px 12px;width:100%;text-align:left;border-radius:var(--r);font-size:14px}
   .ctx .item:hover{background:var(--n200)} .ctx .item .end{margin-left:auto;color:var(--n600)}
-  .ctx .label{padding:8px 16px 2px;color:var(--n600);font-size:12.5px}
+  .ctx .item > svg:first-child{color:var(--n700);width:16px}
+  .ctx .label{padding:4px 12px 6px;color:var(--n600);font-size:12px}
   .ctx .sub{display:block;color:var(--n600);font-size:12px}
-  .stopsq{width:14px;height:14px;border-radius:3px;background:#e5484d}
-  .brn{display:flex;gap:12px;padding:8px 16px} .brn .txt{min-width:0}
+  .ctx .item.danger{color:var(--accent-700)}
+  .ctx .port{border-radius:999px;background:var(--ok);color:#fff;padding:0 6px;font:600 10px/16px var(--mono)}
+  .ctx .run{display:flex;align-items:center;gap:4px;font:600 12px var(--mono)} .ctx .run i{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+  .ctx .pr{display:flex;flex-direction:column;gap:4px;padding:8px 12px;font-size:14px}
+  .ctx .pr .l{display:flex;gap:12px;align-items:flex-start} .ctx .pr .l svg{color:var(--ok);margin-top:3px}
+  .ctx .pr .m{display:flex;flex-wrap:wrap;gap:4px 16px;padding-left:28px;font-size:12px;color:var(--n700)}
+  .ctx .split{display:flex;align-items:center;border-radius:var(--r)} .ctx .split:hover{background:color-mix(in srgb,var(--n200) 60%,transparent)}
+  .ctx .split .item:hover{background:none} .ctx .split .chv{width:28px;height:28px;margin-right:4px;display:grid;place-items:center;color:var(--n700)}
+  .ctx .agent{display:flex;align-items:center;gap:12px;padding:6px 12px;font-size:14px}
+  .ctx .agent .txt{flex:1;min-width:0} .ctx .agent .txt b{display:block;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ctx .agent .el{font:12px var(--mono);color:var(--n600)}
 
-  .hint{position:fixed;right:14px;bottom:10px;color:var(--n500);font-size:12px}
+  .hint{position:fixed;right:434px;bottom:10px;color:var(--n500);font-size:12px}
   @media (max-width:1100px){.app{--panel:0px}}
 </style>
 </head>
@@ -157,6 +171,12 @@
   <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
   <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 4v4M9 13h.01M15 13h.01"/></symbol>
   <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="10" rx="2"/><path d="M3 19h18"/></symbol>
+  <symbol id="i-split" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M12 4.5v15"/></symbol>
+  <symbol id="i-restart" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.6-5.9M4 4.5v4h4"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2" style="fill:currentColor"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l.8 12.5h9.4L17.5 7M10 11v5M14 11v5"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 5l-4 14"/></symbol>
   <symbol id="i-push" viewBox="0 0 24 24"><path d="M12 15V5M7 9l5-5 5 5M5 19h14"/></symbol>
 </defs></svg>
 
@@ -197,9 +217,7 @@
       <button class="ibtn" aria-label="Show sidebar" data-toggle="side"><svg><use href="#i-side"/></svg></button>
       <div class="crumb"><span class="badge chip" style="padding:1px 6px">OC</span><span>ops-console</span><span class="sep">/</span><span class="title">Agent runtime perf: 5 subagents</span></div>
       <div class="right">
-        <button class="ibtn" aria-label="Summary"><svg><use href="#i-files"/></svg></button>
-        <button class="ibtn" aria-label="Terminals dock" aria-pressed="true"><svg><use href="#i-term"/></svg></button>
-        <button class="ibtn" aria-label="Surfaces panel" aria-pressed="true" data-toggle="panel"><svg><use href="#i-side" style="transform:scaleX(-1);transform-origin:center"/></svg></button>
+        <button class="ibtn" aria-label="Session" title="Session: surfaces, branch, servers and lineage" aria-pressed="true" data-toggle="panel" style="position:relative"><svg><use href="#i-side" style="transform:scaleX(-1);transform-origin:center"/></svg><span class="dot work" style="position:absolute;right:3px;top:3px;width:6px;height:6px;box-shadow:none"></span></button>
       </div>
     </header>
 
@@ -249,87 +267,77 @@
     </div>
     <div class="below"><span><svg style="vertical-align:-3px"><use href="#i-folder"/></svg> Session worktree</span><span style="margin-left:auto"><svg style="vertical-align:-3px"><use href="#i-pr"/></svg> perf/integrated</span><span>Repos: this one</span></div>
 
-    <div class="dock"><div class="tools-r"><svg><use href="#i-term"/></svg><svg><use href="#i-plus"/></svg></div>
-      <span class="repo">ops-console</span> on <span class="br">⎇ perf/integrated</span> via <span class="nv">⬢ v24.19.0</span><br>❯ <span style="background:#d1cdcb;color:#000">&nbsp;</span></div>
+    <div class="dock" aria-label="Terminals">
+      <div class="dbar">
+        <span class="dh"><svg><use href="#i-term"/></svg>Terminals</span>
+        <span class="dcur"><span class="dot ok"></span><span class="mono">shell</span></span>
+        <button class="ibtn sm" aria-label="New terminal" title="New terminal: a shell you type commands in"><svg><use href="#i-plus"/></svg></button>
+        <button class="ibtn sm" aria-label="Scripts and folder" title="Run a script, or pick the folder new terminals run in: This Session's folder"><svg><use href="#i-chev"/></svg></button>
+        <button class="ibtn sm" aria-label="Split terminal" title="Split: a new shell beside this one"><svg><use href="#i-split"/></svg></button>
+        <button class="ibtn sm" aria-label="Restart" title="Run the same command again"><svg><use href="#i-restart"/></svg></button>
+        <button class="ibtn sm" aria-label="Stop" title="Stop this process"><svg><use href="#i-stop"/></svg></button>
+        <span class="dsep"></span>
+        <button class="ibtn sm" aria-label="Maximize terminals" title="Maximize terminals"><svg><use href="#i-max"/></svg></button>
+        <button class="ibtn sm" aria-label="Hide terminals" title="Hide terminals. Processes keep running."><svg><use href="#i-close"/></svg></button>
+      </div>
+      <div class="dbody">
+        <div class="dpane"><span class="repo">ops-console</span> on <span class="br">⎇ perf/integrated</span> via <span class="nv">⬢ v24.19.0</span><br>❯ <span style="background:#d1cdcb;color:#000">&nbsp;</span></div>
+        <div class="dlist" role="tablist" aria-label="Processes">
+          <div class="dpr on"><span class="tl">┌</span><span class="dot ok"></span>shell</div>
+          <div class="dpr"><span class="tl">└</span><span class="dot ok"></span>shell 2</div>
+          <div class="dpr"><span class="tl"></span><span class="dot ok"></span>pnpm dev</div>
+        </div>
+      </div>
+    </div>
   </section>
 
-  <!-- Surfaces panel -->
-  <aside class="panel" id="panel" aria-label="Surfaces">
-    <div class="tabs" role="tablist">
-      <button class="tab" role="tab" aria-selected="false" data-surface="ctx"><svg><use href="#i-laptop"/></svg>Session</button>
-      <button class="tab" role="tab" aria-selected="false" data-surface="pr"><svg><use href="#i-pr"/></svg>#106</button>
-      <button class="tab" role="tab" aria-selected="true" data-surface="open"><svg><use href="#i-plus"/></svg></button>
-      <span class="right"><button class="ibtn" aria-label="Expand panel"><svg><use href="#i-max"/></svg></button></span>
-    </div>
-
-    <div class="surface" data-for="open">
-      <div class="open-list"><h4>Open a surface</h4>
-        <button data-surface="browser"><svg><use href="#i-globe"/></svg>Browser<kbd>B</kbd></button>
-        <button data-surface="terminal"><svg><use href="#i-term"/></svg>Terminal<kbd>T</kbd></button>
-        <button data-surface="files"><svg><use href="#i-files"/></svg>Files<kbd>F</kbd></button>
-        <button data-surface="diff"><svg><use href="#i-diff"/></svg>Diff<kbd>D</kbd></button>
-        <button data-surface="pr"><svg><use href="#i-pr"/></svg>Pull request<kbd>P</kbd></button>
-        <button data-surface="linked"><svg><use href="#i-link"/></svg>Linked pull requests<kbd>L</kbd></button>
-        <button data-surface="device" disabled><svg><use href="#i-phone"/></svg>Device<kbd>M</kbd></button>
-        <button data-surface="side"><svg><use href="#i-chat"/></svg>Side chat<kbd>S</kbd></button>
+  <!-- Session card (workspace/session-panel.tsx) -->
+  <aside class="panel" id="panel" aria-label="Session">
+    <div class="wrap"><div class="ctx">
+      <div class="top"><h3>Session</h3><button class="ibtn sm" aria-label="Close the Session panel" title="Close this panel" data-toggle="panel"><svg><use href="#i-close"/></svg></button></div>
+      <div class="sec">
+        <div style="display:flex;align-items:center"><button class="item" title="Open this Session's folder in Visual Studio Code"><svg><use href="#i-code"/></svg>Open in VS Code</button><button class="ibtn sm" aria-label="Show the folder" title="Show this Session's folder in the file manager"><svg><use href="#i-folder"/></svg></button></div>
       </div>
-    </div>
-
-    <div class="surface" data-for="ctx" hidden>
-      <div class="ctx">
-        <div class="sec">
-          <button class="item"><svg><use href="#i-laptop"/></svg>This machine<span class="end"><svg><use href="#i-folder"/></svg></span></button>
-          <button class="item"><svg><use href="#i-files"/></svg>Open in VS Code<span class="end"><svg><use href="#i-chev"/></svg></span></button>
-          <button class="item muted"><svg><use href="#i-plus"/></svg>Add project script</button>
-        </div>
-        <div class="sec">
-          <button class="item"><svg><use href="#i-pr"/></svg>perf/integrated<span class="end"><svg><use href="#i-chev"/></svg></span></button>
-          <div class="brn"><svg style="color:var(--ok)"><use href="#i-pr"/></svg><div class="txt"><div>Performance: agent, Keychain, git, frontend…</div><span class="sub">#106 · <span class="chip ok">1/1 checks</span></span></div></div>
-          <button class="item"><svg><use href="#i-push"/></svg>Commit &amp; push<span class="end"><svg><use href="#i-chev"/></svg></span></button>
-          <button class="item"><svg><use href="#i-diff"/></svg>Changes<span class="end"><span class="add">+55</span> <span class="del">−44</span></span></button>
-        </div>
-        <div class="sec"><div class="label">Servers</div>
-          <button class="item"><svg><use href="#i-globe"/></svg><span>localhost:60449<span class="sub">Agent · node</span></span><span class="end"><span class="stopsq"></span></span></button>
-          <button class="item"><svg><use href="#i-globe"/></svg><span>localhost:61100<span class="sub">Agent · node</span></span></button>
-        </div>
-        <div class="sec"><div class="label">Lineage</div>
-          <button class="item"><svg><use href="#i-bot"/></svg>Subagents<span class="end">5 <svg style="width:12px"><use href="#i-chev"/></svg></span></button>
-          <button class="item"><svg><use href="#i-bot"/></svg><span>Frontend perf + guardrails<span class="sub">asks: Run pnpm check</span></span><span class="end">now</span></button>
-          <button class="item"><svg><use href="#i-bot"/></svg><span>Browser/terminals/processes…<span class="sub">working</span></span><span class="end">6m</span></button>
-          <button class="item"><svg><use href="#i-bot"/></svg><span>Integrations perf (O1 O2 …)<span class="sub">working</span></span><span class="end">6m</span></button>
-        </div>
+      <div class="sec"><div class="label">Open a surface</div>
+        <button class="item" title="A server of this Session is listening on :60449. Open the browser to see it."><svg><use href="#i-globe"/></svg><span style="flex:1">Browser</span><span class="port">:60449</span></button>
+        <button class="item" title="Hide the terminals. Their processes keep running."><svg><use href="#i-term"/></svg><span style="flex:1">Terminals</span><span class="run"><i></i>3</span></button>
+        <button class="item" title="Show what this Session's branch changes"><svg><use href="#i-diff"/></svg>Diff</button>
       </div>
-    </div>
-
-    <div class="surface" data-for="pr" hidden>
-      <h3 style="margin:0 0 6px">Performance: agent, Keychain, git, frontend and browser fixes</h3>
-      <p class="muted tiny" style="margin:0 0 12px">#106 · main ← perf/integrated · 184 files <span class="add">+11,517</span> <span class="del">−2,079</span> · <span class="chip ok">All checks passed</span></p>
-      <div class="card"><div class="card-h">Summary</div><div class="row">Replaces five PRs that no longer merge cleanly. One commit per area.</div></div>
-    </div>
-
-    <div class="surface" data-for="stub" hidden><p class="muted" id="stub-name"></p></div>
+      <div class="sec">
+        <button class="item" title="The branch this Session works on. Pick another to switch."><svg><use href="#i-pr"/></svg><span class="mono" style="font-size:13px">perf/integrated</span><span class="end"><svg><use href="#i-chev"/></svg></span></button>
+        <div class="pr"><div class="l"><svg><use href="#i-pr"/></svg><span>Performance: agent, Keychain, git, frontend and browser fixes</span></div>
+          <div class="m"><span>PR #106 →</span><span>#106 on host ↗</span><span>open</span><span style="color:var(--ok)">checks passed</span></div></div>
+        <div class="split"><button class="item" style="flex:1" title="Commit: the next step for this branch"><svg><use href="#i-push"/></svg>Commit, push &amp; PR</button><span class="chv"><svg style="width:14px"><use href="#i-chev"/></svg></span></div>
+        <button class="item" title="Show what this Session's branch changes"><svg><use href="#i-diff"/></svg>Changes<span class="end mono" style="font-size:12px;font-weight:600"><span class="add">+55</span> <span class="del">−44</span></span></button>
+      </div>
+      <div class="sec"><div class="label">Servers</div>
+        <button class="item" title="Open this server in the browser"><svg><use href="#i-globe"/></svg><span>localhost:60449<span class="sub">Agent · node</span></span></button>
+        <button class="item" title="Open this server in the browser"><svg><use href="#i-globe"/></svg><span>localhost:61100<span class="sub">Agent · node</span></span></button>
+      </div>
+      <div class="sec"><div class="label">Lineage</div>
+        <div class="agent"><svg><use href="#i-bot"/></svg><span style="flex:1">Previous agents</span><span class="el">5</span></div>
+        <div class="agent"><span class="dot wait" style="margin-left:4px"></span><span class="txt"><b>Frontend perf + guardrails (O15 O16)</b><span class="sub">general-purpose · working</span></span><span class="el">6m</span></div>
+        <div class="agent"><span class="dot work" style="margin-left:4px"></span><span class="txt"><b>Browser/terminals/processes perf (O10 O17 O18)</b><span class="sub">general-purpose · working</span></span><span class="el">6m</span></div>
+        <div class="agent"><span class="dot work" style="margin-left:4px"></span><span class="txt"><b>Integrations perf (O1 O2 O3 O19 O20 O21 O22)</b><span class="sub">general-purpose · working</span></span><span class="el">6m</span></div>
+        <div class="agent"><span class="dot ok" style="margin-left:4px"></span><span class="txt"><b>Git/PR/monitor perf + migrations (O6 O7 O8 O9 O11)</b><span class="sub">general-purpose · done</span></span><span class="el">11m</span></div>
+        <div class="agent"><span class="dot ok" style="margin-left:4px"></span><span class="txt"><b>Agent runtime perf (O4 O5 O12 O13 O14 O23 O24 O28 O32)</b><span class="sub">general-purpose · done</span></span><span class="el">8m</span></div>
+      </div>
+      <div class="sec"><button class="item danger" title="Delete this Session and its conversation"><svg><use href="#i-trash"/></svg>Delete</button></div>
+    </div></div>
   </aside>
 </div>
 
-<div class="hint">T flips theme · click the right-panel tabs and the “Open a surface” list</div>
+<div class="hint">T flips theme · the Session button shows or hides the card</div>
 
 <script>
   const app = document.getElementById('app');
   document.querySelectorAll('[data-toggle]').forEach((b) => b.addEventListener('click', () => {
     const k = b.dataset.toggle; app.dataset[k] = app.dataset[k] === 'open' ? 'closed' : 'open';
   }));
-  const show = (name) => {
-    const target = ['open', 'ctx', 'pr'].includes(name) ? name : 'stub';
-    document.querySelectorAll('.surface').forEach((s) => (s.hidden = s.dataset.for !== target));
-    document.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.surface === name)));
-    document.getElementById('stub-name').textContent = target === 'stub' ? name + ' opens here' : '';
-  };
-  document.querySelectorAll('[data-surface]').forEach((b) => b.addEventListener('click', () => !b.disabled && show(b.dataset.surface)));
   addEventListener('keydown', (e) => {
     if (e.target.closest('input,textarea') || e.metaKey || e.ctrlKey) return;
     if (e.key === 't') document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
   });
-  show('ctx');
 </script>
 </body>
 </html>

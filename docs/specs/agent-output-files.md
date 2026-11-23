@@ -5,17 +5,18 @@
 
 ## Problem
 
-The agent makes a file the operator wants to see: a PDF, a spreadsheet, a chart, a zip. The Run sandbox blocks `open`, so
-the agent can only print a path and tell the operator to run `open` in their own terminal. The console shows nothing.
-The operator may also tell the agent to put the file somewhere, such as `~/Downloads`. The sandbox blocks that write, so
-the agent can only print an `mv` command.
+The agent makes a file the operator wants to see: a PDF, a spreadsheet, a chart, a zip. Running `open` in a run would
+open windows on the operator's Mac, so the agent can only print a path and tell the operator to run `open` in their own
+terminal. The console shows nothing.
+The operator may also tell the agent to put the file somewhere, such as `~/Downloads`. A command could write there, but a
+steered run could write there too, and the operator would see no card. The agent can only print an `mv` command.
 
 ## Behavior
 
 1. Each Session has an output folder. The agent is told its path and to write every file meant for the operator there,
    and not to run `open`, `xdg-open` or `start`.
-2. A run's commands may write in the output folder. They may read it too. Nothing else outside the working folder, temp
-   and tool caches opens up; the Run sandbox's other limits stand.
+2. A run's commands may write and read in the output folder, as in any other folder the Run sandbox leaves open
+   ([open-run-sandbox](open-run-sandbox.md)).
 3. A file the agent writes in the output folder shows in the Session's transcript as a chip with its name and size, on
    the message of the turn that wrote it. A file rewritten in a later turn shows on that later turn's message only.
 4. A chip opens the file over the page, as an attached file does: an image or PDF as itself, text as text, any other type
@@ -45,8 +46,9 @@ the agent can only print an `mv` command.
     the new folder of a folder save inside it. A file of the same name in the destination is replaced, and the card
     says so. A folder of that name already there is refused, never merged into, and nothing in it changes.
     A destination that is, or after links are resolved sits inside, `~/.ssh`, `~/.gnupg`, `~/.aws`,
-    `~/Library/LaunchAgents`, `~/Library/LaunchDaemons`, `~/Library/Keychains` or the console's data folder (the default
-    one and the one `OPS_CONSOLE_DATA_DIR` names; the Keychain owner file sits in it) is refused in every Access mode,
+    `~/Library/LaunchAgents`, `~/Library/LaunchDaemons`, `~/Library/Keychains`, `~/Library/Application Support/ops-console`
+    or the console's data folder (the default one and the one `OPS_CONSOLE_DATA_DIR` names; the Keychain owner file sits
+    in it) is refused in every Access mode,
     full included. The error says what is closed and why, and that nothing was copied.
 16. The tool takes only a bare name from the Session's output folder. A path, `..`, a leading dot or a file elsewhere
     on this Mac is refused. A folder holds plain files and folders, at any depth. One link, a file with a second hard
@@ -63,10 +65,10 @@ the agent can only print an `mv` command.
 - **Open how**: in the console only. The daemon never runs `open` on an agent file, so a `.app`, `.command` or
   `.terminal` file cannot start from a click.
 - **Which files**: only the Session's output folder. The console serves no other path on this Mac.
-- **Save where**: anywhere the operator names, through an Approval. The sandbox's write list does not grow; the daemon,
-  outside the sandbox, does the copy, as it does for pushes and pull requests (ADR 0006).
-- **Full access does not unsandbox the run**: it only skips the Approval. The agent still writes `~/Documents` through
-  `save_file`, never with a command, and macOS Full Disk Access of the app lets the daemon write there.
+- **Save where**: anywhere the operator names, through an Approval. The daemon, outside the sandbox, does the copy, as
+  it does for pushes and pull requests (ADR 0006).
+- **Full access skips only the Approval**: the agent still writes `~/Documents` through `save_file`, never with a
+  command, and macOS Full Disk Access of the app lets the daemon write there.
 - **A folder is one save**: one Approval lists every file, so the operator reads the whole copy once. One call per file
   would ask per file.
 - **No merge**: a folder save into a name that exists is refused. The agent renames the folder in the output folder or
@@ -92,12 +94,11 @@ the agent can only print an `mv` command.
 
 ## Safety
 
-The agent gains one tool, `save_file`. It never writes outside the working folder, temp, caches and the output folder
-itself; only the daemon writes the destination, and only after the operator's yes on that exact path. The Run sandbox's
-write list is unchanged.
+The agent gains one tool, `save_file`. The agent is told to write only in its folders and the output folder; only the
+daemon writes a save's destination, and only after the operator's yes on that exact path. The Run sandbox does not
+confine the agent's own writes (ADR 0006), so the Approval and the closed folders below are what bound a save.
 
-The agent gains write access to one more folder, under the data folder, and the daemon serves what it holds. The
-sandbox still denies reading the rest of the data folder, `runtime.json` included. The folder holds files only: the
+The daemon serves what the output folder holds, under the data folder. The folder holds files only: the
 daemon serves no symlink and no file with a second hard link, and opens the file itself rather than trusting an earlier check, since the agent can swap a name between the two. It never writes through a symlink at the destination. A file's bytes reach the console with a type that never renders as a
 page. A destination in the closed folders of Behavior 15 is refused before any Approval and in full access, so a steered
 run cannot plant a key, a launch agent or a file in the console's data folder. A shell or git startup file (`.zshrc`,
@@ -145,10 +146,11 @@ the viewer's error line.
 - **`open` in the daemon**: runs the file with the operator's access; a `.command` or `.app` is code.
 - **Serve any path under temp or the working folder**: a path guard for symlinks and `..`, and reads of files the
   operator never meant to show.
-- **Widen the sandbox's write list** to `~/Downloads` or any path: a run steered by log text would write there too, and
-  the sandbox cannot tell the operator's words from injected ones. ADR 0006 rejects a Setting or an unsandboxed retry.
+- **The agent writes the destination with a command**: the Run sandbox allows it, but no Approval card, no closed-folder
+  check and no replace notice appear, and a run steered by log text writes there too. The prompt tells the agent to use
+  `save_file`.
 - **A Save to button only**: the operator still has to click each time, and the agent cannot finish the job they asked for.
-- **Tell the agent to print `open <path>` for the operator**: what happens today.
+- **Tell the agent to print `open <path>` for the operator**: the operator would run it by hand and the console would show nothing.
 
 ## Glossary
 
@@ -162,13 +164,11 @@ the viewer's error line.
 
 - **Operator approves agent never merges** (0002): rewrite in place. The agent also saves a file outside its folders
   only by asking: `save_file` raises an Approval in every Access mode but full, and only the operator's yes has the daemon copy it.
-  The sandbox's writes do not grow. Considered Options gains "widen the sandbox's write list", with why it lost.
 
 ## Seams
 
 - **Output folder and file list** (unit): 2, 3, 7, 8, 9, 11.
 - **Output file API** (backend + SQLite): 5, 6, 10, and the `not_found` rows of API.
-- **Run sandbox settings** (unit): 2.
 - **Agent prompt** (unit): 1.
 - **Save file tool and Approval** (backend + SQLite): 12, 13, 14, 15, 16, 17, 18.
 - **Transcript chips** (frontend component): 3, 4, 6, UI.

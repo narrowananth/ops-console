@@ -14,7 +14,7 @@ An operator whose install, start or first run fails sees a message in a terminal
 3. Install covers: an unsupported platform or CPU, a macOS older than 13.5, a failed download, a checksum mismatch (nothing is installed), `ops-console: command not found` because `~/.local/bin` is not on the PATH, and the Intel Homebrew on an Apple silicon Mac.
 4. Start and stop covers: `ops-console start` not answering within 15 seconds (read the log tail it prints, and raise the wait with `OPS_CONSOLE_START_TIMEOUT_MS`), a port already in use (start again with `OPS_CONSOLE_PORT`), another daemon already running on the data folder, launchd refusing to load the job with `Bootstrap failed: 5: Input/output error` (run `ops-console stop`, then `ops-console start`), and an update that fails (run `ops-console update`).
 5. Keychain covers: the banner that shows after a Keychain wait of 10 seconds (answer the Mac's password prompt), a run or step that fails after 60 seconds with `keychain_timeout` (answer the prompt, then retry the job), the same failure after 90 seconds during an update (the Keychain handover keeps running, so retry), and a Handover refusal on the Permissions page (the Mac may ask for the login password once per item until the previous version's folder is fixed or removed and the console restarts).
-6. Run sandbox covers: the Run sandbox row reading unavailable (a run fails rather than run without it, and no setting turns the sandbox off) and a run that names a host the sandbox refused (add the host to the Network allowlist).
+6. Run sandbox covers the Run sandbox row reading unavailable: a run fails rather than run without it, and no setting turns the sandbox off.
 7. Permissions covers: Full Disk Access off (the Setup agent cannot start; grant it to Ops Console in System Settings, then `ops-console stop` and `ops-console start`) and Start at login off (switch Ops Console on under App Background Activity, then `ops-console start`, since `stop` keeps it off).
 8. Each entry is a `###` heading with the symptom, then the message the product shows in a code span, the cause in one sentence, and the fix as a command or numbered steps. No tables.
 9. A message is quoted only when the product shows it. The page makes no claim about a stale version after `brew upgrade`, a missing `claude` binary, or the wording of the SDK's own sandbox error.
@@ -24,7 +24,7 @@ An operator whose install, start or first run fails sees a message in a terminal
 ## Settled
 
 - **Areas**: install, start and stop, Keychain, Run sandbox, Permissions. Claude account sign-in stays on the Claude accounts page.
-- **Terms**: Keychain wait, Keychain handover, Handover refusal, Run sandbox, Network allowlist and Start at login as the glossary defines them.
+- **Terms**: Keychain wait, Keychain handover, Handover refusal, Run sandbox and Start at login as the glossary defines them.
 - **Glossary**: no new term.
 - **Source of messages**: the product's own text at the time of writing. The page quotes the short, stable ones.
 

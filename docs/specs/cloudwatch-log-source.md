@@ -1,21 +1,21 @@
 # CloudWatch logs as a third log source
 
-**Status:** shipped
-**Design:** Monitor and Integrations in `design/ops-console.html`. Departure: Integrations lists a fourteenth Connector whose pane has an AWS profile, a region and a log group picker in place of a sign-in button or a folder field, and Alerts and Services carry a third source label.
+**Status:** shipped; the pane's profile, region and sign-in (items 1 and 5) follow [one-click-log-sources](one-click-log-sources.md)
+**Design:** Monitor and Integrations in `design/ops-console.html`. Departure: Integrations lists a fourteenth Connector whose pane has an AWS profile picker, a region picker and a log group picker in place of a folder field, and Alerts and Services carry a source label.
 
 ## Problem
 
-A team whose services log to AWS CloudWatch has nowhere to point Monitor. Datadog and the OpenTelemetry Log folder are the only log sources, and roadmap step 3 names AWS CloudWatch as the next one by reach. The operator already signs in to AWS with the AWS CLI on this Mac, and the agent can query CloudWatch through AWS's own MCP server. The console should read the logs the way it reads Datadog's, with the daemon calling the CLI and no model turn, and let the agent use the MCP server to dig deeper during a Verification.
+A team whose services log to AWS CloudWatch cannot point Monitor at them through Datadog or the OpenTelemetry Log folder. The operator already signs in to AWS with the AWS CLI on this Mac, and the agent can query CloudWatch through AWS's own MCP server. The console should read the logs the way it reads Datadog's, with the daemon calling the CLI and no model turn, and let the agent use the MCP server to dig deeper during a Verification.
 
 ## Behavior
 
-1. Integrations lists a fourteenth Connector, CloudWatch logs, last in the fixed order. Its pane has three fields: the AWS profile, the region and the log groups. The profile and region are text fields. The log groups come from a picker over the account's log groups, and each picked group takes a Service name and an env.
+1. Integrations lists a fourteenth Connector, CloudWatch logs, after OpenTelemetry logs in the fixed order. Its pane has three choices: the AWS profile, the region and the log groups. The profile is a picker of the profiles on this Mac, `default` first, and the region is a picker of AWS regions that takes the profile's own region when it has one. A Find log groups button fills the log group picker from the account, with a filter box, and each picked group takes a Service name and an env.
 2. The Service name defaults to the last path segment of the log group and the env defaults to `prod`. The operator may edit both. Two picked groups that give the same Service name and env are refused.
 3. The console stores no AWS key. The credentials stay where the AWS CLI keeps them.
-4. Connect needs the `aws` CLI and `uvx` on the PATH. When either is missing, Connect stops and the pane names the missing tool and the command that installs it. The console installs neither.
-5. The health check asks the AWS CLI who the profile is. A profile that answers reads connected. A non-zero answer for any reason reads needs auth. Connect on a profile that needs auth runs the CLI's browser sign-in for an Identity Center profile, and for any other profile tells the operator to run `aws login` and then Connect again. While the sign-in waits, the pane offers Cancel, as the other Connectors do.
+4. Connect needs the `aws` CLI and `uvx` on the PATH. When either is missing, Connect stops and the pane names the missing tool and the command that installs it (`brew install awscli`, `brew install uv`). The console installs neither.
+5. The health check asks the AWS CLI who the profile is. A profile that answers reads connected. A non-zero answer for any reason reads needs auth, and a missing `aws` or no chosen profile reads down with the reason. Connect on a profile that is not signed in runs the CLI's browser sign-in: `aws sso login` for an Identity Center profile and `aws login` for any other, which needs AWS CLI 2.32.0 or later. An older CLI stops Connect, and the pane names its version and the command that updates it. A profile that is already signed in connects at once. While the sign-in waits, the pane offers Cancel, as the other Connectors do, and a second Connect changes nothing.
 6. Connecting registers AWS's CloudWatch MCP server with Claude Code in every Claude account, started through `uvx` with the Connector's profile in its environment. Disconnect removes it. Changing the profile registers the server again with the new one.
-7. A Scan reads every connected log source, as before. A Scan the operator starts for one source reads only that source. CloudWatch logs runs on its own schedule from its own Check interval and daily scan time.
+7. A Scan reads every connected log source. A Scan the operator starts for one source reads only that source. CloudWatch logs runs on its own schedule from its own Check interval and daily scan time.
 8. A Scan reads each picked log group with Logs Insights. A first query counts failing events per 10-minute bucket for each status code, method, path and message. A second query reads the newest failing events as Samples, at most 10,000 per log group. When the cap stops the read, the Scan says so.
 9. The reader expects JSON log lines. Each field takes the first of these names present. Status code: `status`, `statusCode`, `status_code`, `http.status_code`. Method: `method`, `httpMethod`, `http.method`. Route: `route`, `path`, `resourcePath`, `url.path`. Level: `level`, `severity`, `log_level`. Message: `message`, `msg`. Time: the time CloudWatch recorded for the event. A line that is not JSON has none of these fields and is not read as a failure. The docs say so.
 10. An event counts as failing when its status code is 400 or more, or its level is `error`, `critical`, `alert`, `emergency` or `fatal`, in any case.
@@ -23,16 +23,16 @@ A team whose services log to AWS CloudWatch has nowhere to point Monitor. Datado
 12. Each Sample keeps its message and fields with secret values and request body values redacted, as a Datadog Sample does.
 13. The Scan's notes carry the bytes Logs Insights scanned for it, and any group a cap or a timeout left unread. A query that has not finished in 5 minutes is stopped, and the Scan reports its log group as not read. Stopping a Scan stops its running queries.
 14. A throttled read fails the source with `rate_limited`. A signed-out profile, a missing log group or an unreachable AWS fails it with `upstream_failed`. A failure in one source does not stop another source's Scan.
-15. Each Alert and Service shows its source, Datadog, OpenTelemetry or CloudWatch, as a small label, and Monitor filters by it.
+15. Each Alert and Service shows its source, Datadog, OpenTelemetry, CloudWatch, Loki or New Relic, as a small label, and Monitor lists one source at a time through its source tabs ([monitor-source-tabs](monitor-source-tabs.md)).
 16. A Service from CloudWatch finds its code by its name, as any Service does: an imported Repo of the same name, or a link the operator sets by hand.
 17. A Verification or Fix of a CloudWatch Alert starts with a Recheck that reads the Alert's log group for the last hour. The Report's evidence section is headed "Log evidence".
 18. The agent's brief for a CloudWatch Alert names the source, gives the Samples and the Alert's filter, and tells the agent to use no `pup` and no Datadog MCP Server, and to use the CloudWatch log tools when it needs more logs than the Samples.
-19. The CloudWatch MCP Server starts for a Verification of a CloudWatch Alert and for a chat with no Alert, and not for a Fix, a pull request job or a review. Of its tools the agent may use only the log tools: listing log groups, running a Logs Insights query, reading its results and cancelling it. The metric, PromQL and alarm tools are not allowed.
+19. The CloudWatch MCP Server starts for a Verification of a CloudWatch Alert and for a chat, and not for a Verification of another source's Alert, a Fix, a pull request job or a review. Of its tools the agent may use only the log tools: listing log groups, running a Logs Insights query, reading its results and cancelling it. The metric, PromQL and alarm tools are not allowed.
 20. The agent's reach is what the AWS profile allows. The docs and the Connector pane tell the operator to use a profile with the `CloudWatchLogsReadOnlyAccess` policy. The console writes nothing to AWS, and an account is read-only whatever its env.
-21. Three sources at once: Alerts from each stay in one Monitor list, filterable by source. A source that is down shows a notice naming it, and the others' Alerts still show.
-22. Existing Datadog and OpenTelemetry Connections, Services, Alerts, Scans and schedules behave as before. After the update every existing row keeps its source, and no Alert reopens or changes Severity.
+21. Several sources at once: Alerts from each stay in one Monitor list under All sources, and each source has a tab. A source that is down shows its reason on its tab and in the status sentence, and the others' Alerts still show.
+22. Datadog and OpenTelemetry Connections, Services, Alerts, Scans and schedules are unaffected by the CloudWatch source. The migration keeps every existing row's source, and no Alert reopens or changes Severity.
 23. A reload mid-Scan, two Sessions at once and an agent that fails mid-run behave as they do for a Datadog Alert.
-24. Docs: the Connectors page lists fourteen Connectors and has a "CloudWatch logs" section with the IAM policy, the JSON log fields from 9 and a log line example. The data-flow page says the daemon calls the AWS CLI as the operator, the agent's MCP server calls AWS from this Mac, and CloudWatch events reach Anthropic only as Samples in a prompt or as the agent's tool output.
+24. Docs: the Connectors page lists sixteen Connectors and has a "CloudWatch logs" section with the IAM policy, the JSON log fields from 9 and a log line example. The data-flow page says the daemon calls the AWS CLI as the operator, the agent's MCP server calls AWS from this Mac, and CloudWatch events reach Anthropic only as Samples in a prompt or as the agent's tool output.
 
 ## Settled
 
@@ -62,7 +62,7 @@ A team whose services log to AWS CloudWatch has nowhere to point Monitor. Datado
 
 ## Safety
 
-The agent's reach grows by one MCP server. It runs outside the Run sandbox, as Claude Code starts it, with the profile's AWS rights, and the sandbox's block on `~/.aws` does not apply to it. The agent may call only its four log tools, which describe and query and change nothing. Nothing in the console writes to AWS, and a PROD account is read-only whatever the env. The daemon reads logs by calling the AWS CLI as the operator, as it calls `pup` and `gh`. Samples in the brief and the agent's tool output go to Anthropic's API as part of the run.
+The agent's reach grows by one MCP server. It runs outside the Run sandbox, as Claude Code starts it, with the profile's AWS rights. The agent may call only its four log tools, which describe and query and change nothing. A run's own commands can read `~/.aws` and reach AWS, since the sandbox closes only the Keychain, the installed app and the git control files ([ADR 0006](../adr/0006-agent-runs-sandboxed-by-the-os.md)), so the tool list limits the server and the profile's policy is the bound on the agent (20). Nothing in the console writes to AWS, and a PROD account is read-only whatever the env. The daemon reads logs by calling the AWS CLI as the operator, as it calls `pup` and `gh`. Samples in the brief and the agent's tool output go to Anthropic's API as part of the run.
 
 ## Database
 
@@ -79,7 +79,7 @@ The migration rebuilds the three tables and copies every row, so each row keeps 
 
 ### Common
 
-- Every Alert, Service and Scan body already carries `connector`. Its value may now be `"cloudwatch_logs"`. The endpoints that take `connector` accept it.
+- Every Alert, Service and Scan body already carries `connector`. Its value may be `"cloudwatch_logs"`. The endpoints that take `connector` accept it.
 - The CloudWatch Connector's `config`:
 
 ```json
@@ -106,16 +106,20 @@ The migration rebuilds the three tables and copies every row, so each row keeps 
 
 ### `GET /connectors/cloudwatch_logs/log-groups`
 
-The log groups of the Connector's profile and region, for the picker. Each item has `name`. It fails with `upstream_failed` when the profile is signed out, and with `tool_missing` when `aws` is not on the PATH.
+The log groups of a profile and region, for the picker. The optional query values `profile` and `region` name them, and the Connector's own are used when left out. Answers `{ data, meta }`; each item has `name`. It fails with `upstream_failed` when the profile is signed out, with `tool_missing` when `aws` is not on the PATH, and with `validation_failed` when no profile or region is known.
+
+### `GET /connectors/cloudwatch_logs/profiles`
+
+The AWS profiles on this Mac for the picker, `default` first and the rest A to Z. Each item has `name` and `region` (null when the profile names none). It fails with `tool_missing` when `aws` is not on the PATH.
 
 ### Connectors
 
-The existing Connector endpoints serve `cloudwatch_logs`: list, read, connect (with `profile`, `region` and `log_groups`), disconnect and check. Disconnect removes the MCP server and leaves the AWS profile and the account untouched.
+The existing Connector endpoints serve `cloudwatch_logs`: list, read, connect (with `profile`, `region` and `log_groups`), cancel a waiting sign-in, disconnect and check. Disconnect removes the MCP server and leaves the AWS profile and the account untouched.
 
 ## UI
 
-- **Integrations**: a Connector pane for CloudWatch logs with the profile, the region and the log group picker, each picked group showing its Service name and env as editable fields. States: not connected, signing in with Cancel, connected with the profile and region shown, needs auth with the command to run, down with the reason (tool missing, log group not found, AWS unreachable), checking. The picker has loading, empty (the profile sees no groups) and error states. It follows the Connector panes of Integrations in the design; the picker replaces the sign-in step.
-- **Monitor**: the source label gains CloudWatch, and the source filter lists three sources. States: loading, empty, a source down (the other sources' Alerts still show, with a notice naming it), a Scan that hit a cap or left a group unread (its detail says so, with the bytes scanned).
+- **Integrations**: a Connector pane for CloudWatch logs with the profile picker, the region picker and the log group picker, each picked group showing its Service name and env as editable fields. States: not connected, signing in with Cancel, connected with the profile and region shown, needs auth with Reconnect, down with the reason (tool missing, log group not found, AWS unreachable), checking. The profile picker has a reading state and says Connect creates `default` when the Mac has no profile. The log group picker has loading, empty (the profile sees no groups) and error states. It follows the Connector panes of Integrations in the design.
+- **Monitor**: the source label and the source tabs include CloudWatch. States: loading, empty, a source down (the other sources' Alerts still show, with its reason on its tab), a Scan that hit a cap or left a group unread (its detail says so, with the bytes scanned).
 - **Report**: the evidence section reads "Log evidence".
 - No PROD-specific state beyond the existing env tag display.
 
@@ -123,7 +127,7 @@ The existing Connector endpoints serve `cloudwatch_logs`: list, read, connect (w
 
 - **`filter-log-events` for the Scan**: it pages through every event and counts on the Mac, and its API allows about 10 calls a second.
 - **AWS's managed MCP server**: its `call_aws` tool runs any AWS API, so only the IAM role would limit the agent. The CloudWatch server's tools describe and query.
-- **The agent reads `~/.aws` itself**: the Run sandbox blocks it, and a key in the agent's reach is what ADR 0006 prevents.
+- **`aws` through `run_integration`**: the agent reads logs through the MCP server's log tools. `aws` is on no `run_integration` list, so the console never runs it for the agent.
 - **Auto-discovering every log group**: an account can hold hundreds, most of them not services, and each would be a Service and a Scan cost.
 - **A tag or naming convention for env**: log groups carry neither, so the operator picks the env.
 - **Keeping the `CHECK` and widening it**: SQLite cannot, and keeping it makes every new source a table rebuild.
@@ -143,17 +147,17 @@ None. The `CHECK` rebuild is reversible, and the agent's MCP reach matches the D
 
 ## Seams
 
-- **Backend + SQLite** (monitor test harness, a scripted fake `aws`): 7 to 14, 16, 17, 21 and 22. A Scan reads fixture Logs Insights answers: the field aliases from 9, failing by status and by level, the 10,000-event cap, a non-JSON group, redaction, Severity, Fingerprint with the source, a query that times out and one that is stopped, `rate_limited` and `upstream_failed`, three sources at once and one down, the Recheck, retention and Services keyed by source.
+- **Backend + SQLite** (monitor test harness, a scripted fake `aws`): 7 to 14, 16, 17, 21 and 22. A Scan reads fixture Logs Insights answers: the field aliases from 9, failing by status and by level, the 10,000-event cap, a non-JSON group, redaction, Severity, Fingerprint with the source, a query that times out and one that is stopped, `rate_limited` and `upstream_failed`, several sources at once and one down, the Recheck, retention and Services keyed by source.
 - **Backend + SQLite** (verification and fix tests, fake agent): 17 to 19. The brief for each source, the MCP scope per run purpose, the allowed tool list and the "Log evidence" heading.
 - **Backend + SQLite** (connectors test): 1 to 6, 20. Connect, the health check states, config validation and the three 422 codes, the log group list, the MCP registration and its removal, and a changed profile.
 - **Backend migration test** (existing): 22. A database with Datadog and OpenTelemetry rows survives the rebuild: every row, every child row, the unique key and no Alert reopened.
-- **Browser** (Playwright e2e, existing): 1, 2, 4, 5, 15 and 21. The Connector pane states, the picker, a duplicate Service refused, the source label and filter, and a source-down notice.
+- **Browser** (Playwright e2e, `frontend/e2e/cloudwatch-connector.spec.ts` and the Monitor specs): 1, 2, 4, 5, 15 and 21. The Connector pane states, the pickers, a duplicate Service refused, the source label and tabs, and a source-down reason.
 - **Node test** (site build test, existing): 24. The Connectors page count and the CloudWatch section, the data-flow lines, and the existing link and third-party checks.
 - **Read in review**: 3 and 23. The console stores no AWS key, and no new state was added for a reload or a second Session.
 
 ## Out of scope
 
-- Loki and New Relic, the rest of roadmap step 3.
+- Loki and New Relic logs, in [loki-log-source](loki-log-source.md) and [new-relic-log-source](new-relic-log-source.md).
 - Access-log mappings for ALB and API Gateway, and plain-text logs.
 - More than one region or profile per Connector.
 - Editing thresholds and intervals in the UI.

@@ -23,16 +23,19 @@ Take from it:
 
 Leave out:
 
-- Decision gates, loops, optional paths and feedback arrows. A Playbook has none: steps run in order, one agent turn each,
-  and a failed step stops the run.
+- Decision gates, loops, optional paths and feedback arrows. A Playbook has none: steps run in order. A job Trigger
+  (Verify, Fix) runs one agent turn per step, and a failed step stops the run. A PR action Trigger (Review PR, Check
+  reply, Address comments) puts the steps into the opening prompt of the Session it opens, as one turn. A chat Trigger
+  runs no steps.
 - Durations, team assignment, deliverables, progress.
 - The word "workflow". `GLOSSARY.md` lists it under Playbook's Avoid.
 
 ## Two views
 
 **Overview.** Opens first. Triggers on the left, grouped under Monitor and Workspace, each naming the Playbook it runs
-("Built-in", or the operator's Playbook). The selected Trigger's preview on the right: a run card with a dropdown (Built-in
-and the operator's Playbooks), a small flow of the first five steps, and three facts. "Your Playbooks" lists the operator's
+("Built-in", or the operator's Playbook). The selected Trigger's preview on the right: its description with a JOB, SESSION
+or CHAT tag, a run card with a dropdown (Built-in and the operator's Playbooks), a small flow of the first five steps, and
+three facts. "Your Playbooks" lists the operator's
 own, only when there is one. New Playbook sits in the page header here and nowhere else.
 
 **Flow.** One Playbook as nodes on a dotted canvas, wrapping to a new row at the canvas width.
@@ -40,8 +43,8 @@ own, only when there is one. New Playbook sits in the page header here and nowhe
 | Node | Domain term | Notes |
 | --- | --- | --- |
 | Trigger | Trigger | Click to attach or detach Triggers. A new Playbook runs on none. |
-| Step card | Playbook step | Number, title, one-line instruction, "scratch copy" tag when it writes. Up to 12. |
-| Console's turn | Closing turn | Dashed, not a step: cannot move or remove. Chat-only Playbooks show none and grey their steps. |
+| Step card | Playbook step | Number, title, one-line instruction, "scratch copy" tag when it writes and the Playbook runs a job. Up to 12. |
+| Console's turn | Closing turn | Dashed, not a step: cannot move or remove. Only the job Triggers have one. A PR action Session has none, and chat-only Playbooks grey their steps. |
 | Rules, Skills, Settings | Rules, Skills, Branch, Jira ticket | Three cards above the flow, joined by a dashed line marked "applies to every turn". |
 
 The panel on the right opens on a click and closes with × or Escape. Its left edge is a bar to drag, or move with the arrow

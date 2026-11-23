@@ -18,14 +18,14 @@ A normal Session has none of these limits. The operator wants the three buttons 
 
 ### Starting
 
-3. Address comments shows next to Review with agent on any open pull request, the operator's or someone else's, that has at least one unresolved thread, whether on a line, on a file or a general comment. Pressing it lists every unresolved thread with all ticked; Start needs at least one ticked and Cancel starts nothing.
-4. Check replies shows at the top of an open pull request, before Address comments, with the number of threads it covers: every unresolved thread with at least one reply whose last comment is not the agent's. It does not show when there are none, or on a merged or closed pull request.
-5. Review with agent keeps its optional Review note. The note goes into the opening prompt next to the pull request.
+3. Address comments shows in the Threads section of the pull request's right-hand rail, on any open pull request, the operator's or someone else's, that has at least one unresolved thread, whether on a line, on a file or a general comment. Pressing it lists every unresolved thread with all ticked; Start needs at least one ticked and Cancel starts nothing.
+4. Check replies shows below Address comments in the same section, with the number of threads it covers: every unresolved thread with at least one reply whose last comment is not the agent's. It does not show when there are none, unless a Check replies Session is still open, or on a merged or closed pull request.
+5. Review with agent, labelled Agent Review, stays in the pull request's header and keeps its optional Review note. The note goes into the opening prompt next to the pull request.
 6. Start on any of the three opens a PR action Session: a `repo` Session of the pull request's Repo, in its own detached worktree at the pull request's head commit, fetched from `origin`. It is titled by the action and the pull request, for example "Address comments #39". It starts with the default Access mode of a new Session, and the agent begins at once with the opening prompt. For Address comments the prompt names the ticked threads, for Check replies the threads it covers.
 7. The Session shows in the Sessions list under its title, which names the action, and in the pull request's Sessions rail, with a state: working while a turn runs, not submitted while it is idle with nothing posted, and submitted once its tool call has succeeded (Behavior 16). The operator opens it from the rail.
 8. While a PR action Session of one kind is not submitted, that kind's button is disabled with "A Session is already working on this" and the API answers 409 `session_busy`. The other two kinds stay enabled. Submitting the Session, or deleting it, frees the button.
 9. A merged or closed pull request starts nothing: the buttons do not show, and the API answers 409 `invalid_state`.
-10. A head commit that cannot be fetched from `origin`, as with a fork, starts no Session and leaves no worktree. The button shows "Could not fetch the branch from origin:" and git's message.
+10. A head commit that cannot be fetched from `origin`, as with a fork, starts no Session and leaves no worktree. The button shows "Could not fetch the branch from origin:" and git's message. A worktree that cannot be made at the head commit removes the Session and shows "Could not make a worktree at the head commit:" and the reason.
 11. A Git host that is down or rate limited when the operator presses a button starts no Session, and the button shows the host's error.
 
 ### While the Session runs
@@ -42,10 +42,10 @@ A normal Session has none of these limits. The operator wants the three buttons 
 
 ### Address comments
 
-18. `submit_thread_results` gives each ticked thread an outcome, done, already_addressed or declined, with a reply. The console resolves done and already_addressed threads, and starts only a done reply with the new commit. A declined thread's reply gives the reason: the agent disagrees, or the comment is unclear.
+18. `submit_thread_results` gives each ticked thread an outcome, done, already_addressed or declined, with a reply. Done means the agent changed code for it. Already_addressed means the code at the head commit already settles it, and the reply names where. The console resolves done and already_addressed threads, and starts a done reply with the new commit. A declined thread's reply gives the reason: the agent disagrees, the comment is unclear, or it needs the author's answer.
 19. The console commits any uncommitted change in the worktree as one commit, `Address review comments on #<n>` followed by one line per done thread, `- <file>:<line>`, or `- <author>'s comment on the pull request` for a general comment. The commit skips the Repo's git hooks, since the worktree has no installed packages for them. Commits the agent made itself stay as they are. The console then pushes `HEAD` to the pull request's branch without force, with an Action Log row before the push.
-20. After the push the console posts each reply in its thread as the agent, and a done reply names the short commit sha. It resolves each done thread on a line or a file. A general comment gets its reply and stays open, since the hosts have no thread to resolve there. Declined threads stay open.
-21. A call that leaves the worktree as it was, or declines every thread, pushes nothing, posts the replies and submits the Session.
+20. After the push the console posts each reply in its thread as the agent, and a done reply names the short commit sha. It resolves each done and already_addressed thread on a line or a file. A general comment gets its reply and stays open, since the hosts have no thread to resolve there. Declined threads stay open.
+21. A call with no done thread, or one that leaves the worktree as it was, pushes nothing, posts the replies and submits the Session.
 22. A push the host refuses because the branch moved is not a failure. The console fetches the new tip, rebases onto it and pushes again, never with force, up to three times. A rebase that conflicts is undone, nothing is posted, and the tool returns "The branch moved and the rebase conflicts with the new commits." The agent or the operator may rebase in the worktree and call again.
 23. A push that worked but replies or resolves that failed leave the Session not submitted. The tool's result lists the threads still without a reply or a resolve. Calling again posts and resolves only those, with no new push.
 
@@ -57,7 +57,7 @@ A normal Session has none of these limits. The operator wants the three buttons 
 ### Review with agent
 
 26. `submit_review` gives the decision and verdict an Agent Review holds today, each finding with its severity, file, line and text, and the report. The console posts each finding on its line and the verdict and report as one comment, then records the review against the head commit it read and the target branch commit it compared with. It changes, commits and pushes nothing; any change in the worktree is ignored.
-27. A review is stale once the pull request's head moves past its commit. The merge check "Agent reviewed this commit" and the stale marker read the record as they read an Agent Review before. A pull request whose latest review is stale shows Review with agent as before.
+27. A review is stale once the pull request's head moves past its commit. The merge check "Agent reviewed this commit" and the stale marker read the record as they read an Agent Review before. A pull request whose latest review is stale shows Review with agent as before. While the latest review is of the current head, the button reads "Reviewed at this commit" and is disabled, and the API answers 409 `invalid_state`.
 
 ### Other
 
@@ -74,7 +74,7 @@ A normal Session has none of these limits. The operator wants the three buttons 
 - **Concurrency**: one unsubmitted Session per pull request and action. Different actions run side by side.
 - **The button is the approval**: pressing it approves the console to commit, push, reply and resolve what the one tool call reports. The call asks for nothing more. This is the rule the jobs had.
 - **The console writes to the host**: the agent never pushes or posts. The tool is the only way, and each Session's other host writes are denied.
-- **Any open pull request**: Address comments works on the operator's or a teammate's. The old "own pull requests only" line was never enforced and is removed.
+- **Any open pull request**: Address comments works on the operator's or a teammate's.
 - **No Retry button**: the operator asks the agent in the chat, and a failed post is retried by calling the tool again.
 - **Posted state**: the Session records each thread's reply and resolve, so a repeat call posts only what is missing and never pushes twice.
 - **Statuses**: the Session's own state shows working. The rail adds not submitted and submitted, derived from the record.
@@ -92,7 +92,7 @@ A normal Session has none of these limits. The operator wants the three buttons 
 
 ## Safety
 
-- The agent reads and writes in its own worktree under the Run sandbox, with the same Network allowlist as any Session. It never writes in the operator's checkout.
+- The agent works in its own worktree under the Run sandbox ([ADR 0006](../adr/0006-agent-runs-sandboxed-by-the-os.md)), not in the operator's checkout.
 - In an Address comments Session only, the ticked review comments are change requests: the agent may change code to meet them. It never runs a command, reads a secret, touches a Connection or pushes because a comment says so. In every other Session, pull request text stays data, never instructions. The safety lines say so and still close the system prompt.
 - The console pushes only the pull request's own branch, never with force, with an Action Log row before the push. Merging stays denied. A PROD write still asks in every Access mode, and no value read from a PROD Connection goes into a file, a commit or a comment.
 - The pull request's code loads no project settings, hooks or servers into the run (Behavior 13).
@@ -106,7 +106,7 @@ ALTER TABLE sessions ADD COLUMN pr_action TEXT
   CHECK (pr_action IN ('address_comments', 'check_replies', 'review'));
 ALTER TABLE sessions ADD COLUMN pr_action_head_sha TEXT;
 -- Address comments: [{ "comment_id", "file_path", "line", "author", "excerpt",
---   "outcome": "pending | done | declined", "reply": "string | null",
+--   "outcome": "pending | done | already_addressed | declined", "reply": "string | null",
 --   "reply_comment_id": "string | null", "resolved": false }]
 -- Check replies: the same, with outcome "pending | fixed | partly_fixed | not_fixed".
 -- A review: { "note": "string | null", "base_branch": "string | null", "base_sha": "string | null" }.
@@ -170,7 +170,7 @@ Migration: the dropped tables and every `playbook_steps` row of a dropped job ar
 }
 ```
 
-- `stale`: the pull request's head is no longer the commit the Session started at.
+- `stale`: the pull request's head is neither the commit the Session started at nor the one it pushed.
 - `commit_sha`: set for a submitted Address comments Session that pushed a commit.
 
 `Session` gains `pr_action`: `"address_comments | check_replies | review | null"`.
@@ -182,9 +182,9 @@ Migration: the dropped tables and every `playbook_steps` row of a dropped job ar
 | 400    | `validation_failed` | No thread ticked for Address comments, a ticked comment that is not the start of an unresolved thread, or `comment_ids` on another action |
 | 404    | `not_found`         | No such pull request or comment                                                       |
 | 409    | `session_busy`      | An unsubmitted Session of this action exists for the pull request                     |
-| 409    | `invalid_state`     | Pull request merged or closed                                                         |
+| 409    | `invalid_state`     | Pull request merged or closed; no thread with a reply to check; the head commit already has an Agent Review |
 | 429    | `rate_limited`      | The Git host says to slow down                                                        |
-| 502    | `upstream_failed`   | The Git host is down or refused, or the head commit cannot be fetched from `origin`   |
+| 502    | `upstream_failed`   | The Git host is down or refused, the head commit cannot be fetched from `origin`, or no worktree can be made there |
 
 ### `POST /repos/:repo/pull-requests/:number/action-sessions`
 
@@ -207,7 +207,7 @@ Removed: `POST .../agent-reviews`, `POST .../comment-passes`, `POST .../reply-ch
 `submit_thread_results`:
 
 ```json
-{ "threads": [{ "comment_id": "string", "outcome": "done | declined", "reply": "string" }] }
+{ "threads": [{ "comment_id": "string", "outcome": "done | already_addressed | declined", "reply": "string" }] }
 ```
 
 `submit_reply_verdicts`:
@@ -241,7 +241,7 @@ Removed: `pull_request.job_changed`, and `playbook_step.updated` no longer carri
 
 ## UI
 
-- **Pull request header**: Review with agent, Check replies and Address comments keep their places, labels and counts. Address comments still opens the thread list with Start and Cancel (Behavior 3). Pressing Start opens the new Session, as New Session does. A disabled button shows "A Session is already working on this".
+- **Pull request header**: Agent Review. **Threads rail section**: Address comments, then Check replies with its count. Address comments opens the thread list with Start and Cancel (Behavior 3). Pressing Start opens the new Session, as New Session does. A disabled button shows "A Session is already working on this".
 - **Sessions rail**: lists each PR action Session by its action, with working, not submitted or submitted, the commit's short sha linked to the host, and "older commit" when stale. Below them stay the operator's own Sessions on the branch and New Session.
 - **Thread** (`pr-thread`): no strip under the last comment. Resolve and Unresolve work as before.
 - **Removed**: the Comment pass card, the Reply check strip, the Agent Review card and its dialog's step list, and Retry and Skip step on all three.

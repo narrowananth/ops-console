@@ -15,7 +15,7 @@ operator that the two disagree.
 1. The Dev tools screen opens ready to ask: the Synced dev tools list on the left and the terminal with its prompt on
    the right. With no `devtools` Session yet, the first question creates one with the scope and the Model, Effort
    and Access picked so far (an empty scope unless the operator picked Connections) and runs.
-2. The list shows "All connected" with a count, then each Connection: type, name and a PROD tag. A Connection with
+2. The list shows "All connected" with a count, then each Connection A→Z: a check box, the icon of its type, its name and a PROD tag. A Connection with
    Access Level `none` shows but cannot be picked. Picking Connections sets the Session's scope; picking "All
    connected" clears it. The change applies to the next run (`09-dev-tools-agent` Behavior 4). On a new terminal,
    the picks become its Session's scope when its first question starts it.
@@ -118,7 +118,7 @@ Two kinds join the union. `session.output` and `GET /sessions/:id/messages` carr
 - **Dev tools screen** follows the design: the Synced dev tools list, then the dark terminal. Terminal tabs sit
   above the terminal in one row that scrolls sideways, oldest on the left, new terminals after the Sessions. When
   tabs are out of sight, that end of the row fades and gets an arrow; a mouse wheel scrolls the row sideways. A tab
-  shows the terminal's first question, or `terminal <n>` before one, and an `×` that deletes it. Each `+` opens another new terminal, blank,
+  shows the Session's title, or `terminal <n>` before the Session has one, and an `×` that deletes it. Each `+` opens another new terminal, blank,
   with its own `new terminal` tab. That tab stays while the operator moves to other tabs and across reloads, keeping
   its scope and settings, until its first question turns it into a Session or its `×` closes it. Text typed at any
   terminal's prompt and not sent stays with that terminal, and the open tab stays open after a reload; the browser
@@ -132,9 +132,8 @@ Two kinds join the union. `session.output` and `GET /sessions/:id/messages` carr
   then the summary. A streaming message ends with `Working…`; a failed run with `✘ The run failed.` The
   prompt is the last line: `>` and an input that grows with what is typed. Enter sends; Shift+Enter adds a line. The prompt keeps the cursor: a click anywhere in the terminal moves it there, and it comes
   back when a run ends. While a run is going, the input reads "The agent is working…".
-- **Model, Effort and Access** sit as chips at the right of the tab row; their lists open downward. A change shows at once. A new terminal shows them too, starting from the defaults in Agents & accounts, and its Session starts with what they show. A pending Approval shows under that bar.
-- **Loading**: "Reading Dev tools…". **No Connections**: the empty state with the link to Connections,
-  as today. **Error**: the message in the terminal in the accent colour.
+- **Model, Effort and Access** sit as chips at the right of the tab row; their lists open downward. A change shows at once. A new terminal shows them too, starting from the defaults in Accounts & Usage, and its Session starts with what they show. A pending Approval shows under that bar.
+- **Loading**: "Reading Dev tools…". **No Connections**: "No Connections yet." with an "Add one in Connections" link. **Error**: the message in the terminal in the accent colour.
 - **Departure from the design**: the Comparison block and Copy JSON are new; the design has per-Connection tables
   only. The chips and a pending Approval sit above the terminal, in the light theme, rather than inside it.
 

@@ -20,7 +20,7 @@ The data folder, `~/Library/Application Support/ops-console`, holds:
 
 - the console's database (`state.db`): Connections without their secrets, Sessions and their messages, Alerts, Reports, Playbooks, runs and settings
 - files you attach to a Session, and files the agent writes for you
-- scratch copies of repositories the agent works in
+- a git worktree for each Session in a Repo, scratch copies of repositories the agent works in, and each Session's Chrome profile for its Browser panel, which holds that page's cookies and site data
 - each Claude account's configuration folder, and local MCP Server files
 
 The daemon log is `~/Library/Logs/ops-console/daemon.log`.
@@ -56,6 +56,7 @@ Ops Console sends nothing to the project. These things go elsewhere, because you
 | The services you connect: Datadog, GitHub, GitLab, Bitbucket and Atlassian, Slack, Sentry, Shopify, slashdocs, Google, AWS CloudWatch, Grafana Cloud, New Relic | Requests the console or the agent makes with your sign-in, and what they return | When you connect, check or use the service, or the agent calls one of its tools |
 | Your databases and other servers added as Connections or MCP Servers | Queries the agent runs and what they return | When the agent uses them. The Access Level and PROD tag of a Connection limit what it may do. |
 | GitHub | A request for the latest release, and the download of an update | When you run `ops-console update`, and when the console checks for a new version |
+| Any host a command the agent runs reaches | A build, a test, a package install or `curl` that a run executes, and the agent's web tools | When the agent runs such a command. The Run sandbox does not limit hosts, so this can be any server your Mac can reach. |
 | Websites | The pages you or the agent open in a Session's Browser panel | When a page is opened. The Inspector (Chrome's DevTools) comes with the console and calls no other host, not even Google's field-data and module hosts |
 | npm and other package sources | Package downloads for tools such as an MCP Server that starts with `npx` | When that server starts |
 

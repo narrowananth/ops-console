@@ -16,17 +16,22 @@ from what it depends on.
 
 1. The list is flat and grouped by state: Needs you (waiting on a question or an Approval, or failed), Running,
    Idle. Within a group Sessions keep their last-active order.
-2. A row is two lines. First: state dot, title, one word for what the Session waits on (`approval`, `question`,
-   `failed`) and time since last active. Second: the Repo (`No Repo` for an anonymous Session) and the branch.
-   Stop shows on a busy row on hover or focus.
+2. A row is three lines. First: the Repo's badge and name (`No Repo` for an anonymous Session), a "Working" chip with
+   the run's minutes while it runs, one word for what the Session waits on (`approval`, `question`, `failed`) and
+   time since last active. Second: state dot and title. Third: the branch, the pull request mark (the number, or `+N`
+   for several, coloured by the newest one's state) and the model. Stop replaces the state and time in the first line
+   of a busy row on hover or focus. After a short rest on a row, a hover card shows the title, Repo and host, branch,
+   what the state means, model, effort and Access mode, when it started and was last active, and each pull request
+   with its title.
 3. Repos with no Session do not show. Idle lists the first 8 Sessions with "Show N more"; a search, or the open
    Session, lifts the limit.
 4. Tabs filter by state (All, Needs you, Running; a count shows when it is above zero) and a Repo picker on the same
    line narrows to one Repo or to No Repo. Tabs and the picker are remembered in this browser.
 5. A group's header folds the group and keeps its count. Folds are remembered in this browser, for both lists.
-6. The search matches a Session's title or branch and its Repo's name or checked-out branch.
-7. **+ New** opens one panel: a Repo picker (searchable, A to Z, `No Repo` first) and, for a Repo, a branch picker
-   and Start. With a Repo picked in the filter it starts there. No Repo needs only Start.
+6. The search matches a Session's title or branch, its Repo's name (`No Repo` for an anonymous Session) or checked-out
+   branch, and a pull request number of the Session written as `#12`.
+7. **+ New** opens one panel: a Repo picker (searchable, `No Repo` first, then A to Z) and, for a Repo, a searchable
+   branch picker, where a name typed in makes a new branch from the default one, and Start. With a Repo picked in the filter it starts there. No Repo needs only Start.
 
 ### Pull requests
 
@@ -43,19 +48,21 @@ from what it depends on.
 
 11. The header holds the number and title. Under it sit the author's initials, branch → base, the state when not
     open, then the number, author, time since opened, additions and deletions and "Open on the host". The actions sit
-    on the right: Agent Review, Approve (not on the operator's own), Merge, and a More actions menu with Request
-    changes. Request changes opens its box under the header. Merge stays disabled until a reviewer approved and asks
+    on the right: Agent Review, Approve, Merge, and a More actions menu with Request changes; Approve and More actions
+    are not on the operator's own pull request. Agent Review opens a Session (see pr-actions-open-sessions). Request
+    changes opens its box under the header. Merge stays disabled until a reviewer approved and asks
     before it merges.
 12. Three tabs sit under the header, in the look of Accounts and Usage: Overview, Files changed and Commits, the last
     two with their counts. The tab is remembered in this browser. Overview shows the conflict box when there is one,
-    the Agent Review card, the Comment pass card, the description ("No description." when empty) and Activity: the
+    the description ("No description." when empty) and Activity: the
     comment box, then the threads. Files changed shows the files with Expand all, Collapse all and the viewed count;
     a file that conflicts says `conflict` on its header. Commits lists the branch's commits newest first: message,
     author, age and the short hash, which opens the commit on the host.
 13. A sidebar on the right stays in view while the page scrolls. Each section folds, and a fold holds on every pull
     request. The sections are Checks, then "N of 5 merge checks passed" (approval, checks, conflicts, open threads,
     agent review), then the people, then the threads with Address comments and Check replies, then the Sessions on the
-    branch with New Session.
+    branch: the PR action Sessions with their state, the operator's own Sessions on the branch, and New Session. Check
+    replies and Address comments open PR action Sessions.
 14. A merged or closed pull request shows its state in the header and no actions.
 15. For an open pull request the console checks whether the branch merges into its base as both stand on origin. It
     fetches the base and the head into the Repo's folder and runs `git merge-tree`, which touches no branch and no
@@ -85,7 +92,7 @@ one with + New." or "No Session in this view." for a filter with no match.
 
 ## Seams
 
-- **Browser** (`frontend/e2e/workspace.spec.ts`): 1 to 7, and `monitor-lists.spec.ts` for the times on rows. The pull request specs (`pr-thread-actions`,
+- **Browser** (`frontend/e2e/workspace.spec.ts`): 1 to 7, hover card included, and `monitor-lists.spec.ts` for the times on rows. The pull request specs (`pr-thread-actions`,
   `session-links`, `shell`) cover 8 to 14; `pr-thread-actions` covers the tabs, Commits, the conflict box, More actions and the Merge confirmation.
 - **Backend** (`backend/test/workspace.test.ts`): 15 against a real origin with one conflicting and one clean branch,
   and the commits the host lists.

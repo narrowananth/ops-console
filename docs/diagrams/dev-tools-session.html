@@ -15,11 +15,11 @@
 </head>
 <body>
   <div class="diagram-container">
-<svg viewBox="0 0 1460 1164" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="dev-tools-session-title dev-tools-session-desc">
+<svg viewBox="0 0 1460 1160" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="dev-tools-session-title dev-tools-session-desc">
 <title id="dev-tools-session-title">Dev tools: from a Connection to Results</title>
-<desc id="dev-tools-session-desc">A database Connection is created with its secret in the Keychain and registered as an MCP server at its Access Level; a Dev tools question fans out to the Connections in scope, every call is logged first, and PROD writes wait for the operator.</desc>
+<desc id="dev-tools-session-desc">A database Connection is created with its secret in the Keychain and registered as an MCP server at its Access Level; a Dev tools question fans out to the Connections in scope, every call is logged first, and a write on a PROD Connection with write access waits for the operator.</desc>
 <defs><marker id="dev-tools-session-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker><marker id="dev-tools-session-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker><marker id="dev-tools-session-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker></defs>
-<rect x="0" y="0" width="1460" height="1164" fill="#f5f5f5"/>
+<rect x="0" y="0" width="1460" height="1160" fill="#f5f5f5"/>
 <text x="56" y="56" fill="#4f5d75" font-size="10.5" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start" letter-spacing="0.18em">LIFECYCLE · CONNECTIONS · DEV TOOLS · PROD SAFETY</text>
 <text x="56" y="100" fill="#2d3142" font-size="36" font-weight="400" font-family="'Instrument Serif', serif" text-anchor="start">Dev tools: from a Connection to Results</text>
 <text x="382" y="158" fill="#5a6580" font-size="8.5" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.16em">ADD A CONNECTION</text>
@@ -56,57 +56,58 @@
 <rect x="546" y="368" width="136" height="76" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.3"/><rect x="554" y="376" width="29.6" height="12" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="568.8" y="385" fill="#2d3142" font-size="7" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">MCP</text><text x="614" y="410" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Connection server</text><text x="614" y="423" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">read-only flag, file</text><text x="614" y="434" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">or read-only user</text>
 <rect x="314" y="368" width="136" height="76" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.3"/><rect x="322" y="376" width="24.4" height="12" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="334.2" y="385" fill="#2d3142" font-size="7" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">UI</text><text x="382" y="410" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Results</text><text x="382" y="423" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">table per Connection</text><text x="382" y="434" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Comparison, Copy JSON</text><circle cx="450" cy="368" r="9" fill="#2d3142"/><text x="450" y="371.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">9</text>
 <rect x="778" y="504" width="136" height="76" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.3"/><rect x="786" y="512" width="55.6" height="12" rx="2" fill="#ffffff" stroke="#bf4520" stroke-width="0.8"/><text x="813.8" y="521" fill="#bf4520" font-size="7" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">OPERATOR</text><text x="846" y="546" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">PROD write asks</text><text x="846" y="559" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Approve or Deny</text><text x="846" y="570" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">every Access mode</text><circle cx="914" cy="504" r="9" fill="#2d3142"/><text x="914" y="507.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">8</text>
-<rect x="56" y="644" width="1348" height="404" rx="8" fill="rgba(45,49,66,0.05)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="56" y="644" width="1348" height="400" rx="8" fill="rgba(45,49,66,0.05)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
 <rect x="72" y="638" width="140" height="12" fill="#f5f5f5"/>
 <text x="142" y="647" fill="#5a6580" font-size="7.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">EDGE CASES AND TIPS</text>
 <circle cx="84" cy="676" r="9" fill="#2d3142"/>
 <text x="84" y="679.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">1</text>
-<text x="108" y="680" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Types: ClickHouse, Firebase, Kafka, MongoDB, Postgres, Redis. Environment is local, dev, staging or prod. Test runs for 30 s and saves nothing. A Firebase Connection that names Realtime</text>
-<text x="108" y="696" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Database or Firestore is tested with a read of that product. The name is also the MCP server name Claude sees; a duplicate returns 409.</text>
-<circle cx="84" cy="720" r="9" fill="#2d3142"/>
-<text x="84" y="723.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">2</text>
-<text x="108" y="724" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The secret goes to the login Keychain; the edit form shows &quot;stored in the Keychain&quot; and a blank field keeps it. Delete removes the Keychain entry, the row and the MCP server. Rename or</text>
-<text x="108" y="740" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">an access change re-registers it.</text>
-<circle cx="84" cy="764" r="9" fill="#2d3142"/>
-<text x="84" y="767.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">3</text>
-<text x="108" y="768" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Access Level changes how the server launches, not only the badge. Redis and Kafka have no read-only server. Kafka allows no access above none. A PROD environment is never Read / write:</text>
-<text x="108" y="784" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">the daemon refuses it (validation_failed).</text>
-<circle cx="84" cy="808" r="9" fill="#2d3142"/>
-<text x="84" y="811.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
-<text x="108" y="812" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A Connection at Access none is greyed and out of scope. A live Session&#x27;s scope applies from its next run. The scope narrows, and a question that names no Connection fans out to every</text>
-<text x="108" y="828" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">one in scope.</text>
-<circle cx="84" cy="852" r="9" fill="#2d3142"/>
-<text x="84" y="855.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
-<text x="108" y="856" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The first question creates the devtools Session with the draft&#x27;s scope and settings; later ones message it. Two terminals run side by side, each with its own scope. Dev tools uses no</text>
-<text x="108" y="872" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Playbook rules.</text>
-<circle cx="84" cy="896" r="9" fill="#2d3142"/>
-<text x="84" y="899.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
-<text x="108" y="900" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A Connection that is down, needs a login, or is read-only for a write is skipped with a step line. The closing line reads &quot;&lt;rows&gt; rows across &lt;answered&gt; of &lt;queried&gt; Connections&quot;.</text>
-<circle cx="84" cy="924" r="9" fill="#2d3142"/>
-<text x="84" y="927.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">7</text>
-<text x="108" y="928" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The PreToolUse hook runs in every Access mode. Every query writes its Action Log row before it runs.</text>
-<circle cx="84" cy="952" r="9" fill="#2d3142"/>
-<text x="84" y="955.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">8</text>
-<text x="108" y="956" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A PROD Connection with write access asks for an Approval on every write, even in Full access. A read-level server refuses the write itself and logs it failed. A denied Approval is</text>
-<text x="108" y="972" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">logged denied and the agent is told.</text>
-<circle cx="84" cy="996" r="9" fill="#2d3142"/>
-<text x="84" y="999.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">9</text>
-<text x="108" y="1000" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A Result shows at most 50 rows and 200 characters per cell. A Comparison needs two or more Connections and marks differing fields. Anything the console cannot parse shows as a code</text>
-<text x="108" y="1016" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">block. There is no manual query path.</text>
-<path d="M 56,1084 L 1404,1084" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
-<text x="56" y="1108" fill="#4f5d75" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start" letter-spacing="0.14em">LEGEND</text>
-<rect x="56" y="1123" width="20" height="13" rx="3" fill="#ffffff" stroke="#2d3142" stroke-width="1.1"/>
-<text x="84" y="1133" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Stage or state</text>
-<rect x="190.39999999999998" y="1123" width="20" height="13" rx="3" fill="rgba(45,49,66,0.07)" stroke="#4f5d75" stroke-width="1.1"/>
-<text x="218.4" y="1133" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Job or store</text>
-<rect x="313.59999999999997" y="1123" width="20" height="13" rx="3" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.1"/>
-<text x="341.6" y="1133" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Operator decision</text>
-<path d="M 464.79999999999995,1129 L 498.79999999999995,1129" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#dev-tools-session-arrow)"/>
-<text x="508.8" y="1133" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Flow</text>
-<path d="M 559.1999999999999,1129 L 593.1999999999999,1129" stroke="#2e5aa8" stroke-width="1.4" marker-end="url(#dev-tools-session-arrow-link)"/>
-<text x="603.2" y="1133" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Trigger or call</text>
-<path d="M 715.1999999999999,1129 L 749.1999999999999,1129" stroke="#bf4520" stroke-width="1.4" marker-end="url(#dev-tools-session-arrow-accent)"/>
-<text x="759.2" y="1133" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Happy path</text>
+<text x="108" y="680" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Types: ClickHouse, Firebase, Kafka, MongoDB, Postgres, Redis. Environment is local, dev, staging or prod. Test runs for 30 s and saves nothing; the server a passing check started is kept for the next</text>
+<text x="108" y="696" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">check of that Connection for 5 minutes. A Firebase Connection that names Realtime Database or Firestore is tested with a read of that product. The name is also the MCP server name Claude sees;</text>
+<text x="108" y="712" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">a duplicate returns 409.</text>
+<circle cx="84" cy="736" r="9" fill="#2d3142"/>
+<text x="84" y="739.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">2</text>
+<text x="108" y="740" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The secret goes to the login Keychain; the edit form shows &quot;stored in the Keychain&quot; and a blank field keeps it. Delete removes the Keychain entry, the row and the MCP server. Rename or</text>
+<text x="108" y="756" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">an access change re-registers it.</text>
+<circle cx="84" cy="780" r="9" fill="#2d3142"/>
+<text x="84" y="783.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">3</text>
+<text x="108" y="784" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Access Level changes how the server launches, not only the badge. Redis and Kafka have no read-only server. Kafka allows no access above none. A PROD environment is never Read / write:</text>
+<text x="108" y="800" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">the daemon refuses it (validation_failed).</text>
+<circle cx="84" cy="824" r="9" fill="#2d3142"/>
+<text x="84" y="827.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
+<text x="108" y="828" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A Connection at Access none is greyed and out of scope. A live Session&#x27;s scope applies from its next run. The scope narrows, and a question that names no Connection fans out to every</text>
+<text x="108" y="844" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">one in scope.</text>
+<circle cx="84" cy="868" r="9" fill="#2d3142"/>
+<text x="84" y="871.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
+<text x="108" y="872" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The first question creates the devtools Session with the draft&#x27;s scope and settings; later ones message it. Each terminal tab is its own Session with its own scope. Dev tools uses no</text>
+<text x="108" y="888" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Playbook rules.</text>
+<circle cx="84" cy="912" r="9" fill="#2d3142"/>
+<text x="84" y="915.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
+<text x="108" y="916" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A Connection that is down, needs a login, or is read-only for a write is skipped with a step line. The closing line reads &quot;&lt;rows&gt; rows across &lt;answered&gt; of &lt;queried&gt; Connections&quot;.</text>
+<circle cx="84" cy="940" r="9" fill="#2d3142"/>
+<text x="84" y="943.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">7</text>
+<text x="108" y="944" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The PreToolUse hook runs in every Access mode. Every query writes its Action Log row before it runs.</text>
+<circle cx="84" cy="968" r="9" fill="#2d3142"/>
+<text x="84" y="971.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">8</text>
+<text x="108" y="972" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A write on a PROD Connection whose Access Level is write waits for an Approval in every Access mode, full included. The console saves no write level on PROD (note 3), so a PROD server is launched</text>
+<text x="108" y="988" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">read-only and refuses a write itself, which logs failed. A denied Approval is logged denied and the agent is told.</text>
+<circle cx="84" cy="1012" r="9" fill="#2d3142"/>
+<text x="84" y="1015.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">9</text>
+<text x="108" y="1016" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A Result shows at most 50 rows and 200 characters per cell. A Comparison needs two or more Connections and marks differing fields. Anything the console cannot parse shows as a code</text>
+<text x="108" y="1032" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">block. There is no manual query path.</text>
+<path d="M 56,1080 L 1404,1080" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<text x="56" y="1104" fill="#4f5d75" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start" letter-spacing="0.14em">LEGEND</text>
+<rect x="56" y="1119" width="20" height="13" rx="3" fill="#ffffff" stroke="#2d3142" stroke-width="1.1"/>
+<text x="84" y="1129" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Stage or state</text>
+<rect x="190.39999999999998" y="1119" width="20" height="13" rx="3" fill="rgba(45,49,66,0.07)" stroke="#4f5d75" stroke-width="1.1"/>
+<text x="218.4" y="1129" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Job or store</text>
+<rect x="313.59999999999997" y="1119" width="20" height="13" rx="3" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.1"/>
+<text x="341.6" y="1129" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Operator decision</text>
+<path d="M 464.79999999999995,1125 L 498.79999999999995,1125" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#dev-tools-session-arrow)"/>
+<text x="508.8" y="1129" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Flow</text>
+<path d="M 559.1999999999999,1125 L 593.1999999999999,1125" stroke="#2e5aa8" stroke-width="1.4" marker-end="url(#dev-tools-session-arrow-link)"/>
+<text x="603.2" y="1129" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Trigger or call</text>
+<path d="M 715.1999999999999,1125 L 749.1999999999999,1125" stroke="#bf4520" stroke-width="1.4" marker-end="url(#dev-tools-session-arrow-accent)"/>
+<text x="759.2" y="1129" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Happy path</text>
 </svg>
   </div>
 </body>

@@ -4,9 +4,9 @@ A Session is one conversation between you and the agent. It is named for its fir
 
 ## Where a Session runs
 
-Each Session works in its own git worktree under the data folder, so Sessions on different branches never share a checkout, and your own folder is never switched. Two kinds of Session have no Repo: a Dev tools Session and an Anonymous Session.
+Each Session works in its own git worktree under the data folder, so Sessions on different branches never share a checkout, and your own folder is never switched. Two kinds of Session have no Repo: a Dev tools Session and an Anonymous Session. The Workspace page lists your Sessions as Needs you, Running and Idle, and the pull requests grouped by what you do next.
 
-A pull request has a Session of its own for the agent's replies, and an Alert has one for its Verification and Fix. The agent may start Spawned Sessions from a Session, and the Running tray shows what is running.
+Each pull request action (Review with agent, Check replies and Address comments) opens a Session of its own, a reply in a review thread has one more, and an Alert has one for its Verification and Fix. The agent may start Spawned Sessions from a Session, and the Running tray shows what is running.
 
 ## Access modes
 
@@ -23,8 +23,8 @@ A write to a PROD Connection asks in every mode. When the agent asks, you get an
 
 ## What a Session can use
 
-- **The Browser panel** shows pages from the Session's Chrome beside the conversation, one tab each. You and the agent drive the same tabs, and the panel lists the outside hosts a page called. Inspect shows Chrome's own DevTools for the tab under the page, or beside it or in a window of their own: Elements, Console, Sources, Network, Application and Memory. Device emulation, Performance recording and Lighthouse do not work there.
-- **The Terminals dock** runs shells and Session processes. A server a process starts opens its page in the Browser panel.
+- **The Browser panel** shows pages from the Session's Chrome beside the conversation, one tab each. You and the agent drive the same tabs, and the panel lists the outside hosts a page called. The agent drives only pages on `localhost`; the address field takes any page. Pick mode sends an element to the composer, with a crop and its role and name. Inspect shows Chrome's own DevTools for the tab under the page, or beside it or in a window of their own: Elements, Console, Sources, Network, Application and Memory. Device emulation, Performance recording and Lighthouse do not work there.
+- **The Terminals dock** runs shells and Session processes as you, outside the agent's sandbox, with the environment your login shell builds. A bar of icons starts a new terminal, runs a package script, splits the view, restarts, stops, maximizes or hides the dock, and a list on the right switches between processes. A server a process starts opens its page in the Browser panel, and Local servers lists the servers that the Session's processes or folders started.
 - **Output files** are files the agent writes for you, kept in a folder per Session. To put a file in another folder, such as Downloads, the agent calls `save_file`, and you approve the destination.
 - **Pull requests** open through the console, never through the agent. You press the button, or the agent asks the console to open one, and the console pushes the branch with your git access and never forces it.
 - **Repos** you open from the composer's Repos icon become part of the Session. The agent writes in them as it does in its own folder, and still never pushes.

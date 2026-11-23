@@ -11,8 +11,10 @@ fetched. Commits merged to production never reached a review, a fix or a reply.
 
 ## Behavior
 
-1. A new Session in a Repo fetches the Repo's default branch from origin first, then works in a Session worktree of its
-   own, under the data folder. The operator's own folder keeps its branch and its changes.
+1. A new Session in a Repo opens at once in a Session worktree of its own, under the data folder, made from the default
+   branch as last fetched. The newest commits follow in the background, and the console fetches the default branch again
+   before each run. A worktree made later, when the first one is gone, fetches first. The operator's own folder keeps its
+   branch and its changes.
 2. A Session on the default branch starts at the newest commit of it, on a detached HEAD, since the Repo's own folder may
    hold the branch. A Session on another branch checks it out, moved forward to origin when it is behind.
 3. Sessions on different branches work at the same time. Switching one Session's branch moves its worktree only. A branch
@@ -21,20 +23,21 @@ fetched. Commits merged to production never reached a review, a fix or a reply.
 4. A Session left on the default branch's detached HEAD with no changes starts each run at the newest commit again.
 5. The Session's branch is the branch its worktree is on: when the agent makes a branch for its fix, the header shows it,
    and the Session follows it once the run ends. On a detached HEAD the Session keeps the branch it has.
-6. The Diff button shows only when the Session's own worktree has changes against where it forked from the default
-   branch, committed or not. A new Session has none, whatever another Session changed or the panel was left open.
+6. The Session panel's Changes row, with its added and removed line counts, and the Diff panel show only when the
+   Session's own worktree has changes against where it forked from the default branch, committed or not. A new Session has none, whatever another Session changed or the panel was left open.
 7. The header shows the pull request the Session opened, with its branch, for as long as the Session is on that branch.
    A pull request named in the conversation, or found for the default branch, never shows. Without one of its own, the
    Session shows the open pull request of its current branch on the Git host.
 8. Opening a pull request, from the button or the agent's `open_pull_request`, and a Fix's PR stage, record the pull
    request on the Session.
 9. Deleting a Session removes its worktree and keeps its branch and commits in the Repo.
-10. Every run is told to fetch origin and work from the newest production branch, whichever Playbook it follows: the
-    built-in Playbooks, the Step blocks' skills and the Ops Console skills say so too. A Reply check, a Comment pass and
-    an Agent Review fetch the production branch before they start, and the Agent Review brief names its commit.
-11. A user message in the conversation shows the date and time it ran.
-12. A Repo row in the Workspace's Sessions list keeps its running count, Session count and New Session button apart: a
-    long Repo name gives way first.
+10. Every run is told to work from the newest production branch, whichever Playbook it follows, and never to run `git
+    fetch`, `pull` or `push` itself: the console fetches origin before the run. The built-in Playbooks, the Step blocks'
+    skills and the Ops Console skills say so too. A PR action Session fetches the pull request's branch from origin before
+    it starts, and the Agent Review brief names its commit and the target branch's.
+11. A message in the conversation shows the date and time it ran beside its label.
+12. A row in the Workspace's Sessions list gives its Repo name way first when the line is short: the state word and the
+    time stay.
 
 ## Settled
 
@@ -45,6 +48,7 @@ fetched. Commits merged to production never reached a review, a fix or a reply.
   with stale files; that is the operator's to avoid.
 - **Repo folder untouched**: a branch the operator's folder holds is never taken from it. The Session detaches at that
   branch's commit, moved forward to origin when it is behind.
+- **PR action Session**: its worktree is detached at the pull request's head commit, on no branch ([pr-actions-open-sessions](pr-actions-open-sessions.md)).
 - **A Session made by the backend** (an Alert Session, an Anonymous Session that joined a Repo) gets its worktree at its
   first run. A joined Session starts on the default branch.
 
@@ -57,24 +61,18 @@ fetched. Commits merged to production never reached a review, a fix or a reply.
 
 The Run sandbox lets a Session's own run write in its worktree and in the Repo's git folder, where its commits go. The
 hooks and config of that folder, and the files that point a worktree to it, stay closed ([ADR 0006](../adr/0006-agent-runs-sandboxed-by-the-os.md)).
-A run in a scratch copy gets no git folder. The agent still never pushes.
+The agent still never pushes.
 
 ## Database
 
-```sql
-ALTER TABLE sessions ADD COLUMN opened_pr_number integer;
-ALTER TABLE sessions ADD COLUMN opened_pr_url text;
--- the branch the pull request came from; the Session shows it only while it is on that branch
-ALTER TABLE sessions ADD COLUMN opened_pr_branch text;
-```
-
-Existing rows keep null: they show the open pull request of their branch until they open one.
+The pull requests the console opened for a Session are rows of `session_pull_requests`, each with the branch it came
+from; the Session shows one only while it is on that branch ([session-pull-requests](session-pull-requests.md)).
 
 ## API
 
 ### `GET /sessions` and `GET /sessions/:id`
 
-Adds `pull_request`: `{ number, url }` for the pull request the Session opened from its current branch, else `null`.
+`pull_request` is `{ number, url }` for the pull request the Session opened from its current branch, else `null`.
 
 ### `GET /sessions/:id/diff`
 
@@ -83,8 +81,9 @@ Session has a worktree.
 
 ## UI
 
-The Session header drops the pull request found in the conversation. The Diff button and panel render only with changed
-files. Each message shows its date and time beside its label. The Repo row truncates the name before the counts.
+The Session header shows no pull request found in the conversation. The Changes row and the Diff panel render only with
+changed files. Each message shows its date and time beside its label. A Sessions list row truncates the Repo name before
+the state word and time.
 
 ## Rejected
 

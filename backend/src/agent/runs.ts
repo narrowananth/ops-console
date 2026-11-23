@@ -112,7 +112,7 @@ export const failedBecause = (summary: RunSummary): string =>
 
 /**
  * The operator's own chat run: a message they sent in a Session, not a job's step, a review, a reply or a PR action
- * Session's work on pull request code. Only this run has the browser and process tools and, when the switch is on, Loopback.
+ * Session's work on pull request code. Only this run has the browser and process tools.
  */
 export const isOperatorChat = (run: {
   onFinish: unknown;

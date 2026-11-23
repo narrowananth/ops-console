@@ -3,7 +3,7 @@
 Every outside system the console reaches is an MCP server or a CLI registered with Claude Code, except New Relic's own
 API when the operator chooses it (below). To
 connect one, the console hands off to the provider's own browser sign-in: Claude Code's MCP OAuth,
-or the CLI's login (`pup`, `gh`, `glab`, `bkt`, `slashdocs`). The operator types no token and fills no form before
+or the CLI's login (`pup`, `gh`, `glab`, `bkt`, `slashdocs`, `aws`). The operator types no token and fills no form before
 Connect, the way claude.ai and ChatGPT connect, unless the provider ships no OAuth client a public repo can
 bundle. The Connector pane offers Connect, Reconnect and Disconnect,
 and Cancel while a sign-in waits; config the console needs keeps its defaults. A secret the console must hold, such as an MCP server's env var, goes to
@@ -38,10 +38,14 @@ The console depends on each MCP server's tools and on the `claude` CLI's output 
 Claude Code cannot run is a server the console cannot use.
 
 Google Docs, Sheets and Drive are reached through a small MCP server the console ships and registers with Claude Code in
-every Claude account: its tools call the products' REST APIs. The console runs Google's sign-in with a client the build ships
-and keeps the refresh token in the Keychain; the server mints each call's access token from it. So one Google sign-in serves
+every Claude account: its tools call the products' REST APIs. The console runs Google's sign-in with a client the build ships,
+through a loopback page on this Mac that lives for one callback ([ADR 0003](0003-local-only-server.md)), and keeps the
+refresh token in the Keychain; the server mints each call's access token from it. So one Google sign-in serves
 every Claude account and CLIProxy, and no Claude config holds a Google token. The cost is a client the project owns, which runs
 unverified, with Google's warning screen and a 100-user cap, and tools the console writes and maintains.
+
+CloudWatch logs are read through the `aws` CLI's own sign-in (`aws login` or `aws sso login`) and AWS Labs' CloudWatch MCP
+server, which Connect registers with the profile and region in its environment. The console holds no AWS secret.
 
 A service with no browser sign-in that gives the console a token of its own is reached through
 Claude Code only. Bitbucket has two: Atlassian's MCP server for the agent, and `bkt` for the

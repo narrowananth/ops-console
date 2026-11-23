@@ -29,11 +29,11 @@ The operator wants to ask questions of their databases and queues in plain words
 - **Scope**: stored in `session_connections`. Empty means every Connection with access.
 - **Agent work** (ADR 0005): every dev-tools question is an agent run. The console runs no query itself.
 - **Read by default**: a new Connection's Access Level is `read`; `write` takes an explicit change (`05-settings-dev-tools`).
-- **PROD-write rule**: this spec supplies the rule the agent runtime checks before every tool call. A tool call on a PROD Connection with Access Level `write` that the classifier does not know to be a read waits for an Approval. SQL (`execute_sql`, `run_query`) is a read only when every statement starts with `select`, `show`, `explain`, `describe`, `desc`, `values`, `table` or `with` and holds no write keyword, with comments and quoted text left out of the check; Mongo reads by tool name, with `aggregate` a write when it holds `$out` or `$merge`; Redis reads by tool name; dbhub's `search_objects` and ClickHouse's `list_databases` and `list_tables` read; any tool not known to read counts as a write. A `read` Connection asks nothing: its server is launched read-only and refuses the write.
+- **PROD-write rule**: this spec supplies the rule the agent runtime checks before every tool call. A tool call on a PROD Connection with Access Level `write` that the classifier does not know to be a read waits for an Approval. SQL (`execute_sql`, `run_query`) is a read only when every statement starts with `select`, `show`, `explain`, `describe`, `desc`, `values`, `table` or `with` and holds no write keyword, with comments and quoted text left out of the check; Mongo reads by tool name, with `aggregate` a write when it holds `$out` or `$merge`; Redis reads by tool name; Firebase reads by tool name (the get, list and query tools of its core, Realtime Database, Firestore and other services); Postgres's `search_objects` and ClickHouse's `list_databases` and `list_tables` read; any tool not known to read counts as a write. A `read` Connection asks nothing: its server is launched read-only and refuses the write.
 - **`is_prod` on a query**: true for every call on a PROD Connection, read or write. The Action Log row also stores the Connection's id.
 - **Step label**: `<name> (read-only)` for Access Level `read`, `<name> (read-write)` for `write`, on the live message and on the transcript read back. A query step reads `<label>: <tool>`, such as `mongo-prod (read-only): find`.
 - **Unreachable server**: a Connection in scope whose server reports `failed` or `needs-auth` when the run starts gets a `step` part, `<name> (read-only): is down, skipped` or `needs a login, skipped`. The part lives on the streamed message; the finished transcript is Claude Code's own and does not keep it.
-- **Working folder**: a `devtools` run has no Repo and runs in `devtools/` under the data folder.
+- **Working folder**: a `devtools` run has no Repo and runs in `devtools/` under the data folder, created with mode `0700`.
 - **Leaving a scope**: setting a Connection to `none` removes its rows from every scope. A Session scoped to that one Connection then has an empty scope, which means every Connection with access.
 - **Create dispatch**: `POST /sessions` picks the handler by `kind`; a body with no `kind` is a `repo` Session. A kind with no creator (`pr_review`) or an unknown kind answers `validation_failed`.
 - **Panel**: the Dev tools screen shows one Session as a terminal-styled transcript with the Synced dev tools list as its scope picker (`10-dev-tools-compare`). Its messages come from the transcript (`02-settings-agents`).
@@ -89,11 +89,11 @@ Messages, `session.output`, `session.finished`, `approval.requested` and `action
 
 ## UI
 
-- Dev tools screen: opens ready to ask; the first question starts the dev-tools Session (`10-dev-tools-compare`). Header shows `scope:` with the chosen Connections or `all connected (<n>)`.
-- Scope picker: the Synced dev tools list, Connections with their type; `none` ones are shown disabled, with a hint to set the Access Level in Connections; PROD ones tagged.
-- Empty: "No Connections yet." with a link to Connections.
+- Dev tools screen: opens ready to ask; the first question starts the dev-tools Session (`10-dev-tools-compare`). The terminal's title bar reads `ops-agent · dev tools · scope:` with the chosen Connections or `all connected (<n>)`, and the Session's state.
+- Scope picker: the Synced dev tools list. An All connected button, with the count of Connections that have access, clears the scope. Below it, Connections A→Z, each with a check box, its brand icon and name; `none` ones are shown disabled, with a hint to set the Access Level in Connections; PROD ones tagged.
+- Empty: "No Connections yet." with an "Add one in Connections" link.
 - An Approval for a PROD write shows above the terminal, with the PROD tag, Approve and Deny.
-- While a terminal's run goes, `waiting_input` included, `stop` shows in its title bar and its tab's `×` is disabled.
+- While a terminal's run goes, `waiting_input` included, `stop` shows in its title bar and its tab's `×` is disabled. A terminal not yet asked keeps its scope, settings and typed text in the browser until its first question or its `×`.
 
 ## Rejected
 

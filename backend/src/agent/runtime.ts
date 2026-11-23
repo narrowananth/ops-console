@@ -1814,7 +1814,7 @@ export class AgentRuntime implements OnModuleDestroy {
   }
 
   /**
-   * Moving into a Repo asks in every Access mode but full: the Session's work then happens in the operator's own checkout. A
+   * Moving into a Repo asks in every Access mode but full: the Session's work then happens in a worktree of that Repo. A
    * call that matches no imported Repo is refused before it asks.
    */
   private async approveJoinRepo(run: Run, toolInput: Record<string, unknown>, stepId: string): Promise<HookJSONOutput> {

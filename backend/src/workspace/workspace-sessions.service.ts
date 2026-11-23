@@ -220,9 +220,9 @@ export class WorkspaceSessionsService {
   }
 
   /**
-   * The agent's sandbox has no git keys, so its own `git fetch` fails: the console fetches the Repo's default branch
-   * before each run, and `origin/<default branch>` is the newest commit when the agent reads it. A Session left clean
-   * on the default branch's detached HEAD also moves forward to it. A failed fetch leaves the last fetched commit.
+   * The console fetches the Repo's default branch before each run, so the agent never fetches, and
+   * `origin/<default branch>` is the newest commit when the agent reads it. A Session left clean on the default
+   * branch's detached HEAD also moves forward to it. A failed fetch leaves the last fetched commit.
    */
   private async refreshDefault(session: SessionRow): Promise<void> {
     const repo = this.repo(session.repoId);

@@ -22,7 +22,7 @@ Agent runs already go on when the browser reloads or closes, because the daemon 
    - Connections: `?connection=<id>`, `?connection=new` to pick a type, or `?connection=new:<type>` for the new Connection's form.
    - Dev tools keeps its picked terminal in local storage with its open terminals (Behavior 3), not in the address. The Setup agent has one terminal at a time, so its page has nothing to pick.
 3. Every other choice on a page is kept in the browser's local storage for that page:
-   - Monitor: severity tab, Closed, ticked Services, the Services filter, how many logs are shown, the logs search, whether the Services column is folded, the Samples JSON view, and each Alert's picked Report version. Range and status codes are kept too.
+   - Monitor: the source tab, the severity tab, Closed, ticked Services, the Services filter, how many logs are shown, the logs search, and each Alert's picked Report version. Range and status codes are kept too.
    - Workspace: Mine or All, the pull request search, each "show all" in the Sessions list, whether a Repo's new-Session form is open and the branch picked in it, each pull request file's split and full view and whether it is open, and which line's comment box and which thread's reply box are open. Viewed files and folded groups are kept too, and so are the Sessions search, whether the side pane is folded, and the Session's Changes panel: open or not, split or one column, and its width.
    - Dev tools: its new terminals, the picked terminal and the text typed at each prompt.
    - Integrations and Connections have nothing to keep beyond their pick. The Connection form's fields are not kept, because the form holds a secret.
@@ -30,7 +30,7 @@ Agent runs already go on when the browser reloads or closes, because the daemon 
 5. Clicking a page in the sidebar opens it at the address it had when the operator last left it, Repos and Agents & accounts included. Opening the console at `/`, or at an address that is no page, lands on the last page visited, `/monitor` the first time.
 6. A Workspace link from the Monitor that names a Session opens that Session and keeps `?session=<id>` in the address instead of clearing it.
 7. A picked item that no longer exists, such as a deleted Session, a dismissed and purged Alert, or a removed Connection, leaves the page in its nothing-picked state. The pick is dropped from the address and storage, with no error shown.
-8. A ticked Service that is missing from the Services list for the current range stays ticked but is not counted or scanned. It counts again when a range lists it. Untick clears every tick, listed or not.
+8. A ticked Service that is missing from the Services list for the current range stays ticked but is not counted or scanned. It counts again when a range lists it. Clear removes every tick, listed or not.
 9. A stored value that fails to read, from an older build or a hand edit, is ignored and the page shows its default.
 10. Menus, confirm steps (Delete, Merge, Remove), dropdowns and "Copied" flashes start closed after a reload or a page switch.
 
@@ -128,7 +128,7 @@ Server to client, when a Scan starts over after a restart. Same payload as when 
 
 - **Every page**: reads its remembered view on load before the first draw and writes each change as it happens. A pick that no longer exists falls back as in Behavior 7. Loading, empty and error states are unchanged.
 - **Sidebar**: each item links to the page's last address (Behavior 5).
-- **Monitor**: Service, Alert, severity tab, Closed, ticks, filter, log count, JSON view and Report version kept. While a Scan restarts after a restart, the Scan button shows "Scanning…" as for any running Scan.
+- **Monitor**: Service, Alert, source tab, severity tab, Closed, ticks, filter, log count and Report version kept. While a Scan restarts after a restart, the Scan button shows "Scanning…" as for any running Scan.
 - **Workspace**: tab, Session or pull request, Mine or All, search, split and full, open files, open comment and reply boxes, and drafts kept. A resumed Session shows the "Resumed after the console restarted" step and streams on.
 - **Integrations, Connections**: picked item in the address.
 - **Dev tools**: picked terminal, new terminals and typed questions in local storage.

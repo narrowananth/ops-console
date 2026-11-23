@@ -7,5 +7,6 @@ Claude Code transcript, pull requests on the Git host, MCP servers in the `claud
 ## Consequences
 
 There is no offline pull request list, and no message history apart from Claude Code's. Only the
-daemon opens `state.db`. Three small records sit beside it as files: `runtime.json` (what the CLI reads to reach the
-daemon), `update.json` and `keychain-owner.json`.
+daemon opens `state.db`. Small records sit beside it as files: `runtime.json` (what the CLI reads to reach the
+daemon, with the session token), `update.json`, `keychain-owner.json`, `keychain-manifest.json` (the names of the
+Keychain items, never their values), and `daemon.lock` while a daemon runs.

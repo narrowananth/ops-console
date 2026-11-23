@@ -131,7 +131,7 @@ function RunSandboxRow() {
       ? {
           glyph: '● on',
           className: 'bg-ok/12 text-ok',
-          tip: 'Agent runs cannot read the login Keychain folder, and nothing else is closed to them.',
+          tip: 'Agent runs cannot read the login Keychain folder or the installed app, or change git hooks and config.',
         }
       : {
           glyph: '✕ unavailable',

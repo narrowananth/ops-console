@@ -2,6 +2,8 @@
 
 Monitor is where the agent starts from a failure and ends at a pull request, with you deciding in between.
 
+Monitor shows one tab per connected log source after All sources, each with its open Alerts by tier. The alerts table lists Alerts with a search, and an Alert opens in a drawer with its Samples, Reports and Fix. The Services menu picks the Services the next Scan reads.
+
 ## From log line to pull request
 
 1. **Scan.** The console scans each Service's logs on a check interval, through Datadog, from an OpenTelemetry [Log folder](/docs/connectors/#opentelemetry-logs), from [CloudWatch Log groups](/docs/connectors/#cloudwatch-logs), from [Loki](/docs/connectors/#loki-logs) or from [New Relic](/docs/connectors/#new-relic-logs), and raises an Alert for each kind of failure. An Alert has a fingerprint, a severity and a route.

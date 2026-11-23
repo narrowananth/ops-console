@@ -49,7 +49,7 @@ that skill, and every other message runs the Playbook.
    that hold it, each A to Z, ignoring case, so `/pr` puts the skill named `pr` first and `/code` finds Code Review and
    Codebase Design. Entries with the same name all show, each with its badge: a Project
    `pr` and a Built-in `pr` both appear.
-10. Each row shows `/name`, the description cut to one line, and a badge: Built-in, Custom or Project. Enter or a click
+10. Each row shows `/name`, the description cut to one line, and a badge: the pack's name for a Built-in skill (Ops Console, Caveman), Custom or Project. Enter or a click
     puts `/name ` in the composer and leaves what the operator typed after it.
 11. The menu reads the skills each time it opens: one installed, created or added to the Repo shows at the next open.
     The menu reads only each skill's name and description. With no skills at all it says so and points to Discover. With
@@ -75,7 +75,7 @@ that skill, and every other message runs the Playbook.
 18. The skill is gone when the operator sends (uninstalled, deleted, or its folder removed after the menu opened): the
     send is refused with "skill not found", no run starts, and the text stays in the composer.
 19. A skill adds method and never relaxes a rule. PROD writes still ask for Approval in every Access mode, and the
-    Run sandbox and Network allowlist apply. A skill that says to merge, push or read a secret changes nothing.
+    Run sandbox applies. A skill that says to merge, push or read a secret changes nothing.
 20. A Session whose run is still going refuses the send as today. Two Sessions that use the same skill each get their own
     copy; a stopped or finished run leaves nothing behind. A skill message whose console skill cannot be handed to the run
     fails with the reason, as a Playbook Skill does, and does not run without it.

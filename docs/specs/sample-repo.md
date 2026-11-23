@@ -1,6 +1,6 @@
 # Sample repo
 
-**Status:** draft
+**Status:** draft, on hold in the [roadmap](../roadmap.md). Nothing in it is built: no `ops-console sample` command, no `sample` folder and no `/docs/sample/` page.
 **Design:** none: a CLI command and a docs page. Monitor and Workspace show the sample's Service, Alerts and pull request as they show any other.
 
 ## Problem

@@ -116,12 +116,6 @@ The row gives a reason, such as `it is not an app bundle` or `its bundle fails c
 
 `/usr/bin/sandbox-exec` failed or took more than 5 seconds, and the row gives its last line as the reason. Agent runs fail until it works, and no setting turns the sandbox off. Include the reason in an issue, as described under [When it is not here](#when-it-is-not-here).
 
-### A run is waiting on a refused host
-
-`The Run sandbox refused <hosts>. Allow it in the Network allowlist, or the run may wait on it.`
-
-A command in the run tried a host that is not on the Network allowlist. Add the host to the allowlist, then run again.
-
 ## Permissions
 
 ### Full Disk Access is off

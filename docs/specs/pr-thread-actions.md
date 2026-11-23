@@ -1,6 +1,6 @@
 # PR thread actions
 
-**Status:** shipped
+**Status:** superseded by [pr-actions-open-sessions](pr-actions-open-sessions.md). Check replies and Address comments open a PR action Session; the jobs, scratch copy, Reply check and Comment pass records, strip, card, Retry and Skip step below no longer exist. Which threads each button covers, the commit message, the replies, the resolves, the rebase and the never-force rule carry over there.
 **Design:** Workspace, pull request view (`pull-request-view.tsx`, `pr-thread.tsx`); Claude, Playbooks. Both
 buttons are new to the design.
 
