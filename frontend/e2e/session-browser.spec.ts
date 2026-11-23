@@ -233,12 +233,14 @@ test('the Terminals dock explains itself when empty, runs a shell the operator t
   await expect(dock.getByText(/keeps running when you hide this panel/)).toBeVisible();
   await expect(dock.getByText(/Its page opens in the Browser panel/)).toBeVisible();
   // A folder with no scripts has no script menu to puzzle over.
-  await expect(dock.getByRole('button', { name: 'Run a script' })).toHaveCount(0);
+  await expect(dock.getByRole('button', { name: 'Scripts and folder' })).toHaveCount(0);
 
   // The empty state's own button and the header's both make a terminal.
   await dock.getByRole('button', { name: 'New terminal' }).last().click();
-  await expect(dock.getByRole('tab', { name: /shell/ })).toBeVisible();
-  await expect(dock.getByText('Running · started')).toBeVisible();
+  await expect(dock.getByText('shell', { exact: true })).toBeVisible();
+  await expect(dock.getByTitle(/^Running · started/)).toBeVisible();
+  // One terminal has no list beside it.
+  await expect(dock.getByRole('tab')).toHaveCount(0);
   await expect(dock.getByRole('heading', { name: 'No terminals yet' })).toHaveCount(0);
   await dock.locator('.xterm-helper-textarea').focus();
   await page.keyboard.type('echo dock-says-$((20 + 22))\n');
@@ -268,6 +270,37 @@ test('the Terminals dock explains itself when empty, runs a shell the operator t
   await expect.poll(async () => (await processesOf(request, id)).map((p) => p.state)).toEqual(['stopped', 'stopped']);
 });
 
+test('Split puts a new shell beside the selected one, the list joins them, and Maximize grows the dock (15)', async ({
+  page,
+  request,
+}) => {
+  const id = await newSession(request);
+  await openSession(page, id);
+  await page.getByRole('button', { name: 'Terminals' }).click();
+  const dock = page.getByRole('region', { name: 'Terminals' });
+  await dock.getByRole('button', { name: 'New terminal' }).last().click();
+  await expect(dock.locator('.xterm-rows:visible')).toHaveCount(1);
+
+  await dock.getByRole('button', { name: 'Split terminal' }).click();
+  await expect(dock.locator('.xterm-rows:visible')).toHaveCount(2);
+  const list = dock.getByRole('tablist', { name: 'Processes' });
+  await expect(list.getByRole('tab')).toHaveCount(2);
+  await expect(list.getByRole('tab', { name: /shell-2/ })).toHaveAttribute('aria-selected', 'true');
+
+  // A terminal of its own leaves the split on the list and shows alone.
+  await dock.getByRole('button', { name: 'New terminal' }).first().click();
+  await expect(list.getByRole('tab')).toHaveCount(3);
+  await expect(dock.locator('.xterm-rows:visible')).toHaveCount(1);
+  await list.getByRole('tab', { name: /shell-2/ }).click();
+  await expect(dock.locator('.xterm-rows:visible')).toHaveCount(2);
+
+  const before = (await dock.boundingBox())?.height ?? 0;
+  await dock.getByRole('button', { name: 'Maximize terminals' }).click();
+  await expect.poll(async () => (await dock.boundingBox())?.height ?? 0).toBeGreaterThan(before);
+  await dock.getByRole('button', { name: 'Restore terminals' }).click();
+  await expect.poll(async () => (await dock.boundingBox())?.height ?? 0).toBe(before);
+});
+
 test('an exited process shows its code, can be restarted or removed, and the empty state returns (17)', async ({
   page,
   request,
@@ -283,8 +316,8 @@ test('an exited process shows its code, can be restarted or removed, and the emp
   await openSession(page, id);
   await page.getByRole('button', { name: 'Terminals' }).click();
   const dock = page.getByRole('region', { name: 'Terminals' });
-  await expect(dock.getByText('Exited with code 3')).toBeVisible();
-  await expect(dock.getByRole('tab', { name: /build.*exited 3/ })).toBeVisible();
+  await expect(dock.getByTitle(/^Exited with code 3/)).toBeVisible();
+  await expect(dock.getByText('exited 3')).toBeVisible();
   await expect(dock.locator('.xterm-rows:visible')).toContainText('build-failed');
   await expect(dock.getByRole('button', { name: 'Stop' })).toHaveCount(0);
   await expect(dock.getByRole('button', { name: 'Restart' })).toBeEnabled();
@@ -368,7 +401,7 @@ test("Run lists the folder's package.json scripts and starts one; Restart runs i
   await openSession(page, id);
   await page.getByRole('button', { name: 'Terminals' }).click();
   const dock = page.getByRole('region', { name: 'Terminals' });
-  await dock.getByRole('button', { name: 'Run a script' }).click();
+  await dock.getByRole('button', { name: 'Scripts and folder' }).click();
   await expect(page.getByRole('menuitem', { name: /hello/ })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: /quick/ })).toBeVisible();
   await page.getByRole('menuitem', { name: /hello/ }).click();

@@ -1,13 +1,16 @@
 import type { SessionProcess } from '@ops-console/shared';
-import { Fragment, type PointerEvent, useRef, useState } from 'react';
+import { Fragment, type PointerEvent, type ReactNode, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Button } from '../components/ui/button';
 import { useNow } from '../components/ui/elapsed';
 import {
+  ChevronIcon,
   CloseIcon,
-  FolderIcon,
+  MaximizeIcon,
   PlusIcon,
   RestartIcon,
+  RestoreIcon,
+  SplitIcon,
   StopIcon,
   TerminalIcon,
   TrashIcon,
@@ -66,11 +69,47 @@ function HeightHandle({ height, onHeight }: { height: number; onHeight: (height:
   );
 }
 
+/** A bare icon button of the toolbar: a tooltip and an accessible name, no text. */
+function IconButton({
+  label,
+  title,
+  disabled = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  title?: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={title ?? label}
+      disabled={disabled}
+      onClick={onClick}
+      className="flex size-7 flex-none cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-neutral-700 transition-colors hover:bg-neutral-200 hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {children}
+    </button>
+  );
+}
+
+/** The groups the operator split, each a row of process ids; every other process is a group of its own. */
+function groupsOf(split: string[][], list: SessionProcess[]): string[][] {
+  const alive = new Set(list.map((one) => one.id));
+  const kept = split.map((group) => group.filter((id) => alive.has(id))).filter((group) => group.length > 0);
+  const placed = new Set(kept.flat());
+  return [...kept, ...list.filter((one) => !placed.has(one.id)).map((one) => [one.id])];
+}
+
 /**
- * The Session's processes under the conversation and the browser. A header names the dock and holds one tab per process,
- * a New terminal button, a menu of scripts when the folder has any, and a Hide button. Under it, the selected process
- * says what it runs and in which state, with Stop (while it runs), Restart and Remove (once it has ended). A process runs
- * on when the dock is hidden.
+ * The Session's processes under the conversation and the browser, laid out as an editor's terminal panel. One bar of
+ * icons: the selected process's name and state, New terminal (+) with a menu for scripts and the folder, Split, Restart,
+ * Stop (while it runs) or Remove (once it ended), Maximize and Hide. Split puts a new shell beside the selected one; a
+ * list of the processes shows at the right from the second on. A process runs on when the dock is hidden.
  */
 export function TerminalsDock({
   sessionId,
@@ -87,153 +126,187 @@ export function TerminalsDock({
   const act = useProcessAction(sessionId);
   const [stored, setStored] = useStored(TERMINALS_DOCK.key, z.number(), TERMINALS_DOCK.initial);
   const widest = Math.max(TERMINALS_DOCK.shortest, Math.floor(window.innerHeight * 0.7));
-  const height = Math.round(Math.min(widest, Math.max(TERMINALS_DOCK.shortest, stored)));
+  const [maximized, setMaximized] = useState(false);
+  const height = maximized ? widest : Math.round(Math.min(widest, Math.max(TERMINALS_DOCK.shortest, stored)));
   const [picked, setPicked] = useState<string | null>(null);
+  const [split, setSplit] = useState<string[][]>([]);
   // The folder a new process runs in: null is the Session's own worktree.
   const [folder, setFolder] = useState<string | null>(null);
 
   const list = processes.data ?? [];
   const current = list.find((one) => one.id === picked) ?? list[0];
-  const run = (body: { name: string; script?: string }) =>
+  const groups = groupsOf(split, list);
+  const shown = groups.find((group) => current !== undefined && group.includes(current.id)) ?? [];
+  const run = (body: { name: string; script?: string }, beside = false) =>
     start.mutate(
       { ...body, ...(folder === null ? {} : { folder }) },
-      { onSuccess: (process) => setPicked(process.id) },
+      {
+        onSuccess: (process) => {
+          setPicked(process.id);
+          if (beside && current !== undefined) {
+            setSplit(groups.map((group) => (group.includes(current.id) ? [...group, process.id] : group)));
+          }
+        },
+      },
     );
   const newTerminal = () => run({ name: 'shell' });
   const error = start.error?.message ?? act.error?.message ?? null;
-  // The script menu appears once the folder lists scripts, or when reading them failed and the menu says why.
+  // The menu appears once the folder lists scripts, or when reading them failed and the menu says why, or with folders to pick.
   const hasScripts = scripts.isError || (scripts.data?.scripts.length ?? 0) > 0;
   const folderName =
     folder === null ? "This Session's folder" : (folders.find((one) => one.path === folder)?.name ?? folder);
+  const running = current !== undefined && isRunning(current);
+  const now = useNow(running);
 
   return (
     <section aria-label="Terminals" style={{ height }} className="@container flex flex-none flex-col bg-bg">
       <HeightHandle
         height={height}
-        onHeight={(next) => setStored(Math.min(widest, Math.max(TERMINALS_DOCK.shortest, Math.round(next))))}
+        onHeight={(next) => {
+          setMaximized(false);
+          setStored(Math.min(widest, Math.max(TERMINALS_DOCK.shortest, Math.round(next))));
+        }}
       />
-      <div className="flex flex-none flex-wrap items-center gap-x-1.5 gap-y-1 border-b border-line bg-surface px-2.5 py-1.5">
-        <h3 className="m-0 flex flex-none items-center gap-1.5 pr-1 text-xs font-semibold text-text">
+      <div className="flex flex-none items-center gap-0.5 border-b border-line bg-surface px-2 py-1">
+        <h3 className="m-0 mr-2 flex flex-none items-center gap-1.5 text-xs font-semibold text-text">
           <TerminalIcon />
-          Terminals
+          <span className="hidden @sm:inline">Terminals</span>
         </h3>
-        <div
-          role="tablist"
-          aria-label="Processes"
-          className="order-last flex w-full min-w-0 items-center gap-1 overflow-x-auto @md:order-none @md:w-auto @md:flex-1"
-        >
-          {list.map((process) => (
-            <ProcessTab
-              key={process.id}
-              process={process}
-              selected={process.id === current?.id}
-              onPick={() => setPicked(process.id)}
-            />
-          ))}
-        </div>
-        <span className="ml-auto flex-none @md:hidden" />
-        <Button
-          className="flex-none rounded-lg px-2.5 py-1 text-xs"
+        <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5 pr-1.5 text-xs text-neutral-700">
+          {current !== undefined && (
+            <span
+              className="flex min-w-0 items-center gap-1.5"
+              title={`${stateSentence(current, now)}. ${current.command || 'shell'} in ${current.folder}`}
+            >
+              <span aria-hidden className={`size-2 flex-none rounded-full ${TONE[stateTone(current)]}`} />
+              <span className="min-w-0 truncate font-mono">{current.name}</span>
+              {!running && <span className="flex-none text-[10px] text-neutral-600">{stateLabel(current)}</span>}
+            </span>
+          )}
+        </span>
+        <IconButton
+          label="New terminal"
+          title="New terminal: a shell you type commands in"
           disabled={start.isPending}
-          aria-label="New terminal"
-          title="Open a new terminal: a shell you type commands in"
           onClick={newTerminal}
         >
           <PlusIcon />
-          <span className="hidden @sm:inline">New terminal</span>
-        </Button>
-        {hasScripts && (
+        </IconButton>
+        {(hasScripts || folders.length > 0) && (
           <MenuButton
-            label="Run a script"
+            label="Scripts and folder"
+            icon
             opens="up"
             width="w-72"
-            title="Run one of this folder's scripts, such as dev or test"
-            menuChildren={(close) =>
-              folder !== null ? (
-                <p className="m-0 px-2.5 py-1.5 text-xs text-neutral-700">
-                  Scripts are listed for this Session's folder only. Pick it as the folder to run one.
-                </p>
-              ) : scripts.isError ? (
-                <p role="alert" className="m-0 px-2.5 py-1.5 text-xs text-accent-700">
-                  Could not read the scripts: {scripts.error.message}
-                </p>
-              ) : (
-                bySource(scripts.data?.scripts ?? []).map(([source, group]) => (
-                  <Fragment key={source}>
-                    <MenuHeading>{source}</MenuHeading>
-                    {group.map((script) => (
+            title={`Run a script, or pick the folder new terminals run in: ${folderName}`}
+            menuChildren={(close) => (
+              <>
+                {folders.length > 0 && (
+                  <>
+                    <MenuHeading>Run in</MenuHeading>
+                    <MenuItem selected={folder === null} onClick={() => setFolder(null)}>
+                      This Session's folder
+                    </MenuItem>
+                    {ascending(folders, (one) => one.name).map((one) => (
                       <MenuItem
-                        key={script.id}
-                        title={script.command || script.run}
-                        hint={script.run}
-                        onClick={() => {
-                          close();
-                          run({ name: script.name, script: script.id });
-                        }}
+                        key={one.path}
+                        selected={folder === one.path}
+                        title={one.path}
+                        onClick={() => setFolder(one.path)}
                       >
-                        {script.name}
+                        {one.name}
                       </MenuItem>
                     ))}
-                  </Fragment>
-                ))
-              )
-            }
-          >
-            <span>Run a script</span>
-            <span aria-hidden className="text-neutral-600">
-              ▾
-            </span>
-          </MenuButton>
-        )}
-        {folders.length > 0 && (
-          <MenuButton
-            label="Folder"
-            opens="up"
-            width="w-64"
-            title={`The folder new terminals and scripts run in: ${folderName}`}
-            menuChildren={() => (
-              <>
-                <MenuHeading>Run in</MenuHeading>
-                <MenuItem selected={folder === null} onClick={() => setFolder(null)}>
-                  This Session's folder
-                </MenuItem>
-                {ascending(folders, (one) => one.name).map((one) => (
-                  <MenuItem
-                    key={one.path}
-                    selected={folder === one.path}
-                    title={one.path}
-                    onClick={() => setFolder(one.path)}
-                  >
-                    {one.name}
-                  </MenuItem>
-                ))}
+                  </>
+                )}
+                {folder !== null ? (
+                  <p className="m-0 px-2.5 py-1.5 text-xs text-neutral-700">
+                    Scripts are listed for this Session's folder only. Pick it to run one.
+                  </p>
+                ) : scripts.isError ? (
+                  <p role="alert" className="m-0 px-2.5 py-1.5 text-xs text-accent-700">
+                    Could not read the scripts: {scripts.error.message}
+                  </p>
+                ) : (
+                  bySource(scripts.data?.scripts ?? []).map(([source, group]) => (
+                    <Fragment key={source}>
+                      <MenuHeading>{source}</MenuHeading>
+                      {group.map((script) => (
+                        <MenuItem
+                          key={script.id}
+                          title={script.command || script.run}
+                          hint={script.run}
+                          onClick={() => {
+                            close();
+                            run({ name: script.name, script: script.id });
+                          }}
+                        >
+                          {script.name}
+                        </MenuItem>
+                      ))}
+                    </Fragment>
+                  ))
+                )}
               </>
             )}
           >
-            <FolderIcon size={14} />
-            <span className="hidden max-w-32 truncate @xl:inline">{folderName}</span>
-            <span aria-hidden className="text-neutral-600">
-              ▾
-            </span>
+            <ChevronIcon />
           </MenuButton>
         )}
-        <button
-          type="button"
-          aria-label="Hide terminals"
-          title="Hide terminals. Processes keep running."
-          onClick={onClose}
-          className="flex size-7 flex-none cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-0 text-neutral-700 hover:bg-neutral-200 hover:text-text"
+        {current !== undefined && (
+          <>
+            <IconButton
+              label="Split terminal"
+              title="Split: a new shell beside this one"
+              disabled={start.isPending}
+              onClick={() => run({ name: 'shell' }, true)}
+            >
+              <SplitIcon />
+            </IconButton>
+            <IconButton
+              label="Restart"
+              title="Run the same command again"
+              disabled={act.isPending}
+              onClick={() => act.mutate({ id: current.id, action: 'restart' })}
+            >
+              <RestartIcon />
+            </IconButton>
+            {running ? (
+              <IconButton
+                label="Stop"
+                title="Stop this process"
+                disabled={act.isPending}
+                onClick={() => act.mutate({ id: current.id, action: 'stop' })}
+              >
+                <StopIcon />
+              </IconButton>
+            ) : (
+              <IconButton
+                label="Remove"
+                title="Remove this process and its output from the list"
+                disabled={act.isPending}
+                onClick={() => act.mutate({ id: current.id, action: 'close' })}
+              >
+                <TrashIcon />
+              </IconButton>
+            )}
+          </>
+        )}
+        <span aria-hidden className="mx-1 h-4 w-px flex-none bg-line" />
+        <IconButton
+          label={maximized ? 'Restore terminals' : 'Maximize terminals'}
+          onClick={() => setMaximized((was) => !was)}
         >
+          {maximized ? <RestoreIcon /> : <MaximizeIcon />}
+        </IconButton>
+        <IconButton label="Hide terminals" title="Hide terminals. Processes keep running." onClick={onClose}>
           <CloseIcon />
-        </button>
+        </IconButton>
       </div>
       {error !== null && (
         <p role="alert" className="m-0 border-b border-line px-3 py-1.5 text-xs text-accent-700">
           {error}
         </p>
-      )}
-      {current !== undefined && (
-        <ProcessBar process={current} busy={act.isPending} onAct={(action) => act.mutate({ id: current.id, action })} />
       )}
       {current !== undefined && current.prod_connections.length > 0 && (
         <p role="status" className="m-0 border-b border-line bg-accent-100 px-3 py-1.5 text-xs text-accent-900">
@@ -251,18 +324,60 @@ export function TerminalsDock({
       ) : current === undefined ? (
         <NoTerminals busy={start.isPending} onNew={newTerminal} />
       ) : (
-        // Every process keeps its view, stacked in one box, so a tab switch shows the screen as it was instead of
-        // reading the output again. A restart is a new run: its view attaches again and reads its output from the start.
-        <div className="relative min-h-0 flex-1">
-          {list.map((one) => (
-            <XtermView
-              key={`${one.id}:${one.started_at}`}
-              path={`/processes/${one.id}`}
-              interactive
-              hidden={one.id !== current.id}
-              className="absolute inset-0 p-2.5"
-            />
-          ))}
+        <div className="flex min-h-0 flex-1">
+          {/* Every process keeps its view, stacked in one box, so a switch shows the screen as it was instead of reading
+              the output again. The group on show lays its views side by side. A restart is a new run: its view attaches
+              again and reads its output from the start. */}
+          <div className="relative min-w-0 flex-1">
+            {list.map((one) => {
+              const slot = shown.indexOf(one.id);
+              const on = slot >= 0;
+              return (
+                <div
+                  key={`${one.id}:${one.started_at}`}
+                  onMouseDownCapture={() => setPicked(one.id)}
+                  style={
+                    on
+                      ? { left: `${(slot / shown.length) * 100}%`, width: `${100 / shown.length}%` }
+                      : { left: 0, width: '100%' }
+                  }
+                  className={`absolute inset-y-0 ${on && slot > 0 ? 'border-l border-line' : ''} ${
+                    on && shown.length > 1 && one.id === current.id ? 'border-t-2 border-t-accent' : ''
+                  }`}
+                >
+                  <XtermView
+                    path={`/processes/${one.id}`}
+                    interactive
+                    hidden={!on}
+                    className="absolute inset-0 p-2.5"
+                  />
+                </div>
+              );
+            })}
+          </div>
+          {list.length > 1 && (
+            <div
+              role="tablist"
+              aria-label="Processes"
+              aria-orientation="vertical"
+              className="flex w-40 flex-none flex-col gap-px overflow-y-auto border-l border-line bg-surface py-1"
+            >
+              {groups.map((group) =>
+                group.map((id, index) => {
+                  const one = list.find((process) => process.id === id);
+                  return one === undefined ? null : (
+                    <ProcessRow
+                      key={id}
+                      process={one}
+                      selected={one.id === current.id}
+                      glyph={group.length === 1 ? null : index === 0 ? '┌' : index === group.length - 1 ? '└' : '├'}
+                      onPick={() => setPicked(one.id)}
+                    />
+                  );
+                }),
+              )}
+            </div>
+          )}
         </div>
       )}
     </section>
@@ -299,90 +414,37 @@ function NoTerminals({ busy, onNew }: { busy: boolean; onNew: () => void }) {
   );
 }
 
-const ACTION =
-  'flex h-7 min-w-7 flex-none cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-line bg-card px-1.5 text-xs text-text transition-colors hover:border-neutral-400 disabled:cursor-not-allowed disabled:opacity-50';
-
-/**
- * The selected process: what it runs, where, and its state in a sentence, with the buttons that act on it. Stop shows
- * while it runs; Remove shows once it has ended.
- */
-function ProcessBar({
+/** A process in the list at the right: its state dot, its name and, in a split group, the tree line that joins it. */
+function ProcessRow({
   process,
-  busy,
-  onAct,
+  selected,
+  glyph,
+  onPick,
 }: {
   process: SessionProcess;
-  busy: boolean;
-  onAct: (action: 'stop' | 'restart' | 'close') => void;
+  selected: boolean;
+  glyph: string | null;
+  onPick: () => void;
 }) {
-  const running = isRunning(process);
-  const now = useNow(running);
-  const actions = [
-    running
-      ? { action: 'stop' as const, label: 'Stop', title: 'Stop this process', icon: <StopIcon /> }
-      : {
-          action: 'close' as const,
-          label: 'Remove',
-          title: 'Remove this process and its output from the list',
-          icon: <TrashIcon />,
-        },
-    { action: 'restart' as const, label: 'Restart', title: 'Run the same command again', icon: <RestartIcon /> },
-  ];
-  return (
-    <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-1.5">
-      <div className="flex min-w-48 flex-1 flex-col gap-0.5">
-        <p className="m-0 flex items-center gap-2 text-xs font-semibold">
-          <span aria-hidden className={`size-2 flex-none rounded-full ${TONE[stateTone(process)]}`} />
-          {stateSentence(process, now)}
-        </p>
-        <p
-          className="m-0 flex min-w-0 gap-1.5 text-xs text-neutral-700"
-          title={`${process.command || 'shell'} in ${process.folder}`}
-        >
-          <span className="max-w-[55%] flex-none truncate font-mono">{process.command || 'Shell'}</span>
-          <span aria-hidden className="flex-none">
-            in
-          </span>
-          <span className="min-w-0 truncate font-mono">{process.folder}</span>
-        </p>
-      </div>
-      <div className="flex flex-none items-center gap-1.5">
-        {actions.map(({ action, label, title, icon }) => (
-          <button
-            key={action}
-            type="button"
-            aria-label={label}
-            title={title}
-            disabled={busy}
-            onClick={() => onAct(action)}
-            className={ACTION}
-          >
-            {icon}
-            <span className="hidden @lg:inline">{label}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ProcessTab({ process, selected, onPick }: { process: SessionProcess; selected: boolean; onPick: () => void }) {
   return (
     <button
       type="button"
       role="tab"
       aria-selected={selected}
+      aria-label={`${process.name}, ${stateLabel(process)}`}
       title={`${process.command || 'shell'} in ${process.folder}`}
       onClick={onPick}
-      className={`flex max-w-56 flex-none cursor-pointer items-center gap-2 rounded-md border-0 px-2.5 py-1 text-xs ${
+      className={`flex w-full cursor-pointer items-center gap-1.5 border-0 px-2.5 py-1 text-left text-xs ${
         selected
           ? 'bg-accent-100 font-semibold text-accent-900'
           : 'bg-transparent text-neutral-700 hover:bg-neutral-200'
       }`}
     >
+      <span aria-hidden className="w-2.5 flex-none font-mono text-neutral-500">
+        {glyph}
+      </span>
       <span aria-hidden className={`size-2 flex-none rounded-full ${TONE[stateTone(process)]}`} />
       <span className="min-w-0 truncate">{process.name}</span>
-      <span className="flex-none text-[10px] font-normal text-neutral-600">{stateLabel(process)}</span>
     </button>
   );
 }

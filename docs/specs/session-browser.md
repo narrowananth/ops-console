@@ -75,25 +75,27 @@ adds the same to a Session.
 
 ### Session processes
 
-15. A Session of kind `repo` or `anonymous` has a Terminals dock under the conversation and the panel. It opens from the
-    header's Terminals button. Its header names it "Terminals" and holds, left to right, one tab per process (a status dot,
-    the name, and "running", "exited 1" or "stopped"), a "New terminal" button, a script menu when the folder has scripts
-    (16), the folder menu (17) when the Session has Opened Repos, and one "×" with the tooltip "Hide terminals. Processes
-    keep running." The "×" hides the dock and ends nothing; Stop is the one way to end a process. The Terminals button in the Session
-    panel says the same. A dock under 448 px wide puts the tabs on their own row; under 384 px New terminal is a "+", and under 512 px
-    Stop, Restart and Remove are icons. Each keeps its tooltip and accessible name.
-    Under the header, the selected process has a line with its state in words ("Running · started 2m ago", "Exited with
-    code 1", "Stopped"), its command and its folder, then its output, in the look of the Setup agent's terminal. The
-    buttons for it sit at the right of that line: Stop (a square) while it runs, Remove (a bin) once it has exited or been
-    stopped, and Restart (a turning arrow) always. A Session with no process shows "No terminals yet", one line on what a
-    terminal is for and that it keeps running when the dock is hidden, a primary "New terminal" button, and the example
-    "e.g. run your dev server. Its page opens in the Browser panel."
-16. "New terminal" starts a shell the operator types in, and is never inside a menu. A "Run a script" menu opens upward
-    from the header and lists the `scripts` of the worktree's `package.json` (`dev`, `start`, `test`, `build`, ...) and the
-    other tools' commands the folder has. It appears only once the folder lists one; a folder with none shows no menu. A
+15. A Session of kind `repo` or `anonymous` has a Terminals dock under the conversation and the panel, laid out as an
+    editor's terminal panel. It opens from the header's Terminals button. Its bar holds only icons (each with a tooltip and
+    an accessible name), left to right: the name of the selected process with a state dot (and "exited 1" or "stopped"
+    once it ended; the tooltip has "Running · started 2m ago", the command and the folder), New terminal (+), a chevron
+    menu for scripts and the folder (16, 17), Split, Restart (a turning arrow), Stop (a square) while the process runs
+    or Remove (a bin) once it has exited or been stopped, then Maximize (Restore when maximized) and one "×" with the
+    tooltip "Hide terminals. Processes keep running." The "×" hides the dock and ends nothing; Stop is the one way to end a
+    process. Maximize grows the dock to 70% of the window and back; dragging the bar above it resizes as before.
+    Split starts a shell in the same folder and shows it beside the selected one; the views of one split group sit side by
+    side, the selected one marked with an accent line on top, and a click in a view selects it. From the second process on, a
+    list of the processes shows at the right of the output, one row each with its state dot and name, and a tree line
+    (┌ ├ └) joining the rows of a split group; a click selects a row and shows its group. A process that was never split
+    shows alone. The split is the dock's own: it is not kept when the page reloads. A Session with no process shows "No
+    terminals yet", one line on what a terminal is for and that it keeps running when the dock is hidden, a primary "New
+    terminal" button, and the example "e.g. run your dev server. Its page opens in the Browser panel."
+16. "New terminal" starts a shell the operator types in, and is never inside a menu. The chevron menu ("Scripts and folder")
+    opens upward from the bar and lists the `scripts` of the worktree's `package.json` (`dev`, `start`, `test`, `build`, ...) and the
+    other tools' commands the folder has. It appears once the folder lists a script or the Session has Opened Repos (17); with neither it shows no menu. A
     script starts as `pnpm`, `npm`, `yarn` or `bun run <script>`, whichever lockfile the Repo has.
 17. The daemon runs each process as the operator, in the Session's worktree (or an Opened Repo's folder, picked in the
-    dock's folder menu, which names the folder new terminals and scripts run in), with the operator's login environment and PATH, outside the Run sandbox, as the Setup agent's terminal does.
+    chevron menu's "Run in" list, which names the folder new terminals and scripts run in), with the operator's login environment and PATH, outside the Run sandbox, as the Setup agent's terminal does.
     It runs until the operator stops it, the Session is deleted, or the daemon exits. When the folder's `.env` files name the host of a PROD Connection, the dock shows "This folder's .env names the PROD Connection <name>" over the process, and the agent's Approval says the same and shows as PROD. A process that exits stays listed with
     its code and its last output until the operator removes it. Restart starts the same command again.
 18. Any number of processes run at once, so the frontend, the backend and the database of one project run side by side.
