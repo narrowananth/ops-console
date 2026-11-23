@@ -1,6 +1,6 @@
 {
   "name": "ops-console",
-  "version": "0.1.68",
+  "version": "0.1.69",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.22.0",
