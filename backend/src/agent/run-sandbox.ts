@@ -4,26 +4,16 @@ import path from 'node:path';
 import type { SandboxSettings } from '@anthropic-ai/claude-agent-sdk';
 
 export type SandboxRun = {
-  /** The folder the run writes in: its scratch copy, or the checkout. */
+  /** The folder the run works in: its scratch copy, or the checkout. */
   workingDir: string;
-  /** The folder the daemon runs on: `state.db`, `runtime.json` and every scratch copy sit in it. */
-  dataDir: string;
-  /** Folders outside the working folder the run may read, such as the Session's attached files. */
-  readable?: string[];
-  /** Folders outside the working folder the run may write and read: the Session's output folder. */
-  writable?: string[];
-  /** Other Repos' checkouts the operator opened to this Session: the run writes and reads them like its working folder. */
-  repos?: { path: string; gitFile: boolean }[];
-  /** The run's Network allowlist (ADR 0006): the only hosts its commands reach. */
-  networkDomains: string[];
-  /** The run's commands may start servers and reach every service on `localhost`: the operator's Loopback switch, for a chat run. */
-  loopback?: boolean;
-  /** The run may not change its working folder: a review of pull request text, or an answer in a thread. */
+  /** The folder the run may not change: a review of pull request text, or an answer in a thread. */
   readOnly?: boolean;
   /** The working folder's `.git` is a file, as in a worktree: the run may not rewrite it. */
   gitFile?: boolean;
   /** The working folder is a Session's own worktree: the Repo's git folder and this worktree's folder in it, where its commits go. */
   gitDirs?: WorktreeGitDirs | null;
+  /** Other Repos' checkouts the operator opened to this Session: their git control files stay closed like the working folder's. */
+  repos?: { path: string; gitFile: boolean }[];
   home?: string;
 };
 
@@ -56,29 +46,6 @@ function worktreeControl({ common, admin }: WorktreeGitDirs): string[] {
   ];
 }
 
-export const TEMP = ['/tmp', '/private/tmp'];
-
-/**
- * Where build tools and commit hooks keep their downloads, under the operator's home: npm, pnpm, Yarn, Cargo's crate
- * cache, Go modules, Maven, Gradle, pre-commit, pip and the macOS cache folder. Never a folder on PATH, such as
- * `~/.cargo/bin` or `~/go/bin`, so a run cannot leave a program there for a later command.
- */
-export const TOOL_CACHES = [
-  '.npm',
-  '.pnpm-store',
-  '.yarn',
-  '.cache',
-  '.cargo/registry',
-  '.cargo/git',
-  '.cargo/.package-cache',
-  'go/pkg',
-  '.m2/repository',
-  '.gradle',
-  '.nuget/packages',
-  'Library/Caches',
-  'Library/pnpm',
-];
-
 /**
  * Git control files the daemon's own `git` later reads outside the sandbox (Pull request opening, PR action Sessions, the
  * Network allowlist). A run's commands may not write them, whatever the SDK's own profile adds.
@@ -91,10 +58,12 @@ export function gitControl(workingDir: string, gitFile: boolean): string[] {
 }
 
 /**
- * The Run sandbox for one agent run (ADR 0006): macOS Seatbelt through the SDK. Commands write only in the working
- * folder, the temp folders and the tool caches, and read neither the data folder, which holds the session token, nor the operator's
- * cloud and Keychain credentials. The working folder stays readable though it sits inside the data folder. The run
- * fails when the sandbox is unavailable and can never ask to leave it. Commands reach only the Network allowlist.
+ * The Run sandbox for one agent run (ADR 0006): macOS Seatbelt through the SDK. It guards the Keychain and what reaches
+ * it, and nothing else: commands write anywhere, reach any host, bind and reach `localhost`, and use any Unix socket,
+ * as in the operator's own terminal. Closed: the login Keychain folder, the installed app and its bundled `node`
+ * (macOS may trust it with Keychain items), and the git control files the daemon's own `git` reads outside the sandbox
+ * (a `credential.helper` written there would run with the Keychain). A read-only run may not change its working folder.
+ * The run fails when the sandbox is unavailable and can never ask to leave it.
  */
 export function runSandbox(run: SandboxRun): SandboxSettings {
   const home = run.home ?? os.homedir();
@@ -105,43 +74,17 @@ export function runSandbox(run: SandboxRun): SandboxSettings {
     // The Access mode, not the sandbox, decides which commands ask.
     autoAllowBashIfSandboxed: false,
     // Go programs such as `gh` check certificates through macOS's trust service, which the sandbox blocks without it.
-    // That service only checks certificates; hosts off the allowlist stay refused.
     enableWeakerNetworkIsolation: true,
-    network: {
-      allowedDomains: run.networkDomains,
-      strictAllowlist: true,
-      // Opens binding and reaching together: the OS rule cannot tell a run's own server from another local service.
-      ...(run.loopback ? { allowLocalBinding: true } : {}),
-    },
+    network: { allowedDomains: ['*'], allowAllUnixSockets: true, allowLocalBinding: true },
     filesystem: {
-      allowWrite: [
-        ...(run.readOnly ? [] : [run.workingDir]),
-        ...TEMP,
-        ...(run.readOnly || !run.gitDirs ? [] : [run.gitDirs.common]),
-        ...(run.writable ?? []),
-        ...(run.readOnly ? [] : (run.repos ?? []).map((repo) => repo.path)),
-        ...TOOL_CACHES.map((folder) => path.join(home, folder)),
-      ],
+      allowWrite: ['/'],
       denyWrite: [
+        ...(run.readOnly ? [run.workingDir, ...(run.gitDirs ? [run.gitDirs.common] : [])] : []),
         ...gitControl(run.workingDir, run.gitFile === true),
         ...(run.gitDirs ? worktreeControl(run.gitDirs) : []),
         ...(run.repos ?? []).flatMap((repo) => gitControl(repo.path, repo.gitFile)),
       ],
-      denyRead: [
-        run.dataDir,
-        // The installed app and its bundled `node`: macOS may trust that binary's Keychain items without a prompt.
-        path.join(home, '.ops-console'),
-        path.join(home, '.aws'),
-        path.join(home, '.config', 'gcloud'),
-        path.join(home, 'Library', 'Keychains'),
-        path.join(home, '.ssh'),
-      ],
-      allowRead: [
-        run.workingDir,
-        ...(run.writable ?? []),
-        ...(run.readable ?? []),
-        ...(run.repos ?? []).map((repo) => repo.path),
-      ],
+      denyRead: [path.join(home, '.ops-console'), path.join(home, 'Library', 'Keychains')],
     },
   };
 }

@@ -59,7 +59,6 @@ import {
   mcpServerListSchema,
   mcpServerSchema,
   messageSchema,
-  networkAllowlistSchema,
   type OpenPullRequest,
   openedPullRequestSchema,
   outputFileSchema,
@@ -98,7 +97,6 @@ import {
   type SkillPatch,
   type SkillRef,
   type StartPrAction,
-  savedNetworkDomainSchema,
   scanSchema,
   scriptsSchema,
   serviceSchema,
@@ -127,7 +125,6 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { useEffect } from 'react';
 import { z } from 'zod';
 import { apiGet, apiGetTrustedList, apiSend, apiUpload } from './api';
-import { waitForEvent } from './live-bus';
 import { sessionToken } from './session';
 
 export const queryKeys = {
@@ -170,7 +167,6 @@ export const queryKeys = {
   diskAccess: ['disk-access'] as const,
   startAtLogin: ['start-at-login'] as const,
   runSandbox: ['run-sandbox'] as const,
-  networkAllowlist: ['network-allowlist'] as const,
   keychainWait: ['keychain-wait'] as const,
   keychainHandover: ['keychain-handover'] as const,
   terminals: ['terminals'] as const,
@@ -247,8 +243,6 @@ const agentSettingsSchema = z.object({
       agent_accounts: agentAccountsSettingSchema,
       /** Optional so a daemon that does not send it yet still parses. */
       health_checks: healthChecksSettingSchema.optional(),
-      /** The Run sandbox's Loopback switch; absent from a daemon that predates it. */
-      run_sandbox_loopback: z.boolean().optional(),
     })
     .loose(),
 });
@@ -274,7 +268,6 @@ export function usePatchSettings() {
       agent_accounts?: AgentAccountsSetting;
       cliproxy?: CliProxySetting;
       health_checks?: HealthChecksSetting;
-      run_sandbox_loopback?: boolean;
     }) => apiSend('PATCH', '/settings', patch, agentSettingsSchema),
     onMutate: async (patch) => {
       await client.cancelQueries({ queryKey: queryKeys.settings });
@@ -793,82 +786,6 @@ export function useRunSandbox() {
     queryKey: queryKeys.runSandbox,
     queryFn: () => apiGet('/terminals/run-sandbox', z.object({ data: runSandboxSchema })).then((r) => r.data),
     refetchOnMount: 'always',
-  });
-}
-
-/** The hosts agent runs may reach, in three groups. Read again each time the Permissions page opens. */
-export function useNetworkAllowlist() {
-  return useQuery({
-    queryKey: queryKeys.networkAllowlist,
-    queryFn: () => apiGet('/network-allowlist', z.object({ data: networkAllowlistSchema })).then((r) => r.data),
-    refetchOnMount: 'always',
-    // The row shows the error with its own Retry.
-    retry: false,
-  });
-}
-
-export function useAddNetworkDomain() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (domain: string) =>
-      apiSend('POST', '/network-allowlist/domains', { domain }, z.object({ data: savedNetworkDomainSchema })),
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: queryKeys.networkAllowlist });
-      // A run lists the hosts still refused; one just allowed leaves the list.
-      void client.invalidateQueries({ queryKey: queryKeys.sessions });
-    },
-  });
-}
-
-/** How long Allow and restart waits for a paused run to end before it gives up. */
-const PAUSE_WAIT_MS = 15_000;
-
-/**
- * Adds the hosts to the Network allowlist, pauses the run and plays it again once it has ended. A run keeps the
- * allowlist it started with, so the restart is what lets it reach them. The run carries on from its conversation.
- */
-export function useAllowAndRestart(sessionId: string) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: async (hosts: string[]) => {
-      for (const domain of hosts) {
-        await apiSend('POST', '/network-allowlist/domains', { domain }, z.object({ data: savedNetworkDomainSchema }));
-      }
-      // The run's end arrives as `session.finished`; the wait starts before the pause so the event is not missed.
-      const ended = waitForEvent(
-        (event) => event.event === 'session.finished' && event.data.session_id === sessionId,
-        PAUSE_WAIT_MS,
-      );
-      try {
-        await apiSend('POST', `/sessions/${sessionId}/pause`, undefined, z.undefined());
-        const { data } = await apiGet(`/agent-runs/${sessionId}`, z.object({ data: runDetailSchema }));
-        if (data.run.running && !(await ended.done)) {
-          throw new Error('The run did not stop in time. Allow is saved; play it again by hand.');
-        }
-      } finally {
-        ended.stop();
-      }
-      await apiSend(
-        'POST',
-        `/sessions/${sessionId}/resume`,
-        undefined,
-        z.object({ data: z.object({ message_id: z.string() }) }),
-      );
-    },
-    onSettled: () => {
-      void client.invalidateQueries({ queryKey: queryKeys.networkAllowlist });
-      void client.invalidateQueries({ queryKey: queryKeys.sessions });
-      void client.invalidateQueries({ queryKey: queryKeys.messages(sessionId) });
-    },
-  });
-}
-
-export function useRemoveNetworkDomain() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (domain: string) =>
-      apiSend('DELETE', `/network-allowlist/domains/${encodeURIComponent(domain)}`, undefined, z.undefined()),
-    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.networkAllowlist }),
   });
 }
 

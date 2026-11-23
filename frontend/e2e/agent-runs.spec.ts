@@ -75,7 +75,6 @@ const run = (id: string, extra: Record<string, unknown> = {}, sessionExtra: Reco
   tokens: null,
   usage: null,
   limit: null,
-  blocked_hosts: [] as string[],
   split: split(60_000),
   ...extra,
 });
@@ -196,8 +195,7 @@ async function routeRuns(page: Page, runs: unknown[] = RUNS): Promise<Calls> {
             right_now: 'pnpm test backend has run 6m 10s. It usually takes 40s.',
             likely_cause: 'The command reaches the network.',
             also: 'A message is queued behind this run. It sends when the run ends.',
-            suggestion: 'Stop the run and tell the agent to mock the call, or allow the host.',
-            blocked_host: 'api.example.com',
+            suggestion: 'Stop the run and tell the agent to mock the call, or check the service it calls is up.',
           },
         }),
       },
@@ -211,10 +209,9 @@ async function routeRuns(page: Page, runs: unknown[] = RUNS): Promise<Calls> {
             kind: 'network_blocked',
             what_happened: 'The agent ran `pnpm install` and it failed.',
             likely_cause:
-              'The Run sandbox lets a command reach listed hosts only. registry.example.com is probably not on the list.',
-            what_to_do: 'Allow registry.example.com in the Network allowlist, then Retry.',
-            raw: 'ERR_PNPM_FETCH_403 GET https://registry.example.com/left-pad: Forbidden',
-            blocked_host: 'registry.example.com',
+              'The command could not reach a host: no connection, a name that does not resolve, or a host that refused it.',
+            what_to_do: 'Check the host is up and the Mac is online, then Retry.',
+            raw: 'getaddrinfo ENOTFOUND registry.example.com',
             resets_at: null,
             resume_point: null,
           },
@@ -235,9 +232,6 @@ async function routeRuns(page: Page, runs: unknown[] = RUNS): Promise<Calls> {
     route.request().method() === 'PUT' ? answer(route, 200, { data: { queued: true } }) : answer(route, 204),
   );
   await page.route(/\/api\/sessions\/[^/]+\/queue\/send$/, (route) => answer(route, 204));
-  await page.route('**/api/network-allowlist/domains', (route) =>
-    answer(route, 200, { data: { domain: 'registry.example.com', builtin: false } }),
-  );
   return calls;
 }
 
@@ -298,27 +292,22 @@ test('a slow run opens to its stage, where the time went and why, and offers a w
   await expect
     .poll(() => calls.filter((call) => call.path.includes('/queue')).map((call) => `${call.method} ${call.path}`))
     .toEqual(['PUT /api/sessions/slow/queue', 'POST /api/sessions/slow/queue/send']);
-
-  await page.getByRole('button', { name: 'Allow api.example.com' }).click();
-  await expect
-    .poll(() => calls.find((call) => call.path === '/api/network-allowlist/domains')?.body)
-    .toEqual({ domain: 'api.example.com' });
 });
 
-test('a failed run says what happened, why and what to do, and Allow and Retry does both', async ({ page }) => {
+test('a failed run says what happened, why and what to do, and Retry carries on', async ({ page }) => {
   const calls = await routeRuns(page);
   await page.goto(`${daemon.url}/agent-runs?run=bad#token=${daemon.token}`);
 
   await expect(page.getByText('Why this run ended')).toBeVisible();
   await expect(page.getByText('Network blocked', { exact: true })).toBeVisible();
-  await expect(page.getByText(/registry\.example\.com is probably not on the list/)).toBeVisible();
-  await expect(page.getByText('ERR_PNPM_FETCH_403')).toBeVisible();
+  await expect(page.getByText(/could not reach a host/)).toBeVisible();
+  await expect(page.getByText('ENOTFOUND registry.example.com')).toBeVisible();
 
-  await expect(page.getByRole('button', { name: 'Retry only' })).toBeVisible();
-  await page.getByRole('button', { name: 'Allow registry.example.com and Retry' }).click();
-  await expect
-    .poll(() => calledPaths(calls, 'POST'))
-    .toEqual(['/api/network-allowlist/domains', '/api/sessions/bad/resume']);
+  await page
+    .locator('section', { hasText: 'Why this run ended' })
+    .getByRole('button', { name: 'Retry', exact: true })
+    .click();
+  await expect.poll(() => calledPaths(calls, 'POST')).toEqual(['/api/sessions/bad/resume']);
 });
 
 test('each run pauses, stops, plays, retries and dismisses, and Stop all asks first', async ({ page }) => {
@@ -704,89 +693,3 @@ for (const size of [
     await page.screenshot({ path: `/tmp/ops-console-shots/limit-${size.width}.png` });
   });
 }
-
-const refusedRun = (extra: Record<string, unknown> = {}) =>
-  run('refused', {
-    health: 'needs_you',
-    health_reason: 'The Run sandbox refused stamped.io, loox.io. Allow them in the Network allowlist.',
-    blocked_hosts: ['stamped.io', 'loox.io'],
-    ...extra,
-  });
-
-test('a run the sandbox refused hosts for names them, and Allow adds one to the allowlist', async ({ page }) => {
-  const calls = await routeRuns(page, [...RUNS, refusedRun()]);
-  await page.route('**/api/agent-runs/refused', (route) =>
-    route.fulfill({ json: { data: { ...detailOf('refused'), run: refusedRun() } } }),
-  );
-  await page.goto(`${daemon.url}/agent-runs?run=refused#token=${daemon.token}`);
-
-  const box = page.getByRole('region', { name: 'Refused hosts' });
-  await expect(box).toContainText('The Run sandbox refused these hosts');
-  await expect(box.getByText('stamped.io', { exact: true })).toBeVisible();
-  await expect(box.getByText('loox.io', { exact: true })).toBeVisible();
-
-  await box.getByRole('listitem').filter({ hasText: 'loox.io' }).getByRole('button', { name: 'Allow' }).click();
-  await expect
-    .poll(() => calls.find((call) => call.path === '/api/network-allowlist/domains')?.body)
-    .toEqual({ domain: 'loox.io' });
-});
-
-test('Allow all and restart adds every host, pauses the run, waits for it to end and plays it again', async ({
-  page,
-}) => {
-  const calls = await routeRuns(page, [...RUNS, refusedRun()]);
-  // The run goes until it is paused, then it has ended.
-  await page.route('**/api/agent-runs/refused', (route) =>
-    route.fulfill({
-      json: {
-        data: {
-          ...detailOf('refused'),
-          run: refusedRun({ running: !calls.some((call) => call.path.endsWith('/pause')) }),
-        },
-      },
-    }),
-  );
-  await page.goto(`${daemon.url}/agent-runs?run=refused#token=${daemon.token}`);
-
-  await page.getByRole('button', { name: 'Allow all and restart the run' }).click();
-  await expect
-    .poll(() => calls.filter((call) => call.method === 'POST').map((call) => call.path))
-    .toEqual([
-      '/api/network-allowlist/domains',
-      '/api/network-allowlist/domains',
-      '/api/sessions/refused/pause',
-      '/api/sessions/refused/resume',
-    ]);
-  expect(calls.filter((call) => call.path === '/api/network-allowlist/domains').map((call) => call.body)).toEqual([
-    { domain: 'stamped.io' },
-    { domain: 'loox.io' },
-  ]);
-});
-
-test('a run going with Loopback shows a chip in the tray and on the page; one without shows none (Loopback 14)', async ({
-  page,
-}) => {
-  await routeRuns(page, [
-    run('open', {}, { loopback: true }),
-    run('shut'),
-    run(
-      'done',
-      { running: false, outcome: 'stopped', finished_at: ago(1), health: 'stopped', health_reason: 'Stopped by you.' },
-      { state: 'idle' },
-    ),
-  ]);
-  await page.goto(`${daemon.url}/agent-runs#token=${daemon.token}`);
-  await page.getByRole('tab', { name: /^All/ }).click();
-  const cards = page.locator('ul > li').filter({ has: page.getByRole('link', { name: /^Session · / }) });
-  await expect(cards).toHaveCount(3);
-  await expect(cards.filter({ hasText: 'task open' }).getByText('Loopback on')).toBeVisible();
-  await expect(cards.filter({ hasText: 'task shut' }).getByText('Loopback on')).toHaveCount(0);
-  await expect(cards.filter({ hasText: 'task done' }).getByText('Loopback on')).toHaveCount(0);
-  await expect(page.getByText('Loopback on')).toHaveCount(1);
-
-  // The Running tray in the sidebar lists the same run with the same chip.
-  await page.getByRole('button', { name: 'Running agents' }).click();
-  const tray = page.getByRole('dialog', { name: 'Agent runs' });
-  await expect(tray.getByText('Loopback on')).toHaveCount(1);
-  await expect(tray.getByText('Loopback on')).toBeVisible();
-});

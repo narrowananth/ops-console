@@ -833,14 +833,14 @@ describe('the Agent runs page', () => {
     expect(ended.run.split.find((one: { phase: string }) => one.phase === 'waiting_you').ms).toBeGreaterThanOrEqual(0);
   });
 
-  it('explains a run the network blocked, with the host to allow', async () => {
+  it('explains a run the network could not reach', async () => {
     const daemon = await start();
     const id = daemon.createSession({ access_mode: AccessMode.Full });
     daemon.sdk.script(
       {
         tool: 'Bash',
         input: { command: 'pnpm install' },
-        fails: 'ERR_PNPM_FETCH_403 GET https://registry.example.com/left-pad: Forbidden',
+        fails: 'getaddrinfo ENOTFOUND registry.example.com',
       },
       { crash: 'process died' },
     );
@@ -851,8 +851,8 @@ describe('the Agent runs page', () => {
     expect(run).toMatchObject({ health: 'failed', outcome: 'failed' });
     expect(run.health_reason).toContain('pnpm install');
     const { failure } = await detail(daemon, id);
-    expect(failure).toMatchObject({ kind: 'network_blocked', blocked_host: 'registry.example.com' });
-    expect(failure.raw).toContain('Forbidden');
+    expect(failure).toMatchObject({ kind: 'network_blocked' });
+    expect(failure.raw).toContain('ENOTFOUND');
   });
 
   it('explains a usage limit, and reports 404 for a Session that never ran', async () => {

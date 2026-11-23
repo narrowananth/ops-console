@@ -117,7 +117,6 @@ agent Session.
 | `connectors` | The sixteen Connectors: browser sign-in through `pup`, `gh`, `glab`, `bkt`, `slashdocs` or an MCP Server (Google Docs, Sheets and Drive: the console's own Google sign-in and a bridge whose tools call Google's REST APIs); cancel a sign-in; the MCP Server each registers; Homebrew install of a missing CLI; checks; config; OpenTelemetry logs has a Log folder in place of a sign-in; CloudWatch logs has an AWS profile chosen from the profiles on the Mac, a region and Log groups, signs in with `aws login` or `aws sso login`, the daemon calls `aws` and the agent's CloudWatch MCP Server starts through `uvx`; Loki logs signs in to Grafana Cloud through the daemon (the MCP SDK's OAuth client, a loopback page for one callback, the tokens in the Keychain), picks a Loki data source, registers Grafana's MCP Server for the agent and has the daemon call its tools; New Relic logs has a Region, signs in through Claude Code to the MCP Server of that Region, picks an account, and has the daemon call the server's tools with the sign-in it reads from Claude Code's own item in the Keychain and never refreshes; CloudWatch logs and OpenTelemetry logs pick their profile and Log folder with dialogs and pickers in place of typed fields |
 | `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks, through one kept server per Connection for 5 minutes; secrets via Keychain, `secret_stored` from memory |
 | `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash, worktrees and checkout; a branch list answers from the last fetch and asks origin after, once a minute at most, then sends `repo.branches_changed` when a branch came or went; each Repo's host and `owner/name` read again from `origin` at start and in the background after a list (at most every 10 seconds), and mapped to the Git host's new owner when the host renames one (`origin` is never edited); a Repo's branch and changes come from one `git status`, kept 10 seconds, eight Repos at a time |
-| `network` | The Network allowlist an agent run starts with: built-in hosts, the host of each Repo's `origin`, and the operator's own domains in `network_domains`; read, add and remove (`/network-allowlist`), registered by `agent` |
 | `agent` | Sessions and their kinds, Claude Agent SDK runs, the Run sandbox rules, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors; stop a run, edit the last message (file edits rewound), attachments, output files, the `save_file` tool and the `run_integration` tool (integration CLIs run in the daemon outside the sandbox); every tool call of a run kept with its time (`run_steps`) and each run's cost (`run_usage`); run health, slow and failure reasons, stages and time split read from them; the message queued behind a run; a skill message, which hands the run its skill in place of the Playbook |
 | `playbooks` | Playbooks and the Trigger each one holds, the built-ins (each Trigger's method, steps and shared rules on evidence, data, Connections and git) and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each; Custom Skills, the Built-in skills in their Skill packs (a catalog in code, the installed packs in `state.db`), the `/skills`, `/skill-packs` and `/skill-menu` routes, the Project skills read from a Repo's folder for the menu, and the Skills each Playbook holds (registered by `agent`) |
 | `accounts` | Claude accounts, their usage, Auto-switch and Smart usage; the Claude account hub: with CLIProxy on, runs go to its loopback address with the API key from the Keychain and switching pauses |
@@ -143,7 +142,7 @@ agent Session.
 | `devtools` | Dev tools page (terminal-style `devtools` Sessions scoped to Connections, Results, Comparison) and the Connections page and form |
 | `integrations` | Integrations page: Connectors and MCP Servers |
 | `repos` | Repos page |
-| `setup` | Setup agent page with its xterm terminal, and the Permissions page: Full Disk Access, Start at login, Keychain, Run sandbox, Network allowlist |
+| `setup` | Setup agent page with its xterm terminal, and the Permissions page: Full Disk Access, Start at login, Keychain, Run sandbox |
 | `playbooks` | Playbooks page: the overview of Triggers (each on its built-in or the operator's Playbook, chosen from a dropdown), New Playbook (Blank or Copy of a built-in), the Playbook as a flow on a canvas with a panel the operator resizes, Step blocks by drag, + or Alt and arrow keys, the Rules and Skills token meters, the Skills a Playbook holds; unsaved edits kept as a Remembered view; a job's Playbook steps and the Skills it was offered |
 | `skills` | Skills page: Discover first (Skill packs, Install and Uninstall, each pack's skills read-only, the Playbooks holding each) and Yours (Custom Skills and their editor, with New Skill); unsaved edits kept as a Remembered view |
 | `agents` | Accounts & Usage page (accounts, sign-in by link, the CLIProxy hub, the chime), Session transcript, model, effort and Access mode chips, Approval prompts, the question panel, stop run, Report rendering |
@@ -280,8 +279,6 @@ the config dir of the Session's Claude account.
 
 ## Agent runs
 
-A command refused by the Run sandbox's filter prints the host (`deny network-outbound host:443`); the post-tool hook keeps it on the Session's row (`run_blocked_hosts`), and the run turns Needs you until the operator allows the host. The agent never adds one.
-
 Runs a job starts (Verification, Fix, each Playbook step) go three at a time;
 the rest wait first come first served and say so in their steps. A Stop on a waiting run ends it before it starts. A message
 the operator sends never waits. The daemon logs a warning when its thread stalls for over a quarter of a second. On
@@ -315,12 +312,10 @@ resuming the stored SDK session. Each Claude account has its own `CLAUDE_CONFIG_
 folder; the console never uses the operator's own Claude Code login. A `PreToolUse` hook writes the
 Action Log row before every Bash and MCP call and holds a PROD write for an Approval in every
 access mode. Every run's shell commands run in the Run sandbox (ADR 0006): the SDK's `sandbox` option, built per run
-from its working folder, the data folder in use and the run's kind, which fails the run when it is unavailable. The
-sandbox's `network` block holds the Network allowlist, built when the run starts from the built-in hosts, the host of
-each Repo's `origin` and the `network_domains` rows the operator added; the SDK's proxy refuses any other host. A chat run
-the operator started also gets `allowLocalBinding` while the `run_sandbox_loopback` Setting (`RunLoopback`, read when the run
-starts) is on; no other run does.
-`disallowedTools` denies `WebFetch` and `WebSearch`, which the proxy does not cover, and `gh pr merge`, `glab mr merge`, `bkt pr merge`, `bkt pr auto-merge` and the GitHub and GitLab MCP
+from its working folder and the run's kind, which fails the run when it is unavailable. The sandbox closes only the login
+Keychain folder, `~/.ops-console` and the git control files, and a read-only run's working folder; its `network` block
+opens every host, `localhost` and every Unix socket.
+`disallowedTools` denies `gh pr merge`, `glab mr merge`, `bkt pr merge`, `bkt pr auto-merge` and the GitHub and GitLab MCP
 merge tools. A PR action Session also denies `git push`, the host CLIs' comment, review and `api`
 commands and the host MCP comment tools, since the console pushes, replies and resolves, and it loads no project settings from the pull request's code. Permission prompts in `supervised` mode, and the agent's questions, reach `canUseTool`
 and wait for the operator. MCP Servers the operator disabled, and for a `devtools` Session the

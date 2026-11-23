@@ -1,6 +1,5 @@
 import { type AgentRun, SubagentStatus } from '@ops-console/shared';
 import { Link } from 'react-router-dom';
-import { LoopbackChip } from '../components/loopback-chip';
 import { Elapsed } from '../components/ui/elapsed';
 import { HealthIcon, RunButtons } from './run-controls';
 import { RunDetailPanel } from './run-detail';
@@ -95,7 +94,6 @@ export function RunCard({
           <span title={look.tip} className={`rounded-full px-2.5 py-px font-mono text-[11px] ${look.chip}`}>
             {statusLabel(run)}
           </span>
-          <LoopbackChip on={session.loopback} />
           <Elapsed from={run.started_at} to={run.finished_at} running={run.running} took={!run.running} />
           {!run.running && run.finished_at && (
             <span className="font-mono text-[11px] text-neutral-700">ended {clock(run.finished_at)}</span>

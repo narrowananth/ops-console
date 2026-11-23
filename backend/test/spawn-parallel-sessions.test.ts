@@ -300,23 +300,6 @@ describe('spawn parallel Sessions', () => {
     expect(part?.call_id).not.toBe('');
   });
 
-  it('gives the parent chat Loopback and its spawned Sessions none, with the switch on (Loopback Behavior 5)', async () => {
-    const ctx = await start();
-    await ctx.http.patch('/settings', { run_sandbox_loopback: true });
-    const parent = await ctx.anonymous(AccessMode.Full);
-    const hold = await ctx.ask(parent, batch(ctx));
-    await runSpawnSessions(ctx.spawner, parent, batch(ctx), 'call-1');
-    hold.open();
-    await until(
-      () => ctx.daemon.sdk.calls.length,
-      (count) => count === 3,
-      'the children runs',
-    );
-    const [parentCall, ...children] = ctx.daemon.sdk.calls;
-    expect(parentCall?.options.sandbox?.network).toMatchObject({ allowLocalBinding: true });
-    for (const call of children) expect(call.options.sandbox?.network).not.toHaveProperty('allowLocalBinding');
-  });
-
   it('does not let a spawned Session spawn, join or lose the single-Session flow (2, 15)', async () => {
     const ctx = await start();
     const parent = await ctx.anonymous();

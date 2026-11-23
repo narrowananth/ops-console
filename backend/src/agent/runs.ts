@@ -37,8 +37,6 @@ export type Run = {
   parts: Part[];
   /** The text part growing from stream deltas, until its block arrives whole. */
   growing: number | null;
-  /** Hosts the Run sandbox refused this run, as its commands reported them. */
-  blockedHosts: Set<string>;
   /** Part indexes changed since their last `session.output`; sent together once per `OUTPUT_EVERY_MS`. */
   outputDirty: Set<number>;
   /** Fires the next send of `outputDirty`; null when nothing waits. */
@@ -90,10 +88,6 @@ export type Run = {
   limitSince: string | null;
   /** The conversation resumes from this transcript entry, dropping what came after it; null for all of it. */
   resumeAt: string | null;
-  /** The Network allowlist the run started with; a retry on another account keeps it. */
-  networkDomains: string[];
-  /** The run's commands may start servers and reach every service on `localhost`; set when the run starts. */
-  loopback: boolean;
   /** The folders the agent's file tools may write in; set when the run starts. */
   editRoots: string[];
   /** Why the run failed, when the console can say: the Run sandbox is unavailable, or the Keychain did not answer. */

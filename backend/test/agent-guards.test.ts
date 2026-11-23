@@ -131,22 +131,16 @@ describe('access modes', () => {
 });
 
 describe('file tool write scope', () => {
-  const outside = (file: string): Step => ({ tool: 'Write', input: { file_path: file, content: 'x' } });
+  const write = (file: string): Step => ({ tool: 'Write', input: { file_path: file, content: 'x' } });
 
-  it('refuses a write outside the run folders in every Access mode, full included', async () => {
+  it('lets a write outside the working folder through in full mode: no hook confines the file tools', async () => {
     const daemon = await start();
-    for (const mode of Object.values(AccessMode)) {
-      daemon.sdk.ran.length = 0;
-      await runTool(daemon, mode, outside(path.join(os.homedir(), '.zshrc')));
-      await runTool(daemon, mode, outside(path.join(os.homedir(), '.ops-console', 'current', 'bin', 'ops-console')));
-      expect(daemon.sdk.ran).toEqual([]);
-    }
-  });
-
-  it('lets a write in the working folder through', async () => {
-    const daemon = await start();
-    await runTool(daemon, AccessMode.Full, outside(path.join(WORKING_DIR, 'notes.md')));
-    expect(daemon.sdk.ran).toEqual([expect.objectContaining({ tool: 'Write' })]);
+    await runTool(daemon, AccessMode.Full, write(path.join(os.homedir(), 'notes.md')));
+    await runTool(daemon, AccessMode.Full, write(path.join(WORKING_DIR, 'notes.md')));
+    expect(daemon.sdk.ran).toEqual([
+      expect.objectContaining({ tool: 'Write' }),
+      expect.objectContaining({ tool: 'Write' }),
+    ]);
   });
 });
 

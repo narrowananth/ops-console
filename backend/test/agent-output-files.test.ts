@@ -22,13 +22,11 @@ async function start() {
 }
 
 describe('Output files (agent-output-files)', () => {
-  it('gives a run its output folder: told to the agent, writable and readable in the sandbox', async () => {
+  it('gives a run its output folder: told to the agent', async () => {
     const ctx = await start();
     ctx.daemon.sdk.script({ text: 'ok' });
     await converse(ctx.daemon, ctx.id, 'make a pdf');
     const call = ctx.daemon.sdk.calls[0];
-    expect(call?.options.sandbox?.filesystem?.allowWrite).toContain(ctx.folder);
-    expect(call?.options.sandbox?.filesystem?.allowRead).toContain(ctx.folder);
     expect(call?.options.additionalDirectories).toContain(ctx.folder);
     const prompt = JSON.stringify(call?.options.systemPrompt);
     expect(prompt).toContain(ctx.folder);

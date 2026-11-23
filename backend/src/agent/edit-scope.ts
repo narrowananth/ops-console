@@ -1,7 +1,25 @@
 import { realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { TEMP, TOOL_CACHES } from './run-sandbox';
+
+export const TEMP = ['/tmp', '/private/tmp'];
+
+/** Where build tools keep their downloads, under the operator's home. */
+export const TOOL_CACHES = [
+  '.npm',
+  '.pnpm-store',
+  '.yarn',
+  '.cache',
+  '.cargo/registry',
+  '.cargo/git',
+  '.cargo/.package-cache',
+  'go/pkg',
+  '.m2/repository',
+  '.gradle',
+  '.nuget/packages',
+  'Library/Caches',
+  'Library/pnpm',
+];
 
 export type EditScope = {
   /** The folder the run works in. */
@@ -16,9 +34,9 @@ export type EditScope = {
 };
 
 /**
- * Where the agent's file tools may write: the folders the Run sandbox lets its commands write in (ADR 0006), plus the
- * account's config folder. File tools run in Claude Code's own process, outside that sandbox, so the console checks
- * their paths itself in every Access mode, `full` included.
+ * The folders that count as the run's own: its working folder, output folder, opened Repos, config folder, temp and tool
+ * caches. `run_integration` runs a CLI outside the sandbox with the operator's sign-in, so it refuses a file argument
+ * outside them.
  */
 export function editRoots(scope: EditScope): string[] {
   const home = scope.home ?? os.homedir();

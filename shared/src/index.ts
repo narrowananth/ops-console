@@ -8,7 +8,6 @@ export * from './errors';
 export * from './health-watch';
 export * from './mcp';
 export * from './monitor';
-export * from './network';
 export * from './playbooks';
 export * from './repos';
 export * from './run-time';

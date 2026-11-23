@@ -27,8 +27,8 @@ session token. Each window gets a CDP session of its own through Playwright, and
 `Emulation`, `Page` navigation and screencast, and the two methods that would read a file or stall requests. Chrome is never
 started with a remote debugging port.
 
-The Network allowlist ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md)) covers a run's commands. It does not cover what
-a page or a Session process reaches.
+A run's commands can reach any host and `localhost` too ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md)), but the
+servers they start end with the run.
 
 ## Considered Options
 
@@ -39,8 +39,7 @@ a page or a Session process reaches.
   defeats running the real frontend.
 - **Loopback only for the page and for the operator's address field**: the safest reach. It lost because the operator
   must test pages that call real APIs, and may open a staging site as in any browser. Only the agent keeps loopback.
-- **The agent starts servers inside its sandboxed run** (`allowLocalBinding`, every API and database host on the
-  allowlist): the servers end with the run, so no project stays up, and every host a project talks to joins the allowlist.
+- **The agent starts servers inside its sandboxed run**: the servers end with the run, so no project stays up.
 - **An Approval on each browser tool call**: it stops the agent on every click. The reach is a loopback page the operator
   watches, so only `browser_evaluate` asks.
 - **Chrome with `--remote-debugging-port`, DevTools pointed at it**: no relay to write. It lost because any process on the
@@ -65,7 +64,7 @@ a page or a Session process reaches.
 ## Consequences
 
 A page the agent wrote can send what it reads to any host. If text the agent read steers it, the page could post the
-Repo's files or `.env` values to a host off the allowlist. The operator reads the code in the Session's diff and runs the
+Repo's files or `.env` values to any host. The operator reads the code in the Session's diff and runs the
 page; the console cannot stop this without blocking the page. A process runs with the Repo's own `.env`, so it may reach
 whatever that file names. A variable that a shell function or a prompt hook exports only after a command runs is not in the
 saved environment. The console shows a PROD Connection whose host that file holds, in the dock and in the agent's

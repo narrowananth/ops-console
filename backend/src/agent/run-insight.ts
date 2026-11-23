@@ -181,14 +181,6 @@ const NETWORK_COMMAND =
   /\b(curl|wget|npm|pnpm|yarn|npx|pip3?|uv|cargo|go\s+(get|mod|install)|git\s+(fetch|clone|pull|ls-remote)|mvn|gradle|docker|gh|brew)\b/;
 const TEST_COMMAND = /\b(test|tests|jest|vitest|pytest|mocha|playwright|cypress|spec|check)\b/;
 
-const hostOf = (text: string): string | null => {
-  const url = /https?:\/\/([a-z0-9][a-z0-9.-]*\.[a-z]{2,})/i.exec(text);
-  if (url?.[1]) return url[1].toLowerCase();
-  const named =
-    /(?:Could not resolve host:|getaddrinfo (?:ENOTFOUND|EAI_AGAIN))\s+([a-z0-9][a-z0-9.-]*\.[a-z]{2,})/i.exec(text);
-  return named?.[1]?.toLowerCase() ?? null;
-};
-
 /** Why a step has gone on so long, as far as its command lets the console tell. Never says what the agent thinks. */
 export function diagnoseSlow(input: {
   steps: StepFacts[];
@@ -203,7 +195,6 @@ export function diagnoseSlow(input: {
   const command = shown(step.summary);
   const network = step.summary.startsWith('$ ') && NETWORK_COMMAND.test(command);
   const test = step.summary.startsWith('$ ') && TEST_COMMAND.test(command);
-  const host = step.summary.startsWith('$ ') ? hostOf(command) : null;
   return {
     right_now: `${command} has run ${fmtMs(ran)}. ${
       usual === null
@@ -211,21 +202,20 @@ export function diagnoseSlow(input: {
         : `It usually takes ${fmtMs(usual)}.`
     }`,
     likely_cause: network
-      ? 'The command reaches the network. The Run sandbox lets a command reach listed hosts only, so a call to another host can wait until it times out.'
+      ? 'The command reaches the network, so a slow or unreachable host can hold it until it times out.'
       : test
-        ? 'A test may be waiting on something that does not answer, such as a host the Run sandbox does not allow. The console cannot see the command output, so it cannot say which.'
+        ? 'A test may be waiting on something that does not answer, such as a service or host it calls. The console cannot see the command output, so it cannot say which.'
         : 'The console cannot see what this step waits on.',
     also: input.queued ? 'A message is queued behind this run. It sends when the run ends.' : null,
     suggestion:
       network || test
-        ? 'Stop the run and tell the agent to mock the call, or allow the host in the Network allowlist.'
+        ? 'Stop the run and tell the agent to mock the call, or check that the service it calls is up.'
         : 'If this is longer than you expect, stop the run and tell the agent what to do instead.',
-    blocked_host: host,
   };
 }
 
 const NETWORK_ERROR =
-  /(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|Could not resolve host|Connection refused|network is unreachable|FETCH_403|403 Forbidden|blocked by|proxy)/i;
+  /(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|Could not resolve host|Connection refused|network is unreachable)/i;
 const WRITE_ERROR = /(Operation not permitted|EPERM|EACCES|read-only file system|Permission denied)/i;
 const HOOK_ERROR = /(husky|pre-commit|lint-staged|lefthook|commit hook|hook failed|pre-push)/i;
 
@@ -254,7 +244,7 @@ export function classifyFailure(input: {
     return null;
   }
   const resume_point = resumePointOf(input.steps, input.subagents ?? []);
-  const none = { raw: null, blocked_host: null, resets_at: null, resume_point };
+  const none = { raw: null, resets_at: null, resume_point };
   if (outcome === RunOutcome.RateLimited) {
     return {
       kind: FailureKind.RateLimited,
@@ -298,24 +288,18 @@ export function classifyFailure(input: {
       what_happened: 'A commit hook failed.',
       likely_cause: 'The repo runs checks on commit and one of them reported a problem.',
       what_to_do: 'Fix what the hook reports and commit again. The console does not skip hooks. Retry carries on.',
-      blocked_host: null,
       raw,
       resets_at: null,
       resume_point,
     };
   }
   if (NETWORK_ERROR.test(text)) {
-    const host = hostOf(text) ?? (step ? hostOf(step.summary) : null);
     return {
       kind: FailureKind.NetworkBlocked,
       what_happened: doing,
-      likely_cause: host
-        ? `The Run sandbox lets a command reach listed hosts only. ${host} is probably not on the list.`
-        : 'The Run sandbox lets a command reach listed hosts only. The host it called is probably not on the list.',
-      what_to_do: host
-        ? `Allow ${host} in the Network allowlist, then Retry. The agent carries on from the conversation.`
-        : 'Allow the host in the Network allowlist, then Retry.',
-      blocked_host: host,
+      likely_cause:
+        'The command could not reach a host: no connection, a name that does not resolve, or a host that refused it.',
+      what_to_do: 'Check the host is up and the Mac is online, then Retry. The agent carries on from the conversation.',
       raw,
       resets_at: null,
       resume_point,
@@ -325,9 +309,9 @@ export function classifyFailure(input: {
     return {
       kind: FailureKind.WriteBlocked,
       what_happened: doing,
-      likely_cause: 'The Run sandbox lets a command write in the working folder and the tool caches only.',
-      what_to_do: 'Tell the agent to write inside the working folder, then Retry.',
-      blocked_host: null,
+      likely_cause:
+        'The Run sandbox closes the login Keychain folder and the git control files, and a read-only run cannot change its working folder.',
+      what_to_do: 'Tell the agent to leave that path alone, then Retry.',
       raw,
       resets_at: null,
       resume_point,
@@ -338,7 +322,6 @@ export function classifyFailure(input: {
     what_happened: doing,
     likely_cause: 'The console has no more detail than the error below.',
     what_to_do: "Open the Session to read the agent's last messages, then Retry.",
-    blocked_host: null,
     raw,
     resets_at: null,
     resume_point,

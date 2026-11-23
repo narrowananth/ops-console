@@ -1,7 +1,6 @@
 import { type AgentRun, RunHealth, RunOutcome, type Subagent, SubagentStatus } from '@ops-console/shared';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { LoopbackChip } from '../components/loopback-chip';
 import { Elapsed } from '../components/ui/elapsed';
 import {
   useAgentAccounts,
@@ -283,7 +282,6 @@ function RunRow({
           <span title={look.tip} className={`rounded-full px-2 py-px font-mono text-[10.5px] ${chip.tone}`}>
             {chip.text}
           </span>
-          <LoopbackChip on={session.loopback} />
           <Elapsed from={run.started_at} to={run.finished_at} running={run.running} took={!run.running} />
         </span>
         <RunButtons run={run} square />

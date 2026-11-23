@@ -1,8 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { type AgentRun, ErrorCode, type RunDetail, RunHealth, type RunLimit, RunOutcome } from '@ops-console/shared';
-import { z } from 'zod';
 import { ApiError } from '../common/errors';
-import { NetworkAllowlistService } from '../network/network-allowlist.service';
 import {
   activityOf,
   classifyFailure,
@@ -32,17 +30,7 @@ export class RunInsights {
     @Inject(RunRegistry) private readonly runs: RunRegistry,
     @Inject(SessionKinds) private readonly kinds: SessionKinds,
     @Inject(RunStepsLog) private readonly log: RunStepsLog,
-    @Inject(NetworkAllowlistService) private readonly allowlist: NetworkAllowlistService,
   ) {}
-
-  /** The hosts the Run sandbox refused this run that a run started now would still be refused. */
-  private blockedOf(row: SessionRow): string[] {
-    if (row.runBlockedHosts === null) return [];
-    return z
-      .array(z.string())
-      .parse(JSON.parse(row.runBlockedHosts))
-      .filter((host) => !this.allowlist.covers(host));
-  }
 
   /** Every run going, then every run that ended unfinished and was not dismissed. */
   list(): AgentRun[] {
@@ -134,7 +122,6 @@ export class RunInsights {
           subagents,
           resetsAt: row.runLimitResetsAt,
         });
-    const blocked = this.blockedOf(row);
     const { health, reason } = healthOf({
       running,
       waiting,
@@ -143,7 +130,6 @@ export class RunInsights {
       history,
       now,
       failure,
-      blocked,
     });
     const open = running ? openStep(steps) : null;
     return {
@@ -162,7 +148,6 @@ export class RunInsights {
       tokens: usage ? costAndTokens(usage).tokens : null,
       usage: usage ? runUsageOf(usage) : null,
       limit: limitOf(row),
-      blocked_hosts: blocked,
       split:
         row.runStartedAt === null
           ? []

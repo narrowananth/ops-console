@@ -12,6 +12,7 @@ export function MenuButton({
   className = '',
   width = 'w-64',
   opens = 'down',
+  icon = false,
   children,
   menuChildren,
 }: {
@@ -21,6 +22,8 @@ export function MenuButton({
   className?: string;
   width?: string;
   opens?: 'up' | 'down';
+  /** A bare square for an icon, in place of the bordered button. */
+  icon?: boolean;
   /** The button's face. */
   children: ReactNode;
   menuChildren: (close: () => void) => ReactNode;
@@ -81,7 +84,11 @@ export function MenuButton({
         title={title}
         disabled={disabled}
         onClick={toggle}
-        className={`flex cursor-pointer items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1 text-xs text-text transition-colors hover:border-neutral-400 disabled:cursor-not-allowed disabled:opacity-50 ${open ? 'border-accent-400' : 'border-line'}`}
+        className={
+          icon
+            ? `flex size-7 cursor-pointer items-center justify-center rounded-md border-0 p-0 text-neutral-700 transition-colors hover:bg-neutral-200 hover:text-text disabled:cursor-not-allowed disabled:opacity-50 ${open ? 'bg-neutral-200' : 'bg-transparent'}`
+            : `flex cursor-pointer items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1 text-xs text-text transition-colors hover:border-neutral-400 disabled:cursor-not-allowed disabled:opacity-50 ${open ? 'border-accent-400' : 'border-line'}`
+        }
       >
         {children}
       </button>

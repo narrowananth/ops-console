@@ -63,16 +63,13 @@ import {
 import { STORE, type Store } from '../db/store';
 import { KEYCHAIN, type Keychain, KeychainTimeout } from '../keychain/keychain';
 import { storedEnvVar } from '../mcp/launcher';
-import { blockedHostsIn } from '../network/blocked-hosts';
-import { NetworkAllowlistService } from '../network/network-allowlist.service';
-import { RunLoopback } from '../network/run-loopback.service';
 import { PlaybooksService } from '../playbooks/playbooks.service';
 import { systemAppend } from '../playbooks/prompts';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
 import { Attachments } from './attachments';
 import { cloudWatchDenial } from './cloudwatch-tools';
 import { ConnectionLookup } from './connection-lookup';
-import { editRoots, outsideEditRoots } from './edit-scope';
+import { editRoots } from './edit-scope';
 import { HOOK_BYPASS_REASON, skipsCommitHooks } from './hook-bypass';
 import { hostedLogDenial } from './hosted-log-tools';
 import { classifyCli, type IntegrationInput, integrationInputSchema, outsideFile, runCli } from './integration-cli';
@@ -193,12 +190,6 @@ export const MERGE_DENIALS = [
 const GIT_HOST_CLIS = new Set(['gh', 'glab', 'bkt']);
 
 /**
- * The Run sandbox filters a run's commands (ADR 0006), not the agent's own web tools, so a steered run could send out
- * what it reads through them.
- */
-export const WEB_DENIALS = ['WebFetch', 'WebSearch'];
-
-/**
  * A PR action Session hands its results to the console, which pushes, replies and resolves, and a Verification writes to
  * no Git host. Both lose the agent's own tools for that (ADR 0002).
  */
@@ -253,38 +244,18 @@ function commandSummary(toolName: string, input: Record<string, unknown>): strin
     : shown;
 }
 
-const EDIT_SCOPE_REASON =
-  "File tools write only in the run's working folder, its output folder and the temp folders. Write the file there, or tell the operator where it belongs.";
-
 /** A permission rule's form of an absolute path. */
 const absolute = (file: string) => `/${file}`;
 
 /**
  * File tools run in Claude Code's own process, outside the Run sandbox's profile (ADR 0006), so the same limits are
- * permission rules, which `disallowedTools` holds in every mode: no reading the data folder's secrets or the operator's
- * credential folders, and no editing the git control files the daemon's `git` later reads.
+ * permission rules, which `disallowedTools` holds in every mode: no reading the login Keychain folder or the installed
+ * app, and no editing the git control files the daemon's `git` later reads.
  */
-export function fileToolDenials(
-  dataDir: string,
-  workingDir: string,
-  home: string = os.homedir(),
-  repoFolders: string[] = [],
-): string[] {
-  const secrets = [
-    path.join(dataDir, 'runtime.json'),
-    path.join(dataDir, 'state.db'),
-    path.join(dataDir, 'state.db-wal'),
-    path.join(dataDir, 'state.db-shm'),
-    path.join(dataDir, 'keychain-owner.json'),
-    path.join(dataDir, 'accounts', '**'),
-    path.join(dataDir, 'mcp-files', '**'),
-    path.join(home, '.aws', '**'),
-    path.join(home, '.config', 'gcloud', '**'),
-    path.join(home, 'Library', 'Keychains', '**'),
-    path.join(home, '.ssh', '**'),
-  ];
+export function fileToolDenials(workingDir: string, home: string = os.homedir(), repoFolders: string[] = []): string[] {
+  const closed = [path.join(home, 'Library', 'Keychains', '**'), path.join(home, '.ops-console', '**')];
   return [
-    ...secrets.flatMap((file) => [`Read(${absolute(file)})`, `Edit(${absolute(file)})`]),
+    ...closed.flatMap((file) => [`Read(${absolute(file)})`, `Edit(${absolute(file)})`]),
     ...[workingDir, ...repoFolders]
       .flatMap((folder) => gitControl(folder, gitFileOf(folder)))
       .map((file) => `Edit(${absolute(file)})`),
@@ -381,7 +352,7 @@ export class AgentRuntime implements OnModuleDestroy {
 
   constructor(
     @Inject(STORE) private readonly store: Store,
-    @Inject(DATA_DIR) private readonly dataDir: string,
+    @Inject(DATA_DIR) readonly _dataDir: string,
     @Inject(KEYCHAIN) private readonly keychain: Keychain,
     @Inject(AGENT_CONFIG) private readonly config: AgentConfig,
     @Inject(SessionsService) private readonly sessions: SessionsService,
@@ -399,8 +370,6 @@ export class AgentRuntime implements OnModuleDestroy {
     @Inject(ConnectionLookup) private readonly connections: ConnectionLookup,
     @Inject(PlaybooksService) private readonly playbooks: PlaybooksService,
     @Inject(SkillMenuService) private readonly skillMenu: SkillMenuService,
-    @Inject(NetworkAllowlistService) private readonly network: NetworkAllowlistService,
-    @Inject(RunLoopback) private readonly loopback: RunLoopback,
     @Inject(RunStepsLog) private readonly steps: RunStepsLog,
     @Inject(StartupRecovery) recovery: StartupRecovery,
   ) {
@@ -758,7 +727,6 @@ export class AgentRuntime implements OnModuleDestroy {
       runFinishedAt: null,
       runOutcome: null,
       runSubagents: null,
-      runBlockedHosts: null,
       runLimitSince: null,
       runLimitResetsAt: null,
     });
@@ -791,7 +759,6 @@ export class AgentRuntime implements OnModuleDestroy {
       onlyHeldSkills: options.onlyHeldSkills ?? true,
       parts: [],
       growing: null,
-      blockedHosts: new Set(),
       outputDirty: new Set(),
       outputTimer: null,
       sdkUuids: new Set(),
@@ -821,16 +788,6 @@ export class AgentRuntime implements OnModuleDestroy {
       prAction: session.prAction,
       readOnly: options.readOnly ?? false,
       purpose: options.purpose ?? RunPurpose.Chat,
-      networkDomains: this.network.forRun(),
-      loopback:
-        isOperatorChat({
-          onFinish,
-          purpose: options.purpose ?? RunPurpose.Chat,
-          readOnly: options.readOnly ?? false,
-          prAction: session.prAction,
-        }) &&
-        options.spawned !== true &&
-        this.loopback.forRun(),
       editRoots: [],
       failure: null,
       autoTitle: null,
@@ -1267,12 +1224,7 @@ export class AgentRuntime implements OnModuleDestroy {
       cwd: run.workingDir,
       sandbox: runSandbox({
         workingDir: run.workingDir,
-        dataDir: this.dataDir,
-        readable: [...(attached === null ? [] : [attached]), ...(skillFolder === null ? [] : [skillFolder])],
-        writable: outputFolder === null ? [] : [outputFolder],
         repos: repoFolders.map((folder) => ({ path: folder, gitFile: gitFileOf(folder) })),
-        networkDomains: run.networkDomains,
-        loopback: run.loopback,
         readOnly: run.readOnly,
         gitFile: gitFileOf(run.workingDir),
         // A Session's own worktree commits into the Repo's git folder, which sits outside it.
@@ -1367,8 +1319,7 @@ export class AgentRuntime implements OnModuleDestroy {
       })(),
       disallowedTools: [
         ...MERGE_DENIALS,
-        ...WEB_DENIALS,
-        ...fileToolDenials(this.dataDir, run.workingDir, undefined, repoFolders),
+        ...fileToolDenials(run.workingDir, undefined, repoFolders),
         ...(run.readOnly ? READ_ONLY_DENIALS : []),
         // Log text steers a Verification: it writes to no Git host and to no Connection (ADR 0002).
         ...(run.purpose === RunPurpose.Verify ? HOST_WRITE_DENIALS : []),
@@ -1683,17 +1634,6 @@ export class AgentRuntime implements OnModuleDestroy {
         tool: input.tool_name,
         summary: stepText(input.tool_name, toolInput),
       });
-      const target = EDIT_TOOLS.has(input.tool_name) ? (toolInput.file_path ?? toolInput.notebook_path) : null;
-      if (typeof target === 'string' && outsideEditRoots(target, run.editRoots, run.workingDir)) {
-        this.steps.finish(input.tool_use_id, { ok: false, error: EDIT_SCOPE_REASON });
-        return {
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'deny',
-            permissionDecisionReason: EDIT_SCOPE_REASON,
-          },
-        };
-      }
       const cloudWatch = cloudWatchDenial(input.tool_name) ?? hostedLogDenial(input.tool_name);
       if (cloudWatch !== null) {
         this.steps.finish(input.tool_use_id, { ok: false, error: cloudWatch });
@@ -1793,25 +1733,12 @@ export class AgentRuntime implements OnModuleDestroy {
       if (input.hook_event_name !== 'PostToolUse' && input.hook_event_name !== 'PostToolUseFailure') return {};
       if (input.hook_event_name === 'PostToolUse') this.steps.finish(input.tool_use_id, { ok: true });
       else this.steps.finish(input.tool_use_id, { ok: false, error: input.error });
-      this.noteBlockedHosts(run, input.hook_event_name === 'PostToolUse' ? input.tool_response : input.error);
       const row = run.toolRows.get(input.tool_use_id);
       if (!row) return {};
       if (input.hook_event_name === 'PostToolUse') this.actionLog.finish(row, ActionOutcome.Ok);
       else this.actionLog.finish(row, ActionOutcome.Failed, redact(input.error).slice(0, 500));
       return {};
     };
-  }
-
-  /**
-   * Keeps the hosts the Run sandbox refused, from what a command printed, so the operator is told while the run goes:
-   * a test that calls a refused host can wait on it for a long time. The console adds nothing to the allowlist itself;
-   * the operator does, and a run that has begun keeps the list it began with (ADR 0006).
-   */
-  private noteBlockedHosts(run: Run, output: unknown): void {
-    const found = blockedHostsIn(output).filter((host) => !run.blockedHosts.has(host));
-    if (found.length === 0) return;
-    for (const host of found) run.blockedHosts.add(host);
-    this.sessions.write(run.sessionId, { runBlockedHosts: JSON.stringify([...run.blockedHosts]) });
   }
 
   /** Permission prompts: the agent's questions, and edits and commands the access mode asks about. */

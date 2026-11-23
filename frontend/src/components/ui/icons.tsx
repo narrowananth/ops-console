@@ -274,3 +274,25 @@ export const RestartIcon = () => (
     <path d="M4 12a8 8 0 1 0 2.6-5.9M4 4.5v4h4" />
   </Icon>
 );
+
+/** A box cut by one vertical line, for Split. */
+export const SplitIcon = () => (
+  <Icon>
+    <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+    <path d="M12 4.5v15" />
+  </Icon>
+);
+
+/** Corners pointing out, for Maximize. */
+export const MaximizeIcon = () => (
+  <Icon>
+    <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+  </Icon>
+);
+
+/** Corners pointing in, for Restore. */
+export const RestoreIcon = () => (
+  <Icon>
+    <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+  </Icon>
+);

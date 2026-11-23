@@ -4,7 +4,6 @@ import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { BUILT_IN_NETWORK_DOMAINS } from '@ops-console/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runSandbox, worktreeGitDirs } from '../src/agent/run-sandbox';
 import { SeatbeltRunSandbox } from '../src/terminals/run-sandbox-gate';
@@ -57,6 +56,10 @@ beforeAll(async () => {
   writeFileSync(path.join(data, 'runtime.json'), '{"token":"SECRET"}');
   writeFileSync(path.join(scratch, 'note.txt'), 'scratch-ok');
   writeFileSync(path.join(home, '.ssh', 'key'), 'ssh-ok');
+  mkdirSync(path.join(home, 'Library', 'Keychains'), { recursive: true });
+  writeFileSync(path.join(home, 'Library', 'Keychains', 'login.keychain-db'), 'keychain-ok');
+  mkdirSync(path.join(home, '.ops-console'), { recursive: true });
+  writeFileSync(path.join(home, '.ops-console', 'note'), 'app-ok');
 
   api = createServer((req, res) => {
     let raw = '';
@@ -190,92 +193,47 @@ function run(command: string, cwd: string, sandbox: object | null): Promise<stri
   });
 }
 
-const BUILT_IN: string[] = [...BUILT_IN_NETWORK_DOMAINS];
-const rules = (workingDir: string, networkDomains = BUILT_IN) =>
-  runSandbox({ workingDir, dataDir: data, home, networkDomains });
+const rules = (workingDir: string) => runSandbox({ workingDir, home });
 
 describe.skipIf(process.platform !== 'darwin' || CLAUDE === null)('Run sandbox, enforced by Seatbelt', () => {
-  it('reads the token with no sandbox, so the cases below prove something', async () => {
-    expect(await run(`cat ${data}/runtime.json`, scratch, null)).toContain('SECRET');
+  it('reads the Keychain folder with no sandbox, so the cases below prove something', async () => {
+    expect(await run(`cat ${home}/Library/Keychains/login.keychain-db`, scratch, null)).toContain('keychain-ok');
   }, 60_000);
 
-  it('cannot read runtime.json, and still reads its own scratch copy inside the data folder (Behavior 3)', async () => {
-    const token = await run(`cat ${data}/runtime.json`, scratch, rules(scratch));
-    expect(token).toContain('Operation not permitted');
-    expect(token).not.toContain('SECRET');
-    expect(await run(`cat ${scratch}/note.txt`, scratch, rules(scratch))).toContain('scratch-ok');
+  it('cannot read the login Keychain folder or the installed app', async () => {
+    const keychain = await run(`cat ${home}/Library/Keychains/login.keychain-db`, scratch, rules(scratch));
+    expect(keychain).toContain('Operation not permitted');
+    expect(keychain).not.toContain('keychain-ok');
+    const app = await run(`cat ${home}/.ops-console/note`, scratch, rules(scratch));
+    expect(app).toContain('Operation not permitted');
+    expect(app).not.toContain('app-ok');
   }, 120_000);
 
-  it('writes in the working folder and temp only (Behavior 2, 6)', async () => {
-    expect(await run(`echo hi > ${scratch}/out.txt && cat ${scratch}/out.txt`, scratch, rules(scratch))).toContain(
-      'hi',
-    );
+  it('reads and writes everything else: the data folder, the credential folders, the home folder', async () => {
+    expect(await run(`cat ${data}/runtime.json`, scratch, rules(scratch))).toContain('SECRET');
+    expect(await run(`cat ${home}/.ssh/key`, checkout, rules(checkout))).toContain('ssh-ok');
+    expect(await run(`echo hi > ${home}/anywhere && cat ${home}/anywhere`, scratch, rules(scratch))).toContain('hi');
     expect(
-      await run('echo hi > /tmp/real-sandbox-probe && cat /tmp/real-sandbox-probe', scratch, rules(scratch)),
+      await run(`echo hi > ${data}/scratch/job-2 && cat ${data}/scratch/job-2`, scratch, rules(scratch)),
     ).toContain('hi');
-    expect(await run(`echo hi > ${home}/escaped; echo exit=$?`, scratch, rules(scratch))).toContain('not permitted');
-    expect(existsSync(path.join(home, 'escaped'))).toBe(false);
-    // A sibling job's scratch copy is not this run's folder.
-    expect(await run(`echo hi > ${data}/scratch/job-2; echo exit=$?`, scratch, rules(scratch))).toContain(
-      'not permitted',
-    );
-    expect(existsSync(path.join(data, 'scratch', 'job-2'))).toBe(false);
-  }, 240_000);
-
-  it('writes in the tool caches a commit hook or build needs, and in no folder on PATH', async () => {
-    // The sandbox matches real paths, so the folder exists first, as it does once a tool has used it.
-    mkdirSync(path.join(home, '.cache'), { recursive: true });
-    const cache = `mkdir -p ${home}/.cache/pre-commit && echo ok > ${home}/.cache/pre-commit/probe && cat ${home}/.cache/pre-commit/probe`;
-    expect(await run(cache, checkout, rules(checkout))).toContain('ok');
     mkdirSync(path.join(home, '.cargo', 'bin'), { recursive: true });
-    expect(await run(`echo x > ${home}/.cargo/bin/planted; echo exit=$?`, checkout, rules(checkout))).toContain(
-      'not permitted',
+    expect(await run(`echo x > ${home}/.cargo/bin/planted && echo exit=$?`, checkout, rules(checkout))).toContain(
+      'exit=0',
     );
-    expect(existsSync(path.join(home, '.cargo', 'bin', 'planted'))).toBe(false);
   }, 240_000);
 
-  it('denies ~/.ssh to every run (console-opens-pull-request 16)', async () => {
-    expect(await run(`cat ${home}/.ssh/key`, checkout, rules(checkout))).toContain('Operation not permitted');
-  }, 120_000);
-
-  it('still runs git and node (Behavior 9)', async () => {
+  it('still runs git and node', async () => {
     expect(await run('git --version && node -v', checkout, rules(checkout))).toMatch(/git version .*\nv\d+/);
   }, 120_000);
 
-  it('refuses a host off the allowlist, names it, and lets the command finish (Network Behavior 1)', async () => {
-    const out = await run('curl -sS -m 10 https://example.com; echo finished', checkout, rules(checkout));
-    expect(out).toContain('deny network-outbound example.com:443 (host is not on the allow list)');
-    expect(out).toContain('finished');
-  }, 120_000);
-
-  it('passes a host on the allowlist through the filter and refuses the same request once it is off (Network Behavior 1)', async () => {
+  it('reaches any host through the filter, and a local port directly', async () => {
     const viaProxy = `curl -sS -m 10 --noproxy '' -x $HTTP_PROXY http://localhost:${port}/ping; echo exit=$?`;
-    expect(await run(viaProxy, checkout, rules(checkout, ['localhost']))).toContain('exit=0');
-    expect(await run(viaProxy, checkout, rules(checkout, ['example.org']))).toContain('host is not on the allow list');
+    expect(await run(viaProxy, checkout, rules(checkout))).toContain('exit=0');
+    const direct = `curl -sS -m 6 --noproxy '*' http://127.0.0.1:${port}/ping; echo exit=$?`;
+    expect(await run(direct, checkout, rules(checkout))).toContain('exit=0');
   }, 240_000);
 
-  it('cannot go around the filter by IP address, DNS, UDP or a client that ignores the proxy (Network Behavior 2)', async () => {
-    const failed = /exit=[1-9]/;
-    expect(
-      await run("curl -sS -m 8 --noproxy '*' -k https://93.184.216.34; echo exit=$?", checkout, rules(checkout)),
-    ).toMatch(failed);
-    expect(
-      await run("curl -sS -m 8 --noproxy '*' https://example.com; echo exit=$?", checkout, rules(checkout)),
-    ).toContain('Could not resolve host');
-    expect(await run("bash -c 'echo x > /dev/udp/93.184.216.34/9'; echo exit=$?", checkout, rules(checkout))).toMatch(
-      failed,
-    );
-    // Node's `fetch` ignores the proxy settings, so even an allowed host fails.
-    expect(
-      await run(
-        "node -e 'fetch(process.argv[1]).then(r=>console.log(r.status),e=>console.log(e.cause.code))' https://api.github.com",
-        checkout,
-        rules(checkout),
-      ),
-    ).toContain('ENOTFOUND');
-  }, 240_000);
-
-  it('refuses a bind and a connection to a local port while Loopback is off, and allows both once it is on (Loopback Behavior 2, 3)', async () => {
+  it('binds and reaches local ports, listens on every address and uses a Unix socket', async () => {
     writeFileSync(
       path.join(checkout, 'bind.js'),
       "const s=require('net').createServer().listen(0,'127.0.0.1',()=>{console.log('bind=ok');s.close()});s.on('error',e=>console.log('bind='+e.code))",
@@ -292,28 +250,18 @@ describe.skipIf(process.platform !== 'darwin' || CLAUDE === null)('Run sandbox, 
       path.join(checkout, 'unix.js'),
       "const s=require('net').createServer().listen('/tmp/loopback-'+process.pid+'.sock',()=>{console.log('unix=ok');s.close()});s.on('error',e=>console.log('unix='+e.code))",
     );
-    const other = `curl -sS -m 6 --noproxy '*' http://127.0.0.1:${port}/ping; echo exit=$?`;
-    const closed = rules(checkout);
-    expect(await run('node bind.js', checkout, closed)).toContain('bind=EPERM');
-    expect(await run('node all.js', checkout, closed)).toContain('all=EPERM');
-    expect(await run('node self.js', checkout, closed)).toContain('self=EPERM');
-    expect(await run(other, checkout, closed)).toContain('exit=7');
-
-    const open = runSandbox({ workingDir: checkout, dataDir: data, home, networkDomains: BUILT_IN, loopback: true });
-    expect(await run('node bind.js', checkout, open)).toContain('bind=ok');
-    expect(await run('node all.js', checkout, open)).toContain('all=ok');
-    expect(await run('node self.js', checkout, open)).toContain('self=ok');
-    // The OS rule opens every local port, not only the run's own server.
-    expect(await run(other, checkout, open)).toContain('exit=0');
-    // Everything else stays shut: a Unix socket, a lookup and a host off the allowlist.
-    expect(await run('node unix.js', checkout, open)).toContain('unix=EPERM');
-    expect(await run("curl -sS -m 8 --noproxy '*' https://example.com; echo exit=$?", checkout, open)).toContain(
-      'Could not resolve host',
-    );
-    expect(await run('curl -sS -m 10 https://example.com; echo finished', checkout, open)).toContain(
-      'deny network-outbound example.com:443 (host is not on the allow list)',
-    );
+    expect(await run('node bind.js', checkout, rules(checkout))).toContain('bind=ok');
+    expect(await run('node all.js', checkout, rules(checkout))).toContain('all=ok');
+    expect(await run('node self.js', checkout, rules(checkout))).toContain('self=ok');
+    expect(await run('node unix.js', checkout, rules(checkout))).toContain('unix=ok');
   }, 600_000);
+
+  it('cannot change the working folder of a read-only run', async () => {
+    const readOnly = runSandbox({ workingDir: checkout, home, readOnly: true });
+    expect(await run(`echo x > ${checkout}/changed; echo exit=$?`, checkout, readOnly)).toContain('not permitted');
+    expect(existsSync(path.join(checkout, 'changed'))).toBe(false);
+    expect(await run('echo hi > /tmp/read-only-probe && cat /tmp/read-only-probe', checkout, readOnly)).toContain('hi');
+  }, 240_000);
 
   it("commits in a Session's own worktree, and still cannot write the Repo's hooks or config", async () => {
     const repo = path.join(path.dirname(data), 'session-repo');
@@ -329,9 +277,7 @@ describe.skipIf(process.platform !== 'darwin' || CLAUDE === null)('Run sandbox, 
     git('worktree', 'add', '-q', '--detach', worktree);
     const sandbox = runSandbox({
       workingDir: worktree,
-      dataDir: data,
       home,
-      networkDomains: BUILT_IN,
       gitFile: true,
       gitDirs: worktreeGitDirs(worktree),
     });
