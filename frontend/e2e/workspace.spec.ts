@@ -35,7 +35,7 @@ const session = (id: string, repoId: string, title: string, state = 'idle', bran
   connection_ids: null,
   extra_repo_ids: [],
   pull_request: null,
-  pull_requests: [],
+  pull_requests: [] as { number: number; url: string; branch: string }[],
   alert_id: null,
   state,
   last_message_preview: null,
@@ -73,8 +73,8 @@ test('Sessions list by what needs you, then running, then idle; a long idle list
   const needs = page.getByRole('region', { name: 'Needs you' });
   const running = page.getByRole('region', { name: 'Running' });
   const idleGroup = page.getByRole('region', { name: 'Idle' });
-  await expect(needs.getByRole('listitem')).toHaveText([/approve the push.*approval.*analytics/]);
-  await expect(running.getByRole('listitem')).toHaveText([/long job.*analytics.*feature\/jobs/]);
+  await expect(needs.getByRole('listitem')).toHaveText([/analytics.*approval.*approve the push/]);
+  await expect(running.getByRole('listitem')).toHaveText([/analytics.*Working.*long job.*feature\/jobs/]);
   // Eight idle Sessions show; the other two wait behind "Show 2 more". Artifacts has none and does not appear.
   await expect(idleGroup.getByRole('listitem')).toHaveCount(9);
   await expect(page.getByText('artifacts')).toHaveCount(0);
@@ -92,6 +92,70 @@ test('Sessions list by what needs you, then running, then idle; a long idle list
   await expect(running.getByRole('listitem')).toHaveCount(1);
   await page.getByRole('button', { name: 'Fold Idle' }).click();
   await expect(idleGroup.getByRole('listitem')).toHaveCount(9);
+});
+
+test("a Session row shows its pull requests and, on hover, a card with each one's title and state", async ({
+  page,
+}) => {
+  const opened = [
+    { number: 138, url: 'https://example.com/pull/138', branch: 'feature/sandbox' },
+    { number: 136, url: 'https://example.com/pull/136', branch: 'feature/header' },
+  ];
+  await repoRoutes(
+    page,
+    [repo('r1', 'ops-console')],
+    [{ ...session('s1', 'r1', 'Spec: privacy docs', 'idle', 'feature/sandbox'), pull_requests: opened }],
+  );
+  const listed = (state: string, numbers: [number, string][]) => ({
+    data: numbers.map(([number, title]) => ({
+      repo_id: 'r1',
+      host: 'github',
+      slug: 'example/ops-console',
+      number,
+      url: `https://example.com/pull/${number}`,
+      title,
+      author: 'ananth',
+      branch: `b${number}`,
+      base_branch: 'main',
+      head_sha: 'abc',
+      state,
+      review_state: 'none',
+      approved_by: [],
+      checks: 'none',
+      additions: 1,
+      deletions: 1,
+      opened_at: NOW,
+      merged_at: null,
+      is_mine: true,
+      by_agent: false,
+      comment_count: 0,
+      resolved_count: 0,
+      agent_session_id: null,
+      latest_agent_review: null,
+    })),
+    meta: { synced_at: NOW, stale: false, next_cursor: null },
+  });
+  await page.route(/\/api\/pull-requests\?repo_id=r1&state=open/, (route) =>
+    route.fulfill({ json: listed('open', [[138, 'Run sandbox: a Loopback switch']]) }),
+  );
+  await page.route(/\/api\/pull-requests\?repo_id=r1&state=merged/, (route) =>
+    route.fulfill({ json: listed('merged', [[136, 'Monitor header on one line']]) }),
+  );
+  await page.route(/\/api\/pull-requests\?repo_id=r1&state=closed/, (route) =>
+    route.fulfill({ json: listed('closed', []) }),
+  );
+  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+
+  const row = page.getByRole('listitem').filter({ hasText: 'Spec: privacy docs' });
+  await expect(row).toContainText('+2');
+  await expect(row).toContainText('Opus');
+  await expect(row).toContainText('feature/sandbox');
+  await row.getByRole('button').hover();
+  const card = page.getByRole('tooltip');
+  await expect(card).toContainText('#138');
+  await expect(card).toContainText('Run sandbox: a Loopback switch');
+  await expect(card).toContainText('#136');
+  await expect(card).toContainText('Monitor header on one line');
 });
 
 test('+ New picks a Repo and a branch, or no Repo, and starts a Session there', async ({ page }) => {

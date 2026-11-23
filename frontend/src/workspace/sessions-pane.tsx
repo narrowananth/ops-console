@@ -1,12 +1,16 @@
 import { type Repo, type Session, SessionKind, SessionState } from '@ops-console/shared';
 import { type ReactNode, useState } from 'react';
 import { z } from 'zod';
+import { MODEL_NAME } from '../agent-runs/run-look';
 import { StopIcon } from '../agents/stop-run';
 import { Button } from '../components/ui/button';
 import { Dropdown } from '../components/ui/dropdown';
+import { useNow } from '../components/ui/elapsed';
 import { Empty } from '../components/ui/empty';
+import { BranchIcon, PullRequestIcon } from '../components/ui/icons';
 import { item } from '../components/ui/item';
 import {
+  useAgentRuns,
   useBranches,
   useCreateAnonymousSession,
   useCreateRepoSession,
@@ -18,6 +22,7 @@ import { useStored } from '../lib/remember';
 import { ascending } from '../lib/sort';
 import { ago } from '../monitor/scan-scope';
 import { FilterTabs, ListGroup, SearchField, useFolded } from './list-parts';
+import { HoverCard, PULL_COLOUR, SessionCard, useSessionPulls } from './session-hover-card';
 
 /** Idle Sessions listed before "Show N more". A search, or the open Session, lifts the limit. */
 const IDLE_SHOWN = 8;
@@ -227,66 +232,134 @@ const STATE_DOT: Record<SessionState, string> = {
   [SessionState.Failed]: 'bg-accent-700',
 };
 
-/** Two lines: state dot, title, the state word and time; then the Repo and the branch. */
+/** `RepoName` as two capitals for the badge: `ops-console` is OC, `apis` is AP. */
+const initials = (name: string) => {
+  const words = name.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const letters = words.length > 1 ? words.map((word) => word[0]).join('') : (words[0] ?? '').slice(0, 2);
+  return letters.slice(0, 2).toUpperCase();
+};
+
+/** The Repo's two capitals, or `··` for a Session with no Repo. */
+function RepoBadge({ repo }: { repo: Repo | null }) {
+  return (
+    <span
+      aria-hidden
+      className={`flex size-4.5 flex-none items-center justify-center rounded-sm font-mono text-[9px] font-semibold ${repo ? 'bg-accent-100 text-accent-700' : 'bg-neutral-200 text-neutral-700'}`}
+    >
+      {repo ? initials(repo.name) : '··'}
+    </span>
+  );
+}
+
+/** Whole minutes up to an hour, then hours and minutes: `36m`, `1h 05m`. */
+const minutes = (ms: number) => {
+  const total = Math.max(0, Math.floor(ms / 60_000));
+  return total < 60 ? `${total}m` : `${Math.floor(total / 60)}h ${String(total % 60).padStart(2, '0')}m`;
+};
+
+/** "Working 36m": the run's time since it started, to the minute. Without a start it says "Working". */
+function WorkingChip({ since }: { since: string | null }) {
+  const now = useNow(since !== null, 15_000);
+  return (
+    <span className="flex-none rounded-sm bg-ok/15 px-1.25 text-[11px] leading-4 font-medium text-ok">
+      Working{since ? ` ${minutes(now - Date.parse(since))}` : ''}
+    </span>
+  );
+}
+
+/** The pull request mark: its number when the console opened one, `+N` for several. Its colour is the newest one's state. */
+function PullRequestChip({ session }: { session: Session }) {
+  const pulls = useSessionPulls(session);
+  const newest = pulls[0];
+  if (!newest) return null;
+  return (
+    <span className="flex flex-none items-center gap-0.5">
+      <span aria-hidden className={`size-3.5 [&>svg]:size-3.5 ${PULL_COLOUR[newest.state ?? 'unknown']}`}>
+        <PullRequestIcon />
+      </span>
+      {pulls.length === 1 ? newest.number : `+${pulls.length}`}
+    </span>
+  );
+}
+
+/**
+ * Three lines: the Repo's badge and name, with the state word and time; the title; then the branch, the pull requests
+ * and the model.
+ */
 function SessionRow({
   session,
   repo,
+  runStart,
   selected,
   onSelect,
 }: {
   session: Session;
   repo: Repo | null;
+  runStart: string | null;
   selected: boolean;
   onSelect: () => void;
 }) {
   return (
     <li className="group relative">
-      <button
-        type="button"
-        aria-current={selected}
-        title={session.branch ? `${session.title} · ${session.branch}` : session.title}
-        onClick={onSelect}
-        className={`flex w-full flex-col gap-0.5 px-2.5 py-1.75 text-[13px] ${item(selected)}`}
-      >
-        <span className="flex items-center gap-2">
-          <span
-            aria-hidden
-            title={SESSION_STATE_TIP[session.state]}
-            className={`size-2 flex-none rounded-full ${STATE_DOT[session.state]} ${session.state === SessionState.Working ? 'animate-pulse' : ''}`}
+      <HoverCard
+        card={() => (
+          <SessionCard
+            session={session}
+            repo={repo}
+            stateTip={SESSION_STATE_TIP[session.state]}
+            badge={<RepoBadge repo={repo} />}
           />
-          <span className="min-w-0 flex-1 truncate font-medium">{session.title}</span>
-          {STATE_WORD[session.state] && (
+        )}
+      >
+        <button
+          type="button"
+          aria-current={selected}
+          onClick={onSelect}
+          className={`flex w-full flex-col gap-0.5 px-2.5 py-1.75 text-[13px] ${item(selected)}`}
+        >
+          <span className="flex items-center gap-1.5">
+            <RepoBadge repo={repo} />
             <span
-              title={SESSION_STATE_TIP[session.state]}
-              className="flex-none rounded-sm bg-accent-100 px-1.25 text-[11px] leading-4 font-medium text-accent-700"
+              className={`min-w-0 flex-1 truncate text-xs ${repo ? 'text-neutral-800' : 'text-neutral-600 italic'}`}
             >
-              {STATE_WORD[session.state]}
+              {repo ? repo.name : 'No Repo'}
             </span>
-          )}
-          <span
-            className="flex-none text-[11px] text-neutral-600 tabular-nums"
-            title={`Started ${new Date(session.created_at).toLocaleString()}, last active ${new Date(session.last_active_at).toLocaleString()}`}
-          >
-            {ago(session.last_active_at)}
-          </span>
-        </span>
-        <span className="flex min-w-0 items-center gap-1 pl-4 font-mono text-[11px] text-neutral-600">
-          <span
-            title={repo ? `${repo.name} on ${repo.host}` : 'Anonymous: no Repo, a folder of its own'}
-            className={`max-w-[50%] flex-none truncate ${repo ? 'text-neutral-800' : 'italic'}`}
-          >
-            {repo ? repo.name : 'No Repo'}
-          </span>
-          {session.branch && (
-            <>
-              <span aria-hidden className="flex-none text-neutral-400">
-                /
+            {session.state === SessionState.Working && <WorkingChip since={runStart} />}
+            {STATE_WORD[session.state] && (
+              <span className="flex-none rounded-sm bg-accent-100 px-1.25 text-[11px] leading-4 font-medium text-accent-700">
+                {STATE_WORD[session.state]}
               </span>
-              <span className="min-w-0 truncate">{session.branch}</span>
-            </>
-          )}
-        </span>
-      </button>
+            )}
+            <span
+              className="flex-none text-[11px] text-neutral-600 tabular-nums"
+              title={`Started ${new Date(session.created_at).toLocaleString()}, last active ${new Date(session.last_active_at).toLocaleString()}`}
+            >
+              {ago(session.last_active_at)}
+            </span>
+          </span>
+          <span className="flex items-center gap-2">
+            <span
+              aria-hidden
+              className={`size-2 flex-none rounded-full ${STATE_DOT[session.state]} ${session.state === SessionState.Working ? 'animate-pulse' : ''}`}
+            />
+            <span className="min-w-0 flex-1 truncate font-medium">{session.title}</span>
+          </span>
+          <span className="flex min-w-0 items-center gap-2 pl-4 font-mono text-[11px] text-neutral-600">
+            {session.branch ? (
+              <span className="flex min-w-0 flex-1 items-center gap-1">
+                <span aria-hidden className="size-3.5 flex-none [&>svg]:size-3.5">
+                  <BranchIcon />
+                </span>
+                <span className="min-w-0 truncate">{session.branch}</span>
+              </span>
+            ) : (
+              <span className="flex-1" />
+            )}
+            <PullRequestChip session={session} />
+            <span className="flex-none">{MODEL_NAME[session.model]}</span>
+          </span>
+        </button>
+      </HoverCard>
       {isBusy(session) && <RowStop session={session} />}
     </li>
   );
@@ -303,6 +376,7 @@ const matcher =
 export function SessionsPane({ selected, onSelect }: { selected: string | null; onSelect: (id: string) => void }) {
   const repos = useRepos();
   const sessions = useRepoSessions();
+  const runs = useAgentRuns();
   const [q, setQ] = useStored('workspace.session-search', z.string(), '');
   const [state, setState] = useStored('workspace.session-state', z.enum(['all', 'needs', 'running']), 'all');
   const [repoFilter, setRepoFilter] = useStored('workspace.session-repo', z.string(), ANY);
@@ -312,6 +386,8 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
   if (repos.isPending || sessions.isPending) return <Empty>Reading Sessions…</Empty>;
   if (repos.isError || sessions.isError) return <Empty>Could not read Sessions.</Empty>;
 
+  const runStartOf = (session: Session) =>
+    runs.data?.find((run) => run.session.id === session.id && run.running)?.started_at ?? null;
   const repoOf = (session: Session) => repos.data.data.find((repo) => repo.id === session.repo_id) ?? null;
   const searching = q.trim() !== '';
   const matches = matcher(q);
@@ -337,7 +413,13 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
   });
   const found = inRepo.filter((session) => {
     const repo = repoOf(session);
-    return matches(session.title, session.branch, repo?.name ?? 'No Repo', repo?.branch ?? null);
+    return matches(
+      session.title,
+      session.branch,
+      repo?.name ?? 'No Repo',
+      repo?.branch ?? null,
+      ...session.pull_requests.map((pr) => `#${pr.number}`),
+    );
   });
   const counts = { needs: found.filter(needsYou).length, running: found.filter(working).length };
   const listed = found.filter(
@@ -355,6 +437,7 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
       key={session.id}
       session={session}
       repo={repoOf(session)}
+      runStart={runStartOf(session)}
       selected={selected === session.id}
       onSelect={() => onSelect(session.id)}
     />
@@ -374,7 +457,7 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
         <div className="flex items-center gap-1.5">
           <SearchField
             label="Search Sessions"
-            title="Matches a Session's title or branch, or its Repo's name or checked-out branch"
+            title="Matches a Session's title, branch or pull request number, or its Repo's name or checked-out branch"
             value={q}
             placeholder="Search Sessions"
             onChange={setQ}
