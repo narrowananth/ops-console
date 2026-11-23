@@ -93,7 +93,7 @@ lines themselves show only when the operator opens the row.
 
 **Network allowlist**:
 The hosts an agent run's commands may reach, built when the run starts from the built-in hosts, the hosts of the
-Repos' remotes and the operator's own domains. Any other host is refused.
+Repos' remotes, the hosts of the Connections the agent may use and the operator's own domains. Any other host is refused.
 
 **Loopback**:
 The Run sandbox's one operator switch, on Permissions, for a chat run (a message the operator sent in a Session): when on,

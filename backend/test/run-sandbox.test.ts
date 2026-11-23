@@ -3,9 +3,12 @@ import { mkdir, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  AccessLevel,
   AccessMode,
   BUILT_IN_NETWORK_DOMAINS,
   CONNECTOR_SERVERS,
+  ConnectionEnv,
+  ConnectionType,
   ConnectorId,
   GitHost,
   PrAction,
@@ -17,7 +20,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { runSandbox, worktreeGitDirs } from '../src/agent/run-sandbox';
 import { isOperatorChat } from '../src/agent/runs';
 import { AgentRuntime, HOST_WRITE_DENIALS } from '../src/agent/runtime';
-import { repos } from '../src/db/schema';
+import { connections, repos } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { KEYCHAIN, type Keychain } from '../src/keychain/keychain';
 import { JobSteps } from '../src/playbooks/job-steps';
@@ -434,13 +437,54 @@ describe('Run sandbox: what a run cannot change or read (ADR 0006)', () => {
 describe('Network allowlist on Permissions', () => {
   const read = async (daemon: AgentDaemon) => (await api(daemon).get('/network-allowlist')).body.data;
 
-  it('lists the three groups, with the Repo that has each host (Network Behavior 12)', async () => {
+  it('lists the four groups, with the Repo that has each host (Network Behavior 12)', async () => {
     const daemon = await start();
-    expect(await read(daemon)).toEqual({ built_in: BUILT_IN, from_repos: [], added: [] });
+    expect(await read(daemon)).toEqual({ built_in: BUILT_IN, from_repos: [], from_connections: [], added: [] });
     await addRepo(daemon, 'billing', 'https://gitlab.example.com/acme/billing.git');
     await addRepo(daemon, 'ledger', 'git@gitlab.example.com:acme/ledger.git');
     await addRepo(daemon, 'scratch', null);
     expect((await read(daemon)).from_repos).toEqual([{ domain: 'gitlab.example.com', repo: 'billing' }]);
+  });
+
+  it('adds the host of each Connection the agent may use, and the next run reaches it', async () => {
+    const daemon = await start();
+    const store = daemon.app.get<Store>(STORE);
+    const save = (name: string, type: ConnectionType, access: AccessLevel, config: object) =>
+      store.write((tx) =>
+        tx
+          .insert(connections)
+          .values({
+            id: crypto.randomUUID(),
+            name,
+            type,
+            env: ConnectionEnv.Prod,
+            access,
+            config: JSON.stringify(config),
+          })
+          .run(),
+      );
+    save('orders-db', ConnectionType.Postgres, AccessLevel.Read, {
+      host: 'db.example.com',
+      port: 5432,
+      database: 'orders',
+      user: 'ro',
+    });
+    save('cache', ConnectionType.Redis, AccessLevel.Write, { host: '10.0.0.5', port: 6379, db_index: 0 });
+    save('local-pg', ConnectionType.Postgres, AccessLevel.Read, {
+      host: 'localhost',
+      port: 5432,
+      database: 'x',
+      user: 'u',
+    });
+    save('unused', ConnectionType.Clickhouse, AccessLevel.None, {
+      host: 'ch.example.com',
+      http_port: 8123,
+      database: 'd',
+      user: 'u',
+    });
+    expect((await read(daemon)).from_connections).toEqual([{ domain: 'db.example.com', connection: 'orders-db' }]);
+    await converse(daemon, daemon.createSession(), 'hello');
+    expect(sandboxOf(daemon).network?.allowedDomains).toContain('db.example.com');
   });
 
   it('saves a domain trimmed and lowercased, and the next run reaches it (Network Behavior 6, 10, 13)', async () => {

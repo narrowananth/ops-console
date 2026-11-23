@@ -79,18 +79,29 @@ export const networkDomainSchema = z
 
 export const addNetworkDomainSchema = z.object({ domain: networkDomainSchema });
 
-/** The Network allowlist in its three groups. `from_repos` names a Repo that has the host. */
+/**
+ * The Network allowlist in its four groups. `from_repos` names a Repo that has the host; `from_connections` names a
+ * Connection that reaches it.
+ */
 export const networkAllowlistSchema = z.object({
   built_in: z.array(z.string()),
   from_repos: z.array(z.object({ domain: z.string(), repo: z.string() })),
+  from_connections: z.array(z.object({ domain: z.string(), connection: z.string() })),
   added: z.array(z.string()),
 });
 
 export type NetworkAllowlist = z.infer<typeof networkAllowlistSchema>;
 
-/** Every distinct domain across the three groups. */
+/** Every distinct domain across the four groups. */
 export function allNetworkDomains(list: NetworkAllowlist): string[] {
-  return [...new Set([...list.built_in, ...list.from_repos.map((entry) => entry.domain), ...list.added])];
+  return [
+    ...new Set([
+      ...list.built_in,
+      ...list.from_repos.map((entry) => entry.domain),
+      ...list.from_connections.map((entry) => entry.domain),
+      ...list.added,
+    ]),
+  ];
 }
 
 export const savedNetworkDomainSchema = z.object({ domain: z.string() });

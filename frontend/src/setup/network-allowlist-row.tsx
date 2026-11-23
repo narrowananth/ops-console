@@ -15,8 +15,16 @@ export function NetworkAllowlistRow() {
   const [refusal, setRefusal] = useState<string | null>(null);
   const list = read.data;
   const count = list ? allNetworkDomains(list).length : null;
-  // The Repos' hosts are built in too; the page does not say which Repo has which.
-  const builtIn = list ? [...new Set([...list.built_in, ...list.from_repos.map((entry) => entry.domain)])] : [];
+  // The Repos' and Connections' hosts are built in too; the page does not say which one has which.
+  const builtIn = list
+    ? [
+        ...new Set([
+          ...list.built_in,
+          ...list.from_repos.map((entry) => entry.domain),
+          ...list.from_connections.map((entry) => entry.domain),
+        ]),
+      ]
+    : [];
   const submit = () => {
     const checked = networkDomainSchema.safeParse(value);
     if (!checked.success) {

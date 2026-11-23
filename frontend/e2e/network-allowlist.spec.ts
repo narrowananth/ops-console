@@ -18,7 +18,12 @@ const api = (method: string, url: string, body?: unknown) =>
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
-type Allowlist = { built_in: string[]; from_repos: { domain: string; repo: string }[]; added: string[] };
+type Allowlist = {
+  built_in: string[];
+  from_repos: { domain: string; repo: string }[];
+  from_connections: { domain: string; connection: string }[];
+  added: string[];
+};
 const read = async (): Promise<Allowlist> =>
   ((await (await api('GET', '/network-allowlist')).json()) as { data: Allowlist }).data;
 

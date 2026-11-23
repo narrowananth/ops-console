@@ -35,8 +35,9 @@ folder.
 A run's commands reach only its Network allowlist, which the SDK's filtering proxy enforces (`network.allowedDomains`
 with `strictAllowlist`). The console builds the list when the run starts: the built-in hosts (GitHub, the API hosts of the
 Connectors' services (Bitbucket, GitLab, Atlassian, Datadog, Slack, Sentry, Shopify), and the package
-registries of npm and Yarn, Cargo, Go, Maven, Gradle, PyPI and RubyGems), the host of each Repo's `origin`, and the
-domains the operator added. A raw IP address, a DNS lookup outside the filter and a client that ignores the proxy settings are
+registries of npm and Yarn, Cargo, Go, Maven, Gradle, PyPI and RubyGems), the host of each Repo's `origin`, the host of
+each Connection the agent may use (a database's `host`, a Kafka cluster's servers and URLs, a Firebase project's Google
+hosts; never an IP address, `localhost`, or a Connection with Access Level `none`), and the domains the operator added. A raw IP address, a DNS lookup outside the filter and a client that ignores the proxy settings are
 refused. `WebFetch` and `WebSearch` run outside the filter, so every run denies them.
 
 A run's commands cannot start a server or reach `localhost` either. One operator switch, Loopback on Permissions, opens
@@ -115,7 +116,7 @@ verbs ask, and a `gh`, `glab` or `bkt` command off the list is refused.
 A run steered by log text can still send out what it can read, but only to a host on its Network allowlist. A run can
 write into the package caches, so it could poison a cached package for a later build; the console does not guard that. `GH_TOKEN`
 reaches `api.github.com`, so a steered run can still use it there (`gh gist create`, a push to a repo it controls); no
-domain rule stops that. The Connectors' API hosts are on every run's list, so a steered run can send out what it reads to Datadog, Slack, Sentry or Atlassian too, but only to their API hosts, never their ingest or webhook hosts. A command to any other host fails with the host named in its result, and the run goes on. The
+domain rule stops that. A Connection's host is on every run's list, a PROD one too, so a steered run can open a connection to it with a credential it can read, such as a `.env` value in the checkout; the Keychain secret stays out of reach, and the Connection's Access Level still governs what the MCP Server does. The Connectors' API hosts are on every run's list, so a steered run can send out what it reads to Datadog, Slack, Sentry or Atlassian too, but only to their API hosts, never their ingest or webhook hosts. A command to any other host fails with the host named in its result, and the run goes on. The
 operator adds the host in Permissions and the next run has it.
 
 With Loopback on, a chat run steered by text it read can reach any service on the Mac's `localhost` that needs no secret a
