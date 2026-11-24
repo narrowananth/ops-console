@@ -5,7 +5,7 @@ import path from 'node:path';
 import { AccessMode, CONNECTOR_SERVERS, ConnectorId, GitHost, RunPurpose, StepBlock } from '@ops-console/shared';
 import { sql } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
-import { runSandbox, worktreeGitDirs } from '../src/agent/run-sandbox';
+import { LINUX_RUN_SANDBOX_PENDING, runSandbox, worktreeGitDirs } from '../src/agent/run-sandbox';
 import { AgentRuntime, HOST_WRITE_DENIALS } from '../src/agent/runtime';
 import { repos } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
@@ -189,6 +189,25 @@ describe('Run sandbox on agent runs', () => {
     });
     await converse(daemon, id, 'again');
     expect((await api(daemon).get(`/sessions/${id}`)).body.data.last_error).toBeNull();
+  });
+});
+
+describe('Run sandbox on Linux until it is verified there (Behavior 21)', () => {
+  it('starts no run and shows the Session why', async () => {
+    const real = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    try {
+      const daemon = await start();
+      const id = daemon.createSession();
+      await converse(daemon, id, 'go');
+      expect((await api(daemon).get(`/sessions/${id}`)).body.data).toMatchObject({
+        state: 'failed',
+        last_error: LINUX_RUN_SANDBOX_PENDING,
+      });
+      expect(daemon.sdk.ran).toEqual([]);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: real });
+    }
   });
 });
 

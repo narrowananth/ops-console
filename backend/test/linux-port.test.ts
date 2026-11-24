@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { LINUX_RUN_SANDBOX_PENDING, runSandbox } from '../src/agent/run-sandbox';
 import { defaultDataDir } from '../src/common/platform';
 import { linuxInstallAdvice } from '../src/connectors/linux-install';
+import { adoptsKeychainItems } from '../src/keychain/handover';
 import {
   type KeychainEntry,
   KeychainTimeout,
@@ -450,5 +451,23 @@ describe('a program that is not installed (Behavior 31)', () => {
     } finally {
       process.env.PATH = was;
     }
+  });
+});
+
+describe('updating on Linux (Behavior 18)', () => {
+  const installed = {
+    version: '1.0.0',
+    self: '/h/.ops-console/versions/1.0.0/node/bin/node',
+    versionDir: '/h/.ops-console/versions/1.0.0',
+  };
+
+  it('hands no Keychain item over, so no start waits for a handover', () => {
+    expect(adoptsKeychainItems({ ...installed, platform: 'linux' })).toBe(false);
+  });
+
+  it('still hands items over on a Mac, from an installed version only (34)', () => {
+    expect(adoptsKeychainItems({ ...installed, platform: 'darwin' })).toBe(true);
+    expect(adoptsKeychainItems({ ...installed, platform: 'darwin', version: 'dev' })).toBe(false);
+    expect(adoptsKeychainItems({ ...installed, platform: 'darwin', self: '/usr/local/bin/node' })).toBe(false);
   });
 });

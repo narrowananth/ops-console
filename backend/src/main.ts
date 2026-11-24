@@ -18,7 +18,7 @@ import { readGoogleClient } from './connectors/google-client';
 import { startDaemon } from './daemon';
 import { DevtoolsModule } from './devtools/devtools.module';
 import { HealthWatchModule } from './health-watch/health-watch.module';
-import { adoptKeychainItems, HandoverRefused, otherVersionApps } from './keychain/handover';
+import { adoptKeychainItems, adoptsKeychainItems, HandoverRefused, otherVersionApps } from './keychain/handover';
 import { HandoverGate } from './keychain/handover-gate';
 import { KeychainHandoverTracker } from './keychain/handover-state';
 import { LoginKeychain } from './keychain/keychain';
@@ -97,9 +97,7 @@ const keychain = new LoginKeychain(process.env.OPS_CONSOLE_KEYCHAIN_SERVICE || u
 function adoptOnUpdate(handover: KeychainHandoverTracker): Promise<boolean> {
   const versionDir = path.dirname(realpathSync(appDir));
   const self = realpathSync(process.execPath);
-  if (version === 'dev' || process.platform !== 'darwin' || !self.startsWith(`${versionDir}/`)) {
-    return Promise.resolve(false);
-  }
+  if (!adoptsKeychainItems({ version, platform: process.platform, self, versionDir })) return Promise.resolve(false);
   const log = (level: string, text: string) =>
     process.stdout.write(`${new Date().toISOString()} ${level} [keychain] ${text}\n`);
   mkdirSync(dataDir, { recursive: true });

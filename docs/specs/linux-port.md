@@ -79,6 +79,11 @@ The Run sandbox is the open part. The Agent SDK sandbox uses bubblewrap on Linux
 35. The Homebrew tap and the Brew entry command stay macOS-only.
 36. Merge denials, the PROD write rule, `run_integration`'s list and Approvals, and the console's own pushing do not change.
 
+### Browser and Setup agent
+
+37. The Session browser finds Chrome on Linux: `OPS_CONSOLE_CHROME_PATH` first, then `google-chrome`, `google-chrome-stable`, `chromium` and `chromium-browser` on the `PATH`. With none, the browser panel says Chrome is missing, as it does on macOS.
+38. The Setup agent's instructions name the config locations of the machine it runs on: on Linux the XDG folders and each app's Linux path, not `~/Library`.
+
 ## Settled
 
 - **Keychain**: the Glossary term stays for the operator's secret store on both systems; on Linux it is the Secret Service. The Permissions row keeps its name and its text names the system.
@@ -194,6 +199,7 @@ No design screen changes layout. The rows keep their position and shape.
 - **Keychain availability and Permissions routes** (backend + SQLite): 10, 11, 16, 22, and the API above.
 - **Run sandbox settings** (unit): 21, 23 and 25 to 27, as built from the spike's results.
 - **Run sandbox on a Linux runner** (browser or CI): 21 and 22 with a real bubblewrap.
+- **Chrome path and Setup agent instructions** (unit): 37 and 38.
 - **Folder dialog, local servers and package-manager hint** (unit with a fake process runner): 29, 31 and 33.
 - **Installer, CLI and terminals** (CI smoke test on a Linux runner per architecture): 3 to 9 and 32.
 - **Permissions page** (frontend component): 10 to 12 and the UI states.
@@ -215,4 +221,4 @@ Built on branch `linux-port`, the spike-independent parts only. Each item was ch
 - Held: no agent run starts on Linux while the Run sandbox is unverified there (`LINUX_RUN_SANDBOX_VERIFIED` is false), and the Run sandbox row says so. Items 23 to 28 wait on the spike, except the `save_file` folders in item 27.
 - Not built: the ADR 0004 and 0006 rewrites, and publishing the Linux tarballs (the release's `checksums.txt` stays macOS-only).
 - Unverified: item 20 (where Claude Code keeps its sign-in on Linux); the native error wording that tells "no Secret Service" from "refused" (item 16), the package names in item 33 on each distro, the namespace flags in item 22 against the SDK's own, and every Linux behavior on a real machine. No test pins item 18 (the handover skip) or the Session's "why" when a run fails closed (item 21).
-- Follow-ups, to be written as spec items first: the Session browser's Chrome path on Linux, and the Setup agent's macOS paths.
+- Follow-ups: the spike script and its results template are in `docs/linux-spike.md` and `scripts/linux-spike/spike.sh`, written but never run. Items 37 and 38 cover the two Linux gaps found while building (the Session browser's Chrome path, the Setup agent's macOS paths); they are not built, and they matter once runs start on Linux.
