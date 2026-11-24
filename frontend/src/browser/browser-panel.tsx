@@ -9,6 +9,7 @@ import {
   useCloseTab,
   useCreateTab,
   useLocalServers,
+  useLocalServersNotice,
   useOpenExternal,
   usePatchTab,
   useProcesses,
@@ -46,6 +47,7 @@ export function BrowserPanel({
 }) {
   const state = useBrowserState(sessionId, true);
   const servers = useLocalServers(sessionId, true, true);
+  const notice = useLocalServersNotice(sessionId, true);
   const stopServer = useStopServer(sessionId);
   const processes = useProcesses(sessionId, true);
   const create = useCreateTab(sessionId);
@@ -132,6 +134,7 @@ export function BrowserPanel({
           servers={servers.data}
           processes={processes.data ?? []}
           error={servers.error?.message ?? null}
+          notice={notice.data ?? null}
           onOpen={(address) => open(address, true)}
           onStop={(port) => stopServer.mutate(port)}
         />
@@ -153,6 +156,7 @@ export function BrowserPanel({
               servers={servers.data}
               processes={processes.data ?? []}
               error={servers.error?.message ?? null}
+              notice={notice.data ?? null}
               onOpen={(address) => open(address, true)}
               onStop={(port) => stopServer.mutate(port)}
             />

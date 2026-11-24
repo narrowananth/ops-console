@@ -55,7 +55,8 @@ export class ProcessesController {
   }
 
   @Get('sessions/:id/local-servers')
-  async localServers(@Param() params: unknown): Promise<{ data: { servers: LocalServer[] } }> {
-    return { data: { servers: await this.processes.localServers(parseInput(idParams, params, 'params').id) } };
+  async localServers(@Param() params: unknown): Promise<{ data: { servers: LocalServer[]; notice: string | null } }> {
+    const servers = await this.processes.localServers(parseInput(idParams, params, 'params').id);
+    return { data: { servers, notice: this.processes.scanNotice() } };
   }
 }

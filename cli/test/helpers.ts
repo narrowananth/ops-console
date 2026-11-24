@@ -4,6 +4,7 @@ import { cp, mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promis
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 export const REPO = path.resolve(import.meta.dirname, '../..');
 const FAKES = path.join(import.meta.dirname, 'fakes');
@@ -25,15 +26,22 @@ export async function freePort(): Promise<number> {
  * A release folder shaped like a GitHub Release: the tarball and checksums.txt. The tarball's Node is a
  * link to the Node running the tests, and its native modules come from the backend's node_modules.
  */
-export async function makeRelease(version: string, arch: 'arm64' | 'x64' = 'arm64'): Promise<string> {
+export async function makeRelease(
+  version: string,
+  arch: 'arm64' | 'x64' = 'arm64',
+  platform: 'darwin' | 'linux' = 'darwin',
+): Promise<string> {
   const stage = await tempDir('stage-');
   await writeFile(path.join(stage, 'VERSION'), `${version}\n`);
   await mkdir(path.join(stage, 'bin'));
   await cp(path.join(REPO, 'cli/bin/ops-console'), path.join(stage, 'bin/ops-console'));
   await mkdir(path.join(stage, 'node/bin'), { recursive: true });
   await symlink(process.execPath, path.join(stage, 'node/bin/node'));
-  await mkdir(path.join(stage, 'Ops Console.app/Contents/MacOS'), { recursive: true });
-  await symlink(process.execPath, path.join(stage, 'Ops Console.app/Contents/MacOS/Ops Console'));
+  // Linux has no app: the daemon runs node/bin/node itself.
+  if (platform === 'darwin') {
+    await mkdir(path.join(stage, 'Ops Console.app/Contents/MacOS'), { recursive: true });
+    await symlink(process.execPath, path.join(stage, 'Ops Console.app/Contents/MacOS/Ops Console'));
+  }
   await mkdir(path.join(stage, 'cli'));
   await cp(path.join(REPO, 'cli/dist/ops-console.js'), path.join(stage, 'cli/ops-console.js'));
   await writeFile(path.join(stage, 'cli/package.json'), '{ "type": "module" }\n');
@@ -43,7 +51,7 @@ export async function makeRelease(version: string, arch: 'arm64' | 'x64' = 'arm6
   await cp(path.join(REPO, 'install.sh'), path.join(stage, 'install.sh'));
 
   const release = await tempDir('release-');
-  const tarball = `ops-console-darwin-${arch}.tar.gz`;
+  const tarball = `ops-console-${platform}-${arch}.tar.gz`;
   const tar = spawnSync('tar', ['-czf', path.join(release, tarball), '-C', stage, '.']);
   if (tar.status !== 0) throw new Error(String(tar.stderr));
   const sum = createHash('sha256')
@@ -93,6 +101,31 @@ export async function machine(release: string, port: number): Promise<Machine> {
   };
 }
 
+/**
+ * A fresh HOME that looks like a glibc Linux machine to the installer, and, through a preload that sets
+ * `process.platform`, to the CLI: fake systemctl and xdg-open stand in for the system's. No DISPLAY, so `open`
+ * finds no desktop until a test sets one.
+ */
+export async function linuxMachine(release: string, port: number): Promise<Machine> {
+  const m = await machine(release, port);
+  const state = path.join(m.home, '.fake-systemctl');
+  delete m.env.FAKE_LAUNCHCTL_STATE;
+  Object.assign(m.env, {
+    FAKE_UNAME_S: 'Linux',
+    FAKE_UNAME_M: 'x86_64',
+    FAKE_SYSTEMCTL_STATE: state,
+    NODE_OPTIONS: `--import=${pathToFileURL(path.join(FAKES, 'force-linux.mjs')).href}`,
+  });
+  return {
+    ...m,
+    dataDir: path.join(m.home, '.local/share/ops-console'),
+    logFile: path.join(m.home, '.local/state/ops-console/daemon.log'),
+    async calls() {
+      return (await readFile(path.join(state, 'calls.log'), 'utf8').catch(() => '')).trim().split('\n');
+    },
+  };
+}
+
 export type Result = { code: number | null; stdout: string; stderr: string };
 
 export function run(command: string, args: string[], env: NodeJS.ProcessEnv, cwd?: string): Promise<Result> {
@@ -120,6 +153,10 @@ export function opsConsole(m: Machine, ...args: string[]): Promise<Result> {
 
 /** Stops a daemon a test left running. */
 export async function cleanup(m: Machine): Promise<void> {
+  if (m.env.FAKE_SYSTEMCTL_STATE) {
+    await run('systemctl', ['--user', 'disable', '--now', 'ops-console.service'], m.env);
+    return;
+  }
   await run('launchctl', ['bootout', `gui/${process.getuid?.()}/dev.ops-console`], m.env);
 }
 

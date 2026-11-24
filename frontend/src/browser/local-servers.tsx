@@ -48,6 +48,7 @@ export function LocalServers({
   servers,
   processes,
   error,
+  notice = null,
   onOpen,
   onStop,
 }: {
@@ -55,6 +56,8 @@ export function LocalServers({
   servers: LocalServer[] | undefined;
   processes: SessionProcess[];
   error: string | null;
+  /** Why the list may be empty on this machine, such as a missing `lsof`. */
+  notice?: string | null;
   onOpen: (address: string) => void;
   onStop: (port: number) => void;
 }) {
@@ -67,6 +70,10 @@ export function LocalServers({
         </p>
       ) : servers === undefined ? (
         <p className="m-0 text-xs text-neutral-700">Looking for local servers…</p>
+      ) : listed.length === 0 && notice !== null ? (
+        <p role="status" className="m-0 text-xs text-accent-700">
+          {notice}
+        </p>
       ) : listed.length === 0 ? (
         <p className="m-0 text-[13px] text-neutral-700">
           No server is running for this Session. Start one from Terminals and its page opens here, or type an address

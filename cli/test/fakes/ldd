@@ -1,0 +1,10 @@
+#!/bin/sh
+# `ldd --version`: GNU prints its banner on stdout, musl on stderr with exit 1. $FAKE_LDD is a glibc version or "musl".
+case "${FAKE_LDD:-2.39}" in
+  musl)
+    echo "musl libc (x86_64)" >&2
+    echo "Version 1.2.5" >&2
+    exit 1
+    ;;
+  *) echo "ldd (Ubuntu GLIBC ${FAKE_LDD:-2.39}-0ubuntu8) ${FAKE_LDD:-2.39}" ;;
+esac

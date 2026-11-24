@@ -24,17 +24,42 @@ if [ "$os/$cpu" = Darwin/x86_64 ] && [ "$(sysctl -n sysctl.proc_translated 2>/de
   cpu=arm64
 fi
 case "$os/$cpu" in
-  Darwin/arm64) arch=arm64 ;;
-  Darwin/x86_64) arch=x64 ;;
-  *) fail "unsupported platform $os $cpu; ops-console runs on macOS on Apple silicon or Intel" ;;
+  Darwin/arm64) platform=darwin arch=arm64 ;;
+  Darwin/x86_64) platform=darwin arch=x64 ;;
+  Linux/aarch64 | Linux/arm64) platform=linux arch=arm64 ;;
+  Linux/x86_64) platform=linux arch=x64 ;;
+  *) fail "unsupported platform $os $cpu; ops-console runs on macOS on Apple silicon or Intel, and on Linux with glibc on x86_64 or aarch64" ;;
 esac
 
-# The bundled Node and its native modules are built for macOS 13.5 and later.
-macos=$(sw_vers -productVersion)
-major=$(echo "$macos" | cut -d. -f1)
-minor=$(echo "$macos.0" | cut -d. -f2)
-if [ "$major" -lt 13 ] || { [ "$major" -eq 13 ] && [ "$minor" -lt 5 ]; }; then
-  fail "ops-console needs macOS 13.5 or later; this Mac runs $macos"
+if [ "$platform" = darwin ]; then
+  # The bundled Node and its native modules are built for macOS 13.5 and later.
+  macos=$(sw_vers -productVersion)
+  major=$(echo "$macos" | cut -d. -f1)
+  minor=$(echo "$macos.0" | cut -d. -f2)
+  if [ "$major" -lt 13 ] || { [ "$major" -eq 13 ] && [ "$minor" -lt 5 ]; }; then
+    fail "ops-console needs macOS 13.5 or later; this Mac runs $macos"
+  fi
+else
+  # The bundled Node and its native modules link glibc. musl prints its banner on stderr and exits 1.
+  libc=$(ldd --version 2>&1 || true)
+  musl=
+  case $libc in
+    *[Mm][Uu][Ss][Ll]*) musl=1 ;;
+    *GNU* | *GLIBC* | *glibc*) ;;
+    *) ls /lib/ld-musl-* >/dev/null 2>&1 && musl=1 ;;
+  esac
+  [ -z "$musl" ] || fail "ops-console needs a glibc distribution; this system uses musl (Alpine, for one)"
+  # Oldest glibc accepted: 2.35, as in Ubuntu 22.04 and Debian 12. The native modules are built on a newer one.
+  glibc=$(printf '%s\n' "$libc" | head -n 1 | awk '{ print $NF }')
+  case $glibc in
+    [0-9]*.[0-9]*)
+      gmajor=$(echo "$glibc" | cut -d. -f1)
+      gminor=$(echo "$glibc" | cut -d. -f2)
+      if [ "$gmajor" -lt 2 ] || { [ "$gmajor" -eq 2 ] && [ "$gminor" -lt 35 ]; }; then
+        fail "ops-console needs glibc 2.35 or later; this system runs glibc $glibc"
+      fi
+      ;;
+  esac
 fi
 
 if [ -n "${OPS_CONSOLE_RELEASE_URL:-}" ]; then
@@ -44,7 +69,7 @@ elif [ -n "${OPS_CONSOLE_VERSION:-}" ]; then
 else
   base=https://github.com/$repo/releases/latest/download
 fi
-tarball=ops-console-darwin-$arch.tar.gz
+tarball=ops-console-$platform-$arch.tar.gz
 
 mkdir -p "$install_dir/versions"
 work=$(mktemp -d "$install_dir/.install.XXXXXX")

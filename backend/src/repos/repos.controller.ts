@@ -1,5 +1,12 @@
 import { Body, Controller, Delete, Get, HttpCode, Inject, Optional, Param, Patch, Post, Query } from '@nestjs/common';
-import { type Branch, importRepoSchema, type Repo, removeRepoQuerySchema, renameRepoSchema } from '@ops-console/shared';
+import {
+  type Branch,
+  type FolderDialog,
+  importRepoSchema,
+  type Repo,
+  removeRepoQuerySchema,
+  renameRepoSchema,
+} from '@ops-console/shared';
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
 import { FOLDER_PICKER, type FolderPicker } from './folder-picker';
@@ -19,6 +26,12 @@ export class ReposController {
   @Get()
   list() {
     return this.repos.list();
+  }
+
+  /** Whether the folder dialog can open here: where it cannot, the UI asks for the path instead. */
+  @Get('folder-dialog')
+  async folderDialog(): Promise<{ data: FolderDialog }> {
+    return { data: { available: (await this.picker.available?.()) ?? true } };
   }
 
   /** Opens the folder dialog on this machine; it picks one folder or several. Nothing is imported: the paths go back to the UI. */

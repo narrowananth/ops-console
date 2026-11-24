@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { RepoIcon } from '../components/ui/brand-icon';
 import { Button } from '../components/ui/button';
 import { Empty } from '../components/ui/empty';
-import { useImportRepo, usePickFolder, useRemoveRepo, useRepos } from '../lib/queries';
+import { useFolderDialog, useImportRepo, usePickFolder, useRemoveRepo, useRepos } from '../lib/queries';
 import { ascending } from '../lib/sort';
 
 function RepoRow({ repo }: { repo: Repo }) {
@@ -95,6 +95,8 @@ export function ReposTab() {
   const repos = useRepos();
   const importRepo = useImportRepo();
   const pick = usePickFolder();
+  const dialog = useFolderDialog();
+  const [typed, setTyped] = useState('');
   const browse = () =>
     pick.mutate(undefined, {
       onSuccess: (chosen) => {
@@ -106,22 +108,44 @@ export function ReposTab() {
     <div>
       <div className="flex flex-col gap-2 border-b border-line px-5 py-4">
         <div className="text-xs font-semibold">Import a local repo</div>
-        <button
-          type="button"
-          disabled={pick.isPending || importRepo.isPending}
-          title="Pick the top folder of one git repository or several: ⌘-click to pick more. Sessions then run in them, on their branches."
-          onClick={browse}
-          className="flex cursor-pointer flex-col items-start gap-0.5 border border-divider bg-card px-3 py-2.5 text-left text-text hover:bg-neutral-200 disabled:cursor-wait"
-        >
-          <span className="text-[13px] font-semibold">Local folder</span>
-          <span className="text-xs text-neutral-700">
-            {pick.isPending
-              ? 'Waiting for the folder dialog…'
-              : importRepo.isPending
-                ? 'Importing…'
-                : 'Browse folders on disk: ⌘-click to pick several'}
-          </span>
-        </button>
+        {dialog.data?.available === false ? (
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (typed.trim() !== '') importRepo.mutate([typed.trim()], { onSuccess: () => setTyped('') });
+            }}
+          >
+            <input
+              aria-label="Folder path"
+              value={typed}
+              onChange={(event) => setTyped(event.target.value)}
+              placeholder="/home/you/code/my-repo"
+              title="No folder dialog is installed (zenity or kdialog), so type the path of a git repository."
+              className="min-w-0 flex-1 border border-divider bg-card px-3 py-2 font-mono text-[13px]"
+            />
+            <Button type="submit" disabled={typed.trim() === '' || importRepo.isPending}>
+              {importRepo.isPending ? 'Importing…' : 'Import'}
+            </Button>
+          </form>
+        ) : (
+          <button
+            type="button"
+            disabled={pick.isPending || importRepo.isPending}
+            title="Pick the top folder of one git repository or several: ⌘-click to pick more. Sessions then run in them, on their branches."
+            onClick={browse}
+            className="flex cursor-pointer flex-col items-start gap-0.5 border border-divider bg-card px-3 py-2.5 text-left text-text hover:bg-neutral-200 disabled:cursor-wait"
+          >
+            <span className="text-[13px] font-semibold">Local folder</span>
+            <span className="text-xs text-neutral-700">
+              {pick.isPending
+                ? 'Waiting for the folder dialog…'
+                : importRepo.isPending
+                  ? 'Importing…'
+                  : 'Browse folders on disk: ⌘-click to pick several'}
+            </span>
+          </button>
+        )}
         {pick.isError && (
           <div role="alert" className="text-xs text-accent-700">
             {pick.error.message}

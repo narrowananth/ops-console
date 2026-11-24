@@ -1,5 +1,5 @@
 import { type DynamicModule, Module } from '@nestjs/common';
-import { FOLDER_PICKER, type FolderPicker, MacFolderPicker } from './folder-picker';
+import { FOLDER_PICKER, type FolderPicker, folderPicker } from './folder-picker';
 import { GIT, Git } from './git';
 import { ReposController } from './repos.controller';
 import { ReposService } from './repos.service';
@@ -14,7 +14,7 @@ export class ReposModule {
       controllers: [ReposController],
       providers: [
         { provide: GIT, useValue: new Git() },
-        { provide: FOLDER_PICKER, useValue: config.picker ?? new MacFolderPicker() },
+        { provide: FOLDER_PICKER, useValue: config.picker ?? folderPicker() },
         ReposService,
       ],
       exports: [ReposService, GIT],

@@ -547,7 +547,7 @@ describe('Full Disk Access for the Setup agent', () => {
 
 /** launchd's agent as the operator switches it under App Background Activity; tests never open System Settings. */
 class FakeStartAtLogin implements StartAtLoginGate {
-  state: StartAtLogin = { on: false, dev_build: false };
+  state: StartAtLogin = { on: false, dev_build: false, manager: 'launchd', lingering: null };
   opened = 0;
 
   async check(): Promise<StartAtLogin> {
@@ -565,14 +565,14 @@ describe('Start at login', () => {
     const ctx = await start({ startAtLogin });
     const before = await api(ctx.daemon).get('/terminals/start-at-login');
     expect(before.status).toBe(200);
-    expect(before.body.data).toEqual({ on: false, dev_build: false });
+    expect(before.body.data).toEqual({ on: false, dev_build: false, manager: 'launchd', lingering: null });
 
     const opened = await api(ctx.daemon).post('/terminals/start-at-login/settings');
     expect(opened.status).toBe(204);
     expect(startAtLogin.opened).toBe(1);
 
-    startAtLogin.state = { on: true, dev_build: false };
+    startAtLogin.state = { on: true, dev_build: false, manager: 'launchd', lingering: false };
     const after = await api(ctx.daemon).get('/terminals/start-at-login');
-    expect(after.body.data).toEqual({ on: true, dev_build: false });
+    expect(after.body.data).toEqual({ on: true, dev_build: false, manager: 'launchd', lingering: false });
   });
 });

@@ -49,6 +49,7 @@ import {
   readFailure,
 } from './hosted-mcp';
 import { HostedServers } from './hosted-servers';
+import { linuxInstallAdvice } from './linux-install';
 import { NEW_RELIC_KEY } from './new-relic-api';
 import { NEW_RELIC_SERVER } from './new-relic-mcp';
 
@@ -822,6 +823,10 @@ export class ConnectorsService implements OnModuleDestroy {
     const present = await Promise.all(commands.map((command) => this.tools.installed(command)));
     const missing = commands.filter((_, index) => !present[index]);
     if (missing.length === 0) return;
+    // Off macOS the console runs no installer: it names the command, since each distro installs its own way.
+    if (process.platform !== 'darwin') {
+      throw new ApiError(409, ErrorCode.InvalidState, linuxInstallAdvice(missing, await this.tools.installed('brew')));
+    }
     if (!(await this.tools.installed('brew'))) {
       throw new ApiError(
         409,
@@ -1179,6 +1184,7 @@ const INSTALL = {
 };
 
 function missingToolMessage(command: keyof typeof INSTALL): string {
+  if (process.platform !== 'darwin') return linuxInstallAdvice([command], false);
   return `${command} is not installed: install ${INSTALL[command]}, then Connect again`;
 }
 

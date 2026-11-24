@@ -3,11 +3,19 @@ import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 
-/** Runs a program with no shell and returns its output. `lsof` and `ps` exit non-zero when nothing matches; that is an empty answer. */
-export async function output(file: string, args: string[]): Promise<string> {
+/**
+ * Runs a program with no shell and returns its output. `lsof` and `ps` exit non-zero when nothing matches; that is an
+ * empty answer. So is a program that is not installed, unless `missing` is `throw`, for a caller that says so.
+ */
+export async function output(
+  file: string,
+  args: string[],
+  options: { missing?: 'empty' | 'throw' } = {},
+): Promise<string> {
   try {
     return (await run(file, args, { timeout: 5000, maxBuffer: 16 * 1024 * 1024 })).stdout;
   } catch (error) {
+    if (options.missing === 'throw' && (error as NodeJS.ErrnoException).code === 'ENOENT') throw error;
     if (
       error instanceof Error &&
       'stdout' in error &&

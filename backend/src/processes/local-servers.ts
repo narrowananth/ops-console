@@ -11,7 +11,13 @@ export const LOCAL_SERVER_SCANNER = Symbol('LOCAL_SERVER_SCANNER');
 export interface LocalServerScanner {
   /** A reading no older than `maxAgeMs` may be reused; the default reads fresh. */
   scan(maxAgeMs?: number): Promise<ListeningServer[]>;
+  /** Why the last scan could list nothing, such as a missing `lsof`; null when it could. */
+  notice?(): string | null;
 }
+
+/** What the server list says on a machine with no `lsof`. */
+export const LSOF_MISSING =
+  'lsof is not installed, so the servers on this machine cannot be listed. Install it with your package manager (for example `sudo apt install lsof`).';
 
 const LOOPBACK_HOSTS = new Set(['*', 'localhost', '[::1]', '[::]']);
 
@@ -49,6 +55,12 @@ function parseCwds(text: string): Map<number, string> {
 
 /** Reads listening sockets with `lsof` and each process's folder with one more call; names come from the shared `ps`. */
 export class LsofScanner implements LocalServerScanner {
+  private missing = false;
+
+  notice(): string | null {
+    return this.missing ? LSOF_MISSING : null;
+  }
+
   private last: { at: number; result: Promise<ListeningServer[]> } | null = null;
 
   scan(maxAgeMs = 0): Promise<ListeningServer[]> {
@@ -63,7 +75,17 @@ export class LsofScanner implements LocalServerScanner {
   }
 
   private async read(maxAgeMs: number): Promise<ListeningServer[]> {
-    const listeners = parseListeners(await output('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-F', 'pcn']));
+    let listening: string;
+    try {
+      listening = await output('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-F', 'pcn'], { missing: 'throw' });
+      this.missing = false;
+    } catch (error) {
+      // A machine with no `lsof` lists no servers, as on a minimal Linux install; nothing else depends on it.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      this.missing = true;
+      return [];
+    }
+    const listeners = parseListeners(listening);
     const byPort = new Map<number, (typeof listeners)[number]>();
     for (const listener of listeners) {
       if (!isConsolePort(listener.port) && !byPort.has(listener.port)) {

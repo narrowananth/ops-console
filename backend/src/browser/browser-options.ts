@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
+import { openProgram } from '../common/platform';
 
 export const BROWSER_OPTIONS = Symbol('BROWSER_OPTIONS');
 
@@ -25,5 +26,5 @@ export function findChrome(configured?: string): string | null {
 const run = promisify(execFile);
 
 export async function openInDefaultBrowser(url: string): Promise<void> {
-  await run('open', [url]);
+  await run(openProgram(), [url]);
 }

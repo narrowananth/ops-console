@@ -51,7 +51,7 @@ diagrams: [docs/architecture.md](docs/architecture.md), with the drawings in [do
 
 ## Install
 
-On macOS 13.5 or later, on Apple silicon or Intel, with no sudo:
+On macOS 13.5 or later, on Apple silicon or Intel, with no sudo (Linux builds are not released yet; see [docs/roadmap.md](docs/roadmap.md)):
 
 ```
 curl -fsSL https://raw.githubusercontent.com/narrowananth/ops-console/main/install.sh | sh

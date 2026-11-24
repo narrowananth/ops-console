@@ -8,6 +8,7 @@ import { AgentModule } from './agent/agent.module';
 import { ClaudeAgentSdk } from './agent/agent-sdk';
 import { quietShadowedPrompt } from './agent/sdk-warnings';
 import { BrowserModule } from './browser/browser.module';
+import { defaultDataDir } from './common/platform';
 import { McpConnectionTester } from './connections/connection-tester';
 import { ConnectionsModule } from './connections/connections.module';
 import { CliConnectorTools } from './connectors/connector-tools';
@@ -17,7 +18,7 @@ import { readGoogleClient } from './connectors/google-client';
 import { startDaemon } from './daemon';
 import { DevtoolsModule } from './devtools/devtools.module';
 import { HealthWatchModule } from './health-watch/health-watch.module';
-import { adoptKeychainItems, HandoverRefused, otherVersionApps } from './keychain/handover';
+import { adoptKeychainItems, adoptsKeychainItems, HandoverRefused, otherVersionApps } from './keychain/handover';
 import { HandoverGate } from './keychain/handover-gate';
 import { KeychainHandoverTracker } from './keychain/handover-state';
 import { LoginKeychain } from './keychain/keychain';
@@ -60,9 +61,7 @@ const versionFile = path.join(appDir, '..', 'VERSION');
 const uiDir = path.join(appDir, 'public');
 const googleClient = readGoogleClient(env, path.join(appDir, 'google-client.json'));
 const version = existsSync(versionFile) ? readFileSync(versionFile, 'utf8').trim() : 'dev';
-const dataDir = path.resolve(
-  env.OPS_CONSOLE_DATA_DIR ?? path.join(homedir(), 'Library', 'Application Support', 'ops-console'),
-);
+const dataDir = path.resolve(env.OPS_CONSOLE_DATA_DIR ?? defaultDataDir());
 
 /**
  * An installed daemon with no list of its keys yet asks its own app for them, once, in the background: later handovers
@@ -98,9 +97,7 @@ const keychain = new LoginKeychain(process.env.OPS_CONSOLE_KEYCHAIN_SERVICE || u
 function adoptOnUpdate(handover: KeychainHandoverTracker): Promise<boolean> {
   const versionDir = path.dirname(realpathSync(appDir));
   const self = realpathSync(process.execPath);
-  if (version === 'dev' || process.platform !== 'darwin' || !self.startsWith(`${versionDir}/`)) {
-    return Promise.resolve(false);
-  }
+  if (!adoptsKeychainItems({ version, platform: process.platform, self, versionDir })) return Promise.resolve(false);
   const log = (level: string, text: string) =>
     process.stdout.write(`${new Date().toISOString()} ${level} [keychain] ${text}\n`);
   mkdirSync(dataDir, { recursive: true });

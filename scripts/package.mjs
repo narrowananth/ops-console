@@ -1,7 +1,8 @@
-// Builds out/ops-console-darwin-<arch>.tar.gz for the machine it runs on:
+// Builds out/ops-console-<darwin|linux>-<arch>.tar.gz for the machine it runs on:
 //   node scripts/package.mjs [version]
-// The tarball holds this Node's own darwin build, the daemon, the UI, the CLI and the native modules built
-// for that Node, so the version running here must be the version shipped.
+// The tarball holds this Node's own build for that system, the daemon, the UI, the CLI and the native modules built
+// for that Node, so the version running here must be the version shipped. On Linux, run it on a runner of the target
+// architecture: `npm install` compiles node-pty there, and the operator's machine needs no compiler.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
@@ -11,10 +12,11 @@ import { buildAppBundle } from './app-bundle.mjs';
 const repo = path.resolve(import.meta.dirname, '..');
 const version = process.argv[2] ?? JSON.parse(await readFile(path.join(repo, 'package.json'), 'utf8')).version;
 const arch = process.arch;
-if (process.platform !== 'darwin' || !['arm64', 'x64'].includes(arch)) {
-  throw new Error(`package on macOS arm64 or x64, not ${process.platform} ${arch}`);
+const platform = process.platform;
+if (!['darwin', 'linux'].includes(platform) || !['arm64', 'x64'].includes(arch)) {
+  throw new Error(`package on macOS or Linux, arm64 or x64, not ${platform} ${arch}`);
 }
-const name = `ops-console-darwin-${arch}`;
+const name = `ops-console-${platform}-${arch}`;
 const out = path.join(repo, 'out');
 const stage = path.join(out, name);
 const sh = (command, args, cwd = repo) => execFileSync(command, args, { cwd, stdio: 'inherit' });
@@ -64,8 +66,8 @@ await writeFile(
 );
 sh('npm', ['install', '--omit=dev', '--no-package-lock', '--no-audit', '--no-fund'], path.join(stage, 'app'));
 
-// This Node's darwin build, checked against nodejs.org's published sums.
-const nodeName = `node-${process.version}-darwin-${arch}`;
+// This Node's build for this system, checked against nodejs.org's published sums.
+const nodeName = `node-${process.version}-${platform}-${arch}`;
 const nodeTarball = path.join(out, `${nodeName}.tar.gz`);
 const dist = `https://nodejs.org/dist/${process.version}`;
 sh('curl', ['-fsSL', `${dist}/${nodeName}.tar.gz`, '-o', nodeTarball]);
@@ -88,10 +90,12 @@ sh('tar', [
   `${nodeName}/bin/node`,
   `${nodeName}/LICENSE`,
 ]);
-// The daemon runs as Ops Console.app; the CLI and the MCP helpers reach the same binary through node/bin/node.
-const executable = await buildAppBundle({ node: path.join(stage, 'node/bin/node'), dir: stage });
-await rm(path.join(stage, 'node/bin/node'));
-await symlink(path.relative(path.join(stage, 'node/bin'), executable), path.join(stage, 'node/bin/node'));
+if (platform === 'darwin') {
+  // The daemon runs as Ops Console.app; the CLI and the MCP helpers reach the same binary through node/bin/node.
+  const executable = await buildAppBundle({ node: path.join(stage, 'node/bin/node'), dir: stage });
+  await rm(path.join(stage, 'node/bin/node'));
+  await symlink(path.relative(path.join(stage, 'node/bin'), executable), path.join(stage, 'node/bin/node'));
+}
 
 const tarball = path.join(out, `${name}.tar.gz`);
 sh('tar', ['-czf', tarball, '-C', stage, '.']);

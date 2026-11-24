@@ -17,6 +17,16 @@ export type SandboxRun = {
   home?: string;
 };
 
+/**
+ * Whether the Run sandbox has been checked on Linux, where bubblewrap keeps a run's commands out of the Secret Service
+ * (docs/specs/linux-port.md, the spike). Until it is, no run starts on Linux.
+ */
+export const LINUX_RUN_SANDBOX_VERIFIED = false;
+
+/** Why a run does not start on Linux while `LINUX_RUN_SANDBOX_VERIFIED` is false. */
+export const LINUX_RUN_SANDBOX_PENDING =
+  'Agent runs are off on Linux until the Run sandbox is verified there: its limits on the Secret Service, localhost and Docker are not settled yet';
+
 export type WorktreeGitDirs = { common: string; admin: string };
 
 /**
@@ -65,7 +75,10 @@ export function gitControl(workingDir: string, gitFile: boolean): string[] {
  * (a `credential.helper` written there would run with the Keychain). A read-only run may not change its working folder.
  * The run fails when the sandbox is unavailable and can never ask to leave it.
  */
-export function runSandbox(run: SandboxRun): SandboxSettings {
+export function runSandbox(run: SandboxRun, platform: NodeJS.Platform = process.platform): SandboxSettings {
+  // Seatbelt's rules below name macOS paths. Bubblewrap needs rules of its own, which the Linux spike settles; a run
+  // never starts with the wrong ones.
+  if (platform === 'linux' && !LINUX_RUN_SANDBOX_VERIFIED) throw new Error(LINUX_RUN_SANDBOX_PENDING);
   const home = run.home ?? os.homedir();
   return {
     enabled: true,

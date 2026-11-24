@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post } from '@n
 import {
   createTerminalSchema,
   type DiskAccess,
+  type KeychainAvailability,
   type KeychainHandover,
   type KeychainWait,
   type RunSandbox,
@@ -12,6 +13,7 @@ import {
 import { z } from 'zod';
 import { parseInput } from '../common/errors';
 import { KEYCHAIN_HANDOVER, type KeychainHandoverTracker } from '../keychain/handover-state';
+import { KEYCHAIN, type Keychain } from '../keychain/keychain';
 import { KEYCHAIN_WAIT, type KeychainWaitTracker } from '../keychain/keychain-wait';
 import { DISK_ACCESS, type DiskAccessGate } from './disk-access';
 import { RUN_SANDBOX, type RunSandboxGate } from './run-sandbox-gate';
@@ -30,6 +32,7 @@ export class TerminalsController {
     @Inject(RUN_SANDBOX) private readonly runSandbox: RunSandboxGate,
     @Inject(KEYCHAIN_WAIT) private readonly keychainWait: KeychainWaitTracker,
     @Inject(KEYCHAIN_HANDOVER) private readonly keychainHandover: KeychainHandoverTracker,
+    @Inject(KEYCHAIN) private readonly keychain: Keychain,
   ) {}
 
   @Get('disk-access')
@@ -57,6 +60,11 @@ export class TerminalsController {
   @Get('run-sandbox')
   async checkRunSandbox(): Promise<{ data: RunSandbox }> {
     return { data: await this.runSandbox.check() };
+  }
+
+  @Get('keychain')
+  async checkKeychain(): Promise<{ data: KeychainAvailability }> {
+    return { data: (await this.keychain.availability?.()) ?? { available: true, reason: null, store: 'keychain' } };
   }
 
   @Get('keychain-wait')

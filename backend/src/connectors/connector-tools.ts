@@ -4,6 +4,7 @@ import { type AwsProfile, ErrorCode } from '@ops-console/shared';
 import { z } from 'zod';
 import { LOGIN_TIMEOUT_MS } from '../claude-cli/claude-cli';
 import { ApiError } from '../common/errors';
+import { openProgram } from '../common/platform';
 
 const run = promisify(execFile);
 
@@ -331,7 +332,7 @@ export class CliConnectorTools implements ConnectorTools {
   }
 
   async openPage(url: string): Promise<void> {
-    await run('open', [url]);
+    await run(openProgram(), [url]);
   }
 
   async installed(command: string): Promise<boolean> {
