@@ -56,7 +56,7 @@ export function FilterTabs<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <fieldset aria-label={label} className="m-0 flex flex-none items-center gap-px border-0 p-0">
+    <fieldset aria-label={label} className="m-0 flex flex-none items-center gap-1 border-0 p-0">
       {filters.map((filter) => {
         const on = filter.value === value;
         const count = filter.count ?? 0;
@@ -67,7 +67,7 @@ export function FilterTabs<T extends string>({
             type="button"
             aria-pressed={on}
             onClick={() => onChange(filter.value)}
-            className={`flex flex-none cursor-pointer items-center gap-1 rounded-md border-0 px-1.75 py-1 text-xs whitespace-nowrap transition-colors ${on ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:bg-neutral-200 hover:text-text'}`}
+            className={`flex flex-none cursor-pointer items-center gap-1 rounded-md border-0 px-2.5 py-1 text-xs whitespace-nowrap transition-colors ${on ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:bg-neutral-200 hover:text-text'}`}
           >
             {filter.label}
             {count > 0 && (

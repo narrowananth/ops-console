@@ -4,6 +4,8 @@ import { AccessMode, Effort, SessionKind, splitAttachments, withAttachments } fr
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AgentRuntime } from '../src/agent/runtime';
+import { SessionKinds } from '../src/agent/session-kinds';
+import { SessionsService } from '../src/agent/sessions.service';
 import { type AgentDaemon, api, converse, gate, listen, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
 
 const running: AgentDaemon[] = [];
@@ -993,5 +995,59 @@ describe('the Agent runs page', () => {
 
     expect((await api(daemon).delete('/agent-runs')).body.data).toEqual({ dismissed: 3 });
     expect((await api(daemon).get('/agent-runs')).body.data).toEqual([]);
+  });
+});
+
+describe('forking from a response', () => {
+  /** The fixture's Repo kind makes no Sessions of its own: it makes them the way the real one does, minus the worktree. */
+  const makesSessions = (daemon: AgentDaemon) => {
+    const handler = daemon.app.get(SessionKinds).get(SessionKind.Repo);
+    const sessions = daemon.app.get(SessionsService);
+    if (handler) {
+      handler.create = (body) => {
+        const input = body as { repo_id: string; branch: string };
+        return sessions.view(sessions.create({ kind: SessionKind.Repo, repoId: input.repo_id, branch: input.branch }));
+      };
+    }
+  };
+  type Said = { id: string; role: string; parts: { kind: string; text?: string }[] };
+  const said = async (daemon: AgentDaemon, id: string) =>
+    ((await api(daemon).get(`/sessions/${id}/messages`)).body.data as Said[]).map((message) => ({
+      id: message.id,
+      role: message.role,
+      text: message.parts.map((part) => part.text ?? '').join(''),
+    }));
+
+  it('opens a new Session holding the conversation up to that response, and leaves the source alone', async () => {
+    const daemon = await start();
+    makesSessions(daemon);
+    const id = daemon.createSession();
+    await converse(daemon, id, 'first');
+    daemon.sdk.script({ text: 'Second answer.' });
+    await converse(daemon, id, 'second');
+    const [, firstAnswer] = await said(daemon, id);
+
+    const forked = await api(daemon).post(`/sessions/${id}/messages/${firstAnswer?.id}/fork`);
+    expect(forked.status).toBe(201);
+    const copy = forked.body.data;
+    expect(copy.id).not.toBe(id);
+    expect(copy.kind).toBe('repo');
+    expect(copy.title).toMatch(/\(fork\)$/);
+
+    expect((await said(daemon, copy.id)).map(({ role, text }) => ({ role, text }))).toEqual([
+      { role: 'user', text: 'first' },
+      { role: 'agent', text: 'Done.' },
+    ]);
+    expect((await said(daemon, id)).map(({ text }) => text)).toEqual(['first', 'Done.', 'second', 'Second answer.']);
+  });
+
+  it('refuses a message that is not an agent response, and a Session with no conversation', async () => {
+    const daemon = await start();
+    makesSessions(daemon);
+    const id = daemon.createSession();
+    expect((await api(daemon).post(`/sessions/${id}/messages/nothing/fork`)).status).toBe(409);
+    await converse(daemon, id, 'first');
+    const [question] = await said(daemon, id);
+    expect((await api(daemon).post(`/sessions/${id}/messages/${question?.id}/fork`)).status).toBe(404);
   });
 });

@@ -26,8 +26,8 @@ retry after a limit all skip it. It stays signed in, and a run already going on 
 
 **Account usage**:
 The tokens, estimated cost, runs and subagents the console recorded for each Claude account, by day,
-run kind and subagent type. Runs with no account (from before it was recorded, or through CLIProxy)
-count as Not attributed.
+run kind and subagent type. Runs through CLIProxy count as CLIProxy. Runs with no account the
+console can name (from before it was recorded) count as Not attributed.
 
 **Health check**:
 The console's own scheduled check of a Connection, Connector or MCP server, kept as a history, and
@@ -312,8 +312,11 @@ the Session is deleted or the daemon exits, and shows in the Terminals dock.
 **Terminals dock**:
 The panel under a Session's conversation and Browser panel for its Session processes, laid out as an editor's terminal
 panel. One bar of icons holds the selected process's name and state, New terminal (with a menu of scripts and folders), Split,
-Restart, Stop or Remove, Maximize and Hide; below it sit the output and, from the second process on, a process list at the
+Restart, Delete (a running process is stopped first), Maximize and Hide; below it sit the output and, from the second process on, a process list at the
 right. Hiding the dock ends nothing.
+
+**Fork from this response**:
+The icon under a finished agent response that opens a new Session holding the conversation up to the end of that response. The new Session has the same kind, Repo, branch, model, effort and Access mode and a working folder of its own, so code the source left uncommitted is not carried over. The source goes on as it was. Only `repo` and `anonymous` Sessions fork.
 
 **Split**:
 A button of the Terminals dock that opens a new shell beside the selected process, so two show side by side.
@@ -331,7 +334,7 @@ the starting Session's model, effort and Access mode. It cannot start others. It
 _Avoid_: child chat, subtask
 
 **Subagent**:
-An agent the main agent starts inside a run with the Agent tool, for one independent part of the work. The main agent waits for all of them and gives the operator one merged answer. A Session keeps the subagents of its latest run, and the Session panel and the waiting row show them. Not a Spawned Session, which is a Session of its own.
+An agent the main agent starts inside a run with the Agent tool, for one independent part of the work or for work that prints a lot. The console registers `explorer`, `test-runner` and `reviewer` in every run. The main agent waits for all of them and gives the operator one merged answer. A Session keeps the subagents of its latest run, and the Session panel and the waiting row show them. Not a Spawned Session, which is a Session of its own.
 _Avoid_: child agent, worker
 
 **Session panel**:

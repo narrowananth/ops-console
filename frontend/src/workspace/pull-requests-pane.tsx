@@ -209,9 +209,9 @@ function PullRow({
 }
 
 export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null; onSelect: (pull: Pull) => void }) {
-  const [mine, setMine] = useStored('workspace.pr-mine', z.boolean(), true);
+  const [whose, setWhose] = useStored('workspace.pr-whose', z.enum(['mine', 'others', 'all']), 'mine');
+  const mine = whose === 'mine';
   const [q, setQ] = useStored('workspace.pr-search', z.string(), '');
-  const [filter, setFilter] = useStored('workspace.pr-filter', z.enum(['all', 'review', 'failing']), 'all');
   const [project, setProject] = useStored('workspace.pr-project', z.string(), ANY);
   const settled = useSettled(q.trim(), 400);
   const pulls = usePullRequests({ mine, q: settled });
@@ -224,12 +224,9 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
     ([, slug]) => slug,
   );
   const picked = projects.some(([key]) => key === project) ? project : ANY;
-  const inProject = everything.filter((pr) => picked === ANY || projectKey(pr) === picked);
-  const counts = {
-    review: inProject.filter((pr) => nextFor(pr) === 'review').length,
-    failing: inProject.filter((pr) => nextFor(pr) === 'failing').length,
-  };
-  const listed = inProject.filter((pr) => filter === 'all' || nextFor(pr) === filter);
+  const listed = everything.filter(
+    (pr) => (picked === ANY || projectKey(pr) === picked) && (whose !== 'others' || !pr.is_mine),
+  );
 
   return (
     <div className="pb-3">
@@ -247,21 +244,18 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
           >
             {(
               [
-                [true, 'Mine'],
-                [false, 'All'],
+                ['mine', 'Mine', 'Pull requests you opened, and the ones on a branch a Session worked on'],
+                ['others', 'Others', 'Open pull requests other people opened, to review'],
+                ['all', 'All', 'Every open pull request in the repositories you can read on your connected Git hosts'],
               ] as const
-            ).map(([value, label]) => (
+            ).map(([value, label, title]) => (
               <button
-                key={label}
+                key={value}
                 type="button"
-                title={
-                  value
-                    ? 'Pull requests you opened, and the ones on a branch a Session worked on'
-                    : 'Every open pull request in the repositories you can read on your connected Git hosts'
-                }
-                aria-pressed={mine === value}
-                onClick={() => setMine(value)}
-                className={`cursor-pointer rounded-sm border-0 px-2.5 text-xs transition-colors ${mine === value ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
+                title={title}
+                aria-pressed={whose === value}
+                onClick={() => setWhose(value)}
+                className={`cursor-pointer rounded-sm border-0 px-2.5 text-xs transition-colors ${whose === value ? 'bg-card font-semibold text-text shadow-sm' : 'bg-transparent text-neutral-700 hover:text-text'}`}
               >
                 {label}
               </button>
@@ -300,16 +294,6 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
         )}
         {everything.length > 0 && (
           <div className="flex items-center gap-1">
-            <FilterTabs
-              label="What to do next"
-              value={filter}
-              onChange={setFilter}
-              filters={[
-                { value: 'all', label: 'All' },
-                { value: 'review', label: 'To review', count: counts.review },
-                { value: 'failing', label: 'Failing', count: counts.failing, urgent: true },
-              ]}
-            />
             <Dropdown
               label="Filter by project"
               caption=""
@@ -327,7 +311,7 @@ export function PullRequestsPane({ selected, onSelect }: { selected: Pull | null
                 })),
               ]}
               onChange={setProject}
-              className="ml-auto min-w-0"
+              className="min-w-0"
               listClassName="w-max min-w-52 max-w-md"
             />
           </div>

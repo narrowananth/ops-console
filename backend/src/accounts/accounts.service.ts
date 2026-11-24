@@ -4,6 +4,7 @@ import { Inject, Injectable, Logger, type OnApplicationBootstrap, type OnModuleD
 import {
   type AgentAccountsSetting,
   agentAccountsSettingSchema,
+  CLIPROXY_ACCOUNT_ID,
   type ClaudeAccount,
   ErrorCode,
   SignInVia,
@@ -490,9 +491,9 @@ export class AccountsService implements OnApplicationBootstrap, OnModuleDestroy 
     return this.one(id);
   }
 
-  /** The account a run's usage counts for: none through CLIProxy, which picks the account itself. */
-  attributedTo(accountId: string): string | null {
-    return this.cliProxy.enabled() ? null : accountId;
+  /** The account a run's usage counts for: `cliproxy` through CLIProxy, which picks the account itself. */
+  attributedTo(accountId: string): string {
+    return this.cliProxy.enabled() ? CLIPROXY_ACCOUNT_ID : accountId;
   }
 
   /** The operator's Use: `smart` when the account is the Smart pick, `manual` otherwise. */

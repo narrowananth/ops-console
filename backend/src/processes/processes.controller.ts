@@ -37,8 +37,8 @@ export class ProcessesController {
 
   @Delete('processes/:id')
   @HttpCode(204)
-  remove(@Param() params: unknown): void {
-    this.processes.remove(parseInput(idParams, params, 'params').id);
+  async remove(@Param() params: unknown): Promise<void> {
+    await this.processes.remove(parseInput(idParams, params, 'params').id);
   }
 
   @Get('sessions/:id/scripts')

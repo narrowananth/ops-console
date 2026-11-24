@@ -328,7 +328,7 @@ function keysOf(
 /** One run's saved usage: the SDK's cost, every token, and the raw counts when they were kept. */
 export type UsageRow = {
   sessionId: string;
-  /** The account the run ended on; null for CLIProxy and runs kept before accounts were recorded. */
+  /** The account the run ended on, `cliproxy` through CLIProxy; null for runs kept before accounts were recorded. */
   accountId: string | null;
   /** What the run was for; null for a run kept before purposes were recorded. */
   purpose: string | null;

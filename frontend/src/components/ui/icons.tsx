@@ -83,6 +83,22 @@ export const AgentIcon = () => (
   </Icon>
 );
 
+export const CopyIcon = () => (
+  <Icon>
+    <rect x="9" y="9" width="11" height="11" rx="2.5" />
+    <path d="M15 9V6.5A2.5 2.5 0 0 0 12.5 4h-6A2.5 2.5 0 0 0 4 6.5v6A2.5 2.5 0 0 0 6.5 15H9" />
+  </Icon>
+);
+
+export const ForkIcon = () => (
+  <Icon>
+    <circle cx="6" cy="5.5" r="2" />
+    <circle cx="18" cy="5.5" r="2" />
+    <circle cx="12" cy="19" r="2" />
+    <path d="M6 7.5v1.5a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7.5M12 12v5" />
+  </Icon>
+);
+
 export const TrashIcon = () => (
   <Icon>
     <path d="M4 7h16M9 7V4.5h6V7M6.5 7l.8 12.5h9.4L17.5 7M10 11v5M14 11v5" />

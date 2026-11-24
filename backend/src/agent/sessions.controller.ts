@@ -38,6 +38,7 @@ import { OutputFiles } from './output-files';
 import { RunInsights } from './run-insights.service';
 import { RunRegistry } from './runs';
 import { AgentRuntime } from './runtime';
+import { SessionForks } from './session-forks';
 import { SessionKinds } from './session-kinds';
 import { SessionsService } from './sessions.service';
 
@@ -117,6 +118,7 @@ export class SessionsController {
     @Inject(SessionKinds) private readonly kinds: SessionKinds,
     @Inject(Attachments) private readonly attachments: Attachments,
     @Inject(OutputFiles) private readonly outputs: OutputFiles,
+    @Inject(SessionForks) private readonly forks: SessionForks,
   ) {}
 
   /** Each kind's spec makes its own Sessions; a body without a `kind` is a `repo` Session. */
@@ -160,6 +162,14 @@ export class SessionsController {
   async edit(@Param() params: unknown, @Body() body: unknown): Promise<{ data: EditedMessage }> {
     const { id, message_id } = parseInput(editParams, params, 'params');
     return { data: await this.runtime.edit(id, message_id, parseInput(sendMessageSchema, body, 'body').text) };
+  }
+
+  /** Fork from this response: a new Session holding the conversation up to the end of that agent response. */
+  @Post(':id/messages/:message_id/fork')
+  @HttpCode(201)
+  async fork(@Param() params: unknown): Promise<{ data: Session }> {
+    const { id, message_id } = parseInput(editParams, params, 'params');
+    return { data: await this.forks.fork(id, message_id) };
   }
 
   /**

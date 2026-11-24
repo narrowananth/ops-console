@@ -221,7 +221,7 @@ test('a port with no server says so (8)', async ({ page, request }) => {
   await expect(panel.getByText(`Nothing is listening on :${unused}`)).toBeVisible();
 });
 
-test('the Terminals dock explains itself when empty, runs a shell the operator types in, and stops it (15, 16, 17)', async ({
+test('the Terminals dock explains itself when empty, runs a shell the operator types in, and deletes it (15, 16, 17)', async ({
   page,
   request,
 }) => {
@@ -260,14 +260,13 @@ test('the Terminals dock explains itself when empty, runs a shell the operator t
   expect((await processesOf(request, id)).map((p) => p.state)).toEqual(['running', 'running']);
   await page.getByRole('button', { name: 'Terminals' }).click();
 
-  // Stop is the one way to end a process; Remove takes its place once it has ended.
-  await expect(dock.getByRole('button', { name: 'Remove' })).toHaveCount(0);
-  await dock.getByRole('button', { name: 'Stop' }).click();
-  await expect(dock.getByRole('button', { name: 'Remove' })).toBeEnabled();
-  await dock.getByRole('tab', { name: /shell-2/ }).click();
-  await dock.getByRole('button', { name: 'Stop' }).click();
-  await expect(dock.getByRole('button', { name: 'Remove' })).toBeEnabled();
-  await expect.poll(async () => (await processesOf(request, id)).map((p) => p.state)).toEqual(['stopped', 'stopped']);
+  // Delete is the one way to end a terminal: a running one is stopped and taken off the list in one step.
+  await expect(dock.getByRole('button', { name: 'Stop' })).toHaveCount(0);
+  await dock.getByRole('button', { name: 'Delete terminal' }).click();
+  await expect.poll(async () => (await processesOf(request, id)).map((p) => p.name)).toEqual(['shell-2']);
+  await dock.getByRole('button', { name: 'Delete terminal' }).click();
+  await expect.poll(async () => (await processesOf(request, id)).length).toBe(0);
+  await expect(dock.getByRole('heading', { name: 'No terminals yet' })).toBeVisible();
 });
 
 test('Split puts a new shell beside the selected one, the list joins them, and Maximize grows the dock (15)', async ({
@@ -301,7 +300,7 @@ test('Split puts a new shell beside the selected one, the list joins them, and M
   await expect.poll(async () => (await dock.boundingBox())?.height ?? 0).toBe(before);
 });
 
-test('an exited process shows its code, can be restarted or removed, and the empty state returns (17)', async ({
+test('an exited process shows its code, can be restarted or deleted, and the empty state returns (17)', async ({
   page,
   request,
 }) => {
@@ -322,7 +321,7 @@ test('an exited process shows its code, can be restarted or removed, and the emp
   await expect(dock.getByRole('button', { name: 'Stop' })).toHaveCount(0);
   await expect(dock.getByRole('button', { name: 'Restart' })).toBeEnabled();
 
-  await dock.getByRole('button', { name: 'Remove' }).click();
+  await dock.getByRole('button', { name: 'Delete terminal' }).click();
   await expect(dock.getByRole('heading', { name: 'No terminals yet' })).toBeVisible();
   await expect.poll(async () => (await processesOf(request, id)).length).toBe(0);
 });
@@ -382,7 +381,7 @@ const processesOf = async (request: APIRequestContext, id: string): Promise<Proc
   ((await (await request.get(api(`/sessions/${id}/processes`), { headers: auth })).json()) as { data: ProcessView[] })
     .data;
 
-test("Run lists the folder's package.json scripts and starts one; Restart runs it again and Stop ends it (15, 16, 17)", async ({
+test("Run lists the folder's package.json scripts and starts one; Restart runs it again and Delete ends it (15, 16, 17)", async ({
   page,
   request,
 }) => {
@@ -417,12 +416,8 @@ test("Run lists the folder's package.json scripts and starts one; Restart runs i
   await expect(dock.locator('.xterm-rows:visible')).toContainText('hello-from-script');
   expect((await processesOf(request, id)).find((p) => p.name === 'hello')?.state).toBe('running');
 
-  await dock.getByRole('button', { name: 'Stop' }).click();
-  await expect
-    .poll(async () => (await processesOf(request, id)).find((p) => p.name === 'hello')?.state)
-    .toBe('stopped');
-  await expect(dock.getByRole('button', { name: 'Remove' })).toBeEnabled();
-  await dock.getByRole('button', { name: 'Remove' }).click();
+  // Deleting a running script ends it and takes it off the list.
+  await dock.getByRole('button', { name: 'Delete terminal' }).click();
   await expect.poll(async () => (await processesOf(request, id)).some((p) => p.name === 'hello')).toBe(false);
 });
 

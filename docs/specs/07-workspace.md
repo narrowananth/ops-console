@@ -215,6 +215,7 @@ Behavior 34.
 | ----- | ---- | ------- |
 | `POST /sessions/:id/commit` | `{ message?, new_branch? }` | 201 `{ sha, branch, message, files }`; `invalid_state`, `upstream_failed` |
 | `POST /sessions/:id/push` | | 200 `{ branch }`; `invalid_state`, `branch_moved`, `upstream_failed` |
+| `POST /sessions/:id/messages/:message_id/fork` | none | 201 and the new Session; `message_id` is a finished agent response; 404 for any other message, 409 for a Session that cannot fork or has no conversation yet |
 | `POST /sessions/:id/open-folder` | `{ target: "editor" \| "folder" }` | 204; `invalid_state` when the Session has no folder, `upstream_failed` when the machine cannot open it |
 
 `GET /sessions/:id/pull-request`, `POST /sessions/:id/pull-request-draft` and `POST /sessions/:id/pull-request` belong to `console-opens-pull-request`.
@@ -331,8 +332,10 @@ Adds `branch: string | null`.
   Take back puts it in the box. Its draft is kept per Session.
   Files attach to the next message three ways: the paperclip, dropping them on the box, or pasting them (a
   screenshot, a file copied in Finder). Each uploads at once to `POST /api/sessions/:id/attachments?name=` and is
-  saved under a new name in `attachments/<session id>/` in the data folder. Each file is a chip in a row above the
-  text (`session-start-and-composer-menus` Behavior 25), with a thumbnail for images, its size and a remove button. Two
+  saved under a new name in `attachments/<session id>/` in the data folder. Each file is a chip in the text where
+  the cursor was (`[📎 name]` in the message, drawn like a `$skill` chip), in the order added; a click opens it and
+  Backspace takes it, and its file, out. A pasted long text stays a card in a row above the text, with its first lines
+  and an edit button, and so does a file whose upload failed, with the reason and a remove button. Two
   files with one name get `name (2)` and on. Saved files stay with the Session through a reload, a switch of Session or
   tab, until removed or sent. Send waits until every file is saved. The message ends with an "Attached files" list of
   each name, saved path, type and size, and the run lets the agent read that folder, so its Read tool opens them without
@@ -381,11 +384,11 @@ Adds `branch: string | null`.
   was opened (with `↗` when it opens on the host), then `#number`, the repository's short name (its `slug` in the Tip) and
   the author, followed by `not imported` when no Repo matches, `agent` when `by_agent`, the checks mark (◐ running, ✓ passed,
   ✕ failed), who approved it ("approved") or the review state ("changes"), and the comment count. One line holds the search,
-  Mine (the default) or All, and Refresh, which reads the Git hosts again. Under Mine the search reads "#, title or your
+  Mine (the default), Others or All, and Refresh, which reads the Git hosts again. Under Mine the search reads "#, title or your
   email" and matches the number, the title and the Connector's `login`; under All it reads "#, title or author" and matches
   the number, the title and the author. A search stays still for 400 ms before it is sent, and a number shows "Asking the
-  Git hosts for #N…" while it waits. Mine or All, the search text and the tab are kept. With any pull request listed, the
-  tabs All, To review and Failing (with counts) and a project picker ("All projects", then each repository A→Z) narrow the
+  Git hosts for #N…" while it waits. Mine, Others or All and the search text are kept. Others reads the same pull requests as All and lists the ones the
+  operator did not open. With any pull request listed, a project picker ("All projects", then each repository A→Z) narrow the
   list. A pull request of an imported GitHub or Bitbucket Repo opens in the console; any other opens on the host in a new
   tab. A stale banner reads "The Git host did not answer. Showing what was read at" `synced_at` when `meta.stale` is true.
   Loading reads "Reading pull requests…". An error reads "Could not read pull requests:" and the host's message when the

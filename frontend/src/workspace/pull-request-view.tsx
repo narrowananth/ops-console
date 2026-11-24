@@ -358,7 +358,7 @@ function Loaded(props: {
             )}
           </div>
         </RailSection>
-        <RailSection id="sessions" label="Sessions" summary="Sessions on this branch">
+        <RailSection id="sessions" label="Sessions" summary="Sessions on this pull request">
           <PrSessions pr={pr} />
         </RailSection>
       </div>

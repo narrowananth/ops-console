@@ -300,7 +300,6 @@ function docsBody(slug, article, headings) {
   return `<div class="wrap docs">
   <nav class="docs-side" aria-label="Docs">${side}</nav>
   <article class="prose">${article}${pager}
-    <p class="edit"><a href="${REPO}/edit/main/site/content/docs/${slug}.md">Edit this page on GitHub</a></p>
   </article>
   ${toc ? `<nav class="docs-toc" aria-label="On this page"><h2>On this page</h2>${toc}</nav>` : ''}
 </div>`;

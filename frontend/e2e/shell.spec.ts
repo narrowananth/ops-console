@@ -402,7 +402,7 @@ test('a stored choice that no longer reads falls back to the default', async ({ 
   await page.reload();
   await expect(whose.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');
 
-  await page.evaluate(() => localStorage.setItem('ops-console:workspace.pr-mine', '"not a boolean"'));
+  await page.evaluate(() => localStorage.setItem('ops-console:workspace.pr-whose', '"nobody"'));
   await page.reload();
   await expect(whose.getByRole('button', { name: 'Mine', exact: true })).toHaveAttribute('aria-pressed', 'true');
 });

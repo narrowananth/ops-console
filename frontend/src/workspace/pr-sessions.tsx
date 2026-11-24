@@ -7,7 +7,7 @@ import { sessionDraftKey, sessionPath } from './links';
 import { ACTION_LABEL, ACTION_STATE_LABEL, commitUrl } from './pr-jobs';
 
 /**
- * The PR action Sessions on a pull request, then the operator's Sessions on its branch, each a link, and New Session,
+ * The PR action Sessions on a pull request, then the operator's Sessions on its branch or that opened it, each a link, and New Session,
  * which starts one there and opens it with the pull request named in its draft, for the operator to say what to change.
  */
 export function PrSessions({ pr }: { pr: PullRequestDetail }) {
@@ -16,7 +16,10 @@ export function PrSessions({ pr }: { pr: PullRequestDetail }) {
   const navigate = useNavigate();
   const repoId = pr.repo_id;
   const onBranch = (sessions.data ?? []).filter(
-    (session) => session.kind === SessionKind.Repo && session.repo_id === repoId && session.branch === pr.branch,
+    (session) =>
+      session.kind === SessionKind.Repo &&
+      session.repo_id === repoId &&
+      (session.branch === pr.branch || session.pull_requests.some((opened) => opened.number === pr.number)),
   );
   const start = () => {
     if (repoId === null) return;
@@ -34,7 +37,7 @@ export function PrSessions({ pr }: { pr: PullRequestDetail }) {
   return (
     <div className="flex flex-col items-stretch gap-2 text-xs">
       <span title="Your Sessions checked out on this pull request's branch" className="text-neutral-700">
-        Sessions on {pr.branch}:
+        Sessions on this pull request:
       </span>
       {pr.action_sessions.map((action) => {
         const href = action.commit_sha && commitUrl(pr.url, action.commit_sha);

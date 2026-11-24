@@ -13,6 +13,7 @@ import { Button, Spinner } from '../components/ui/button';
 import { CodeBlock } from '../components/ui/code-block';
 import { Elapsed } from '../components/ui/elapsed';
 import { FileKindIcon, kindOf } from '../components/ui/file-kind';
+import { CopyIcon, ForkIcon } from '../components/ui/icons';
 import { Markdown } from '../components/ui/markdown';
 import type { PathwayState } from '../components/ui/pathway';
 import { ComparisonView, ResultView } from '../devtools/result-tables';
@@ -89,6 +90,7 @@ export const MessageView = memo(
     a.editable === b.editable &&
     a.deferred === b.deferred &&
     a.onEdit === b.onEdit &&
+    a.onFork === b.onFork &&
     sameFiles(a.files, b.files),
 );
 
@@ -99,6 +101,7 @@ function MessageItem({
   editable,
   deferred,
   onEdit,
+  onFork,
 }: {
   message: Message;
   sessionId: string;
@@ -107,6 +110,8 @@ function MessageItem({
   editable: boolean;
   deferred: boolean;
   onEdit: (messageId: string, text: string) => Promise<unknown>;
+  /** Opens a new Session from the end of this agent response; absent for a Session that cannot be forked. */
+  onFork?: (messageId: string) => Promise<unknown>;
 }) {
   const agent = message.role === 'agent';
   const text = message.parts.map((part) => ('text' in part ? part.text : '')).join('\n');
@@ -114,6 +119,16 @@ function MessageItem({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [copied, copy] = useCopy();
+  const [forking, setForking] = useState(false);
+  const [forkError, setForkError] = useState<string | null>(null);
+  const fork = () => {
+    if (!onFork || forking) return;
+    setForking(true);
+    setForkError(null);
+    onFork(message.id)
+      .catch((failure: unknown) => setForkError(failure instanceof Error ? failure.message : String(failure)))
+      .finally(() => setForking(false));
+  };
   const rerun = () => {
     if (!editable || draft === null || draft.trim() === '' || pending) return;
     setPending(true);
@@ -142,7 +157,7 @@ function MessageItem({
         {message.status === 'streaming' && <Elapsed from={message.created_at} to={null} running className="ml-1" />}
         {/* When the prompt ran, or the agent's turn began. */}
         {/* An entry with no timestamp reads as the epoch: it shows none. */}
-        {Date.parse(message.created_at) > 0 && (
+        {Date.parse(message.created_at) > 0 && !(agent && message.status === 'done') && (
           <time
             dateTime={message.created_at}
             title={new Date(message.created_at).toLocaleString()}
@@ -179,6 +194,46 @@ function MessageItem({
           <>
             <MessageParts message={message} sessionId={sessionId} />
             {message.status !== 'streaming' && <OutputChips sessionId={sessionId} files={files} />}
+            {message.status === 'done' && (
+              <div className="flex items-center gap-1 pt-1 text-xs text-neutral-600">
+                <button
+                  type="button"
+                  aria-label={copyLabel(copied, 'Copy response')}
+                  title={copied === 'failed' ? COPY_FAILED : 'Copy this response'}
+                  onClick={() => copy(text)}
+                  className={responseAction}
+                >
+                  <CopyIcon />
+                </button>
+                {copied !== 'idle' && <span className="text-neutral-700">{copyLabel(copied, '')}</span>}
+                {onFork && (
+                  <button
+                    type="button"
+                    aria-label="Fork from this response"
+                    title="Fork from this response: a new Session that starts with the conversation up to here"
+                    disabled={forking}
+                    onClick={fork}
+                    className={responseAction}
+                  >
+                    {forking ? <Spinner /> : <ForkIcon />}
+                  </button>
+                )}
+                {Date.parse(message.created_at) > 0 && (
+                  <time
+                    dateTime={message.created_at}
+                    title={new Date(message.created_at).toLocaleString()}
+                    className="ml-1.5"
+                  >
+                    {when(message.created_at)}
+                  </time>
+                )}
+                {forkError && (
+                  <span role="alert" className="ml-2 text-accent-700">
+                    {forkError}
+                  </span>
+                )}
+              </div>
+            )}
           </>
         ) : (
           <>
@@ -390,6 +445,9 @@ function MessageParts({ message, sessionId }: { message: Message; sessionId: str
     return <StepRun key={group.at} end={end} steps={group.parts.map((part) => ('text' in part ? part.text : ''))} />;
   });
 }
+
+const responseAction =
+  'flex size-7 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-neutral-600 hover:bg-neutral-200 hover:text-text disabled:cursor-not-allowed disabled:opacity-60';
 
 const messageAction =
   'cursor-pointer rounded-sm border-0 bg-transparent px-1.5 py-0.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-200 hover:text-text';

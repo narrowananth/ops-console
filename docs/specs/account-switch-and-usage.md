@@ -22,10 +22,10 @@ Enable and Disable
 Usage dashboard
 
 8. Accounts & Usage has two tabs, Accounts and Usage. The URL carries `?tab=usage`, `&account=<id>` (or `none` for runs with no account) for one account and `&range=today|7d|30d|90d`. The default is all accounts, 7 days, and leaves `range` out of the address; an unknown range reads as 7 days and an unknown account as all accounts.
-9. Every run records the account it ended on, with its tokens, cost and subagents. A run that moved accounts after a rate-limit rejection counts for the second one. With CLIProxy on, a run counts for no account. Runs kept before the console recorded an account have no account and count as "Not attributed", so the All accounts total matches the "today" usage line of the run tray. A removed account's runs stay and count as "Removed account".
+9. Every run records the account it ended on, with its tokens, cost and subagents. A run that moved accounts after a rate-limit rejection counts for the second one. With CLIProxy on, a run counts for the CLIProxy bucket (account id `cliproxy`). Runs kept before the console recorded an account have no account and count as "Not attributed", so the All accounts total matches the "today" usage line of the run tray. A removed account's runs stay and count as "Removed account".
 10. The console keeps 90 days of run steps, subagents, usage and health checks, and no more. Rows past 90 days are deleted oldest first, 250 rows at a time, each batch in its own short transaction with a pause between batches, so no request waits behind a bulk delete. Pruning runs once, a minute after the daemon starts, and then once a day, never when a run starts. A run's detail on the Agent runs page keeps its steps for the same 90 days.
 11. All accounts shows: four figures, Tokens (with input, output and cache), Estimated cost, Agent runs and Subagents; Cost per day stacked by account; a By account table with a share bar, where each row has share, tokens, cost, runs and subagents, and a total row; By work, what the runs were for (Your messages (chat), Monitor Verify, Monitor Fix, Comment pass, Reply check, Agent Review, Open pull request), with its runs, cost per run, tokens per run and subagents per run; By subagent type, with "Main agent" as its own row, its agents, failures, average time and cost per agent; and Top spenders, the 25 costliest runs, each opening to its main agent and subagents with their status and time. A run kept before purposes were recorded counts under its Session's kind, for example "Agent review (earlier runs)".
-12. One account shows the same, filtered to that account: its 5-hour and weekly bars, its ENABLED or DISABLED pill, a trend stacked by work, By work, By subagent type and Runs on this account. The Not attributed chip shows the same for runs with no account.
+12. One account shows the same, filtered to that account: its 5-hour and weekly bars, its ENABLED or DISABLED pill, a trend stacked by work, By work, By subagent type and Runs on this account. The CLIProxy and Not attributed chips show the same for their runs.
 13. Cost is the estimate priced from raw token counts, the same way as a run's cost on the Agent runs page. It is labelled "at API prices, not billed". Totals and rows add up: the days, the accounts and the work rows each sum to the totals.
 14. Every subagent a run starts is kept when it starts: its type, what it was asked, the subagent that started it, its status (`working`, `done`, `failed`, `stopped`), and when it started and finished. A subagent that ends with the run, because the run finished, failed or was stopped, or because the daemon restarted, gets that end. A subagent that used no tokens still counts. Subagents of runs kept before subagents were recorded are known from their token lines, or not at all; they count under "Type not kept (earlier runs)". There is no backfill.
 15. Days are the machine's local days. A range with no runs says "No agent runs in the last 7 days" with the other ranges as links; one account with no runs in the range says "No runs counted for <account> in this range yet" with a link to Not attributed. A failed read shows the error with Try again. While reading, the tab shows skeleton lines.
@@ -122,7 +122,7 @@ Refused with `invalid_state` while the account is disabled.
 } }
 ```
 
-`tokens` in `totals` holds the raw counts of the runs that kept them; `total_tokens` counts every token of every run. `work` is a `RunPurpose`, or `kind:<session kind>` for a run kept before purposes were recorded. `avg_ms` is `null` when no agent of the type was timed. `runs` holds the 25 costliest. `label` is the account's email, its label when it has none, "Not attributed" for `null`, and "Removed account" for an id no account has.
+`tokens` in `totals` holds the raw counts of the runs that kept them; `total_tokens` counts every token of every run. `work` is a `RunPurpose`, or `kind:<session kind>` for a run kept before purposes were recorded. `avg_ms` is `null` when no agent of the type was timed. `runs` holds the 25 costliest. `label` is the account's email, its label when it has none, "CLIProxy" for `cliproxy`, "Not attributed" for `null`, and "Removed account" for an id no account has.
 
 ### WebSocket `account.updated`
 
@@ -133,7 +133,7 @@ Server to client; carries the account with `enabled`. Fires when the switch chan
 Accounts & Usage has the tabs Accounts and Usage.
 
 - **Accounts**: each row has an Enabled or Disabled label and a switch under its buttons. A disabled row dims its bars, shows a DISABLED pill, and its note reads "Disabled: skipped by Use, Smart pick and failover. Runs going on it finish." Disabling the active account asks first, naming the account the runs move to. A signed-out account's switch and CLIProxy's switches are dimmed with the reason. A disabled row's Use button is disabled.
-- **Usage**: an account picker (All accounts, one chip per account in A to Z order, each with its colour, and a Not attributed chip while runs with no account exist), a range control (Today, 7 days, 30 days, 90 days), four figures, the daily trend, By account, By work, By subagent type and Top spenders. One account swaps By account for its bars and ENABLED or DISABLED pill, stacks the trend by work, and titles the last block Runs on this account. States: loading skeleton, empty range, read error, every account disabled, CLIProxy note.
+- **Usage**: an account picker (All accounts, one chip per account in A to Z order, each with its colour, and a CLIProxy chip while runs through it exist, and a Not attributed chip while runs with no account exist), a range control (Today, 7 days, 30 days, 90 days), four figures, the daily trend, By account, By work, By subagent type and Top spenders. One account swaps By account for its bars and ENABLED or DISABLED pill, stacks the trend by work, and titles the last block Runs on this account. States: loading skeleton, empty range, read error, every account disabled, CLIProxy note.
 
 ## Rejected
 
@@ -145,7 +145,8 @@ Accounts & Usage has the tabs Accounts and Usage.
 
 - **Disabled account**: a Claude account the console never starts or moves a run onto; it stays signed in.
 - **Account usage**: the tokens, estimated cost, runs and subagents the console recorded for each Claude account, by day, kind of work and subagent type.
-- **Not attributed**: runs that have no account: before the console kept one, or through CLIProxy.
+- **CLIProxy**: runs through CLIProxy, which picks the account itself.
+- **Not attributed**: runs that have no account the console can name: before it kept one.
 
 ## Seams
 

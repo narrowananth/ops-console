@@ -19,7 +19,7 @@ The agent runs under the active account. Accounts & Usage shows the tokens, the 
 
 ## CLIProxy
 
-With CLIProxy as the Claude account hub, runs send CLIProxy's API key to a CLIProxy server on this Mac, and CLIProxy picks the account and tracks the quota. Auto-switch and Smart usage pause. The CLIProxy address must be a loopback address, because every prompt and file the agent reads goes there. Runs through CLIProxy show as Not attributed in Account usage.
+With CLIProxy as the Claude account hub, runs send CLIProxy's API key to a CLIProxy server on this Mac, and CLIProxy picks the account and tracks the quota. Auto-switch and Smart usage pause. The CLIProxy address must be a loopback address, because every prompt and file the agent reads goes there. Runs through CLIProxy show as CLIProxy in Account usage.
 
 ## What works the same either way
 

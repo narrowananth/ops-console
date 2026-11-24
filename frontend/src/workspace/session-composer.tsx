@@ -1,6 +1,9 @@
 import {
   type EditedMessage,
+  fileToken,
   type Message,
+  namesInText,
+  PASTED_TEXT_NAME,
   type Repo,
   type Session,
   SessionKind,
@@ -82,8 +85,21 @@ export function SessionComposer({
   const attached = attachments.items.map((item) => item.name);
   const files = attachments.saved(attached);
   const uploading = attachments.uploading(attached);
+  const inText = new Set(namesInText(text));
   const empty = text.trim() === '' && files.length === 0 && elements.picks.length === 0;
-  const addFiles = (dropped: File[]) => attachments.add(dropped);
+  // Pasted text stays a card above the box; any other file goes into the text as a chip where the cursor is.
+  const addFiles = (dropped: File[]) => {
+    for (const name of attachments.add(dropped)) {
+      if (PASTED_TEXT_NAME.test(name)) continue;
+      editor.current?.insertFile(name);
+    }
+  };
+  // The text's chips are the operator's to delete: a chip taken out of the text takes its file out of the message.
+  const syncPlaced = (next: string) => {
+    const still = new Set(namesInText(next));
+    const gone = [...inText].filter((name) => !still.has(name));
+    if (gone.length > 0) attachments.remove(gone);
+  };
   const openFile = (name: string) => {
     const item = attachments.find(name);
     if (item?.file) setViewed({ name, file: item.file });
@@ -211,14 +227,26 @@ export function SessionComposer({
             onRemove={elements.remove}
           />
           <AttachmentChips
-            items={attachments.items.filter((item) => !crops.includes(item.name))}
+            items={attachments.items.filter(
+              (item) => !crops.includes(item.name) && !(inText.has(item.name) && item.error === null),
+            )}
             onOpen={openFile}
             onEdit={(name) => {
               const item = attachments.find(name);
               if (item?.file) setEditing({ name, file: item.file });
               else if (item?.saved) setEditing({ name, path: item.saved.path });
             }}
-            onRemove={(name) => attachments.remove([name])}
+            onRemove={(name) => {
+              attachments.remove([name]);
+              // A chip of the file left in the text goes with it.
+              setText((now) =>
+                now
+                  .split(`${fileToken(name)} `)
+                  .join('')
+                  .split(fileToken(name))
+                  .join(''),
+              );
+            }}
           />
           <MessageEditor
             ref={editor}
@@ -234,8 +262,10 @@ export function SessionComposer({
             onChange={(next) => {
               // The first key is the operator's turn to speak: the agent can start up meanwhile.
               if (text === '' && next !== '') warmSession(id);
+              syncPlaced(next);
               setText(next);
             }}
+            onOpenFile={openFile}
             onPasteFiles={addFiles}
             onSubmit={submit}
             onKey={composerMenus.onKey}

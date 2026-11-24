@@ -81,10 +81,9 @@ adds the same to a Session.
     editor's terminal panel. It opens from the Terminals row of the Session panel, which shows how many processes run. Its bar holds only icons (each with a tooltip and
     an accessible name), left to right: the Terminals icon (with its word in a wide dock), the name of the selected process with a state dot (and "exited 1" or "stopped"
     once it ended; the tooltip has "Running · started 2m ago", the command and the folder), New terminal (+), a chevron
-    menu for scripts and the folder (16, 17), Split, Restart (a turning arrow), Stop (a square) while the process runs
-    or Remove (a bin) once it has exited or been stopped, then Maximize (Restore when maximized) and one "×" with the
-    tooltip "Hide terminals. Processes keep running." The "×" hides the dock and ends nothing; Stop is the one way to end a
-    process. Maximize grows the dock to 70% of the window and back; dragging the bar above it resizes as before.
+    menu for scripts and the folder (16, 17), Split, Restart (a turning arrow), Delete (a bin: a process that runs is stopped, then taken off the list), then Maximize (Restore when maximized) and one "×" with the
+    tooltip "Hide terminals. Processes keep running." The "×" hides the dock and ends nothing; Delete is the one way to end a
+    process, in the bar or on its row of the list. Maximize grows the dock to 70% of the window and back; dragging the bar above it resizes as before.
     Split starts a shell in the same folder and shows it beside the selected one; the views of one split group sit side by
     side, the selected one marked with an accent line on top, and a click in a view selects it. From the second process on, a
     list of the processes shows at the right of the output, one row each with its state dot and name, and a tree line
@@ -439,7 +438,7 @@ Stops the server on `port` when it is this Session's. 204. 404 `not_found` for a
 
 ### `POST /processes/:id/stop`, `POST /processes/:id/restart`, `DELETE /processes/:id`
 
-`{ data: process }`; `DELETE` closes an exited one and answers 204.
+`{ data: process }`; `DELETE` stops a running one, deletes it and answers 204.
 
 ### WebSocket `/browser/:tabId`
 

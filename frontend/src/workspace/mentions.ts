@@ -1,6 +1,8 @@
+import { FILE_TOKEN } from '@ops-console/shared';
+
 /**
- * `$skill` and `@file` mentions: how they read in a message the agent gets, and how the console draws them as chips.
- * The text is the only truth; a chip is how the console shows it.
+ * `$skill` and `@file` mentions and `[📎 name]` attached files: how they read in a message the agent gets, and how the
+ * console draws them as chips. The text is the only truth; a chip is how the console shows it.
  */
 
 /** A mention in a message: at the start or after whitespace. `$name`, `@"a path with spaces"` or `@path/to.file`. */
@@ -21,12 +23,47 @@ export const skillLabel = (name: string) =>
     .join(' ');
 
 /** What a chip shows for a mention's text: the skill's name, or the file's own name with its path in the tip. */
-export function describeMention(raw: string): { kind: 'skill' | 'file'; label: string; title: string; badge: string } {
+export function describeMention(raw: string): {
+  kind: 'skill' | 'file' | 'attachment';
+  label: string;
+  title: string;
+  badge: string;
+} {
+  const attached = ATTACHED_RAW.exec(raw)?.[1];
+  if (attached !== undefined) {
+    const ext = attached.includes('.') ? (attached.split('.').at(-1) ?? '') : '';
+    return {
+      kind: 'attachment',
+      label: attached,
+      title: `Attached file ${attached}`,
+      badge: ext.slice(0, 4).toUpperCase(),
+    };
+  }
   if (raw.startsWith('$')) return { kind: 'skill', label: skillLabel(raw.slice(1)), title: raw, badge: '' };
   const path = raw.startsWith('@"') ? raw.slice(2, -1) : raw.slice(1);
   const name = path.split('/').filter(Boolean).at(-1) ?? path;
   const ext = name.includes('.') ? (name.split('.').at(-1) ?? '') : '';
   return { kind: 'file', label: name, title: path, badge: ext.slice(0, 4).toUpperCase() };
+}
+
+const ATTACHED_RAW = /^\[📎 ([^\]\n]+)\]$/;
+
+/** An attached file's name when `raw` is its `[📎 name]` token; null for any other mention. */
+export const attachedName = (raw: string): string | null => ATTACHED_RAW.exec(raw)?.[1] ?? null;
+
+/** Every chip in `text`, in order: the `[📎 name]` tokens, and the `$` and `@` mentions around them. */
+export function chipsIn(text: string): { raw: string; start: number; end: number }[] {
+  const found: { raw: string; start: number; end: number }[] = [];
+  let at = 0;
+  for (const token of text.matchAll(FILE_TOKEN)) {
+    const start = token.index ?? 0;
+    for (const one of mentionsIn(text.slice(at, start)))
+      found.push({ raw: one.raw, start: one.start + at, end: one.end + at });
+    found.push({ raw: token[0], start, end: start + token[0].length });
+    at = start + token[0].length;
+  }
+  for (const one of mentionsIn(text.slice(at))) found.push({ raw: one.raw, start: one.start + at, end: one.end + at });
+  return found;
 }
 
 /** The mentions in `text`, with where each starts and ends. */
@@ -47,6 +84,7 @@ const BASE =
 export const CHIP_CLASS = {
   skill: `${BASE} border-skill/30 bg-skill/10 text-skill`,
   file: `${BASE} border-line bg-neutral-200/60 text-text`,
+  attachment: `${BASE} cursor-pointer border-line bg-neutral-200/60 text-text`,
   badge:
     'flex-none rounded-sm bg-neutral-300/70 px-1 text-[10px] leading-4 font-semibold text-neutral-800 before:content-[attr(data-badge)]',
 } as const;

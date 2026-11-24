@@ -160,16 +160,16 @@ describe('a Session process', () => {
     expect(await listProcesses(daemon, sessionId)).toHaveLength(1);
   });
 
-  it('closes an exited process, and refuses to close a running one', async () => {
+  it('deletes a process, stopping it first when it runs', async () => {
     const { daemon, sessionId } = await start();
-    const started = await startProcess(daemon, sessionId, { name: 'api', command: 'sleep 60' });
+    const started = await startProcess(daemon, sessionId, {
+      name: 'api',
+      command: node(fixtures.server, '127.0.0.1', 'child'),
+    });
+    const pids = pidsIn(await (await watch(daemon, started.id)).wait('pids '));
 
-    const refused = await api(daemon).delete(`/processes/${started.id}`);
-    expect(refused.status).toBe(409);
-    expect(refused.body.error.code).toBe('invalid_state');
-
-    await api(daemon).post(`/processes/${started.id}/stop`);
     expect((await api(daemon).delete(`/processes/${started.id}`)).status).toBe(204);
+    await gone(...pids);
     expect(await listProcesses(daemon, sessionId)).toEqual([]);
     expect((await api(daemon).post(`/processes/${started.id}/stop`)).status).toBe(404);
   });
