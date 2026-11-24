@@ -318,8 +318,8 @@ function Loaded(props: {
 
   const openCount = openThreads(pr).length;
   const sidebar = (
-    <aside aria-label="Decision" className="w-76 flex-none">
-      <div className="sticky top-0 flex max-h-[calc(100vh-4rem)] flex-col overflow-y-auto py-2 pr-5 pl-1">
+    <aside aria-label="Decision" className="flex min-h-0 w-76 flex-none flex-col">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2 pr-5 pl-1">
         <ChecksSection pr={pr} />
         <MergeChecksSection pr={pr} />
         <PeopleSection pr={pr} />
@@ -366,8 +366,8 @@ function Loaded(props: {
   );
 
   return (
-    <div className="flex min-h-full flex-col">
-      <header className="flex flex-col gap-3 border-b border-line px-6 pt-5">
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="flex max-h-[60%] flex-none flex-col gap-3 overflow-y-auto border-b border-line px-6 pt-5">
         <h2 className="m-0 text-xl leading-snug font-semibold">
           <span className="font-normal text-neutral-600">#{pr.number}</span> {pr.title}
         </h2>
@@ -439,8 +439,11 @@ function Loaded(props: {
           />
         </div>
       </header>
-      <div className="flex flex-1 gap-6">
-        <div role="tabpanel" className="flex min-w-0 flex-1 flex-col gap-5 py-4 pl-6">
+      <div className="flex min-h-0 flex-1 gap-6">
+        <div
+          role="tabpanel"
+          className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto py-4 pl-6 [&>*]:shrink-0"
+        >
           {noting && (
             <AgentReviewDialog
               onCancel={() => setNoting(false)}

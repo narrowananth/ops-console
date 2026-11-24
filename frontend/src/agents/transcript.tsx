@@ -13,7 +13,7 @@ import { Button, Spinner } from '../components/ui/button';
 import { CodeBlock } from '../components/ui/code-block';
 import { Elapsed } from '../components/ui/elapsed';
 import { FileKindIcon, kindOf } from '../components/ui/file-kind';
-import { CopyIcon, ForkIcon } from '../components/ui/icons';
+import { CopyIcon, ForkIcon, PencilIcon } from '../components/ui/icons';
 import { Markdown } from '../components/ui/markdown';
 import type { PathwayState } from '../components/ui/pathway';
 import { ComparisonView, ResultView } from '../devtools/result-tables';
@@ -77,7 +77,7 @@ const sameFiles = (a: OutputFile[], b: OutputFile[]) =>
   a === b || (a.length === b.length && a.every((file, at) => file === b[at]));
 
 /**
- * One message. The operator's messages have Copy; the last one also has Edit, when `editable`, which has `onEdit` rerun
+ * One message. The operator's messages have Copy and their time below; the last one also has Edit, when `editable`, which has `onEdit` rerun
  * the edited text after putting back the files the agent edited since it. A message the operator has scrolled far past
  * is `deferred`: the browser skips drawing it until it nears the screen. Props are plain values, so a stream that
  * changes the last message draws only that one.
@@ -155,9 +155,9 @@ function MessageItem({
         </span>
         {/* The run's in-flight message starts with the run, so its age is how long the agent has worked. */}
         {message.status === 'streaming' && <Elapsed from={message.created_at} to={null} running className="ml-1" />}
-        {/* When the prompt ran, or the agent's turn began. */}
+        {/* When the agent's turn began; a finished message shows its time in the footer. */}
         {/* An entry with no timestamp reads as the epoch: it shows none. */}
-        {Date.parse(message.created_at) > 0 && !(agent && message.status === 'done') && (
+        {Date.parse(message.created_at) > 0 && agent && message.status !== 'done' && (
           <time
             dateTime={message.created_at}
             title={new Date(message.created_at).toLocaleString()}
@@ -165,28 +165,6 @@ function MessageItem({
           >
             {when(message.created_at)}
           </time>
-        )}
-        {!agent && draft === null && (
-          <span className="ml-auto flex gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-            <button
-              type="button"
-              onClick={() => copy(text)}
-              title={copied === 'failed' ? COPY_FAILED : 'Copy this message'}
-              className={messageAction}
-            >
-              {copyLabel(copied, 'Copy')}
-            </button>
-            {editable && (
-              <button
-                type="button"
-                onClick={() => setDraft(text)}
-                title="Change your last message and run it again. Files the agent edited since are put back first."
-                className={messageAction}
-              >
-                Edit
-              </button>
-            )}
-          </span>
         )}
       </div>
       {draft === null ? (
@@ -239,6 +217,38 @@ function MessageItem({
           <>
             {message.skill && <SkillChip skill={message.skill} />}
             <SentText text={text} />
+            <div className="flex items-center justify-end gap-1 pt-1 text-xs text-neutral-600">
+              {Date.parse(message.created_at) > 0 && (
+                <time
+                  dateTime={message.created_at}
+                  title={new Date(message.created_at).toLocaleString()}
+                  className="mr-1.5"
+                >
+                  {when(message.created_at)}
+                </time>
+              )}
+              {editable && (
+                <button
+                  type="button"
+                  aria-label="Edit from here"
+                  title="Edit from here: change this message and run it again. Files the agent edited since are put back first."
+                  onClick={() => setDraft(text)}
+                  className={`${responseAction} ${revealed}`}
+                >
+                  <PencilIcon />
+                </button>
+              )}
+              <button
+                type="button"
+                aria-label={copyLabel(copied, 'Copy message')}
+                title={copied === 'failed' ? COPY_FAILED : 'Copy message'}
+                onClick={() => copy(text)}
+                className={`${responseAction} ${revealed}`}
+              >
+                <CopyIcon />
+              </button>
+              {copied !== 'idle' && <span className="text-neutral-700">{copyLabel(copied, '')}</span>}
+            </div>
           </>
         )
       ) : (
@@ -449,5 +459,6 @@ function MessageParts({ message, sessionId }: { message: Message; sessionId: str
 const responseAction =
   'flex size-7 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-neutral-600 hover:bg-neutral-200 hover:text-text disabled:cursor-not-allowed disabled:opacity-60';
 
-const messageAction =
-  'cursor-pointer rounded-sm border-0 bg-transparent px-1.5 py-0.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-200 hover:text-text';
+/** An action that appears while the message is hovered or has focus inside it. */
+const revealed =
+  'opacity-0 transition-opacity focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100';
