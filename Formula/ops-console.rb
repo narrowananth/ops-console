@@ -7,15 +7,15 @@ class OpsConsole < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/narrowananth/ops-console/releases/download/v0.1.71/ops-console-darwin-arm64.tar.gz",
+      url "https://github.com/narrowananth/ops-console/releases/download/v0.1.72/ops-console-darwin-arm64.tar.gz",
           using: :nounzip
-      sha256 "27f06734195ac5272b00be2b8d2d832c6f5c84240d2d87e524561f80f1ca0ee0"
+      sha256 "11416fe624ff496dc1960b42f9bd9e74e2af7bf2af8025a22f132586d1c29e7a"
     end
 
     on_intel do
-      url "https://github.com/narrowananth/ops-console/releases/download/v0.1.71/ops-console-darwin-x64.tar.gz",
+      url "https://github.com/narrowananth/ops-console/releases/download/v0.1.72/ops-console-darwin-x64.tar.gz",
           using: :nounzip
-      sha256 "e2bda2533d539028e8a92a745e63310074c37c313f25bbaeb378ff34b42f8e50"
+      sha256 "e279a7d90e053b6da8d78739b119499032f4e7f86e6803573ee4670ee0548335"
     end
   end
 
