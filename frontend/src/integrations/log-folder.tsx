@@ -1,7 +1,7 @@
 import { type Connector, HealthStatus } from '@ops-console/shared';
 import { useState } from 'react';
 import { Button } from '../components/ui/button';
-import { usePickLogFolder } from '../lib/queries';
+import { useFolderDialog, usePickLogFolder } from '../lib/queries';
 import { ChoiceCard, type ConnectPane, SignInStep } from './sign-in-step';
 
 /** The Log folder the Connector reads, kept across a Disconnect; empty until one is chosen. */
@@ -13,6 +13,7 @@ export function savedFolder(connector: Connector): string {
 export function LogFolderStep({ connector, pending, cancelling, onConnect, onCancel }: ConnectPane) {
   const [folder, setFolder] = useState(savedFolder(connector));
   const pick = usePickLogFolder();
+  const noDialog = useFolderDialog().data?.available === false;
   const connected = connector.status === HealthStatus.Ok;
   return (
     <>
@@ -22,24 +23,37 @@ export function LogFolderStep({ connector, pending, cancelling, onConnect, onCan
             <span className="font-semibold" title="The folder on this Mac that Monitor reads OpenTelemetry logs from.">
               Log folder
             </span>
-            <span className={`truncate font-mono text-[13px] ${folder === '' ? 'text-neutral-700' : ''}`}>
-              {folder === '' ? 'No folder chosen' : folder}
-            </span>
+            {noDialog ? (
+              <input
+                aria-label="Log folder path"
+                value={folder}
+                onChange={(event) => setFolder(event.target.value)}
+                placeholder="/var/log/otel"
+                title="No folder dialog is installed (zenity or kdialog), so type the path."
+                className="border border-divider bg-card px-2 py-1 font-mono text-[13px]"
+              />
+            ) : (
+              <span className={`truncate font-mono text-[13px] ${folder === '' ? 'text-neutral-700' : ''}`}>
+                {folder === '' ? 'No folder chosen' : folder}
+              </span>
+            )}
           </div>
-          <Button
-            className="shrink-0"
-            title="Pick the folder your Collector's file exporter writes OTLP JSON logs to"
-            disabled={pick.isPending || connector.sign_in !== null}
-            onClick={() =>
-              pick.mutate(undefined, {
-                onSuccess: (path) => {
-                  if (path !== null) setFolder(path);
-                },
-              })
-            }
-          >
-            Choose folder…
-          </Button>
+          {!noDialog && (
+            <Button
+              className="shrink-0"
+              title="Pick the folder your Collector's file exporter writes OTLP JSON logs to"
+              disabled={pick.isPending || connector.sign_in !== null}
+              onClick={() =>
+                pick.mutate(undefined, {
+                  onSuccess: (path) => {
+                    if (path !== null) setFolder(path);
+                  },
+                })
+              }
+            >
+              Choose folder…
+            </Button>
+          )}
         </div>
         {pick.error && (
           <div role="alert" className="text-xs text-accent-700">

@@ -113,7 +113,11 @@ export const localServerSchema = z.object({
 });
 export type LocalServer = z.infer<typeof localServerSchema>;
 
-export const localServersSchema = z.object({ servers: z.array(localServerSchema) });
+/**
+ * `notice` says why the list may be empty when the machine cannot list servers, as when `lsof` is not installed;
+ * null otherwise.
+ */
+export const localServersSchema = z.object({ servers: z.array(localServerSchema), notice: z.string().nullable() });
 
 /** One thing a folder can run: a package script, a make or just recipe, or a toolchain's usual command. */
 export const scriptSchema = z.object({

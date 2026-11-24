@@ -3,6 +3,9 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # A run by hand, from the Actions tab or `gh workflow run release.yml --ref <branch>`, builds and smoke-tests the
+  # tarballs on a branch. Only a tag publishes: `publish` and `tap` skip it.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -131,6 +134,7 @@ jobs:
 
   publish:
     needs: build
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v7
@@ -151,6 +155,7 @@ jobs:
   # A failure here leaves the published release as it is; rerun the job.
   tap:
     needs: publish
+    if: github.ref_type == 'tag'
     runs-on: macos-latest
     permissions:
       contents: write

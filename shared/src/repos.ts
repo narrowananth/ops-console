@@ -55,3 +55,8 @@ export const branchSchema = z.object({
 });
 
 export type Branch = z.infer<typeof branchSchema>;
+
+/** Whether this machine can show a folder dialog; when it cannot, the UI asks for the path to be typed. */
+export const folderDialogSchema = z.object({ available: z.boolean() });
+
+export type FolderDialog = z.infer<typeof folderDialogSchema>;

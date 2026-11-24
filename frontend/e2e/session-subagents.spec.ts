@@ -123,6 +123,7 @@ test('the Session panel lists the branch, the servers and every subagent with it
       json: {
         data: {
           servers: [{ port: 60449, process: 'node', folder: '/work/orders-api', session_id: 's1', process_id: null }],
+          notice: null,
         },
       },
     }),

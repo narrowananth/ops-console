@@ -1,5 +1,8 @@
 import { execFile } from 'node:child_process';
+import { constants } from 'node:fs';
+import { access } from 'node:fs/promises';
 import os from 'node:os';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import { ErrorCode } from '@ops-console/shared';
 import { ApiError } from '../common/errors';
@@ -12,6 +15,8 @@ export const FOLDER_PICKER = Symbol('FOLDER_PICKER');
 export interface FolderPicker {
   /** The chosen folders, one or more; empty when the operator closes the dialog. */
   pick(options?: PickOptions): Promise<string[]>;
+  /** Whether a dialog can open here; absent where one always can. */
+  available?(): Promise<boolean>;
 }
 
 /** The dialog asks for several git repositories unless told otherwise. */
@@ -61,12 +66,35 @@ const runDialog: Dialog = async (file, args) => (await run(file, args, { timeout
 /** The dialog programs a Linux desktop may have, in the order tried. */
 const NO_DIALOG = 'No folder dialog is installed (zenity or kdialog): type the path instead';
 
+/** Whether a program is on the PATH, found without running it. */
+async function onPath(name: string, search = process.env.PATH ?? ''): Promise<boolean> {
+  for (const dir of search.split(path.delimiter).filter(Boolean)) {
+    try {
+      await access(path.join(dir, name), constants.X_OK);
+      return true;
+    } catch {
+      // Not in this folder.
+    }
+  }
+  return false;
+}
+
 /**
  * The desktop's folder dialog through `zenity` or `kdialog`. Neither installed, or no desktop to show it on, and the
  * operator types the path. `kdialog` picks one folder at a time.
  */
 export class LinuxFolderPicker implements FolderPicker {
-  constructor(private readonly dialog: Dialog = runDialog) {}
+  constructor(
+    private readonly dialog: Dialog = runDialog,
+    private readonly env: { display?: string; path?: string } = {},
+  ) {}
+
+  /** A display to open on and one of the two programs installed. */
+  async available(): Promise<boolean> {
+    const display = this.env.display ?? process.env.DISPLAY ?? process.env.WAYLAND_DISPLAY;
+    if (!display) return false;
+    return (await onPath('zenity', this.env.path)) || (await onPath('kdialog', this.env.path));
+  }
 
   async pick({ prompt = 'Choose one or more git repositories', multiple = true }: PickOptions = {}): Promise<string[]> {
     if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY && this.dialog === runDialog) {

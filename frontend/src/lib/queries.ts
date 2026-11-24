@@ -42,6 +42,7 @@ import {
   fileMenuSchema,
   findCodeResultSchema,
   fixSchema,
+  folderDialogSchema,
   HEALTH_CHECKS_DEFAULT,
   type HealthArea,
   type HealthChecksSetting,
@@ -862,6 +863,14 @@ export function useImportRepo() {
 }
 
 /** Opens the Finder folder dialog on this machine; one folder or several. Empty when the operator closes it. */
+/** Whether the folder dialog can open on this machine; where it cannot, the UI asks for the path instead. */
+export function useFolderDialog() {
+  return useQuery({
+    queryKey: ['folder-dialog'] as const,
+    queryFn: () => apiGet('/repos/folder-dialog', z.object({ data: folderDialogSchema })).then((r) => r.data),
+  });
+}
+
 export function usePickFolder() {
   return useMutation({
     mutationFn: () =>
@@ -2039,15 +2048,23 @@ export function useClearBrowserData(sessionId: string) {
  */
 export function useLocalServers(sessionId: string, enabled: boolean, poll: boolean) {
   return useQuery({
-    queryKey: queryKeys.localServers(sessionId),
-    queryFn: () =>
-      apiGet(`/sessions/${sessionId}/local-servers`, z.object({ data: localServersSchema })).then(
-        (b) => b.data.servers,
-      ),
+    ...localServersQuery(sessionId),
+    select: (body) => body.servers,
     enabled,
     refetchInterval: poll ? SERVERS_POLL_MS : false,
   });
 }
+
+/** Why the server list may be empty on this machine, such as a missing `lsof`; null otherwise. Shares `useLocalServers`'s read. */
+export function useLocalServersNotice(sessionId: string, enabled: boolean) {
+  return useQuery({ ...localServersQuery(sessionId), select: (body) => body.notice, enabled });
+}
+
+const localServersQuery = (sessionId: string) => ({
+  queryKey: queryKeys.localServers(sessionId),
+  queryFn: () =>
+    apiGet(`/sessions/${sessionId}/local-servers`, z.object({ data: localServersSchema })).then((b) => b.data),
+});
 
 /** Stops a server of this Session that no Session process owns, such as one left running by `nohup`. */
 export function useStopServer(sessionId: string) {

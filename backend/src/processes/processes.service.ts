@@ -290,6 +290,11 @@ export class ProcessesService implements OnModuleInit, OnModuleDestroy {
     this.serversChanged(sessionId);
   }
 
+  /** Why the server list may be empty on this machine, or null. */
+  scanNotice(): string | null {
+    return this.scanner.notice?.() ?? null;
+  }
+
   /** The Session's servers on a loopback port: one a Session process started, or one running in the Session's folders. */
   async localServers(sessionId: string): Promise<LocalServer[]> {
     const session = this.supported(sessionId);

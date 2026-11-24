@@ -4,7 +4,9 @@ import { ErrorCode } from '@ops-console/shared';
 import { describe, expect, it } from 'vitest';
 import { LINUX_RUN_SANDBOX_PENDING, runSandbox } from '../src/agent/run-sandbox';
 import { defaultDataDir } from '../src/common/platform';
+import { linuxInstallAdvice } from '../src/connectors/connectors.service';
 import { type KeychainEntry, KeychainTimeout, LoginKeychain, SecretServiceUnavailable } from '../src/keychain/keychain';
+import { LSOF_MISSING, LsofScanner } from '../src/processes/local-servers';
 import { LinuxFolderPicker } from '../src/repos/folder-picker';
 import { BubblewrapRunSandbox, type Program } from '../src/terminals/run-sandbox-gate';
 import { SystemdStartAtLogin } from '../src/terminals/start-at-login';
@@ -284,5 +286,56 @@ describe('the folder dialog on Linux (Behavior 29)', () => {
       throw failing('ENOENT');
     });
     await expect(picker.pick()).rejects.toMatchObject({ status: 409, code: ErrorCode.InvalidState });
+  });
+});
+
+describe('the folder dialog is offered only where one can open (Behavior 29)', () => {
+  const never = async () => '';
+
+  it('is unavailable with no display, or with neither zenity nor kdialog on the PATH', async () => {
+    const bin = await tempDir('ops-console-bin-');
+    await writeFile(path.join(bin, 'zenity'), '#!/bin/sh\n', { mode: 0o755 });
+    expect(await new LinuxFolderPicker(never, { display: '', path: bin }).available()).toBe(false);
+    expect(
+      await new LinuxFolderPicker(never, { display: ':0', path: await tempDir('ops-console-empty-') }).available(),
+    ).toBe(false);
+  });
+
+  it('is available with a display and either program installed', async () => {
+    const bin = await tempDir('ops-console-bin-');
+    await writeFile(path.join(bin, 'kdialog'), '#!/bin/sh\n', { mode: 0o755 });
+    expect(await new LinuxFolderPicker(never, { display: ':0', path: bin }).available()).toBe(true);
+  });
+});
+
+describe('the server list on a machine with no lsof (Behavior 31)', () => {
+  it('lists nothing and says why, and says nothing when lsof is there', async () => {
+    const was = process.env.PATH;
+    const scanner = new LsofScanner();
+    try {
+      process.env.PATH = await tempDir('ops-console-empty-');
+      expect(await scanner.scan()).toEqual([]);
+      expect(scanner.notice()).toBe(LSOF_MISSING);
+      // `lsof` installed, and listening to nothing: it exits 1 with no output.
+      const bin = await tempDir('ops-console-lsof-');
+      await writeFile(path.join(bin, 'lsof'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+      process.env.PATH = bin;
+      const found = new LsofScanner();
+      expect(await found.scan()).toEqual([]);
+      expect(found.notice()).toBeNull();
+    } finally {
+      process.env.PATH = was;
+    }
+  });
+});
+
+describe('a missing CLI on Linux (Behavior 33)', () => {
+  it('names the package manager, and Homebrew only when it is installed, and runs neither', () => {
+    expect(linuxInstallAdvice(['gh'], false)).toBe(
+      'gh is not installed: install it with your package manager, then Connect again',
+    );
+    expect(linuxInstallAdvice(['pup', 'gh'], true)).toBe(
+      'pup, gh are not installed: install them with your package manager, or with Homebrew: `brew install pup gh`, then Connect again',
+    );
   });
 });

@@ -1,7 +1,7 @@
 # Linux port
 
 **Status:** draft
-**Built:** items 3 to 22 and 29 to 33 except what waits on a Linux machine; the Linux Run sandbox rules (23 to 28), ADRs 0004 and 0006, Linux publishing and the hidden Choose button are not built. See Built notes at the end.
+**Built:** items 3 to 22 and 29 to 33 except what waits on a Linux machine; the Linux Run sandbox rules (23 to 28), ADRs 0004 and 0006, and Linux publishing are not built. See Built notes at the end.
 **Design:** none. Permissions: the Full Disk Access row stays macOS-only, and the Keychain, Start at login and Run sandbox rows gain Linux text and fixes.
 
 ## Problem
@@ -198,8 +198,9 @@ Items 19, 20, 30, 32 and 34 to 36 are pinned by the existing tests for those are
 
 Built on branch `linux-port`, the spike-independent parts only. Each item was checked on this Mac with fakes; nothing ran on Linux.
 
-- Built: the install, CLI and systemd side (3 to 9), start at login (10 to 12), the Secret Service backend, refusal and availability route (13 to 19), the Run sandbox gate and its fail-closed rule (21, 22), the folder dialog (29), the Linux data folder, and the release build job.
+- Built: the install, CLI and systemd side (3 to 9), start at login (10 to 12), the Secret Service backend, refusal and availability route (13 to 19), the Run sandbox gate and its fail-closed rule (21, 22), the folder dialog and its typed-path fallback (29), the empty server list with its `lsof` notice (31), the missing-CLI message (33), the Linux data folder, and the release build job.
 - Held: no agent run starts on Linux while the Run sandbox is unverified there (`LINUX_RUN_SANDBOX_VERIFIED` is false), and the Run sandbox row says so. Items 23 to 28 wait on the spike.
-- Not built: the ADR 0004 and 0006 rewrites, publishing the Linux tarballs (the release's `checksums.txt` stays macOS-only), the hidden Choose button (29 returns a 409 and the path field stays), and package-manager hints for missing CLIs (33).
-- Partly built: item 31 returns an empty server list when `lsof` is missing and shows no message saying so.
-- Unverified: item 20 (where Claude Code keeps its sign-in on Linux), and every Linux behavior on a real machine.
+- Changed from the draft: no path field existed in the UI, so with no dialog tool the Repos tab and the Log folder step now show a typed-path field in place of the Choose button (`GET /repos/folder-dialog` says whether a dialog can open). A missing CLI on Linux gets a message naming the package manager, and Homebrew when it is installed; the console runs neither (33).
+- Not built: the ADR 0004 and 0006 rewrites, and publishing the Linux tarballs (the release's `checksums.txt` stays macOS-only).
+- Unverified: item 20 (where Claude Code keeps its sign-in on Linux), and every Linux behavior on a real machine. `release.yml` can now be run by hand on a branch (`workflow_dispatch`), which builds and smoke-tests the Linux tarballs without publishing.
+- Follow-ups, to be written as spec items first: the Session browser's Chrome path on Linux, and the Setup agent's macOS paths.

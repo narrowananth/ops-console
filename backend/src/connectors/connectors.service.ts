@@ -822,6 +822,10 @@ export class ConnectorsService implements OnModuleDestroy {
     const present = await Promise.all(commands.map((command) => this.tools.installed(command)));
     const missing = commands.filter((_, index) => !present[index]);
     if (missing.length === 0) return;
+    // Off macOS the console runs no installer: it names the command, since each distro installs its own way.
+    if (process.platform !== 'darwin') {
+      throw new ApiError(409, ErrorCode.InvalidState, linuxInstallAdvice(missing, await this.tools.installed('brew')));
+    }
     if (!(await this.tools.installed('brew'))) {
       throw new ApiError(
         409,
@@ -1179,7 +1183,15 @@ const INSTALL = {
 };
 
 function missingToolMessage(command: keyof typeof INSTALL): string {
+  if (process.platform !== 'darwin') return linuxInstallAdvice([command], false);
   return `${command} is not installed: install ${INSTALL[command]}, then Connect again`;
+}
+
+/** The message for a missing command on Linux: install it with the system's package manager, or Homebrew when it is there. The console runs neither. */
+export function linuxInstallAdvice(missing: string[], brew: boolean): string {
+  const names = missing.join(', ');
+  const withBrew = brew ? `, or with Homebrew: \`brew install ${missing.join(' ')}\`` : '';
+  return `${names} ${missing.length === 1 ? 'is' : 'are'} not installed: install ${missing.length === 1 ? 'it' : 'them'} with your package manager${withBrew}, then Connect again`;
 }
 
 function signedOutDetail(profile: string): string {
