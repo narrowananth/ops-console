@@ -177,15 +177,32 @@ export function blockParts(block: ContentBlock, label?: ServerLabel | null): Par
   return [];
 }
 
-/** Prompts the operator typed; not tool results, compaction summaries or slash-command echoes. */
+function entryText(entry: z.infer<typeof entrySchema>): string {
+  const { content } = entry.message;
+  return typeof content === 'string'
+    ? content
+    : content.flatMap((block) => (block.type === 'text' && 'text' in block ? [block.text] : [])).join('\n');
+}
+
+const NOTIFICATION = /^\s*<task-notification>/;
+const ENTITIES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" };
+const STEP_LIMIT = 140;
+
+/** One line for a finished background task, from the `<summary>` the SDK writes as a user entry; null for any other text. */
+function notificationStep(text: string): string | null {
+  if (!NOTIFICATION.test(text)) return null;
+  const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1] ?? '';
+  const plain = summary.replace(/&(?:amp|lt|gt|quot|#39);/g, (entity) => ENTITIES[entity] ?? entity).trim();
+  const line = plain.replace(/\s+/g, ' ');
+  if (!line) return 'Background task finished';
+  return line.length > STEP_LIMIT ? `${line.slice(0, STEP_LIMIT - 1)}…` : line;
+}
+
+/** Prompts the operator typed; not tool results, compaction summaries, slash-command echoes or task notifications. */
 function operatorText(entry: z.infer<typeof entrySchema>): string | null {
   if (entry.is_meta || entry.isCompactSummary) return null;
-  const { content } = entry.message;
-  const text =
-    typeof content === 'string'
-      ? content
-      : content.flatMap((block) => (block.type === 'text' && 'text' in block ? [block.text] : [])).join('\n');
-  if (!text.trim() || /^\s*<(command-|local-command-)/.test(text)) return null;
+  const text = entryText(entry);
+  if (!text.trim() || /^\s*<(command-|local-command-)/.test(text) || NOTIFICATION.test(text)) return null;
   return text;
 }
 
@@ -200,6 +217,8 @@ export function toMessages(
   label?: ServerLabel | null,
 ): Message[] {
   const messages: Message[] = [];
+  // Notifications that arrived before the agent's next entry; they open that message.
+  let notices: Part[] = [];
   for (const value of raw) {
     const parsed = entrySchema.safeParse(value);
     if (!parsed.success) continue;
@@ -207,6 +226,13 @@ export function toMessages(
     if (entry.parent_tool_use_id !== null || entry.type === 'system' || skip.has(entry.uuid)) continue;
     const createdAt = entry.timestamp ?? new Date(0).toISOString();
     if (entry.type === 'user') {
+      const notice = notificationStep(entryText(entry));
+      if (notice !== null) {
+        const last = messages.at(-1);
+        if (last?.role === 'agent') last.parts.push({ kind: 'step', text: notice });
+        else notices.push({ kind: 'step', text: notice });
+        continue;
+      }
       const text = operatorText(entry);
       if (text !== null) {
         messages.push({
@@ -220,8 +246,11 @@ export function toMessages(
       continue;
     }
     const content = entry.message.content;
-    const parts =
-      typeof content === 'string' ? textParts(content) : content.flatMap((block) => blockParts(block, label));
+    const parts = [
+      ...notices,
+      ...(typeof content === 'string' ? textParts(content) : content.flatMap((block) => blockParts(block, label))),
+    ];
+    notices = [];
     const last = messages.at(-1);
     if (last?.role === 'agent') last.parts.push(...parts);
     else messages.push({ id: entry.uuid, role: 'agent', status: 'done', parts, created_at: createdAt });
