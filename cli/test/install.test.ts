@@ -98,7 +98,9 @@ describe('install.sh', () => {
   });
 
   it.each([
-    ['Linux', 'x86_64'],
+    ['Linux', 'i686'],
+    ['Linux', 'riscv64'],
+    ['FreeBSD', 'amd64'],
     ['Darwin', 'i386'],
   ])('refuses %s %s, naming the platform', async (os, cpu) => {
     const m = await machine(release100, 0);
@@ -126,5 +128,57 @@ describe('install.sh', () => {
     expect((await readdir(path.join(m.installDir, 'versions'))).sort()).toEqual(['1.1.0', '1.2.0']);
     expect(await readlink(path.join(m.installDir, 'current'))).toBe('versions/1.2.0');
     expect((await opsConsole(m, '--version')).stdout.trim()).toBe('1.2.0');
+  });
+});
+
+describe('install.sh on Linux', () => {
+  const linux = { FAKE_UNAME_S: 'Linux', FAKE_UNAME_M: 'x86_64' };
+
+  it.each([
+    ['x86_64', 'x64'],
+    ['aarch64', 'arm64'],
+  ] as const)('installs the linux-%s tarball under the home folder', async (uname, arch) => {
+    const release = await makeRelease('1.0.0', arch, 'linux');
+    const m = await machine(release, 0);
+    const result = await install(m, { ...linux, FAKE_UNAME_M: uname });
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(`ops-console-linux-${arch}.tar.gz`);
+    expect(await readlink(path.join(m.installDir, 'current'))).toBe('versions/1.0.0');
+    expect(await readlink(path.join(m.home, '.local/bin/ops-console'))).toBe(
+      path.join(m.installDir, 'current/bin/ops-console'),
+    );
+  });
+
+  it('refuses a tarball whose checksum does not match, and installs nothing', async () => {
+    const release = await makeRelease('1.0.0', 'x64', 'linux');
+    await writeFile(path.join(release, 'checksums.txt'), `${'0'.repeat(64)}  ops-console-linux-x64.tar.gz\n`);
+    const m = await machine(release, 0);
+    const result = await install(m, linux);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toMatch(/checksum mismatch/);
+    await expect(readlink(path.join(m.installDir, 'current'))).rejects.toThrow();
+  });
+
+  it('refuses a musl system, naming musl', async () => {
+    const m = await machine(await makeRelease('1.0.0', 'x64', 'linux'), 0);
+    const result = await install(m, { ...linux, FAKE_LDD: 'musl' });
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('musl');
+    await expect(readlink(path.join(m.installDir, 'current'))).rejects.toThrow();
+  });
+
+  it('refuses a glibc older than 2.35, naming the version it found', async () => {
+    const m = await machine(await makeRelease('1.0.0', 'x64', 'linux'), 0);
+    const result = await install(m, { ...linux, FAKE_LDD: '2.31' });
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('glibc 2.35 or later');
+    expect(result.stderr).toContain('2.31');
+  });
+
+  it('accepts glibc 2.35 and a newer major', async () => {
+    const m = await machine(await makeRelease('1.0.0', 'x64', 'linux'), 0);
+    expect((await install(m, { ...linux, FAKE_LDD: '2.35' })).code).toBe(0);
+    expect((await install(m, { ...linux, FAKE_LDD: '3.0' })).code).toBe(0);
   });
 });

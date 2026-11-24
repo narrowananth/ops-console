@@ -1,6 +1,6 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { AsyncEntry } from '@napi-rs/keyring';
-import { ErrorCode, KEYCHAIN_WAIT_MESSAGE } from '@ops-console/shared';
+import { ErrorCode, KEYCHAIN_WAIT_MESSAGE, type KeychainAvailability } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
 import type { KeychainWaitTracker } from './keychain-wait';
@@ -12,6 +12,8 @@ export interface Keychain {
   set(key: string, value: string): Promise<void>;
   get(key: string): Promise<string | null>;
   delete(key: string): Promise<void>;
+  /** Whether secrets can be stored on this machine; absent where the system always can. */
+  availability?(): Promise<KeychainAvailability>;
 }
 
 /** One call waits this long for the Mac to answer, then fails. */
@@ -24,11 +26,35 @@ export const HANDOVER_LIMIT_MS = 90_000;
  */
 export const NATIVE_CALLS = 2;
 
+/** The availability probe gives the Secret Service this long to answer before it counts a pending prompt as an answer. */
+export const PROBE_LIMIT_MS = 5_000;
+/** The probe's answer is kept this long, so reading the Permissions page twice makes one call. */
+const PROBE_KEPT_MS = 10_000;
+/** An item no one writes: reading it asks the Secret Service for nothing but whether it answers. */
+const PROBE_KEY = 'availability-probe';
+
 /** A Keychain call the Mac did not answer in time, usually because it waits for the login password. */
 export class KeychainTimeout extends ApiError {
   constructor() {
     super(503, ErrorCode.KeychainTimeout, KEYCHAIN_WAIT_MESSAGE);
   }
+}
+
+/** Secrets need a Secret Service the console could not reach. Linux only: a Mac always has its Keychain. */
+export class SecretServiceUnavailable extends ApiError {
+  constructor(readonly detail: string) {
+    super(
+      409,
+      ErrorCode.InvalidState,
+      `No Secret Service answered: ${detail}. Secrets need a desktop keyring such as GNOME Keyring or KWallet, running in this login session.`,
+    );
+  }
+}
+
+/** The first line of a native error, cut short: what the Permissions row and a failed save show. */
+function detailOf(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  return (text.split('\n')[0] ?? text).slice(0, 200) || 'the call failed';
 }
 
 /** The part of a Keychain item `LoginKeychain` uses; tests pass a fake that never answers. */
@@ -44,6 +70,9 @@ export type LoginKeychainOptions = {
   callMs?: number;
   handoverMs?: number;
   nativeCalls?: number;
+  probeMs?: number;
+  /** The system the console runs on, for the checks that differ: Linux has a Secret Service, not a Keychain. */
+  platform?: NodeJS.Platform;
   /** Where the keys this console holds are listed, so the next handover reads them directly. Never holds a value. */
   manifestFile?: string;
 };
@@ -114,6 +143,8 @@ export class LoginKeychain implements Keychain {
   /** Every key this app holds. `trusted` once a file or a finished handover says the list is complete. */
   private readonly keys = new Set<string>();
   private trusted = false;
+  private readonly platform: NodeJS.Platform;
+  private probed: { at: number; answer: KeychainAvailability } | null = null;
 
   constructor(
     private readonly service = 'ops-console',
@@ -124,6 +155,7 @@ export class LoginKeychain implements Keychain {
     this.callMs = options.callMs ?? CALL_LIMIT_MS;
     this.handoverMs = options.handoverMs ?? HANDOVER_LIMIT_MS;
     this.slots = new Slots(options.nativeCalls ?? NATIVE_CALLS);
+    this.platform = options.platform ?? process.platform;
     this.gate = ready instanceof Promise ? { waitFor: () => ready } : ready;
     this.loadManifest();
   }
@@ -146,15 +178,51 @@ export class LoginKeychain implements Keychain {
   async get(key: string): Promise<string | null> {
     const kept = this.values.get(key);
     if (kept !== undefined) return kept;
-    const value = (await this.call((entry) => entry.getPassword(), key)) ?? null;
+    let value: string | null;
+    try {
+      value = (await this.call((entry) => entry.getPassword(), key)) ?? null;
+    } catch (error) {
+      // With no Secret Service nothing was ever stored, so there is nothing to read.
+      if (error instanceof SecretServiceUnavailable) return null;
+      throw error;
+    }
     if (value !== null) this.values.set(key, value);
     return value;
   }
 
   async delete(key: string): Promise<void> {
-    await this.call((entry) => entry.deletePassword(), key);
+    try {
+      await this.call((entry) => entry.deletePassword(), key);
+    } catch (error) {
+      // As with a read: with no Secret Service the item is already gone. Only a save needs one.
+      if (!(error instanceof SecretServiceUnavailable)) throw error;
+    }
     this.values.delete(key);
     this.remember(key, false);
+  }
+
+  /**
+   * Whether this machine can store secrets. A Mac always can. On Linux the Secret Service must answer a read: a read
+   * still pending after `probeMs` is a keyring waiting for its unlock prompt, so it counts as answering.
+   */
+  async availability(): Promise<KeychainAvailability> {
+    const store = this.platform === 'linux' ? 'secret_service' : 'keychain';
+    const available: KeychainAvailability = { available: true, reason: null, store };
+    if (this.platform !== 'linux' || this.options.wait?.state().waiting) return available;
+    if (this.probed && Date.now() - this.probed.at < PROBE_KEPT_MS) return this.probed.answer;
+    let answer: KeychainAvailability = available;
+    try {
+      await within(
+        this.slots.run(() => this.entry(this.service, PROBE_KEY).getPassword()),
+        this.options.probeMs ?? PROBE_LIMIT_MS,
+      );
+    } catch (error) {
+      if (!(error instanceof KeychainTimeout)) {
+        answer = { available: false, reason: `no Secret Service answered: ${detailOf(error)}`, store };
+      }
+    }
+    this.probed = { at: Date.now(), answer };
+    return answer;
   }
 
   /** The keys this app holds, for a handover to read directly; `null` until a start has made the list complete. */
@@ -207,6 +275,9 @@ export class LoginKeychain implements Keychain {
       );
     } catch (error) {
       abandoned = true;
+      // Any other failure of the native call on Linux means the Secret Service is not there to ask.
+      if (this.platform === 'linux' && !(error instanceof ApiError))
+        throw new SecretServiceUnavailable(detailOf(error));
       throw error;
     } finally {
       done?.();

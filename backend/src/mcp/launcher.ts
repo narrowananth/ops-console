@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
+import { defaultDataDir } from '../common/platform';
 import { HANDOVER_FLAG, waitForHandover } from '../keychain/handover';
 import { HANDOVER_LIMIT_MS, type Keychain } from '../keychain/keychain';
 
@@ -39,9 +40,7 @@ export const FILES_DIR = '{{files}}';
 
 /** The data folder, where the daemon keeps `runtime.json`. */
 function dataDir(): string {
-  return path.resolve(
-    process.env.OPS_CONSOLE_DATA_DIR ?? path.join(homedir(), 'Library', 'Application Support', 'ops-console'),
-  );
+  return path.resolve(process.env.OPS_CONSOLE_DATA_DIR ?? defaultDataDir());
 }
 
 /**

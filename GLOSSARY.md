@@ -77,6 +77,8 @@ The operating-system limit on an agent run's commands, closed to the login Keych
 git control files the daemon's `git` reads, and open to everything else: writes anywhere, any host, `localhost`, servers
 and Unix sockets. A read-only run may not change its working folder. It applies in every Access mode, and a run fails
 when the sandbox is unavailable. The agent's file tools are held to the same closed paths; the console checks them.
+On macOS it is Seatbelt. On Linux it is bubblewrap, and no run starts there until the sandbox's limits on the Secret
+Service, `localhost` and Docker are verified ([linux-port](docs/specs/linux-port.md)).
 
 **Output file**:
 A file the agent wrote in its Session's output folder for the operator: a PDF, a spreadsheet, a chart, an archive. It shows
@@ -444,16 +446,21 @@ _Avoid_: audit trail, history
 ### Console
 
 **Start at login**:
-launchd starting the installed console when the operator logs in, and again if it stops. macOS lists it as Ops
-Console under App Background Activity. A dev build never starts at login.
+The service manager starting the installed console when the operator logs in, and again if it stops: launchd on macOS,
+which lists it as Ops Console under App Background Activity, and a systemd user service on Linux, which stops when the
+operator logs out unless lingering is on. A dev build never starts at login.
 
 **Start-up queue**:
 The background work the daemon holds back while it boots, such as the first MCP Probe, the usage poll and the Scans a stopped
 daemon missed. It opens once the port listens and runs two tasks at a time.
 
+**Keychain**:
+The operator's secret store: the login Keychain on macOS, the Secret Service (a desktop keyring) on Linux. With no
+Secret Service running, the console saves no secret.
+
 **Keychain wait**:
-A Keychain call the Mac has not answered, usually because it waits for the login password. The console shows it after
-10 seconds and fails the call after 60.
+A Keychain call that has not been answered, usually because the Mac waits for the login password or a Linux keyring
+waits to be unlocked. The console shows it after 10 seconds and fails the call after 60.
 
 **Keychain handover**:
 The first start of a new version taking the Keychain items from the previous version's app, so macOS does not ask for the

@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import os from 'node:os';
 import { promisify } from 'node:util';
 import { ErrorCode } from '@ops-console/shared';
 import { ApiError } from '../common/errors';
@@ -50,4 +51,56 @@ export class MacFolderPicker implements FolderPicker {
       throw new ApiError(502, ErrorCode.UpstreamFailed, 'The folder dialog failed');
     }
   }
+}
+
+/** Runs a program with no shell and resolves to its stdout; rejects with the exit code when it fails. */
+export type Dialog = (file: string, args: string[]) => Promise<string>;
+
+const runDialog: Dialog = async (file, args) => (await run(file, args, { timeout: 10 * 60_000 })).stdout;
+
+/** The dialog programs a Linux desktop may have, in the order tried. */
+const NO_DIALOG = 'No folder dialog is installed (zenity or kdialog): type the path instead';
+
+/**
+ * The desktop's folder dialog through `zenity` or `kdialog`. Neither installed, or no desktop to show it on, and the
+ * operator types the path. `kdialog` picks one folder at a time.
+ */
+export class LinuxFolderPicker implements FolderPicker {
+  constructor(private readonly dialog: Dialog = runDialog) {}
+
+  async pick({ prompt = 'Choose one or more git repositories', multiple = true }: PickOptions = {}): Promise<string[]> {
+    if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY && this.dialog === runDialog) {
+      throw new ApiError(409, ErrorCode.InvalidState, NO_DIALOG);
+    }
+    const zenity = [
+      '--file-selection',
+      '--directory',
+      `--title=${prompt}`,
+      ...(multiple ? ['--multiple', '--separator=\n'] : []),
+    ];
+    for (const [file, args] of [
+      ['zenity', zenity],
+      ['kdialog', ['--getexistingdirectory', os.homedir(), '--title', prompt]],
+    ] as const) {
+      try {
+        return (await this.dialog(file, [...args]))
+          .split('\n')
+          .map((line) => line.trim().replace(/(.)\/$/, '$1'))
+          .filter(Boolean);
+      } catch (error) {
+        const { code, stderr } = error as { code?: unknown; stderr?: unknown };
+        // A program that is not installed is skipped. A closed dialog exits 1 and says nothing; with a message, as when
+        // there is no display to open on, the dialog failed.
+        if (code === 'ENOENT') continue;
+        if (code === 1 && !String(stderr ?? '').trim()) return [];
+        throw new ApiError(502, ErrorCode.UpstreamFailed, 'The folder dialog failed');
+      }
+    }
+    throw new ApiError(409, ErrorCode.InvalidState, NO_DIALOG);
+  }
+}
+
+/** The folder picker for this machine's system. */
+export function folderPicker(platform: NodeJS.Platform = process.platform): FolderPicker {
+  return platform === 'linux' ? new LinuxFolderPicker() : new MacFolderPicker();
 }

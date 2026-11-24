@@ -10,6 +10,7 @@ import type {
   HookJSONOutput,
   Options,
   PermissionMode,
+  SandboxSettings,
   SDKAssistantMessage,
   SDKMessage,
   SDKTaskNotificationMessage,
@@ -1221,9 +1222,9 @@ export class AgentRuntime implements OnModuleDestroy {
     const scope = mcpScope(run.purpose, session.kind, logSource);
     // The console tools this run offers, for `key`: the servers' own objects cannot be compared.
     const tools: string[] = [];
-    const options: Options = {
-      cwd: run.workingDir,
-      sandbox: runSandbox({
+    let sandbox: SandboxSettings;
+    try {
+      sandbox = runSandbox({
         workingDir: run.workingDir,
         repos: repoFolders.map((folder) => ({ path: folder, gitFile: gitFileOf(folder) })),
         readOnly: run.readOnly,
@@ -1232,7 +1233,15 @@ export class AgentRuntime implements OnModuleDestroy {
         ...(kind?.ownWorktree && run.workingDir === kind.workingDir(session)
           ? { gitDirs: worktreeGitDirs(run.workingDir) }
           : {}),
-      }),
+      });
+    } catch (error) {
+      // No sandbox, no run: the Session shows why.
+      run.failure = error instanceof Error ? error.message : 'the Run sandbox is unavailable';
+      throw error;
+    }
+    const options: Options = {
+      cwd: run.workingDir,
+      sandbox,
       // A folder that holds pull request code never adds its own settings, hooks, servers or memory to the run.
       ...(run.projectSettings ? {} : { settingSources: ['user' as const] }),
       ...(scope.none ? { strictMcpConfig: true } : {}),

@@ -1,0 +1,83 @@
+#!/usr/bin/env node
+// Stands in for `systemctl --user`: `enable --now` runs the unit file's ExecStart in the background with its
+// Environment= values and log file, `disable --now` stops it and waits for the exit, as systemd does. Every call is
+// appended to $FAKE_SYSTEMCTL_STATE/calls.log. $FAKE_SYSTEMD=none makes every call fail as on a login with no user manager.
+import { spawn } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+
+const state = process.env.FAKE_SYSTEMCTL_STATE;
+mkdirSync(state, { recursive: true });
+const args = process.argv.slice(2);
+appendFileSync(path.join(state, 'calls.log'), `${args.join(' ')}\n`);
+if (process.env.FAKE_SYSTEMD === 'none') {
+  console.error('Failed to connect to bus: No medium found');
+  process.exit(1);
+}
+const [, command, ...rest] = args;
+const unitName = rest.find((arg) => arg.endsWith('.service'));
+const pidFile = path.join(state, 'pid');
+const enabledFile = path.join(state, 'enabled');
+
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const runningPid = () => {
+  if (!existsSync(pidFile)) return null;
+  const pid = Number(readFileSync(pidFile, 'utf8'));
+  return alive(pid) ? pid : null;
+};
+const stopJob = async () => {
+  const pid = runningPid();
+  if (pid === null) return;
+  process.kill(pid, 'SIGTERM');
+  while (alive(pid)) await new Promise((resolve) => setTimeout(resolve, 50));
+};
+
+/** The words of a unit line, unquoted the way systemd does: `\\`, `\"`, `%%` and `$$`. */
+const words = (line) =>
+  [...line.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) =>
+    m[1].replace(/\\(.)/g, '$1').replaceAll('%%', '%').replaceAll('$$', '$'),
+  );
+const startJob = () => {
+  const dir = process.env.XDG_CONFIG_HOME ?? path.join(process.env.HOME, '.config');
+  const unit = readFileSync(path.join(dir, 'systemd/user', unitName), 'utf8').split('\n');
+  const program = words(unit.find((line) => line.startsWith('ExecStart=')));
+  const env = {};
+  for (const line of unit.filter((l) => l.startsWith('Environment='))) {
+    const [pair] = words(line);
+    env[pair.slice(0, pair.indexOf('='))] = pair.slice(pair.indexOf('=') + 1);
+  }
+  const log = unit.find((line) => line.startsWith('StandardOutput=append:')).slice('StandardOutput=append:'.length);
+  const out = openSync(log, 'a');
+  const child = spawn(program[0], program.slice(1), {
+    env: { HOME: process.env.HOME, ...env },
+    stdio: ['ignore', out, out],
+    detached: true,
+  });
+  writeFileSync(pidFile, String(child.pid));
+  child.unref();
+};
+
+if (command === 'show-environment' || command === 'daemon-reload') {
+  process.exit(0);
+} else if (command === 'enable' && rest.includes('--now')) {
+  writeFileSync(enabledFile, '');
+  if (runningPid() === null) startJob();
+} else if (command === 'disable' && rest.includes('--now')) {
+  rmSync(enabledFile, { force: true });
+  await stopJob();
+} else if (command === 'is-enabled') {
+  process.exit(existsSync(enabledFile) ? 0 : 1);
+} else if (command === 'restart') {
+  await stopJob();
+  startJob();
+} else {
+  console.error(`fake systemctl: unsupported ${args.join(' ')}`);
+  process.exit(64);
+}

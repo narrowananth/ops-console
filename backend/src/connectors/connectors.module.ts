@@ -1,7 +1,7 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { CONNECTOR_SERVERS, ConnectorId } from '@ops-console/shared';
 import { KEYCHAIN, type Keychain } from '../keychain/keychain';
-import { FOLDER_PICKER, type FolderPicker, MacFolderPicker } from '../repos/folder-picker';
+import { FOLDER_PICKER, type FolderPicker, folderPicker } from '../repos/folder-picker';
 import { CLAUDE_CREDENTIALS, type ClaudeCredentials, MacClaudeCredentials } from './claude-credentials';
 import { CONNECTOR_TOOLS, type ConnectorTools } from './connector-tools';
 import { ConnectorsController } from './connectors.controller';
@@ -44,7 +44,7 @@ export class ConnectorsModule {
         },
         { provide: CLAUDE_CREDENTIALS, useValue: config.claudeCredentials ?? new MacClaudeCredentials() },
         { provide: HOSTED_HOSTS, useValue: hosts },
-        { provide: FOLDER_PICKER, useValue: config.folderPicker ?? new MacFolderPicker() },
+        { provide: FOLDER_PICKER, useValue: config.folderPicker ?? folderPicker() },
         HostedServers,
         ConnectorsService,
       ],

@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { COMPILE_CACHE, CURRENT_APP, CURRENT_DAEMON, DATA_DIR, LABEL, LOG_DIR, LOG_FILE, PLIST } from './paths';
+import { daemonEnv } from './daemon-env';
+import { DAEMON_EXECUTABLE, DAEMON_SCRIPT, LABEL, LOG_DIR, LOG_FILE, PLIST } from './paths';
 
 const domain = `gui/${process.getuid?.() ?? 0}`;
 const service = `${domain}/${LABEL}`;
@@ -11,22 +12,6 @@ const BOOTOUT_TIMEOUT_MS = 15_000;
 function launchctl(...args: string[]): { ok: boolean; output: string } {
   const result = spawnSync('launchctl', args, { encoding: 'utf8' });
   return { ok: result.status === 0, output: `${result.stdout ?? ''}${result.stderr ?? ''}`.trim() };
-}
-
-/**
- * launchd starts agents with a bare PATH and its own idea of HOME. The daemon gets the operator's PATH, so
- * it finds `claude`, and the data folder this CLI reads the runtime file from. A pool of 16 threads keeps a few
- * Keychain calls that wait for a password from holding every thread the daemon's files and DNS share.
- */
-function daemonEnv(): Record<string, string> {
-  const env: Record<string, string> = {
-    PATH: process.env.PATH ?? '/usr/bin:/bin',
-    OPS_CONSOLE_DATA_DIR: DATA_DIR,
-    UV_THREADPOOL_SIZE: '16',
-    NODE_COMPILE_CACHE: COMPILE_CACHE,
-  };
-  if (process.env.OPS_CONSOLE_PORT) env.OPS_CONSOLE_PORT = process.env.OPS_CONSOLE_PORT;
-  return env;
 }
 
 function plist(): string {
@@ -41,8 +26,8 @@ function plist(): string {
     <string>${LABEL}</string>
     <key>ProgramArguments</key>
     <array>
-      <string>${xmlEscape(CURRENT_APP)}</string>
-      <string>${xmlEscape(CURRENT_DAEMON)}</string>
+      <string>${xmlEscape(DAEMON_EXECUTABLE)}</string>
+      <string>${xmlEscape(DAEMON_SCRIPT)}</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
@@ -100,4 +85,8 @@ export async function unload(): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   launchctl('disable', service);
+}
+
+export async function removeUnit(): Promise<void> {
+  await rm(PLIST, { force: true });
 }

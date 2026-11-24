@@ -4,8 +4,9 @@ import { lstat, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { runningDaemon } from './daemon';
-import { load, restart, unload } from './launchd';
-import { BIN_LINK, DATA_DIR, INSTALL_DIR, LOG_DIR, LOG_FILE, PLIST, VERSION_ROOT } from './paths';
+import { openPlan } from './opener';
+import { BIN_LINK, DATA_DIR, INSTALL_DIR, LOG_DIR, LOG_FILE, RUNTIME_FILE, VERSION_ROOT } from './paths';
+import { service } from './service';
 
 const START_TIMEOUT_MS = z.coerce
   .number()
@@ -36,9 +37,9 @@ async function start(): Promise<number> {
 
 /** Loads the job, or with `replacing` restarts it, and waits until a daemon other than the one `replacing` names answers. */
 async function launch(replacing?: number): Promise<number> {
-  const loaded = await (replacing === undefined ? load() : restart());
+  const loaded = await (replacing === undefined ? service.load() : service.restart());
   if (!loaded.ok) {
-    console.error(`launchctl could not load ${PLIST}: ${loaded.output}`);
+    console.error(`${service.manager} could not load ${service.unitFile}: ${loaded.output}`);
     return 1;
   }
   const deadline = Date.now() + START_TIMEOUT_MS;
@@ -52,7 +53,7 @@ async function launch(replacing?: number): Promise<number> {
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  await unload();
+  await service.unload();
   console.error(
     `The daemon did not answer within ${Math.round(START_TIMEOUT_MS / 1000)} seconds. Last lines of ${LOG_FILE}:`,
   );
@@ -69,7 +70,7 @@ async function logTail(lines: number): Promise<string> {
 }
 
 async function stop(): Promise<number> {
-  await unload();
+  await service.unload();
   console.log('ops-console stopped.');
   return 0;
 }
@@ -94,11 +95,26 @@ async function open(): Promise<number> {
     console.error('The daemon is not running. Run `ops-console start`.');
     return 1;
   }
-  const url = `http://127.0.0.1:${running.port}/#token=${running.token}`;
-  // A second browser signs in the same way, by name; the token never shows in the terminal.
+  const address = `http://127.0.0.1:${running.port}`;
   const browser = process.argv[3];
-  console.log(`Opening http://127.0.0.1:${running.port}${browser ? ` in ${browser}` : ''}`);
-  return spawnSync('open', browser ? ['-a', browser, url] : [url], { stdio: 'inherit' }).status ?? 1;
+  const plan = openPlan({
+    platform: process.platform,
+    env: process.env,
+    url: `${address}/#token=${running.token}`,
+    browser,
+  });
+  if ('none' in plan) {
+    // The token stays out of the terminal, so the address alone signs nobody in.
+    console.log(`${plan.none}, so no browser was opened.
+Address  ${address}
+Run \`ops-console open\` from a desktop session on this machine to sign a browser in. For a browser elsewhere, forward
+the port (ssh -L ${running.port}:127.0.0.1:${running.port} <host>) and add #token=<token> to the address; the token is
+the "token" field of ${RUNTIME_FILE}.`);
+    return 0;
+  }
+  // A second browser signs in the same way, by name; the token never shows in the terminal.
+  console.log(`Opening ${address}${browser ? ` in ${browser}` : ''}`);
+  return spawnSync(plan.command, plan.args, { stdio: 'inherit' }).status ?? 1;
 }
 
 function logs(): Promise<number> {
@@ -117,8 +133,8 @@ async function update(): Promise<number> {
 }
 
 async function uninstall(): Promise<number> {
-  await unload();
-  await rm(PLIST, { force: true });
+  await service.unload();
+  await service.removeUnit();
   await rm(INSTALL_DIR, { recursive: true, force: true });
   if ((await lstat(BIN_LINK).catch(() => null))?.isSymbolicLink()) await rm(BIN_LINK);
   console.log(`ops-console removed. Left in place:

@@ -122,7 +122,7 @@ test('Start at login reads off until Ops Console is on under App Background Acti
   let on = false;
   let opened = 0;
   await page.route('**/api/terminals/start-at-login', (route) =>
-    route.fulfill({ json: { data: { on, dev_build: false } } }),
+    route.fulfill({ json: { data: { on, dev_build: false, manager: 'launchd', lingering: null } } }),
   );
   await page.route('**/api/terminals/start-at-login/settings', (route) => {
     opened += 1;
@@ -147,7 +147,7 @@ test('Start at login reads off until Ops Console is on under App Background Acti
 
 test('a dev build never starts at login and offers no Login Items', async ({ page }) => {
   await page.route('**/api/terminals/start-at-login', (route) =>
-    route.fulfill({ json: { data: { on: false, dev_build: true } } }),
+    route.fulfill({ json: { data: { on: false, dev_build: true, manager: 'launchd', lingering: null } } }),
   );
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
   await page.getByRole('navigation').getByRole('link', { name: 'Permissions' }).click();

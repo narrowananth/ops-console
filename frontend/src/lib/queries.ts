@@ -49,6 +49,7 @@ import {
   healthChecksSettingSchema,
   healthOverviewSchema,
   healthSchema,
+  keychainAvailabilitySchema,
   keychainHandoverSchema,
   keychainWaitSchema,
   type LogSource,
@@ -167,6 +168,7 @@ export const queryKeys = {
   diskAccess: ['disk-access'] as const,
   startAtLogin: ['start-at-login'] as const,
   runSandbox: ['run-sandbox'] as const,
+  keychain: ['keychain'] as const,
   keychainWait: ['keychain-wait'] as const,
   keychainHandover: ['keychain-handover'] as const,
   terminals: ['terminals'] as const,
@@ -785,6 +787,15 @@ export function useRunSandbox() {
   return useQuery({
     queryKey: queryKeys.runSandbox,
     queryFn: () => apiGet('/terminals/run-sandbox', z.object({ data: runSandboxSchema })).then((r) => r.data),
+    refetchOnMount: 'always',
+  });
+}
+
+/** Whether secrets can be stored here: the Secret Service must answer on Linux. Read again each time Permissions opens. */
+export function useKeychainAvailability() {
+  return useQuery({
+    queryKey: queryKeys.keychain,
+    queryFn: () => apiGet('/terminals/keychain', z.object({ data: keychainAvailabilitySchema })).then((r) => r.data),
     refetchOnMount: 'always',
   });
 }

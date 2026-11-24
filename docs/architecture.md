@@ -46,6 +46,16 @@ items, makes a second start and `mcp-exec` wait for it. `keychain-owner.json` in
 holds the items. `ops-console update` runs `install.sh` and then `launchctl kickstart -k` on the loaded job (a job not
 loaded, or whose plist changed, is loaded again), so launchd starts the daemon once.
 
+**Linux.** `install.sh` also installs `ops-console-linux-<arch>` on a glibc distribution, and the tarball carries a plain
+`node/bin/node` and native modules compiled on a Linux runner of that architecture. `ops-console start` writes the
+systemd user unit `ops-console.service` (`Restart=always`) and runs `systemctl --user enable --now`; `stop` runs
+`disable --now`. The data folder is `${XDG_DATA_HOME:-~/.local/share}/ops-console` and the log
+`${XDG_STATE_HOME:-~/.local/state}/ops-console/daemon.log`. Secrets live in the Secret Service under the same keys, with
+no handover: a Linux start never runs `keychain-handover`, and with no Secret Service a save fails with
+`invalid_state`. Agent runs do not start on Linux until the Run sandbox is verified there
+([linux-port](specs/linux-port.md)), so the release workflow builds and smoke-tests the Linux tarballs and does not
+publish them.
+
 `ops-console start` writes a LaunchAgent plist (`RunAtLoad`, `KeepAlive`) that runs `current/Ops Console.app` on
 `current/app/main.js`, so launchd starts the daemon at login and again if it stops. The job runs as `ProcessType` `Interactive`, so the Chrome of a
 Session browser gets the priority of a foreground app. macOS lists it as Ops Console under App Background Activity in Login
@@ -102,7 +112,7 @@ running after 5 seconds is left for the next start.
 | Backend | NestJS on Node 24, Claude Agent SDK (TypeScript), `ws` WebSocket, MCP TypeScript SDK, node-pty, `playwright-core` driving the operator's Chrome, the `claude` CLI, Zod at boundaries |
 | Database | SQLite through `better-sqlite3`, Drizzle ORM and Drizzle Kit migrations |
 | Jobs | In-process scheduler, no queue |
-| Secrets | macOS Keychain through `@napi-rs/keyring` |
+| Secrets | macOS Keychain, or the Secret Service on Linux, through `@napi-rs/keyring` |
 | Tests | Vitest, Playwright, Supertest |
 | Tooling | pnpm workspaces, Node 24 via mise, Biome for lint and format, esbuild for the daemon and CLI bundles, tsx for development |
 
@@ -141,7 +151,7 @@ agent Session.
 | `devtools` | `devtools` Sessions scoped to Connections; ties MCP calls to their Connection; the PROD-write rule; the instructions that make the agent hand over Results and a Comparison |
 | `updates` | The newest GitHub release, the version record (`update.json`), install through `install.sh`, auto-update, the wait for running agent runs |
 | `health-watch` | Checks of Connections, Connectors and MCP servers on a schedule per area (`health_checks`: every 30 minutes to 24 hours, or off; Connections 2 hours and Integrations 1 hour by default), two at a time, the operator's own check going first; every `connection.checked` kept in `health_checks` (a `connection.checked` of the same answer within 30 seconds is one row; 90 days kept); sends `health.changed` once when an item breaks or recovers; `GET /health-watch`, `POST /health-watch/:area/checks` |
-| `terminals` | node-pty terminals behind an authenticated WebSocket; the Setup agent, its MCP tools, local file, folder, URL and Keychain reads with secrets masked; the gates behind the Permissions page: Full Disk Access, Start at login, whether the Run sandbox works (`sandbox-exec`), the Keychain wait and handover state |
+| `terminals` | node-pty terminals behind an authenticated WebSocket; the Setup agent, its MCP tools, local file, folder, URL and Keychain reads with secrets masked; the gates behind the Permissions page: Full Disk Access (macOS), Start at login (launchd, or a systemd user service with its lingering state), whether the Run sandbox works (`sandbox-exec` on macOS; bubblewrap, socat and user namespaces on Linux), whether secrets can be stored (`GET /terminals/keychain`), the Keychain wait and handover state |
 
 `agent`, `playbooks`, `accounts` and `action-log` are one Nest module (`AgentModule`); `main.ts` lists the others.
 

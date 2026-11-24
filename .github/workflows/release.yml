@@ -58,6 +58,77 @@ jobs:
           name: ops-console-darwin-${{ matrix.arch }}
           path: out/ops-console-darwin-${{ matrix.arch }}.tar.gz
 
+  # Linux ships after the spike's results are approved (docs/specs/linux-port.md, Release order): these jobs build and
+  # test the tarballs and keep them as artifacts. `publish` and `tap` do not take them.
+  build-linux:
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    # A runner of the build's own architecture, so `npm install` compiles node-pty for it, on glibc 2.35: the oldest
+    # `install.sh` accepts, so what loads here loads on every system it admits.
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: Chrome DevTools frontend, kept per pin
+        uses: actions/cache@v5
+        with:
+          path: frontend/public/devtools-frontend
+          key: devtools-frontend-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/devtools-frontend.json') }}
+      - name: Package
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+        run: node scripts/package.mjs "${GITHUB_REF_NAME#v}"
+      # The runner's systemd user manager needs a login session: lingering starts it, and the bus lives under
+      # XDG_RUNTIME_DIR.
+      - name: Start a systemd user manager
+        run: |
+          set -eu
+          sudo loginctl enable-linger "$USER"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+          for _ in $(seq 1 30); do
+            XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user show-environment >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user show-environment
+      - name: Install the built tarball and run it under systemd
+        run: |
+          set -eu
+          mkdir release
+          cp "out/ops-console-linux-${{ matrix.arch }}.tar.gz" release/
+          (cd release && sha256sum ops-console-linux-*.tar.gz > checksums.txt)
+          OPS_CONSOLE_RELEASE_URL="file://$PWD/release" sh install.sh
+          export PATH="$HOME/.local/bin:$PATH"
+          test "$(ops-console --version)" = "${GITHUB_REF_NAME#v}"
+          ops-console start
+          ops-console status
+          # No DISPLAY here: open prints the address and exits 0.
+          ops-console open
+          # The compiled node-pty the tarball carries loads, so terminals open.
+          (cd "$HOME/.ops-console/current/app" && "$HOME/.ops-console/current/node/bin/node" -e "require('node-pty')")
+          ops-console stop
+          code=0; ops-console status || code=$?
+          test "$code" = 3
+      - name: Daemon log
+        if: failure()
+        run: |
+          cat "${XDG_STATE_HOME:-$HOME/.local/state}/ops-console/daemon.log" || true
+          systemctl --user status ops-console.service || true
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ops-console-linux-${{ matrix.arch }}
+          path: out/ops-console-linux-${{ matrix.arch }}.tar.gz
+
   publish:
     needs: build
     runs-on: ubuntu-latest
@@ -66,6 +137,8 @@ jobs:
         with:
           path: release
           merge-multiple: true
+          pattern: ops-console-darwin-*
+      # macOS only for now: the Linux tarballs are not downloaded here, so checksums.txt cannot name them.
       - name: Attach tarballs and checksums to the release
         env:
           GH_TOKEN: ${{ github.token }}

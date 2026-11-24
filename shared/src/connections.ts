@@ -200,10 +200,17 @@ export const diskAccessSchema = z.object({ granted: z.boolean().nullable(), app_
 export type DiskAccess = z.infer<typeof diskAccessSchema>;
 
 /**
- * Whether the daemon starts when the operator logs in: launchd's agent for the installed app, which macOS lists under
- * App Background Activity. `on` is null off macOS; a dev build never starts at login.
+ * Whether the daemon starts when the operator logs in: launchd's agent on macOS, which lists it under App Background
+ * Activity, or the systemd user service on Linux. `on` is null elsewhere; a dev build never starts at login.
+ * `manager` names the service manager, null where there is none. `lingering` is whether systemd keeps the operator's
+ * services running after they log out: null off Linux.
  */
-export const startAtLoginSchema = z.object({ on: z.boolean().nullable(), dev_build: z.boolean() });
+export const startAtLoginSchema = z.object({
+  on: z.boolean().nullable(),
+  dev_build: z.boolean(),
+  manager: z.enum(['launchd', 'systemd']).nullable(),
+  lingering: z.boolean().nullable(),
+});
 
 export type StartAtLogin = z.infer<typeof startAtLoginSchema>;
 
@@ -211,6 +218,19 @@ export type StartAtLogin = z.infer<typeof startAtLoginSchema>;
 export const runSandboxSchema = z.object({ status: z.enum(['on', 'unavailable']), reason: z.string().nullable() });
 
 export type RunSandbox = z.infer<typeof runSandboxSchema>;
+
+/**
+ * Whether this machine can store secrets, and where: the login Keychain on macOS, the Secret Service (a desktop
+ * keyring) on Linux. `reason` says what is missing when `available` is false and holds no secret. Always available on
+ * macOS.
+ */
+export const keychainAvailabilitySchema = z.object({
+  available: z.boolean(),
+  reason: z.string().nullable(),
+  store: z.enum(['keychain', 'secret_service']),
+});
+
+export type KeychainAvailability = z.infer<typeof keychainAvailabilitySchema>;
 
 /** The Keychain wait: `waiting` once a call has been pending past 10 seconds; `since` is when the oldest began. */
 export const keychainWaitSchema = z.object({
@@ -225,6 +245,9 @@ export type KeychainWait = z.infer<typeof keychainWaitSchema>;
 export const keychainHandoverSchema = z.object({ refused: z.boolean(), reason: z.string().nullable() });
 
 export type KeychainHandover = z.infer<typeof keychainHandoverSchema>;
+
+/** The command that keeps a Linux user's systemd services running after they log out. The console shows it and never runs it. */
+export const LINGER_COMMAND = 'loginctl enable-linger $USER';
 
 /** What the Permissions Keychain row says when the handover was refused; the reason follows it. */
 export const KEYCHAIN_HANDOVER_MESSAGE = 'Handover refused: previous app failed its check';

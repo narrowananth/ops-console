@@ -8,6 +8,7 @@ import { AgentModule } from './agent/agent.module';
 import { ClaudeAgentSdk } from './agent/agent-sdk';
 import { quietShadowedPrompt } from './agent/sdk-warnings';
 import { BrowserModule } from './browser/browser.module';
+import { defaultDataDir } from './common/platform';
 import { McpConnectionTester } from './connections/connection-tester';
 import { ConnectionsModule } from './connections/connections.module';
 import { CliConnectorTools } from './connectors/connector-tools';
@@ -60,9 +61,7 @@ const versionFile = path.join(appDir, '..', 'VERSION');
 const uiDir = path.join(appDir, 'public');
 const googleClient = readGoogleClient(env, path.join(appDir, 'google-client.json'));
 const version = existsSync(versionFile) ? readFileSync(versionFile, 'utf8').trim() : 'dev';
-const dataDir = path.resolve(
-  env.OPS_CONSOLE_DATA_DIR ?? path.join(homedir(), 'Library', 'Application Support', 'ops-console'),
-);
+const dataDir = path.resolve(env.OPS_CONSOLE_DATA_DIR ?? defaultDataDir());
 
 /**
  * An installed daemon with no list of its keys yet asks its own app for them, once, in the background: later handovers
