@@ -411,7 +411,7 @@ Server to client, each time a job's step changes status.
 
 ## UI
 
-- **Sidebar**: Playbooks under Claude, after Agents & accounts, at `/playbooks`.
+- **Sidebar**: Playbooks under Claude, after Accounts & Usage and Agent runs, at `/playbooks`.
 - **Page**: the overview of Triggers and one Playbook's flow, as `playbooks-redesign` describes. The open Playbook is in
   the address as `?playbook=<id>`.
 - **Skills**: the Skills a Playbook holds sit beside Rules and Settings (`playbook-skills`).

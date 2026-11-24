@@ -79,8 +79,8 @@ data. The client branches on `code`, never `message`.
 ## Frontend
 
 Server state through TanStack Query; UI-only state in Zustand. No fetch in components outside a
-query or mutation hook. Components come from `frontend/src/components/ui` (shadcn/ui); colours and
-spacing from the theme tokens ported from the design, never hard-coded.
+query or mutation hook. Shared components live in `frontend/src/components/ui`; colours and
+spacing come from the theme tokens in `frontend/src/styles/theme.css`, never hard-coded.
 
 Every panel has loading, empty and error states. A PROD connection always shows its PROD tag.
 
@@ -113,8 +113,8 @@ text stay exact.
 
 ## Naming
 
-- Database tables: plural, snake case (`agent_sessions`, `verification_reports`).
+- Database tables: plural, snake case (`run_steps`, `session_pull_requests`).
 - Domain types: singular, Pascal case (`Alert`, `Connection`).
 - REST routes: plural (`/connections`, `/connections/:id`).
 - Files: kebab case (`mcp-status-bar.tsx`, `monitor.service.ts`).
-- WebSocket events: `<area>.<past-tense verb>` (`session.output`, `alert.verified`).
+- WebSocket events: `<area>.<past-tense verb>` (`session.finished`, `alert.verified`).

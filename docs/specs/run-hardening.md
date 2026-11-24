@@ -1,6 +1,6 @@
 # Agent run hardening
 
-**Status:** shipped. Item 4 and the Network allowlist in item 10 are superseded by [open-run-sandbox](open-run-sandbox.md)
+**Status:** shipped. The closed data folder in item 4 is superseded by [open-run-sandbox](open-run-sandbox.md)
 and [ADR 0006](../adr/0006-agent-runs-sandboxed-by-the-os.md); the other items hold, with PR action Sessions in place of
 Agent Review, Reply check and Comment pass.
 **Design:** none. No screen changes.
@@ -21,9 +21,9 @@ scratch copy could write in the operator's checkout.
 3. An Address comments Session commits and pushes only while the worktree's `.git` still names a worktree under the
    Repo's own `.git/worktrees`. Otherwise nothing is pushed or posted and the call fails with "the scratch copy was
    changed outside the console".
-4. Superseded by open-run-sandbox. In every Access mode a run's file tools may not read or edit the login Keychain
-   folder or the installed app, and may not edit the git control files of the working folder or of an opened Repo. The
-   data folder, `runtime.json` included, is readable.
+4. In every Access mode a run's file tools may not read or edit the login Keychain folder or the installed app, and
+   may not edit the git control files of the working folder or of an Opened Repo. The data folder, `runtime.json`
+   included, is readable (open-run-sandbox).
 5. Every run denies commands that name a host's pull request merge endpoint or merge mutation, besides the merge
    commands and MCP tools it already denied.
 6. A run that holds Git host denials (a Verification, a PR action Session, an answer in a review thread) also denies

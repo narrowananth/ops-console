@@ -107,7 +107,7 @@ Existing rows take `datadog` from the default. The `connectors` table gains no c
 
 Query parameters include `connector` (default `datadog`). Returns the Services that source has failing requests for, as before.
 
-### `POST /monitor/scans`
+### `POST /scans`
 
 The body gains an optional `connector`. Left out, the Scan reads every connected log source, and the answer is the first source's Scan.
 

@@ -183,7 +183,7 @@ CREATE TABLE approvals (
 CREATE INDEX approvals_pending_idx ON approvals (requested_at) WHERE status = 'pending';
 ```
 
-Later specs add columns with `ALTER TABLE … ADD COLUMN`: `sessions.repo_id`, `branch`, `pr_number` and `extra_repo_ids` (`07-workspace`, `open-other-repos-to-session`), `sessions.pr_action` and its result columns (`pr-actions-open-sessions`), `sessions.alert_id` (`08-monitor-dashboard`), `sessions.trusted_clis` (Behavior 17a), `sessions.run_started_at`, `run_finished_at`, `run_outcome`, `run_subagents`, `run_limit_since` and `run_limit_resets_at` (Behavior 5, `agent-runs-page`), `sessions.queued_text` (Behavior 7a) and `sessions.spawned_by_session_id` and `spawn_call_id` (`spawn-parallel-sessions`); `action_log.connection_id` (`05-settings-dev-tools`) and `action_log.alert_id` (`08-monitor-dashboard`), each a nullable reference with no default. A `devtools` Session's Connection scope lives in its own table (`09-dev-tools-agent`). A plain id without a foreign key was the alternative; a reference keeps `ON DELETE SET NULL` working.
+Later specs add columns with `ALTER TABLE … ADD COLUMN`: `sessions.repo_id`, `branch`, `pr_number` and `extra_repo_ids` (`07-workspace`, `open-other-repos-to-session`), `sessions.pr_action` and its result columns (`pr-actions-open-sessions`), `sessions.alert_id` (`08-monitor-dashboard`), `sessions.trusted_clis` (Behavior 17a), `sessions.run_started_at`, `run_finished_at`, `run_outcome`, `run_subagents`, `run_limit_since` and `run_limit_resets_at` (Behavior 5, `agent-runs-page`), `sessions.queued_text` (Behavior 7a) and `sessions.spawned_by_session_id` and `spawn_call_id` (`spawn-parallel-sessions`); `approvals.trust_cli` (Behavior 17a); `action_log.connection_id` (`05-settings-dev-tools`) and `action_log.alert_id` (`08-monitor-dashboard`), each a nullable reference with no default. A `devtools` Session's Connection scope lives in its own table (`09-dev-tools-agent`). A plain id without a foreign key was the alternative; a reference keeps `ON DELETE SET NULL` working.
 
 Enums live in code only (`01-base-daemon-setup`):
 
@@ -237,7 +237,7 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 | --------------- | ---- | ------- |
 | `GET /sessions` | query `kind?`, `q?` (title search), `limit?`, `cursor?` | `Session[]` with `meta.next_cursor`, newest `last_active_at` first; Sessions of a Repo removed with its Sessions kept are left out (`07-workspace` Behavior 3) |
 | `GET /sessions/:id` | | `Session` |
-| `PATCH /sessions/:id` | `{ title?, model?, effort?, access_mode? }`, plus `connection_ids?` on a `devtools` Session (`09-dev-tools-agent`) | `Session` |
+| `PATCH /sessions/:id` | `{ title?, model?, effort?, access_mode? }`, plus `connection_ids?` on a `devtools` Session (`09-dev-tools-agent`) and `extra_repo_ids?` (`open-other-repos-to-session`) | `Session` |
 | `DELETE /sessions/:id` | | 204; `session_busy` |
 | `POST /sessions/:id/messages/:message_id/edit` | `{ text }` | 202 `{ message_id, reverted: { files, insertions, deletions } \| null, revert_error }`; `invalid_state` for any message but the last; `session_busy` (Behavior 8a) |
 | `POST /sessions/:id/warm` | | 204; starts a spare Claude Code process for the next message (Behavior 2); `session_busy` while a run goes |

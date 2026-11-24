@@ -32,7 +32,7 @@ the service `ops-console-dev`, so it runs beside the installed app and leaves it
 `~/.ops-console/current` at it, links `~/.local/bin/ops-console` and keeps only the new and the previous version. An
 Intel shell under Rosetta installs the arm64 build. The tarball carries its own
 Node 24, the bundled daemon, the built UI, the CLI, the native modules (`better-sqlite3`,
-`@napi-rs/keyring`, `node-pty`) built for that Node, and the Claude Agent SDK with its platform's
+`@napi-rs/keyring`, `node-pty`) built for that Node, `playwright-core` and the Claude Agent SDK with its platform's
 Claude Code binary. The system Node is never used. The Node binary sits inside `Ops Console.app`, so
 macOS names the daemon Ops Console when the operator grants it Full Disk Access; `node/bin/node`
 links to it for the CLI and the MCP helpers. The bundle is signed ad hoc and carries no version, so releases on the
@@ -43,14 +43,16 @@ once per item. The handover runs in the background and reads the keys listed in 
 in parallel; with no list yet, the previous app finds them by scanning the login keychain, once. A Keychain call waits
 only for its own item, and `keychain-handover.pending` in the data folder, which holds the pid of the start moving the
 items, makes a second start and `mcp-exec` wait for it. `keychain-owner.json` in the data folder names the app that
-holds the items. Installing only does `launchctl kickstart -k` on the loaded job, so launchd starts the daemon once;
-the plist sets `UV_THREADPOOL_SIZE=16` and a Node compile cache (`~/.ops-console/compile-cache`, cleared by the next install).
+holds the items. `ops-console update` runs `install.sh` and then `launchctl kickstart -k` on the loaded job (a job not
+loaded, or whose plist changed, is loaded again), so launchd starts the daemon once.
 
 `ops-console start` writes a LaunchAgent plist (`RunAtLoad`, `KeepAlive`) that runs `current/Ops Console.app` on
 `current/app/main.js`, so launchd starts the daemon at login and again if it stops. The job runs as `ProcessType` `Interactive`, so the Chrome of a
 Session browser gets the priority of a foreground app. macOS lists it as Ops Console under App Background Activity in Login
 Items & Extensions; switched off there, it does not start at login. The Permissions page shows that as Start at login, read
-from the plist and `launchctl print-disabled`. `OPS_CONSOLE_PORT` at `start` goes into the plist. The data folder is
+from the plist and `launchctl print-disabled`. The plist also sets the operator's `PATH` (so the daemon finds `claude`),
+`OPS_CONSOLE_DATA_DIR`, `UV_THREADPOOL_SIZE=16` and `NODE_COMPILE_CACHE` (`~/.ops-console/compile-cache`, cleared by the
+next install); `OPS_CONSOLE_PORT` at `start` goes into it too. The data folder is
 `~/Library/Application Support/ops-console` (`OPS_CONSOLE_DATA_DIR` overrides it) and holds `state.db`, `runtime.json` (pid,
 port, version, session token; mode `0600`), `daemon.lock`, `update.json`, `keychain-owner.json`, `keychain-manifest.json`,
 and a folder each for Claude accounts (`accounts/`, each one's config dir), the git worktree of each `repo` Session
@@ -59,10 +61,16 @@ for the operator (`outputs/`, one folder per Session), each Session's Chrome pro
 copies (`scratch/`), Dev tools Sessions (`devtools/`), terminals (`terminals/`) and local MCP Server files (`mcp-local/`).
 The log is `~/Library/Logs/ops-console/daemon.log`.
 
+The CLI has `start` (waits 15 seconds for the daemon), `stop` (unloads and disables the job, so it stays down across
+logins until the next `start`), `status` (exit code 3 when stopped), `open [app]`, `logs`, `update`, `uninstall` (keeps
+data and logs) and `--version`.
+
 Homebrew installs only the Brew entry command (`scripts/homebrew/entry.sh`, [ADR 0008](adr/0008-homebrew-installs-an-entry-command.md)):
 the formula keeps the release tarball, its checksum and `install.sh` in its Cellar, and the first command, or the first
-after `brew upgrade` brings a newer formula, runs that `install.sh` with `OPS_CONSOLE_NO_LINK` into `~/.ops-console`. The
-`tap` job of `release.yml` renders the formula (`scripts/homebrew/render.mjs`), checks it from a local tap and commits it
+after `brew upgrade` brings a newer formula, runs that `install.sh` with `OPS_CONSOLE_NO_LINK` into `~/.ops-console`, and restarts a running daemon on the new version.
+A tag `v*` runs `release.yml`: `build` packages one tarball per architecture on an arm64 and an Intel runner and starts
+each under launchd, `publish` attaches both with `checksums.txt` to a GitHub release, and the
+`tap` job renders the formula (`scripts/homebrew/render.mjs`), checks it from a local tap and commits it
 to `Formula/ops-console.rb` on `main`, which is the tap.
 
 To try an install before a release, `pnpm build`, `pnpm package` and a `checksums.txt` beside the tarball in `out/`,
@@ -120,7 +128,7 @@ agent Session.
 | `claude-cli` | `claude mcp add`, `remove`, `list`, `get`, `login`, and Claude account sign-in in this browser or by link and code, parsed with Zod |
 | `mcp` | Servers registered in every Claude account (`.claude.json`: `claude mcp` in the active account, the entry copied into the others) and a Repo's `.mcp.json`; Probe of the active account, kept 5 minutes (another account's when it becomes active, or after 10), after the Keychain handover; add, edit, reconnect (one server alone), disable, remove; the `mcp-exec` launcher; the Google bridge, a stdio MCP Server the Google Connectors register, whose tools (`google-tools.ts`) call Google's REST APIs with an access token it mints from the refresh token `mcp-exec` hands it |
 | `connectors` | The sixteen Connectors: browser sign-in through `pup`, `gh`, `glab`, `bkt`, `slashdocs` or an MCP Server; cancel a sign-in; the MCP Server each registers; Homebrew install of a missing CLI; checks; config. Google Docs, Sheets and Drive sign in through the console's own Google OAuth client and register the Google bridge. OpenTelemetry logs has a Log folder, chosen in the macOS folder dialog, in place of a sign-in. CloudWatch logs has an AWS profile chosen from the profiles on the Mac, a region and Log groups; it signs in with `aws login` or `aws sso login`, the daemon calls `aws`, and the agent's CloudWatch MCP Server starts through `uvx`. Loki logs signs in to Grafana Cloud through the daemon (the MCP SDK's OAuth client, a loopback page for one callback, the tokens in the Keychain), picks a Loki data source, registers Grafana's MCP Server for the agent and has the daemon call its tools. New Relic logs has a Region, signs in through Claude Code to the MCP Server of that Region, picks an account, and has the daemon call the server's tools with the sign-in it reads from Claude Code's own item in the Keychain and never refreshes; with a User API key from the Keychain it calls New Relic's own API instead (`new-relic-api.ts`) |
-| `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks, through one kept server per Connection for 5 minutes; secrets via Keychain, `secret_stored` from memory |
+| `connections` | Connections, Access Levels, PROD tags; how each type's MCP Server launches; checks, through one kept server per Connection for 5 minutes; secrets via Keychain, `secret_stored` from memory; a Kafka Connection saves with Access Level `none` only, since no MCP Server launches for it yet |
 | `repos` | Repos: import by path or the Finder's folder dialog, rename, remove; local git reads, clone, stash, worktrees and checkout; a branch list answers from the last fetch and asks origin after, once a minute at most, then sends `repo.branches_changed` when a branch came or went; each Repo's host and `owner/name` read again from `origin` at start and in the background after a list (at most once a minute), and mapped to the Git host's new owner when the host renames one (`origin` is never edited); a Repo's branch and changes come from one `git status`, kept 10 seconds, eight Repos at a time |
 | `agent` | Sessions and their kinds, Claude Agent SDK runs, the Run sandbox settings (`run-sandbox.ts`) and the file-tool denials, permission hooks, the PROD-write rule hook, streaming parts, transcripts, message interceptors; stop a run, edit the last message (file edits rewound), attachments, output files, the console's in-process MCP server `ops-console` with its tools (`open_pull_request`, `join_repo`, `spawn_sessions`, `run_integration`, `save_file`, `query_new_relic`, `submit_*`, `browser_*`, `start_process`, `process_output`, `stop_process`; `session-tools.ts`), and which MCP servers a run starts (`mcp-scope.ts`); the integration CLIs run in the daemon outside the sandbox; every tool call of a run kept with its time (`run_steps`), each subagent (`run_agents`) and each run's cost (`run_usage`), pruned after 90 days; run health, slow and failure reasons, stages and time split read from them; the message queued behind a run; a skill message, which hands the run its skill in place of the Playbook; the `/` and `$` menu data (`/skill-menu`) |
 | `playbooks` | Playbooks and the Trigger each one holds, the built-ins (each Trigger's method, steps and shared rules on evidence, data, Connections and git) and Step blocks, the console's safety lines, and running a job's Playbook steps one turn each; Custom Skills, the Built-in skills in their Skill packs (a catalog in code, the installed packs in `state.db`), the `/skills`, `/skill-packs` and `/skill-menu` routes, the Project skills read from a Repo's folder for the menu, and the Skills each Playbook holds (registered by `agent`) |
@@ -141,7 +149,7 @@ agent Session.
 
 | Folder | Holds |
 |---|---|
-| `app` | Sign-in gate with the restart panel while an update installs, sidebar with the running tasks tray, the update card, version panel and "Updated to" notice, page shell and routes (each page's code loads when its route opens), theme store, the remembered page address |
+| `app` | Sign-in gate with the restart panel while an update installs, sidebar with the running tasks tray, the Keychain wait banner, the update card, version panel and "Updated to" notice, page shell and routes (each page's code loads when its route opens), theme store, the remembered page address |
 | `lib` | API client (a few large lists check only their first and last items), TanStack queries, `/ws` live events and the waits on them, session token, Remembered view storage, the page a link came from (`return-to.ts`), sorting, the finish chime, clipboard copy |
 | `monitor` | Monitor page: a header with how the Scans went (a source with something to say opens its detail), the range, HTTP status codes and the Scan button; one tab per log source after All sources, each with its open Alerts by tier; the Services menu (ticked Services are the next Scan); the alerts table (100 rows at a time, a search, Trend bars, Freshness); the Alert drawer, over the right of the page and widened by dragging its edge, with Samples, Reports, Review and Fix; the log source label on each Alert and Service |
 | `agent-runs` | Agent runs page: run health, why a run is slow or ended, time split, timeline, steps, queued messages, desktop alerts |
@@ -256,7 +264,7 @@ each connected Git host, plus imported Repos under other owners. The daemon keep
 serves them stale-while-revalidate: a list older than 30 minutes (a detail older than 15 seconds) is served
 at once while a background read runs, and a read that changed something sends
 `pull_request.refreshed` with the changed numbers. A failed background read keeps the old list and
-marks it stale, and a failed list is tried again after 5 minutes. Refresh drops the memory and reads again; it is the
+marks it stale, and a failed list is tried again after 5 minutes. A host that answers 429 is not read for 10 minutes, and its kept lists are served stale. Refresh drops the memory and reads again; it is the
 only read besides the 30-minute one. A list row carries no description and only the status, decision and staleness of its latest Agent Review; the detail has both whole. A comment, a resolve, a delete, a review or a merge patches the kept lists and detail from the host's answer (one read of that pull request at most) instead of dropping them; a job's posts do the same after it. A comment or review pre-check, and a job's start, use the kept detail once one read of the pull request alone confirms its head commit. Bitbucket, GitHub and GitLab lists and the detail's comments, commits and files follow the host's next page. A search by words filters what is kept. A search of just a number, with or without
 `#`, asks the host for that number in every known project, in any state, and keeps the answer for a minute. Mine matches
 number, title and the operator's login (the email on Bitbucket); All matches number, title and author. The UI prefetches the list at load. A host that answers 404 for an owner reads as an owner with no pull requests, not as a failed read; any other failure marks the list stale. The UI groups the list by what the operator does next (changes requested, checks failing, to review, waiting on review, ready to merge, merged or closed) and a Session that worked on the branch shows as `agent`. A pull request's Commits tab lists the branch's commits from the host.
@@ -365,7 +373,7 @@ Where the build departs from `design/ops-console.html` on purpose:
 - **Access Level** changes how a Connection's MCP server launches (read-only flag, config file or
   read-only user), not only the badge.
 - **Merge** is a button for the operator only; the agent has no merge tool.
-- **Connectors** add Sentry, Shopify, slashdocs, Google Docs, Sheets and Drive, and four log sources (OpenTelemetry logs, CloudWatch logs, Loki logs, New Relic logs), and drop Kafka.
+- **Connectors** add Sentry, Shopify, slashdocs, Google Docs, Sheets and Drive, and four log sources (OpenTelemetry logs, CloudWatch logs, Loki logs, New Relic logs).
 - **Monitor** reads a log source per tab, lists Alerts in a table and opens one in a drawer.
 - **Health checks**: the check strip, problem banner and history stripe on Integrations and Connections, and a red count in the sidebar.
 - **Agent runs** page under Claude: run health, why a run is slow or ended, time split and every step.
@@ -394,7 +402,7 @@ Where the build departs from `design/ops-console.html` on purpose:
 
 ## Diagrams
 
-Each diagram in `docs/diagrams/` is an HTML file with an inline SVG and a PNG of the same drawing. Open the HTML in a browser, or read the PNG.
+Each diagram in `docs/diagrams/` is an HTML file with an inline SVG and a PNG of the same drawing; `run-sandbox-flow` is an SVG and a PNG. Open the HTML or SVG in a browser, or read the PNG.
 
 | Diagram | Shows |
 |---|---|
@@ -414,7 +422,7 @@ Each diagram in `docs/diagrams/` is an HTML file with an inline SVG and a PNG of
 | `agent-run-safety` | What runs where, and who approves |
 | `run-sandbox-flow` | The Run sandbox: what is closed, what is open, and `run_integration` |
 | `console-opens-pull-request` | The console pushes the branch and opens the pull request |
-| `pull-request-review` | PR action Sessions: Review with agent, Check replies, Address comments |
+| `pull-request-review` | A Workspace pull request from list to merge: conflict check, PR action Sessions (Review with agent, Check replies, Address comments), the operator's merge |
 | `session-browser-and-terminals` | The Session's Browser panel, servers and Terminals dock |
 | `dev-tools-session` | Dev tools: from a Connection to Results |
 | `skill-menu-sources` | What the `$` menu lists |

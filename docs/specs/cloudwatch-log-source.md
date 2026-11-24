@@ -137,7 +137,7 @@ The existing Connector endpoints serve `cloudwatch_logs`: list, read, connect (w
 
 - **Log group**: A CloudWatch Logs group the CloudWatch logs Connector reads. The operator picks it, and it is one Service.
 - **Connector**: widened to "An outside service the operator signs in to, or a Log folder it reads, or an AWS profile it reads logs with. It holds the sign-in or the folder or the profile and registers the service's MCP Server when it has one."
-- **Log source**: "Where a Scan reads failing requests from: Datadog, a Log folder, or CloudWatch logs."
+- **Log source**: "Where a Scan reads failing requests from: Datadog, a Log folder, CloudWatch logs, Loki or New Relic."
 - **Service**: "A deployed app the console watches in a log source, one per source, service name and env."
 - **Scan**, **Sample**, **Recheck**: name the Alert's log source wherever they say Datadog or the Log folder.
 

@@ -5,7 +5,7 @@
 
 ## Problem
 
-An operator whose install, start or first run fails sees a message in a terminal, a banner or the Permissions page, and has nowhere to look it up. Roadmap step 2 wants a user in any timezone to get from install to a first verified alert without asking anyone. The messages and the fixes already exist in the product. No page ties them together.
+An operator whose install, start or first run fails sees a message in a terminal, a banner or the Permissions page, and has nowhere to look it up. The roadmap's Self-serve onboarding section wants a user in any timezone to get from install to a first verified alert without asking anyone. The messages and the fixes already exist in the product. No page ties them together.
 
 ## Behavior
 
@@ -52,5 +52,5 @@ No change.
 ## Out of scope
 
 - Links from the Permissions page and the Keychain banner to this guide: a follow-up spec.
-- The sample repo and the video walkthrough: the other two items of roadmap step 2.
+- The sample repo and the video walkthrough: the sample repo is on hold in the roadmap, and the video waits for it.
 - Google OAuth verification and release signing: on hold.

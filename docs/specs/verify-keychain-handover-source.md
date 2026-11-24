@@ -118,8 +118,8 @@ Server to client. Fires once, when the refusal is set.
 
 - **`adoptKeychainItems` with a fake `codesign` and a fake `run` (unit, `keychain-handover.test.ts`)**: 1 to 8 and 11.
   The fake `codesign` returns a pass, a failure, an error and a hang.
-- **`GET /terminals/keychain-handover` and `keychain.handover_refused` (backend)**: 9, and the restart reset in 8.
-- **Permissions Keychain row (frontend component)**: 10.
+- **`GET /terminals/keychain-handover` and `keychain.handover_refused` (backend, `keychain-handover-state.test.ts`)**: 9, and the restart reset in 8.
+- **Permissions Keychain row (browser, `frontend/e2e/keychain-handover.spec.ts`)**: 10.
 
 ## Out of scope
 

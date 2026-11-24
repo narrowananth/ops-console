@@ -38,7 +38,6 @@ An operator deciding whether to install Ops Console wants to know where their da
 - **Anthropic**: named for the console's own Claude accounts. For CLIProxy the text says "the providers you configured", as the policy does today.
 - **Glossary**: no new term. The text uses Connector, Claude account hub, Scan, Health check, Recheck, Verification, Fix, Sample, Report, Access Level and PROD as defined.
 - **Link from `PRIVACY.md`**: a full URL, because a site-relative path breaks on GitHub.
-- **Roadmap**: `/ship` adds `Spec: [data-flow-docs](specs/data-flow-docs.md)` to the matching item in `docs/roadmap.md`.
 
 ## Not required
 
@@ -62,6 +61,6 @@ No change.
 
 ## Out of scope
 
-- Google OAuth verification and release signing. Both are on hold; they stay in `docs/roadmap.md` step 1.
+- Google OAuth verification and release signing. Both are on hold in `docs/roadmap.md`.
 - Opt-outs for Claude Code's own traffic.
-- Roadmap steps 2 to 6.
+- The roadmap's numbered steps.

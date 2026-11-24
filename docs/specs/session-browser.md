@@ -383,7 +383,7 @@ adds the same to a Session.
 
 | Status | Error code | When |
 | ------ | ---------- | ---- |
-| 404 | `session_not_found` | Unknown Session |
+| 404 | `not_found` | Unknown Session, tab or process |
 | 409 | `browser_not_available` | Session kind has no browser or terminals |
 | 422 | `url_not_allowed` | Not `http` or `https`, or the agent's URL is off loopback or is a console port |
 | 503 | `chrome_missing` | No Chrome found |

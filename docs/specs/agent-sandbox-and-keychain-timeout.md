@@ -1,6 +1,6 @@
 # Agent Sandbox and Keychain Timeout
 
-**Status:** shipped; the Run sandbox's write, read and network limits (items 2, 3, 4, 6, 9) are replaced by [open-run-sandbox](open-run-sandbox.md)
+**Status:** shipped; the Run sandbox's write, read and network limits (items 2, 3, 4, 9) follow [open-run-sandbox](open-run-sandbox.md)
 **Design:** none. Permissions page: Run sandbox and Keychain rows. The app shell has a banner.
 
 ## Problem

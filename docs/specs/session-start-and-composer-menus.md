@@ -122,7 +122,6 @@ The New Session card's branch list, the composer's three menus and its settings 
 
 - **Backend + SQLite** (`workspace.test.ts`): 1 to 5, 10 to 12.
 - **Backend + SQLite** (`skill-kinds.test.ts`): 8.
-- **Browser** (`skill-kinds.spec.ts`): 8, 9, 10, 13.
 - **Browser** (`workspace.spec.ts`): 15 to 20, 25, 26.
 - **Browser** (`skill-kinds.spec.ts`): 8 to 10, 13, 22 to 24.
 - **Backend + SQLite** (`agent-sessions.test.ts`): 25, 26 (the saved type and size, the empty file).

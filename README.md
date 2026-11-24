@@ -2,10 +2,12 @@
 
 Ops Console is a local web app on top of Claude Code. It runs on your Mac, shows how your services are doing, and
 lets a Claude agent work on your code and tools. The agent reproduces a failing route and writes a report. You read
-it. Only after you confirm does the agent fix the code and open a pull request, and you merge it yourself.
+it. Only after you confirm does the agent fix the code and open a pull request, and you merge it yourself. It is for developers who own services in production and want an agent to investigate failures
+while they approve every change.
 
 Website and user docs: [opsconsole.org](https://opsconsole.org), built from `site/`. Stack, modules and
-diagrams: [docs/architecture.md](docs/architecture.md). Terms: [GLOSSARY.md](GLOSSARY.md). The screens come from
+diagrams: [docs/architecture.md](docs/architecture.md), with the drawings in [docs/diagrams](docs/diagrams). Decisions:
+[docs/adr](docs/adr). Terms: [GLOSSARY.md](GLOSSARY.md). Plans: [docs/roadmap.md](docs/roadmap.md). The screens come from
 [design/ops-console.html](design/ops-console.html) and the layout from
 [design/ops-console-sidebar.html](design/ops-console-sidebar.html); open them in a browser.
 
@@ -27,6 +29,8 @@ diagrams: [docs/architecture.md](docs/architecture.md). Terms: [GLOSSARY.md](GLO
   Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Sheets and Drive, and the four log sources besides
   Datadog). Connections are the databases the agent may use, each with an Environment and an Access Level. Scheduled
   health checks say when any of them breaks.
+- **Setup agent and Permissions.** The Setup agent is Claude in a terminal that adds Connections, MCP Servers and
+  Connectors from what you type. Permissions shows whether Full Disk Access, Start at login and the Run sandbox work.
 - **Agent runs.** See each run's health, why it was slow or ended, where its time went and every call it made.
 - **Accounts & Usage.** Add several Claude accounts, see each one's tokens and cost, and let Auto-switch or Smart usage
   move work between them. CLIProxy can sign the agent in instead.

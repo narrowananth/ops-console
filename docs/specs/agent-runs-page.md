@@ -66,17 +66,18 @@ one browser tab, so no other view can show it.
     or paused the run, which holds it as "On hold". Send now sends it at once and stops a run that is going first. Take
     back clears it. Queue with no run going sends the message. A Session whose run is paused or stopped shows Play
     beside Send in its chat; Play carries the run on from the conversation, as it does on the page.
-14. Desktop alerts, off until the operator turns each on: when a run needs them, and when a run ends. The Alerts pill
-    in the page bar and in the tray turns both on or off; the page keeps a switch for each. The browser asks
-    permission once. An alert shows only while the console is open in a tab that is not in front, and not for what was
-    there when the page loaded.
-15. The Running tray shows the same runs in a popup. Its header gives the counts, the Alerts pill and Stop all going
-    (which asks first). Chips filter All, Going, Needs you and Ended, with today's tokens and cost beside them. Runs
+14. Desktop alerts, off until the operator turns each on: when a run needs them, and when a run ends. The switches are
+    in Accounts & Usage, Notifications. The Alerts pill in the page bar and in the tray shows on, off or blocked and
+    links there. The browser asks permission once. An alert shows only while the console is open in a tab that is not in
+    front, and not for what was there when the page loaded.
+15. The Running tray shows the same runs in a popup. Its header gives the counts, the Alerts pill, Play all and Stop all
+    going (which asks first). Chips filter All, Going, Needs you and Ended, with today's tokens and cost beside them. Runs
     sit in three groups: needs you, going (the first three, then Show all, which becomes Show less) and ended, which
     stay until dismissed. The popup is never taller than the room above the Running button, so its header stays in
     view. A row opens in place to its facts (kind, start or end, access, model, account, usage), links to the
     Session, pull request and Alert, the queued message with Send now and Take back, the same stage, why it is slow
-    or ended, time split, timeline and steps as the page (5 to 9), and its subagents with a link to each. The footer links to the page and has Dismiss all ended.
+    or ended, time split, timeline and steps as the page (5 to 9), and its subagents with a link to each. The footer
+    links to the page and has Dismiss all ended.
 
 ## Not required
 

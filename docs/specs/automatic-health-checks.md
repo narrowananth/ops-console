@@ -1,6 +1,6 @@
 # Automatic health checks
 
-**Status:** ready
+**Status:** shipped
 **Design:** Connections and Integrations in `design/ops-console.html`. The check strip, the problem banner and the history stripe depart from it: the design has none of them.
 
 ## Problem

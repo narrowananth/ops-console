@@ -112,7 +112,7 @@ Reads the commits and answers 200 at once.
 { "base_branch": "main" }
 ```
 
-Answers `{ "title": "string | null", "description": "string | null" }`; both null when the turn failed. `session_busy` (409) while the Session's run is going.
+Answers `{ "title": "string | null", "description": "string | null" }`; both null when the branch has no commits beyond the base. Errors: Common.
 
 ### `POST /sessions/:id/pull-request`
 

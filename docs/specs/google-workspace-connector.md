@@ -48,7 +48,7 @@ The operator keeps notes, runbooks and figures in Google Docs, Sheets and Drive,
 
 ## Not required
 
-- **Workspace admin approval**: a Superfans-style Workspace may block third-party apps until its admin allows the client id. The sign-in then ends `auth` with Google's reason.
+- **Workspace admin approval**: a Google Workspace may block third-party apps until its admin allows the client id. The sign-in then ends `auth` with Google's reason.
 - **Google verification**: the app runs unverified (Settled). A later step may put the client through Google's review to drop the warning and the cap. `drive.readonly` is a restricted scope, so that review is a security assessment.
 - **More tools**: Docs formatting, tables and comments, Sheets formatting and charts, and Drive writes (uploads, moves, sharing). Each is a later change.
 - **Calendar and Gmail**: each is its own Connector on the same bridge, in a later spec.

@@ -13,14 +13,6 @@ Owner decision. Each waits for the thing named, then moves back into the order b
 - A sample repo with a failing route and mock Datadog alerts, so a new user can try the verify, review, fix and PR flow without production data. Spec: [sample-repo](specs/sample-repo.md). Low priority: it helps adoption and leaves the core flow as it is. Waits until onboarding outranks work on the core flow.
 - A webhook receiver, so a monitoring tool can push an Alert to the console the moment it fires. A push needs a way in to a daemon that listens on 127.0.0.1 only, and every route in (a tunnel, a relay server, a second listener) conflicts with [ADR 0003](adr/0003-local-only-server.md). Scans and the OpenTelemetry Log folder already cover detection. No spec yet. Waits until a source cannot be read by Scan or Log folder, and an ADR 0003 design is approved.
 
-## Shipped
-
-- Homebrew tap, in 0.1.61: `brew tap narrowananth/ops-console https://github.com/narrowananth/ops-console`, then `brew install ops-console`. Spec: [homebrew-tap](specs/homebrew-tap.md).
-- A data-flow section in `PRIVACY.md` and on the site: what moves between the operator's machine, Anthropic's API and each Connector, and that none of it reaches an Ops Console server. Spec: [data-flow-docs](specs/data-flow-docs.md).
-- The opsconsole.org docs site, with a troubleshooting guide for install, start, Keychain and sandbox failures. Specs: [website](specs/website.md), [troubleshooting-guide](specs/troubleshooting-guide.md).
-- Monitoring sources beyond Datadog: OpenTelemetry logs from a Log folder ([otel-log-source](specs/otel-log-source.md)), AWS CloudWatch ([cloudwatch-log-source](specs/cloudwatch-log-source.md)), Grafana Loki ([loki-log-source](specs/loki-log-source.md)) and New Relic ([new-relic-log-source](specs/new-relic-log-source.md)), each connected in one click ([one-click-log-sources](specs/one-click-log-sources.md)).
-- The Run sandbox open to everything but the Keychain, so builds, tests and Docker-based suites run unchanged. Spec: [open-run-sandbox](specs/open-run-sandbox.md).
-
 ## Self-serve onboarding
 
 A user in any timezone should get from install to a first verified alert without asking anyone. What remains:

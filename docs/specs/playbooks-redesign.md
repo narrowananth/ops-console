@@ -37,7 +37,7 @@ Behavior this spec does not list is as in `agent-playbooks` and `playbook-skills
    runs its built-in attaches it at once. Choosing Built-in detaches the Playbook at once and the built-in returns.
    Escape closes the dropdown.
 7. A change on a Trigger applies from the next job or turn. A Playbook cannot be dragged onto a Trigger, nor a Trigger off
-   one: the dropdown is the only way (departs from Agent Playbooks 8).
+   one: the dropdown is the only way (Agent Playbooks 8).
 8. Deleting a Playbook asks first and names the Triggers that go back to built-in.
 9. While the Playbooks load, the page reads "Reading Playbooks…". A failed read shows "Could not read Playbooks:" with
    the reason and a Retry.
@@ -50,7 +50,7 @@ Behavior this spec does not list is as in `agent-playbooks` and `playbook-skills
 11. A new Playbook runs on no Trigger. It opens on its flow with the Trigger node asking the operator to attach
     Triggers. A copy of a built-in starts with that built-in's rules and steps and holds no Skills.
 12. A built-in has no Customize or Duplicate action. New Playbook, Copy of a built-in, is the only way to get an
-    editable copy, and an operator's own Playbook cannot be copied (departs from Agent Playbooks 3 and 4, and Playbook
+    editable copy, and an operator's own Playbook cannot be copied (Agent Playbooks 3 and 4, Playbook
     Skills 9).
 
 ### The flow
@@ -118,7 +118,7 @@ Behavior this spec does not list is as in `agent-playbooks` and `playbook-skills
 - **Token estimate**: made in the browser from character counts. No new API, no tokenizer.
 - **Trigger blurbs and the console's own turn text**: fixed copy in the frontend, checked against what the daemon does.
 - **Desktop only**: no phone layout, as on the other pages.
-- **Scratch copy on Triggers**: no Trigger refuses it, as in `agent-playbooks` Behavior 11 and `pr-thread-actions`.
+- **Scratch copy on Triggers**: no Trigger refuses it, as in `agent-playbooks` Behavior 11 and `pr-actions-open-sessions` 1.
 
 ## Not required
 

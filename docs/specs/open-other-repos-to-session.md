@@ -16,8 +16,8 @@ its own.
    no other Repo.
 2. The icon opens a list of the other imported Repos, A to Z, with a search box. It does not list the Session's own Repo.
    The operator ticks and unticks Repos; each click saves.
-3. From the Session's next run, the operator's own runs in that Session (a chat turn) work in each ticked checkout as in
-   the working folder. The run adds it as an additional folder, `git` checkout, branch, add and commit run there, and
+3. From the Session's next run, the operator's own runs in that Session (a chat turn) work in each ticked checkout (an
+   Opened Repo) as in the working folder. The run adds it as an additional folder, `git` checkout, branch, add and commit run there, and
    `run_integration` accepts files in it as arguments.
 4. A ticked Repo's git control files (`.git/hooks`, `.git/config` and the rest the working folder closes) stay closed.
    The agent never pushes and `open_pull_request` opens a pull request for the working folder's branch only.

@@ -5,7 +5,7 @@
 
 ## Problem
 
-A new operator has installed the console and signed in to a Claude account, but has no production data, and perhaps no Datadog account, to watch. They cannot see the flow the console exists for: a failing Route, a Verification, a Review, a Fix and a pull request. Roadmap step 2 wants a first verified Alert without asking anyone.
+A new operator has installed the console and signed in to a Claude account, but has no production data, and perhaps no Datadog account, to watch. They cannot see the flow the console exists for: a failing Route, a Verification, a Review, a Fix and a pull request. The roadmap's Self-serve onboarding section wants a first verified Alert without asking anyone.
 
 ## Behavior
 
@@ -72,6 +72,6 @@ No change to what the agent may do. The stand-in answers reads only, and every o
 
 ## Out of scope
 
-- The video walkthrough, the last item of roadmap step 2. It follows this one.
+- The video walkthrough in the roadmap's Self-serve onboarding section. It follows this one.
 - `ops-console sample --remove` and a second data folder for demos.
 - Linux and Windows. The stand-in and the command follow the macOS install.
