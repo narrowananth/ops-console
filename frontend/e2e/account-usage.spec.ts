@@ -509,7 +509,38 @@ test('Not attributed has its own chip when the all-accounts read has that bucket
   await expect(page).toHaveURL(/account=none/);
   await expect.poll(() => asked.at(-1)).toBe('7d|none');
   await expect(chip).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText('runs before accounts were tracked, or through CLIProxy')).toBeVisible();
+  await expect(page.getByText('runs that no account can be named for')).toBeVisible();
+});
+
+test('runs through CLIProxy have their own chip, and picking it asks for the cliproxy bucket', async ({ page }) => {
+  const PROXY = {
+    account_id: 'cliproxy',
+    label: 'CLIProxy',
+    removed: false,
+    enabled: true,
+    tokens: 1_000_000,
+    cost_usd: 9,
+    runs: 3,
+    subagents: 0,
+  };
+  const proxied = { ...REPORT, accounts: [...REPORT.accounts.slice(0, 3), PROXY] };
+  const asked = await mock(page, (url) => ({
+    json: {
+      data:
+        url.searchParams.get('account') === 'cliproxy'
+          ? { ...proxied, account_id: 'cliproxy', accounts: [PROXY] }
+          : proxied,
+    },
+  }));
+  await open(page);
+
+  const chip = page.getByRole('button', { name: 'CLIProxy' });
+  await chip.click();
+  await expect(page).toHaveURL(/account=cliproxy/);
+  await expect.poll(() => asked.at(-1)).toBe('7d|cliproxy');
+  await expect(chip).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('runs signed in through CLIProxy')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Not attributed' })).toHaveCount(0);
 });
 
 test('no Not attributed chip when nothing is unattributed', async ({ page }) => {

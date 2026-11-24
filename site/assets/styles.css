@@ -457,10 +457,6 @@ tr:last-child td {
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   margin-top: 1.5rem;
 }
-.edit {
-  margin-top: 2.5rem;
-  font-size: 0.9rem;
-}
 .pager {
   display: flex;
   justify-content: space-between;

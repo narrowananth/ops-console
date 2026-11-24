@@ -24,6 +24,7 @@ import { RunInsights } from './run-insights.service';
 import { RunStepsLog } from './run-steps';
 import { RunRegistry } from './runs';
 import { AgentRuntime } from './runtime';
+import { SessionForks } from './session-forks';
 import { SessionKinds } from './session-kinds';
 import { AccountUsageController, AgentRunsController, SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
@@ -63,6 +64,7 @@ export class AgentModule {
         ConnectionLookup,
         ProdWriteRule,
         Transcripts,
+        SessionForks,
         Attachments,
         OutputFiles,
         ActionLogService,

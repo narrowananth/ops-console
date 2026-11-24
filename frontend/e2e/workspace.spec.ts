@@ -418,7 +418,7 @@ test('every message the operator sent copies; the last one edits, reverts the fi
   await expect(box).toHaveCount(0);
 });
 
-test('files picked, pasted or dropped on the message box upload, show as chips above it and go with the message', async ({
+test('files picked, pasted or dropped on the message box upload, sit in the text as chips and go with the message', async ({
   page,
 }) => {
   const uploads: string[] = [];
@@ -468,29 +468,31 @@ test('files picked, pasted or dropped on the message box upload, show as chips a
     element.dispatchEvent(new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true }));
     element.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
   });
-  // Each file is a chip in the row above the text, in the order it was added.
+  // Each file is a chip in the text, where the cursor was, in the order it was added; no row above the box.
   const row = page.getByRole('list', { name: 'Files to send' });
-  const chip = (name: string) => row.locator(`[data-file="${name}"]`);
-  await expect(row.getByRole('listitem')).toHaveCount(3);
-  await expect(chip('app.log')).toContainText('2 KB');
+  const chip = (name: string) => box.locator(`[data-mention="[📎 ${name}]"]`);
+  await expect(chip('app.log')).toBeVisible();
   await expect(chip('shot.png')).toBeVisible();
   await expect(chip('order.json')).toBeVisible();
-  await expect(box.locator('[data-file]')).toHaveCount(0);
+  await expect(row).toHaveCount(0);
   expect(uploads).toEqual(['app.log', 'shot.png', 'order.json']);
 
-  // Files stay with the Session through a reload.
+  // Files and their chips stay with the Session through a reload.
   await page.reload();
-  await expect(chip('app.log')).toContainText('2 KB');
+  await expect(chip('app.log')).toBeVisible();
 
-  await chip('order.json').getByRole('button', { name: 'Remove order.json' }).click();
-  await expect(chip('order.json')).toHaveCount(0);
+  // Backspace takes the chip out of the text, and its file out of the message.
   await box.click();
+  await box.press('End');
+  await box.press('Backspace');
+  await box.press('Backspace');
+  await expect(chip('order.json')).toHaveCount(0);
   await box.pressSequentially('why does this fail?');
   await box.press('Enter');
   await expect
     .poll(() => sent?.text)
     .toBe(
-      'why does this fail?\n\nAttached files (open each with the Read tool):\n- app.log: /data/attachments/s1/1.bin (text/plain, 2 KB)\n- shot.png: /data/attachments/s1/2.bin (image/png, 2 KB)',
+      '[📎 app.log] [📎 shot.png] why does this fail?\n\nAttached files (open each with the Read tool):\n- app.log: /data/attachments/s1/1.bin (text/plain, 2 KB)\n- shot.png: /data/attachments/s1/2.bin (image/png, 2 KB)',
     );
   await expect(row).toHaveCount(0);
 });
@@ -506,7 +508,7 @@ const TYPE_OF: Record<string, string> = {
   'blob.xyz': 'application/octet-stream',
 };
 
-test('every kind of file attaches as its own chip; a file that fails or is empty leaves the others alone', async ({
+test('every kind of file attaches as its own chip in the text; a file that fails or is empty leaves the others alone', async ({
   page,
 }) => {
   const uploads: string[] = [];
@@ -564,15 +566,11 @@ test('every kind of file attaches as its own chip; a file that fails or is empty
     { name: 'empty.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) },
   ]);
 
+  const box = page.getByRole('textbox', { name: 'Message' });
   const row = page.getByRole('list', { name: 'Files to send' });
-  for (const [name, kind] of kinds) {
-    const chip = row.locator(`[data-file="${name}"]`);
-    await expect(chip).toHaveAttribute('data-kind', kind);
-    await expect(chip).toContainText('3 KB');
-    await expect(chip.getByRole('button', { name: `Remove ${name}` })).toBeVisible();
-  }
-  // The image shows its own picture.
-  await expect(row.locator('[data-file="shot.png"] img')).toBeVisible();
+  for (const [name] of kinds) await expect(box.locator(`[data-mention="[📎 ${name}]"]`)).toBeVisible();
+  // Only a file that failed stays in the row above the box, so its reason shows.
+  await expect(row.getByRole('listitem')).toHaveCount(2);
   // A failed upload says why in its chip, an empty file is refused without going to the daemon.
   await expect(row.locator('[data-file="bad.log"]')).toContainText('The data folder is full');
   await expect(row.locator('[data-file="empty.txt"]')).toContainText('empty');
@@ -580,14 +578,22 @@ test('every kind of file attaches as its own chip; a file that fails or is empty
 
   await row.locator('[data-file="bad.log"]').getByRole('button', { name: 'Remove bad.log' }).click();
   await row.locator('[data-file="empty.txt"]').getByRole('button', { name: 'Remove empty.txt' }).click();
-  await page.getByRole('textbox', { name: 'Message' }).click();
+  await expect(box.locator('[data-mention="[📎 bad.log]"]')).toHaveCount(0);
+  await box.evaluate((element) => {
+    element.focus();
+    const end = document.createRange();
+    end.selectNodeContents(element);
+    end.collapse(false);
+    document.getSelection()?.removeAllRanges();
+    document.getSelection()?.addRange(end);
+  });
   await page.keyboard.type('read these');
   await page.keyboard.press('Enter');
   await expect
     .poll(() => sent?.text)
     .toBe(
       [
-        'read these',
+        `${kinds.map(([name]) => `[📎 ${name}]`).join(' ')} read these`,
         '',
         'Attached files (open each with the Read tool):',
         '- shot.png: /data/attachments/s1/1.bin (image/png, 3 KB)',
@@ -789,7 +795,8 @@ test('a file chip opens the file over the page, in the message box and in the co
     data.items.add(new File(['hello there'], 'note.txt', { type: 'text/plain' }));
     element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
   });
-  await page.locator('[data-file="note.txt"] button').first().click();
+  // A file in the box is a chip in the text; one click opens it.
+  await box.locator('[data-mention="[📎 note.txt]"]').click();
   await expect(page.getByRole('dialog', { name: 'note.txt' })).toContainText('hello there');
 });
 
@@ -1208,6 +1215,50 @@ test("a Session links the pull request it opened, and shows none that another Se
   await expect(page.getByRole('complementary', { name: 'Session' }).getByRole('link', { name: /^PR #/ })).toHaveCount(
     0,
   );
+});
+
+test('a finished response has Copy and Fork from this response; Fork opens the new Session', async ({ page }) => {
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'apis', 1)], meta: { next_cursor: null } } }),
+  );
+  let forked: string | null = null;
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          session('s1', 'r1', 'engage platform'),
+          ...(forked ? [session('s2', 'r1', 'engage platform (fork)')] : []),
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          { id: 'm1', role: 'user', status: 'done', parts: [{ kind: 'text', text: 'why?' }], created_at: NOW },
+          { id: 'm2', role: 'agent', status: 'done', parts: [{ kind: 'text', text: 'Because.' }], created_at: NOW },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/sessions/s2/messages', (route) => route.fulfill({ json: { data: [] } }));
+  await page.route('**/api/sessions/s1/messages/m2/fork', (route) => {
+    forked = route.request().method();
+    return route.fulfill({ status: 201, json: { data: session('s2', 'r1', 'engage platform (fork)') } });
+  });
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+
+  // The operator's own message has no Fork; the agent's finished response has Copy, Fork and its time.
+  const response = page.locator('[data-message-id="m2"]');
+  await expect(
+    page.locator('[data-message-id="m1"]').getByRole('button', { name: 'Fork from this response' }),
+  ).toHaveCount(0);
+  await expect(response.getByRole('button', { name: 'Copy response' })).toBeVisible();
+  await expect(response.locator('time')).toHaveCount(1);
+  await response.getByRole('button', { name: 'Fork from this response' }).click();
+  await expect(page).toHaveURL(/\/workspace\?session=s2$/);
+  expect(forked).toBe('POST');
 });
 
 test('a Session that has edited nothing shows no Diff button or panel, even while the panel is open for another', async ({

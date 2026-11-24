@@ -124,6 +124,7 @@ import {
 } from './sessions.service';
 import { type ResolvedSkill, SkillMenuService } from './skill-menu.service';
 import { removeSkillPlugin, skillNames, skillRunsDir, writeSkillPlugin } from './skill-plugin';
+import { CONSOLE_SUBAGENTS } from './subagents';
 import { Transcripts } from './transcripts';
 
 /**
@@ -1317,6 +1318,7 @@ export class AgentRuntime implements OnModuleDestroy {
             }
           : {};
       })(),
+      agents: CONSOLE_SUBAGENTS,
       disallowedTools: [
         ...MERGE_DENIALS,
         ...fileToolDenials(run.workingDir, undefined, repoFolders),

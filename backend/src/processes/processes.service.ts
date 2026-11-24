@@ -213,12 +213,11 @@ export class ProcessesService implements OnModuleInit, OnModuleDestroy {
     return this.announce(row);
   }
 
-  /** Closes a process that is not running. */
-  remove(id: string): void {
+  /** Deletes a process; one that still runs is stopped first. */
+  async remove(id: string): Promise<void> {
     const row = this.row(id);
-    if (this.live.get(id)?.state === ProcessState.Running) {
-      throw new ApiError(409, ErrorCode.InvalidState, 'Stop the process before closing it');
-    }
+    const live = this.live.get(id);
+    if (live?.state === ProcessState.Running) await this.terminate(live);
     this.live.delete(id);
     for (const socket of this.sockets.get(id) ?? []) socket.close();
     this.sockets.delete(id);

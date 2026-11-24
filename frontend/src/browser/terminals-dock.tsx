@@ -11,7 +11,6 @@ import {
   RestartIcon,
   RestoreIcon,
   SplitIcon,
-  StopIcon,
   TerminalIcon,
   TrashIcon,
 } from '../components/ui/icons';
@@ -108,7 +107,7 @@ function groupsOf(split: string[][], list: SessionProcess[]): string[][] {
 /**
  * The Session's processes under the conversation and the browser, laid out as an editor's terminal panel. One bar of
  * icons: the selected process's name and state, New terminal (+) with a menu for scripts and the folder, Split, Restart,
- * Stop (while it runs) or Remove (once it ended), Maximize and Hide. Split puts a new shell beside the selected one; a
+ * Delete (a running process is stopped first), Maximize and Hide. Split puts a new shell beside the selected one; a
  * list of the processes shows at the right from the second on. A process runs on when the dock is hidden.
  */
 export function TerminalsDock({
@@ -271,25 +270,18 @@ export function TerminalsDock({
             >
               <RestartIcon />
             </IconButton>
-            {running ? (
-              <IconButton
-                label="Stop"
-                title="Stop this process"
-                disabled={act.isPending}
-                onClick={() => act.mutate({ id: current.id, action: 'stop' })}
-              >
-                <StopIcon />
-              </IconButton>
-            ) : (
-              <IconButton
-                label="Remove"
-                title="Remove this process and its output from the list"
-                disabled={act.isPending}
-                onClick={() => act.mutate({ id: current.id, action: 'close' })}
-              >
-                <TrashIcon />
-              </IconButton>
-            )}
+            <IconButton
+              label="Delete terminal"
+              title={
+                running
+                  ? 'Delete this terminal. It is still running: deleting stops it and removes it with its output.'
+                  : 'Delete this terminal and its output'
+              }
+              disabled={act.isPending}
+              onClick={() => act.mutate({ id: current.id, action: 'close' })}
+            >
+              <TrashIcon />
+            </IconButton>
           </>
         )}
         <span aria-hidden className="mx-1 h-4 w-px flex-none bg-line" />
@@ -372,6 +364,7 @@ export function TerminalsDock({
                       selected={one.id === current.id}
                       glyph={group.length === 1 ? null : index === 0 ? '┌' : index === group.length - 1 ? '└' : '├'}
                       onPick={() => setPicked(one.id)}
+                      onDelete={() => act.mutate({ id: one.id, action: 'close' })}
                     />
                   );
                 }),
@@ -414,37 +407,57 @@ function NoTerminals({ busy, onNew }: { busy: boolean; onNew: () => void }) {
   );
 }
 
-/** A process in the list at the right: its state dot, its name and, in a split group, the tree line that joins it. */
+/**
+ * A process in the list at the right: its state dot, its name and, in a split group, the tree line that joins it, with
+ * a Delete at the end of the row.
+ */
 function ProcessRow({
   process,
   selected,
   glyph,
   onPick,
+  onDelete,
 }: {
   process: SessionProcess;
   selected: boolean;
   glyph: string | null;
   onPick: () => void;
+  onDelete: () => void;
 }) {
   return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={selected}
-      aria-label={`${process.name}, ${stateLabel(process)}`}
-      title={`${process.command || 'shell'} in ${process.folder}`}
-      onClick={onPick}
-      className={`flex w-full cursor-pointer items-center gap-1.5 border-0 px-2.5 py-1 text-left text-xs ${
-        selected
-          ? 'bg-accent-100 font-semibold text-accent-900'
-          : 'bg-transparent text-neutral-700 hover:bg-neutral-200'
+    <div
+      className={`group flex w-full items-center pr-1 ${
+        selected ? 'bg-accent-100 text-accent-900' : 'bg-transparent text-neutral-700 hover:bg-neutral-200'
       }`}
     >
-      <span aria-hidden className="w-2.5 flex-none font-mono text-neutral-500">
-        {glyph}
-      </span>
-      <span aria-hidden className={`size-2 flex-none rounded-full ${TONE[stateTone(process)]}`} />
-      <span className="min-w-0 truncate">{process.name}</span>
-    </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={selected}
+        aria-label={`${process.name}, ${stateLabel(process)}`}
+        title={`${process.command || 'shell'} in ${process.folder}`}
+        onClick={onPick}
+        className={`flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-1 pr-1 pl-2.5 text-left text-xs text-inherit ${selected ? 'font-semibold' : ''}`}
+      >
+        <span aria-hidden className="w-2.5 flex-none font-mono text-neutral-500">
+          {glyph}
+        </span>
+        <span aria-hidden className={`size-2 flex-none rounded-full ${TONE[stateTone(process)]}`} />
+        <span className="min-w-0 truncate">{process.name}</span>
+      </button>
+      <button
+        type="button"
+        aria-label={`Delete ${process.name}`}
+        title={
+          isRunning(process)
+            ? `Delete ${process.name}. It is still running: deleting stops it.`
+            : `Delete ${process.name} and its output`
+        }
+        onClick={onDelete}
+        className="flex size-6 flex-none cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-neutral-700 hover:bg-neutral-300 hover:text-text"
+      >
+        <TrashIcon />
+      </button>
+    </div>
   );
 }

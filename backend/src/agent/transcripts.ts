@@ -1,4 +1,4 @@
-import { cp, open, readdir, readFile, realpath, rm, stat } from 'node:fs/promises';
+import { cp, open, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getSessionMessages, type SessionStore, type SessionStoreEntry } from '@anthropic-ai/claude-agent-sdk';
 import { Logger } from '@nestjs/common';
@@ -43,6 +43,12 @@ function parseOrNull(text: string): unknown {
   } catch {
     return null;
   }
+}
+
+/** A transcript line as an object; null when it is not one. */
+function entryOf(line: string): Record<string, unknown> | null {
+  const value = parseOrNull(line);
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
 }
 
 /**
@@ -210,6 +216,36 @@ export class Transcripts {
 
   async exists(sdkSessionId: string, configDir: string): Promise<boolean> {
     return (await this.find(sdkSessionId, configDir)) !== null;
+  }
+
+  /**
+   * Writes a new transcript holding the conversation up to the end of the agent response `messageId` (the lines before
+   * the next message of the operator), under a new SDK session id, next to the source. The new id is what a Session
+   * resumes. Null when the transcript or the message is not there.
+   */
+  async fork(
+    sdkSessionId: string,
+    workingDir: string,
+    configDir: string,
+    messageId: string,
+    label: ServerLabel | null | undefined,
+  ): Promise<string | null> {
+    const projectKey = await this.find(sdkSessionId, configDir, workingDir);
+    if (projectKey === null) return null;
+    const messages = toMessages(await this.read(sdkSessionId, workingDir, configDir), undefined, label);
+    const at = messages.findIndex((message) => message.id === messageId && message.role === 'agent');
+    if (at < 0) return null;
+    const next = messages.slice(at + 1).find((message) => message.role === 'user');
+    const folder = path.join(configDir, 'projects', projectKey);
+    const lines = (await readFile(path.join(folder, `${sdkSessionId}.jsonl`), 'utf8')).split('\n').filter(Boolean);
+    const cut = next === undefined ? lines.length : lines.findIndex((line) => entryOf(line)?.uuid === next.id);
+    const forked = crypto.randomUUID();
+    const kept = lines.slice(0, cut < 0 ? lines.length : cut).map((line) => {
+      const entry = entryOf(line);
+      return entry && 'sessionId' in entry ? JSON.stringify({ ...entry, sessionId: forked }) : line;
+    });
+    await writeFile(path.join(folder, `${forked}.jsonl`), `${kept.join('\n')}\n`);
+    return forked;
   }
 
   /** Copies the transcript, and its folder of subagent files when there is one, into another config dir. */

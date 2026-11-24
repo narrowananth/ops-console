@@ -1,5 +1,6 @@
 import {
   type AccountUsageReport,
+  CLIPROXY_ACCOUNT_ID,
   type ClaudeAccount,
   RunPurpose,
   SubagentStatus,
@@ -67,10 +68,12 @@ const HATCHED: Paint = {
   },
 };
 const REMOVED: Paint = { className: 'bg-neutral-500' };
+const CLIPROXY_PAINT: Paint = { className: 'bg-info' };
 
 /** Colour by place in the sorted account list, so a chip, a bar and a table row of one account always match. */
 const accountPaint = (id: string | null, order: string[]): Paint => {
   if (id === null) return HATCHED;
+  if (id === CLIPROXY_ACCOUNT_ID) return CLIPROXY_PAINT;
   const at = order.indexOf(id);
   return at < 0 ? REMOVED : { className: PALETTE[at % PALETTE.length] };
 };
@@ -381,6 +384,9 @@ function AccountTable({
                   {one.account_id === null && (
                     <span className="text-[11px] text-neutral-700">runs before accounts were tracked</span>
                   )}
+                  {one.account_id === CLIPROXY_ACCOUNT_ID && (
+                    <span className="text-[11px] text-neutral-700">CLIProxy picks the account</span>
+                  )}
                 </span>
               </td>
               <td className={td}>{share(one.cost_usd).toFixed(0)}%</td>
@@ -639,18 +645,24 @@ export function AccountUsageView({
   const accounts = useAgentAccounts(true);
   const hub = useCliProxy(true);
   const list = accounts.data?.data ?? [];
-  const picked = account === 'none' || list.some((one) => one.id === account) ? account : null;
+  const picked =
+    account === 'none' || account === CLIPROXY_ACCOUNT_ID || list.some((one) => one.id === account) ? account : null;
   const current = rangeOf(range);
   const usage = useAccountUsage(current, picked);
   // Which buckets exist comes from the all-accounts read, which is the same request when it is the one shown.
   const everyone = useAccountUsage(current, null);
   const hasNone = everyone.data?.accounts.some((entry) => entry.account_id === null) ?? false;
+  const hasProxy = everyone.data?.accounts.some((entry) => entry.account_id === CLIPROXY_ACCOUNT_ID) ?? false;
   const proxied = hub.data?.data.enabled ?? false;
   const sorted = ascending(list, (one) => one.label);
   const order = sorted.map((one) => one.id);
   const report = usage.data;
   const labelOf = (id: string | null) =>
-    id === null ? 'Not attributed' : (list.find((one) => one.id === id)?.label ?? 'Removed account');
+    id === null
+      ? 'Not attributed'
+      : id === CLIPROXY_ACCOUNT_ID
+        ? 'CLIProxy'
+        : (list.find((one) => one.id === id)?.label ?? 'Removed account');
   const phrase = RANGES.find((one) => one.id === current)?.phrase ?? '';
   const one = list.find((candidate) => candidate.id === picked);
 
@@ -679,6 +691,17 @@ export function AccountUsageView({
               {one.label}
             </button>
           ))}
+          {(hasProxy || picked === CLIPROXY_ACCOUNT_ID) && (
+            <button
+              type="button"
+              aria-pressed={picked === CLIPROXY_ACCOUNT_ID}
+              onClick={() => onChange({ account: CLIPROXY_ACCOUNT_ID })}
+              className={chip(picked === CLIPROXY_ACCOUNT_ID)}
+            >
+              <Swatch paint={CLIPROXY_PAINT} />
+              CLIProxy
+            </button>
+          )}
           {(hasNone || picked === 'none') && (
             <button
               type="button"
@@ -710,10 +733,19 @@ export function AccountUsageView({
       </div>
 
       {one && <AccountHeader account={one} />}
+      {picked === CLIPROXY_ACCOUNT_ID && (
+        <div className={`${card} mt-4 px-4 py-3 text-[13px]`}>
+          <strong>CLIProxy</strong>
+          <span className="text-xs text-neutral-700"> · runs signed in through CLIProxy, which picks the account</span>
+        </div>
+      )}
       {picked === 'none' && (
         <div className={`${card} mt-4 px-4 py-3 text-[13px]`}>
           <strong>Not attributed</strong>
-          <span className="text-xs text-neutral-700"> · runs before accounts were tracked, or through CLIProxy</span>
+          <span className="text-xs text-neutral-700">
+            {' '}
+            · runs that no account can be named for, such as runs kept before accounts were tracked
+          </span>
         </div>
       )}
 

@@ -137,6 +137,30 @@ describe('what the rows add up to', () => {
     expect(none.totals.runs).toBe(1);
   });
 
+  it('keeps CLIProxy runs under their own bucket, after the accounts and before the removed ones', () => {
+    const proxied = accountUsageOf({
+      rows: [row('s1', 'a1', 6, [line(null, 100)]), row('s2', 'cliproxy', 6, [line(null, 100)])],
+      sessions,
+      accounts,
+      query: { range: UsageRange.Week },
+      now,
+    });
+    expect(proxied.accounts.map((one) => [one.label, one.removed, one.runs])).toEqual([
+      ['ops@example.com', false, 1],
+      ['sam@example.com', false, 0],
+      ['CLIProxy', false, 1],
+    ]);
+    expect(
+      accountUsageOf({
+        rows: [row('s2', 'cliproxy', 6, [line(null, 100)])],
+        sessions,
+        accounts,
+        query: { range: UsageRange.Week, account: 'cliproxy' },
+        now,
+      }).totals.runs,
+    ).toBe(1);
+  });
+
   it('keeps the range: Today holds today’s run only, 30 days adds the earlier one', () => {
     expect(report({ range: UsageRange.Today }).totals.runs).toBe(2);
     expect(report({ range: UsageRange.Month }).totals.runs).toBe(5);

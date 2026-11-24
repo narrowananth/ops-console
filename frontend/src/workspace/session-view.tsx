@@ -7,7 +7,7 @@ import {
   SessionState,
 } from '@ops-console/shared';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { MessageView, outputsByMessage } from '../agents/transcript';
 import { BrowserLinksProvider } from '../browser/browser-links';
@@ -23,6 +23,7 @@ import {
   useBrowserTabCount,
   useDeleteSession,
   useEditMessage,
+  useForkSession,
   useLocalServers,
   useMessages,
   useOpenFolder,
@@ -44,7 +45,7 @@ import { BranchSwitcher } from './branch-switcher';
 import { CommitDialog } from './commit-dialog';
 import type { ComposerCommand } from './composer-menus';
 import { ConversationMap, ScrollToEnd, useFollowLatest } from './conversation';
-import { alertPath, pullRequestPath } from './links';
+import { alertPath, pullRequestPath, sessionPath } from './links';
 import { OpenPullRequestForm } from './open-pull-request';
 import { SessionComposer } from './session-composer';
 import { DIFF_PANEL, DiffPanel } from './session-diff';
@@ -72,6 +73,8 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   );
   const remove = useDeleteSession();
   const { mutateAsync: edit } = useEditMessage(id);
+  const { mutateAsync: fork } = useForkSession();
+  const navigate = useNavigate();
   // What the last edit did to the files, until the operator closes it or sends again.
   const [reverted, setReverted] = useState<EditedMessage | null>(null);
   // One function for every message, so a stream that changes the last one draws only that one.
@@ -81,6 +84,12 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   );
   const latest = useFollowLatest();
   const session = sessions.data?.find((candidate) => candidate.id === id);
+  // Fork from a response opens the new Session; only Sessions that work in a folder can be forked.
+  const forkable = session?.kind === SessionKind.Repo || session?.kind === SessionKind.Anonymous;
+  const forkFrom = useCallback(
+    (messageId: string) => fork({ sessionId: id, messageId }).then((forked) => navigate(sessionPath(forked.id))),
+    [fork, id, navigate],
+  );
   const [diffOpen, setDiffOpen] = useStored('workspace.session-diff-open', z.boolean(), false);
   // The row beside the header; held in state so the panel measures it once it renders.
   const [body, setBody] = useState<HTMLDivElement | null>(null);
@@ -340,6 +349,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                             // Long conversations draw only what is near the screen; the last few always show.
                             deferred={index < messages.data.length - KEEP_DRAWN}
                             onEdit={editLast}
+                            onFork={forkable ? forkFrom : undefined}
                           />
                         ))}
                       </ul>

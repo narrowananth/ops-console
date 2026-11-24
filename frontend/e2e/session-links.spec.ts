@@ -113,7 +113,7 @@ test('a pull request links the Sessions on its branch, and New Session opens one
   const created = await routeWorkspace(page);
   await page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1%2F7#token=${daemon.token}`);
 
-  await expect(page.getByText('Sessions on fix/empty-cart:')).toBeVisible();
+  await expect(page.getByText('Sessions on this pull request:')).toBeVisible();
   await page.getByRole('link', { name: 'Session s1 · idle' }).click();
   await expect(page).toHaveURL(/\/workspace\?session=s1$/);
   await expect(page.getByRole('heading', { name: 'Session s1' })).toBeVisible();
@@ -123,6 +123,18 @@ test('a pull request links the Sessions on its branch, and New Session opens one
   await expect(page).toHaveURL(/\/workspace\?session=s2$/);
   await expect.poll(() => created).toEqual([{ repo_id: 'r1', branch: 'fix/empty-cart', from_origin: true }]);
   await expect(page.getByRole('textbox', { name: 'Message' })).toHaveText('On pull request #7 (Guard empty carts): ');
+});
+
+test('a pull request links a Session that opened it from another branch', async ({ page }) => {
+  await routeWorkspace(page, [
+    session('s1', {
+      branch: 'fix/stacked-on-top',
+      pull_requests: [{ number: 7, url: 'https://example.com/pr/7', branch: 'fix/empty-cart' }],
+    }),
+  ]);
+  await page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1%2F7#token=${daemon.token}`);
+
+  await expect(page.getByRole('link', { name: 'Session s1 · idle' })).toBeVisible();
 });
 
 test('a Session links its pull request and its Monitor Alert', async ({ page }) => {

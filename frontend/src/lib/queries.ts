@@ -1031,6 +1031,21 @@ function addSession(client: ReturnType<typeof useQueryClient>, session: Session)
   void client.invalidateQueries({ queryKey: queryKeys.sessions });
 }
 
+/** Fork from this response: a new Session holding the conversation up to the end of that agent response. */
+export function useForkSession() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, messageId }: { sessionId: string; messageId: string }) =>
+      apiSend(
+        'POST',
+        `/sessions/${sessionId}/messages/${messageId}/fork`,
+        undefined,
+        z.object({ data: sessionSchema }),
+      ).then((body) => body.data),
+    onSuccess: (session) => addSession(client, session),
+  });
+}
+
 export function useCreateAnonymousSession() {
   const client = useQueryClient();
   return useMutation({

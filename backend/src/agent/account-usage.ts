@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   type AccountUsageQuery,
   type AccountUsageReport,
+  CLIPROXY_ACCOUNT_ID,
   type ClaudeAccount,
   SubagentStatus,
   type TokenCounts,
@@ -18,6 +19,7 @@ import { costAndTokens } from './run-usage';
 /** The runs listed under Top spenders. */
 const TOP_RUNS = 25;
 const NOT_ATTRIBUTED = 'Not attributed';
+const CLIPROXY_LABEL = 'CLIProxy';
 const REMOVED = 'Removed account';
 const DAY_MS = 86_400_000;
 
@@ -125,7 +127,7 @@ export function accountUsageOf(input: {
   now: Date;
 }): AccountUsageReport {
   const { sessions: facts, accounts, query, now } = input;
-  const known = new Set(accounts.map((account) => account.id));
+  const known = new Set([CLIPROXY_ACCOUNT_ID, ...accounts.map((account) => account.id)]);
   const startedBy = new Map<string, AgentRow[]>();
   for (const task of input.agents ?? []) {
     const key = `${task.sessionId}\u0000${task.runStartedAt}`;
@@ -242,6 +244,7 @@ export function accountUsageOf(input: {
 
   const labelOf = (id: string | null) => {
     if (id === null) return NOT_ATTRIBUTED;
+    if (id === CLIPROXY_ACCOUNT_ID) return CLIPROXY_LABEL;
     const account = accounts.find((one) => one.id === id);
     return account ? (account.email ?? account.label) : REMOVED;
   };
@@ -251,6 +254,7 @@ export function accountUsageOf(input: {
       ? [only]
       : [
           ...[...accounts].sort((a, b) => a.position - b.position).map((account) => account.id),
+          ...(byAccount.has(CLIPROXY_ACCOUNT_ID) ? [CLIPROXY_ACCOUNT_ID] : []),
           ...[...byAccount.keys()].filter((id) => id !== null && !known.has(id)),
           ...(byAccount.has(null) ? [null] : []),
         ];
@@ -258,7 +262,10 @@ export function accountUsageOf(input: {
     account_id: id,
     label: labelOf(id),
     removed: id !== null && !known.has(id),
-    enabled: id === null || !known.has(id) ? true : (accounts.find((one) => one.id === id)?.enabled ?? true),
+    enabled:
+      id === null || id === CLIPROXY_ACCOUNT_ID || !known.has(id)
+        ? true
+        : (accounts.find((one) => one.id === id)?.enabled ?? true),
     ...(byAccount.get(id) ?? empty()),
   }));
 

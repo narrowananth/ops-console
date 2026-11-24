@@ -1,7 +1,7 @@
-import { PASTE_AS_FILE_LIMIT } from '@ops-console/shared';
+import { fileToken, PASTE_AS_FILE_LIMIT } from '@ops-console/shared';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react';
 import { filesIn } from './attachments';
-import { CHIP_CLASS, CUBE_PATH, describeMention, mentionsIn, type Token } from './mentions';
+import { attachedName, CHIP_CLASS, CUBE_PATH, chipsIn, describeMention, type Token } from './mentions';
 
 export type MessageEditorHandle = {
   /** Focuses the message with the cursor after its last character. */
@@ -10,6 +10,8 @@ export type MessageEditorHandle = {
   replaceToken: (raw: string | null) => void;
   /** Types `text` at the cursor, as the keyboard would. */
   insertText: (text: string) => void;
+  /** Puts an attached file's chip where the cursor is, or where it was last, or at the end. */
+  insertFile: (name: string) => void;
 };
 
 type Props = {
@@ -23,6 +25,8 @@ type Props = {
   activeId?: string;
   onPasteFiles: (files: File[]) => void;
   onSubmit: () => void;
+  /** A click on an attached file's chip. */
+  onOpenFile?: (name: string) => void;
   /** Sees each key first; true means it was handled (the menus' arrows and Enter) and the editor leaves it. */
   onKey?: (event: KeyboardEvent) => boolean;
 };
@@ -37,7 +41,7 @@ const CLIPBOARD_TYPE = 'application/x-ops-console-composer';
  * comes in plain, and a paste that came from this box brings its chips back.
  */
 export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function MessageEditor(
-  { label, value, placeholder, onChange, onToken, activeId, onPasteFiles, onSubmit, onKey },
+  { label, value, placeholder, onChange, onToken, activeId, onPasteFiles, onSubmit, onOpenFile, onKey },
   handle,
 ) {
   const root = useRef<HTMLDivElement>(null);
@@ -45,10 +49,16 @@ export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function Mes
   const reported = useRef<string | null>(null);
   const tokenRef = useRef(onToken);
   tokenRef.current = onToken;
+  // Where the cursor last was in the box: a file picker takes the focus, and the file still goes there.
+  const lastCaret = useRef<Range | null>(null);
 
   const report = useCallback(() => {
     const node = root.current;
     if (!node) return;
+    const selection = document.getSelection();
+    if (selection && selection.rangeCount > 0 && node.contains(selection.anchorNode)) {
+      lastCaret.current = selection.getRangeAt(0).cloneRange();
+    }
     const found = tokenAtCaret(node);
     const key = found?.token.key ?? null;
     if (key === reported.current) return;
@@ -110,6 +120,20 @@ export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function Mes
         root.current?.focus();
         document.execCommand('insertText', false, text);
       },
+      insertFile: (name) => {
+        const node = root.current;
+        if (!node) return;
+        node.focus();
+        const selection = document.getSelection();
+        const inside = selection && selection.rangeCount > 0 && node.contains(selection.anchorNode);
+        if (!inside)
+          placeCaret(
+            lastCaret.current && node.contains(lastCaret.current.startContainer) ? lastCaret.current : endOf(node),
+          );
+        insertHtml(chip(fileToken(name)).outerHTML);
+        document.execCommand('insertText', false, ' ');
+        revealCaret(node);
+      },
     }),
     [],
   );
@@ -137,6 +161,11 @@ export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function Mes
         contentEditable
         suppressContentEditableWarning
         onInput={emit}
+        onClick={(event) => {
+          const target = event.target instanceof Element ? event.target.closest(`[${MENTION_ATTR}]`) : null;
+          const name = attachedName(target?.getAttribute(MENTION_ATTR) ?? '');
+          if (name !== null) onOpenFile?.(name);
+        }}
         onCopy={(event) => copy(event, false)}
         onCut={(event) => copy(event, true)}
         onPaste={(event) => {
@@ -221,7 +250,7 @@ function draw(node: HTMLElement, value: string) {
       if (line) node.append(document.createTextNode(line));
     });
   };
-  for (const { raw, start, end } of mentionsIn(value)) {
+  for (const { raw, start, end } of chipsIn(value)) {
     text(value.slice(at, start));
     node.append(chip(raw));
     at = end;
@@ -240,10 +269,14 @@ function chip(raw: string): HTMLElement {
   element.setAttribute(MENTION_ATTR, raw);
   element.contentEditable = 'false';
   element.setAttribute('role', 'img');
-  element.setAttribute('aria-label', `${kind === 'skill' ? 'Skill' : 'File'} ${label}`);
+  element.setAttribute(
+    'aria-label',
+    `${kind === 'skill' ? 'Skill' : kind === 'attachment' ? 'Attached file' : 'File'} ${label}`,
+  );
   element.title = title;
   element.className = CHIP_CLASS[kind];
   const name = Object.assign(document.createElement('span'), { className: 'min-w-0 truncate', textContent: label });
+  if (kind === 'attachment') element.setAttribute('role', 'button');
   if (kind === 'skill') {
     const svg = document.createElementNS(SVG, 'svg');
     svg.setAttribute('viewBox', '0 0 24 24');

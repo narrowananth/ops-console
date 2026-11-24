@@ -832,7 +832,10 @@ export enum UsageRange {
   Quarter = '90d',
 }
 
-/** `GET /agent-accounts/usage`: `account` is an account id, or `none` for runs that have no account. */
+/** The account id usage is kept under for runs that went through CLIProxy, which picks the Claude account itself. */
+export const CLIPROXY_ACCOUNT_ID = 'cliproxy';
+
+/** `GET /agent-accounts/usage`: `account` is an account id, `cliproxy`, or `none` for runs that have no account. */
 export const accountUsageQuerySchema = z.object({
   range: z.enum(UsageRange).default(UsageRange.Week),
   account: z.string().min(1).optional(),

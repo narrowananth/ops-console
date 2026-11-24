@@ -272,7 +272,7 @@ export const runUsage = sqliteTable(
       .references(() => sessions.id, { onDelete: 'cascade' }),
     runStartedAt: text('run_started_at').notNull(),
     finishedAt: text('finished_at').notNull(),
-    /** The account the run ended on; null for CLIProxy and for runs kept before this column. No key: a removed account's runs stay. */
+    /** The account the run ended on, `cliproxy` through CLIProxy; null for runs kept before this column. No key: a removed account's runs stay. */
     accountId: text('account_id'),
     /** What the run was for (`RunPurpose`); null for a run kept before purposes were recorded. */
     purpose: text(),

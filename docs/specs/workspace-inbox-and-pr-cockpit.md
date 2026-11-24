@@ -41,8 +41,8 @@ from what it depends on.
 9. A row is two lines. First: the title and time since opened. Second: the number, project and author, then
    `agent` when a Session worked on the branch, a checks mark, the review state and the comment count. A repository
    not imported as a Repo, and a GitLab one, open on the host as before and say `not imported` or carry `↗`.
-10. The search (a number asks the Git host), Mine/All and Refresh share one line; the stale warning is unchanged.
-    Tabs filter All, To review and Failing, and a project picker on the same line narrows to one repository.
+10. The search (a number asks the Git host), Mine/Others/All and Refresh share one line; the stale warning is unchanged.
+    The groups already split by next step; a project picker on the next line narrows to one repository.
 
 ### Pull request page
 
