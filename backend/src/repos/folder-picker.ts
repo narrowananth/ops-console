@@ -63,7 +63,7 @@ export type Dialog = (file: string, args: string[]) => Promise<string>;
 
 const runDialog: Dialog = async (file, args) => (await run(file, args, { timeout: 10 * 60_000 })).stdout;
 
-/** The dialog programs a Linux desktop may have, in the order tried. */
+/** What a request for the dialog says when none is installed. */
 const NO_DIALOG = 'No folder dialog is installed (zenity or kdialog): type the path instead';
 
 /** Whether a program is on the PATH, found without running it. */
@@ -97,9 +97,6 @@ export class LinuxFolderPicker implements FolderPicker {
   }
 
   async pick({ prompt = 'Choose one or more git repositories', multiple = true }: PickOptions = {}): Promise<string[]> {
-    if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY && this.dialog === runDialog) {
-      throw new ApiError(409, ErrorCode.InvalidState, NO_DIALOG);
-    }
     const zenity = [
       '--file-selection',
       '--directory',

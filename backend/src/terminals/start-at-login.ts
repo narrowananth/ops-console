@@ -81,9 +81,11 @@ export class SystemdStartAtLogin implements StartAtLoginGate {
       return { on: false, dev_build: true, manager: 'systemd', lingering: null };
     }
     const exec = this.options.exec ?? runText;
+    // As the CLI writes it: an XDG folder counts only when it is an absolute path.
+    const config = process.env.XDG_CONFIG_HOME;
     const unitFile =
       this.options.unitFile ??
-      path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'systemd', 'user', UNIT);
+      path.join(config && path.isAbsolute(config) ? config : path.join(home, '.config'), 'systemd', 'user', UNIT);
     return {
       on: existsSync(unitFile) && (await this.enabled(exec)),
       dev_build: false,

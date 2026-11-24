@@ -31,8 +31,9 @@ export type Program = (file: string, args: string[]) => Promise<unknown>;
 
 const runProgram: Program = (file, args) => run(file, args, { timeout: 5_000 });
 
-/** The pieces the Agent SDK's Linux sandbox needs, and the command that installs them. */
-const INSTALL = 'Install them with your package manager, for example `sudo apt install bubblewrap socat`';
+/** The install command for the pieces the Agent SDK's Linux sandbox needs, per package manager. */
+const installWith = (packages: string[]): string =>
+  `Debian or Ubuntu: \`sudo apt install ${packages.join(' ')}\`; Fedora: \`sudo dnf install ${packages.join(' ')}\`; Arch: \`sudo pacman -S ${packages.join(' ')}\``;
 
 /**
  * bubblewrap, on Linux and WSL2. The row names the first piece that is missing; once all are there it says the sandbox
@@ -55,12 +56,18 @@ export class BubblewrapRunSandbox implements RunSandboxGate {
     if (/microsoft/i.test(kernel) && !/wsl2/i.test(kernel)) {
       return unavailable('Sandboxing needs WSL2: this distribution runs WSL1. Upgrade it with `wsl --set-version`');
     }
-    if (!(await works(program, 'bwrap', ['--version']))) {
-      return unavailable(`bubblewrap is not installed. ${INSTALL}`);
+    const names = [
+      ...((await works(program, 'bwrap', ['--version'])) ? [] : ['bubblewrap']),
+      ...((await works(program, 'socat', ['-V'])) ? [] : ['socat']),
+    ];
+    if (names.length > 0) {
+      return unavailable(
+        `${names.join(' and ')} ${names.length === 1 ? 'is' : 'are'} not installed. ${installWith(names)}`,
+      );
     }
-    if (!(await works(program, 'socat', ['-V']))) return unavailable(`socat is not installed. ${INSTALL}`);
     try {
-      await program('bwrap', ['--ro-bind', '/', '/', 'true']);
+      // The namespaces a run's commands get: their own user and network, over a read-only view of the disk.
+      await program('bwrap', ['--unshare-user', '--unshare-net', '--ro-bind', '/', '/', 'true']);
     } catch (error) {
       return unavailable(`bubblewrap cannot start a sandbox: ${firstLine(error)}${NAMESPACE_HINT}`);
     }

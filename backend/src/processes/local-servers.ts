@@ -77,15 +77,13 @@ export class LsofScanner implements LocalServerScanner {
   private async read(maxAgeMs: number): Promise<ListeningServer[]> {
     let listening: string;
     try {
-      listening = await output('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-F', 'pcn']);
+      listening = await output('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-F', 'pcn'], { missing: 'throw' });
       this.missing = false;
     } catch (error) {
       // A machine with no `lsof` lists no servers, as on a minimal Linux install; nothing else depends on it.
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        this.missing = true;
-        return [];
-      }
-      throw error;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      this.missing = true;
+      return [];
     }
     const listeners = parseListeners(listening);
     const byPort = new Map<number, (typeof listeners)[number]>();

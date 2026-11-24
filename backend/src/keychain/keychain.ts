@@ -1,4 +1,5 @@
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { AsyncEntry } from '@napi-rs/keyring';
 import { ErrorCode, KEYCHAIN_WAIT_MESSAGE, type KeychainAvailability } from '@ops-console/shared';
 import { z } from 'zod';
@@ -28,8 +29,6 @@ export const NATIVE_CALLS = 2;
 
 /** The availability probe gives the Secret Service this long to answer before it counts a pending prompt as an answer. */
 export const PROBE_LIMIT_MS = 5_000;
-/** The probe's answer is kept this long, so reading the Permissions page twice makes one call. */
-const PROBE_KEPT_MS = 10_000;
 /** An item no one writes: reading it asks the Secret Service for nothing but whether it answers. */
 const PROBE_KEY = 'availability-probe';
 
@@ -49,6 +48,31 @@ export class SecretServiceUnavailable extends ApiError {
       `No Secret Service answered: ${detail}. Secrets need a desktop keyring such as GNOME Keyring or KWallet, running in this login session.`,
     );
   }
+}
+
+/** A native error that says the operator or the keyring refused the call, so a Secret Service is there. */
+const REFUSED = /dismiss|cancel|denied|locked|unlock|prompt/i;
+/** A native error that says nothing answered on the bus. The spike confirms the wording on each system. */
+const NO_SERVICE = /ServiceUnknown|NoStorageAccess|org\.freedesktop\.secrets|not activatable|no secret service|d-?bus/i;
+
+/**
+ * Whether a native error means no Secret Service is reachable, as against one that is there and refused or failed.
+ * Only the first lets a read or a delete count as "nothing stored".
+ */
+export function secretServiceMissing(error: unknown, busReachable: boolean): boolean {
+  const text = error instanceof Error ? error.message : String(error);
+  if (REFUSED.test(text)) return false;
+  return !busReachable || NO_SERVICE.test(text);
+}
+
+/** Whether this login session has a D-Bus session bus to reach a Secret Service on. */
+export function sessionBusReachable(env: NodeJS.ProcessEnv = process.env): boolean {
+  const address = env.DBUS_SESSION_BUS_ADDRESS;
+  if (address) {
+    const socket = /unix:path=([^,;]+)/.exec(address)?.[1];
+    return socket === undefined || existsSync(socket);
+  }
+  return env.XDG_RUNTIME_DIR !== undefined && existsSync(path.join(env.XDG_RUNTIME_DIR, 'bus'));
 }
 
 /** The first line of a native error, cut short: what the Permissions row and a failed save show. */
@@ -71,6 +95,8 @@ export type LoginKeychainOptions = {
   handoverMs?: number;
   nativeCalls?: number;
   probeMs?: number;
+  /** Whether a D-Bus session bus exists; tests pass a fixed answer. */
+  busReachable?: () => boolean;
   /** The system the console runs on, for the checks that differ: Linux has a Secret Service, not a Keychain. */
   platform?: NodeJS.Platform;
   /** Where the keys this console holds are listed, so the next handover reads them directly. Never holds a value. */
@@ -144,7 +170,6 @@ export class LoginKeychain implements Keychain {
   private readonly keys = new Set<string>();
   private trusted = false;
   private readonly platform: NodeJS.Platform;
-  private probed: { at: number; answer: KeychainAvailability } | null = null;
 
   constructor(
     private readonly service = 'ops-console',
@@ -209,20 +234,18 @@ export class LoginKeychain implements Keychain {
     const store = this.platform === 'linux' ? 'secret_service' : 'keychain';
     const available: KeychainAvailability = { available: true, reason: null, store };
     if (this.platform !== 'linux' || this.options.wait?.state().waiting) return available;
-    if (this.probed && Date.now() - this.probed.at < PROBE_KEPT_MS) return this.probed.answer;
-    let answer: KeychainAvailability = available;
     try {
       await within(
         this.slots.run(() => this.entry(this.service, PROBE_KEY).getPassword()),
         this.options.probeMs ?? PROBE_LIMIT_MS,
       );
     } catch (error) {
-      if (!(error instanceof KeychainTimeout)) {
-        answer = { available: false, reason: `no Secret Service answered: ${detailOf(error)}`, store };
+      // A refusal or a failure of any other kind came from a Secret Service that is there; only a missing one is "unavailable".
+      if (!(error instanceof KeychainTimeout) && secretServiceMissing(error, this.bus())) {
+        return { available: false, reason: `no Secret Service answered: ${detailOf(error)}`, store };
       }
     }
-    this.probed = { at: Date.now(), answer };
-    return answer;
+    return available;
   }
 
   /** The keys this app holds, for a handover to read directly; `null` until a start has made the list complete. */
@@ -262,6 +285,10 @@ export class LoginKeychain implements Keychain {
     renameSync(temp, file);
   }
 
+  private bus(): boolean {
+    return (this.options.busReachable ?? sessionBusReachable)();
+  }
+
   private async call<T>(use: (entry: KeychainEntry) => Promise<T>, key: string, gated = true): Promise<T> {
     if (this.options.wait?.state().waiting) throw new KeychainTimeout();
     const done = this.options.wait?.begin();
@@ -275,9 +302,11 @@ export class LoginKeychain implements Keychain {
       );
     } catch (error) {
       abandoned = true;
-      // Any other failure of the native call on Linux means the Secret Service is not there to ask.
-      if (this.platform === 'linux' && !(error instanceof ApiError))
-        throw new SecretServiceUnavailable(detailOf(error));
+      if (this.platform === 'linux' && !(error instanceof ApiError)) {
+        if (secretServiceMissing(error, this.bus())) throw new SecretServiceUnavailable(detailOf(error));
+        // The Secret Service is there and said no, as when its unlock prompt is dismissed.
+        throw new ApiError(502, ErrorCode.UpstreamFailed, `The Secret Service refused the call: ${detailOf(error)}`);
+      }
       throw error;
     } finally {
       done?.();

@@ -49,6 +49,7 @@ import {
   readFailure,
 } from './hosted-mcp';
 import { HostedServers } from './hosted-servers';
+import { linuxInstallAdvice } from './linux-install';
 import { NEW_RELIC_KEY } from './new-relic-api';
 import { NEW_RELIC_SERVER } from './new-relic-mcp';
 
@@ -1185,13 +1186,6 @@ const INSTALL = {
 function missingToolMessage(command: keyof typeof INSTALL): string {
   if (process.platform !== 'darwin') return linuxInstallAdvice([command], false);
   return `${command} is not installed: install ${INSTALL[command]}, then Connect again`;
-}
-
-/** The message for a missing command on Linux: install it with the system's package manager, or Homebrew when it is there. The console runs neither. */
-export function linuxInstallAdvice(missing: string[], brew: boolean): string {
-  const names = missing.join(', ');
-  const withBrew = brew ? `, or with Homebrew: \`brew install ${missing.join(' ')}\`` : '';
-  return `${names} ${missing.length === 1 ? 'is' : 'are'} not installed: install ${missing.length === 1 ? 'it' : 'them'} with your package manager${withBrew}, then Connect again`;
 }
 
 function signedOutDetail(profile: string): string {

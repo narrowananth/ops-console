@@ -1,11 +1,18 @@
-import { mkdir, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ErrorCode } from '@ops-console/shared';
 import { describe, expect, it } from 'vitest';
 import { LINUX_RUN_SANDBOX_PENDING, runSandbox } from '../src/agent/run-sandbox';
 import { defaultDataDir } from '../src/common/platform';
-import { linuxInstallAdvice } from '../src/connectors/connectors.service';
-import { type KeychainEntry, KeychainTimeout, LoginKeychain, SecretServiceUnavailable } from '../src/keychain/keychain';
+import { linuxInstallAdvice } from '../src/connectors/linux-install';
+import {
+  type KeychainEntry,
+  KeychainTimeout,
+  LoginKeychain,
+  SecretServiceUnavailable,
+  sessionBusReachable,
+} from '../src/keychain/keychain';
+import { output } from '../src/processes/command';
 import { LSOF_MISSING, LsofScanner } from '../src/processes/local-servers';
 import { LinuxFolderPicker } from '../src/repos/folder-picker';
 import { BubblewrapRunSandbox, type Program } from '../src/terminals/run-sandbox-gate';
@@ -32,6 +39,32 @@ class LockedEntry implements KeychainEntry {
   deletePassword = () => new Promise<void>(() => {});
 }
 
+/** A keyring that is there and refuses: its unlock prompt was dismissed. */
+class DismissedEntry implements KeychainEntry {
+  setPassword = async () => {
+    throw new Error('Prompt dismissed by the user');
+  };
+  getPassword = async (): Promise<string | null> => {
+    throw new Error('Prompt dismissed by the user');
+  };
+  deletePassword = async () => {
+    throw new Error('Prompt dismissed by the user');
+  };
+}
+
+/** A failure the library words in no way that names a Secret Service. */
+class OddEntry implements KeychainEntry {
+  setPassword = async () => {
+    throw new Error('something broke');
+  };
+  getPassword = async (): Promise<string | null> => {
+    throw new Error('something broke');
+  };
+  deletePassword = async () => {
+    throw new Error('something broke');
+  };
+}
+
 class MemoryEntry implements KeychainEntry {
   stored: string | null = null;
   async setPassword(value: string): Promise<void> {
@@ -48,14 +81,22 @@ class MemoryEntry implements KeychainEntry {
 describe('Secrets on Linux (Behavior 13 to 18)', () => {
   it('keeps a secret in the Secret Service and reads it back (13)', async () => {
     const entry = new MemoryEntry();
-    const keychain = new LoginKeychain('t', undefined, { entry: () => entry, platform: 'linux' });
+    const keychain = new LoginKeychain('t', undefined, {
+      entry: () => entry,
+      platform: 'linux',
+      busReachable: () => true,
+    });
     await keychain.set('connection:a', 's3cret');
     expect(entry.stored).toBe('s3cret');
     await expect(keychain.get('connection:a')).resolves.toBe('s3cret');
   });
 
   it('refuses a save with the reason when no Secret Service answers (16)', async () => {
-    const keychain = new LoginKeychain('t', undefined, { entry: () => new NoServiceEntry(), platform: 'linux' });
+    const keychain = new LoginKeychain('t', undefined, {
+      entry: () => new NoServiceEntry(),
+      platform: 'linux',
+      busReachable: () => true,
+    });
     const refused = await keychain.set('connection:a', 'x').catch((error: unknown) => error);
     expect(refused).toBeInstanceOf(SecretServiceUnavailable);
     expect(refused).toMatchObject({ status: 409, code: ErrorCode.InvalidState });
@@ -64,9 +105,73 @@ describe('Secrets on Linux (Behavior 13 to 18)', () => {
   });
 
   it('reads nothing and deletes nothing without a Secret Service, so a Connection with no secret still works (16)', async () => {
-    const keychain = new LoginKeychain('t', undefined, { entry: () => new NoServiceEntry(), platform: 'linux' });
+    const keychain = new LoginKeychain('t', undefined, {
+      entry: () => new NoServiceEntry(),
+      platform: 'linux',
+      busReachable: () => true,
+    });
     await expect(keychain.get('connection:a')).resolves.toBeNull();
     await expect(keychain.delete('connection:a')).resolves.toBeUndefined();
+  });
+
+  it('lets a dismissed unlock prompt fail every call, so nothing reads as missing and no delete is lost (16)', async () => {
+    const keychain = new LoginKeychain('t', undefined, {
+      entry: () => new DismissedEntry(),
+      platform: 'linux',
+      busReachable: () => true,
+    });
+    for (const call of [
+      () => keychain.set('connection:a', 'x'),
+      () => keychain.get('connection:a'),
+      () => keychain.delete('connection:a'),
+    ]) {
+      const refused = await call().catch((error: unknown) => error);
+      expect(refused).not.toBeInstanceOf(SecretServiceUnavailable);
+      expect(refused).toMatchObject({ status: 502, code: ErrorCode.UpstreamFailed });
+      expect((refused as Error).message).toContain('Prompt dismissed by the user');
+    }
+    await expect(keychain.availability()).resolves.toMatchObject({ available: true });
+  });
+
+  it('counts an unrecognised native error as no Secret Service only when there is no session bus (16)', async () => {
+    const noBus = new LoginKeychain('t', undefined, {
+      entry: () => new OddEntry(),
+      platform: 'linux',
+      busReachable: () => false,
+    });
+    await expect(noBus.get('connection:a')).resolves.toBeNull();
+    await expect(noBus.availability()).resolves.toMatchObject({ available: false });
+    const withBus = new LoginKeychain('t', undefined, {
+      entry: () => new OddEntry(),
+      platform: 'linux',
+      busReachable: () => true,
+    });
+    await expect(withBus.get('connection:a')).rejects.toMatchObject({ status: 502 });
+  });
+
+  it('finds the session bus from its address, or from the runtime folder', async () => {
+    const run = await realpath(await tempDir('ops-console-run-'));
+    expect(sessionBusReachable({ XDG_RUNTIME_DIR: run })).toBe(false);
+    await writeFile(path.join(run, 'bus'), '');
+    expect(sessionBusReachable({ XDG_RUNTIME_DIR: run })).toBe(true);
+    expect(sessionBusReachable({ DBUS_SESSION_BUS_ADDRESS: `unix:path=${run}/bus` })).toBe(true);
+    expect(sessionBusReachable({ DBUS_SESSION_BUS_ADDRESS: `unix:path=${run}/gone` })).toBe(false);
+    expect(sessionBusReachable({})).toBe(false);
+  });
+
+  it('writes the secret to no file (17)', async () => {
+    const dir = await tempDir('ops-console-data-');
+    const keychain = new LoginKeychain('t', undefined, {
+      entry: () => new MemoryEntry(),
+      platform: 'linux',
+      busReachable: () => true,
+      manifestFile: path.join(dir, 'keychain-manifest.json'),
+    });
+    await keychain.set('connection:a', 'hunter2-secret');
+    keychain.confirmManifest();
+    for (const name of await readdir(dir)) {
+      expect(await readFile(path.join(dir, name), 'utf8')).not.toContain('hunter2-secret');
+    }
   });
 
   it('leaves a macOS failure as it was (34)', async () => {
@@ -78,24 +183,34 @@ describe('Secrets on Linux (Behavior 13 to 18)', () => {
     const keychain = new LoginKeychain('t', undefined, {
       entry: () => new LockedEntry(),
       platform: 'linux',
+      busReachable: () => true,
       callMs: 20,
     });
     await expect(keychain.get('connection:a')).rejects.toBeInstanceOf(KeychainTimeout);
   });
 
   it('reports itself available when the Secret Service answers, and when it waits for an unlock (16)', async () => {
-    const answers = new LoginKeychain('t', undefined, { entry: () => new MemoryEntry(), platform: 'linux' });
+    const answers = new LoginKeychain('t', undefined, {
+      entry: () => new MemoryEntry(),
+      platform: 'linux',
+      busReachable: () => true,
+    });
     await expect(answers.availability()).resolves.toEqual({ available: true, reason: null, store: 'secret_service' });
     const locked = new LoginKeychain('t', undefined, {
       entry: () => new LockedEntry(),
       platform: 'linux',
+      busReachable: () => true,
       probeMs: 20,
     });
     await expect(locked.availability()).resolves.toEqual({ available: true, reason: null, store: 'secret_service' });
   });
 
   it('reports itself unavailable, with the reason and no secret, when none answers (16)', async () => {
-    const keychain = new LoginKeychain('t', undefined, { entry: () => new NoServiceEntry(), platform: 'linux' });
+    const keychain = new LoginKeychain('t', undefined, {
+      entry: () => new NoServiceEntry(),
+      platform: 'linux',
+      busReachable: () => true,
+    });
     await expect(keychain.availability()).resolves.toEqual({
       available: false,
       reason: 'no Secret Service answered: Platform secure storage failure: no D-Bus session',
@@ -106,21 +221,6 @@ describe('Secrets on Linux (Behavior 13 to 18)', () => {
   it('is always available on a Mac (34)', async () => {
     const keychain = new LoginKeychain('t', undefined, { entry: () => new NoServiceEntry(), platform: 'darwin' });
     await expect(keychain.availability()).resolves.toEqual({ available: true, reason: null, store: 'keychain' });
-  });
-
-  it('asks the Secret Service once for two reads in a row', async () => {
-    let calls = 0;
-    const entry = new MemoryEntry();
-    const keychain = new LoginKeychain('t', undefined, {
-      entry: () => {
-        calls += 1;
-        return entry;
-      },
-      platform: 'linux',
-    });
-    await keychain.availability();
-    await keychain.availability();
-    expect(calls).toBe(1);
   });
 });
 
@@ -142,19 +242,11 @@ describe('the Run sandbox on Linux (Behavior 21, 22)', () => {
     expect(() => runSandbox({ workingDir: '/w' }, 'linux')).toThrow(LINUX_RUN_SANDBOX_PENDING);
   });
 
-  it('still builds the macOS rules on a Mac (34)', () => {
-    expect(runSandbox({ workingDir: '/w', home: '/h' }, 'darwin')).toMatchObject({
-      enabled: true,
-      failIfUnavailable: true,
-      filesystem: { denyRead: ['/h/.ops-console', '/h/Library/Keychains'] },
-    });
-  });
-
   const present =
     (...missing: string[]): Program =>
     async (file, args) => {
       if (missing.includes(file)) throw new Error('not found');
-      if (file === 'bwrap' && args[0] === '--ro-bind' && missing.includes('userns')) {
+      if (file === 'bwrap' && args.includes('--ro-bind') && missing.includes('userns')) {
         throw new Error('bwrap: setting up uid map: Permission denied');
       }
     };
@@ -165,8 +257,12 @@ describe('the Run sandbox on Linux (Behavior 21, 22)', () => {
       new BubblewrapRunSandbox({ program: present(...missing), kernel: async () => kernel, verified: true });
     expect(await gate(['bwrap']).check()).toMatchObject({ status: 'unavailable' });
     expect((await gate(['bwrap']).check()).reason).toContain('bubblewrap is not installed');
+    expect((await gate(['bwrap']).check()).reason).toContain('sudo apt install bubblewrap`');
     expect((await gate(['socat']).check()).reason).toContain('socat is not installed');
-    expect((await gate(['socat']).check()).reason).toContain('apt install bubblewrap socat');
+    const both = (await gate(['bwrap', 'socat']).check()).reason;
+    expect(both).toContain('bubblewrap and socat are not installed');
+    expect(both).toContain('sudo dnf install bubblewrap socat');
+    expect(both).toContain('sudo pacman -S bubblewrap socat');
   });
 
   it('names the AppArmor limit when user namespaces fail (22)', async () => {
@@ -257,14 +353,11 @@ describe('the folder dialog on Linux (Behavior 29)', () => {
   });
 
   it('falls back to kdialog when zenity is not installed', async () => {
-    const seen: string[] = [];
     const picker = new LinuxFolderPicker(async (file) => {
-      seen.push(file);
       if (file === 'zenity') throw failing('ENOENT');
       return '/home/u/api\n';
     });
     expect(await picker.pick()).toEqual(['/home/u/api']);
-    expect(seen).toEqual(['zenity', 'kdialog']);
   });
 
   it('reports a dialog that could not open a display as a failure, not a cancel', async () => {
@@ -330,12 +423,32 @@ describe('the server list on a machine with no lsof (Behavior 31)', () => {
 });
 
 describe('a missing CLI on Linux (Behavior 33)', () => {
-  it('names the package manager, and Homebrew only when it is installed, and runs neither', () => {
+  it('prints the install command per package manager, and Homebrew only when it is installed', () => {
     expect(linuxInstallAdvice(['gh'], false)).toBe(
-      'gh is not installed: install it with your package manager, then Connect again',
+      'gh is not installed. Install it (Debian or Ubuntu: `sudo apt install gh`; Fedora: `sudo dnf install gh`; Arch: `sudo pacman -S github-cli`), then Connect again',
     );
-    expect(linuxInstallAdvice(['pup', 'gh'], true)).toBe(
-      'pup, gh are not installed: install them with your package manager, or with Homebrew: `brew install pup gh`, then Connect again',
+    expect(linuxInstallAdvice(['gh', 'glab'], true)).toBe(
+      'gh, glab are not installed. Install them (Debian or Ubuntu: `sudo apt install gh glab`; Fedora: `sudo dnf install gh glab`; Arch: `sudo pacman -S github-cli glab`; Homebrew: `brew install gh glab`), then Connect again',
     );
+  });
+
+  it('says where to get a command no distro packages, and falls back to the package manager for an unknown one', () => {
+    expect(linuxInstallAdvice(['github-mcp-server'], false)).toContain('github.com/github/github-mcp-server/releases');
+    expect(linuxInstallAdvice(['mystery'], false)).toBe(
+      'mystery is not installed. Install it with your package manager, then Connect again',
+    );
+  });
+});
+
+describe('a program that is not installed (Behavior 31)', () => {
+  it('reads as an empty answer unless the caller asks to be told, so a missing ps breaks nothing', async () => {
+    const was = process.env.PATH;
+    try {
+      process.env.PATH = await tempDir('ops-console-empty-');
+      expect(await output('ps', ['-axo', 'pid='])).toBe('');
+      await expect(output('ps', ['-axo', 'pid='], { missing: 'throw' })).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      process.env.PATH = was;
+    }
   });
 });

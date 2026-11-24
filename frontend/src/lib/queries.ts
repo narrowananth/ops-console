@@ -862,7 +862,6 @@ export function useImportRepo() {
   });
 }
 
-/** Opens the Finder folder dialog on this machine; one folder or several. Empty when the operator closes it. */
 /** Whether the folder dialog can open on this machine; where it cannot, the UI asks for the path instead. */
 export function useFolderDialog() {
   return useQuery({
@@ -871,6 +870,7 @@ export function useFolderDialog() {
   });
 }
 
+/** Opens the folder dialog on this machine; one folder or several. Empty when the operator closes it. */
 export function usePickFolder() {
   return useMutation({
     mutationFn: () =>

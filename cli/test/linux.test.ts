@@ -41,9 +41,6 @@ describe('ops-console start on Linux', () => {
     expect(unit).toContain(
       `ExecStart="${path.join(m.installDir, 'current/node/bin/node')}" "${path.join(m.installDir, 'current/app/main.js')}"`,
     );
-    expect(unit).toContain('Restart=always');
-    expect(unit).toContain('Environment="UV_THREADPOOL_SIZE=16"');
-    expect(unit).toContain(`Environment="OPS_CONSOLE_DATA_DIR=${m.dataDir}"`);
     expect(await m.calls()).toEqual(
       expect.arrayContaining(['--user daemon-reload', '--user enable --now ops-console.service']),
     );

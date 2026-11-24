@@ -29,13 +29,13 @@ The Run sandbox is the open part. The Agent SDK sandbox uses bubblewrap on Linux
 
 ### Install and start
 
-3. `install.sh` installs on Linux x64 and arm64 on a glibc distribution the bundled Node supports. It refuses other systems and older distributions with the reason, as it refuses an old macOS. A musl distribution such as Alpine is refused.
+3. `install.sh` installs on Linux x64 and arm64 on a glibc distribution of version 2.35 or later (Ubuntu 22.04, Debian 12, Fedora 36). It refuses other systems and older distributions with the reason, as it refuses an old macOS. A musl distribution such as Alpine is refused.
 4. A release carries `ops-console-linux-x64` and `ops-console-linux-arm64` tarballs next to the two macOS ones, with their sha256 in `checksums.txt`. The installer checks the sum before it installs anything. Each tarball is built on a Linux runner of its own architecture, where the native modules, `node-pty` included, are compiled and bundled, so the operator's machine needs no compiler, Python or sudo.
 5. The install needs no sudo and writes only under the operator's home, as on macOS. The console never installs a system package; it names what is missing.
 6. `ops-console start`, `stop`, `status`, `open`, `logs`, `update` and `uninstall` work as on macOS. `start` enables and starts a systemd user service that restarts the daemon if it stops (`systemctl --user enable --now`), and `stop` disables and stops it (`disable --now`), so it stays stopped across logins until the next `start`, as `launchctl disable` does on macOS.
 7. On a system with no systemd user manager, `start` says so and exits non-zero, and runs no daemon.
 8. `ops-console open` opens the UI in the default browser through `xdg-open`. With no desktop it prints the address.
-9. A release is smoke-tested on a Linux runner of each architecture the tarball was built on: install from the built tarball, `start`, `status`, `open`, `stop`, and open a terminal, as on macOS.
+9. A release is smoke-tested on a Linux runner of each architecture the tarball was built on: install from the built tarball, `start`, `status`, `open`, `stop`, and load the compiled `node-pty` module, as the macOS job runs its own start and stop.
 
 ### Start at login
 
@@ -48,7 +48,7 @@ The Run sandbox is the open part. The Agent SDK sandbox uses bubblewrap on Linux
 13. On Linux, a Connection's secret, an MCP Server's env vars, a Connector's tokens and the CLIProxy key are kept in the desktop's Secret Service under the same service names and keys as the macOS Keychain. Nothing reaches `state.db`, a log, a WebSocket payload or the browser.
 14. A read of a secret already read stays in memory, so a second read makes no call.
 15. The Keychain timeouts apply: a call fails at 60 seconds with `keychain_timeout`, a call pending past 10 seconds shows as the Keychain wait, and a call made while that wait shows fails at once. On Linux the wait is usually an unlock prompt for the keyring.
-16. With no Secret Service reachable (a headless login with no D-Bus session, no keyring daemon), the console stores no secret. Saving a Connection or MCP Server that needs one fails with the reason and what would provide a Secret Service. A Connection that needs no secret still works. Permissions shows the Keychain row as unavailable with the same reason.
+16. With no Secret Service reachable (a headless login with no D-Bus session, no keyring daemon), the console stores no secret. Saving a Connection or MCP Server that needs one fails with the reason and what would provide a Secret Service. A Connection that needs no secret still works: with no Secret Service a read finds nothing and a delete has nothing to remove. A Secret Service that is there but refuses or fails, as when its unlock prompt is dismissed, fails the call with its own error and is never read as "nothing stored", so a delete never drops a Connection while its secret stays in the keyring. Permissions shows the Keychain row as unavailable with the same reason.
 17. The console writes no secret to a file, encrypted or not, and to no kernel keyring. Reading a secret another program keeps in its own file, as in item 20, is not a write.
 18. Updating the console on Linux has no Keychain handover and no Handover refusal, and no start waits for one. A secret saved by one version is read by the next.
 19. The Setup agent's local Keychain reads stay macOS-only. On Linux the console reads no item it did not write, apart from the stored MCP sign-in in item 20.
@@ -57,21 +57,21 @@ The Run sandbox is the open part. The Agent SDK sandbox uses bubblewrap on Linux
 ### Run sandbox
 
 21. Every agent run's commands run in the Run sandbox on Linux and WSL2, in every Access mode, as on macOS. A run fails before its first command, and its Session shows why, when the sandbox is unavailable. The console never runs a command outside it, and no Setting turns it off.
-22. Permissions' Run sandbox row says whether bubblewrap and its network relay are installed, whether unprivileged user namespaces work, and names the fix for each missing piece. On a WSL1 distribution it says WSL2 is required. A check runs a trivial command in the sandbox each time the row is read.
+22. Permissions' Run sandbox row says whether bubblewrap and its network relay are installed, whether unprivileged user namespaces work, and names every missing piece with its install command for Debian or Ubuntu, Fedora and Arch. On a WSL1 distribution it says WSL2 is required. A check runs a trivial command in the sandbox each time the row is read.
 23. A run's commands cannot reach the secret store by any route the spike found: the keyring's data folder, the D-Bus session socket at the path `DBUS_SESSION_BUS_ADDRESS` names, gnome-keyring's own socket, and abstract sockets. The deny paths come from the environment, not from a fixed path, and the run's environment carries no `DBUS_SESSION_BUS_ADDRESS`. If a route stays open, the run fails closed (item 24).
 24. When the spike finds no way to keep a run's commands from the Secret Service, Settled records the design that replaces it, and until then Linux is not released.
 25. A run's commands cannot read the installed app folder, and cannot write the git control files the daemon's `git` reads outside the sandbox. The placeholder files the sandbox makes for control files that do not exist leave `git`, worktrees and commits working.
 26. A read-only run cannot change its working folder, as on macOS.
-27. The agent's file tools are held to the same closed paths on Linux.
+27. The agent's file tools are held to the same closed paths on Linux. The folders a `save_file` never writes in gain the keyrings, the user's systemd units and the autostart entries on Linux; macOS keeps its own list.
 28. What a run's commands can do on `localhost`, with Docker and with Unix sockets follows Settled once the spike decides it. The SDK documents `allowLocalBinding` as having no effect on Linux and gives each command a private `localhost`; if the spike confirms that, ADR 0006's promise of open `localhost`, servers and Docker does not hold there and its rewrite says so. The Run sandbox row, the Glossary and ADR 0006 state exactly what holds on Linux and where it differs from macOS.
 
 ### Other platform code
 
-29. Choosing a folder to import a Repo or a Log folder opens a native dialog through `zenity` or `kdialog` when one is installed, and otherwise says to type the path. A cancelled dialog returns no folder.
+29. Choosing a folder to import a Repo or a Log folder opens a native dialog through `zenity` or `kdialog` when one is installed, and otherwise shows a path field in place of the Choose button on the Repos tab and the Log folder step. A cancelled dialog returns no folder; a dialog that cannot open a display is an error, not a cancel.
 30. Opening a Session's worktree in an editor or the file manager keeps working on Linux.
-31. Local servers the Terminals dock lists come from the system's socket and process tools. When they are missing the list says so and is empty; nothing else breaks.
+31. Local servers the Terminals dock lists come from the system's socket and process tools. When `lsof` is missing the list is empty and says why; a missing `ps` or any other program leaves the list as it was, and nothing else breaks.
 32. The terminals open on Linux with the `node-pty` build compiled for that tarball (item 4).
-33. The Connectors' "install a missing CLI" offers the command for the distro's package manager and runs none itself. Homebrew on Linux is named when found.
+33. The Connectors' "install a missing CLI" prints the install command for each package manager that carries the command (apt, dnf, pacman), Homebrew's when it is installed, and where to download it when no distro packages it, and runs none itself.
 
 ### What must not regress
 
@@ -88,7 +88,8 @@ The Run sandbox is the open part. The Agent SDK sandbox uses bubblewrap on Linux
 - **Service manager**: systemd user service. No system service, no root.
 - **Lingering**: the console never enables it; it shows the command.
 - **Packages**: the console never installs a system package. It names bubblewrap, socat, a dialog tool and the lingering command.
-- **Libc**: glibc only.
+- **Libc**: glibc 2.35 or later. The release builds on the oldest glibc the installer accepts, so what loads there loads everywhere it admits. A system with an older glibc, such as RHEL 9 (2.34), is refused until a build container with an older glibc is added.
+- **Linux locations**: data `${XDG_DATA_HOME:-~/.local/share}/ops-console`, log `${XDG_STATE_HOME:-~/.local/state}/ops-console/daemon.log`, unit `${XDG_CONFIG_HOME:-~/.config}/systemd/user/ops-console.service`. An XDG variable counts only when it is an absolute path, for the daemon and the CLI alike. `OPS_CONSOLE_DATA_DIR` overrides the data folder.
 - **WSL2**: the Linux build, tested in the spike. WSL1 is refused. No native Windows build.
 - **Sandbox failure**: the run fails when the sandbox cannot start. The SDK's `failIfUnavailable` stays on.
 - **Release order**: macOS keeps shipping. Linux ships once the spike's results are in this section and ADRs 0004 and 0006 are rewritten.
@@ -120,6 +121,18 @@ Does nothing on Linux; Permissions shows the lingering command instead of a butt
 ### `GET /terminals/run-sandbox`
 
 Same body, `status` and `reason`. On Linux `reason` names the missing piece from item 22.
+
+### `GET /repos/folder-dialog`
+
+Whether a folder dialog can open on this machine, so the UI shows a path field when it cannot.
+
+```json
+{ "data": { "available": false } }
+```
+
+### `GET /sessions/:id/local-servers`
+
+Gains `notice`: a string saying why the list may be empty when `lsof` is missing, `null` otherwise.
 
 ### `GET /terminals/keychain-wait`
 
@@ -198,9 +211,8 @@ Items 19, 20, 30, 32 and 34 to 36 are pinned by the existing tests for those are
 
 Built on branch `linux-port`, the spike-independent parts only. Each item was checked on this Mac with fakes; nothing ran on Linux.
 
-- Built: the install, CLI and systemd side (3 to 9), start at login (10 to 12), the Secret Service backend, refusal and availability route (13 to 19), the Run sandbox gate and its fail-closed rule (21, 22), the folder dialog and its typed-path fallback (29), the empty server list with its `lsof` notice (31), the missing-CLI message (33), the Linux data folder, and the release build job.
-- Held: no agent run starts on Linux while the Run sandbox is unverified there (`LINUX_RUN_SANDBOX_VERIFIED` is false), and the Run sandbox row says so. Items 23 to 28 wait on the spike.
-- Changed from the draft: no path field existed in the UI, so with no dialog tool the Repos tab and the Log folder step now show a typed-path field in place of the Choose button (`GET /repos/folder-dialog` says whether a dialog can open). A missing CLI on Linux gets a message naming the package manager, and Homebrew when it is installed; the console runs neither (33).
+- Built: the install, CLI and systemd side (3 to 9), start at login (10 to 12), the Secret Service backend, refusal and availability route (13 to 19), the Run sandbox gate and its fail-closed rule (21, 22), the folder dialog and its typed-path fallback (29), the empty server list with its `lsof` notice (31), the missing-CLI message (33), the Linux data folder, and the release build job. `release.yml` can be run by hand on a branch (`workflow_dispatch`): it builds and smoke-tests the Linux tarballs and publishes nothing.
+- Held: no agent run starts on Linux while the Run sandbox is unverified there (`LINUX_RUN_SANDBOX_VERIFIED` is false), and the Run sandbox row says so. Items 23 to 28 wait on the spike, except the `save_file` folders in item 27.
 - Not built: the ADR 0004 and 0006 rewrites, and publishing the Linux tarballs (the release's `checksums.txt` stays macOS-only).
-- Unverified: item 20 (where Claude Code keeps its sign-in on Linux), and every Linux behavior on a real machine. `release.yml` can now be run by hand on a branch (`workflow_dispatch`), which builds and smoke-tests the Linux tarballs without publishing.
+- Unverified: item 20 (where Claude Code keeps its sign-in on Linux); the native error wording that tells "no Secret Service" from "refused" (item 16), the package names in item 33 on each distro, the namespace flags in item 22 against the SDK's own, and every Linux behavior on a real machine. No test pins item 18 (the handover skip) or the Session's "why" when a run fails closed (item 21).
 - Follow-ups, to be written as spec items first: the Session browser's Chrome path on Linux, and the Setup agent's macOS paths.

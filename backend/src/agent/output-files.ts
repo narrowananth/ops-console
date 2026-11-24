@@ -244,11 +244,13 @@ export class OutputFiles implements FileSaver {
       ...['LaunchAgents', 'LaunchDaemons', 'Keychains'].map((name) => path.join(home, 'Library', name)),
       path.join(home, 'Library', 'Application Support', 'ops-console'),
       // On Linux: the Secret Service's keyrings and the user services and autostart entries that start programs.
-      ...[
-        ['.local', 'share', 'keyrings'],
-        ['.config', 'systemd'],
-        ['.config', 'autostart'],
-      ].map((parts) => path.join(home, ...parts)),
+      ...(process.platform === 'linux'
+        ? [
+            ['.local', 'share', 'keyrings'],
+            ['.config', 'systemd'],
+            ['.config', 'autostart'],
+          ].map((parts) => path.join(home, ...parts))
+        : []),
       this.dataDir,
     ];
     const real = await realpath(folder);
