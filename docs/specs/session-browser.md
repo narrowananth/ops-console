@@ -1,7 +1,7 @@
 # Session browser and processes
 
 **Status:** shipped
-**Design:** `design/session-browser.html`: the Browser panel in six states, the Terminals dock in its states and the agent's Approval. It departs from every screen: neither `design/ops-console.html` nor `design/ops-console-sidebar.html` has a browser or a process panel.
+**Design:** `design/session-browser.html`: the Browser panel in six states, the Terminals dock in its states and the agent's Approval (eight views). It departs from every screen: neither `design/ops-console.html` nor `design/ops-console-sidebar.html` has a browser or a process panel.
 
 ## Problem
 
@@ -9,7 +9,7 @@ The operator wants to run a whole project in a Session: the frontend, the backen
 Then they want to see it work without leaving the console, and to tell the agent "test the checkout flow" and watch it
 happen.
 
-Today a run's commands are sandboxed and end with the run, so no server stays up. The agent says "open localhost:5173",
+A run's commands end with the run, so no server stays up. The agent says "open localhost:5173",
 the operator finds the tab, comes back and reports what they saw. The agent cannot see the page, so it cannot check its
 own UI change. Links in the transcript open a new tab and lose the Session.
 
@@ -20,11 +20,13 @@ adds the same to a Session.
 
 ### The panel
 
-1. A Session of kind `repo` or `anonymous` has a Browser button in its header. It opens a Browser panel beside the
-   conversation, folding to a rail like the Changes panel. A `pr_review` or dev-tools Session has none. The panel's
-   width and open state are remembered per browser.
-2. The panel holds tabs, one page each. A new panel has one blank tab with the address field focused and the Local
-   servers list below it (Behavior 11).
+1. A Session of kind `repo` or `anonymous` has a Browser row in its Session panel (the header's Session button opens it).
+   The row opens a Browser panel in the right column beside the conversation, which folds the Diff and Session panels that
+   share the column. The panel's × closes it and the tabs stay open. A `pr_review` or dev-tools Session has none. The
+   panel's width and open state are remembered per browser. The row shows `:<port>` while a server of the Session listens and no tab shows it.
+2. The panel holds tabs, one page each. A panel with no tab shows a blank "New tab" with the address field focused and the
+   Local servers list below it (Behavior 11); an address typed there makes the first tab, and "+" adds a blank one. A tab
+   the agent opened carries an `agent` tag.
 3. The toolbar has back, forward, reload (stop while loading), an address field, a device menu, then one icon button per
    action, each named by its tooltip and its accessible name: "Open in a window" (35), "Pick an element" (45), "Inspect"
    (39), "Open in your browser" (an arrow leaving a box) and "Clear this Session's cookies" (a cookie with a small x). There is no "..."
@@ -56,7 +58,7 @@ adds the same to a Session.
     the Session's processes (Behavior 17) is tagged with that process; one whose folder is in the Session's worktree, its
     Opened Repos or its output folder is tagged with the Session. A server of any other process on the Mac is not listed.
     A click opens one in the tab. The list refreshes when a process starts or ends, within half a second of a started server listening, and
-    every 30 seconds while a panel is open. The console's own ports (4545, 4555, 4556) are never listed, nor is a port of the agent's own `claude` process, which runs the Run sandbox's network filter. A server that is the Session's but that no Session
+    every 30 seconds while a panel is open. The console's own ports (4545, 4555, 4556) are never listed, nor is a port of the agent's own `claude` process, which runs the Run sandbox's proxy. A server that is the Session's but that no Session
     process owns, such as one started with `nohup` that outlived its terminal, shows a Stop button. Stop ends that process
     and what it started (by parent links, never by process group).
 11a. When a process started while the Session is open begins listening, its page opens in the Browser panel with no
@@ -67,7 +69,7 @@ adds the same to a Session.
 ### Links
 
 13. A `http` or `https` link in a transcript, an Approval or an Agent's message to a loopback host opens in the panel when
-    the Session has a Browser button. Any other link opens in the operator's own browser. Cmd-click, Ctrl-click and the
+    the Session has a Browser row. Any other link opens in the operator's own browser. Cmd-click, Ctrl-click, Shift-click, Alt-click and the
     middle button always go there. There is no setting for it. A page opened this way (a link, a Local servers row, a server that
     started) whose site (scheme, host and port) a tab already shows loads in that tab, which reloads, instead of a new tab.
     An address typed in the address field does not do this.
@@ -76,8 +78,8 @@ adds the same to a Session.
 ### Session processes
 
 15. A Session of kind `repo` or `anonymous` has a Terminals dock under the conversation and the panel, laid out as an
-    editor's terminal panel. It opens from the header's Terminals button. Its bar holds only icons (each with a tooltip and
-    an accessible name), left to right: the name of the selected process with a state dot (and "exited 1" or "stopped"
+    editor's terminal panel. It opens from the Terminals row of the Session panel, which shows how many processes run. Its bar holds only icons (each with a tooltip and
+    an accessible name), left to right: the Terminals icon (with its word in a wide dock), the name of the selected process with a state dot (and "exited 1" or "stopped"
     once it ended; the tooltip has "Running · started 2m ago", the command and the folder), New terminal (+), a chevron
     menu for scripts and the folder (16, 17), Split, Restart (a turning arrow), Stop (a square) while the process runs
     or Remove (a bin) once it has exited or been stopped, then Maximize (Restore when maximized) and one "×" with the
@@ -91,9 +93,8 @@ adds the same to a Session.
     terminals yet", one line on what a terminal is for and that it keeps running when the dock is hidden, a primary "New
     terminal" button, and the example "e.g. run your dev server. Its page opens in the Browser panel."
 16. "New terminal" starts a shell the operator types in, and is never inside a menu. The chevron menu ("Scripts and folder")
-    opens upward from the bar and lists the `scripts` of the worktree's `package.json` (`dev`, `start`, `test`, `build`, ...) and the
-    other tools' commands the folder has. It appears once the folder lists a script or the Session has Opened Repos (17); with neither it shows no menu. A
-    script starts as `pnpm`, `npm`, `yarn` or `bun run <script>`, whichever lockfile the Repo has.
+    opens upward from the bar and lists what the worktree can run, in a group per tool: the `scripts` of `package.json` (`dev`, `start`, `test`, `build`, ...), the recipes of a `Makefile` or `justfile`, and the usual commands of Cargo, Go, Python, Gradle, Maven, Rails and Docker Compose when the folder has them. It appears once the folder lists something or the Session has Opened Repos (17); with neither it shows no menu. A
+    `package.json` script starts as `pnpm`, `npm`, `yarn` or `bun run <script>`, whichever lockfile the Repo has; any other entry starts as the command the menu shows. With an Opened Repo's folder picked, the menu lists no scripts and says so.
 17. The daemon runs each process as the operator, in the Session's worktree (or an Opened Repo's folder, picked in the
     chevron menu's "Run in" list, which names the folder new terminals and scripts run in), with the operator's login environment and PATH, outside the Run sandbox, as the Setup agent's terminal does.
     It runs until the operator stops it, the Session is deleted, or the daemon exits. When the folder's `.env` files name the host of a PROD Connection, the dock shows "This folder's .env names the PROD Connection <name>" over the process, and the agent's Approval says the same and shows as PROD. A process that exits stays listed with
@@ -108,7 +109,7 @@ adds the same to a Session.
 
 ### The agent
 
-21. A chat run the operator started in a Session with a Browser button has the console tools `browser_open`,
+21. A chat run the operator started in a Session with a Browser row has the console tools `browser_open`,
     `browser_snapshot`, `browser_screenshot`, `browser_click`, `browser_type`, `browser_press`, `browser_scroll`,
     `browser_evaluate`, `browser_console` and `browser_network`. They act on the Session's tabs, the same ones the operator
     sees, and a tab the agent opens appears in the panel at once, tagged `agent`. A job (Verification, Fix, Agent Review,
@@ -258,8 +259,8 @@ adds the same to a Session.
 
 ### Must not regress
 
-33. A run's commands still reach only the Network allowlist, and a run's sandbox is unchanged: no host is added by the
-    browser, and a process the operator starts is not a run.
+33. The Run sandbox is unchanged by the browser and the processes: nothing is added to it or taken from it, and a process
+    the operator starts is not a run.
 34. `/ws` still sends server to client events only, and nothing but the token holder reaches the page stream or a terminal
     (ADR 0003).
 
@@ -271,13 +272,13 @@ adds the same to a Session.
 - **Chrome, not Chromium**: the operator's own Chrome, run through `playwright-core`. Chromium is 366 MB and would triple
   the release.
 - **No page blocking**: the page may call any host, so the Session's frontend runs as it would in the operator's Chrome.
-  The cost is stated in the ADR: the Network allowlist covers a run's commands, not the pages a run helped build.
+  The cost is stated in the ADR: a page a run helped build can send what it reads to any host.
 - **The agent stays on loopback**: it opens only loopback pages and acts only on loopback tabs, so a steered agent cannot
   browse the internet through the daemon. A script it runs in a page asks first (23), the one tool that can make the page
   send data to a host the operator never named.
-- **Processes outside the sandbox, as the operator**: a dev server needs a bound port, the project's databases and APIs, the
-  operator's tools and a life longer than one run. The Run sandbox gives none. They run as the operator does in a terminal; only
-  the operator starts one, or approves the agent's command each time. `allowLocalBinding` is not added to the sandbox.
+- **Processes outside the sandbox, as the operator**: a dev server needs the operator's login environment and tools and a life
+  longer than one run, which a run's commands do not have. They run as the operator does in a terminal; only
+  the operator starts one, or approves the agent's command each time.
 - **Stream**: frames go to the panel over a WebSocket of their own, `/browser/:tabId`, behind the same token check as
   `/terminals/:id`. Input comes back on it. Process output has its own, `/processes/:id`. `/ws` is untouched.
 - **Sharp frames**: Chrome's screencast makes no frame with more pixels than its screen has, and a headless screen is 1x.
@@ -382,7 +383,7 @@ adds the same to a Session.
 
 | Status | Error code | When |
 | ------ | ---------- | ---- |
-| 404 | `session_not_found` | Unknown Session |
+| 404 | `not_found` | Unknown Session, tab or process |
 | 409 | `browser_not_available` | Session kind has no browser or terminals |
 | 422 | `url_not_allowed` | Not `http` or `https`, or the agent's URL is off loopback or is a console port |
 | 503 | `chrome_missing` | No Chrome found |
@@ -430,11 +431,11 @@ Stops the server on `port` when it is this Session's. 204. 404 `not_found` for a
 
 ### `GET /sessions/:id/scripts`
 
-`{ data: { runner: "pnpm" | "npm" | "yarn" | "bun", scripts: [{ name, command }] } }` from the worktree's `package.json`.
+`{ data: { scripts: [{ id, source, name, run, command }] } }` for the worktree, or for the Opened Repo's folder in `?folder=`. `id` is `source:name`; `source` is the tool (`package.json`, `Makefile`, `Cargo`, ...); `run` is the command line that starts it; `command` is what it does, when the project says.
 
 ### `GET /sessions/:id/processes`, `POST /sessions/:id/processes`
 
-`POST` body `{ name, command?, script?, folder? }`; `script` or `command`, not both; none for a new terminal. `{ data: process }`.
+`POST` body `{ name, command?, script?, folder? }`; `script` is a script `id`; `script` or `command`, not both; none for a new terminal. `{ data: process }`.
 
 ### `POST /processes/:id/stop`, `POST /processes/:id/restart`, `DELETE /processes/:id`
 
@@ -466,14 +467,14 @@ chunks) and `exit` (code). It replays what the process printed to a browser that
 ### WebSocket `/ws` events
 
 Server to client: `browser.tabs_changed` and `browser.servers_changed` (`{ session_id }`), `process.changed` (`{ session_id,
-process }`), `process.removed` (`{ session_id, process_id }`), so the Browser button's dot and the dock update without the panel open.
+process }`), `process.removed` (`{ session_id, process_id }`), so the Session panel's Browser and Terminals rows and the dock update without the Browser panel open.
 
 ## UI
 
-The Browser panel, a tab's window (the toolbar and the page, no sidebar), the Terminals dock, the Browser and Terminals buttons in the Session header (Workspace). States: no
+The Browser panel, a tab's window (the toolbar and the page, no sidebar), the Terminals dock, the Browser and Terminals rows in the Session panel (Workspace). States: no
 Chrome, loading, blank tab with the Local servers list, no server for the Session, called hosts, crashed, "Agent is using this tab",
 the page stream lost (a notice over the last frame while the panel reconnects), a tab in a window ("This tab is open in its own window."), a window whose tab or Session is gone, the Inspect button with no page, pressed, and with a blocked popup; DevTools docked at the bottom and at the right;
-the dock with no process, a running one, an exited one, the Run a script menu, a folder with no scripts, a narrow dock, an Approval card for the agent's `start_process`; pick mode with an element
+the dock with no process, a running one, a split group with its process list, an exited one, the Scripts and folder menu, a folder with no scripts, a maximized dock, a narrow dock, an Approval card for the agent's `start_process`; pick mode with an element
 outlined, and the composer with picked-element chips. Departure: neither design file has a browser or a dock, so the mock is new
 (`design/session-browser.html`). The window, its panel placeholder, the Pick, Inspect, Open in your browser and Clear cookies icons and
 the DevTools dock are not in it, and the mock still shows the old External button and "..." menu.
@@ -481,14 +482,13 @@ the DevTools dock are not in it, and the mock still shows the old External butto
 ## Rejected
 
 - **An iframe of the dev server**: pages that refuse framing do not load, and the agent cannot see or drive the page.
-- **Playwright's Chromium, bundled or downloaded**: 150 to 366 MB, a download host for the allowlist and a progress state,
+- **Playwright's Chromium, bundled or downloaded**: 150 to 366 MB, a download and a progress state,
   where the operator already has Chrome.
 - **Blocking or allow-on-click for the page's outside hosts**: pages look broken until the operator clicks, and a dev
   server's fonts, CDNs, analytics and sign-in each need a click. The operator asked for no blocking.
 - **Loopback only for the operator's address field**: the operator may open a staging site as in any browser; only the
   agent is held to loopback.
-- **The agent starts servers inside its sandboxed run**: needs `allowLocalBinding` and every API and database host on the
-  Network allowlist, and the servers end with the run, so no project stays up.
+- **The agent starts servers inside its sandboxed run**: the servers end with the run, so no project stays up.
 - **An Approval on every browser tool call**: it would stop the agent on every click. The reach is a loopback page the
   operator can watch. Only `browser_evaluate` asks.
 - **Starting Chrome with a remote debugging port for DevTools**: any process on the Mac, the sandboxed agent included,
@@ -521,10 +521,10 @@ the DevTools dock are not in it, and the mock still shows the old External butto
 
 - **A Session's pages call any host, and its processes run outside the sandbox**: the Browser panel is a real Chrome page
   with no blocking, and a Session process runs as the operator, started by the operator or by an Approval of the agent's
-  command. The Network allowlist (ADR 0006) covers a run's commands, not what these two reach. The agent stays on loopback
+  command. A run's commands reach any host as well (ADR 0006), but end with the run. The agent stays on loopback
   pages, and only the operator's click or yes starts a process. Hard to reverse because chats and Playbooks come to rely on
-  it; surprising because the daemon runs a browser and long-lived processes; a real trade-off against the sandbox. ADR 0006
-  records the exception. It also records the Inspector: Chrome's own DevTools, reached through a relay on the
+  it; surprising because the daemon runs a browser and long-lived processes; a real trade-off against the sandbox. ADR 0007
+  records it. It also records the Inspector: Chrome's own DevTools, reached through a relay on the
   console's token.
 
 ## Seams
@@ -534,7 +534,7 @@ the DevTools dock are not in it, and the mock still shows the old External butto
   no Chrome. `browser-orphans.test.ts`: 29.
 - **Backend + SQLite** (`session-processes.test.ts`, real child processes): 15 to 20, 26, 33; `process-prod-env.test.ts`: 17 and 26's PROD line; `process-hangup.test.ts`: 20; with `local-servers.test.ts`
   (a real listening socket): 11, 12, and the Stop of a leftover server.
-- **Browser** (`frontend/e2e/session-browser.spec.ts`, a real daemon and Chrome): 1 to 3, 5, 6, 8, 11 (Stop), 15 to 17 (the empty state, New terminal, Run a script, Hide, Stop, Restart, Remove, an exited process), 21, 26, 27, 28, 32, and the PROD warning of 17.
+- **Browser** (`frontend/e2e/session-browser.spec.ts`, a real daemon and Chrome): 1 to 3, 5, 6, 8, 11 (Stop), 15 to 17 (the empty state, New terminal, Scripts and folder, Split, Maximize, Hide, Stop, Restart, Remove, an exited process), 21, 26, 27, 28, 32, and the PROD warning of 17.
 - **Browser** (`frontend/e2e/session-browser-pick.spec.ts`, a real daemon and Chrome): 3 (the icons and their names, no "..." menu, a
   narrow panel), 13, and 45 to 51 (the outline, a click that does not reach the page, the chips, several picks, send with the block
   and the crop, Escape, a tab's window).

@@ -9,24 +9,26 @@ Monitor needs Datadog to scan, the fix flow needs Jira and a Git host, and revie
 
 ## Behavior
 
-1. Listing Connectors returns all twelve in a fixed order (the last three are `google-workspace-connector`), each with how it is reached (`via`), status, account label and config. The first start seeds every Connector with status `off`.
-2. Connect takes no body. It starts the provider's own browser sign-in and answers 202 at once. Nothing is typed in the console before Connect.
+1. Listing Connectors returns all sixteen in a fixed order: the nine service Connectors, then the three of `google-workspace-connector`, then the four log sources (`otel-log-source`, `cloudwatch-log-source`, `loki-log-source` and `new-relic-log-source`, connected as `one-click-log-sources` says). Each comes with how it is reached (`via`), status, account label and config. The migrations seed every Connector with status `off`.
+2. Connect of a service Connector takes no body. It starts the provider's own browser sign-in and answers 202 at once. Nothing is typed in the console before Connect. A log source's Connect may carry the choices its pane made (API) and is refused before it answers when a choice is bad. The Log folder has no sign-in: its Connect checks the folder and connects before it answers, or is refused with `folder_not_found`. A CloudWatch Connect for an AWS profile that is already signed in connects before it answers too.
 3. Connecting a Connector that rides an MCP Server (Jira, Bitbucket, Slack, Sentry, Shopify) registers that server in every account if it is missing (`03-settings-mcp-servers`), turns it on if it was turned off, then runs its Authenticate; Shopify's Dev MCP needs no sign-in, and its Connect reads the server alone in the active account. A server registered by this Connect holds no sign-in yet, so its browser sign-in opens in the active account without a Probe first, within a second of the click. Connect signs in the active account only, so it opens one browser sign-in; Bitbucket after Jira opens none for `atlassian`. Jira and Bitbucket share the `atlassian` server. The Connector's status follows the server's, except Bitbucket's: after the server, Bitbucket signs `bkt` in with `bkt auth login --kind cloud --web` unless it already is, and its status follows `bkt api /user`. Its `login` is the Bitbucket nickname. With `bkt` not installed, Connect ends `auth` with where to install it from.
 4. Connecting Datadog, GitHub or GitLab runs the CLI's own browser sign-in (`pup auth login`, `gh auth login --web`, `glab auth login --web`). Connecting GitHub first installs `gh` and `github-mcp-server` from Homebrew, in one `brew install`, when they are not on the PATH, and is refused with "install Homebrew from brew.sh" when Homebrew is missing too. After the sign-in it registers the `github` MCP Server (`github-mcp-server stdio`) with the `gh` token (`gh auth token`) as `GITHUB_PERSONAL_ACCESS_TOKEN`, kept in the Keychain and passed through the launcher, so it never reaches Claude Code's config. Connecting Datadog also registers the `datadog-pup` MCP Server (`pup mcp serve`) so the agent can query it, when the installed `pup` has an `mcp` command; `pup` 2.3.5 has none, and then nothing is registered. Connecting GitLab installs `glab` the same way, and skips the sign-in when `glab` is already signed in to the host, because `glab` asks to confirm a second sign-in. Connecting slashdocs signs its CLI in with `slashdocs auth login`, to the server set in the pane or, when that is blank, the CLI's active one. It skips the sign-in when `slashdocs auth whoami` already reads a user, so it connects at once. Its `login` is the user's email, and its account label is the server. With `slashdocs` not installed, Connect ends `auth` with "install the slashdocs CLI". slashdocs has no MCP Server.
-5. While a sign-in waits on the operator, the Connector's `sign_in` holds the page the CLI printed and, for GitHub, the one-time code (`gh` prints the page instead of opening it when no terminal is attached). Each change sends `connection.checked`; `sign_in` is `null` once the sign-in ends.
+5. While a sign-in waits on the operator, the Connector's `sign_in` holds the page to open and, for GitHub, the one-time code (`gh` prints the page instead of opening it when no terminal is attached). For a Google Connector and Loki logs the page is the one the console opened itself. Each change sends `connection.checked`; `sign_in` is `null` once the sign-in ends.
 6. When the provider's sign-in ends, the console runs a check and records it before any later step, such as registering GitHub's or Datadog's MCP Server, so the drawer stops waiting within a second of the operator approving. A later step that fails records `auth` with its reason. GitHub's server registers again only when the `gh` token changed. A check records status, account label and, for a Git host, the signed-in `login`. `07-workspace` uses `login` to tell the operator's own pull requests apart.
-7. A sign-in that fails leaves the status `auth` with the reason in `status_detail`. Cancel stops a sign-in still waiting on the browser, `claude mcp login` included, and leaves the status as it was before Connect, so the step offers Connect again.
-8. Saving config validates it per Connector. A bad value (a Datadog threshold that is not a number, a scan time that is not `HH:MM`) returns `validation_failed` naming the fields and saves nothing. Blank fields keep their value.
+7. A sign-in that fails leaves the status `auth` with the reason in `status_detail`; a picked CloudWatch log group that is gone, or an MCP Server name the operator already uses, leaves `fail`. Cancel stops a sign-in still waiting on the browser, `claude mcp login` included, and leaves the status as it was before Connect, so the step offers Connect again.
+8. Saving config validates it per Connector. A bad value (a Datadog threshold that is not a number, a scan time that is not `HH:MM`) returns `validation_failed` naming the fields and saves nothing. Blank fields keep their value. Two picked CloudWatch log groups that are the same Service in the same env are refused with `duplicate_service`. Changing the profile or region of a connected CloudWatch logs registers its MCP Server again and checks it.
 9. Disconnect clears what the console stored and sets the Connector `off`:
    - For an MCP-backed Connector it removes the server (`03-settings-mcp-servers` Behavior 12), unless another connected Connector rides it.
+   - A Google Connector first takes its access back at Google, unless another Google Connector uses the same Google account; a Google that does not answer does not stop Disconnect.
+   - Loki logs deletes the console's Grafana sign-in from the Keychain, and New Relic logs deletes its User API key and goes back to the MCP route.
    - It clears `login`, `account_label` and `status_detail`.
    - It stops a sign-in still waiting on the browser, `claude mcp login` included, so a second Connect starts clean.
-10. Disconnect does not sign `pup`, `gh` or `glab` out. The operator's own terminal shares that login. The console stops calling the CLI for this Connector.
+10. Disconnect does not sign `pup`, `gh`, `glab`, `bkt`, `slashdocs` or `aws` out. The operator's own terminal shares that login. The console stops calling the CLI for this Connector.
 11. An action that needs a Connector whose status is not `ok` is refused with `connector_not_connected`, naming the Connector. Nothing is started.
-12. Reading the list checks again, in the background, every connected Connector that has its own CLI whose last check is older than 10 minutes. A Connector reached only through its MCP Server (Jira, Slack, Sentry, Shopify) takes its server's status from the kept readings on each read, so it moves when the server does; the stored reason stays while the status is unchanged. The list starts no Probe. Opening its pane checks it: that reads its one server in the active account.
+12. Reading the list checks again, in the background, every connected Connector that is not reached only through an MCP Server, when its last check is older than 10 minutes. A Connector reached only through its MCP Server (Jira, Slack, Sentry, Shopify) takes its server's status from the kept readings on each read, so it moves when the server does; the stored reason stays while the status is unchanged. The list starts no Probe. The automatic health checks (`automatic-health-checks`) check every connected Connector on the operator's schedule: a Connector reached only through its MCP Server reads that one server alone in the active account.
 13. Every check and sign-in sends `connection.checked` with target `connector`.
 14. No response, event or log carries a token.
-15. Connect while a sign-in for the same Connector still waits stops that sign-in and starts a new one.
+15. Connect while a sign-in for the same Connector still waits stops that sign-in and starts a new one. For Loki, New Relic and CloudWatch logs a second Connect during the wait changes nothing.
 16. A Connector whose MCP Server the operator turned off in Integrations reads `fail`, "<server> is turned off in MCP servers". Connect turns the server back on. A check of a Connector reached only through its MCP Server, whose server is not registered, reads `auth`, "<server> is not registered".
 17. A browser sign-in that the operator does not finish within 5 minutes is stopped and reads `auth`.
 18. The picked Connector's pane lives in the address as `?open=connector:<id>` (`03-settings-mcp-servers` Behavior 18).
@@ -46,27 +48,32 @@ Monitor needs Datadog to scan, the fix flow needs Jira and a Git host, and revie
   | `bitbucket` | `bkt` CLI, and the Atlassian MCP Server; git over SSH | OAuth through Claude Code, then through `bkt` |
   | `shopify` | Shopify Dev MCP Server (`npx -y @shopify/dev-mcp@latest`) | none |
   | `slashdocs` | `slashdocs` CLI | sign-in through `slashdocs` |
+  | `google_docs`, `google_sheets`, `google_drive` | the console's Google bridge, an MCP Server per product | Google's sign-in, run by the console (`google-workspace-connector`) |
+  | `otel_logs` | a folder on this Mac | none: choose the Log folder |
+  | `cloudwatch_logs` | `aws` CLI, and AWS's CloudWatch MCP Server | `aws login` or `aws sso login` |
+  | `loki_logs` | Grafana Cloud's hosted MCP Server | Grafana's sign-in, run by the console |
+  | `new_relic_logs` | New Relic's hosted MCP Server, or its API with a User API key | OAuth through Claude Code, or the key |
 
-- **Fixed reads**: the console calls `pup`, `gh`, `glab` and `bkt` directly for checks, Scans and pull request lists, with no model turn. Atlassian's OAuth token stays with Claude Code; `bkt` keeps its own in the Keychain (ADR 0005). Ticket and message work runs in agent sessions through the MCP Servers.
-- **Order**: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs.
+- **Fixed reads**: the console calls `pup`, `gh`, `glab` and `bkt` directly for checks, Scans and pull request lists, and `slashdocs` and `aws` for checks, with no model turn. Atlassian's OAuth token stays with Claude Code; `bkt` keeps its own in the Keychain (ADR 0005). Ticket and message work runs in agent sessions through the MCP Servers.
+- **Order**: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets, Google Drive, OpenTelemetry logs, CloudWatch logs, Loki logs, New Relic logs.
 - **Slack sign-in**: Slack's MCP Server offers no dynamic client registration, so `slack` registers with the OAuth app Claude Code's Slack plugin uses (`--client-id 1601185624273.8899143856786 --callback-port 3118`). Connect registers it again when it was registered without that app.
 - **Sentry**: kept as a Connector, as the architecture doc says, though the design shows "No Sentry connector yet".
 - **Reports folder**: defaults to `reports` inside the data directory (`01-base-daemon-setup`), not the design's `~/.ops-console/reports`.
-- **Check**: a check reads the CLI for a signed-in user (`pup auth status`, `gh api user`, `glab api user`, `bkt api /user`) or, for a Connector reached only through its MCP Server, a read of that one server alone in the active account. A tool that fails to answer reads `fail`; a tool that is signed out reads `auth`.
+- **Check**: a check reads the CLI for a signed-in user (`pup auth status`, `gh api user`, `glab api user`, `bkt api /user`, `slashdocs auth whoami`) or, for a Connector reached only through its MCP Server, a read of that one server alone in the active account. The Google, log source and hosted-server Connectors check as their own specs say. A tool that fails to answer reads `fail`; a tool that is signed out reads `auth`.
 - **GitHub sign-in**: `gh auth login --web --hostname github.com --git-protocol ssh --skip-ssh-key --clipboard`. With no terminal attached `gh` copies the one-time code and prints `https://github.com/login/device` without opening it; the Connector pane shows both. GitHub's own OAuth would need a registered app secret, which this public repo cannot ship.
 - **GitLab sign-in**: `glab auth login --hostname <host> --web --git-protocol ssh --container-registry-domains <host>,<host>:443,registry.<host>`; the flags answer every prompt but the browser step.
-- **MCP servers**: Jira and Bitbucket share `atlassian` (http), Slack is `slack` (http), Sentry is `sentry` (http), Datadog is `datadog-pup`, GitHub is `github` (stdio), Shopify is `shopify` (stdio). `03-settings-mcp-servers` shows the Connector in `used_by`.
-- **Design departure**: secrets go to the Keychain, not `~/.ops-console/secrets` (ADR 0004). The Connector pane has no token field, config fields or Test.
+- **MCP servers**: Jira and Bitbucket share `atlassian` (http), Slack is `slack` (http), Sentry is `sentry` (http), Datadog is `datadog-pup`, GitHub is `github` (stdio), Shopify is `shopify` (stdio), the Google Connectors are `google-docs`, `google-sheets` and `google-drive` (stdio), CloudWatch logs is `cloudwatch` (stdio), Loki logs is `grafana` (http) and New Relic logs is `newrelic` (http). `03-settings-mcp-servers` shows the Connector in `used_by`.
+- **Design departure**: secrets go to the Keychain, not `~/.ops-console/secrets` (ADR 0004). The service Connectors' panes have no token field, config fields or Test. The log sources' panes hold only the choices their Connect needs, and New Relic's pane takes a User API key (`one-click-log-sources`).
 
 ## Not required
 
 - **Live status**: a status can be 10 minutes old until the list is read again.
-- **Editing config in the UI**: settings such as the Jira project or Slack channel keep their defaults; only the API changes them.
+- **Editing config in the UI**: settings such as the Jira project or Slack channel keep their defaults; only the API changes them. The slashdocs server and the log sources' choices are set in their panes.
 - **CLI sign-out**: after Disconnect, `pup`, `gh` and `glab` stay signed in for the operator's own terminal.
 
 ## Safety
 
-No change to the agent's reach. The agent cannot change a Connector's config or connect one. The setup agent in `05-settings-dev-tools` can start a sign-in through the same code as the endpoint, and the operator completes it in the browser. The console holds no Connector token; the `gh` token for the `github` MCP Server goes only to the Keychain adapter.
+No change to the agent's reach. The agent cannot change a Connector's config or connect one. The setup agent in `05-settings-dev-tools` can start a sign-in through the same code as the endpoint, and the operator completes it in the browser. The console holds no Connector token in its database, its events or its log. The `gh` token for the `github` MCP Server, a Google refresh token, the Grafana sign-in and a New Relic User API key go only to the Keychain adapter.
 
 ## Database
 
@@ -86,31 +93,43 @@ Enums live in code only (`01-base-daemon-setup`):
 
 | Enum | Values | Used by |
 | ---- | ------ | ------- |
-| `ConnectorId` | `datadog`, `jira`, `github`, `gitlab`, `bitbucket`, `slack`, `sentry`, `shopify`, `slashdocs` | `connectors.id` |
+| `ConnectorId` | `datadog`, `jira`, `github`, `gitlab`, `bitbucket`, `slack`, `sentry`, `shopify`, `slashdocs`, `google_docs`, `google_sheets`, `google_drive`, `otel_logs`, `cloudwatch_logs`, `loki_logs`, `new_relic_logs` | `connectors.id` |
 | `HealthStatus` | from `03-settings-mcp-servers` | `connectors.status` |
 
-Migration of existing rows: none. The migration creates the table and inserts one row per `ConnectorId` with status `off` and that Connector's default config. Shopify's and slashdocs' rows come from later migrations that insert them the same way and leave a row already there.
+Migration of existing rows: none. The migration creates the table and inserts one row per `ConnectorId` with status `off` and that Connector's default config. The rows of Shopify, slashdocs, the Google Connectors and the log sources come from later migrations that insert them the same way and leave a row already there.
 
 ## API
 
 ### Common
 
-Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This spec adds one code:
+Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This spec adds these codes:
 
 | Status | Error code | When |
 | ------ | ---------- | ---- |
 | 409 | `connector_not_connected` | The action needs a Connector whose status is not `ok`; `message` names it |
+| 422 | `tool_missing` | A log source's Connect needs `aws` or `uvx`, or the CloudWatch profile or log group list needs `aws`, and it is not on the PATH; `message` names the install command |
+| 422 | `folder_not_found` | The Log folder is not a folder the daemon can read |
+| 422 | `log_group_not_found` | A picked CloudWatch log group is not in the profile's region |
+| 422 | `duplicate_service` | Two picked CloudWatch log groups are the same Service in the same env |
+| 409 | `pick_required` | A Loki or New Relic sign-in waits on a data source or account and Connect named none |
 
-`Connector`: all `connectors` columns, plus `name`, `via` and `sign_in` (`{ code, url }` while a sign-in waits on the operator, else `null`).
+`Connector`: all `connectors` columns, plus `name`, `via`, `sign_in` (`{ code, url }` while a sign-in waits on the operator, else `null`) and `pick` (`data_source` or `account` while a signed-in Loki or New Relic Connector waits on that choice, else `null`).
 
 | Method and path | Body | Returns |
 | --------------- | ---- | ------- |
 | `GET /connectors` | | `Connector[]` in the fixed order; `meta.next_cursor` is `null` |
 | `PATCH /connectors/:id` | `{ config }` | `Connector`; `validation_failed` with field names |
-| `POST /connectors/:id/connect` | | 202. `connection.checked` reports `sign_in` changes and the result |
+| `POST /connectors/:id/connect` | none for a service Connector; for a log source, any of `region`, `account_id`, `api_key`, `datasource_uid`, `profile`, `log_groups`, `folder` | 202. `connection.checked` reports `sign_in` changes and the result. A log source's bad choice returns `validation_failed` before it answers |
 | `POST /connectors/:id/checks` | | `{ status, status_detail, account_label, login, last_checked_at }` |
 | `DELETE /connectors/:id/sign-in` | | `Connector` with `sign_in: null` and the status it had before Connect (Cancel) |
 | `DELETE /connectors/:id/credentials` | | `Connector` with `status: off`, `login: null` (Disconnect) |
+| `GET /connectors/cloudwatch_logs/profiles` | | The AWS profiles on this Mac, `default` first, each with its region |
+| `GET /connectors/cloudwatch_logs/log-groups` | query `profile`, `region` | The log groups of that profile and region, or the Connector's own when none are given |
+| `GET /connectors/loki_logs/datasources` | | The Loki data sources of the signed-in stack; `invalid_state` while not signed in |
+| `GET /connectors/new_relic_logs/accounts` | | The accounts the New Relic sign-in or key can read; `invalid_state` while not signed in |
+| `POST /connectors/otel_logs/pick-folder` | | 200 `{ path }`: the folder the macOS dialog returned, or `null`. Nothing is stored |
+
+The log source routes and their lists are specified in `one-click-log-sources` and the source specs.
 
 Config shapes:
 
@@ -139,7 +158,24 @@ Config shapes:
   "slack": { "workspace": "string", "alert_channel": "string", "review_dm_to": "string" },
   "sentry": { "org": "string | null" },
   "shopify": {},
-  "slashdocs": { "server": "string" }
+  "slashdocs": { "server": "string" },
+  "google_docs": {},
+  "google_sheets": {},
+  "google_drive": {},
+  "otel_logs": { "folder": "string", "...scan fields": "as datadog, without site" },
+  "cloudwatch_logs": {
+    "profile": "string",
+    "region": "string",
+    "log_groups": [{ "name": "string", "service": "string", "env": "string" }],
+    "...scan fields": "as datadog, without site"
+  },
+  "loki_logs": { "datasource_uid": "string", "...scan fields": "as datadog, without site" },
+  "new_relic_logs": {
+    "account_id": "digits, or empty",
+    "region": "US | EU | JP",
+    "route": "mcp | key",
+    "...scan fields": "as datadog, without site"
+  }
 }
 ```
 
@@ -147,11 +183,11 @@ Config shapes:
 
 ## UI
 
-Integrations, first in the list and A→Z by name: one row per Connector with name, a `Connector` label, `via` and account label under it, a status pill (○ not connected, ◌ signing in while `sign_in` is set, ● connected, ◐ needs auth, ✕ failed) and one action: Connect when off, Sign in for `auth`, Reconnect for `fail`, Manage when connected. Picking a row opens the Connector pane beside the list (Behavior 18), with the name, its status and Close on top, reading "Connect <name> to Ops Console" and "Reached through <via>." over one numbered step, "1 Sign in to <name>", with Connect on the right ("Opens <name>'s sign-in page in your browser. Nothing to fill in here."). Shopify's step reads "Add Shopify" and "Adds its MCP server. No sign-in needed." While the sign-in waits, the step says "Finish in the browser tab that opened. This updates on its own.", its button reads "Waiting…" and is disabled, a Cancel button beside it stops the sign-in, and it shows GitHub's code ("Enter this code (already copied)") and an Open <name> ↗ link to the page. Once connected, the step reads "Signed in as <login>", with the account label after it when that differs, or "Signed in to <account label>" when there is no login, and its button is Reconnect. Any Connector that is not off shows Disconnect… ("Stops the console using <name>."), whose confirm reads "Signs out and stops Claude from using it. Monitor and tasks that rely on it pause. Your own terminal stays signed in to the CLI." slashdocs' pane also has a "slashdocs server" field over the step ("Blank uses the server the slashdocs CLI already signed in to."). Connect saves a changed server first. Other panes have only Connect, Reconnect and Disconnect: no config fields and no Test. Config keeps its defaults unless set through `PATCH /connectors/:id`.
+Integrations, first in the list and A→Z by name, under the page's health strip and banner (`automatic-health-checks`): one row per Connector with name, a `Connector` label, `via` under it followed by the account label (a log source adds its folder, or its profile and region), a status pill (○ not connected, ◌ signing in while `sign_in` is set, ◌ checking, ● connected, ◐ needs auth, ✕ failed) and one action: Connect when off, Sign in for `auth` (Reconnect on a log source), Reconnect for `fail`, Manage when connected. Picking a row opens the Connector pane beside the list (Behavior 18), with the name, its status and Close on top, reading "Connect <name> to Ops Console" and "Reached through <via>." over one numbered step, "1 Sign in to <name>", with Connect on the right ("Opens <name>'s sign-in page in your browser. Nothing to fill in here."). Shopify's step reads "Add Shopify" and "Adds its MCP server. No sign-in needed." While the sign-in waits, the step says "Finish in the browser tab that opened. This updates on its own.", its button reads "Waiting…" and is disabled, a Cancel button beside it stops the sign-in, and it shows GitHub's code ("Enter this code (already copied)") and an Open <name> ↗ link to the page (Open Google ↗ for a Google Connector). Google's step reads "Opens Google in your browser. Pick the Google account to use; every Claude account uses it." Once connected, the step reads "Signed in as <login>", with the account label after it when that differs, or "Signed in to <account label>" when there is no login, and its button is Reconnect. Any Connector that is not off shows Disconnect… ("Stops the console using <name>."), whose confirm reads "Signs out and stops Claude from using it. Monitor and tasks that rely on it pause. Your own terminal stays signed in to the CLI." A Google Connector's confirm reads "Stops the console using it and takes its access back at Google. Every Claude account loses it." and each log source's confirm says what it removes. slashdocs' pane also has a "slashdocs server" field over the step ("Blank uses the server the slashdocs CLI already signed in to."). Connect saves a changed server first. The other service panes have only Connect, Reconnect and Disconnect: no config fields and no Test. The log sources' panes add the choices above their step (`one-click-log-sources`). Config keeps its defaults unless set through `PATCH /connectors/:id` or a pane's choice.
 
-- Loading: "Loading integrations…" until the Connectors and MCP Servers answer; then statuses refresh as checks return.
+- Loading: "Loading integrations…" until the Connectors and MCP Servers answer; then statuses refresh as checks return. A server list that does not load reads "Could not read MCP servers: <reason>".
 - Not connected: the step's action is Connect.
-- Error: `status_detail` in the step, with Reconnect. A failed Connect or Disconnect call shows its message under the step. A list that does not load reads "Could not read Connectors: <reason>".
+- Error: `status_detail` in the step, with Connect (Reconnect on a log source). A failed Connect or Disconnect call shows its message under the step. A list that does not load reads "Could not read Connectors: <reason>".
 
 ## Rejected
 
@@ -161,7 +197,7 @@ Integrations, first in the list and A→Z by name: one row per Connector with na
 
 ## Seams
 
-- **Backend + SQLite, over HTTP** (fakes for `pup`, `gh`, `glab`, `bkt`, `brew`, the Probe, the `claude` CLI and the Keychain adapter): 1 to 12, 14 to 17.
+- **Backend + SQLite, over HTTP** (fakes for `pup`, `gh`, `glab`, `bkt`, `slashdocs`, `aws`, `brew`, Google, the Probe, the `claude` CLI and the Keychain adapter): 1 to 12, 14 to 17.
 - **Backend + SQLite, over WebSocket**: 5, 13.
 - **Browser** (Playwright, the lists answered by the test): 2, 5, 18, and the pane's text.
 

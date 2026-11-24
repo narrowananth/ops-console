@@ -9,11 +9,11 @@ A Session remembers one pull request. The agent can open a pull request on anoth
 
 ## Behavior
 
-1. A `repo` Session keeps a list of the pull requests the console opened for it: those the agent asked for and those the operator opened with the Open pull request button. Each entry holds the number, the URL and the branch it came from.
+1. A `repo` Session keeps a list of the pull requests the console opened for it: those the agent asked for and those the operator opened with the Create PR step of the Commit, push & PR row. Each entry holds the number, the URL and the branch it came from.
 2. A pull request opened on a branch of the Session's Repo joins the list and leaves the others in it. Opening the same pull request again, from a retry, a second browser or a Fix retry, leaves one entry.
 3. The list survives a reload and a restart of the console. Deleting the Session deletes its list.
 4. A pull request that only appears in the conversation is not in the list. An open pull request the Git host lists for the Session's own branch shows as the first row even when the console did not open it, as the single row always showed it. It is not recorded.
-5. The Session panel shows the list under the branch picker, newest first. Each row shows the title, the number as a link to the Git host, its state (open, merged or closed) and the CI checks ring, as the single pull request row does today. The first three rows show, and a "Show N more" row opens the rest and a "Show less" row folds them again.
+5. The Session panel shows the list under the branch picker, newest first. Each row shows the title, a link to the pull request in the Workspace's Pull requests tab, a link to the Git host, its state (open, merged or closed) and the CI checks mark. The first three rows show, and a "Show N more" row opens the rest and a "Show less" row folds them again.
 6. Title, state and checks come from the Git host list the Repo's Pull requests tab reads. A pull request that list does not return shows its number and link only.
 7. The row for the pull request of the branch the Session is on is the one the Session header's link shows, as before. A Session on a branch with no pull request of its own shows the header as before.
 8. A Session with no opened pull request and no open one on its own branch shows no list. A `pr_review`, `anonymous` or `devtools` Session shows none.
@@ -76,6 +76,7 @@ The Session body gains `pull_requests`, newest first:
 ## UI
 
 - **Session panel**: the list under the branch picker, in the rows of the existing pull request row. States: no pull request (no list), one (one row, as before), more than three (three rows and "Show N more"), the Git host list loading (numbers and links only), down or rate limited (the same).
+- **Sessions list**: a row with pull requests shows a mark in its third line, the number for one or `+N` for several, coloured by the newest one's state. The row's hover card lists each with its number and title, coloured the same.
 - No PROD-specific state.
 
 ## Rejected

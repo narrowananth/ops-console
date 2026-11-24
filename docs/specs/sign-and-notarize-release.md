@@ -1,6 +1,6 @@
 # Sign and notarize the release
 
-**Status:** draft
+**Status:** draft, on hold until an Apple Developer Program membership exists (see Blocker). Nothing in it is built: releases are ad hoc signed.
 **Design:** none. Permissions page: no change. Follows no design screen.
 
 ## Problem
@@ -162,7 +162,7 @@ Unchanged in shape. `reason` gains two values, listed under Behavior 10, and nam
 - **Packaging script with no identity (unit)**: 7.
 - **Release workflow on a tag with the switch off (CI)**: 5 and 6. The workflow with the switch on cannot run before the membership, so 1 to 4 have no automated seam.
 - **`GET /terminals/keychain-handover` (backend)**: the two reasons in 10.
-- **Permissions Keychain row (frontend component)**: the new reasons in the UI section.
+- **Permissions Keychain row (browser)**: the new reasons in the UI section.
 - **Manual on the first signed tag, on a Mac that ran an ad hoc release**: 1 to 4, 9, 13 and 14. Run `codesign
   --verify --strict`, `spctl --assess` and `xcrun stapler validate`, install over the ad hoc build, then read System
   Settings, Keychain prompts and the Full Disk Access row. The same run settles the entitlement set in 3.

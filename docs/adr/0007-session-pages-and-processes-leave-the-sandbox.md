@@ -15,17 +15,18 @@ the operator types in is always a login shell.
 
 The operator starts a process, or approves the agent's `start_process` call, which shows the exact command and says it
 runs outside the sandbox, in every Access mode but full. The agent drives the panel in a chat the operator started with the
-`browser_*` tools, with no Approval, but only on loopback pages (`localhost`, `127.0.0.1`, `::1`, not the console's own
+`browser_*` tools, with no Approval, but only on loopback pages (`localhost`, `*.localhost`, `127.x.x.x`, `::1`, not the console's own
 ports); it opens no other host and acts on no tab that has left loopback. `browser_evaluate` asks in every Access mode but full. No
-job, no `pr_review` Session and no read-only run has these tools. The operator's own address field opens any `http` or
+job, no PR action Session, no `pr_review` Session and no read-only run has these tools. The operator's own address field opens any `http` or
 `https` page.
 
 The panel's Inspect button shows Chrome's own DevTools frontend for a tab, docked in the panel or in a window of its own: the real frontend, built from a
 pinned revision of its repository and served by the daemon. It talks to the page through a relay, a WebSocket route behind the
-session token. Each window gets a CDP session of its own through Playwright, and the relay forwards the DevTools domains
-(DOM, CSS, Runtime, Network, Debugger, Storage and the like) and refuses `Browser`, `Target`, `Fetch`, `Tracing`, `Input`,
-`Emulation`, `Page` navigation and screencast, and the two methods that would read a file or stall requests. Chrome is never
-started with a remote debugging port.
+session token. Each window gets a CDP session of its own through Playwright. The relay forwards the DevTools domains
+(DOM, CSS, Runtime, Network, Debugger, Storage and the like) and a short list of `Page`, `Security` and `Target` methods
+that only read. It refuses every other domain and method, among them `Browser`, `Fetch`, `Tracing`, `Input`, `Emulation`,
+`Page` navigation and screencast, and the two methods that would read a file or stall requests; it answers the calls that
+attach child targets with an empty result. Chrome is never started with a remote debugging port.
 
 A run's commands can reach any host and `localhost` too ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md)), but the
 servers they start end with the run.

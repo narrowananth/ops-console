@@ -12,19 +12,20 @@ Sessions, Verifications and Fixes run inside a local git repository, and Monitor
 1. Importing a path stores a Repo. A leading `~` is expanded, and a path inside a repository resolves to its top folder. The name is the folder name. The response says the branch it is on: "Imported `<name>` · branch `<branch>`".
 2. A path that does not exist or is not inside a git repository is refused with `not_a_repo`. An empty path is `validation_failed`.
 3. A top folder already imported is refused with `duplicate`. A folder removed with its Sessions kept imports again as the same Repo, under its old name, with host, slug and default branch read again (`07-workspace` Behavior 3).
-4. The host comes from the `origin` remote URL on `github.com`, `gitlab.com` or `bitbucket.org`, over HTTPS or SSH: `github`, `gitlab` or `bitbucket`, with `remote_slug` set to `owner/name` (GitLab: `group/subgroup/name`). A Repo with no `origin`, or one on another host, is `local`. The default branch comes from `origin/HEAD`, else the current branch.
-5. Listing Repos returns them by name with the current branch and dirty state read from git each time. A Repo whose folder is gone shows `missing: true` and no branch.
+4. The host comes from the `origin` remote URL on `github.com`, `gitlab.com` or `bitbucket.org` (Bitbucket's `ssh.bitbucket.org` and `altssh.bitbucket.org` too), over HTTPS or SSH: `github`, `gitlab` or `bitbucket`, with `remote_slug` set to `owner/name` (GitLab: `group/subgroup/name`). A Repo with no `origin`, or one on another host, is `local`. The default branch comes from `origin/HEAD`, else the current branch. When `origin` changes to a known host, the stored host and `remote_slug` change with it, read at start and, in the background, when the list is read, at most once a minute ([repo-follows-host-owner](repo-follows-host-owner.md)).
+5. Listing Repos returns them by name with the current branch and dirty state read from git, one `git status` per Repo, reused for 10 seconds. A Repo whose folder is gone shows `missing: true` and no branch. A detached HEAD reads as the short commit.
 6. Renaming a Repo changes only its display name.
 7. Removing a Repo takes it off the list and leaves the folder untouched. A Repo with Sessions needs the operator's choice for them (`07-workspace` Behavior 3).
-8. Listing a Repo's branches reads git each time: local branches by most recent commit, the current one marked. A missing folder returns `not_found`.
-9. A Repo's `.mcp.json` servers appear in Integrations with scope `project` and this Repo (`03-settings-mcp-servers`). A server Claude Code has not approved yet reads `auth` with "pending approval in Claude Code".
+8. Listing a Repo's branches reads git each time: local branches by most recent commit with the current one marked, then the branches only `origin` has, as last fetched, by most recent commit, each with `remote: true`. The console asks `origin` for new branches after it answers, at most once a minute per Repo, and sends `repo.branches_changed` when a branch came or went. A missing folder returns `not_found`.
+9. A Repo's `.mcp.json` servers appear in Integrations with scope `project` and this Repo (`03-settings-mcp-servers`). A server Claude Code has not approved yet reads `auth` with "<account label>: pending approval in Claude Code".
 10. Adding a MCP server with scope `project` takes a `repo_id` and writes the Repo's `.mcp.json` once, with one `claude mcp add`; removing it removes it from that file. A project server cannot move to another scope.
 11. Local folder opens the macOS folder dialog on this machine, where the operator picks one folder or several (⌘-click), and answers their paths without importing them; the UI then imports each in turn. A folder the console refuses shows its path and reason, and the others still import. Closing the dialog answers no paths and imports nothing. Off macOS the dialog is refused with `invalid_state`, and a dialog that fails is `upstream_failed`.
 
 ## Settled
 
 - **Identity**: a Repo is its top folder. Two Repos may share a name; the path tells them apart.
-- **Live, not stored**: branch, dirty state and the branch list.
+- **Live, not stored**: branch, dirty state and the branch list. A branch and dirty read is kept 10 seconds.
+- **Git without programs**: the console runs `git` with `core.hooksPath=/dev/null` and `core.fsmonitor=false`, because it runs outside the Run sandbox in folders an agent run wrote in ([ADR 0006](../adr/0006-agent-runs-sandboxed-by-the-os.md)).
 - **Groups**: not in this spec. Repos are one flat list.
 - **Project servers**: a name a user or local server already holds wins over the same name in a `.mcp.json`. A removed project server keeps no Repo, so Authenticate on its row is refused with `validation_failed`; it is added again from the form.
 
@@ -46,6 +47,7 @@ CREATE TABLE repos (
   path            TEXT NOT NULL UNIQUE,          -- top folder of the repository on this machine
   host            TEXT NOT NULL,                 -- GitHost
   remote_slug     TEXT,                          -- 'owner/name' on the host; null for local
+  origin_slug     TEXT,                          -- 'owner/name' the folder's origin named when last read; null until the first read
   default_branch  TEXT NOT NULL,
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   removed_at      TEXT                           -- removed with its Sessions kept; hidden until imported again
@@ -58,7 +60,7 @@ Enums live in code only (`01-base-daemon-setup`):
 | ---- | ------ | ------- |
 | `GitHost` | `github`, `bitbucket`, `gitlab`, `local` | `repos.host` |
 
-Migration of existing rows: none; the table is new. Adding `removed_at` leaves it null on existing rows.
+Migration of existing rows: none; the table is new. Adding `removed_at` or `origin_slug` leaves it null on existing rows.
 
 ## API
 
@@ -70,7 +72,7 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 | ------ | ---------- | ---- |
 | 400 | `not_a_repo` | The path does not exist or is not inside a git repository |
 
-`Repo`: all `repos` columns but `removed_at`, plus `branch`, `dirty` and `missing`, read from git, and `session_count`.
+`Repo`: all `repos` columns but `removed_at`, plus `branch`, `dirty` and `missing`, read from git, and `session_count`. `origin_slug` is `owner/name` only while the folder's `origin` names another one than `remote_slug`, else `null`.
 
 | Method and path | Body | Returns |
 | --------------- | ---- | ------- |
@@ -79,11 +81,11 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 | `POST /repos` | `{ path }` | 201 `Repo`; `not_a_repo`, `duplicate`, `validation_failed` |
 | `PATCH /repos/:id` | `{ name }` | `Repo` |
 | `DELETE /repos/:id?sessions=keep\|delete` | | 204; `sessions` needed when it has Sessions, else `repo_has_sessions`; `session_busy` for `delete` while one runs |
-| `GET /repos/:id/branches` | | `{ name, current, has_open_pr }[]` (`has_open_pr` from `07-workspace`); `not_found` when the folder is gone |
+| `GET /repos/:id/branches` | | `{ name, current, remote, has_open_pr }[]`: local branches, then those only `origin` has (`remote`); `has_open_pr` from `07-workspace`; `not_found` when the folder is gone |
 
 ## UI
 
-Repos: a Local folder button that opens the Finder folder dialog and imports every chosen folder, with the result message below it (the Repos imported, then one line per refused folder), then "Imported repos" with a count, one row per Repo A→Z by name (name, host, path, branch, and "uncommitted changes" when dirty), and Remove with an inline "Remove from the list?" confirm.
+Repos: an "Import a local repo" box with a Local folder button that opens the Finder folder dialog and imports every chosen folder, with the result message below it ("Imported `<name>` · branch `<branch>`" for the Repos imported, then one line per refused folder), then "Imported repos · N", one row per Repo A→Z by name (host icon, name, host, path, branch, and "uncommitted changes" when dirty), and Remove with an inline "Remove from the list?" confirm.
 
 - Waiting: the button reads "Waiting for the folder dialog…" until the dialog closes.
 - A Repo with Sessions: the confirm reads "Remove from the list? It has N Sessions. Kept ones come back when you import this folder again." with Keep Sessions, Delete Sessions and Cancel (`07-workspace` Behavior 3).
@@ -91,6 +93,7 @@ Repos: a Local folder button that opens the Finder folder dialog and imports eve
 - Empty: "No repos yet. Import one above."
 - Error: the refusal message under the button ("`<name>` is already imported", "Not a git repository").
 - Missing folder: the row reads "This folder is gone from the machine.", with Remove.
+- Moved owner: while `origin_slug` is set, the row adds "The Git host now calls this `<remote_slug>`. The folder's origin still says `<origin_slug>`."
 
 ## Rejected
 
@@ -103,7 +106,7 @@ Repos: a Local folder button that opens the Finder folder dialog and imports eve
 
 ## Seams
 
-- **Backend + SQLite, over HTTP** (real git in temporary folders, a fake folder dialog): 1 to 8, 11. Builds repositories with and without remotes, imports them, moves and deletes folders, and reads the responses.
+- **Backend + SQLite, over HTTP** (real git in temporary folders, a fake folder dialog): 1 to 8, 11. Importing, removing and the remote follow-up are in `backend/test/repos.test.ts`. Builds repositories with and without remotes, imports them, moves and deletes folders, and reads the responses.
 - **Backend + SQLite, over HTTP, with `03-settings-mcp-servers`**: 9, 10. A Repo with a `.mcp.json` shows its server in the MCP list.
 
 ## Out of scope

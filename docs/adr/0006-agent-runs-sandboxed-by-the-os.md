@@ -38,10 +38,10 @@ The integration CLIs (`pup`, `gh`, `glab`, `bkt`, `slashdocs`) keep their sign-i
 cannot use them itself. Its `run_integration` tool has the daemon run one outside the sandbox, as the operator, in the
 Session's output folder. The agent gives the CLI and an argument list; no shell runs. The console classifies the command
 by its words, default deny: a read runs at once, a write (a comment, a create, an update, a mute) raises an Approval in
-every Access mode but full unless the operator chose "Don't ask again this Session" for that CLI (kept on the Session until it is deleted, one CLI at a time), and a run that is not the operator's own chat writes nothing. Sign-in, tokens, config, extensions,
+every Access mode but full unless the operator chose "Don't ask again this Session" for that CLI (kept on the Session until it is deleted, one CLI at a time), and a run that is not a chat writes nothing. A PR action Session's Git host CLIs read only. Sign-in, tokens, config, extensions,
 aliases, a flag that passes a secret or another server, a merge by any spelling, and every command no list names are
 refused. An argument that names a file outside the run's own folders (its working folder, output folder, opened Repos,
-temp and tool caches) is refused too, since the CLI runs with the operator's sign-in. The CLI gets its home folder and
+its account's Claude config folder, temp and tool caches) is refused too, since the CLI runs with the operator's sign-in. The CLI gets its home folder and
 PATH and nothing of the daemon's environment; its output is redacted and cut at 100,000 characters; each call is an
 Action Log row. The tool exists only in a run that has an output folder.
 
@@ -72,9 +72,9 @@ refuses `--no-verify`, `git commit -n`, `HUSKY=0`, `SKIP=`, `LEFTHOOK=0` and a `
   to judge it. It lost to a list the console classifies, where a read never asks and a write names what it changes.
 - **The Keychain token handed to the run, as `GH_TOKEN` is**: `pup` has no token export, and its token writes monitors,
   dashboards and incidents.
-- **Reading `~/.ssh` in a Fix so its PR stage can push**: the first design. `ssh` writes `known_hosts` and ignores the
-  proxy, and the GitLab and Bitbucket CLIs keep short-lived tokens in the Keychain, so a run could not open a pull
-  request there anyway. The console pushes and opens it in the daemon instead (Pull request opening).
+- **Letting a Fix push and open its pull request from the run**: the first design. The GitLab and Bitbucket CLIs keep
+  short-lived tokens in the Keychain, so a run could not open a pull request there. The console pushes and opens it in
+  the daemon instead (Pull request opening).
 - **A Git host token handed to the run, as `GH_TOKEN` is**: `bkt` has no token export and refreshes its own OAuth token.
 - **Closing the data folder, so a run cannot read the session token**: it kept Approvals honest. The operator chose a
   sandbox that never blocks the work over that guard.
@@ -96,7 +96,8 @@ verbs ask, and a `gh`, `glab` or `bkt` command off the list is refused.
 The sandbox blocks the login Keychain, so `gh` signs in through that token in place of its Keychain item, and
 `enableWeakerNetworkIsolation` lets Go programs check certificates through macOS's trust service. `pup` keeps its
 Datadog sign-in in the Keychain and does not work inside a run's shell; the Datadog MCP Server and `run_integration`, both
-outside the sandbox, are how the Playbooks and chats reach Datadog, and the run's system prompt says so. `ssh` has no
-Keychain item to read in a run, so a run cannot push. The console pushes and opens every pull request in the daemon,
-outside the sandbox, as the operator. A late `set` may still reach the Keychain after its timeout. The Keychain reads of
+outside the sandbox, are how the Playbooks and chats reach Datadog, and the run's system prompt says so. The console pushes and opens every
+pull request in the daemon, outside the sandbox, as the operator. The sandbox does not stop a run's own `git push`: a
+run reads `~/.ssh`, reaches any host and has `GH_TOKEN`. The agent is told never to push, and `git push` is denied in a
+PR action Session and a Verification. A late `set` may still reach the Keychain after its timeout. The Keychain reads of
 `mcp-exec` and the Setup agent have their own waits and are not shown.

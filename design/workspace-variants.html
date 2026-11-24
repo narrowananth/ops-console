@@ -152,7 +152,7 @@
 
 <h1>Workspace: layout variants</h1>
 <p class="lede">Same data in every frame: 32 Repos, 6 Sessions, 3 waiting on the operator. Problem today: three nested columns, Repo-first tree where 29 Repos are empty, truncated names, a "+" on every Repo, three-line rows.</p>
-<p class="lede" style="margin-top:-20px">Shipped: variant A, Inbox, both tabs. The live mock is ops-console-sidebar.html.</p>
+<p class="lede" style="margin-top:-20px">Shipped: variant A, Inbox, both tabs. The live mock is ops-console-sidebar.html. Its Session rows are three lines (Repo badge and name with state and time; title; branch, pull request chip and model), a hover card shows the rest, and Stop takes the corner of a busy row. The Session header holds the Repo, title, state and a Session button that opens the Session panel (branch, Diff, Commit, push &amp; PR, Delete). The frames below draw a simpler header.</p>
 
 <template id="detail">
   <div class="dh">

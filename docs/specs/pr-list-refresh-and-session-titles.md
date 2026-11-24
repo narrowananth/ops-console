@@ -22,14 +22,14 @@ flat pink box.
    the result stale.
 4. The search box waits 400 ms after the last key before sending. The previous list stays up meanwhile.
 5. A new Session is named for its first task: the first sentence, with attachment chips, code blocks and openers such as
-   "can you please" dropped, cut at a word within 52 characters. Attachments alone make "Attached files".
+   "can you please" dropped, cut at a word within 52 characters. Attachments alone make "Attached files", and picked page elements alone make "Picked element".
    When the first run ends, the name Claude Code gave the conversation (its `ai-title` transcript entry, such as
    "Hermes Atlas stores API response" for a pasted `curl`) replaces it, cut the same way. A Session the operator renamed
    meanwhile keeps their name, and later runs never rename it. With no `ai-title` within a few seconds the first
    sentence stays.
 6. The Session title is the same size as the Repo name before it.
 7. An Approval shows as a card: kind icon, "Approval needed", the kind, a PROD badge, the summary, the command in a
-   mono block, then Approve and Deny.
+   mono block, then Approve and Deny. An integration CLI write adds "Don't ask again this Session for <cli>" between them.
 
 ## Not required
 

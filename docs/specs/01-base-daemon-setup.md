@@ -13,9 +13,9 @@ Every later spec needs the same footing: a daemon that launchd keeps running, a 
 
 Install
 
-1. `curl -fsSL <install url> | sh` on macOS arm64 or x64 downloads `ops-console-darwin-<arch>.tar.gz` and `checksums.txt` from the GitHub Release (latest, or `OPS_CONSOLE_VERSION`), checks the SHA-256, extracts to `~/.ops-console/versions/<version>`, points `~/.ops-console/current` at it, and links `~/.local/bin/ops-console`. It runs without sudo and writes only under the home folder. When `~/.local/bin` is not on `PATH`, it prints the line to add.
+1. `curl -fsSL <install url> | sh` on macOS arm64 or x64 downloads `ops-console-darwin-<arch>.tar.gz` and `checksums.txt` from the GitHub Release (latest, or `OPS_CONSOLE_VERSION`), checks the SHA-256, extracts to `~/.ops-console/versions/<version>`, points `~/.ops-console/current` at it, and links `~/.local/bin/ops-console`. It runs without sudo and writes only under the home folder. When `~/.local/bin` is not on `PATH`, it prints the line to add. With `OPS_CONSOLE_NO_LINK` set it makes no link and prints no hint ([homebrew-tap](homebrew-tap.md)). A shell running under Rosetta on an Apple silicon Mac installs the arm64 build.
 2. A missing checksum, or one that does not match, stops the script with a non-zero exit. Nothing is extracted, and `current` still points at the version it pointed at before.
-3. Any other OS or CPU stops the script with a non-zero exit that names the platform.
+3. Any other OS or CPU stops the script with a non-zero exit that names the platform. On macOS before 13.5 it stops with a non-zero exit that names the Mac's version.
 4. Installing over an existing version adds the new folder and moves `current`. The current and the previous version stay; older version folders are removed.
 
 CLI
@@ -23,9 +23,9 @@ CLI
 5. `ops-console start` writes `~/Library/LaunchAgents/dev.ops-console.plist` (`RunAtLoad`, `KeepAlive`) pointing at `current`, enables and bootstraps it in `gui/<uid>`, and returns once the daemon answers `GET /api/health`. If the daemon does not answer within 15 seconds, it boots the agent out again, prints the last 20 log lines and exits non-zero. With the daemon already running, it says so and exits 0.
 6. `ops-console stop` boots the agent out and disables it, so it stays stopped across logins until the next `start`.
 7. `ops-console status` prints running or stopped, and for a running daemon its pid, version, port and health. It exits 0 when running and 3 when stopped.
-8. `ops-console open` opens `http://127.0.0.1:4545/#token=<token>` with the token from the runtime file, in the default browser, or with `ops-console open <app>` in that browser app, so a second browser signs in too. It never prints the token. Every signed-in browser works on the one daemon at once. With the daemon stopped, it says to run `ops-console start` and exits 1.
+8. `ops-console open` opens `http://127.0.0.1:<port>/#token=<token>` with the port and token from the runtime file, in the default browser, or with `ops-console open <app>` in that browser app, so a second browser signs in too. It never prints the token. Every signed-in browser works on the one daemon at once. With the daemon stopped, it says to run `ops-console start` and exits 1.
 9. `ops-console logs` follows the daemon log.
-10. `ops-console update` runs the installer for the latest version and restarts the daemon if it was running. Migrations apply on that start (Behavior 17). The console also updates itself; see Updates below.
+10. `ops-console update` runs the installer for the latest version and, if the daemon was running, restarts it through launchd and returns once a new daemon answers. Migrations apply on that start (Behavior 17). The console also updates itself; see Updates below.
 11. `ops-console uninstall` stops the daemon, removes the plist, `~/.ops-console` and the `~/.local/bin` link, and prints the data and log folders it left in place.
 12. `ops-console --version` prints the installed version.
 
@@ -33,21 +33,22 @@ Updates
 
 - The sidebar footer shows the installed version under the theme and collapse buttons. Clicking it opens the version panel. The panel shows the installed and latest versions, when the console last checked (with Check now), the new version's release notes, the Update automatically switch and Update.
 - The daemon reads the newest GitHub release (`GET /updates`) 10 seconds after it starts and every 10 minutes after that. Each check asks `github.com/<repo>/releases/latest` for its redirect to the newest tag, which uses no API quota; GitHub's API is asked only for a tag not seen yet, for its date and notes, and without them the version alone is enough to update. It reads nothing in a development build. If GitHub can't be reached, the panel says so and keeps the last answer.
-- Update automatically is on by default (setting `updates.auto_update`). With it on, a newer release installs by itself. With it off, an Update available card above the account card offers Update and What's new. In the collapsed sidebar, the version button is the bare version number, with a dot for a newer one.
-- An update waits until no agent run is going, because a restart fails each run going. Auto-update always waits. A manual Update with runs going asks first: Update anyway installs now, and Wait until idle installs once Running reads 0.
-- Installing runs the installed version's `install.sh` for the new version. The daemon then stops, and launchd starts it again from `current`. The page shows that the console is restarting, and loads the new version's UI once it answers. A failed install leaves the old version running and says why. Auto-update does not try a failed install again; Try again does.
+- Update automatically is on by default (setting `updates.auto_update`). With it on, a newer release installs by itself. With it off, an Update available card above the account card offers Update and What's new. While a release waits for agent runs, the card says so and offers Update now. While it installs, the card reads Updating to vX. After a failed install it shows the error and Try again. In the collapsed sidebar there is no card, and the version button is the bare version number, with a dot for a newer one.
+- An update waits until no agent run is going, because a restart fails each run going. Auto-update always waits. In the card, Update with runs going asks first: Update anyway installs now, and Wait until idle installs once none goes. The version panel's button then reads "Update to vX when idle" and waits without asking. Update now in the waiting card installs at once.
+- Installing runs the installed version's `install.sh` for the new version. The daemon then stops, and launchd starts it again from `current`. The page shows that the console is restarting, and reloads to the new version's UI once the daemon answers on it. A failed install leaves the old version running and says why. Auto-update does not try a failed install again; Try again does.
 - The first start on a new version shows an Updated to vX notification bottom right. It says whether auto-update put it there, links to the release notes, and stays closed once closed.
 
 Daemon
 
-13. The daemon listens on `127.0.0.1:4545` only. `/api/*` is REST (other specs write paths without the `/api` prefix), `/ws` is the WebSocket, and every other path serves the built UI, with unknown client routes falling back to `index.html`.
+13. The daemon listens on `127.0.0.1:4545` only. `/api/*` is REST (other specs write paths without the `/api` prefix), `/ws` is the WebSocket, `/terminals/<id>`, `/browser/<id>` (and `/browser/<id>/devtools`) and `/processes/<id>` are the WebSockets of a terminal, a browser tab and a Session process, and every other path serves the built UI, with unknown client routes falling back to `index.html`. Each WebSocket path needs the token (Behavior 22).
 14. If the port is taken, the daemon exits with a log line naming the port, and `start` reports it (Behavior 5).
 15. On start the daemon writes the runtime file in the data folder with `pid`, `port`, `version`, `started_at` and a new session token, with mode `0600` so only the operator can read it. A clean stop removes it.
 16. A daemon started on a data folder whose lock file another running daemon holds exits before it opens `state.db`, with a log line naming the folder and the other daemon's pid. A lock file left by a daemon that no longer runs is taken over. A clean stop removes the lock file.
 17. On an empty data folder the daemon creates `state.db` and applies every migration. A later start applies only migrations not yet applied, and existing rows stay.
 18. A migration that fails rolls back, the daemon exits, and the log names the migration. `state.db` is as it was before that start.
 19. After migrations and before the port opens, the daemon runs every registered start-up recovery function in registration order. No request is served until they finish.
-20. A scheduled job runs at each slot while the daemon runs. A job whose slot passed while the daemon was stopped runs once at start, however many slots were missed. A job that throws is logged and runs again at its next slot.
+19a. Work a start could do all at once (the first MCP probe, the usage poll, a job's catch-up run) goes into a start-up queue. The queue opens 3 seconds after the port opens, runs two tasks at a time in the order they were added, and rests 1 second between a task's end and the next start, so the page's first requests answer first. A task that throws is logged, and the rest still run.
+20. A scheduled job runs at each slot while the daemon runs. A job whose slot passed while the daemon was stopped runs once at start, however many slots were missed, through the start-up queue. A job that throws is logged and runs again at its next slot.
 21. `GET /api/settings` returns every registered key with its stored value, or its default when none is stored. `PATCH /api/settings` validates each key with that key's schema. An unknown key or a bad value returns `validation_failed` naming the key, and nothing is written.
 22. A REST request without the session token returns `unauthorized`. A WebSocket connection without it is refused.
 23. List endpoints page with `limit` and `cursor`. `meta.next_cursor` is `null` on the last page.
@@ -57,30 +58,30 @@ Daemon
 
 App shell
 
-27. Opening the URL from `ops-console open` stores the token in the browser's local storage and removes it from the address bar, so closing the tab and opening the console again stays signed in while the daemon runs. A token the daemon refuses, such as after a restart issued a new one, is cleared (`persist-selections-and-runs`). The shell shows the left sidebar with every page.
+27. Opening the URL from `ops-console open` stores the token in the browser's local storage and removes it from the address bar, so closing the tab and opening the console again stays signed in while the daemon runs. A token the daemon refuses, such as after a restart issued a new one, is cleared (`persist-selections-and-runs`). The shell shows the left sidebar with every page. A Session's browser tab opened in its own window at `/browser-window/<session>/<tab>` shows that tab without the sidebar (`session-browser`).
 28. Without a token, or with a token the daemon refuses, the shell shows "Run `ops-console open` to sign in." A daemon that does not answer shows "The console daemon is not running. Run `ops-console start`."
-28a. Each sidebar link opens its page at the address it had when the operator last left it, picks in the address included. Opening `/`, or any path that is no page, goes to the last page visited, or Monitor the first time. The browser keeps both in local storage.
-28b. A sidebar item shows what waits there: Monitor the count of Alerts it lists that are not resolved or dismissed, Integrations the count of Connectors and of MCP Servers with no Connector that read `auth` or `fail`, Connections and Repos how many there are. A count of 0 shows no badge.
-28c. The sidebar foot shows the active Claude account, or the first signed-in one, with its 5-hour and weekly usage, and links to Agents & accounts. With no signed-in account it shows nothing.
+28a. Each sidebar link of Monitor, Workspace, Dev tools, Integrations, Connections, Repos, Setup agent, Accounts & Usage, Playbooks and Skills opens its page at the address it had when the operator last left it, picks in the address included. Opening `/`, or any path that is no page, goes to the last page visited among those, or Monitor the first time. The browser keeps both in local storage. Permissions and Agent runs always open at their own path.
+28b. A sidebar item shows what waits there: Monitor the count of Alerts it lists that are not resolved or dismissed; Integrations the count of Integrations failing their automatic check ([automatic-health-checks](automatic-health-checks.md)), or when none fails, the count of Connectors and of MCP Servers with no Connector that read `auth` or `fail`; Connections the count failing their automatic check, or when none fails, how many there are; Agent runs the count of runs that wait on the operator; Repos how many there are. A count of 0 shows no badge, and a collapsed sidebar shows none.
+28c. The sidebar foot shows the active Claude account, or the first signed-in one, with its 5-hour and weekly usage, and links to Accounts & Usage. With the Claude account hub on, it shows CLIProxy and whether it is connected instead. With no signed-in account and no hub it shows nothing. A collapsed sidebar hides it.
 28d. The theme switch moves between light and dark, and Collapse leaves icons only, each naming its page on hover. The browser keeps both. The first theme follows the system's.
 28e. A page scrolls inside its own body, never past the app: an absolutely placed element inside a scroll box, such as a label only screen readers read, stays within that box.
-28f. Running, above the account in the sidebar foot, counts the Sessions of every kind whose run goes, `waiting_input` and `waiting_approval` included, and is tinted while any waits on the operator. It opens a list, most recently active first: each run's Session title (a `pr_review` run reads "Pull request #N"), its Repo ("No Repo", "Dev tools") and branch, its state or "needs you", and an Alert link for a Monitor Session. A run opens where its work shows: the Session in Workspace, the pull request for a `pr_review`, Dev tools for a `devtools`. Moving to another page, Escape or a click outside closes the list. With none running it reads "No agent running".
+28f. Running, above the account in the sidebar foot, counts the Sessions of every kind whose run goes, `waiting_input` and `waiting_approval` included, and how many ended runs wait to be dismissed; it is tinted while any run waits on the operator. Collapsed, it shows the count of runs going. It opens the run tray of [agent-runs-page](agent-runs-page.md): runs that need the operator first, then those going, then those ended, with the tabs All, Going, Needs you and Ended. A run shows its title (a `pr_review` run reads "Pull request #N"), its Repo ("No Repo", "Dev tools"), its state and time, and Pause, Stop, Play, Retry or Dismiss. A run opens in place to its facts, links and subagents. A title opens where the work shows: the Session in Workspace, the pull request for a `pr_review`, Dev tools for a `devtools`. Moving to another page, Escape or a click outside closes the tray. With no run it says so and the label reads "No agent running".
 28g. Each control, status, badge and count whose meaning its words leave open explains itself in a tip: what it means, what pressing it makes the agent do, or why it is off and what turns it on. A label with no control beside it gets a "?" that shows its tip. The tip shows after a short rest of the pointer or at once on keyboard focus, sits inside the window, and closes on leaving, a click, a scroll or Escape. Screen readers read it as the element's description.
 
 Release and checks
 
-29. Pushing a `v*` tag builds the arm64 and x64 tarballs on macOS runners, installs each with `install.sh` from the built files, runs `start`, `status` and `stop` against it, and only then attaches the tarballs and `checksums.txt` to the GitHub Release.
+29. Pushing a `v*` tag builds the arm64 and x64 tarballs on macOS runners, installs each with `install.sh` from the built files, runs `start`, `status`, `open` and `stop` against it, and only then attaches the tarballs and `checksums.txt` to the GitHub Release. The Homebrew formula follows in the same run ([homebrew-tap](homebrew-tap.md)).
 30. `pnpm check` runs lint, typecheck and tests in every package.
 
 ## Settled
 
-- **Layout**: pnpm workspace with `frontend/`, `backend/` and `shared/`, plus `cli/` for the `ops-console` command and `install.sh` at the repo root. This spec creates the backend's `common`, `db`, `auth`, `settings`, `scheduler`, `keychain`, `claude-cli` and `mcp-client` modules; feature modules arrive with their specs.
+- **Layout**: pnpm workspace with `frontend/`, `backend/` and `shared/`, plus `cli/` for the `ops-console` command and `install.sh` at the repo root. This spec creates the backend's `common`, `db`, `auth`, `settings`, `scheduler`, `keychain` and `claude-cli` modules, and the MCP client (`mcp-exec`); feature modules arrive with their specs.
 - **Stack**: NestJS on Node 24, React 18 with Vite, Drizzle with `better-sqlite3`, Zod at every boundary, Vitest, Biome. Coding rules stay in `CODING_STANDARDS.md`.
-- **Port**: `127.0.0.1:4545` serves UI and API. In development the backend runs on `4546` and Vite on `4545` proxies `/api` and `/ws` to it.
-- **Install folder**: `~/.ops-console`, holding `versions/<version>` and `current`. The tarball holds a Node 24 runtime, the built backend and frontend, production `node_modules` with native modules (`better-sqlite3`, `node-pty`, `@napi-rs/keyring`) built for that platform, `bin/ops-console`, a launcher that runs the bundled Node, and `Ops Console.app`, that Node in an app bundle with the Ops Console name and logo, which launchd runs as the daemon (`05-settings-dev-tools` Behavior 19). `node/bin/node` links to the bundle's binary. The system Node is never used.
+- **Port**: `127.0.0.1:4545` serves UI and API, or the port in `OPS_CONSOLE_PORT`. In development (`pnpm dev`) the backend runs on `4556` and Vite on `4555` proxies `/api`, `/ws`, `/terminals`, `/browser` and `/processes` to it, so the installed app keeps `4545`.
+- **Install folder**: `~/.ops-console`, holding `versions/<version>` and `current`. The tarball holds a Node 24 runtime, the built backend and frontend, production `node_modules` with native modules (`better-sqlite3`, `node-pty`, `@napi-rs/keyring`) built for that platform, the Agent SDK with its platform binary, `bin/ops-console`, a launcher that runs the bundled Node, and `Ops Console.app`, that Node in an app bundle with the Ops Console name and logo, which launchd runs as the daemon (`05-settings-dev-tools` Behavior 19). `node/bin/node` links to the bundle's binary. The system Node is never used.
 - **Install URL**: `install.sh` is served from `raw.githubusercontent.com` until there is a domain. `OPS_CONSOLE_RELEASE_URL` points it at another release folder, which the release job and tests use.
 - **launchd**: label `dev.ops-console`, stdout and stderr to the daemon log.
-- **Data folder**: `~/Library/Application Support/ops-console`, or `OPS_CONSOLE_DATA_DIR` when set. It holds `state.db`, the runtime file and the lock file. Tests point it at a temporary folder. Updating and uninstalling leave it in place.
+- **Data folder**: `~/Library/Application Support/ops-console`, or `OPS_CONSOLE_DATA_DIR` when set. It holds `state.db`, the runtime file, the lock file and the files the other specs name. Tests point it at a temporary folder. Updating and uninstalling leave it in place.
 - **Runtime file**: `runtime.json` in the data folder, written once the port is open, mode `0600`. It holds the session token, so no other local user may read it.
 - **Data folder lock**: `daemon.lock` in the data folder holds the daemon's pid. The daemon creates it with an exclusive create before opening `state.db`. When it exists and its pid still runs, the daemon refuses to start; when its pid no longer runs, the daemon replaces it. Two daemons on one `state.db` would race on migrations and overwrite each other's runtime file and token.
 - **Daemon log**: `~/Library/Logs/ops-console/daemon.log`.
@@ -89,10 +90,11 @@ Release and checks
 - **Migrations**: Drizzle Kit generates them; the daemon applies them on start, each in a transaction. A spec adds columns to an earlier spec's table with `ALTER TABLE … ADD COLUMN`.
 - **Transactions**: a state change and every row it writes commit together, and its WebSocket event goes out after the commit.
 - **Start-up recovery**: a module registers a function; each spec says what it closes on start (rows left `running` and the like). This spec registers none.
-- **Scheduler**: in-process timers, no queue. A job registers a name, its slots and a handler. The last run time of each job is kept in memory and rebuilt from the owning spec's rows on start.
+- **Scheduler**: in-process timers, no queue of its own. A job registers a name, its slots and a handler. The last run time of each job is kept in memory and rebuilt from the owning spec's rows on start. A catch-up run goes through the start-up queue (Behavior 19a).
+- **Start-up queue**: a service adds a named task on start; the daemon opens the queue 3 seconds after the port opens, with two tasks at a time and a 1-second rest after each. Tests open it at once with no rest.
 - **Settings**: a key, a Zod schema and a default, registered by the spec that owns the key. A row exists only once the operator changes a value.
 - **Token**: 32 random bytes, base64url, new on every start (ADR 0003). REST sends `Authorization: Bearer <token>`. The WebSocket sends it as the second subprotocol, `["ops-console", "<token>"]`, so it stays out of URLs.
-- **Keychain adapter** (ADR 0004): `set`, `get` and `delete` by key in the login Keychain under service `ops-console`, through `@napi-rs/keyring`. Tests use a fake.
+- **Keychain adapter** (ADR 0004): `set`, `get` and `delete` by key in the login Keychain under service `ops-console`, through `@napi-rs/keyring`. A call the Mac does not answer within 60 seconds fails with `keychain_timeout` (503). Tests use a fake.
 - **Claude CLI wrapper**: runs `claude` with an argument array, never a shell string, and parses each output with Zod. It covers `claude mcp add`, `remove`, `list` and `get`. Tests use a fake.
 - **MCP client**: connects to a server registered with Claude Code, using the config `claude mcp get` returns, to call a tool directly for a fixed read with no model turn. Tests use a fake MCP server.
 - **Integration layer** (ADR 0005): every outside system the console reaches is an MCP server or a CLI that Claude Code also uses. A form collects config, the secret goes to the Keychain adapter, and the console registers the server with `claude mcp add`. Fixed reads (PR lists, Scan counts, health checks) go through the MCP client or the CLI. Judgment work (Verification, Fix, Agent Review, the Setup agent, dev-tools queries) runs as an agent session; see `02-settings-agents`.
@@ -114,7 +116,7 @@ No agent runs in this change, so the agent's reach is unchanged.
 - The daemon binds `127.0.0.1` only, and every REST call and WebSocket needs the token issued at that start (ADR 0003).
 - The token reaches the browser through the URL fragment, which is never sent to the server, and leaves the address bar on load. The browser keeps it in local storage until the daemon refuses it.
 - The daemon log never holds the token or a Keychain value.
-- The runtime file, which holds the token, is readable only by the operator (mode `0600`).
+- The runtime file, which holds the token, is readable only by the operator's own processes (mode `0600`). An agent run's commands are among them ([ADR 0003](../adr/0003-local-only-server.md)).
 
 ## Database
 
@@ -193,7 +195,7 @@ Reads the newest release now. 200 `UpdateState`.
 ### `POST /api/updates`
 
 Body: `{ "when": "now | idle" }`. `now` installs at once and stops the agent runs going; `idle` waits for them.
-202 `UpdateState`. `invalid_state` in a development build.
+202 `UpdateState`. `invalid_state` in a development build, or when no newer release is known.
 
 ### WebSocket `/ws`
 
@@ -223,14 +225,14 @@ Server to client, after a `PATCH /api/settings` commits.
 
 ## UI
 
-- **Shell**: a left sidebar, as in `design/ops-console-sidebar.html`. Operate: Monitor, Workspace, Dev tools. Connect: Integrations, Connections, Repos, Setup agent. Claude: Agents & accounts. Each item is a route (`/monitor`, `/workspace`, `/devtools`, `/integrations`, `/connections`, `/repos`, `/setup`, `/agents`) with a slim top bar only where the page has main actions (Integrations "Add with Setup agent →", Connections "Import with Setup agent →"): the title small on the left, its one line as the tooltip, the actions on the right. A page with no actions has no bar and a hidden h1; the Workspace's Session header is its top bar. The active item is bold with its icon in the accent colour. Badges follow Behavior 28b. The foot holds the active Claude account's 5-hour and weekly usage, then Dark or Light and Collapse; collapsed, the foot keeps only the two buttons. Buttons, fields, cards, badges and switches are rounded.
+- **Shell**: a left sidebar, as in `design/ops-console-sidebar.html`. Operate: Monitor, Workspace, Dev tools. Connect: Integrations, Connections, Repos, Setup agent, Permissions. Claude: Accounts & Usage, Agent runs, Playbooks, Skills. Each item is a route (`/monitor`, `/workspace`, `/devtools`, `/integrations`, `/connections`, `/repos`, `/setup`, `/permissions`, `/agents`, `/agent-runs`, `/playbooks`, `/skills`) with a slim top bar only where the page has main actions (Integrations "Add with Setup agent →", Connections "Import with Setup agent →", Agent runs, Playbooks and Skills their own): the title small on the left, its one line as the tooltip, the actions on the right. A page with no actions has no bar and a hidden h1; the Workspace's Session header is its top bar. The active item is bold with its icon in the accent colour. Badges follow Behavior 28b. The foot holds Running, the Update card when one is due, the active Claude account's 5-hour and weekly usage, Dark or Light and Collapse, and the installed version; collapsed, the foot keeps Running's count, the two buttons and the version. Buttons, fields, cards, badges and switches are rounded.
 - **No token**: one panel with "Run `ops-console open` to sign in."
 - **Daemon down**: one panel with "The console daemon is not running. Run `ops-console start`."
-- Theme tokens are ported from the design now, so later screens use them (`CODING_STANDARDS.md`, Frontend).
+- Theme tokens are ported from the design, so every screen uses them (`CODING_STANDARDS.md`, Frontend).
 
 ## Rejected
 
-- **Homebrew**: needs a tap repo and a formula to maintain, and the operator asked for a single `curl` line.
+- **Homebrew as the only route**: the operator asked for a single `curl` line, so `install.sh` stays the install. The tap in this repository adds a second route ([ADR 0008](../adr/0008-homebrew-installs-an-entry-command.md)).
 - **The system Node**: its version would vary per machine, and native modules are built for one Node ABI.
 - **`node:sqlite`**: still experimental in Node 24. The tarball already ships native modules.
 - **Two ports in production**: one origin removes CORS and makes `ops-console open` a single URL.
@@ -246,17 +248,17 @@ Server to client, after a `PATCH /api/settings` commits.
 ## Seams
 
 - **Installer and CLI, shell tests** (Vitest spawning `sh install.sh` and `ops-console` with a temporary `HOME`, `OPS_CONSOLE_RELEASE_URL` pointing at a local release folder, and a fake `launchctl` on `PATH`): 1 to 12, 14.
-- **Backend + SQLite, over HTTP** (Supertest, a temporary data folder per test, fakes for the Keychain adapter, the `claude` CLI and an MCP server; start-up cases close the app and open it again on the same folder): 13, 15 to 19, 21 to 24, 26.
+- **Backend + SQLite, over HTTP** (Supertest, a temporary data folder per test, fakes for the Keychain adapter, the `claude` CLI and an MCP server; start-up cases close the app and open it again on the same folder): 13, 15 to 19, 21 to 24, 26. Updates: `backend/test/updates.test.ts` with a fake release source and installer.
 - **Backend + SQLite, over WebSocket**: 22, 25.
-- **Unit**: 20, the scheduler with a fake clock.
-- **Browser** (Playwright against the built daemon): 27, 28, 28a, and Collapse in 28d. 28b, 28c, 28e and the theme have no test.
+- **Unit**: 19a, the start-up queue; 20, the scheduler with a fake clock.
+- **Browser** (Playwright against the built daemon): 27, 28, 28a, Collapse in 28d, the Updates section (`updates.spec.ts`), the tip of 28g and the Running tray of 28f (`agent-runs.spec.ts`). 28c, 28e and the theme have no test.
 - **Release job on macOS runners**: 29, with real `launchctl`. It also runs the CLI checks for 5 to 8 once per tag.
 - **CI**: 30, `pnpm check` on a runner.
 
 ## Out of scope
 
-- Agent runtime, Sessions, session defaults, Agents & accounts, Action Log and Approvals: `02-settings-agents`.
+- Agent runtime, Sessions, session defaults, Accounts & Usage, Action Log and Approvals: `02-settings-agents`.
 - Integrations: MCP Servers in `03-settings-mcp-servers`, Connectors in `04-settings-connectors`. Connections and the Setup agent: `05-settings-dev-tools`. Repos: `06-settings-repos`.
 - Workspace, Git host adapter and pull requests: `07-workspace`. Monitor: `08-monitor-dashboard`. Dev tools: `09-dev-tools-agent`.
-- A Linux `systemd --user` unit, a custom domain for `install.sh`, a Homebrew tap, and a Tauri or Electron window around the daemon: later specs.
+- A Linux `systemd --user` unit, a custom domain for `install.sh`, and a Tauri or Electron window around the daemon: later specs. The Homebrew tap is [homebrew-tap](homebrew-tap.md).
 - `GLOSSARY.md`: this spec adds no terms.

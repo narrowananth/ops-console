@@ -42,8 +42,8 @@ In the composer, files could not be mentioned from the keyboard, and the placeho
 13. Arrows move, Enter or Tab picks, Escape closes until the word changes, in all three menus. With no row, Enter sends.
     The menu is a listbox and the message box names the row that is picked with `aria-activedescendant`.
 14. The menus show only in a Repo Session and an Anonymous Session. A `pr_review` or dev-tools Session shows none.
-15. The composer's toolbar holds Attach and the Repos icon on the left, and on the right one settings pill, then Send
-    (Stop and Queue as before). A second row under the message box does not exist.
+15. The composer's toolbar holds Attach and the Repos icon on the left, and on the right one settings pill, then Play
+    (only while a paused or stopped run can carry on), Stop and Send (Queue while the agent works). A second row under the message box does not exist.
 16. The pill reads the model's short name and the effort, such as `Sonnet 5.5 High`, with the Claude mark. It opens one
     popover over the message box, no wider than the box except in a very narrow Session column, which it still fits.
 17. The popover has a search box (focused on open) over the model list, the effort list under `Reasoning`, and a footer chip
@@ -122,7 +122,6 @@ The New Session card's branch list, the composer's three menus and its settings 
 
 - **Backend + SQLite** (`workspace.test.ts`): 1 to 5, 10 to 12.
 - **Backend + SQLite** (`skill-kinds.test.ts`): 8.
-- **Browser** (`skill-kinds.spec.ts`): 8, 9, 10, 13.
 - **Browser** (`workspace.spec.ts`): 15 to 20, 25, 26.
 - **Browser** (`skill-kinds.spec.ts`): 8 to 10, 13, 22 to 24.
 - **Backend + SQLite** (`agent-sessions.test.ts`): 25, 26 (the saved type and size, the empty file).

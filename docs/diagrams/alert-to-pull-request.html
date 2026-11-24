@@ -23,7 +23,7 @@
   <div class="diagram-container">
 <svg viewBox="0 64 1460 872" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="alert-to-pull-request-title alert-to-pull-request-desc">
 <title id="alert-to-pull-request-title">From a failing route to a merged pull request</title>
-<desc id="alert-to-pull-request-desc">Lifecycle of a Monitor Alert: Scan detects it, a Verification writes a Report, the operator confirms or dismisses it, a Fix opens a pull request, and the operator merges; failure, cancel, abandon and regression paths return it to earlier states.</desc>
+<desc id="alert-to-pull-request-desc">Lifecycle of a Monitor Alert: a Scan of one log source detects it, a Verification writes a Report, the operator confirms or dismisses it, a Fix opens a pull request, and the operator merges; failure, cancel, abandon and regression paths return it to earlier states.</desc>
 <defs>
 <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
 <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
@@ -42,6 +42,7 @@
 <path d="M 880,200 L 804,200" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
 <path d="M 500,228 L 500,264 Q 500,272 492,272 L 376,272 Q 368,272 368,264 L 368,228" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
 <path d="M 1388,164 L 1388,140 Q 1388,132 1380,132 L 340,132 Q 332,132 332,140 L 332,164" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<path d="M 676,348 L 340,348 Q 332,348 332,340 L 332,228" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
 <path d="M 1124,164 L 1124,156 Q 1124,148 1116,148 L 748,148 Q 740,148 740,156 L 740,164" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
 <path d="M 700,228 L 700,316" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
 <path d="M 780,316 L 780,228" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
@@ -68,6 +69,8 @@
 <text x="434" y="263" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">FAILED · RETRY</text>
 <rect x="809" y="114" width="62" height="12" rx="2" fill="#f5f5f5"/>
 <text x="840" y="123" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">REGRESSED</text>
+<rect x="474" y="330" width="62" height="12" rx="2" fill="#f5f5f5"/>
+<text x="505" y="339" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">REGRESSED</text>
 <rect x="1015" y="154" width="62" height="12" rx="2" fill="#f5f5f5"/>
 <text x="1046" y="163" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">PR CLOSED</text>
 <rect x="634.5" y="292" width="51" height="12" rx="2" fill="#f5f5f5"/>
@@ -87,7 +90,7 @@
 <rect x="72" y="170" width="31" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-opacity="0.45" stroke-width="0.8"/>
 <text x="87.5" y="179" fill="#5a6580" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">SCAN</text>
 <text x="128" y="199" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Scan</text>
-<text x="128" y="212" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Datadog through pup</text>
+<text x="128" y="212" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">one log source</text>
 <text x="128" y="223" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">6 h grid or by hand</text>
 <circle cx="188" cy="168" r="8" fill="#2d3142"/>
 <text x="188" y="171.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">1</text>
@@ -187,12 +190,12 @@
 <text x="740" y="100" fill="#5a6580" font-size="8" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.18em">REVIEW</text>
 <text x="944" y="100" fill="#5a6580" font-size="8" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.18em">FIX</text>
 <text x="1250" y="100" fill="#5a6580" font-size="8" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.18em">PULL REQUEST</text>
-<text x="78" y="616" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Scans run on a 6 h grid and by hand. The same Fingerprint reopens a resolved Alert, which is a regression.</text>
+<text x="78" y="616" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Each Scan reads one log source, on a 6 h grid and by hand. A resolved or dismissed Alert reopens (a Regression) once a Scan saw it healthy and then failing again.</text>
 <text x="78" y="640" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A failed Verification, or a daemon restart (interrupted), returns the Alert to Open. Its scratch copy is removed once the Report is ready.</text>
-<text x="78" y="664" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Stale Alerts show overdue; awaiting prod check clears when the Recheck count and the version tag are read. Neither blocks a job.</text>
-<text x="78" y="688" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Confirming the Report starts the Fix in the same Session and its worktree, in a new conversation. Dismiss is undoable until the Alert moves on.</text>
-<text x="78" y="712" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The ticket stage runs only when the Fix Playbook asks and Jira is connected. Otherwise the branch is fix/&lt;slug&gt;.</text>
-<text x="78" y="736" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A failed step stops the job. The Fix stays at its stage and a retry resumes there. A retry never makes a second ticket or pull request.</text>
+<text x="78" y="664" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Alerts show overdue after two Check intervals with no covering Scan. Resolved ones show awaiting prod check until a Scan reads the Service without seeing them. An open Alert unseen for 14 days resolves itself.</text>
+<text x="78" y="688" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Confirming the Report, or sending go, yes, start, do it or ok in its Session, starts the Fix in the same Session and worktree, in a new conversation. Dismiss can be undone.</text>
+<text x="78" y="712" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The ticket stage runs only when the Fix Playbook's Jira ticket switch is on and Jira is connected; the built-in leaves it off. Without a ticket the branch is fix/&lt;slug&gt;.</text>
+<text x="78" y="736" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A failed step stops the job. The Fix stays at its stage and a retry resumes there. A retry never makes a second ticket or pull request. With a ticket, the agent moves it to In review.</text>
 <text x="78" y="760" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Cancel with no PR yet: stop the run, stash changes, delete the Fix branch, back to Verified. With a PR, close it on the Git host.</text>
 <text x="78" y="784" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Only the operator merges. Every 5 min and after each list refresh: merged resolves the Alert, closed unmerged abandons the Fix.</text>
 <circle cx="60" cy="613" r="8" fill="#2d3142"/>

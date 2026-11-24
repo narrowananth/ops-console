@@ -127,7 +127,7 @@ A Skill the console ships in a Skill pack. The operator installs the pack; the s
 its text. Its badge in the console names its pack.
 
 **Skill pack**:
-A set of Built-in skills installed and uninstalled together. The Skills page lists packs under Discover, where an installed pack's skills are read; Yours holds only Custom Skills. Two ship today: Ops Console, the console's own skills for specifying, shipping, reviewing and refactoring a change, and Caveman, coding methods in a terse voice. A run asked for one skill of a pack also gets the rest of that pack, so its skills can call one another.
+A set of Built-in skills installed and uninstalled together. The Skills page lists packs under Discover, where an installed pack's skills are read; Yours holds only Custom Skills. Two ship today: Ops Console, the console's own skills for a change from spec to pull request (spec, ship, review, commit, pull request, refactor, look back), and Caveman, coding methods in a terse voice. A run asked for one skill of a pack also gets the rest of that pack, so its skills can call one another.
 
 **Custom Skill**:
 A Skill the operator wrote. It is available to every Session.
@@ -197,14 +197,14 @@ model turn. It says whether the failure is still happening.
 
 **Log source**:
 Where a Scan reads failing requests from: Datadog, a Log folder, CloudWatch logs, Loki or New Relic. Loki means Grafana Cloud's Loki. Each is a Connector, and a Service, an Alert and a
-Scan belong to one source.
+Scan belong to one source. Monitor shows a tab per connected source after All sources, each with that source's open Alerts by tier.
 _Avoid_: log provider, backend
 
 **Loki data source**:
 One Loki in a Grafana stack that the Loki logs Connector reads. The operator picks it when the stack has several.
 
 **Daemon sign-in**:
-A sign-in the console performs itself, with its own client, and keeps in the Keychain. Grafana Cloud uses one. Every other MCP sign-in belongs to Claude Code.
+A sign-in the console performs itself, with its own client, and keeps in the Keychain. Grafana Cloud and the Google Connectors use one. Every other MCP sign-in belongs to Claude Code.
 
 **Log folder**:
 The folder the OpenTelemetry logs Connector reads: OTLP JSON log files a Collector's `file` exporter writes on this Mac.
@@ -274,6 +274,10 @@ The console's background test of whether a pull request's branch merges into its
 fetches both into the Repo's folder and runs `git merge-tree`, which touches no branch and no work tree. The answer is kept
 two minutes per head commit. When git cannot fetch, the check reads "Conflicts not known" and does not disable Merge.
 
+**Sessions inbox**:
+The Workspace's list of Sessions, flat and grouped Needs you, Running and Idle, with the Repo as a chip, a filter and a + New
+that picks a Repo (or none) and a branch. A row shows the Session's pull requests, and hovering it opens a card with them.
+
 **Session**:
 One conversation between the operator and the agent, named for its first task. It runs in one Repo on one branch, in a
 Session worktree, except a
@@ -306,8 +310,13 @@ database, a test watch, a shell. The operator starts it, or approves the agent's
 the Session is deleted or the daemon exits, and shows in the Terminals dock.
 
 **Terminals dock**:
-The strip under a Session's conversation and Browser panel that lists its Session processes, one tab each, with their output.
-The operator opens a terminal or runs a script from it, and stops, restarts or removes a process. Hiding the dock ends nothing.
+The panel under a Session's conversation and Browser panel for its Session processes, laid out as an editor's terminal
+panel. One bar of icons holds the selected process's name and state, New terminal (with a menu of scripts and folders), Split,
+Restart, Stop or Remove, Maximize and Hide; below it sit the output and, from the second process on, a process list at the
+right. Hiding the dock ends nothing.
+
+**Split**:
+A button of the Terminals dock that opens a new shell beside the selected process, so two show side by side.
 
 **Element pick**:
 The operator's click on an element of a tab's page in pick mode (the toolbar's pointer-arrow button). The element, with a
@@ -357,7 +366,7 @@ The git worktree a Session in a Repo works in, under the data folder, made from 
 branch fetched from origin. Sessions on different branches work at once, and the operator's own folder is never checked
 out. A Session on the default branch, or on a branch the operator's own folder holds, starts on a detached HEAD and keeps
 the branch's name. The console fetches the default branch before each run;
-the agent never fetches, since its sandbox has no git keys.
+the agent is told never to fetch, pull or push.
 _Avoid_: checkout, working copy
 
 **Session diff**:
@@ -434,6 +443,10 @@ _Avoid_: audit trail, history
 **Start at login**:
 launchd starting the installed console when the operator logs in, and again if it stops. macOS lists it as Ops
 Console under App Background Activity. A dev build never starts at login.
+
+**Start-up queue**:
+The background work the daemon holds back while it boots, such as the first MCP Probe, the usage poll and the Scans a stopped
+daemon missed. It opens once the port listens and runs two tasks at a time.
 
 **Keychain wait**:
 A Keychain call the Mac has not answered, usually because it waits for the login password. The console shows it after

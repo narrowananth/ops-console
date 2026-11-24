@@ -6,8 +6,9 @@
 ## Problem
 
 The agent writes an Output file and the operator tells it where the file should go: a Slack channel, a branch in a Repo,
-an S3 bucket, a URL. The Run sandbox blocks the network except the allowlist and hides the operator's cloud sign-in, so
-the agent can only print a command for the operator to run. `save_file` reaches local folders only.
+an S3 bucket, a URL. The Run sandbox closes the Keychain, where the Slack Connector's sign-in sits, and the agent never
+pushes, so it cannot send to Slack or a Repo branch. A run's commands can reach any host and read `~/.aws`, so an
+`aws` or `curl` command sends to S3 or a URL with no Approval. `save_file` reaches local folders only.
 
 ## Behavior
 
@@ -29,7 +30,7 @@ the agent can only print a command for the operator to run. `save_file` reaches 
 7. **Repo** commits the file at the path on the branch and pushes it, as pull request opening does: the operator's git
    keys, never with force. A branch that moved, the default branch, and a Repo with no `origin` on a supported Git host are
    refused before the Approval. The path stays inside the Repo.
-8. **S3** copies with the operator's own AWS sign-in on this Mac, which the sandbox hides from the run. No `aws` command
+8. **S3** copies with the operator's own AWS sign-in on this Mac, run by the daemon so the send asks first. No `aws` command
    or no sign-in gives the agent an error and no Approval. The Approval for an S3 address marks it as a write to cloud
    storage.
 9. **URL** sends the bytes in a `PUT` with `Content-Type` from the file's name, and no header the operator did not see.
@@ -47,8 +48,8 @@ the agent can only print a command for the operator to run. `save_file` reaches 
 
 ## Settled
 
-- **Who sends**: the daemon, outside the sandbox, as `save_file` and pull request opening do. The sandbox's write list and
-  Network allowlist do not grow, and no credential reaches the run.
+- **Who sends**: the daemon, outside the sandbox, as `save_file` and pull request opening do. Every send asks first, and
+  no credential is handed to the run.
 - **Approval every time**: no shortcut when the operator's message names the destination. Text injected through a log can
   name one too, and the daemon cannot tell the two apart.
 - **One tool**: `send_file` takes a tagged destination, so the agent has one way to send and the Approval one shape.
@@ -68,9 +69,9 @@ the agent can only print a command for the operator to run. `save_file` reaches 
 ## Safety
 
 The agent gains one tool, `send_file`. It writes and sends nothing itself: only the daemon sends, only after the
-operator's yes on the exact destination, and the run's reach is unchanged. A steered run can ask to send a file, never
-send one. The operator reads the destination on the card: a URL or bucket the operator does not recognise is a no. The
-agent never sees the operator's Slack, git or AWS sign-in. An S3 destination counts as a cloud write and says so on the
+operator's yes on the exact destination, and the run's reach is unchanged. A steered run can ask to send a file through
+this tool, and nothing goes without the yes. The operator reads the destination on the card: a URL or bucket the operator does not recognise is a no. The
+tool hands the agent no Slack, git or AWS sign-in. An S3 destination counts as a cloud write and says so on the
 card. No PROD connection is touched. Merge stays the operator's button.
 
 ## API
@@ -102,8 +103,8 @@ card for a URL shows the whole address, never cut.
 
 ## Rejected
 
-- **Let the run reach the destination itself** (widen the Network allowlist, expose `~/.aws` or the Slack token): a run
-  steered by log text could send out whatever it reads, which is the case ADR 0006 closes.
+- **Rely on the run's own commands** (`aws`, `curl`): a run can reach any host and read `~/.aws` (ADR 0006), so a run
+  steered by log text could send out whatever it reads with no Approval. The tool is the path that asks.
 - **Skip the Approval when the operator's message names the target**: see Settled.
 - **A separate tool per destination**: four tools, four card shapes, and more for a run to misuse.
 - **Slack through the Slack MCP server's file tools in the run**: those tools run outside the sandbox and read a path the

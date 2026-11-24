@@ -1,27 +1,28 @@
-# Agents & accounts: agent runtime, Claude accounts, Action Log and Approvals
+# Accounts & Usage: agent runtime, Claude accounts, Action Log and Approvals
 
 **Status:** shipped
-**Design:** Agents & accounts in `design/ops-console.html` (accounts list, Auto-switch, Smart usage, default model, effort and access), plus the Session composer chips (Model, Effort, Access) and the approval prompts those settings drive
+**Design:** Agents & accounts in `design/ops-console.html` (accounts list, Auto-switch, Smart usage, default model, effort and access), shown as the Accounts tab of Accounts & Usage, plus the Session composer chips (Model, Effort, Access) and the approval prompts those settings drive. The Usage tab and the Enable switch are in [account-switch-and-usage](account-switch-and-usage.md)
 
 ## Problem
 
-The rest of the console relies on the agent, and every later spec needs the same pieces from it. A Session needs a place to run, a way to resume after a reload, and output that streams to the browser. The operator needs to know what the agent did outside its own process, and needs to say yes before it writes to PROD. The operator also works on more than one Claude subscription. The Agents tab shows each account's 5-hour and weekly usage, and can move Sessions to another account when the active one runs low, without losing the conversation.
+The rest of the console relies on the agent, and every later spec needs the same pieces from it. A Session needs a place to run, a way to resume after a reload, and output that streams to the browser. The operator needs to know what the agent did outside its own process, and needs to say yes before it writes to PROD. The operator also works on more than one Claude subscription. The Accounts tab shows each account's 5-hour and weekly usage, and can move Sessions to another account when the active one runs low, without losing the conversation.
 
-This spec builds the agent runtime, the core of a Session, the Action Log, Approvals and the Agents tab. Kind-specific Sessions (`repo`, `pr_review`, `anonymous`, `devtools`) come later, in `07-workspace` and `09-dev-tools-agent`. Daemon, storage, envelopes, the `settings` table, the start-up hook and the `claude` CLI wrapper come from `01-base-daemon-setup`.
+This spec builds the agent runtime, the core of a Session, the Action Log, Approvals and the Accounts tab. Kind-specific Sessions (`repo`, `pr_review`, `anonymous`, `devtools`) come later, in `07-workspace` and `09-dev-tools-agent`. Daemon, storage, envelopes, the `settings` table, the start-up hook and the `claude` CLI wrapper come from `01-base-daemon-setup`.
 
 ## Behavior
 
 Sessions and runs
 
-1. A new Session takes its model, effort and access mode from the `session_defaults` setting unless the creating spec passes them. That covers every Session kind: Workspace, Dev tools, Monitor Verify and Fix, and Agent Review. The Dev tools setup terminal takes its model and effort from it too (`05-settings-dev-tools`). Its state is `idle` and its title is "New session" until the first message, whose task names it: the first sentence, with attachment chips, code blocks and openers such as "can you please" dropped, capitalized and cut at a word within 52 characters. A first message of attachments alone titles it "Attached files".
-2. The first message starts a Claude Agent SDK run under the active Claude account, in the working directory the Session's kind supplies. The run's SDK session id and the account are stored on the Session. Later messages resume that SDK session.
-3. The console stores no messages. Listing a Session's messages reads the transcript through the SDK from the Session's account, oldest first, and maps user and assistant entries to `Message`s with parts: text to `text`, tool calls to `step`, file edits to `diff`, code blocks to `code`, the agent's questions to `question`.
+1. A new Session takes its model, effort and access mode from the `session_defaults` setting unless the creating spec passes them. That covers every Session kind: Workspace, Dev tools, Monitor Verify and Fix, and Agent Review. The Dev tools setup terminal takes its model and effort from it too (`05-settings-dev-tools`). Its state is `idle` and its title is "New session" until the first message, whose task names it: the first sentence, with attachment chips, code blocks and openers such as "can you please" dropped, capitalized and cut at a word within 52 characters. A first message of attachments alone titles it "Attached files", and one of picked page elements alone "Picked element". When the first run ends, the name Claude Code gave the conversation replaces that title, unless the operator renamed the Session meanwhile.
+2. The first message starts a Claude Agent SDK run under the active Claude account, in the working directory the Session's kind supplies. The run's SDK session id and the account are stored on the Session. Later messages resume that SDK session. When the operator opens a Session that takes messages, `POST /sessions/:id/warm` starts a spare Claude Code process for the next message, so the message does not wait for it to start. A message that would start differently (another account, model or Playbook) closes the spare and starts its own, and an unused spare closes after a minute.
+3. The console stores no messages. Listing a Session's messages reads the transcript through the SDK from the Session's account, oldest first, and maps user and assistant entries to `Message`s with parts: text to `text`, tool calls to `step`, file edits to `diff`, code blocks to `code`, the agent's questions to `question`, a `spawn_sessions` call to `spawn` (`spawn-parallel-sessions`).
 4. While a run streams, each part goes out as `session.output`. A part that grows is resent whole with the same `part_index`. The in-flight agent message lives in the daemon's memory: listing during a run returns it as `streaming`, and after a reload mid-run the next `session.output` continues from the next `part_index`.
 4a. While a run goes, the agent's in-flight message in the Session reads "Agent · working" with a timer beside it that counts up each second from the run's start, the message's `created_at`.
-5. A run that ends sets the Session `idle`, or `failed` when the run errored, updates `last_message_preview` (the first line of the agent's first text in that run, cut to 200 characters) and `last_active_at`, and sends `session.finished`. After a failed run, listing marks the last agent message `failed`.
-5a. `session.finished` says who started the run: `operator` for a run the operator's message started, `console` for one a job started, such as a Monitor Verify step or an Agent Review. The page plays a soft two-note chime when a run the operator started ends: rising when it finished, falling when it failed. A job's runs stay quiet, so a job of eight steps does not chime eight times. The sound is made in the browser with Web Audio, with no audio file, and only after the operator first clicked or typed on the page. Notifications on Agents & accounts turns it off for this browser (`ops-console:notify.sound`, on by default), and Play sounds it.
+5. A run that ends sets the Session `idle`, or `failed` when the run errored, updates `last_message_preview` (the first line of the agent's first text in that run, cut to 200 characters) and `last_active_at`, and sends `session.finished`. The Session also keeps how the run ended (`done`, `stopped`, `paused`, `failed`, `rate_limited`, `signed_out` or `interrupted`); a run that ended any way but `done` stays in the Running tray until dismissed (`agent-runs-page`). After a failed run, listing marks the last agent message `failed`.
+5a. `session.finished` says who started the run: `operator` for a run the operator's message started, `console` for one a job started, such as a Monitor Verify step or an Agent Review. The page plays a soft two-note chime when a run the operator started ends: rising when it finished, falling when it failed. A job's runs stay quiet, so a job of eight steps does not chime eight times. The sound is made in the browser with Web Audio, with no audio file, and only after the operator first clicked or typed on the page. Notifications on Accounts & Usage turns it off for this browser (`ops-console:notify.sound`, on by default), sets how loud it is (`ops-console:notify.volume`, 0 to 100, 100 by default), and Play sounds it even with the sound off. Desktop alerts for runs and for health checks are in `agent-runs-page` and `automatic-health-checks`.
 6. A Session whose transcript is gone (deleted outside the console) lists no messages. Its next message starts a new SDK session and replaces `sdk_session_id`.
-7. A message to a Session whose run is still going is refused with `session_busy`. Runs of different Sessions go on side by side.
+7. A message to a Session whose run is still going, other than the answer to a question (Behavior 8), is refused with `session_busy`. Runs of different Sessions go on side by side.
+7a. The composer queues a message sent while a run goes (`PUT /sessions/:id/queue`). The Session keeps one queued message, which goes out when the run ends, unless the operator stopped the run. With no run going, queuing sends the message. Take back clears it; Send now stops the run going and sends it (`agent-runs-page`, `running-tray-controls`).
 8. When the agent asks the operator a question, the Session is `waiting_input` and the question shows as a `question` part. The operator's next message answers it and sets the Session `working`.
 8a. The operator can edit the Session's last message, and only that one, while no run is going. Every run keeps a
     file checkpoint at each message. Editing first puts back the files the agent changed with its edit tools since
@@ -43,40 +44,44 @@ Sessions and runs
     `session.finished` says `done`; a job that started the run fails with "stopped by the operator" and can be
     retried. Stopping a Session with no run going is refused with `invalid_state`. Stop shows wherever a run goes: the
     Session view, its row in the Session list, a Dev tools terminal, and a running Report, Fix or Agent Review.
+    Pause ends the run the same way and keeps it in the Running tray for Play. Play, and Retry for a failed run,
+    start the run again from the conversation as it stands (`POST /sessions/:id/resume`).
 
 Guards, Action Log and Approvals
 
-12. No access mode skips a PROD write. A `PreToolUse` hook checks every tool call against the PROD-write rule (`05-settings-dev-tools` supplies it; until then it matches nothing) and holds a match for an Approval of kind `prod_write`, in every mode, `full` included.
-13. No Session can merge. The Git host merge commands (`gh pr merge`, `glab mr merge`) and any Git host MCP tool that merges are denied in every mode, and the agent gets a denial it can read.
-14. Before every Bash call and every MCP tool call runs, an Action Log row exists with outcome `pending`. After the call the row is `ok` or `failed`; a call the operator denied is `denied`. Kind comes from the call: Bash `git …` is `git`, `gh pr …` and `glab mr …` are `pr`, other Bash is `shell`, a Slack tool is `message`, an Atlassian issue tool is `ticket`, any other MCP tool is `query`.
+12. No access mode skips a PROD write. A `PreToolUse` hook checks every tool call against the PROD-write rule (`05-settings-dev-tools` supplies it) and holds a match for an Approval of kind `prod_write`, in every mode, `full` included.
+13. No Session can merge. The Git host merge commands (`gh pr merge`, `glab mr merge`, `bkt pr merge`, `bkt pr auto-merge`), any Git host MCP tool that merges, and a call to a host's own merge endpoint or mutation through `gh api`, `curl` or another client are denied in every mode, and the agent gets a denial it can read.
+14. Before every Bash call, every MCP tool call and every Skill load runs, an Action Log row exists with outcome `pending`. The console's own tools that act outside the run, such as `run_integration`, a started process and a page script, get a row the same way. After the call the row is `ok` or `failed`; a call the operator denied is `denied`. Kind comes from the call: Bash `git …` is `git`, `gh pr …` and `glab mr …` are `pr`, other Bash is `shell`, a Slack tool is `message`, an Atlassian issue tool is `ticket`, a Skill load is `skill`, any other MCP tool is `query`.
 15. Commands are redacted before they are stored: values that look like secrets become `[redacted]`.
 16. The Action Log has no update or delete endpoint.
 17. Approving a pending Approval lets the call run; denying it sets the Action Log row `denied` and tells the agent no. Deciding an Approval that is not `pending` is refused with `invalid_state`.
-18. On daemon start, Sessions left `working`, `waiting_input` or `waiting_approval` become `failed`, and `pending` Approvals become `expired` with their Action Log row `failed` and `error_message` `interrupted`. This runs in the start-up hook from `01-base-daemon-setup`.
+17a. An Approval for a write by an integration CLI (`run_integration`, `05-settings-dev-tools`) carries `trust_cli`. Approving it with `trust_session: true` ("Don't ask again this Session for <cli>") stores that CLI on the Session, and its later writes there run without an Approval until the Session is deleted. The other guards still apply.
+18. On daemon start, Sessions left `working`, `waiting_input` or `waiting_approval` become `failed` with run outcome `interrupted`, and `pending` Approvals become `expired` with their Action Log row `failed` and `error_message` `interrupted`. This runs in the start-up hook from `01-base-daemon-setup`.
 
 Claude accounts
 
-19. First start has no Claude account and no active account (`active_account_id` is `null`). The operator adds one; the first account to sign in becomes active, with no `account.switched` event. A message sent while no account is signed in is refused with `invalid_state`.
+19. First start has no Claude account and no active account (`active_account_id` is `null`). The operator adds one; the first account to sign in becomes active, with no `account.switched` event. A message sent while no account is signed in is refused with `invalid_state`, and so is one while every signed-in account is disabled (Behavior 28b).
 20. Adding an account takes no input. It creates a config dir under the data directory, labels the account `New account` and returns the sign-in command for that dir. The account's label is the email Claude reports: each check that finds an email sets it. Signing in an account runs `claude auth login` with that dir, in one of two ways. In this browser: the CLI opens Anthropic's page in a browser tab on this Mac and the daemon waits up to 5 minutes, then checks the account. By sign-in link: the CLI runs with `BROWSER=true`, so no tab opens, and the account carries the link the CLI prints in `sign_in_link`; the daemon waits up to 15 minutes. Anyone can open the link in any browser and sign in. Anthropic then shows a one-time code, which `POST /agent-accounts/:id/logins/code` writes to the CLI. A pasted address of that page is turned into the code. The request answers once the CLI took the code, with the account checked, or turned it down. The CLI ends its sign-in on a code it turns down, so the daemon starts a new sign-in by link on the same account and answers `validation_failed` with the CLI's reason; the old link no longer works. While either way waits the account reads `signing_in`; cancelling stops it. A Claude account is added once: an account whose check finds the email of another signed-in account is signed out again with `invalid_state`, and a new one is deleted. The tab shows nothing about it. A new account that never signed in is deleted when its sign-in is cancelled, declined, fails or times out. A shell credential (`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`) or API host (`ANTHROPIC_BASE_URL`) never reaches an added account's CLI or runs, because it would override the account's own sign-in. The only exception is the console's own CLIProxy key and address while the Claude account hub is on (Behavior 28a). The sign-in completes in Anthropic's own flow; the console never reads, stores or passes on a Claude token. The one-time code of a sign-in by link goes from the page to the CLI's input and is not kept; only that CLI process can trade it for a token.
-21. Checking an account runs the `claude` CLI's sign-in status with that account's config dir and stores `signed_in`, `email` and `plan`. The active account is always signed in, or there is none. When there is no active account, or the active one is signed out, an account that checks as signed in becomes active. An active account that checks as signed out hands over to another signed-in account, or leaves none active.
+21. Checking an account runs the `claude` CLI's sign-in status with that account's config dir and stores `signed_in`, `email` and `plan`. The active account is always signed in, or there is none. When there is no active account, or the active one is signed out, an enabled account that checks as signed in becomes active. An active account that checks as signed out hands over to another enabled, signed-in account, or leaves none active.
 21a. Signing an account out runs `claude auth logout` with its config dir, then checks it (Behavior 21). A run going on the account refuses it with `invalid_state`.
 22. Each rate-limit event from a run updates that account's 5-hour and weekly usage percentages, their reset times and `usage_seen_at`. A window past its reset time reads 0%. An account with no usage read yet reads usage unknown.
-22a. The daemon also reads the usage of each signed-in account on start, right after the account signs in, and every 5 minutes. It asks a Claude Code process under the account's config dir for its `/usage` numbers, which sends nothing to the model and spends no quota. The result is stored like a rate-limit event (Behaviors 22 and 24), so an idle account shows its 5-hour and weekly usage. A read that fails or returns no limits keeps the last values. A read that comes back as a different account than the row's email is not stored: the daemon checks the account again, as on a sign-in. A folder signed in as another added account is signed out, loses its usage, and hands the active account to the next signed-in one.
-23. Using an account makes it active. A run in progress finishes on its own account. The next run of a Session that ran under another account first copies the Session's transcript into the new account's config dir, so the conversation carries over, then resumes there. `account.switched` reports the change with reason `manual`, or `smart` when the account used is the Smart pick.
-24. With Smart usage on, the daemon makes the Smart pick the active account on its own, whenever usage is stored (Behaviors 22 and 22a), an account signs in, or Smart usage is turned on. The reason is `smart`. With Smart usage off and Auto-switch on, when the active account's 5-hour usage reaches the threshold (default 95%), the daemon makes the signed-in account with the lowest known 5-hour usage under the threshold active. The reason is `auto` with the percentage. With no candidate, the active account stays. Using an account by hand holds until the next stored usage; to stop the daemon moving off it, the operator turns Smart usage off.
-25. Smart rank: candidates are signed in, have known usage, a 5-hour usage under the threshold and a weekly usage under 100%. Score is (100 − weekly %) ÷ days until the weekly reset; highest first. When Smart usage is on and there is a top pick, the account list carries `smart_pick` and its reason, whether or not the pick is already active.
+22a. The daemon also reads the usage of each signed-in account on start, right after the account signs in, and every 5 minutes. It asks a Claude Code process under the account's config dir for its `/usage` numbers, which sends nothing to the model and spends no quota. The result is stored like a rate-limit event (Behaviors 22 and 24), so an idle account shows its 5-hour and weekly usage. An account with a run going is skipped, since its run reports usage itself. A read that fails or returns no limits keeps the last values, and the 5-minute poll leaves that account alone for twice as long after each failure in a row, up to an hour. A read that comes back as a different account than the row's email is not stored: the daemon checks the account again, as on a sign-in. A folder signed in as another added account is signed out, loses its usage, and hands the active account to the next signed-in one.
+23. Using an account makes it active; a disabled account is refused with `invalid_state`. A run in progress finishes on its own account. The next run of a Session that ran under another account first copies the Session's transcript into the new account's config dir, so the conversation carries over, then resumes there. `account.switched` reports the change with reason `manual`, or `smart` when the account used is the Smart pick.
+24. With Smart usage on, the daemon makes the Smart pick the active account on its own, whenever usage is stored (Behaviors 22 and 22a), an account signs in, or Smart usage is turned on. Rate-limit events from one account's runs trigger it at most every 10 seconds. The reason is `smart`. With Smart usage off and Auto-switch on, when the active account's 5-hour usage reaches the threshold (default 95%), the daemon makes the enabled, signed-in account with the lowest known 5-hour usage under the threshold active. The reason is `auto` with the percentage. With no candidate, the active account stays. Using an account by hand holds until the next stored usage; to stop the daemon moving off it, the operator turns Smart usage off.
+25. Smart rank: candidates are enabled, signed in, have known usage, a 5-hour usage under the threshold and a weekly usage under 100%. Score is (100 − weekly %) ÷ days until the weekly reset; highest first. When Smart usage is on and there is a top pick, the account list carries `smart_pick` and its reason, whether or not the pick is already active.
 26. A run rejected because its account hit a limit resumes once on a new account when Auto-switch picked one. The switch reason is `rate_limited`. Otherwise the Session ends `failed` with `rate_limited`.
-26a. A run that fails to authenticate (a saved sign-in that expired and cannot refresh, which `claude auth status` still reads as signed in) marks its account signed out. The active role moves to the account Auto-switch would pick, else any signed-in one, with reason `sign_in_failed`, and the run resumes once there. With none signed in, the Session ends `failed` with `unauthorized`.
-27. Removing an account signs it out of its config dir when it is signed in, deletes the row and its config dir, and sends `account.removed`; each Session on it gets its transcript copied to the active account first. Removing the active account hands over to another signed-in account, or leaves none active. An account with a run going is refused with `invalid_state`.
+26a. A run that fails to authenticate (a saved sign-in that expired and cannot refresh, which `claude auth status` still reads as signed in) marks its account signed out. The active role moves to the account Auto-switch would pick, else any enabled, signed-in one, with reason `sign_in_failed`, and the run resumes once there. With none signed in, the Session ends `failed` with `unauthorized`.
+27. Removing an account signs it out of its config dir when it is signed in, deletes the row and its config dir, and sends `account.removed`; each Session on it gets its transcript copied to the active account first. Removing the active account hands over to another enabled, signed-in account, or leaves none active. An account with a run going is refused with `invalid_state`.
 28. The `agent_accounts` setting holds the active account, Auto-switch on or off, the threshold and Smart usage on or off. A threshold outside 50 to 100 is refused with `validation_failed`.
-28a. The `cliproxy` setting holds the Claude account hub: `enabled` and `address`, off and `http://127.0.0.1:8317` by default. An address that is not on this Mac (`127.0.0.1`, `localhost` or `[::1]`, any port) is refused with `validation_failed`: the agent's prompts and code go there (ADR 0003). The key is one of CLIProxy's `access.api-keys`. `PUT /cliproxy/key` keeps it in the Keychain as `cliproxy:api-key` (ADR 0004), and no answer carries it. `DELETE /cliproxy/key` removes it and turns the hub off. `GET /cliproxy` answers with `enabled`, `address`, `has_key` and the last check. `POST /cliproxy/checks` asks `<address>/v1/models` with the key and stores `connected` (200), `refused` (401 or 403) or `unreachable`. The daemon also checks on start, when a key is saved and when the setting changes. While the hub is on, a run's `claude` gets `ANTHROPIC_BASE_URL` set to the address and `ANTHROPIC_AUTH_TOKEN` to the key, on top of the account's environment. The Setup agent's terminal gets the same. The run still goes under the active account, or the first one, signed in or not: that account's config dir keeps the conversations and MCP servers. With no account at all, a run is refused with `invalid_state`, and so is one while the hub has no key. CLIProxy picks the Claude account itself, so Auto-switch and Smart usage do nothing. A rate limit or a refused key does not switch accounts or sign one out (Behaviors 26 and 26a), and a run's rate-limit events do not update any account's usage. The tab shows the hub above the accounts. Use CLIProxy turns on only once the last check is `connected`, so it stays greyed while CLIProxy is not installed or not running, and says to install it (`brew install cliproxyapi`), start it and Check. Turning it off never waits. While it is on, the accounts and Account switching are greyed and out of reach, keyboard included, and the sidebar foot shows CLIProxy's state in place of the active account's usage.
+28a. The `cliproxy` setting holds the Claude account hub: `enabled` and `address`, off and `http://127.0.0.1:8317` by default. An address that is not on this Mac (`127.0.0.1`, `localhost` or `[::1]`, any port) is refused with `validation_failed`: the agent's prompts and code go there (ADR 0003). The key is one of CLIProxy's `access.api-keys`. `PUT /cliproxy/key` keeps it in the Keychain as `cliproxy:api-key` (ADR 0004), and no answer carries it. `DELETE /cliproxy/key` removes it and turns the hub off. `GET /cliproxy` answers with `enabled`, `address`, `has_key` and the last check (`status`, `status_detail`, `checked_at`). `POST /cliproxy/checks` asks `<address>/v1/models` with the key and stores `connected` (200), `refused` (401 or 403) or `unreachable` (no answer, or any other status). `GET /cliproxy` reads `no_key` while no key is saved and `unchecked` until the first check. The daemon also checks on start, when a key is saved and when the setting changes. While the hub is on, a run's `claude` gets `ANTHROPIC_BASE_URL` set to the address and `ANTHROPIC_AUTH_TOKEN` to the key, on top of the account's environment. The Setup agent's terminal gets the same. The run still goes under the active account, or the first one, signed in or not: that account's config dir keeps the conversations and MCP servers. With no account at all, a run is refused with `invalid_state`, and so is one while the hub has no key. CLIProxy picks the Claude account itself, so Auto-switch and Smart usage do nothing. A rate limit or a refused key does not switch accounts or sign one out (Behaviors 26 and 26a), and a run's rate-limit events do not update any account's usage. The tab shows the hub above the accounts. Use CLIProxy turns on only once the last check is `connected`, so it stays greyed while CLIProxy is not installed or not running, and says to install it (`brew install cliproxyapi`), start it and Check. Turning it off never waits. While it is on, the accounts and Account switching are greyed and out of reach, keyboard included, the Enable switches are refused with `invalid_state`, and the sidebar foot shows CLIProxy's state in place of the active account's usage. Runs record no account in their usage.
+28b. A disabled account stays signed in, but no run starts or moves onto it: Use, the Smart pick, Auto-switch and failover skip it, and the active role moves off it with reason `disabled`. A run going on it finishes. `PATCH /agent-accounts/:id` with `{ enabled }` sets it. Enabling an account while none is active makes it active. A message while every signed-in account is disabled is refused with `invalid_state`. The Enable switch and the Usage tab are in [account-switch-and-usage](account-switch-and-usage.md).
 
 ## Settled
 
-- **Runtime**: `@anthropic-ai/claude-agent-sdk` `query()` with `resume` set to the stored SDK session id. The run's `env` carries the account's `CLAUDE_CONFIG_DIR`, and `CLAUDE_CODE_MCP_STARTUP_WAIT_MS` of 30 s: Claude Code would otherwise let the model in while slow servers (Firebase starts through `npx` in about 10 s) still connect, and the turn would see them as missing.
+- **Runtime**: `@anthropic-ai/claude-agent-sdk` `query()` with `resume` set to the stored SDK session id. The run's `env` carries the account's `CLAUDE_CONFIG_DIR`, and `CLAUDE_CODE_MCP_STARTUP_WAIT_MS` of 10 s, or 0 for a run that starts no MCP server (`agent/mcp-scope.ts`): Claude Code would otherwise let the model in while slow servers (Firebase starts through `npx` in about 10 s) still connect, and the turn would see them as missing.
 - **Transcript reads**: `getSessionMessages()` with the run's working directory, under the Session's account. Documented in the SDK.
 - **Moving a transcript**: copying the session file into another config dir's `projects/` before `resume` is the documented way to resume elsewhere.
-- **Parts**: `text`, `step`, `diff`, `code`, `question`. `result` and `comparison` belong to `10-dev-tools-compare`.
+- **Parts**: `text`, `step`, `diff`, `code`, `question`, and `spawn` (`spawn-parallel-sessions`). `result` and `comparison` belong to `10-dev-tools-compare`.
 - **Effort**: `ultrathink` runs at the SDK's `max`; the other levels pass through as they are.
 - **Guards**: the PROD-write check and the Action Log write are `PreToolUse` hooks, which run before every other permission step and can deny even in `bypassPermissions`. The merge denial is a scoped `disallowedTools` rule, which holds in every mode. `supervised` prompts reach `canUseTool`.
 - **Action Log scope**: every Bash call and every MCP tool call. File reads and edits inside the working directory are not logged; the diff shows them.
@@ -89,7 +94,7 @@ Claude accounts
 - **Smart usage acts by itself**: turning it on is the operator's approval to switch to the Smart pick without asking. Turning it off stops that. Its switch can undo a manual Use at the next stored usage.
 - **Settings hook**: a registered setting may carry an `onChange` callback that `PATCH /settings` calls once the new value is stored. `agent_accounts` uses it so turning Smart usage on switches at once.
 - **Defaults**: `session_defaults` is `{ "model": "claude-sonnet-5-5", "effort": "high", "access_mode": "supervised" }`. `agent_accounts` starts as Auto-switch on, threshold 95, Smart usage on, matching the design.
-- **Design departure reversed**: `docs/architecture.md` lists account rotation as out until Anthropic's terms are checked. The operator chose the full tab; `/ship` updates `architecture.md` and records the risk in Safety below.
+- **Design departure**: the operator chose the full tab, with account switching; the terms risk is recorded in Safety below.
 - **Concurrency**: one run per Session at a time (`session_busy`); a switch of the active account never moves a run in progress.
 
 ## Not required
@@ -120,6 +125,7 @@ CREATE TABLE claude_accounts (
   config_dir           TEXT,                     -- CLAUDE_CONFIG_DIR, set on every row
   position             INTEGER NOT NULL,         -- order in the list
   signed_in            INTEGER NOT NULL DEFAULT 0 CHECK (signed_in IN (0, 1)),
+  enabled              INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),  -- 0: no run starts or moves onto it
   email                TEXT,                     -- from the CLI's sign-in status
   plan                 TEXT,                     -- as the CLI reports it, for example 'Max 20x'
   five_hour_pct        REAL,                     -- null: unknown
@@ -177,7 +183,7 @@ CREATE TABLE approvals (
 CREATE INDEX approvals_pending_idx ON approvals (requested_at) WHERE status = 'pending';
 ```
 
-Later specs add columns with `ALTER TABLE … ADD COLUMN`: `sessions.repo_id`, `branch` and `pr_number` (`07-workspace`) and `sessions.alert_id` (`08-monitor-dashboard`); `action_log.connection_id` (`05-settings-dev-tools`) and `action_log.alert_id` (`08-monitor-dashboard`), each a nullable reference with no default. A `devtools` Session's Connection scope lives in its own table (`09-dev-tools-agent`). A plain id without a foreign key was the alternative; a reference keeps `ON DELETE SET NULL` working.
+Later specs add columns with `ALTER TABLE … ADD COLUMN`: `sessions.repo_id`, `branch`, `pr_number` and `extra_repo_ids` (`07-workspace`, `open-other-repos-to-session`), `sessions.pr_action` and its result columns (`pr-actions-open-sessions`), `sessions.alert_id` (`08-monitor-dashboard`), `sessions.trusted_clis` (Behavior 17a), `sessions.run_started_at`, `run_finished_at`, `run_outcome`, `run_subagents`, `run_limit_since` and `run_limit_resets_at` (Behavior 5, `agent-runs-page`), `sessions.queued_text` (Behavior 7a) and `sessions.spawned_by_session_id` and `spawn_call_id` (`spawn-parallel-sessions`); `approvals.trust_cli` (Behavior 17a); `action_log.connection_id` (`05-settings-dev-tools`) and `action_log.alert_id` (`08-monitor-dashboard`), each a nullable reference with no default. A `devtools` Session's Connection scope lives in its own table (`09-dev-tools-agent`). A plain id without a foreign key was the alternative; a reference keeps `ON DELETE SET NULL` working.
 
 Enums live in code only (`01-base-daemon-setup`):
 
@@ -189,11 +195,12 @@ Enums live in code only (`01-base-daemon-setup`):
 | `AccessMode` | `supervised`, `accept_edits`, `auto`, `full` | `sessions.access_mode` |
 | `SessionState` | `idle`, `working`, `waiting_input`, `waiting_approval`, `failed` | `sessions.state` |
 | `ActionActor` | `agent`, `operator` | `action_log.actor` |
-| `ActionKind` | `query`, `shell`, `message`, `git`, `pr`, `ticket` | `action_log.kind` |
+| `ActionKind` | `query`, `shell`, `message`, `git`, `pr`, `ticket`, `skill` | `action_log.kind` |
 | `ActionOutcome` | `pending`, `ok`, `failed`, `denied` | `action_log.outcome` |
 | `ApprovalKind` | `prod_write`, `command`, `edit` | `approvals.kind` |
 | `ApprovalStatus` | `pending`, `approved`, `denied`, `expired` | `approvals.status` |
-| `SwitchReason` | `manual`, `auto`, `smart`, `rate_limited`, `sign_in_failed` | `account.switched` event |
+| `SwitchReason` | `manual`, `auto`, `smart`, `rate_limited`, `sign_in_failed`, `disabled` | `account.switched` event |
+| `RunOutcome` | `done`, `stopped`, `paused`, `failed`, `rate_limited`, `signed_out`, `interrupted` | `sessions.run_outcome` |
 
 Migration: no existing rows. A database from the build that seeded a `default` account (no `config_dir`) loses that row: it is deleted, its Sessions lose their account, and the first signed-in added account becomes active. The migration creates the tables in the order above and the `settings` keys `session_defaults` (Settled) and `agent_accounts` `{ "active_account_id": null, "auto_switch": true, "threshold": 95, "smart_usage": true }`.
 
@@ -215,27 +222,32 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 { "kind": "diff",     "file": "string", "lines": [{ "sign": "+ | - | ' '", "text": "string" }] }
 { "kind": "code",     "lang": "string", "text": "string" }
 { "kind": "question", "text": "string", "header": "string", "multi_select": false, "options": [{ "label": "string", "description": "string" }] }
+{ "kind": "spawn",    "call_id": "string", "entries": [{ "repo": "string", "task": "string" }] }
 ```
 
-`Session`: every `sessions` column except `sdk_session_id`, plus the fields later specs add: `repo_id`, `branch` and `pr_number` (`07-workspace`), `connection_ids` (`09-dev-tools-agent`), and `alert_id`: the Monitor Alert whose Verification or Fix runs in it, null for any other Session (`08-monitor-dashboard`).
+`Session`: every `sessions` column the page needs, without `sdk_session_id`, plus the fields later specs add: `repo_id`, `branch`, `pr_number`, `pull_request`, `pull_requests` and `extra_repo_ids` (`07-workspace`, `session-pull-requests`), `pr_action` (`pr-actions-open-sessions`), `connection_ids` (`09-dev-tools-agent`), `playbook` (`agent-playbooks`), `spawned_by`, `spawned` and `subagents` (`spawn-parallel-sessions`, `session-panel-and-subagents`), `queued_message` (Behavior 7a), `last_error` (why the last run failed, when the console can say), and `alert_id`: the Monitor Alert whose Verification or Fix runs in it, null for any other Session (`08-monitor-dashboard`).
 
-`Message`, read from the transcript: `id` (the transcript entry id), `role` (`user | agent`), `status` (`streaming | done | failed`), `parts: Part[]`, `created_at`.
+`Message`, read from the transcript: `id` (the transcript entry id), `role` (`user | agent`), `status` (`streaming | done | failed`), `parts: Part[]`, `created_at`, and `skill`, the Skill a user message was sent with (`playbook-skills`).
 
-`ClaudeAccount`: every `claude_accounts` column except `config_dir`, plus `is_active`, `signing_in` (a sign-in is waiting; held in memory), `sign_in_link` (`{ url, expires_at }` while a sign-in by link waits, `url` `null` until the CLI prints it; else `null`; held in memory), and `smart_note` when Smart usage is on (for example "5-hour window nearly full, skipped" or "65% weekly left ÷ 2d = 32.5% / day").
+`ClaudeAccount`: every `claude_accounts` column except `config_dir`, with usage percentages read as 0 once their window has reset, plus `is_active`, `signing_in` (a sign-in is waiting; held in memory), `sign_in_link` (`{ url, expires_at }` while a sign-in by link waits, `url` `null` until the CLI prints it; else `null`; held in memory), and `smart_note` when Smart usage is on (for example "5-hour window nearly full, skipped" or "65% weekly left ÷ 2d = 32.5% / day").
 
 ### Sessions
 
 | Method and path | Body | Returns |
 | --------------- | ---- | ------- |
-| `GET /sessions` | query `kind?`, `q?` (title search) | `Session[]`, newest `last_active_at` first; Sessions of a Repo removed with its Sessions kept are left out (`07-workspace` Behavior 3) |
+| `GET /sessions` | query `kind?`, `q?` (title search), `limit?`, `cursor?` | `Session[]` with `meta.next_cursor`, newest `last_active_at` first; Sessions of a Repo removed with its Sessions kept are left out (`07-workspace` Behavior 3) |
 | `GET /sessions/:id` | | `Session` |
-| `PATCH /sessions/:id` | `{ title?, model?, effort?, access_mode? }`, plus `connection_ids?` on a `devtools` Session (`09-dev-tools-agent`) | `Session` |
+| `PATCH /sessions/:id` | `{ title?, model?, effort?, access_mode? }`, plus `connection_ids?` on a `devtools` Session (`09-dev-tools-agent`) and `extra_repo_ids?` (`open-other-repos-to-session`) | `Session` |
 | `DELETE /sessions/:id` | | 204; `session_busy` |
 | `POST /sessions/:id/messages/:message_id/edit` | `{ text }` | 202 `{ message_id, reverted: { files, insertions, deletions } \| null, revert_error }`; `invalid_state` for any message but the last; `session_busy` (Behavior 8a) |
+| `POST /sessions/:id/warm` | | 204; starts a spare Claude Code process for the next message (Behavior 2); `session_busy` while a run goes |
 | `POST /sessions/:id/stop` | | 204; `invalid_state` with no run going (Behavior 11a) |
 | `POST /sessions/:id/pause` | | 204; ends the run like stop and keeps it in the Running tray for Play; `invalid_state` with no run going |
+| `PUT /sessions/:id/queue` | `{ text }` | `{ queued }`: `true` when the message waits behind the run, `false` when no run went and it was sent (Behavior 7a) |
+| `DELETE /sessions/:id/queue` | | 204; takes the queued message back |
+| `POST /sessions/:id/queue/send` | | 204; sends the queued message now, stopping a run that goes; `invalid_state` with none queued |
 | `POST /sessions/:id/resume` | | 202 `{ message_id }`; starts a paused, stopped or failed run again; `session_busy` while one goes |
-| `GET /agent-runs` | | `AgentRun[]`: runs going, then runs that ended unfinished and were not dismissed, newest first |
+| `GET /agent-runs` | | `AgentRun[]`: runs going, then runs that ended unfinished and were not dismissed, newest first; the other `/agent-runs` routes are in `agent-runs-page` |
 | `DELETE /agent-runs/:session_id` | | 204; takes an ended run out of the tray; `session_busy` while it goes |
 | `GET /sessions/:id/messages` | | `Message[]` oldest first, the in-flight message included; empty with no transcript |
 
@@ -244,10 +256,10 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 ### `POST /sessions/:id/messages`
 
 ```json
-{ "text": "string" }
+{ "text": "string", "skill": { "kind": "builtin | custom | project", "name": "string" } }
 ```
 
-Returns 202 with `{ "data": { "message_id": "string" } }`. The reply arrives through `session.output`. Errors: `session_busy`; `invalid_state` when the kind's spec forbids messages (`pr_review`).
+`skill` is optional (`playbook-skills`). Returns 202 with `{ "data": { "message_id": "string" } }`. The reply arrives through `session.output`. Errors: `session_busy`; `invalid_state` when the kind's spec forbids messages (`pr_review`).
 
 ### Approvals and Action Log
 
@@ -259,16 +271,19 @@ Returns 202 with `{ "data": { "message_id": "string" } }`. The reply arrives thr
 
 ### Claude accounts
 
+`GET /agent-accounts/usage` is in [account-switch-and-usage](account-switch-and-usage.md), and the Claude account hub routes (`GET /cliproxy`, `PUT` and `DELETE /cliproxy/key`, `POST /cliproxy/checks`) are in Behavior 28a.
+
 | Method and path | Body | Returns |
 | --------------- | ---- | ------- |
 | `GET /agent-accounts` | | `ClaudeAccount[]` by `position`. `meta` adds `active_account_id` (`null` with no account) and `smart_pick: { account_id, reason } \| null` |
 | `POST /agent-accounts` | none | 201 `{ account: ClaudeAccount, sign_in_command: "string" }` |
+| `PATCH /agent-accounts/:id` | `{ enabled: boolean }` | `ClaudeAccount` (Behavior 28b); `invalid_state` while CLIProxy is on |
 | `POST /agent-accounts/:id/checks` | | `ClaudeAccount` after the CLI's sign-in status |
 | `POST /agent-accounts/:id/logout` | | `ClaudeAccount` after the sign-out; `invalid_state` (Behavior 21a) |
 | `POST /agent-accounts/:id/logins` | `{ via?: "browser" \| "link" }` (default `browser`) | `ClaudeAccount` with `signing_in: true`; the account is checked when the sign-in ends |
 | `POST /agent-accounts/:id/logins/code` | `{ code: "string" }`: the code, or the address of the page showing it | `ClaudeAccount` once signed in; `validation_failed` when the CLI turns the code down (a new link is ready); `invalid_state` when no sign-in by link waits |
 | `DELETE /agent-accounts/:id/logins` | | 204; stops a waiting sign-in |
-| `POST /agent-accounts/:id/activate` | | `ClaudeAccount`; `invalid_state` unless signed in |
+| `POST /agent-accounts/:id/activate` | | `ClaudeAccount`; `invalid_state` unless signed in and enabled |
 | `DELETE /agent-accounts/:id` | | 204; `invalid_state` (Behavior 27) |
 
 Session defaults and the Auto-switch, threshold and Smart usage values change through `PATCH /settings` keys `session_defaults` and `agent_accounts` (`01-base-daemon-setup`), validated as in Behavior 28.
@@ -294,7 +309,7 @@ Server to client, when a run ends.
 Server to client, when a Session's title, state, account or settings change.
 
 ```json
-{ "session_id": "uuid", "title": "string", "state": "SessionState", "account_id": "uuid | null" }
+{ "session_id": "uuid", "title": "string", "state": "SessionState", "account_id": "uuid | null", "branch": "string | null" }
 ```
 
 ### WebSocket `approval.requested`
@@ -334,7 +349,7 @@ Server to client, when an account is deleted, including an abandoned first sign-
 Server to client, when an account's sign-in or usage changes.
 
 ```json
-{ "account_id": "uuid", "signed_in": true, "five_hour_pct": "number | null", "weekly_pct": "number | null", "usage_seen_at": "string | null" }
+{ "account_id": "uuid", "signed_in": true, "enabled": true, "five_hour_pct": "number | null", "weekly_pct": "number | null", "usage_seen_at": "string | null" }
 ```
 
 ### WebSocket `account.switched`
@@ -347,21 +362,24 @@ Server to client, when the active account changes.
 
 ## UI
 
-Agents & accounts, as the design shows:
+Accounts & Usage, a page under Claude in the sidebar at `/agents`, has two tabs, Accounts and Usage; the Accounts tab carries a count of accounts. The Accounts tab holds the sections below, top to bottom: Claude account hub, Claude Code accounts, Account switching, Defaults for new sessions and Notifications. The Usage tab is in [account-switch-and-usage](account-switch-and-usage.md). Account rows, Auto-switch, Smart usage and the defaults are as the design shows:
 
-- **Accounts**: rows A→Z by label (the account's email), numbered 01, 02, …, each with its plan, a 5-hour bar with "resets in", and a weekly bar with "resets in Nd". The 5-hour bar turns accent at 90%, the weekly bar at 80%. The active row is shaded; others have Use. "SMART PICK" marks the pick. The tab re-reads the accounts every 10 seconds while it is open. A signed-in row always shows both bars; with usage unknown the bars are empty and read "no usage yet". Only a signed-in active row is shaded and badged ACTIVE. Under the bars a signed-in row shows its `smart_note` and how long ago its usage was seen. A row not signed in reads "Not signed in." and shows Sign in, which opens Anthropic's sign-in in the browser; while it waits the row reads "Finish signing in with Anthropic in your browser." and shows Re-login, which opens the browser sign-in again, and Cancel, which also deletes an account that never signed in. A row waiting for a sign-in by link reads "Waiting for a sign-in through the link." and shows Show link in place of Re-login.
-- **Smart banner**: when `smart_pick` is set and there is more than one account, the reason ("65% of its weekly quota is left and it resets in 2 days, use it first") and a line that it is used automatically while Smart usage is on. No Use button; the pick row carries SMART PICK.
+- **Accounts**: rows A→Z by label (the account's email), numbered 01, 02, …, each with its plan, a 5-hour bar with "resets in", and a weekly bar with "resets in Nd". The 5-hour bar turns accent at 90%, the weekly bar at 80%. The active row is shaded; others have Use, which is greyed with "Enable this account first" while the account is disabled. "SMART PICK" marks the pick, and "DISABLED" marks a disabled account, whose row is dimmed. The tab re-reads the accounts every 10 seconds while it is open. A signed-in row always shows both bars; with usage unknown the bars are empty and read "no usage yet". Only a signed-in active row is shaded and badged ACTIVE. Under the bars a signed-in row shows its `smart_note` and "usage seen <age> ago"; a disabled row reads "Disabled: skipped by Use, Smart pick and failover. Runs going on it finish." in their place. A row not waiting for sign-in carries an Enabled or Disabled switch (Behavior 28b); turning it off for the active account asks first and names the account runs move to. A row not signed in reads "Not signed in." and shows Sign in, which opens Anthropic's sign-in in the browser; while it waits the row reads "Finish signing in with Anthropic in your browser." and shows Re-login, which opens the browser sign-in again, and Cancel, which also deletes an account that never signed in. A row waiting for a sign-in by link reads "Waiting for a sign-in through the link." and shows Show link in place of Re-login.
+- **Smart banner**: in Account switching, when `smart_pick` is set and there is more than one account: "<account> is the smart pick: <reason>. It is used automatically; turn Smart usage off to stop that." The reason reads "65% of its weekly quota is left and it resets in 2 days, use it first". No Use button; the pick row carries SMART PICK.
 - **Auto-switch accounts**: toggle, and the threshold field while it is on. Text: "When the active account reaches 95% of its usage window, the session moves to the next account with headroom. Context carries over.", with the threshold set in place of 95.
 - **Smart usage**: toggle. Text: "Uses the account whose weekly quota would otherwise go unused first: weekly % left ÷ days until weekly reset. Accounts with a full 5-hour window are skipped."
-- **No account yet**: the tab holds a short note and the two Add buttons, nothing else.
-- **Accounts, none signed in**: the account list and the two Add buttons show under a banner that says to sign in. Auto-switch, Smart usage, and the defaults appear once one account is signed in.
+- **No account yet**: the accounts section holds "No Claude account yet. Add one to run agents; the usage and session settings appear once it is signed in." and the two Add buttons. The Claude account hub and Notifications show as always; Account switching and the defaults wait for a signed-in account.
+- **Accounts, none signed in**: the account list and the two Add buttons show under a "Sign in to a Claude account" banner. Auto-switch, Smart usage, and the defaults appear once one account is signed in.
 - **Row actions**: a signed-in row has Use (when not active), Re-login and Log out. Re-login runs the same browser sign-in; Log out is Behavior 21a. Every row except one waiting for sign-in has a trash icon that removes the account (Behavior 27); a waiting row has Cancel instead.
 - **Add buttons**: two, named for how the account signs in. Add in this browser adds the account and opens Anthropic's sign-in in a browser tab on this Mac. Add by sign-in link adds the account, starts a sign-in by link and opens the Sign in by link dialog. Either way the row shows the Claude email once the sign-in finishes.
 - **Sign in by link dialog**: says the agent then runs on that account's subscription. Step 1 shows the link (host in bold, cut to fit) with Copy link and Open link, which opens it in a new tab. Step 2 is a box for the code, or the address of the page showing it, and Sign in with code; Enter sends. A code turned down shows the CLI's reason, and step 1 shows the new link. The footer counts down to when the link stops working and has Cancel sign-in. Closing the dialog keeps the sign-in waiting; the row's Show link opens it again. Once signed in it reads "Signed in as <email>." A sign-in that stopped offers New link; an account removed with it says to add it again.
 - **Defaults**: Default model, Default effort, Default access, with the design's descriptions.
-- **Session composer chips** (Model, Effort, Access) write `PATCH /sessions/:id`. Approval prompts list pending Approvals as cards: an icon for the kind (production write, action or file edit), "Approval needed" with that kind and a PROD badge, the summary, the command in a mono block when there is one, and Approve and Deny with a line saying Approve lets the agent run it once.
-- States: loading; error from `GET /agent-accounts` with Retry; one account only hides the Smart banner.
-- Each switch leaves a line in the Session's output: "⇄ Smart usage: operator → operator.personal · session context carried over", built from `account.switched` (the reason reads "Smart usage", "Auto-switch at 95%", "Switched manually" or "Rate limit"), not stored.
+- **Session composer chips** (Model, Effort, Access) write `PATCH /sessions/:id`. Approval prompts list pending Approvals as cards: an icon for the kind (production write, action or file edit), "Approval needed" with that kind and a PROD badge, the summary, the command in a mono block when there is one, and Approve and Deny with a line saying Approving lets the agent run this once. An Approval with `trust_cli` also offers "Don't ask again this Session for <cli>" (Behavior 17a).
+- States: "Loading agents…"; "Could not load the Claude accounts." with Retry when `GET /agent-accounts` or the settings fail; one account only hides the Smart banner.
+- **Claude account hub**: a section above the accounts, with Use CLIProxy (toggle), Address (a field with Save), API key (a password field with Save, and Remove once one is saved), a status line (Connected, No API key, Not checked yet, Key refused or Not reachable, with the detail and when it was checked) with Check, and Open CLIProxy ↗, which opens CLIProxy's own panel. While the hub is on, a note says CLIProxy manages Claude accounts and quota, and the accounts and Account switching are greyed.
+- **All disabled**: while every signed-in account is disabled and the hub is off, a banner on both tabs reads "Every Claude account is disabled. New runs fail until one is enabled."; on the Usage tab it links to the Accounts tab.
+- **Notifications**: Sound when the agent finishes (toggle, with Play), Volume (a slider, 0 to 100 in steps of 5, greyed with the sound off; releasing it plays the chime), Alert when a run needs me, Alert when a run ends, and Alert when a connection or integration breaks (desktop alerts, each a toggle; `agent-runs-page`, `automatic-health-checks`). Each is kept per browser. A link to `#notifications` lands on this section. If the browser refuses notifications, the section says to allow them for the site.
+- Each switch refreshes the account list and the sidebar foot, which shows the active account's email, ACTIVE and its two usage bars.
 
 ## Rejected
 
@@ -385,15 +403,15 @@ Agents & accounts, as the design shows:
 
 ## Seams
 
-- **Backend + SQLite, over HTTP** (temporary data directory, a fake Agent SDK that replays scripted runs and rate-limit events and serves transcripts, a fake `claude` CLI): 1, 2, 3, 5, 6, 7, 9, 10, 11, 16, 17, 18, 19, 20, 21, 21a, 22, 22a, 23, 24, 26, 27, 28. Sessions are created through the shared creation step the kind specs call.
-- **Backend + SQLite, over WebSocket**: 4, 8, 12, 13, 14, 23, 24. Asserts streaming, the reload continuation, Approvals held in `full` mode, the merge denial, Action Log events and switch events.
+- **Backend + SQLite, over HTTP** (temporary data directory, a fake Agent SDK that replays scripted runs and rate-limit events and serves transcripts, a fake `claude` CLI): 1, 2, 3, 5, 6, 7, 7a, 9, 10, 11, 16, 17, 17a, 18, 19, 20, 21, 21a, 22, 22a, 23, 24, 26, 26a, 27, 28, 28a, 28b. Sessions are created through the shared creation step the kind specs call.
+- **Backend + SQLite, over WebSocket**: 4, 5a, 8a, 11a, 12, 13, 14, 23, 24. Asserts streaming, the reload continuation, Approvals held in `full` mode, the merge denial, Action Log events and switch events.
 - **Unit**: 15, 25. Redaction and the Smart rank.
 
 ## Out of scope
 
 - Session kinds and their creation, working directories, Connection scope and the "go" shortcut: `07-workspace`, `09-dev-tools-agent`, `08-monitor-dashboard`.
 - The PROD-write rule and Access Level launch arguments: `05-settings-dev-tools`.
-- MCP registrations per account: `03-settings-mcp-servers` must register every server in every account's config dir, and register them on a new account after sign-in. Until then a new account's runs see no MCP servers.
-- Pasting a sign-in code, and a terminal that runs the sign-in command: `07-workspace` if it is ever needed.
+- MCP registrations per account: `03-settings-mcp-servers`. Each account's config dir holds its own registrations, and a server registers in an account that lacks it when the operator reconnects it.
+- A terminal that runs the sign-in command: `07-workspace` if it is ever needed.
 - Codex and other agents: a later spec.
 - Daemon, storage, envelopes, the `settings` table, the start-up hook, the `claude` CLI wrapper: `01-base-daemon-setup`.

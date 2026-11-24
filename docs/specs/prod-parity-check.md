@@ -16,10 +16,10 @@ merge the Alert shows `resolved` at once, though nothing has shown that prod is 
 
 ### Freshness
 
-1. Each Alert shows its Freshness: "last scanned 9h ago", on the Alert row and in the Alert's header above the
-   Report panel. It counts
-   from the end of the newest Scan with status `ok` whose Services and status codes include the Alert's. A `failed`,
-   `rate_limited` or `running` Scan does not count.
+1. An Alert's header above the Report panel shows its Freshness: "last scanned 9h ago". It counts
+   from the end of the newest Scan with status `ok` that read the Alert's log source and env and whose Services and
+   status codes include the Alert's. A `failed`, `rate_limited`, `cancelled` or `running` Scan does not count. The
+   Alerts table shows it only as the warning in 2 and 3.
 2. Past two Check intervals the text becomes a warning badge, "last scanned 9h ago · a Scan was missed". The
    interval is the Service's own, or the one its Scans use when the Service has none.
 3. An Alert no Scan has covered since the console recorded Scans shows "never scanned" as a warning.
@@ -28,15 +28,15 @@ merge the Alert shows `resolved` at once, though nothing has shown that prod is 
 
 ### Recheck
 
-5. Pressing Verify or starting a Fix first reads Datadog once for the Alert: its `datadog_query` over the last hour,
-   in the Alert's Service and env, through `pup`, with no model turn. The result is one of `still_failing` (at least
+5. Pressing Verify or starting a Fix first reads the Alert's log source once: the Alert's stored `source_query` over
+   the last hour, in the Alert's Service and env, through the source's reader, with no model turn. The result is one of `still_failing` (at least
    one log) or `not_seen` (none).
-6. The Recheck result goes into the agent's brief as one line: "Datadog recheck, last hour: still failing" or "not
-   seen". A Recheck that failed puts "could not be read (<reason>)" in its place. The agent's run starts either way: a
+6. The Recheck result goes into the agent's brief as one line: "<source> recheck, last hour: still failing" or "not
+   seen", with the source's name, such as "Datadog" or "Loki logs". A Recheck that failed puts "could not be read (<reason>)" in its place. The agent's run starts either way: a
    Recheck never blocks Verify or Fix.
 7. A Verification writes the result as the first step of its Report, so the Report panel shows it after a reload. A
    Fix has no Report: its result reaches only the brief.
-8. A Recheck that fails (Datadog rate limit, `pup` signed out, a timeout) writes "Recheck failed: <reason>", and the
+8. A Recheck that fails (a rate limit, a source signed out, a timeout) writes "Recheck failed: <reason>", and the
    run goes on. A rate limit does not retry.
 9. A Recheck is made for every Verification and every Fix start, including a retry. A Recheck result is never
    cached. A retried Verification resumes its conversation, so its new Recheck reaches the Report as a step and not
@@ -105,7 +105,7 @@ merge the Alert shows `resolved` at once, though nothing has shown that prod is 
 
 ## Safety
 
-No change. The Recheck is a fixed `pup` read of logs, the same reach as a Scan, with no model turn. The agent's tools,
+No change. The Recheck is a fixed read of the Alert's log source, the same reach as a Scan, with no model turn. The agent's tools,
 Connections and approvals are as before. It still never merges.
 
 ## Database
@@ -148,7 +148,8 @@ reload.
 
 Monitor: the Alert row and the Report panel, following "Report v2" in `design/ops-console.html`.
 
-- **Alert row**: beside the Route, "last scanned 9h ago". Past the threshold or never scanned, it is a warning badge.
+- **Alert row and header**: the row shows a warning badge under the Route only when a Scan was missed or none
+  happened; the header always shows "last scanned 9h ago", as a warning badge past the threshold or never scanned.
   Past the threshold its Tip says: "No Scan has read this Service for 2 Check intervals. The failure may be gone." For
   never scanned it says: "No Scan has read this Service since the console began recording Scans."
 - **Resolved row and header**: "Merged, not yet seen healthy in prod" beside the status. Tip: "The
@@ -175,7 +176,7 @@ Departure from the design: all three texts are new.
   Check intervals.
 - **Prod parity**: the section of a Report or pull request description that says how the run differed from prod: code
   version, data, configuration and environment, dependencies.
-- **Recheck**: one read of Datadog for an Alert's query over the last hour, made when a Verification or Fix
+- **Recheck**: one read of the Alert's log source for its query over the last hour, made when a Verification or Fix
   starts, with no model turn.
 
 ## ADR
@@ -184,7 +185,7 @@ None. Each decision is easy to reverse.
 
 ## Seams
 
-- **Backend + SQLite** (`backend/test/monitor.test.ts`, with its Datadog stub): Behaviors 1 to 3 (Freshness and
+- **Backend + SQLite** (`backend/test/monitor.test.ts`, with its log source stubs): Behaviors 1 to 3 (Freshness and
   `scan_overdue`), 4 (Freshness reads `ok` Scans only), 5 to 9 (Recheck, brief, first Report step, failure, every start), 10 to 13
   (version step and its warning), 14 and 16 to 17 (the closing turn and PR instruction carry the section), 18 to 21
   (`awaiting_prod_check`), 22 to 25 (no regression, two Alerts, reload, PROD).

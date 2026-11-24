@@ -301,7 +301,7 @@ export function consoleToolsServer(
         ? [
             tool(
               'save_file',
-              "Copies a file, or a whole folder with its files, from your output folder into a folder the operator names, such as ~/Downloads or ~/Documents. Your commands cannot write there, in any Access mode. The operator approves first unless the Session has full access. Give the name of the file or folder in your output folder and the destination folder's absolute path. A folder is copied as a new folder of that name inside the destination, so to make ~/Documents/sample-project, build sample-project in your output folder and save it to ~/Documents. A folder or file that is already there is never merged into; a file of the same name is replaced.",
+              "Copies a file, or a whole folder with its files, from your output folder into a folder the operator names, such as ~/Downloads or ~/Documents. The operator approves first unless the Session has full access. Give the name of the file or folder in your output folder and the destination folder's absolute path. A folder is copied as a new folder of that name inside the destination, so to make ~/Documents/sample-project, build sample-project in your output folder and save it to ~/Documents. A folder or file that is already there is never merged into; a file of the same name is replaced.",
               saveFileInputSchema.shape,
               (args) => runSaveFile(saver, sessionId, args),
             ),

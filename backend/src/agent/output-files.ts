@@ -55,8 +55,7 @@ const bytes = (size: number) =>
       : `${(size / 1024 / 1024).toFixed(1)} MB`;
 
 /**
- * Files the agent writes for the operator: one folder per Session under the data folder, which the Run sandbox lets
- * the run write and read. The daemon serves only plain files in it, by bare name, and copies one elsewhere only after
+ * Files the agent writes for the operator: one folder per Session under the data folder. The daemon serves only plain files in it, by bare name, and copies one elsewhere only after
  * the operator's Approval.
  */
 @Injectable()
@@ -172,8 +171,8 @@ export class OutputFiles implements FileSaver {
 
   /**
    * Opens a plain file of the folder, never through a symlink, and checks the open file itself: the agent can swap a
-   * name for a link between a check and a read. A file with another hard link is refused, since a link to a file the
-   * sandbox hides would read through this folder.
+   * name for a link between a check and a read. A file with another hard link is refused, since a link to a file
+   * outside this folder would read through it.
    */
   private async openPlain(sessionId: string, name: string): Promise<{ handle: FileHandle; size: number } | null> {
     if (!bare(name)) return null;

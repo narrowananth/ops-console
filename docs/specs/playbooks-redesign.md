@@ -24,7 +24,7 @@ Behavior this spec does not list is as in `agent-playbooks` and `playbook-skills
    Trigger running a Playbook with unsaved edits shows the same dot as that Playbook's row (Behavior 5).
 3. With no Playbooks yet, which is every new install, every Trigger reads "Built-in", the "Your Playbooks" list is
    absent, and the page has no empty screen. Nothing needs setting up for a Trigger to run.
-4. The preview of a Trigger shows its name, one line on what the agent does there, JOB or CHAT, a run card, the flow
+4. The preview of a Trigger shows its name, one line on what the agent does there, JOB, SESSION or CHAT, a run card, the flow
    the Trigger runs as small nodes (the first five steps, then "+N more") with a button that opens the full flow, "View
    full flow" or, on the operator's own, "Edit flow", and three facts: Rules, Skills, and Branch with Jira ticket. A
    built-in adds a note that it is read only and that a copy comes from New Playbook.
@@ -37,7 +37,7 @@ Behavior this spec does not list is as in `agent-playbooks` and `playbook-skills
    runs its built-in attaches it at once. Choosing Built-in detaches the Playbook at once and the built-in returns.
    Escape closes the dropdown.
 7. A change on a Trigger applies from the next job or turn. A Playbook cannot be dragged onto a Trigger, nor a Trigger off
-   one: the dropdown is the only way (departs from Agent Playbooks 8).
+   one: the dropdown is the only way (Agent Playbooks 8).
 8. Deleting a Playbook asks first and names the Triggers that go back to built-in.
 9. While the Playbooks load, the page reads "Reading Playbooks…". A failed read shows "Could not read Playbooks:" with
    the reason and a Retry.
@@ -50,7 +50,7 @@ Behavior this spec does not list is as in `agent-playbooks` and `playbook-skills
 11. A new Playbook runs on no Trigger. It opens on its flow with the Trigger node asking the operator to attach
     Triggers. A copy of a built-in starts with that built-in's rules and steps and holds no Skills.
 12. A built-in has no Customize or Duplicate action. New Playbook, Copy of a built-in, is the only way to get an
-    editable copy, and an operator's own Playbook cannot be copied (departs from Agent Playbooks 3 and 4, and Playbook
+    editable copy, and an operator's own Playbook cannot be copied (Agent Playbooks 3 and 4, Playbook
     Skills 9).
 
 ### The flow
@@ -60,14 +60,19 @@ Behavior this spec does not list is as in `agent-playbooks` and `playbook-skills
     cards hold Rules, Skills and Settings, joined by a dashed line marked "applies to every turn". Up to 12 steps. A legend under the canvas names
     the two lines and says a failed step stops the run.
 14. The console's own turn is not a step: it cannot be moved or removed. It reads, for each Trigger, what the console
-    does after the steps. A Playbook that runs only on chat Triggers shows no closing turn, and its steps stay shown but
-    greyed with the note that they do not run there.
+    does after the steps, and only Verify and Fix have one (write the Report; commit, push and open the PR). A Playbook
+    that runs on no job Trigger ends on an "End" node. A Playbook that runs only on chat Triggers shows its steps
+    greyed with the note that they do not run there. A PR action Trigger (Review PR, Check reply, Address comments)
+    opens a Session: its steps go into the Session's opening prompt as one turn, and the step panel and the overview
+    say so.
 15. A built-in opens read only: the same flow, every field read only, a banner "Built-in, read only", and no palette. The
     header holds no action button. The banner names the Playbook that replaced it on its Trigger, when one has. Its Skills
     card reads "A built-in holds none."
 16. Selecting a node opens its fields in the panel on the right; the close button or Escape closes it. The panel shows
     the Trigger node's Trigger chips, a step's title, instructions and scratch copy tag, the Rules text, the Skills the
-    Playbook holds with a picker of those it does not, or the Settings: Branch and the Jira ticket switch. A link from the Skills panel to the Skills page opens it with
+    Playbook holds with a picker of those it does not, or the Settings: Branch and the Jira ticket switch. The scratch
+    copy tag, its checkbox on a Custom step and the palette's note about it show only for a Playbook that runs on no
+    Trigger or on a job Trigger. A link from the Skills panel to the Skills page opens it with
     "← Back to <Playbook name>" in its header; that returns to the same Playbook, its unsaved edits kept. Picking a
     pack or Skill on the Skills page keeps the button.
 17. The palette on the left lists the ten Step blocks, Custom step first, and the + menu on the line lists them in the
@@ -113,7 +118,7 @@ Behavior this spec does not list is as in `agent-playbooks` and `playbook-skills
 - **Token estimate**: made in the browser from character counts. No new API, no tokenizer.
 - **Trigger blurbs and the console's own turn text**: fixed copy in the frontend, checked against what the daemon does.
 - **Desktop only**: no phone layout, as on the other pages.
-- **Scratch copy on Triggers**: no Trigger refuses it, as in `agent-playbooks` Behavior 11 and `pr-thread-actions`.
+- **Scratch copy on Triggers**: no Trigger refuses it, as in `agent-playbooks` Behavior 11 and `pr-actions-open-sessions` 1.
 
 ## Not required
 

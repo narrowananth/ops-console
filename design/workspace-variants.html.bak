@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workspace: layout variants</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg:#f3f2f2; --surface:#ebe9e8; --card:#fbfafa; --text:#201e1d; --accent:#ec3013;
+    --line:rgba(32,30,29,.11); --divider:rgba(32,30,29,.18);
+    --ok:#2f7d3b; --warn:#b26b00; --info:#2a5db0;
+    --n200:#eae7e7; --n300:#d7d3d3; --n500:#9b9797; --n600:#7d7979; --n700:#605d5d;
+    --a100:#fff2ef; --a200:#ffe0d9;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#dedbda; color:var(--text); font:13px/1.4 "Archivo",system-ui,sans-serif; padding:32px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .lede { color:var(--n700); margin:0 0 28px; }
+  .variant { margin-bottom:48px; }
+  .variant > h2 { font-size:16px; margin:0 0 2px; }
+  .variant > .why { color:var(--n700); margin:0 0 10px; max-width:1100px; }
+  .frame { width:1280px; height:720px; background:var(--bg); border:1px solid var(--divider); border-radius:10px;
+           display:flex; overflow:hidden; position:relative; box-shadow:0 6px 24px rgba(0,0,0,.08); }
+  .mono { font-family:var(--mono); }
+  button { font:inherit; color:inherit; }
+
+  /* app rail (the console's own sidebar, folded) */
+  .app { width:56px; flex:none; border-right:1px solid var(--line); display:flex; flex-direction:column; align-items:center; gap:6px; padding:12px 0; }
+  .logo { width:30px; height:30px; border-radius:8px; background:var(--accent); margin-bottom:10px; }
+  .app i { width:34px; height:34px; border-radius:9px; display:grid; place-items:center; color:var(--n600); font-style:normal; font-size:15px; }
+  .app i.on { background:var(--card); color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.12); }
+
+  /* shared bits */
+  .dot { width:8px; height:8px; border-radius:50%; flex:none; display:inline-block; }
+  .d-need { background:var(--accent); } .d-run { background:var(--ok); } .d-idle { background:var(--n300); }
+  .chip { display:inline-flex; align-items:center; gap:4px; padding:1px 7px; border-radius:99px; background:var(--n200); font-size:11px; color:var(--n700); white-space:nowrap; }
+  .chip.need { background:var(--a200); color:#9b1f0a; } .chip.run { background:#e3f1e5; color:var(--ok); }
+  .seg { display:flex; gap:2px; background:var(--n200); padding:3px; border-radius:9px; }
+  .seg b { flex:1; text-align:center; font-weight:400; padding:4px 10px; border-radius:7px; color:var(--n700); white-space:nowrap; }
+  .seg b.on { background:var(--card); color:var(--text); font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,.1); }
+  .search { display:flex; align-items:center; gap:6px; border:1px solid var(--line); background:var(--card); border-radius:9px; padding:6px 10px; color:var(--n500); }
+  .search kbd { margin-left:auto; font:11px var(--mono); border:1px solid var(--line); border-radius:5px; padding:0 5px; color:var(--n600); }
+  .btn { border:1px solid var(--line); background:var(--card); border-radius:9px; padding:6px 12px; cursor:pointer; }
+  .btn.pri { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  .sub { color:var(--n600); font-size:12px; }
+  .grp { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--n600); padding:12px 14px 4px; display:flex; gap:6px; align-items:center; }
+  .grp em { font-style:normal; margin-left:auto; font-family:var(--mono); }
+
+  /* session row */
+  .row { padding:9px 14px; border-radius:10px; margin:0 6px; cursor:pointer; }
+  .row.sel { background:var(--card); box-shadow:0 1px 2px rgba(0,0,0,.1); }
+  .row .t { display:flex; gap:8px; align-items:center; font-weight:600; }
+  .row .t span.n { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+  .row .m { display:flex; gap:6px; align-items:center; margin:3px 0 0 16px; color:var(--n600); font-size:12px; white-space:nowrap; overflow:hidden; }
+  .row .m .br { font-family:var(--mono); font-size:11px; overflow:hidden; text-overflow:ellipsis; }
+
+  /* detail */
+  .detail { flex:1; min-width:0; display:flex; flex-direction:column; background:var(--bg); }
+  .dh { padding:14px 22px 10px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px; }
+  .dh h3 { margin:0; font-size:16px; }
+  .dh .sp { flex:1; }
+  .conv { flex:1; padding:18px 22px; overflow:hidden; display:flex; flex-direction:column; gap:12px; }
+  .msg { max-width:640px; padding:10px 14px; border-radius:12px; background:var(--card); border:1px solid var(--line); }
+  .msg.me { align-self:flex-end; background:var(--a100); border-color:var(--a200); }
+  .tool { font:12px var(--mono); color:var(--n700); background:var(--surface); border-radius:8px; padding:6px 10px; max-width:640px; }
+  .appr { border:1px solid var(--accent); background:var(--a100); border-radius:12px; padding:10px 14px; max-width:640px; display:flex; gap:10px; align-items:center; }
+  .appr .sp { flex:1; }
+  .comp { margin:0 22px 18px; border:1px solid var(--line); background:var(--card); border-radius:12px; padding:12px 14px; color:var(--n500); display:flex; }
+  .comp b { margin-left:auto; color:#fff; background:var(--accent); border-radius:8px; padding:2px 12px; font-weight:600; }
+
+  /* A: inbox */
+  .listA { width:340px; flex:none; border-right:1px solid var(--line); display:flex; flex-direction:column; }
+  .listA .top { padding:14px 12px 8px; display:flex; flex-direction:column; gap:8px; }
+  .listA .scroll { flex:1; overflow:hidden; }
+  .filters { display:flex; gap:6px; flex-wrap:wrap; }
+  .filters .chip { padding:3px 10px; background:transparent; border:1px solid var(--line); }
+  .filters .chip.on { background:var(--text); color:#fff; border-color:var(--text); }
+
+  /* B: repo rail */
+  .repos { width:64px; flex:none; border-right:1px solid var(--line); padding:12px 0; display:flex; flex-direction:column; align-items:center; gap:8px; background:var(--surface); }
+  .rp { width:40px; height:40px; border-radius:11px; background:var(--card); border:1px solid var(--line); display:grid; place-items:center; font-weight:700; position:relative; color:var(--n700); }
+  .rp.on { border:2px solid var(--accent); color:var(--text); }
+  .rp small { position:absolute; top:-5px; right:-6px; background:var(--accent); color:#fff; font:600 10px var(--mono); border-radius:99px; padding:0 5px; }
+  .rp.dim { opacity:.55; }
+  .more { font-size:11px; color:var(--n600); text-align:center; margin-top:2px; }
+  .listB { width:300px; flex:none; border-right:1px solid var(--line); display:flex; flex-direction:column; }
+  .listB .rh { padding:14px 14px 8px; display:flex; align-items:center; gap:8px; }
+  .listB .rh h3 { margin:0; font-size:15px; }
+  .branch { margin:6px 14px 2px; font:11px var(--mono); color:var(--n600); display:flex; gap:6px; align-items:center; }
+
+  /* C: board */
+  .boardwrap { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .bh { padding:14px 22px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--line); }
+  .bh h3 { margin:0; font-size:18px; }
+  .bh .sp { flex:1; }
+  .cols { flex:1; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; padding:14px 16px; min-height:0; }
+  .col { background:var(--surface); border-radius:12px; padding:8px; display:flex; flex-direction:column; gap:8px; }
+  .col h4 { margin:4px 6px; font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--n700); display:flex; gap:6px; align-items:center; }
+  .col h4 em { margin-left:auto; font:normal 11px var(--mono); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .card.sel { outline:2px solid var(--accent); }
+  .card b { display:block; margin-bottom:5px; }
+  .card .m { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .drawer { flex:none; width:430px; background:var(--bg); border-left:1px solid var(--divider); display:flex; flex-direction:column; }
+  .drawer .dh { flex-wrap:wrap; row-gap:6px; }
+  .drawer .dh h3 { flex-basis:calc(100% - 24px); }
+  .drawer .dh .sp { display:none; }
+  .drawer .dh .btn { margin-left:auto; } .drawer .dh .btn + .btn { margin-left:0; }
+
+  /* D: tabs + palette */
+  .dwrap { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .tabs { display:flex; align-items:flex-end; gap:4px; padding:10px 14px 0; border-bottom:1px solid var(--line); background:var(--surface); }
+  .tab { display:flex; gap:8px; align-items:center; padding:7px 14px; border-radius:9px 9px 0 0; color:var(--n700); max-width:220px; white-space:nowrap; }
+  .tab span { overflow:hidden; text-overflow:ellipsis; }
+  .tab.on { background:var(--bg); color:var(--text); font-weight:600; border:1px solid var(--line); border-bottom:1px solid var(--bg); margin-bottom:-1px; }
+  .tabs .sp { flex:1; }
+  .tabs .jump { margin-bottom:6px; }
+  .scrim { position:absolute; inset:0; background:rgba(32,30,29,.28); display:flex; justify-content:center; padding-top:70px; }
+  .pal { width:620px; height:max-content; background:var(--card); border-radius:14px; box-shadow:0 20px 50px rgba(0,0,0,.28); overflow:hidden; border:1px solid var(--line); }
+  .pal .in { padding:14px 16px; border-bottom:1px solid var(--line); font-size:15px; display:flex; gap:8px; }
+  .pal .in span { color:var(--n500); }
+  .pal .row { margin:2px 6px; }
+  .pal .foot { padding:8px 14px; border-top:1px solid var(--line); color:var(--n600); font-size:11px; display:flex; gap:14px; }
+
+  /* A2: pull requests */
+  .pr .num { font-family:var(--mono); color:var(--n600); font-weight:400; }
+  .st { font-size:11px; display:inline-flex; gap:3px; align-items:center; }
+  .st.ok { color:var(--ok); } .st.bad { color:#b4210e; } .st.run { color:var(--warn); } .st.mute { color:var(--n600); }
+  .row.off { opacity:.6; }
+  .pdh { padding:16px 22px 0; border-bottom:1px solid var(--line); }
+  .pdh h3 { margin:0 0 6px; font-size:18px; }
+  .meta { display:flex; gap:8px; align-items:center; flex-wrap:wrap; color:var(--n700); margin-bottom:12px; }
+  .acts { display:flex; gap:8px; align-items:center; margin-bottom:10px; }
+  .acts .sp { flex:1; }
+  .btn.off { opacity:.45; cursor:not-allowed; }
+  .link { display:flex; gap:8px; align-items:center; background:var(--surface); border-radius:9px; padding:6px 10px; margin-bottom:10px; color:var(--n700); }
+  .subtabs { display:flex; gap:20px; }
+  .subtabs span { padding:8px 0; color:var(--n700); border-bottom:2px solid transparent; }
+  .subtabs span.on { color:var(--text); font-weight:600; border-color:var(--accent); }
+  .subtabs em { font:normal 11px var(--mono); background:var(--n200); border-radius:99px; padding:0 6px; margin-left:4px; }
+  .body { flex:1; overflow:hidden; padding:16px 22px; display:flex; flex-direction:column; gap:12px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .panel > h5 { margin:0; padding:8px 14px; background:var(--surface); font-size:12px; display:flex; gap:8px; align-items:center; }
+  .panel > div { padding:10px 14px; }
+  .find { display:flex; gap:8px; padding:6px 0; border-top:1px solid var(--line); }
+  .find:first-child { border-top:0; }
+  .find .mono { color:var(--n600); }
+</style>
+</head>
+<body>
+
+<h1>Workspace: layout variants</h1>
+<p class="lede">Same data in every frame: 32 Repos, 6 Sessions, 3 waiting on the operator. Problem today: three nested columns, Repo-first tree where 29 Repos are empty, truncated names, a "+" on every Repo, three-line rows.</p>
+<p class="lede" style="margin-top:-20px">Shipped: variant A, Inbox, both tabs. The live mock is ops-console-sidebar.html. Its Session rows are three lines (Repo badge and name with state and time; title; branch, pull request chip and model), a hover card shows the rest, and Stop takes the corner of a busy row. The Session header holds the Repo, title, state and a Session button that opens the Session panel (branch, Diff, Commit, push &amp; PR, Delete); the detail drawn below predates it.</p>
+
+<template id="detail">
+  <div class="dh">
+    <span class="dot d-need"></span>
+    <h3>Fix checkout webhook auth</h3>
+    <span class="chip mono">storefront-api</span>
+    <span class="chip mono">fix/webhook-auth</span>
+    <span class="sp"></span>
+    <button class="btn">Diff</button>
+    <button class="btn pri">Open pull request</button>
+  </div>
+  <div class="conv">
+    <div class="msg me">Webhook route accepts unsigned calls from the live-video provider. Verify locally, then fix.</div>
+    <div class="tool">▸ Read src/webhooks/live-video.controller.ts · ▸ Ran curl localhost:3000/webhooks/live-video → 200</div>
+    <div class="msg">Confirmed: unsigned POST returns 200. I'll add signature verification and a mocked test.</div>
+    <div class="appr"><span class="dot d-need"></span><b>Approval needed</b><span class="mono sub">git checkout -b fix/webhook-auth</span><span class="sp"></span><button class="btn">Deny</button><button class="btn pri">Approve</button></div>
+  </div>
+  <div class="comp">Reply to the agent… <b>Send</b></div>
+</template>
+
+<!-- ============================ A ============================ -->
+<section class="variant">
+  <h2>A · Inbox: one flat list, Repo becomes a filter</h2>
+  <p class="why">Drops the Repo tree. Sessions sorted by what needs you, then running, then idle. Repo is a chip, empty Repos vanish, one "New session" button with a Repo picker. Two-line rows. Closest to today's structure, smallest build.</p>
+  <div class="frame">
+    <div class="app"><div class="logo"></div><i>◔</i><i class="on">▤</i><i>⛁</i><i>⑂</i><i>⚙</i></div>
+    <div class="listA">
+      <div class="top">
+        <div style="display:flex;gap:8px;align-items:center">
+          <div class="seg" style="flex:1"><b class="on">Sessions</b><b>Pull requests</b></div>
+          <button class="btn pri" title="New session">+ New</button>
+        </div>
+        <div class="search">⌕ Search Sessions <kbd>⌘K</kbd></div>
+        <div class="filters"><span class="chip on">All 6</span><span class="chip">Needs you 2</span><span class="chip">Running 1</span><span class="chip">Repo: any ▾</span></div>
+      </div>
+      <div class="scroll">
+        <div class="grp">Needs you <em>2</em></div>
+        <div class="row sel"><div class="t"><span class="dot d-need"></span><span class="n">Fix checkout webhook auth</span><span class="sub">2m</span></div><div class="m"><span class="chip mono">storefront-api</span><span class="br">fix/webhook-auth</span></div></div>
+        <div class="row"><div class="t"><span class="dot d-need"></span><span class="n">Delete convert-svg route</span><span class="sub">1h</span></div><div class="m"><span class="chip mono">web-admin</span><span class="br">fix/delete-svg-route</span></div></div>
+        <div class="grp">Running <em>1</em></div>
+        <div class="row"><div class="t"><span class="dot d-run"></span><span class="n">Lockfile sync lint failure</span><span class="sub">now</span></div><div class="m"><span class="chip mono">storefront-api</span><span class="br">fix/lockfile-sync</span></div></div>
+        <div class="grp">Idle <em>3</em></div>
+        <div class="row"><div class="t"><span class="dot d-idle"></span><span class="n">Pull request 4498 live video</span><span class="sub">2d</span></div><div class="m"><span class="chip mono">storefront-api</span><span class="br">fix/live-video-auth</span></div></div>
+        <div class="row"><div class="t"><span class="dot d-idle"></span><span class="n">Feed access rules</span><span class="sub">3d</span></div><div class="m"><span class="chip mono">atlas</span><span class="br">SF-2202-feed-access</span></div></div>
+        <div class="row"><div class="t"><span class="dot d-idle"></span><span class="n">New session</span><span class="sub">3d</span></div><div class="m"><span class="chip">No Repo</span></div></div>
+      </div>
+    </div>
+    <div class="detail" data-detail></div>
+  </div>
+</section>
+
+<!-- ============================ A2 ============================ -->
+<section class="variant">
+  <h2>A · Inbox, Pull requests tab</h2>
+  <p class="why">Same shell as A, so switching tab changes only the list and the detail. List: flat, sorted by what you must do next (review, fix, merge), project as a chip. "Mine / All" and Refresh stay. Repos not imported dim and open on the host. Detail: one sticky header with the actions, then Overview / Files / Comments tabs instead of one long scroll.</p>
+  <div class="frame pr">
+    <div class="app"><div class="logo"></div><i>◔</i><i class="on">▤</i><i>⛁</i><i>⑂</i><i>⚙</i></div>
+    <div class="listA">
+      <div class="top">
+        <div style="display:flex;gap:8px;align-items:center">
+          <div class="seg" style="flex:1"><b>Sessions</b><b class="on">Pull requests</b></div>
+          <button class="btn" title="Read the Git hosts again now">⟳</button>
+        </div>
+        <div class="search">⌕ Number, title or author <kbd>⌘K</kbd></div>
+        <div class="filters"><span class="chip on">Mine</span><span class="chip">All</span><span class="chip">Needs review 2</span><span class="chip">Failing 1</span><span class="chip">Repo ▾</span></div>
+      </div>
+      <div class="scroll">
+        <div class="grp">Needs your review <em>2</em></div>
+        <div class="row sel"><div class="t"><span class="dot d-need"></span><span class="n"><span class="num">#4498</span> Live video webhook auth</span><span class="sub">2d</span></div><div class="m"><span class="chip mono">storefront-api</span><span>maya</span><span class="st ok">✓ checks</span><span class="st mute">💬 2</span></div></div>
+        <div class="row"><div class="t"><span class="dot d-need"></span><span class="n"><span class="num">#212</span> Add feed access rules</span><span class="sub">1d</span></div><div class="m"><span class="chip mono">atlas</span><span>dev</span><span class="st bad">✕ checks</span></div></div>
+        <div class="grp">Yours: changes requested <em>1</em></div>
+        <div class="row"><div class="t"><span class="dot d-run"></span><span class="n"><span class="num">#88</span> Remove convert-svg route</span><span class="sub">4h</span></div><div class="m"><span class="chip mono">web-admin</span><span class="st bad">changes requested</span><span class="st mute">💬 3</span></div></div>
+        <div class="grp">Ready to merge <em>1</em></div>
+        <div class="row"><div class="t"><span class="dot d-idle"></span><span class="n"><span class="num">#4510</span> Bump lockfile deps</span><span class="sub">6h</span></div><div class="m"><span class="chip mono">storefront-api</span><span class="st ok">✓ checks</span><span class="st ok">approved</span></div></div>
+        <div class="grp">Other <em>1</em></div>
+        <div class="row off"><div class="t"><span class="dot d-idle"></span><span class="n"><span class="num">#17</span> Tune cache TTL</span><span class="sub">5d</span></div><div class="m"><span class="chip mono">gitlab · billing</span><span>not imported · opens on GitLab ↗</span></div></div>
+      </div>
+    </div>
+    <div class="detail">
+      <div class="pdh">
+        <h3><span class="num mono" style="color:var(--n600)">#4498</span> Live video webhook auth</h3>
+        <div class="meta"><span class="chip mono">storefront-api</span><span class="mono">fix/live-video-auth → main</span><span>by maya</span><span class="sub">·</span><span style="color:var(--diff-add,#1d6b30)">+128</span><span style="color:#a3200d">−34</span><span class="sub">8 files</span><span class="st ok">✓ checks passed</span><span class="st run">● review requested</span></div>
+        <div class="acts">
+          <button class="btn pri">Agent Review</button>
+          <button class="btn">Approve</button>
+          <button class="btn">Request changes</button>
+          <button class="btn">Address comments · 2</button>
+          <span class="sp"></span>
+          <button class="btn off" title="Merge needs an approved review">Merge</button>
+        </div>
+        <div class="link"><span class="dot d-idle"></span>Session: Pull request 4498 live video <span class="sub">· agent replies, 2d</span><span style="margin-left:auto">Open ↗</span></div>
+        <div class="subtabs"><span class="on">Overview</span><span>Files<em>3/8 viewed</em></span><span>Comments<em>3</em></span></div>
+      </div>
+      <div class="body">
+        <div class="panel"><h5>Agent review <span class="chip run">Ready</span><span class="sub" style="margin-left:auto">at 9f3c2ab</span></h5>
+          <div>
+            <div class="find"><span class="chip need">high</span><div><b>Signature compared with <span class="mono">==</span></b><div class="sub mono">src/webhooks/live-video.controller.ts:42 · use timing-safe compare</div></div></div>
+            <div class="find"><span class="chip">low</span><div><b>No test for replayed timestamp</b><div class="sub mono">src/webhooks/live-video.spec.ts</div></div></div>
+          </div>
+        </div>
+        <div class="panel"><h5>Description <span class="sub">by maya</span><span style="margin-left:auto" class="sub">▾</span></h5>
+          <div>Verifies the provider signature on <span class="mono">POST /webhooks/live-video</span> and rejects unsigned calls with 401. Adds a mocked test for both paths.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ B ============================ -->
+<section class="variant">
+  <h2>B · Repo rail: icons for Repos, list shows one Repo</h2>
+  <p class="why">Repos shrink to a Slack-style rail with a badge for Sessions waiting. Only Repos with Sessions sit on top; the other 29 live behind "All Repos". The list pane then shows one Repo grouped by branch, so names never truncate.</p>
+  <div class="frame">
+    <div class="app"><div class="logo"></div><i>◔</i><i class="on">▤</i><i>⛁</i><i>⑂</i><i>⚙</i></div>
+    <div class="repos">
+      <div class="rp" title="Needs you">✦<small>3</small></div>
+      <span style="width:24px;height:1px;background:var(--divider)"></span>
+      <div class="rp on" title="storefront-api">sa<small>2</small></div>
+      <div class="rp" title="web-admin">wa<small>1</small></div>
+      <div class="rp" title="atlas">at</div>
+      <div class="rp" title="No Repo" style="border-style:dashed">∅</div>
+      <span style="width:24px;height:1px;background:var(--divider)"></span>
+      <div class="rp dim" title="All Repos">⋯</div>
+      <div class="more">29 more</div>
+    </div>
+    <div class="listB">
+      <div class="rh"><h3>storefront-api</h3><span class="chip mono">GitHub</span><span style="flex:1"></span><button class="btn pri">+ New</button></div>
+      <div style="padding:0 12px 6px"><div class="seg"><b class="on">Sessions 3</b><b>Pull requests 1</b></div></div>
+      <div class="branch">⑂ fix/webhook-auth</div>
+      <div class="row sel"><div class="t"><span class="dot d-need"></span><span class="n">Fix checkout webhook auth</span><span class="sub">2m</span></div></div>
+      <div class="branch">⑂ fix/lockfile-sync</div>
+      <div class="row"><div class="t"><span class="dot d-run"></span><span class="n">Lockfile sync lint failure</span><span class="sub">now</span></div></div>
+      <div class="branch">⑂ fix/live-video-auth <span class="chip" style="margin-left:auto">PR #4498</span></div>
+      <div class="row"><div class="t"><span class="dot d-idle"></span><span class="n">Pull request 4498 live video</span><span class="sub">2d</span></div></div>
+    </div>
+    <div class="detail" data-detail></div>
+  </div>
+</section>
+
+<!-- ============================ C ============================ -->
+<section class="variant">
+  <h2>C · Board: Sessions as cards by state, detail in a drawer</h2>
+  <p class="why">Answers "what needs me" at a glance. The list pane disappears; the board takes the width and a Session opens in a right drawer. Costs the persistent split view, so jumping between two Sessions takes a click more.</p>
+  <div class="frame">
+    <div class="app"><div class="logo"></div><i>◔</i><i class="on">▤</i><i>⛁</i><i>⑂</i><i>⚙</i></div>
+    <div class="boardwrap">
+      <div class="bh"><h3>Workspace</h3><div class="seg"><b class="on">Sessions</b><b>Pull requests</b></div><span class="sp"></span><div class="search" style="width:150px">⌕ Search</div><span class="chip">Repo ▾</span><button class="btn pri">+ New</button></div>
+      <div class="cols">
+        <div class="col"><h4><span class="dot d-need"></span>Needs you <em>2</em></h4>
+          <div class="card sel"><b>Fix checkout webhook auth</b><div class="m"><span class="chip mono">storefront-api</span><span class="chip need">Approval</span></div></div>
+          <div class="card"><b>Delete convert-svg route</b><div class="m"><span class="chip mono">web-admin</span><span class="chip need">Question</span></div></div>
+        </div>
+        <div class="col"><h4><span class="dot d-run"></span>Running <em>1</em></h4>
+          <div class="card"><b>Lockfile sync lint failure</b><div class="m"><span class="chip mono">storefront-api</span><span class="chip run">Step 3 of 5</span></div></div>
+        </div>
+        <div class="col"><h4><span class="dot d-idle"></span>Idle <em>3</em></h4>
+          <div class="card"><b>Feed access rules</b><div class="m"><span class="chip mono">atlas</span><span class="sub">3d</span></div></div>
+          <div class="card"><b>New session</b><div class="m"><span class="chip">No Repo</span><span class="sub">3d</span></div></div>
+        </div>
+        <div class="col"><h4>⑂ PR open <em>1</em></h4>
+          <div class="card"><b>#4498 Live video webhook auth</b><div class="m"><span class="chip mono">storefront-api</span><span class="chip">2 comments</span></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="drawer" data-detail></div>
+  </div>
+</section>
+
+<!-- ============================ D ============================ -->
+<section class="variant">
+  <h2>D · Tabs + ⌘K switcher: no list pane at all</h2>
+  <p class="why">Detail gets the full width. Open Sessions are tabs; ⌘K jumps to any Session, PR or Repo and starts a new one, grouped by state with Repo as a chip. Fewest pixels spent on navigation. Worst for browsing without knowing the name.</p>
+  <div class="frame">
+    <div class="app"><div class="logo"></div><i>◔</i><i class="on">▤</i><i>⛁</i><i>⑂</i><i>⚙</i></div>
+    <div class="dwrap">
+      <div class="tabs">
+        <div class="tab on"><span class="dot d-need"></span><span>Fix checkout webhook auth</span></div>
+        <div class="tab"><span class="dot d-run"></span><span>Lockfile sync lint failure</span></div>
+        <div class="tab"><span class="dot d-need"></span><span>Delete convert-svg route</span></div>
+        <div class="tab"><span>⑂ #4498</span></div>
+        <span class="sp"></span>
+        <div class="search jump" style="width:230px">⌕ Jump to… <kbd>⌘K</kbd></div>
+      </div>
+      <div class="detail" data-detail style="flex:1"></div>
+    </div>
+    <div class="scrim">
+      <div class="pal">
+        <div class="in"><span>⌕</span>fix<span style="margin-left:-4px;color:var(--text)">|</span></div>
+        <div class="grp">Needs you</div>
+        <div class="row sel"><div class="t"><span class="dot d-need"></span><span class="n">Fix checkout webhook auth</span><span class="chip mono">storefront-api</span></div></div>
+        <div class="grp">Running</div>
+        <div class="row"><div class="t"><span class="dot d-run"></span><span class="n">Lockfile sync lint failure</span><span class="chip mono">storefront-api</span></div></div>
+        <div class="grp">Repos</div>
+        <div class="row"><div class="t"><span>⑂</span><span class="n">Start Session on a branch of web-admin</span><span class="sub">↵</span></div></div>
+        <div class="foot"><span>↑↓ move</span><span>↵ open</span><span>⌘↵ new Session here</span><span>Tab switch to PRs</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  const tpl = document.getElementById('detail');
+  document.querySelectorAll('[data-detail]').forEach(el => el.append(tpl.content.cloneNode(true)));
+</script>
+</body>
+</html>

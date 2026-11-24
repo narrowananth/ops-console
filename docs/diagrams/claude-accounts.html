@@ -15,11 +15,11 @@
 </head>
 <body>
   <div class="diagram-container">
-<svg viewBox="0 0 1460 936" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="claude-accounts-title claude-accounts-desc">
+<svg viewBox="0 0 1460 1000" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="claude-accounts-title claude-accounts-desc">
 <title id="claude-accounts-title">Claude accounts: sign in, read usage, switch</title>
 <desc id="claude-accounts-desc">How agent runs get a Claude account: sign in through Anthropic, read usage on a timer, pick the active account by Smart usage or Auto-switch, and switch once on a limit or sign-in failure; CLIProxy replaces all of it.</desc>
 <defs><marker id="claude-accounts-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker><marker id="claude-accounts-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker><marker id="claude-accounts-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker></defs>
-<rect x="0" y="0" width="1460" height="936" fill="#f5f5f5"/>
+<rect x="0" y="0" width="1460" height="1000" fill="#f5f5f5"/>
 <text x="56" y="56" fill="#4f5d75" font-size="10.5" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start" letter-spacing="0.18em">LIFECYCLE · AGENTS &amp; ACCOUNTS · SIGN-IN · USAGE · SWITCHING</text>
 <text x="56" y="100" fill="#2d3142" font-size="36" font-weight="400" font-family="'Instrument Serif', serif" text-anchor="start">Claude accounts: sign in, read usage, switch</text>
 <text x="382" y="158" fill="#5a6580" font-size="8.5" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.16em">ADD AN ACCOUNT</text>
@@ -53,52 +53,58 @@
 <rect x="1242" y="368" width="136" height="76" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.3"/><rect x="1250" y="376" width="40" height="12" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="1270" y="385" fill="#2d3142" font-size="7" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text><text x="1310" y="410" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Run rejected</text><text x="1310" y="423" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">rate limit or</text><text x="1310" y="434" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">sign-in failure</text><circle cx="1378" cy="368" r="9" fill="#2d3142"/><text x="1378" y="371.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
 <rect x="1010" y="368" width="136" height="76" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.3"/><rect x="1018" y="376" width="45.2" height="12" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="1040.6" y="385" fill="#2d3142" font-size="7" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">SWITCH</text><text x="1078" y="410" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">Switch once</text><text x="1078" y="423" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">rate_limited or</text><text x="1078" y="434" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">sign_in_failed</text><circle cx="1146" cy="368" r="9" fill="#2d3142"/><text x="1146" y="371.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">8</text>
 <rect x="778" y="368" width="136" height="76" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.40)" stroke-width="1.1" stroke-dasharray="4,3"/><rect x="786" y="376" width="55.6" height="12" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.35)" stroke-width="0.8"/><text x="813.8" y="385" fill="#2d3142" font-size="7" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">CLIPROXY</text><text x="846" y="410" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">CLIProxy hub</text><text x="846" y="423" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">loopback address,</text><text x="846" y="434" fill="#4f5d75" font-size="9" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">key in the Keychain</text><circle cx="914" cy="368" r="9" fill="#2d3142"/><text x="914" y="371.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">7</text>
-<rect x="56" y="508" width="1348" height="312" rx="8" fill="rgba(45,49,66,0.05)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<rect x="56" y="508" width="1348" height="376" rx="8" fill="rgba(45,49,66,0.05)" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
 <rect x="72" y="502" width="140" height="12" fill="#f5f5f5"/>
 <text x="142" y="511" fill="#5a6580" font-size="7.5" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">EDGE CASES AND TIPS</text>
 <circle cx="84" cy="540" r="9" fill="#2d3142"/>
 <text x="84" y="543.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">1</text>
-<text x="108" y="544" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Add in this browser (a tab opens, 5 min) or by sign-in link: open it, paste the code or page address Anthropic shows. A link works for one sign-in and stops after 15 min. A rejected code gets a new link. One</text>
-<text x="108" y="560" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">email is added once (409).</text>
+<text x="108" y="544" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Add in this browser (a tab opens, 5 min) or by sign-in link: open it, paste the code or page address Anthropic shows. A link works for one sign-in and stops after 15 min. A rejected code gets a new link.</text>
+<text x="108" y="560" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">One email is added once (409): an account that signs in as one already added is signed out again.</text>
 <circle cx="84" cy="584" r="9" fill="#2d3142"/>
 <text x="84" y="587.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">2</text>
 <text x="108" y="588" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Sign-in runs in Anthropic&#x27;s own flow. The console never reads a Claude token and never uses the operator&#x27;s own Claude Code login. Cancelling removes a new account.</text>
 <circle cx="84" cy="612" r="9" fill="#2d3142"/>
 <text x="84" y="615.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">3</text>
-<text x="108" y="616" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Each account has its own CLAUDE_CONFIG_DIR under the data folder. The first account to sign in becomes active. Remove copies each Session&#x27;s transcript to the target account first. Log out and Remove are</text>
-<text x="108" y="632" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">refused while a run on that account goes.</text>
+<text x="108" y="616" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Each account has its own CLAUDE_CONFIG_DIR under the data folder. The first account to sign in becomes active. Remove copies each Session&#x27;s transcript to the account that stays active first.</text>
+<text x="108" y="632" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Log out and Remove are refused while a run on that account goes. A disabled account stays signed in, but Use, Smart usage, Auto-switch and the retry after a limit skip it.</text>
 <circle cx="84" cy="656" r="9" fill="#2d3142"/>
 <text x="84" y="659.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">4</text>
-<text x="108" y="660" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Usage is read per signed-in account from the SDK&#x27;s rate-limit events and a usage request. A failing read keeps the last values. The 5-hour bar turns accent from 90 %, the weekly bar from 80 %.</text>
-<circle cx="84" cy="684" r="9" fill="#2d3142"/>
-<text x="84" y="687.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
-<text x="108" y="688" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Smart usage moves to the top pick (weekly % left divided by days to reset) on every read, and can undo a manual Use. With it off, Auto-switch moves at a 5-hour threshold (50 to 100 %, default 95).</text>
-<text x="108" y="704" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Anthropic&#x27;s terms may read this as getting around usage limits; the operator accepted that risk and both can be turned off.</text>
-<circle cx="84" cy="728" r="9" fill="#2d3142"/>
-<text x="84" y="731.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
-<text x="108" y="732" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A limit rejection resumes once on a new account (rate_limited) or the Session fails. An auth failure signs the account out, moves on (sign_in_failed), resumes once, else the Session fails unauthorized.</text>
-<circle cx="84" cy="756" r="9" fill="#2d3142"/>
-<text x="84" y="759.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">7</text>
-<text x="108" y="760" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">CLIProxy can be turned on only while Connected. With it on, runs send its API key and address, usage is not read, and Auto-switch and Smart usage pause. The address must be loopback (ADR 0003).</text>
-<circle cx="84" cy="784" r="9" fill="#2d3142"/>
-<text x="84" y="787.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">8</text>
-<text x="108" y="788" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Switch reasons recorded: manual, auto, smart, rate_limited, sign_in_failed. Each switch sends account.switched and the sidebar account card follows it.</text>
-<path d="M 56,856 L 1404,856" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
-<text x="56" y="880" fill="#4f5d75" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start" letter-spacing="0.14em">LEGEND</text>
-<rect x="56" y="895" width="20" height="13" rx="3" fill="#ffffff" stroke="#2d3142" stroke-width="1.1"/>
-<text x="84" y="905" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Stage or state</text>
-<rect x="190.39999999999998" y="895" width="20" height="13" rx="3" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.1"/>
-<text x="218.4" y="905" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Operator decision</text>
-<rect x="341.59999999999997" y="895" width="20" height="13" rx="3" fill="rgba(45,49,66,0.07)" stroke="#4f5d75" stroke-width="1.1"/>
-<text x="369.6" y="905" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Job or store</text>
-<rect x="464.79999999999995" y="895" width="20" height="13" rx="3" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.40)" stroke-width="1.1" stroke-dasharray="4,3"/>
-<text x="492.8" y="905" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Optional</text>
-<path d="M 565.5999999999999,901 L 599.5999999999999,901" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#claude-accounts-arrow)"/>
-<text x="609.6" y="905" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Flow</text>
-<path d="M 659.9999999999999,901 L 693.9999999999999,901" stroke="#bf4520" stroke-width="1.4" marker-end="url(#claude-accounts-arrow-accent)"/>
-<text x="704" y="905" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Happy path</text>
-<path d="M 787.9999999999999,901 L 821.9999999999999,901" stroke="#4f5d75" stroke-width="1.1" stroke-dasharray="5,4" marker-end="url(#claude-accounts-arrow)"/>
-<text x="832" y="905" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Return or retry</text>
+<text x="108" y="660" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Usage is read for each signed-in account at start-up and every 5 min, by a Claude Code process that sends no prompt, and from the rate-limit events of runs. An account with a run going is skipped.</text>
+<text x="108" y="676" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A failing read keeps the last values and waits twice as long each time, up to an hour. The 5-hour bar turns accent from 90 %, the weekly bar from 80 %.</text>
+<circle cx="84" cy="700" r="9" fill="#2d3142"/>
+<text x="84" y="703.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">5</text>
+<text x="108" y="704" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Smart usage, on by default, moves to the top pick (weekly % left divided by days to reset) on every read, and can undo a manual Use.</text>
+<text x="108" y="720" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">It ranks enabled, signed-in accounts under the 5-hour threshold and under 100 % weekly. With it off, Auto-switch moves at a 5-hour threshold (50 to 100 %, default 95).</text>
+<text x="108" y="736" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Anthropic&#x27;s terms may read this as getting around usage limits; the operator accepted that risk and both can be turned off.</text>
+<g transform="translate(0,16)">
+<circle cx="84" cy="744" r="9" fill="#2d3142"/>
+<text x="84" y="747.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">6</text>
+<text x="108" y="748" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">A limit rejection resumes once on a new account (rate_limited) when Auto-switch is on, else the Session fails.</text>
+<text x="108" y="764" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">An auth failure signs the account out, moves on (sign_in_failed), resumes once, else the Session fails unauthorized.</text>
+<circle cx="84" cy="788" r="9" fill="#2d3142"/>
+<text x="84" y="791.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">7</text>
+<text x="108" y="792" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">CLIProxy can be turned on only while Connected. With it on, runs send its API key (from the Keychain) and address, a run&#x27;s usage counts as Not attributed, and Auto-switch and Smart usage pause.</text>
+<text x="108" y="808" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">The address must be on this Mac (ADR 0003). A limit or a refused key is CLIProxy&#x27;s to handle: no switch, no sign-out.</text>
+<circle cx="84" cy="832" r="9" fill="#2d3142"/>
+<text x="84" y="835.2" fill="#f5f5f5" font-size="9" font-weight="600" font-family="'Geist', system-ui, sans-serif" text-anchor="middle">8</text>
+<text x="108" y="836" fill="#2d3142" font-size="10" font-weight="400" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start">Switch reasons recorded: manual, auto, smart, rate_limited, sign_in_failed, disabled. Each switch sends account.switched and the sidebar account card follows it.</text>
+<path d="M 56,904 L 1404,904" stroke="rgba(45,49,66,0.16)" stroke-width="0.8"/>
+<text x="56" y="928" fill="#4f5d75" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="start" letter-spacing="0.14em">LEGEND</text>
+<rect x="56" y="943" width="20" height="13" rx="3" fill="#ffffff" stroke="#2d3142" stroke-width="1.1"/>
+<text x="84" y="953" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Stage or state</text>
+<rect x="190.39999999999998" y="943" width="20" height="13" rx="3" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.1"/>
+<text x="218.4" y="953" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Operator decision</text>
+<rect x="341.59999999999997" y="943" width="20" height="13" rx="3" fill="rgba(45,49,66,0.07)" stroke="#4f5d75" stroke-width="1.1"/>
+<text x="369.6" y="953" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Job or store</text>
+<rect x="464.79999999999995" y="943" width="20" height="13" rx="3" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.40)" stroke-width="1.1" stroke-dasharray="4,3"/>
+<text x="492.8" y="953" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Optional</text>
+<path d="M 565.5999999999999,949 L 599.5999999999999,949" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#claude-accounts-arrow)"/>
+<text x="609.6" y="953" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Flow</text>
+<path d="M 659.9999999999999,949 L 693.9999999999999,949" stroke="#bf4520" stroke-width="1.4" marker-end="url(#claude-accounts-arrow-accent)"/>
+<text x="704" y="953" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Happy path</text>
+<path d="M 787.9999999999999,949 L 821.9999999999999,949" stroke="#4f5d75" stroke-width="1.1" stroke-dasharray="5,4" marker-end="url(#claude-accounts-arrow)"/>
+<text x="832" y="953" fill="#4f5d75" font-size="9.5" font-weight="400" font-family="'Geist', system-ui, sans-serif" text-anchor="start">Return or retry</text>
+</g>
 </svg>
   </div>
 </body>

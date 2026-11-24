@@ -1,7 +1,7 @@
 # Monitor and Workspace list redesign
 
-**Status:** shipped
-**Design:** Monitor (Services and logs columns) and Workspace (Sessions, pull requests) in `design/ops-console.html`.
+**Status:** superseded. Monitor items by [monitor-source-tabs](monitor-source-tabs.md), Workspace items by [workspace-inbox-and-pr-cockpit](workspace-inbox-and-pr-cockpit.md); items 2 to 4 still hold in the Services menu.
+**Design:** none left of its own: `design/monitor-redesign.html` for the Monitor, `design/workspace-variants.html` for the lists.
 
 ## Problem
 
@@ -11,24 +11,24 @@ The pull request and Session lists do not say when something was opened or start
 
 ## Behavior
 
-1. The Services header holds the title with the Service count, one muted line, the range buttons, then an `HTTP`
-   status picker and the filter on one row. The picker reads `HTTP 400+` for every code, or the picked codes.
-2. A Service row is two lines: name and count, then the bar with its tier counts beside it. The tick box shows on
-   hover, and on every row once any Service is ticked.
+1. Superseded by monitor-source-tabs item 2: the header holds the title, one status sentence, the range buttons, the
+   `HTTP` status picker and the Scan button. The picker reads `HTTP 400+` for every code, or the picked codes.
+2. A Service row in the Services menu is two lines: name and count, then the bar with its tier counts beside it. The
+   tick box shows on hover, and on every row once any Service is ticked.
 3. Above the list, "Tick Services to Scan" with "Tick all". With ticks it reads "N ticked" with "Tick all" and
-   "Clear". Nothing sits under the Scan button to untick.
+   "Clear".
 4. The Scan button reads "Scan checkout-api · 24h" for one, "Scan 3 ticked · 24h", or "Scan 12 Services · 24h".
-5. Under the button, one line: "Last Scan 5m ago" with a toggle that opens the Services, range and codes that Scan
-   read. The names show only when it is open. A failed Scan keeps its warning text.
-6. The logs header holds the Service name, "Failing logs" and the range with codes. Tabs All, High, Medium and Low
-   carry a tier dot and the count. The search box and a Closed switch share one row.
-7. A log row is titled by its Route (method, then path), or the title when it has none. A tier-coloured bar replaces
-   the tier pill. It shows last seen on the right, then the Service when all are shown, the status code, `×count`
-   and the status when it is not `open`, then the log line in two muted lines.
-8. On the All tab, rows group under High, Medium and Low heads with counts. A tier tab shows no heads.
-9. A pull request row shows "Opened Nov 5 · 2:14 PM" with the relative time under it. The year shows for another
-   year.
-10. A Session row shows "Started Nov 5 · 2:14 PM · active 3h ago".
+5. Superseded by monitor-source-tabs items 2 and 3: the status sentence and the source tabs say when each source was
+   last scanned; Scan notes and failures open from the sentence.
+6. Superseded by monitor-source-tabs item 5: the toolbar holds the severity switch with counts, the search box, the
+   Services menu and the Closed switch.
+7. Superseded by monitor-source-tabs item 8: the Alerts are table rows titled by Route.
+8. Superseded by monitor-source-tabs item 5: the table lists highest tier first with no group heads; a tier tab shows
+   one tier.
+9. Superseded by workspace-inbox-and-pr-cockpit item 9: a pull request row shows the time since opened, and the full
+   date is in the tooltip.
+10. Superseded by workspace-inbox-and-pr-cockpit item 2: a Session row shows the time since last active, and the hover
+    card and the tooltip give the start and last-active dates.
 
 ## Not required
 
@@ -40,12 +40,11 @@ No change.
 
 ## UI
 
-Follows the redesigned Services and logs columns in `design/ops-console.html`. Loading, empty and error states are
-unchanged.
+Loading, empty and error states are unchanged.
 
 ## Seams
 
-- **Browser** (`frontend/e2e/monitor-lists.spec.ts`): 1 to 10.
+- **Browser** (`frontend/e2e/monitor-lists.spec.ts`): 2 to 4.
 
 ## Out of scope
 

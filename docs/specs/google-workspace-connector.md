@@ -9,7 +9,7 @@ The operator keeps notes, runbooks and figures in Google Docs, Sheets and Drive,
 
 ## Behavior
 
-1. Listing Connectors returns twelve in the fixed order. The last three are `google_docs`, `google_sheets` and `google_drive`. The migration seeds each with status `off` and the config `{}`.
+1. Listing Connectors returns sixteen in the fixed order. `google_docs`, `google_sheets` and `google_drive` come right after slashdocs, and the four log-source Connectors follow them. The migration seeds each with status `off` and the config `{}`.
 2. A Google Connector reaches its product's REST API (Docs, Sheets or Drive) through a small bridge the console ships: a stdio MCP server with tools of the console's own. The console registers the bridge as an MCP Server named `google-docs`, `google-sheets` or `google-drive` in every Claude account's config, signed in or not. The launcher (`mcp-exec`) hands the bridge the Connector's sign-in from the Keychain as environment variables; the bridge mints an access token and makes each tool's calls to Google. No token is written to a Claude config or a transcript.
 3. Connect takes no body and answers 202. The console runs Google's sign-in itself: the authorization code flow with PKCE, a loopback redirect on a port the console picks, Google's account chooser and consent screen in the operator's browser. `sign_in` holds `{ "code": null, "url": <Google's page> }` and each change sends `connection.checked`. When Google returns, the console keeps the refresh token in the Keychain, registers the server in every account, and the Connector reads `ok`. `account_label` shows the Google account's email.
 4. The client the sign-in uses is the one the build ships: its id and secret come from the build, never from git and never typed by the operator. A build with no client ends a Google Connect at `auth`: "Google sign-in is not set up in this build".
@@ -23,7 +23,7 @@ The operator keeps notes, runbooks and figures in Google Docs, Sheets and Drive,
 12. In a chat Session, a Google tool call follows the Session's Access mode exactly as a Slack or Atlassian call does. The console adds no read or write rule of its own beyond Behavior 13.
 13. Drive's tools only read: the bridge has no tool that deletes a file, empties the trash or changes who may open one, so no Access mode, `full` included, can do either.
 14. When Google answers a call with `401`, the bridge mints a new access token and sends that call once more. If Google still refuses, the tool gets Google's error as its result. A call Google refuses or a tool given arguments it cannot use ends as a tool error the agent reads, never as a crash of the bridge.
-15. The nine earlier Connectors, Slack's sign-in and their checks, Disconnects and the agent's reach through them do not change.
+15. The nine Connectors before the Google ones in the fixed order, Slack's sign-in and their checks, Disconnects and the agent's reach through them are unaffected.
 
 ## Settled
 
@@ -36,19 +36,19 @@ The operator keeps notes, runbooks and figures in Google Docs, Sheets and Drive,
   | `google_drive` | `drive.googleapis.com` | `drive.readonly` | `search_files`, `get_file`, `read_file` |
 
   Each also asks `openid` and `email`, to show the account. Each scope is the one its tools need and no wider; the list is pinned in `shared` and a test holds it. A tool takes a link or an id. `get_document` returns the title and text, and `read_file` a Google Doc as text, a Google Sheet's first sheet as CSV and a text file as it is, each cut at 100,000 characters; a binary file or one over 1 MB is refused. Drive's Connector reads every file the account can open; Docs and Sheets reach the files the operator gives them, by link or id.
-- **Names and order**: "Google Docs", "Google Sheets", "Google Drive", appended after slashdocs in the fixed order. The Integrations list stays A→Z. `via` reads "Google Docs API" and so on.
+- **Names and order**: "Google Docs", "Google Sheets", "Google Drive", after slashdocs in the fixed order. The Integrations list stays A→Z. `via` reads "Google Docs API" and so on.
 - **Client**: one Google OAuth client of type Desktop app, shipped in the build. Packaging writes `google-client.json` from the repo secrets `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`; `pnpm dev` reads `OPS_CONSOLE_GOOGLE_CLIENT_ID` and `OPS_CONSOLE_GOOGLE_CLIENT_SECRET`. A desktop client's secret is not confidential to Google. The project publishes the consent screen "In production": an unverified app shows Google's warning screen once and is capped at 100 users. In "Testing" status Google ends a refresh token after 7 days, which this design does not accept. The Cloud project enables the Docs, Sheets and Drive APIs, and needs no billing account.
 - **Redirect**: `http://127.0.0.1:<port>/`, the port picked at Connect, closed when the sign-in ends. A Desktop client takes any loopback port, so two sign-ins can run at once.
 - **Keychain** (ADR 0004): the launcher's entry for the server, `mcp:google-docs` and so on, holding the client id, the client secret and the refresh token. Nothing else is stored.
 - **Drive stays read-only**: the bridge does not offer the calls, so there is no rule to pin. A test holds the Drive tool list to the three reads.
 - **Tool annotations**: each tool says whether it only reads (`readOnlyHint`), so Claude Code can tell a read from a write.
-- **Jobs**: the console leaves the three servers out of a Job's MCP set by name. A Playbook cannot add them.
+- **Jobs**: the MCP scope of a Job's purpose (`mcp-scope.ts`) leaves the three servers out. A Playbook cannot add them.
 - **Seeded config**: `{}`.
 - **Concurrency**: several Google sign-ins at once; several Sessions may use connected Google servers at once.
 
 ## Not required
 
-- **Workspace admin approval**: a Superfans-style Workspace may block third-party apps until its admin allows the client id. The sign-in then ends `auth` with Google's reason.
+- **Workspace admin approval**: a Google Workspace may block third-party apps until its admin allows the client id. The sign-in then ends `auth` with Google's reason.
 - **Google verification**: the app runs unverified (Settled). A later step may put the client through Google's review to drop the warning and the cap. `drive.readonly` is a restricted scope, so that review is a security assessment.
 - **More tools**: Docs formatting, tables and comments, Sheets formatting and charts, and Drive writes (uploads, moves, sharing). Each is a later change.
 - **Calendar and Gmail**: each is its own Connector on the same bridge, in a later spec.
@@ -61,10 +61,10 @@ The agent gets up to three more tool sets in chat Sessions, and its write rights
 ## Database
 
 ```sql
--- No new table. The connectors table gained three rows (0040); the config is empty (0041).
+-- No new table. The connectors table has three rows for them (0040); the config is empty (0041).
 ```
 
-`ConnectorId` has `google_docs`, `google_sheets`, `google_drive`. A Keychain entry an earlier build made for a client the operator typed is left where it is, unused. A `google-docs` server an earlier build registered in a Claude config is replaced by the bridge at the next registration.
+`ConnectorId` has `google_docs`, `google_sheets`, `google_drive`. A Keychain entry for a client the operator typed is left where it is, unused. A `google-docs` server registered in a Claude config by another route is replaced by the bridge at the next registration.
 
 ## API
 

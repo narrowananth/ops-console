@@ -1,13 +1,53 @@
 # ops-console
 
-A local console on top of Claude Code. It shows which MCP servers are connected, how each service
-is doing in Datadog, in OpenTelemetry logs, in CloudWatch logs, in Loki logs or in New Relic logs, the databases the agent may use, open PRs and Claude sessions. When a route
-fails, the agent reproduces it locally and writes a report; the operator reviews it, and only then
-does the agent fix the code and open a PR.
+Ops Console is a local web app on top of Claude Code. It runs on your Mac, shows how your services are doing, and
+lets a Claude agent work on your code and tools. The agent reproduces a failing route and writes a report. You read
+it. Only after you confirm does the agent fix the code and open a pull request, and you merge it yourself. It is for developers who own services in production and want an agent to investigate failures
+while they approve every change.
 
-The screens come from [design/ops-console.html](design/ops-console.html) and the layout from
-[design/ops-console-sidebar.html](design/ops-console-sidebar.html) (open them in a browser).
-Website and user docs: [opsconsole.org](https://opsconsole.org), built from `site/`. Stack and modules: [docs/architecture.md](docs/architecture.md). Terms: [GLOSSARY.md](GLOSSARY.md).
+Website and user docs: [opsconsole.org](https://opsconsole.org), built from `site/`. Stack, modules and
+diagrams: [docs/architecture.md](docs/architecture.md), with the drawings in [docs/diagrams](docs/diagrams). Decisions:
+[docs/adr](docs/adr). Terms: [GLOSSARY.md](GLOSSARY.md). Plans: [docs/roadmap.md](docs/roadmap.md). The screens come from
+[design/ops-console.html](design/ops-console.html) and the layout from
+[design/ops-console-sidebar.html](design/ops-console-sidebar.html); open them in a browser.
+
+## What you can do with it
+
+- **Monitor.** Read the failing requests of each Service from Datadog, an OpenTelemetry Log folder, CloudWatch logs,
+  Loki or New Relic, one tab per source. Each kind of failure becomes an Alert with a severity and a Route. Verify an
+  Alert in a scratch copy of your code, review the Report, and confirm it to start a Fix that ends in a pull request.
+- **Workspace.** Start Sessions with the agent in your Repos, each in its own git worktree. A Sessions inbox shows
+  which need you. The pull request cockpit lists pull requests across your Git hosts, with checks, threads, a conflict
+  check and merge checks. Review with agent, Check replies and Address comments each open a Session on a pull request.
+- **Browser panel and Terminals.** A Session has a Chrome page you and the agent both drive, with Chrome's DevTools,
+  element pick and Local servers, and a Terminals dock for shells and long-running processes.
+- **Dev tools.** Ask a question in plain words and have the agent query your databases, scoped to the Connections you
+  choose, with Results and a Comparison.
+- **Playbooks and Skills.** Write the rules and steps the agent follows for each Trigger, copy and edit the built-in
+  ones, and attach Skills: built-in packs, your own, or a Repo's.
+- **Integrations, Connections and MCP Servers.** Sixteen Connectors sign in once (Datadog, Jira, GitHub, GitLab,
+  Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Sheets and Drive, and the four log sources besides
+  Datadog). Connections are the databases the agent may use, each with an Environment and an Access Level. Scheduled
+  health checks say when any of them breaks.
+- **Setup agent and Permissions.** The Setup agent is Claude in a terminal that adds Connections, MCP Servers and
+  Connectors from what you type. Permissions shows whether Full Disk Access, Start at login and the Run sandbox work.
+- **Agent runs.** See each run's health, why it was slow or ended, where its time went and every call it made.
+- **Accounts & Usage.** Add several Claude accounts, see each one's tokens and cost, and let Auto-switch or Smart usage
+  move work between them. CLIProxy can sign the agent in instead.
+
+## How it keeps the agent safe
+
+- **Run sandbox.** Every run's shell commands run in the macOS sandbox. It is open to the network and to writes, as your
+  own terminal is, and closed to the login Keychain folder, the installed app and git control files. It has no switch,
+  and a run fails when the sandbox is unavailable. See [ADR 0006](docs/adr/0006-agent-runs-sandboxed-by-the-os.md).
+- **Approvals.** The Access mode decides which edits and commands ask you first. A write to a PROD Connection asks in
+  every mode.
+- **PROD is read-only** for the agent unless you set write access on that Connection and approve the action. A command
+  that writes to prod is yours to run.
+- **It never merges.** Every run denies the merge commands and tools. The console, not the agent, pushes branches and
+  posts replies. Merge is your button.
+- **Local only.** The server listens on 127.0.0.1 with a session token, and secrets stay in the macOS Keychain. Nothing
+  goes to a server the project runs.
 
 ## Install
 
@@ -62,9 +102,11 @@ it at once: `ops-console open "Google Chrome"` signs in a browser other than the
 | `cli/` | The `ops-console` command |
 | `shared/` | Zod schemas and types both sides import: REST bodies, WebSocket events |
 | `install.sh` | The installer |
-| `scripts/` | `pnpm dev:open` and `pnpm package` |
+| `Formula/` | The Homebrew formula, which the release workflow commits |
+| `scripts/` | `pnpm dev:open`, `pnpm package`, the Homebrew formula and the DevTools build |
+| `site/` | The opsconsole.org docs site, built by `pnpm site` into `site/dist` |
 | `design/` | Claude Design export |
-| `docs/` | Architecture, ADRs, specs |
+| `docs/` | Architecture, ADRs, specs, roadmap |
 | `GLOSSARY.md` | Domain terms |
 
 ## Develop

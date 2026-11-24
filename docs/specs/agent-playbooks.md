@@ -1,14 +1,14 @@
 # Agent Playbooks
 
-**Status:** shipped
+**Status:** shipped; Review PR, Check reply and Address comments open Sessions ([pr-actions-open-sessions](pr-actions-open-sessions.md))
 **Design:** Playbooks in `design/ops-console-sidebar.html` (sidebar, under Claude after Agents & accounts): the overview
 of Triggers and the Playbook as a flow, as `playbooks-redesign` describes. `design/ops-console.html` shows the Playbook
-on the Monitor Verify button and Report panel, the Session header and the Agent Review card.
+on the Monitor Verify button and Report panel and a Session's Playbook link.
 
 ## Problem
 
 Each place the agent starts work has its method fixed by the console. A Verification always follows the same four
-steps (map the log, replay, cross-check, decide), a Fix always runs Code then Tests, an Agent Review always reads
+steps (map the log, replay, cross-check, decide), a Fix always runs Code then Tests, a pull request review always reads
 the diff the same way, and a Session gets no standing instructions at all. The operator knows
 how their services should be checked: which Repo really owns a failure, which other services call the feature,
 which Connection holds the data that explains it, how to build mock data and test a lasting fix instead of a quick
@@ -20,6 +20,8 @@ patch. They have no place to write that down, so they retype it in every Session
 
 1. The Playbooks page lists seven Triggers under their tabs. Monitor: Verify and Fix. Workspace: Review PR, Check reply, Address
    comments, Reply in thread and Session message. Dev tools has none: a Dev tools Session runs with no Playbook rules.
+   Verify and Fix start jobs, Review PR, Check reply and Address comments open PR action Sessions, and Reply in thread
+   and Session message are chats.
 2. Each Trigger holds exactly one Playbook. A Trigger with none runs its built-in Playbook. Every built-in has rules:
    the Trigger's own method plus the rules every job and chat shares (evidence over assumptions; verified, mocked
    and unverified kept apart; databases read only with writes mocked; only the Connections the work needs; never
@@ -34,7 +36,7 @@ patch. They have no place to write that down, so they retype it in every Session
 4. The operator creates a Playbook from nothing or as a copy of a built-in. A Playbook has a name, rules and ordered steps.
    Limits: name 60 characters and unique without regard to case, rules 8000, at most 12 steps, step title 80, step
    instructions 4000. A Playbook may have no steps.
-5. One Playbook may hold several Triggers; editing it changes what each of them runs from their next job or turn.
+5. One Playbook may hold several Triggers; editing it changes what each of them runs from their next job, Session or turn.
    Attaching a Playbook to a Trigger that already holds one replaces it after a confirm: "Verify runs Checkout deep
    check. Replace it with Safe DB fix?"
 6. Detaching a Playbook from a Trigger puts the built-in back. Deleting a Playbook detaches it from every Trigger
@@ -44,7 +46,7 @@ patch. They have no place to write that down, so they retype it in every Session
 
 7. The Step blocks palette holds ten blocks, each with written instructions: Trace the log through the code, Find
    the Repo that owns it, Find who else uses it, Read real data from Connections, Replay the request locally, Make
-   mock data, Run the tests, Test a lasting fix, Check PROD readiness, and Custom step (empty).
+   mock data, Run the tests, Test a lasting fix, Check PROD readiness, and Custom step (empty). The page lists Custom step first.
 8. Dragging a block onto a line of the flow inserts a copy at that point; the copy's title and instructions are then the
    Playbook's own to edit. Dragging a step reorders it. Dragging a step off the canvas removes it. A Playbook goes on
    a Trigger from the Trigger's dropdown, and comes off by choosing Built-in there.
@@ -52,18 +54,23 @@ patch. They have no place to write that down, so they retype it in every Session
    Remove in a step's panel, and each Trigger's dropdown of Built-in and the operator's Playbooks.
 10. A step that writes files or runs commands carries the tag "scratch copy". The blocks Replay the request locally,
     Make mock data, Run the tests and Test a lasting fix carry it, whatever the step's text says; Custom step has a checkbox for it. Editing a step's text keeps its tag.
-11. Review PR may hold tagged steps; the built-in's "Run the tests and build" is one. With any, the Agent Review makes
-    a scratch copy at the pull request's head commit, runs every step and its closing turn there, and removes it when
-    the review ends. A copy that cannot be made fails the review with "Could not make a scratch copy:" and git's
-    message. Without a tagged step it reads only, as before.
+    The tag means a step of a job: the page shows it, and the Custom step checkbox, only on a Playbook that runs on no
+    Trigger or on at least one of Verify and Fix.
+11. Review PR, Check reply and Address comments open a PR action Session in a worktree at the pull request's head
+    commit, where the agent may install, build and run the tests. A tag on their steps changes nothing: the page does
+    not show it for them, and the steps go into the Session's opening prompt as written.
 12. Save writes the Playbook; Discard drops the edits. Unsaved edits stay in the browser until Save or Discard,
-    through page switches, reloads and reopening the console, and the Playbook's row shows a dot while they exist.
+    through page switches, reloads and reopening the console, and the Playbook's row shows an "unsaved" pill, and each Trigger that runs it a dot, while they exist.
 
 ### Running a job
 
-13. Verify, Fix, Review PR, Check reply and Address comments start jobs. A job copies its Trigger's Playbook (name, rules, steps) when it starts.
-    Editing, detaching or deleting the Playbook later changes neither the running job nor its record; the Report,
-    Fix and Agent Review show the name and steps they ran.
+13. Verify and Fix start jobs. A job copies its Trigger's Playbook (name, rules, Skills, steps) when it starts.
+    Editing, detaching or deleting the Playbook later changes neither the running job nor its record; the Report and
+    Fix show the name and steps they ran.
+13a. Review PR, Check reply and Address comments open a Session. The Session's opening prompt carries the pull request,
+    the Trigger's rules, its Skills with their full text and its steps as one turn, each step's title a heading over its
+    instructions. No step has a status of its own, and the Session keeps no copy of the Playbook. As in any Session,
+    its turns carry the Session message rules in the system prompt.
 14. Each step is its own agent turn in the job's Session, in order. The turn carries the step's instructions and asks
     the agent to end with its outcome: done, skipped or failed, and a summary of at most 500 characters. The job view
     shows each step as pending, running, done, skipped or failed, with its summary, live. When something in the step
@@ -74,39 +81,41 @@ patch. They have no place to write that down, so they retype it in every Session
     stops the job, which fails with "Step 3 · Make mock data failed:" and the summary. An agent error, an answer the
     console cannot read and the operator stopping the run each fail the running step; a stopped step's summary is
     "stopped by the operator".
-15a. While a job runs a step, the step shows "Skip step N" under its title, on the Report, the Fix, the Agent Review,
-    the Reply check and the Comment pass. It calls `POST /jobs/:kind/:id/skip-step` (`kind` is `report`, `fix`,
-    `agent_review`, `reply_check` or `comment_pass`): the step's turn stops, the step reads skipped with "Skipped by the
-    operator while it ran", and the job goes on from the next step in the same Session. With no step running, as during
+15a. While a job runs a step, the step shows "Skip step N" under its title, on the Report and the Fix. It calls
+    `POST /jobs/:kind/:id/skip-step` (`kind` is `report` or `fix`): the step's turn stops, the step reads skipped with
+    "Skipped by the operator while it ran", and the job goes on from the next step in the same Session. With no step running, as during
     the closing turn, it answers `invalid_state`. Stop, by contrast, fails the step and the job; the failed job then
     offers "Retry from step N" and "Skip step N", side by side and the same size.
-16. After the last step the console runs its own closing turn: the Verification writes the Report, the Agent Review
-    writes its findings, checklist and verdict, and the Fix goes on to its PR stage. Report, Agent Review and PR keep
-    today's shape.
+16. After the last step the console runs its own closing turn: the Verification writes the Report, and the Fix goes on
+    to its PR stage, where the agent commits and writes the description and the console pushes and opens the pull
+    request. A Session Trigger has no closing turn.
 17. A failed Verification offers "Retry from step 3": it runs again from the failed step in the same Session, with
     the same copy, into the same Report version. Verify again starts a new Report version with the Playbook Verify
-    holds now. A failed Fix retries from its failed stage or step. A failed Agent Review retries from its failed step,
-    or its closing turn when no step failed, while the pull request is on the same commit.
-    Next to "Retry from step N", every failed job with a failed step offers "Skip step N": the step reads skipped,
+    holds now. A failed Fix retries from its failed stage or step.
+    Next to "Retry from step N", a failed Report or Fix with a failed step offers "Skip step N": the step reads skipped,
     its summary "Skipped by the operator:" and why it failed, and the job goes on from the next step.
-17a. Every job shows how long it has taken: the Report and the Fix on Monitor, and the Agent Review, Reply check and Comment pass on a pull request. While the job runs, its header counts up each second (`42s`, `4m 05s`, `1h 02m`); once it ends, the header says "took 4m 05s". Each step shows its own time beside its title the same way. A job's clock is `started_at` to `finished_at`, and a retry starts it again. A step's clock starts when the step does, so a retried step shows only its last run. Jobs from before times were kept show no time.
-18. The buttons that start a job name a Playbook that is not built-in: "Verify with agent · Checkout deep check".
-    With the built-in they read as today.
+17a. Every job shows how long it has taken: the Report and the Fix on Monitor. While the job runs, its header counts up each second (`42s`, `4m 05s`, `1h 02m`); once it ends, the header says "took 4m 05s". Each step shows its own time beside its title the same way. A job's clock is `started_at` to `finished_at`, and a retry starts it again. A step's clock starts when the step does, so a retried step shows only its last run. A job or step with no recorded end shows no time.
+18. The buttons that start a job or a PR action Session name a Playbook that is not built-in: "Verify with agent ·
+    Checkout deep check", "Fix with agent", "Agent Review", "Address comments" and "Check replies" with the same suffix.
+    With the built-in they read without it.
 
 ### Chat Triggers
 
 19. Session message and Reply in thread are chats, so they use only a Playbook's rules. On the page their
-    Playbook's steps show greyed with "Steps don't run on chat Triggers."
+    Playbook's steps show greyed, and the Playbook's last node reads "Steps don't run on chat Triggers: the agent replies
+    using the rules."
 20. A chat Trigger reads its Playbook at each turn, so an edit applies from the next message.
 21. In an Alert's Session, the operator's messages use the rules the Alert's latest job copied, not Session message.
-22. A Session's header names the Playbook its rules come from, when it is not built-in, and links to it on the
-    Playbooks page.
+22. The Session panel has a row "Playbook: <name>" for the Playbook a Session's rules come from, when it is not
+    built-in, linking to it on the Playbooks page.
 
 ### Rules
 
-23. Rules go into the system prompt of every turn the Trigger starts, after Claude Code's own and the console's
-    instructions for that kind of run, and before the console's safety lines. The console's pull request description
-    rule comes just before them, in every turn, Playbook or not, so a Playbook's rules add to it. It asks for a
+23. Rules go into the system prompt of every turn the Trigger starts, after Claude Code's own, the console's
+    instructions for that kind of run and the console's own rules (latest code, pull request description, opening pull
+    requests, integrations, commit hooks, subagents, and the output folder and other Repos where a Session has them),
+    and before the Session folders and the console's safety lines. The console's pull request description
+    rule is in every turn, Playbook or not, so a Playbook's rules add to it. It asks for a
     description in depth whenever the agent opens a pull request or writes its description: summary, problem or root
     cause with file and line, changes by file and the choices behind them, testing done and not done, risk and
     rollback, and links; in the Repo's pull request template when it has one; never one line. The Playbook editor
@@ -118,14 +127,15 @@ patch. They have no place to write that down, so they retype it in every Session
 24. A Verification runs in a scratch copy of the code: a git worktree of the Service's Repo, or of its clone, kept in
     the data directory. It is at the newest commit of the first branch in the Playbook's Branch field that origin has
     (`production, master, main`, tried in order), fetched from origin first; a blank Branch means the Repo's default
-    branch. The Report's first step reads "Code: origin/production at 1a2b3c4, fetched from origin", and the brief
+    branch. A step of the Report reads "Code: origin/production at 1a2b3c4, fetched from origin", and the brief
     names the branch and commit. When origin cannot be reached, the first of those branches the Repo has locally
     stands in, and the step and the brief say it may be behind. The agent may write files there (mock
     data, a test) and run local commands. The operator's checkout keeps its branch and its uncommitted changes.
 25. The scratch copy is removed when its Report is ready, or when the Alert's next Verification starts. A failed
     Report keeps it for Retry. At start-up the daemon removes every scratch copy whose Report is neither running
     nor failed.
-26. A Fix runs in the Repo's checkout, as today, and starts a new agent conversation there. Its brief carries the
+26. A Fix runs in the Alert's Session folder (the Session's worktree of the Repo, or its clone), not in the scratch
+    copy, and starts a new agent conversation there. Its brief carries the
     Report, so nothing written in the scratch copy reaches the Fix branch. A new Fix branch starts at the same kind
     of base: the newest commit of the Fix Playbook's Branch, fetched, not the branch checked out.
 27. If the scratch copy cannot be made (no listed branch is on origin or in the Repo, git fails), the Verification fails
@@ -134,19 +144,20 @@ patch. They have no place to write that down, so they retype it in every Session
 ### Safety and what must not regress
 
 28. Nothing a Playbook says widens the agent's reach. Merging stays denied, a PROD write still asks, Access Levels
-    and disabled MCP Servers still hold, and a Verification still writes to no Connection.
+    and disabled MCP Servers still hold, the Run sandbox ([ADR 0006](../adr/0006-agent-runs-sandboxed-by-the-os.md))
+    applies, and a Verification still writes to no Connection.
 29. Every job and chat turn carries the mock data rule: mock data is made up, shaped like the real data, and no
     value read from a PROD Connection is written to a file, a commit, a PR or its comments, a Ticket or a Report.
 30. With every Trigger on its built-in, Fix progress shows Ticket (skipped: the built-in makes no Jira ticket),
     Branch, the seven built-in steps by title, and PR.
 31. Two jobs at once each run their own copy; editing or moving a Playbook while both run changes neither.
-32. A daemon restart mid-step fails the step and its job as interrupted, as start-up recovery does today.
-33. Reports and Agent Reviews made before this change show no Playbook. A Fix made before it shows its Code and Tests
+32. A daemon restart mid-step fails the step and its job as interrupted, as start-up recovery does.
+33. A Report made before Playbooks existed shows no Playbook. A Fix made before them shows its Code and Tests
     stages as the steps Code and Tests.
 
 ## Settled
 
-- **Trigger, not Action**: the Action Log already means each query or command the agent runs, so the six places that
+- **Trigger, not Action**: the Action Log already means each query or command the agent runs, so the seven places that
   start the agent are Triggers.
 - **One Playbook per Trigger**: the agent is never told two methods at once, and a button always runs the same
   Playbook. No scope by Service or Repo and no pick at run time; rules for one Repo belong in its `CLAUDE.md`,
@@ -157,22 +168,23 @@ patch. They have no place to write that down, so they retype it in every Session
 - **Jira ticket switch**: a Playbook's own flag, off by default and on no built-in. Fix copies it at start; off, the
   Fix makes no ticket even with Jira connected, and the ticket stage reads "No ticket: the Fix Playbook makes no Jira
   ticket.".
-- **Job Triggers and chat Triggers**: Verify, Fix, Review PR, Check reply and Address comments start jobs with an end; only jobs run steps. The rest
-  are chats and use rules only.
+- **Job, Session and chat Triggers**: Verify and Fix start jobs with an end, and only jobs run steps, one turn each.
+  Review PR, Check reply and Address comments open a Session and put the steps in its opening prompt. The rest are
+  chats and use rules only.
 - **Steps are turns**: one turn per step, in the job's Session, so progress shows per step and Retry starts at the
   failed one.
 - **Console keeps the contract**: a Playbook replaces the method. The closing turn's JSON, the safety lines and the
   Fix stages the console runs itself (Ticket, Branch, PR) stay out of the operator's reach.
-- **Step outcome**: `done`, `skipped` or `failed`, plus a summary. `skipped` goes on, `failed` stops. Fix's old Tests
-  check (`passed: false` fails) becomes the built-in Tests step answering `failed`.
+- **Step outcome**: `done`, `skipped` or `failed`, plus a summary. `skipped` goes on, `failed` stops.
 - **Fix stages**: `ticket`, `branch`, `steps`, `pr`. The stage `steps` covers the Playbook's steps, in order.
-- **Scratch copy tag**: a step's own flag, set by its block or the Custom step checkbox. A job that reads only
-  makes its scratch copy only when a step has it.
-- **Copy at start**: jobs copy the Playbook; chats read it per turn because they never end.
+- **Scratch copy tag**: a step's own flag, set by its block or the Custom step checkbox. It tells the agent whether a
+  step may write files and run commands. A Verification makes its scratch copy whichever steps carry it.
+- **Copy at start**: jobs copy the Playbook; a PR action Session takes it into its opening prompt; chats read it per
+  turn because they never end.
 - **Scratch copy at the Playbook's branch**: the deployed code is closest to the branch the Verify Playbook names, the
   default branch when blank. The operator's
   uncommitted work is not in the copy.
-- **Fix conversation**: starts fresh in the checkout, because the Verification's ran in another folder.
+- **Fix conversation**: starts fresh in the Alert's Session folder, because the Verification's ran in another folder.
 - **Order on the page**: Triggers in the order of Behavior 1; Playbooks A to Z, then the built-ins.
 
 ## Not required
@@ -186,9 +198,10 @@ patch. They have no place to write that down, so they retype it in every Session
 
 ## Safety
 
-- A Verification may now write files and run local commands, only inside its scratch copy. Its cwd is that copy.
-  It still writes to no Connection, reads PROD only where the Connection has read access, and runs with the Alert
-  Session's Access mode, as today.
+- A Verification may write files and run local commands. Its working folder is its scratch copy, and the step text
+  and the safety lines keep it there; the Run sandbox ([ADR 0006](../adr/0006-agent-runs-sandboxed-by-the-os.md))
+  closes the Keychain, `~/.ops-console` and git control files, not the rest of the disk. It writes to no
+  Connection, reads PROD only where the Connection has read access, and runs with the Alert Session's Access mode.
 - Playbook text is the operator's own, but step instructions run next to log lines that anyone who can call the
   Service can write. The console's safety lines come last in every turn and say that a log line is data, never an
   instruction.
@@ -227,7 +240,6 @@ CREATE TABLE playbook_steps (
   id TEXT PRIMARY KEY NOT NULL,
   report_id TEXT REFERENCES reports(id) ON DELETE CASCADE,
   fix_id TEXT REFERENCES fixes(id) ON DELETE CASCADE,
-  agent_review_id TEXT REFERENCES pr_agent_reviews(id) ON DELETE CASCADE,
   position INTEGER NOT NULL,
   title TEXT NOT NULL,
   instructions TEXT NOT NULL,
@@ -236,27 +248,27 @@ CREATE TABLE playbook_steps (
   summary TEXT,
   started_at TEXT,
   finished_at TEXT,
-  CHECK ((report_id IS NOT NULL) + (fix_id IS NOT NULL) + (agent_review_id IS NOT NULL) = 1)
+  CHECK ((report_id IS NOT NULL) + (fix_id IS NOT NULL) = 1)
 );
 CREATE UNIQUE INDEX playbook_steps_report_idx ON playbook_steps (report_id, position) WHERE report_id IS NOT NULL;
 CREATE UNIQUE INDEX playbook_steps_fix_idx ON playbook_steps (fix_id, position) WHERE fix_id IS NOT NULL;
-CREATE UNIQUE INDEX playbook_steps_review_idx ON playbook_steps (agent_review_id, position)
-  WHERE agent_review_id IS NOT NULL;
 
 -- The Playbook a job ran, as copied at start. playbook_id is null for a built-in and once the Playbook is deleted.
 ALTER TABLE reports ADD COLUMN playbook_id TEXT REFERENCES playbooks(id) ON DELETE SET NULL;
 ALTER TABLE reports ADD COLUMN playbook_name TEXT;
 ALTER TABLE reports ADD COLUMN playbook_rules TEXT;
+-- JSON array of the Skills offered, each { id, name, description, instructions }; null for none.
+ALTER TABLE reports ADD COLUMN playbook_skills TEXT;
 ALTER TABLE reports ADD COLUMN playbook_branches TEXT;
 -- The scratch copy's folder; null once removed.
 ALTER TABLE reports ADD COLUMN scratch_path TEXT;
 ALTER TABLE fixes ADD COLUMN playbook_id TEXT REFERENCES playbooks(id) ON DELETE SET NULL;
 ALTER TABLE fixes ADD COLUMN playbook_name TEXT;
 ALTER TABLE fixes ADD COLUMN playbook_rules TEXT;
+ALTER TABLE fixes ADD COLUMN playbook_skills TEXT;
 ALTER TABLE fixes ADD COLUMN playbook_branches TEXT;
-ALTER TABLE pr_agent_reviews ADD COLUMN playbook_id TEXT REFERENCES playbooks(id) ON DELETE SET NULL;
-ALTER TABLE pr_agent_reviews ADD COLUMN playbook_name TEXT;
-ALTER TABLE pr_agent_reviews ADD COLUMN playbook_rules TEXT;
+-- The Playbook's Jira ticket switch as copied at start.
+ALTER TABLE fixes ADD COLUMN playbook_jira_ticket INTEGER NOT NULL DEFAULT 0;
 ```
 
 Migration:
@@ -266,7 +278,7 @@ Migration:
   at stage `ticket` or `branch` has both `pending`. At `code` or `tests`, the earlier one is `done` and its own row
   takes the Fix's status (`running` or `failed`). At `pr`, both are `done`. Then `fixes.stage` moves from `code` and
   `tests` to `steps`, and `playbook_name` becomes "Fix (built-in)".
-- Reports and Agent Reviews get no rows and keep `playbook_name` null.
+- Reports get no rows and keep `playbook_name` null.
 
 ## API
 
@@ -292,33 +304,44 @@ Migration:
   "branches": "comma-separated branch names, up to 200; blank: the Repo's default branch",
   "steps": [Step],
   "jira_ticket": false,
+  "skills": [{ "id": "string", "kind": "custom | builtin", "name": "string", "description": "string" }],
   "triggers": ["verify | fix | review_pr | check_reply | address_comments | thread_reply | session_message"],
   "updated_at": "ISO 8601 | null"
 }
 ```
 
 - `steps`: at most 12.
+- `skills`: the Skills it holds, A to Z, at most 8 (`playbook-skills`); empty on a built-in.
 - `triggers`: the Triggers holding it now. A built-in's lists its Trigger when no Playbook holds it.
 - `updated_at`: null on a built-in.
 
-`JobPlaybook`, added to `Report`, `Fix` and `PrAgentReview`, null on jobs from before this change:
+`JobPlaybook`, added to `Report` and `Fix`, null on jobs from before Playbooks:
 
 ```json
 {
   "id": "uuid | null",
   "name": "string",
-  "steps": [{ "title": "string", "writes": true, "status": "pending | running | done | skipped | failed", "summary": "string | null" }]
+  "skills": [{ "id": "uuid | null", "name": "string" }],
+  "steps": [{
+    "title": "string",
+    "writes": true,
+    "status": "pending | running | done | skipped | failed",
+    "summary": "string | null",
+    "started_at": "ISO 8601 | null",
+    "finished_at": "ISO 8601 | null"
+  }]
 }
 ```
 
 - `id`: null for a built-in and once the Playbook is deleted.
+- `skills`: the Skills the job was offered; `id` is null once a Skill is deleted.
 
 | Status | Error code          | When                                                                                     |
 | ------ | ------------------- | ---------------------------------------------------------------------------------------- |
 | 400    | `validation_failed` | A limit is broken, an unknown block or Trigger                                           |
-| 404    | `not_found`         | No Playbook with that id                                                                  |
+| 404    | `not_found`         | No Playbook with that id, or a `skill_ids` entry that names no Skill                     |
 | 409    | `duplicate`         | Another Playbook has that name                                                           |
-| 409    | `invalid_state`     | Changing or deleting a built-in, a retry of a job that has not failed |
+| 409    | `invalid_state`     | Changing or deleting a built-in, a retry of a job that has not failed, a skip with nothing to skip |
 
 ### `GET /playbooks`
 
@@ -327,11 +350,11 @@ blocks in the order of Behavior 7.
 
 ### `POST /playbooks`
 
-Body: `name`, `rules`, `branches`, `jira_ticket`, `steps`. 201 `Playbook`. A copy of a built-in is this call with its fields.
+Body: `name`, `rules`, `branches`, `jira_ticket`, `steps`, `skill_ids`. 201 `Playbook`. A copy of a built-in is this call with its fields.
 
 ### `PATCH /playbooks/:id`
 
-Body: any of `name`, `rules`, `branches`, `jira_ticket`, `steps`. 200 `Playbook`.
+Body: any of `name`, `rules`, `branches`, `jira_ticket`, `steps`, `skill_ids`. 200 `Playbook`.
 
 ### `DELETE /playbooks/:id`
 
@@ -341,15 +364,24 @@ Body: any of `name`, `rules`, `branches`, `jira_ticket`, `steps`. 200 `Playbook`
 
 Body: `{ "playbook_id": "uuid | null" }`. Null detaches. 200 `[Playbook]`, the list as in `GET /playbooks`.
 
-### `POST /alerts/:id/verifications`, `POST /alerts/:id/review`, `POST /repos/:repo/pull-requests/:number/agent-reviews`
+### `POST /alerts/:id/verifications`, `POST /alerts/:id/review`
 
-Unchanged bodies. The Job they start copies the Trigger's Playbook; the `Report`, `Fix` and `PrAgentReview` they
-return carry `playbook`.
+Their bodies carry no Playbook field. The job they start copies the Trigger's Playbook; the `Report` and `Fix`
+they return carry `playbook`.
+
+### `POST /repos/:repo/pull-requests/:number/action-sessions`
+
+Opens the PR action Session of Review PR, Check reply or Address comments (`pr-actions-open-sessions`). It reads the
+Trigger's Playbook when it starts and returns the `Session`; the Playbook's text goes into the opening prompt.
+
+### `POST /jobs/:kind/:id/skip-step`
+
+`kind` is `report` or `fix`. 204. Stops the job's running step, which reads skipped, and the job goes on from the
+next one. `invalid_state` when no step is running.
 
 ### Retry
 
-`POST /reports/:id/retry`, `POST /fixes/:id/retry`, `POST /agent-reviews/:id/retry`, and the Reply check and Comment
-pass retries. Body, optional: `{ "skip": false }`. `skip` true first marks the failed step skipped by the operator,
+`POST /reports/:id/retry` and `POST /fixes/:id/retry`. Body, optional: `{ "skip": false }`. `skip` true first marks the failed step skipped by the operator,
 so the job goes on from the next step. `invalid_state` when `skip` is true and no step failed.
 
 ### `POST /reports/:id/retry`
@@ -361,12 +393,6 @@ Runs a failed Report again from its failed step, in its scratch copy. 202 `Repor
 
 Retries from the failed stage, or the failed step when the stage is `steps`.
 
-### `POST /agent-reviews/:id/retry`
-
-Runs a failed Agent Review again from its failed step, or only its closing turn when no step failed. 202
-`PrAgentReview` in `running`. `invalid_state` unless it failed and the pull request is still on its commit;
-`session_busy` while another job runs on the pull request.
-
 ### WebSocket `playbook_step.updated`
 
 Server to client, each time a job's step changes status.
@@ -375,7 +401,6 @@ Server to client, each time a job's step changes status.
 {
   "report_id": "uuid | null",
   "fix_id": "uuid | null",
-  "agent_review_id": "uuid | null",
   "position": 0,
   "status": "pending | running | done | skipped | failed",
   "summary": "string | null"
@@ -386,21 +411,21 @@ Server to client, each time a job's step changes status.
 
 ## UI
 
-- **Sidebar**: Playbooks under Claude, after Agents & accounts, at `/playbooks`.
+- **Sidebar**: Playbooks under Claude, after Accounts & Usage and Agent runs, at `/playbooks`.
 - **Page**: the overview of Triggers and one Playbook's flow, as `playbooks-redesign` describes. The open Playbook is in
   the address as `?playbook=<id>`.
+- **Skills**: the Skills a Playbook holds sit beside Rules and Settings (`playbook-skills`).
 - **Confirms**: Delete and Replace (Behaviors 5 and 6) ask in a modal over a dimmed page, with Cancel focused first.
   Escape, Cancel or a click on the dimmed page closes it.
 - **Monitor**: the Verify and Fix buttons name a Playbook that is not built-in (Behavior 18). The Report panel shows
   the Playbook's name, then its steps with status and summary above today's live tool steps, then "Writing the
   Report" during the closing turn. A failed one shows "Retry from step N" next to Verify again. Fix progress shows
-  Ticket, Branch, each step by title, and PR as one path (`08-monitor-dashboard`). The Report's and the Agent
-  Review's steps use the same path under a progress bar, the console's closing turn last ("Write the Report",
-  "Write findings, checklist and verdict"). A job with no steps shows "Read the code" or "Read the change" in their
-  place. Each card's status is a pill tinted like its path.
-- **Workspace, pull request**: Review with agent names a Playbook that is not built-in. An Agent Review shows its
-  Playbook's name and steps above the findings.
-- **Session header**: "Playbook: <name>" linking to `/playbooks?playbook=<id>` (Behavior 22).
+  Ticket, Branch, each step by title, and PR as one path (`08-monitor-dashboard`). The Report's steps use the same
+  path under a progress bar, the console's closing turn last ("Write the Report"). A job with no steps shows
+  "Read the code" in their place. Each card's status is a pill tinted like its path.
+- **Workspace, pull request**: Agent Review, Address comments and Check replies name a Playbook that is not built-in
+  (Behavior 18). The Session each opens shows its Playbook's steps only in its opening prompt.
+- **Session panel**: the row "Playbook: <name>" linking to `/playbooks?playbook=<id>` (Behavior 22).
 - **PROD**: no change. PROD Connections keep their badge and Approvals in every step.
 
 ## Rejected
@@ -429,29 +454,29 @@ Server to client, each time a job's step changes status.
 - **Playbook**: the rules and ordered steps the agent follows when a Trigger starts it, written by the operator.
   Each Trigger holds one; one Playbook may be held by several.
   _Avoid_: rule, pipeline, workflow
-- **Trigger**: a place in a tab that starts the agent: Verify and Fix in Monitor, Review PR, Reply in thread and
-  Session message in Workspace.
+- **Trigger**: a place in a tab that starts the agent: Verify and Fix in Monitor, Review PR, Check reply, Address
+  comments, Reply in thread and Session message in Workspace.
   _Avoid_: action (the Action Log means each command the agent runs)
 - **Playbook step**: one titled instruction in a Playbook, run as its own agent turn, ending done, skipped or
   failed.
 - **Step block**: a ready-made Playbook step the operator drags or adds into a Playbook and then edits.
-- **Verification** (changed): the agent's attempt to explain an Alert from the code, in a scratch copy of it: follow
+- **Verification**: the agent's attempt to explain an Alert from the code, in a scratch copy of it: follow
   the log through the code end to end, replay the request and test with mock data locally when it can, cross-check
   Connections, and write a Report on the issue and its fix.
 
 ## ADR
 
-- **ADR 0002 rewritten: a Verification may write in a scratch copy.** Before this change the agent changed no code
-  before the operator confirmed the Report. Now a Verification writes mock data and tests and runs them, only in a
-  worktree in the data directory that is thrown away, never in the operator's checkout or a Connection. Trade-off:
+- **ADR 0002: a Verification may write in a scratch copy.** A Verification writes mock data and tests and runs them
+  in a worktree in the data directory that is thrown away, never in the operator's checkout or a Connection. Trade-off:
   the operator gets a cause proven by a test before deciding, at the cost of letting a run steered by log text
-  execute commands locally. The safety lines and the Alert Session's Access mode bound that. The old rule joins
-  Considered Options. The operator approved it.
+  execute commands locally. The safety lines and the Alert Session's Access mode bound that, and the Run sandbox
+  ([ADR 0006](../adr/0006-agent-runs-sandboxed-by-the-os.md)) guards the Keychain. The rule that a Verification reads
+  only is a Considered Option there.
 
 ## Seams
 
-- **Backend + SQLite** (services with the fake agent SDK and a temp git repo): 2, 3, 4, 5, 6, 10, 11, 13, 14, 15, 16,
-  17, 20, 21, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33.
+- **Backend + SQLite** (services with the fake agent SDK and a temp git repo): 2, 3, 4, 5, 6, 10, 13, 13a, 14, 15, 15a,
+  16, 17, 20, 21, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33.
 - **Browser** (Playwright against the dev daemon): 1, 7, 8, 9, 12, 18, 19, 22, and the page states in UI.
 
 ## Out of scope

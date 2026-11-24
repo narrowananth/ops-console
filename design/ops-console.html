@@ -190,6 +190,7 @@
   .pg { background: #4169e1; } .mongo { background: #47a248; } .redis { background: #ff4438; } .ch { background: #ffcc01; color: #161414; }
   .fb { background: #dd2c00; } .kafka { background: #231f20; } .dd { background: #632ca6; } .jira, .bb { background: #0052cc; }
   .gh { background: #181717; } .gl { background: #fc6d26; } .slack { background: #4a154b; } .sentry { background: #362d59; }
+  .cw { background: #c7176e; } .gdoc { background: #4285f4; } .gdrive { background: #0f9d58; } .gsheet { background: #188038; } .loki { background: #f46800; } .nr { background: #1ce783; color: #161414; } .otel { background: #425cc7; } .sd { background: #2d2b2b; }
   .shop { background: #7ab55c; } .claude { background: #d97757; } .mcp { background: #000; } .figma { background: #f24e1e; }
 
   /* Diff (components/ui/diff.tsx) */
@@ -480,10 +481,18 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-5-6-5M12 19h8"/></svg>
         <span class="lbl">Setup agent</span>
       </button>
+      <button class="item" data-page="permissions" title="Permissions">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+        <span class="lbl">Permissions</span>
+      </button>
       <div class="group"><span class="txt">Claude</span><span class="dot">·</span></div>
-      <button class="item" data-page="agents" title="Agents &amp; accounts">
+      <button class="item" data-page="agents" title="Accounts &amp; Usage">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
-        <span class="lbl">Agents &amp; accounts</span>
+        <span class="lbl">Accounts &amp; Usage</span>
+      </button>
+      <button class="item" data-page="runs" title="Agent runs">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+        <span class="lbl">Agent runs</span>
       </button>
       <button class="item" data-page="playbooks" title="Playbooks">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h11l3 3v13H5z"/><path d="M9 10h6M9 14h6M9 18h3"/></svg>
@@ -513,6 +522,7 @@
   <main>
 
     <!-- ============ Monitor (monitor/*.tsx) ============ -->
+    <!-- Superseded: the Monitor page now follows monitor-redesign.html (source tabs, one alerts table, Alert drawer). This screen is kept as drawn. -->
     <section class="page on" id="p-monitor">
       <header class="ph"><div class="ph-in"><h1>Monitor</h1><span class="sub">Datadog health of your services, their Alerts and fixes</span><span class="sp"></span></div></header>
       <div class="pb" style="overflow:hidden">
@@ -780,6 +790,7 @@
     </section>
 
     <!-- ============ Workspace (workspace/*.tsx) ============ -->
+    <!-- Superseded: the page now follows ops-console-sidebar.html (Session panel, Pull requests tab) and ops-console-t3-shell.html. This screen is kept as drawn. -->
     <section class="page" id="p-workspace">
       <header class="ph"><div class="ph-in"><h1>Workspace</h1><span class="sub">Sessions in your Repos and their pull requests</span><span class="sp"></span></div></header>
       <div class="pb" style="overflow:hidden">
@@ -1139,13 +1150,21 @@ pnpm build</pre><button class="cp" aria-label="Copy" title="Copy"><svg width="14
           <div class="col wide">
             <div class="card"><ul aria-label="Integrations" style="display:flex;flex-direction:column;gap:2px;padding:6px">
               <li class="irow" data-go="intg:bitbucket"><span class="row" style="gap:14px;min-width:0"><span class="bi lg bb">B</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">Bitbucket</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">bkt CLI + Atlassian MCP</span></span></span><span class="status" style="justify-self:end">○ not connected</span><button class="ract">Connect</button></li>
+              <li class="irow" data-go="intg:cloudwatch"><span class="row" style="gap:14px;min-width:0"><span class="bi lg cw">CW</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">CloudWatch logs</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">aws CLI + CloudWatch MCP</span></span></span><span class="status " style="justify-self:end">○ not connected</span><button class="ract">Connect</button></li>
               <li class="irow" data-go="intg:datadog"><span class="row" style="gap:14px;min-width:0"><span class="bi lg dd">DD</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">Datadog</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">pup CLI + datadog-pup MCP · example-org</span></span></span><span class="status ok" style="justify-self:end">● connected</span><button class="ract">Manage</button></li>
               <li class="irow sel" data-go="intg:github"><span class="row" style="gap:14px;min-width:0"><span class="bi lg gh">GH</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">GitHub</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">gh CLI + GitHub MCP</span></span></span><span class="status" style="justify-self:end">◌ signing in</span><button class="ract">Connect</button></li>
               <li class="irow" data-go="intg:gitlab"><span class="row" style="gap:14px;min-width:0"><span class="bi lg gl">GL</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">GitLab</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">glab CLI</span></span></span><span class="status" style="justify-self:end">○ not connected</span><button class="ract">Connect</button></li>
+              <li class="irow" data-go="intg:gdocs"><span class="row" style="gap:14px;min-width:0"><span class="bi lg gdoc">GD</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">Google Docs</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">Google Docs API</span></span></span><span class="status " style="justify-self:end">○ not connected</span><button class="ract">Connect</button></li>
+              <li class="irow" data-go="intg:gdrive"><span class="row" style="gap:14px;min-width:0"><span class="bi lg gdrive">GR</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">Google Drive</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">Google Drive API</span></span></span><span class="status " style="justify-self:end">○ not connected</span><button class="ract">Connect</button></li>
+              <li class="irow" data-go="intg:gsheets"><span class="row" style="gap:14px;min-width:0"><span class="bi lg gsheet">GS</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">Google Sheets</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">Google Sheets API</span></span></span><span class="status " style="justify-self:end">○ not connected</span><button class="ract">Connect</button></li>
               <li class="irow" data-go="intg:jira"><span class="row" style="gap:14px;min-width:0"><span class="bi lg jira">J</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">Jira</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">Atlassian MCP</span></span></span><span class="status bad" style="justify-self:end">◐ needs auth</span><button class="ract attn">Sign in</button></li>
+              <li class="irow" data-go="intg:loki"><span class="row" style="gap:14px;min-width:0"><span class="bi lg loki">L</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">Loki logs</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">Grafana Cloud MCP · example-org</span></span></span><span class="status ok" style="justify-self:end">● connected</span><button class="ract">Manage</button></li>
+              <li class="irow" data-go="intg:newrelic"><span class="row" style="gap:14px;min-width:0"><span class="bi lg nr">NR</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">New Relic logs</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">New Relic MCP</span></span></span><span class="status " style="justify-self:end">○ not connected</span><button class="ract">Connect</button></li>
+              <li class="irow" data-go="intg:otel"><span class="row" style="gap:14px;min-width:0"><span class="bi lg otel">OT</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">OpenTelemetry logs</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">a local folder · ~/otel-logs</span></span></span><span class="status ok" style="justify-self:end">● connected</span><button class="ract">Manage</button></li>
               <li class="irow" data-go="intg:sentry"><span class="row" style="gap:14px;min-width:0"><span class="bi lg sentry">S</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">Sentry</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">Sentry MCP</span></span></span><span class="status" style="justify-self:end">○ not connected</span><button class="ract">Connect</button></li>
               <li class="irow" data-go="intg:shopify"><span class="row" style="gap:14px;min-width:0"><span class="bi lg shop">S</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">Shopify</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">Shopify Dev MCP</span></span></span><span class="status" style="justify-self:end">○ not connected</span><button class="ract">Connect</button></li>
               <li class="irow" data-go="intg:slack"><span class="row" style="gap:14px;min-width:0"><span class="bi lg slack">S</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">Slack</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">Slack MCP</span></span></span><span class="status bad" style="justify-self:end">✕ failed</span><button class="ract attn">Reconnect</button></li>
+              <li class="irow" data-go="intg:slashdocs"><span class="row" style="gap:14px;min-width:0"><span class="bi lg sd">sd</span><span class="grow"><span class="row"><span class="trunc xb" style="font-size:14px">slashdocs</span><span class="kind">Connector</span></span><span class="trunc s muted" style="display:block">slashdocs CLI</span></span></span><span class="status " style="justify-self:end">○ not connected</span><button class="ract">Connect</button></li>
               <li class="irow" data-go="intg:docs"><span class="row" style="gap:14px;min-width:0"><span class="bi lg mcp">M</span><span class="grow"><span class="row"><span class="trunc xb mono" style="font-size:14px">docs-search</span><span class="kind">MCP</span></span><span class="trunc s muted" style="display:block">user · https://mcp.example.com/mcp · 6 tools</span></span></span><span class="status ok" style="justify-self:end">● connected</span><button class="ract">Manage</button></li>
               <li class="irow" data-go="intg:figma"><span class="row" style="gap:14px;min-width:0"><span class="bi lg figma">F</span><span class="grow"><span class="row"><span class="trunc xb mono" style="font-size:14px">figma</span><span class="kind">MCP</span></span><span class="trunc s muted" style="display:block">user · http://127.0.0.1:3845/mcp · 9 tools</span></span></span><span class="status ok" style="justify-self:end">● connected</span><button class="ract">Manage</button></li>
               <li class="irow" data-go="intg:pg"><span class="row" style="gap:14px;min-width:0"><span class="bi lg pg">PG</span><span class="grow"><span class="row"><span class="trunc xb mono" style="font-size:14px">reports-db</span><span class="kind">MCP</span></span><span class="trunc s acc" style="display:block">connect ETIMEDOUT 127.0.0.1:5436</span></span></span><span class="status bad" style="justify-self:end">✕ failed</span><button class="ract attn">Reconnect</button></li>
@@ -1320,6 +1339,7 @@ pnpm build</pre><button class="cp" aria-label="Copy" title="Copy"><svg width="14
     </section>
 
     <!-- ============ Playbooks (playbooks/*.tsx) ============ -->
+    <!-- Superseded: the page now follows ops-console-sidebar.html (Triggers overview and Flow canvas). This screen is kept as drawn. -->
     <!-- Superseded: the Playbooks page now follows #playbooks in ops-console-sidebar.html (docs/specs/playbooks-redesign.md). This three-column screen is kept as drawn. -->
     <section class="page" id="p-playbooks">
       <header class="ph"><div class="ph-in"><h1>Playbooks</h1><span class="sub">What the agent follows when each Trigger starts it. One Playbook per Trigger.</span><span class="sp"></span><button class="btn">+ New Playbook</button></div></header>
@@ -1458,9 +1478,10 @@ pnpm build</pre><button class="cp" aria-label="Copy" title="Copy"><svg width="14
       </div>
     </section>
 
-    <!-- ============ Agents & accounts (agents/agents-tab.tsx) ============ -->
+    <!-- ============ Accounts & Usage (agents/agents-tab.tsx) ============ -->
+    <!-- Superseded: the page now follows ops-console-sidebar.html (Accounts and Usage tabs, Claude account hub, Notifications). This screen is kept as drawn. -->
     <section class="page" id="p-agents">
-      <header class="ph"><div class="ph-in narrow"><h1>Agents &amp; accounts</h1><span class="sub">Claude Code accounts and defaults for every session</span><span class="sp"></span></div></header>
+      <header class="ph"><div class="ph-in narrow"><h1>Accounts &amp; Usage</h1><span class="sub">Claude Code accounts and defaults for every session</span><span class="sp"></span></div></header>
       <div class="pb">
         <div class="col narrow">
           <section class="sec" aria-label="Claude Code accounts">
@@ -1502,6 +1523,16 @@ pnpm build</pre><button class="cp" aria-label="Copy" title="Copy"><svg width="14
           </section>
         </div>
       </div>
+    </section>
+
+    <section class="page" id="p-permissions">
+      <header class="ph"><div class="ph-in narrow"><h1>Permissions</h1><span class="sp"></span></div></header>
+      <div class="pb"><div class="col narrow"><p class="s muted">Permissions is drawn in ops-console-sidebar.html.</p></div></div>
+    </section>
+
+    <section class="page" id="p-runs">
+      <header class="ph"><div class="ph-in narrow"><h1>Agent runs</h1><span class="sp"></span></div></header>
+      <div class="pb"><div class="col narrow"><p class="s muted">No mockup for Agent runs. The page lists every agent run: how it goes, why it is slow, why it failed.</p></div></div>
     </section>
 
   </main>

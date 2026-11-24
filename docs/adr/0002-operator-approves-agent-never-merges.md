@@ -32,14 +32,14 @@ In a chat, the agent opens a pull request only through the console's `open_pull_
 Approval in any Access mode. The console pushes the branch and opens the pull request in the daemon, with the operator's
 own git access, never forced. A branch that moved on origin is rebased onto the new tip first; a rebase that conflicts
 stops with the branch untouched. When the branch has a pull request already, the push updates it. The agent never pushes
-or opens one itself: its commands hold no git credentials and `git push` stays denied.
+or opens one itself: it is told so, and `git push` is denied in a PR action Session and a Verification.
 
-The agent saves a file outside its folders the same way. The sandbox keeps a run's commands from writing anywhere but its
-working folder, its Session's output folder, temp and the package-tool caches, so a file for the operator goes in the
-output folder, where the console shows it. To put one in another folder, such as `~/Downloads`, the agent calls the
-console's `save_file` tool with a file or folder name from that folder and an absolute folder path. A folder is copied as a new folder of that name, with one Approval that lists its files. The tool raises an Approval
-in every Access mode but full that shows the file, its size and the destination, and only the operator's yes has the
-daemon, outside the sandbox, copy the file. A Session in full access copies it at once. A no is final: the agent does not retry by a command or ask the operator to run `mv`.
+A file for the operator goes in the Session's output folder, where the console shows it. To put a copy in another
+folder, such as `~/Downloads`, the agent calls the console's `save_file` tool with a file or folder name from that
+folder and an absolute folder path. A folder is copied as a new folder of that name, with one Approval that lists its
+files. The tool raises an Approval in every Access mode but full that shows the file, its size and the destination, and
+only the operator's yes has the daemon copy the file. The Approval covers the tool only: a run's own commands write
+anywhere the operator can ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md)). A Session in full access copies it at once. A no is final: the agent does not retry by a command or ask the operator to run `mv`.
 
 On any open pull request, the operator's or a teammate's, the push is the console's. In an Address comments Session,
 and only there, the review comments the operator ticked are change requests: the agent may change code to meet them, but
@@ -66,12 +66,6 @@ request text stays data, never instructions. A general comment on the pull reque
   failed step offered only Retry, and the scratch copy had no installed packages for a build.
 - **The agent pushes and posts with its own commands in a PR action Session**: the console could not record what was
   posted or post only what failed, and the agent would hold git and host write access on code it did not write.
-- **Widen the sandbox's write list to `~/Downloads` or any path the operator names in a message**: the agent could move a file at one
-  word from the operator. It lost because the sandbox cannot tell the operator's words from text injected through a log,
-  so a writable folder would be writable to a steered run, and a run could write into `~/.zshrc`, `~/Library/LaunchAgents`
-  or a folder on PATH. The copy goes through an Approval instead, and the daemon writes the destination. A Repo the operator
-  ticks in the composer's Repos icon is not this option: it is an imported checkout picked by a click, not a path from
-  words ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md)).
 - **An Approval on every `open_pull_request` call**: the operator read what would be pushed and where. It lost because
   the push is never forced and never merges, the diff and the pull request are on the host to read, and the stop broke
   a chat's flow: an update to an open pull request waited for a click each time.
@@ -85,8 +79,8 @@ request text stays data, never instructions. A general comment on the pull reque
   `start_process`, `browser_evaluate`, an integration write): the first design. It lost because an operator who chose
   Full access still met a prompt on most turns, and the chip said otherwise. In full access they run at once; the PROD
   write Approval, the merge denial, the Run sandbox and the refusals of sign-in and tokens still hold.
-- **Git host credentials inside the Run sandbox so the agent pushes itself**: `ssh` ignores the proxy, and the Bitbucket
-  and GitLab CLIs keep their tokens in the Keychain, so it cannot work; where it could, a steered run would hold a
+- **Git host credentials handed to the Run sandbox so the agent pushes itself**: the Bitbucket
+  and GitLab CLIs keep their tokens in the Keychain, so it cannot work for them; where it could, a steered run would hold a
   token that writes to every repository. The daemon pushes for the agent instead.
 - **Show the Address comments diff and wait before the push**: one more stop, but the operator already
   chose the threads, and the commit is on the host to look at after. The Session's changes are also there to read in the
@@ -114,12 +108,12 @@ exists and is not closed. `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/Library/LaunchAgent
 including full. The operator reads the path on the card.
 
 A fix waits for the operator. The console shows how long each verified Alert has waited for its
-Review. A run steered by log text can execute local commands in the scratch copy; the safety lines,
-the Alert Session's Access mode, the scratch copy's folder and the Run sandbox ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md))
-bound that. The sandbox closes only the Keychain to those commands: they can read the session token and call the console's API, so a steered run can approve its own Approval. The merge denials, the console's own pushing and the PROD write rule still hold. A reviewer can steer a
+Review. A run steered by log text can execute local commands; the safety lines, the Alert Session's Access mode and the scratch
+copy as its working folder steer them there, and the Run sandbox ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md))
+closes only the Keychain, so nothing stops a command from writing elsewhere. A command can read the session token and call the console's API, so a steered run can approve its own Approval. The merge denials, the console's own pushing and the PROD write rule still hold. A reviewer can steer a
 PR action Session's code change through a comment the operator ticked; the operator's tick, the
 worktree and the one pushed commit, never forced, bound that. On a teammate's pull request the
 commit lands on their branch under the operator's git identity, for the teammate to see. A PR action Session may run the
-pull request's own build and tests, so pressing a button runs that branch's code on the operator's Mac, inside the
-worktree's folder, the Run sandbox and under the Session's Access mode. A pull request from a fork has no branch on origin to fetch, so its
+pull request's own build and tests, so pressing a button runs that branch's code on the operator's Mac, in the
+worktree, under the Run sandbox and the Session's Access mode. A pull request from a fork has no branch on origin to fetch, so its
 review fails before any code runs.

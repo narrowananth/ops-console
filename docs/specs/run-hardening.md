@@ -1,6 +1,8 @@
 # Agent run hardening
 
-**Status:** shipped
+**Status:** shipped. The closed data folder in item 4 is superseded by [open-run-sandbox](open-run-sandbox.md)
+and [ADR 0006](../adr/0006-agent-runs-sandboxed-by-the-os.md); the other items hold, with PR action Sessions in place of
+Agent Review, Reply check and Comment pass.
 **Design:** none. No screen changes.
 
 ## Problem
@@ -16,22 +18,25 @@ scratch copy could write in the operator's checkout.
    in the working folder. When the folder's `.git` is a file, as in a worktree, they cannot write it.
 2. The daemon's `git` runs no hook and no `core.fsmonitor` program, whatever the repository's config says. A clone URL
    that starts with a dash is not read as an option.
-3. A Comment pass commits and pushes only while the scratch copy's `.git` still names a worktree under the Repo's own
-   `.git/worktrees`. Otherwise the pass fails with "the scratch copy was changed outside the console" and offers no retry.
-4. In every Access mode a run's file tools may not read `runtime.json`, `state.db`, the account folders, the MCP key
-   files or the credential folders, and may not edit those or the git control files of the working folder. The data
-   folder as a whole stays readable, because scratch copies sit in it.
+3. An Address comments Session commits and pushes only while the worktree's `.git` still names a worktree under the
+   Repo's own `.git/worktrees`. Otherwise nothing is pushed or posted and the call fails with "the scratch copy was
+   changed outside the console".
+4. In every Access mode a run's file tools may not read or edit the login Keychain folder or the installed app, and
+   may not edit the git control files of the working folder or of an Opened Repo. The data folder, `runtime.json`
+   included, is readable (open-run-sandbox).
 5. Every run denies commands that name a host's pull request merge endpoint or merge mutation, besides the merge
    commands and MCP tools it already denied.
-6. A run that holds Git host denials also denies the write tools of the GitHub and GitLab MCP servers, by the verb their
-   names start with (`create_`, `update_`, `push_` and so on). Read tools stay.
-7. A run on pull request code (Agent Review, Reply check, Comment pass, a review thread answer) loads only the user's
-   settings: no `.claude` settings, hooks, `.mcp.json` servers or CLAUDE.md from the pull request.
-8. An Agent Review with no scratch copy step, and an agent's answer in a review thread, run read-only: no edit tools and
-   no writable working folder. The answer also holds the Git host denials.
+6. A run that holds Git host denials (a Verification, a PR action Session, an answer in a review thread) also denies
+   the write tools of the GitHub and GitLab MCP servers, by the verb their names start with (`create_`, `update_`,
+   `push_` and so on). Read tools stay.
+7. A run on pull request code (a PR action Session, an answer in a review thread) loads only the user's settings: no
+   `.claude` settings, hooks, `.mcp.json` servers or CLAUDE.md from the pull request. A Verification on a clone of a
+   URL the operator never imported does the same.
+8. An agent's answer in a review thread runs read-only: no edit tools and no writable working folder. It also holds the
+   Git host denials.
 9. The key file of a Connection's MCP Server is written under `mcp-files` in the data folder while the server runs, and
    removed after, not in the user temp folder.
-10. Nothing else changes: the Access modes, the Approvals and the Network allowlist behave as before.
+10. Nothing else changes: the Access modes and the Approvals behave as before.
 
 ## Not required
 
@@ -44,5 +49,5 @@ scratch copy could write in the operator's checkout.
 
 ## Safety
 
-The agent's reach shrinks. It gains nothing. ADR 0002 and 0006 hold and now describe the file tools and the git control
+The agent's reach shrinks. It gains nothing. ADR 0002 and 0006 hold and describe the file tools and the git control
 files.

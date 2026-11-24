@@ -1,6 +1,6 @@
 # Automatic health checks
 
-**Status:** ready
+**Status:** shipped
 **Design:** Connections and Integrations in `design/ops-console.html`. The check strip, the problem banner and the history stripe depart from it: the design has none of them.
 
 ## Problem
@@ -13,11 +13,11 @@ A Connection that loses its password, a Connector that signs out or an MCP serve
 2. A run of Connections checks every Connection whose Access Level is not `none`, two at a time, each through the kept server of that Connection when one runs. A run of Integrations checks every Connector that is not `off`, and every registered, enabled MCP server no server-only Connector stands for, two at a time; each server is read alone in the active account. A check waits while one the operator started runs. Checks are the ones the pages already use, and send no write.
 3. The first run starts about 20 seconds after the daemon starts, then each area runs when its interval has passed since its last run. Turning an interval off stops that area. Only one run of an area goes at a time.
 4. Check now starts a run of the area at once and answers at once. The page shows "Checking… N of M done" while it goes.
-5. Every check is kept: its status, detail, latency and time. Two checks of the same item with the same answer within 30 seconds are kept once. The history stripe shows the last 24 checks, oldest first. The console keeps 90 days of checks, pruned like the rest of the run history.
+5. Every check is kept: its status, detail, latency and time. Two checks of the same item with the same status and detail within 30 seconds are kept once. The history stripe shows the last 24 checks, oldest first. The console keeps 90 days of checks, pruned like the rest of the run history.
 6. Failing means status `fail` or `auth`. An item that is failing shows "Failing 14 min" from the first check of its current run of failures, and its detail. An item that answers again after failing reads Recovered for an hour, with when it was down.
-7. A problem banner on each page names what is failing in that area, its detail and since when. With more than one, it names the first two and the count. When everything in the area answered at its last check, the page shows "Everything answers" instead.
+7. A problem banner on each page names what is failing in that area. Up to three failing items are listed, each with its detail and since when. More than three fold into reasons: the two biggest groups of identical detail show with their item names and since when, and a Show all button opens the full list. When every item in the area answered at its last check, the page shows "Everything answers" and how many items were checked.
 8. The sidebar shows a red count on Connections and on Integrations while that area has failing items.
-9. When a check turns a working item into a failing one, and when it turns a failing one back, the daemon sends `health.changed` once. An item that stays down sends nothing more until it recovers. An item that fails at its first check counts as a break. A burst of events for one answer is one check.
+9. When a check turns a working item into a failing one, and when it turns a failing one back, the daemon sends `health.changed` once. An item that stays down sends nothing more until it recovers. A Connection that fails at its first check counts as a break. A Connector or MCP server that has never answered is not set up: it reads as off, counts as failing nowhere and sends nothing. A burst of events for one answer is one check.
 10. With "Alert when a connection or integration breaks" on in Notifications, the page shows a desktop alert for each `health.changed`, under the same rules as run alerts: only when the console is open in a tab that is not in front and the browser allowed alerts.
 11. An MCP server that a Connection registers for itself is not an Integration: its checks count under the Connection.
 

@@ -104,11 +104,9 @@ svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stro
 @keyframes pu{50%{opacity:.3}}
 .st .r2{font:11.5px var(--mono);color:var(--n700);display:flex;gap:7px;align-items:baseline;font-variant-numeric:tabular-nums;min-height:17px}
 .st .r2 em{font-style:normal;color:var(--accent);font-weight:700}.st .r2 s{text-decoration:none;color:var(--warn);font-weight:700}
-.st .r2.t{font-family:var(--sans);font-size:11.5px}
-.st .r2 .bad{color:var(--a600);font-weight:600;font-family:var(--sans)}
 .st .r3{font-size:10.5px;color:var(--n600)}
+.st .r3.bad{color:var(--a700);font-weight:600}
 .st.all .lg{background:var(--text);color:var(--bg)}
-.prog{height:3px;border-radius:9px;background:var(--n200);overflow:hidden;margin-top:2px}.prog u{display:block;height:100%;width:44%;background:var(--info);border-radius:9px}
 .lg{width:24px;height:24px;border-radius:8px;display:grid;place-items:center;font:800 11px var(--sans);color:#fff;background:var(--h,var(--n600));flex:none}
 .lg.sm{width:18px;height:18px;border-radius:6px;font-size:9.5px}
 .lg+.lg.sm{margin-left:-3px;box-shadow:0 0 0 2px var(--card)}
@@ -146,6 +144,7 @@ td.sv{width:10px;padding:0}
 .num{font:600 12.5px var(--mono);font-variant-numeric:tabular-nums;text-align:right}
 .spk{width:84px;height:24px;display:block}
 .ls{color:var(--n700);font-size:12px}
+.tag{background:var(--n200);color:var(--n700);border-radius:4px;padding:0 6px;font-size:11px;line-height:16px}
 .srcl{display:flex;align-items:center;padding-left:6px}
 .lowrow td{padding:14px 12px;color:var(--n700);text-align:center;background:var(--bg)}
 .lowrow button{border:0;background:none;color:var(--text);font-weight:600}
@@ -178,10 +177,6 @@ td.sv{width:10px;padding:0}
 .stat .v small{font-size:11px;font-weight:400;color:var(--n700);display:block;line-height:1.2}
 .sec{padding:12px 16px;border-top:1px solid var(--line)}
 .sec h4{margin:0 0 8px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--n600);font-weight:700;display:flex;justify-content:space-between}
-.seen{display:flex;flex-direction:column;gap:7px}
-.seen .o{display:grid;grid-template-columns:24px 110px 1fr auto;gap:8px;align-items:center;font-size:12px}
-.seen .bar2{height:6px;border-radius:9px;background:var(--n200);overflow:hidden}.seen .bar2 u{display:block;height:100%;background:var(--h);border-radius:9px}
-.seen .c{font:600 12px var(--mono)}
 #bigspark{width:100%;height:64px;display:block}
 .ax{display:flex;justify-content:space-between;font:10px var(--mono);color:var(--n600);padding-top:2px}
 .log{width:100%;border-collapse:collapse;font:11.5px var(--mono)}
@@ -190,7 +185,6 @@ td.sv{width:10px;padding:0}
 .lvl{color:var(--warn);font-weight:700}
 pre.q{margin:0;padding:14px 16px;font:12px/1.6 var(--mono);background:var(--n900);color:var(--n100);border-radius:12px;white-space:pre-wrap;word-break:break-all}
 [data-theme=dark] pre.q{background:#0f0e0d;color:#ecebea}
-.qs{display:flex;justify-content:space-between;align-items:center}
 .tl{list-style:none;margin:0;padding:6px 16px 12px;font:12px var(--mono)}.tl li{display:flex;gap:12px;padding:5px 0}.tl time{color:var(--n600);min-width:132px}
 .field{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--n700);font-weight:600;flex:1}
 .field .in{display:flex;align-items:center;border:1px solid var(--divider);background:var(--bg);border-radius:10px;padding:7px 10px;font-weight:400;font-size:12.5px;color:var(--text);min-height:34px}
@@ -235,13 +229,13 @@ pre.q{margin:0;padding:14px 16px;font:12px/1.6 var(--mono);background:var(--n900
     <button data-w="1440" aria-pressed="true">Desktop 1440</button>
     <button data-w="1000" aria-pressed="false">Laptop 1000</button>
     <span class="muted" style="margin-left:10px">Sidebar</span>
-    <button id="side" aria-pressed="false">Expand</button>
+    <button id="side" aria-pressed="true">Collapse</button>
     <span class="muted" style="margin-left:10px">Theme</span>
     <button id="theme" aria-pressed="false">Dark</button>
   </div>
 
   <div class="frame-wrap"><div class="frame" id="frame">
-  <div class="app" id="app">
+  <div class="app wide-side" id="app">
     <aside class="side">
       <div class="brand"><b><svg class="i" style="stroke:#fff"><use href="#i-term"/></svg></b><span>Ops Console</span></div>
       <div class="grp">Operate</div>
@@ -257,26 +251,28 @@ pre.q{margin:0;padding:14px 16px;font:12px/1.6 var(--mono);background:var(--n900
       <div class="sep"></div><div class="grp">Claude</div>
       <button class="nav" title="Accounts &amp; Usage"><svg class="i"><use href="#i-user"/></svg><span class="t2">Accounts &amp; Usage</span></button>
       <button class="nav" title="Agent runs"><svg class="i"><use href="#i-pulse"/></svg><span class="t2">Agent runs</span></button>
+      <button class="nav" title="Playbooks"><svg class="i"><use href="#i-doc"/></svg><span class="t2">Playbooks</span></button>
+      <button class="nav" title="Skills"><svg class="i"><use href="#i-star"/></svg><span class="t2">Skills</span></button>
       <div class="spacer"></div>
       <div class="usage"><b>5-hour</b> 6% · <b>Weekly</b> 15%</div>
-      <div class="side-foot"><span style="font-family:var(--mono)">v0.1.65</span> · <span style="color:var(--ok)">✓ Up to date</span></div>
+      <div class="side-foot"><span style="font-family:var(--mono)">v0.1.70</span> · <span style="color:var(--ok)">✓ Up to date</span></div>
     </aside>
 
     <main class="main" id="main">
       <header class="head">
         <h1>Monitor</h1>
-        <div class="sub"><span class="dot"></span>5 of 7 sources scanned · last Scan 3m ago</div>
+        <div class="sub"><span class="dot"></span>4 of 5 sources scanned · last Scan 3m ago</div>
         <span class="grow"></span>
-        <div class="seg"><button>1h</button><button>4h</button><button class="on">24h</button><button>7d</button></div>
+        <div class="seg"><button>15m</button><button>1h</button><button>4h</button><button class="on">24h</button><button>7d</button></div>
         <button class="chip-btn">HTTP <b style="font-family:var(--mono)">400+</b><svg class="i"><use href="#i-chev"/></svg></button>
-        <div class="split"><button class="btn primary"><svg class="i"><use href="#i-scan"/></svg>Scan all sources</button><button class="btn primary" title="Scan only…"><svg class="i"><use href="#i-chev"/></svg></button></div>
+        <button class="btn primary" disabled style="opacity:.6"><svg class="i"><use href="#i-scan"/></svg>Scanning…</button><button class="btn" title="Stop the Scan now. What it read so far is dropped.">Stop</button>
       </header>
 
       <div class="tabs-wrap"><div class="srcs" id="srcs"></div><span class="fade"></span></div>
 
       <div class="tool">
         <div class="seg" id="sevSeg"></div>
-        <label class="search"><svg class="i"><use href="#i-search"/></svg><input placeholder="Route, message, code"></label>
+        <label class="search"><svg class="i"><use href="#i-search"/></svg><input placeholder="Route, message, code, Service"></label>
         <span class="relpos"><button class="chip-btn" id="svcF"><svg class="i"><use href="#i-layers"/></svg>29 Services<svg class="i"><use href="#i-chev"/></svg></button><div class="pop" id="svcPop"></div></span>
         <button class="toggle" aria-pressed="false" id="closedT"><i></i>Closed</button>
         <span class="grow"></span>
@@ -284,7 +280,7 @@ pre.q{margin:0;padding:14px 16px;font:12px/1.6 var(--mono);background:var(--n900
       </div>
 
       <div class="tbl"><table>
-        <thead><tr><th style="width:8px;padding:0"></th><th>Severity</th><th>Route</th><th class="hide-n">Service</th><th>Status</th><th>Sources</th><th style="text-align:right">Events</th><th class="hide-n">24h</th><th>Last seen</th></tr></thead>
+        <thead><tr><th style="width:8px;padding:0"></th><th>Severity</th><th>Route</th><th class="hide-n">Service</th><th>Status</th><th>Source</th><th style="text-align:right">Events</th><th class="hide-n">Trend</th><th>Last seen</th></tr></thead>
         <tbody id="rows"></tbody>
       </table></div>
 
@@ -292,7 +288,6 @@ pre.q{margin:0;padding:14px 16px;font:12px/1.6 var(--mono);background:var(--n900
       <aside class="drawer" id="drawer">
         <div class="dh">
           <div class="dtop"><span class="pill" id="dPill">High</span><span id="dSrc" style="display:flex;align-items:center"></span><span class="muted" id="dOpen">open · last scanned 3m ago</span><span class="grow"></span>
-            <button class="icon-btn" title="More: Open in source, Ignore this Route, Close, Copy link"><svg class="i"><use href="#i-more"/></svg></button>
             <button class="icon-btn" id="dClose" title="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
           <h2 id="dTitle"></h2>
           <div class="dsub" id="dSub"></div>
@@ -326,11 +321,11 @@ pre.q{margin:0;padding:14px 16px;font:12px/1.6 var(--mono);background:var(--n900
               <div class="sec"><h4><span>Events per hour</span><span style="font-family:var(--mono);text-transform:none;letter-spacing:0">peak 214 / h</span></h4>
                 <svg id="bigspark" viewBox="0 0 480 64" preserveAspectRatio="none"></svg>
                 <div class="ax"><span>-24h</span><span>-18h</span><span>-12h</span><span>-6h</span><span>now</span></div></div>
-              <div class="sec"><h4><span id="seenT">Seen in sources</span><span style="text-transform:none;letter-spacing:0;font-weight:400">same Route, status and error = one Alert</span></h4><div class="seen" id="seen"></div></div>
+              
             </div>
           </div>
-          <div class="tp" id="t-samples"><div class="card" style="overflow:hidden"><table class="log"><thead><tr><th>Time</th><th>Src</th><th>Lvl</th><th>Request id</th><th>Fwd</th></tr></thead><tbody id="sampleRows"></tbody></table><div style="padding:8px 14px 12px"><button class="link">Show all 25</button></div></div></div>
-          <div class="tp" id="t-query"><div class="qs"><div class="seg" id="qseg"></div><button class="chip-btn" id="openSrc">Open in source</button></div><pre class="q" id="qpre"></pre></div>
+          <div class="tp" id="t-samples"><div class="field" style="margin-bottom:8px"><span class="in ph">Search level, message, request id</span></div><div class="card" style="overflow:hidden"><table class="log"><thead><tr><th>Time</th><th>Level</th><th>Message</th></tr></thead><tbody id="sampleRows"></tbody></table></div></div>
+          <div class="tp" id="t-query"><p class="muted" id="qtip" style="margin:0 0 8px"></p><pre class="q" id="qpre"></pre></div>
           <div class="tp" id="t-history"><div class="card"><ol class="tl">
             <li><time>Nov 22, 01:41 AM</time>seen again · scan</li><li><time>Nov 21, 02:00 PM</time>severity raised to high · scan</li><li><time>Nov 21, 12:43 PM</time>opened · scan</li></ol></div></div>
         </div>
@@ -342,18 +337,18 @@ pre.q{margin:0;padding:14px 16px;font:12px/1.6 var(--mono);background:var(--n900
   <div class="notes">
     <div><h3>Less crowded</h3><ul>
       <li>Two surfaces, not four columns: one table, and the detail in a drawer that takes the width when you need it.</li>
-      <li>Sidebar is an icon rail by default (Expand toggle above). Scan controls sit in one header row.</li>
+      <li>The sidebar collapses to an icon rail (Collapse toggle above). Range, status codes and Scan sit in one header row.</li>
       <li>Default view is Needs attention (High and Medium). The 3,936 Low alerts stay one click away.</li>
     </ul></div>
     <div><h3>Sources clear</h3><ul>
-      <li>One tab per source: health dot, High / Medium / Low counts, and its own state: ok, scanning with progress, or sign-in expired.</li>
-      <li>"All sources" is the first tab. 5 to 7 tabs fit at 1440. More scroll sideways with a fade.</li>
-      <li>Rows show stacked source logos. An Alert seen in several sources lists each count in the drawer.</li>
+      <li>One tab per source: health dot, High / Medium / Low counts, and its own state: last Scan time, scanning, or the reason it is down.</li>
+      <li>"All sources" is the first tab, then one per connected log source: Datadog, OpenTelemetry, CloudWatch, Loki, New Relic. Tabs scroll sideways when they do not fit.</li>
+      <li>An Alert belongs to one source: its row shows that source's logo, and the drawer names it.</li>
     </ul></div>
     <div><h3>Drawer</h3><ul>
       <li>Header: severity, sources, Route, Service, env. Tabs: Overview, Samples, Query, History.</li>
       <li>Overview leads with the four-step strip and the link-code form. A pinned footer holds the one primary action.</li>
-      <li>Query tab switches syntax per source of the Alert. Esc or the scrim closes the drawer.</li>
+      <li>Query tab shows the Alert's source query in that source's syntax. Esc, the close button or the scrim closes the drawer.</li>
     </ul></div>
   </div>
 </div>
@@ -375,6 +370,8 @@ pre.q{margin:0;padding:14px 16px;font:12px/1.6 var(--mono);background:var(--n900
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
   <symbol id="i-scan" viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3M4 12h16"/></symbol>
   <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5zM9 10h6M9 14h6M9 18h3"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3l2.4 5.6L20 10l-4.2 3.8L17 20l-5-3-5 3 1.2-6.2L4 10l5.6-1.4z"/></symbol>
   <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5"/></symbol>
 </defs></svg>
 
@@ -382,26 +379,26 @@ pre.q{margin:0;padding:14px 16px;font:12px/1.6 var(--mono);background:var(--n900
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const ic=n=>`<svg class="i"><use href="#i-${n}"/></svg>`;
 
-/* Sources: 5 to 7 log sources, each scanned and failing on its own. Placeholder data only. */
-const SRC={dd:['Datadog','#7b4bd8','D'],ot:['OpenTelemetry','#2f7fe0','O'],cw:['CloudWatch','#d97a1a','C'],lk:['Loki','#c58a00','L'],nr:['New Relic','#1aa089','N'],se:['Sentry','#6b52b8','S'],sl:['Slack alerts','#4a8a5c','#']};
+/* Sources: the five log sources, each scanned and failing on its own. An Alert belongs to one source. Placeholder data only. */
+const SRC={dd:['Datadog','#7b4bd8','D'],ot:['OpenTelemetry','#2f7fe0','O'],cw:['CloudWatch','#d97a1a','C'],lk:['Loki','#c58a00','L'],nr:['New Relic','#1aa089','N']};
 const lgo=k=>`<span class="lg sm" style="--h:${SRC[k][1]}" title="${SRC[k][0]}">${SRC[k][2]}</span>`;
 const SOURCES=[
- ['dd','ok',[3,2,'1.2k'],'3m ago · 12 Services'],['ot','ok',[1,0,880],'3m ago · 6 Services'],
- ['cw','err',[1,1,640],'6h stale'],['lk','ok',[1,1,902],'9m ago · 8 Services'],
- ['nr','run',null,'4 of 9 Services'],['se','ok',[0,0,310],'1h ago · 3 projects'],['sl','ok',[0,0,0],'Idle · 2 channels']];
+ ['dd','ok',[3,2,'1.2k'],'Last Scan 3m ago'],['ot','ok',[1,0,880],'Last Scan 3m ago'],
+ ['cw','err',[1,1,640],'Sign-in expired'],['lk','ok',[1,1,902],'Last Scan 9m ago'],
+ ['nr','run',[0,0,310],'Scanning…']];
 let sSel=null;
 function renderTabs(){
- const all=`<button class="st all ${sSel===null?'on':''}" data-k=""><div class="r1"><span class="lg">∑</span>All sources<span class="s"></span></div><div class="r2"><em>6</em><s>4</s><span>3,936</span></div><div class="r3">5 of 7 ok</div></button>`;
+ const all=`<button class="st all ${sSel===null?'on':''}" data-k=""><div class="r1"><span class="lg">∑</span>All sources<span class="s"></span></div><div class="r2"><em>6</em><s>4</s><span>3,936</span></div><div class="r3">4 of 5 ok</div></button>`;
  $('#srcs').innerHTML=all+SOURCES.map(([k,state,c,t])=>{
-  const r2=state==='run'?'Scanning…':state==='err'?'<span class="bad">Sign-in expired</span>':`${c[0]?`<em>${c[0]}</em>`:''}${c[1]?`<s>${c[1]}</s>`:''}<span>${c[2]}</span>`;
+  const r2=`${c[0]?`<em>${c[0]}</em>`:''}${c[1]?`<s>${c[1]}</s>`:''}<span>${c[2]}</span>`;
   return `<button class="st ${state} ${sSel===k?'on':''}" data-k="${k}"><div class="r1"><span class="lg" style="--h:${SRC[k][1]}">${SRC[k][2]}</span>${SRC[k][0]}<span class="s"></span></div>
-  <div class="r2 ${state==='run'?'t':''}">${r2}</div>${state==='run'?'<div class="prog"><u></u></div>':`<div class="r3">${t}</div>`}</button>`}).join('');
+  <div class="r2">${r2}</div><div class="r3 ${state==='err'?'bad':''}">${t}</div></button>`}).join('');
  $$('.st').forEach(b=>b.onclick=()=>{sSel=b.dataset.k||null;renderTabs();renderRows()});
 }
 
 /* Alerts: [sev, method, path, service, code, events, last seen, sources, message] */
 const A=[
- ['hi','GET','/api/v1/reviews','reviews-api',400,2135,'3m',['dd','ot','lk'],'status=400 request_id=7d733fe9… fwd=203.0.113.18'],
+ ['hi','GET','/api/v1/reviews','reviews-api',400,2135,'3m',['dd'],'status=400 request_id=7d733fe9… fwd=203.0.113.18'],
  ['hi','POST','/webhook/orderupdate','webhook-gateway',401,2130,'3m',['dd'],'status=401 signature invalid'],
  ['hi','POST','/api/events','event-dispatch',400,14470,'3m',['ot'],'status=400 request_id=94847827…'],
  ['hi','POST','/v4/analytics/record','analytics-api',600,447,'3m',['dd'],'status=200 appid=25599'],
@@ -447,20 +444,17 @@ const QT={
  lk:a=>`{service="${a[3]}", env="prod"} |= "status=${a[4]}"\n| logfmt | method="${a[1]}" | url=~"${a[2]}.*"`,
  cw:a=>`fields @timestamp, @message\n| filter service = "${a[3]}" and status = ${a[4]} and path = "${a[2]}"\n| sort @timestamp desc | limit 25`,
  nr:a=>`SELECT * FROM Log WHERE service.name = '${a[3]}' AND http.statusCode = ${a[4]} SINCE 24 hours ago`};
+const QTIP={dd:'The Datadog log search that finds these failures. Paste it into Datadog Logs to see them there.',ot:'The filter the Recheck reads the Log folder with: the Service, env, status code, method and path of these failures.',lk:'The filter the Recheck reads Loki with: the Service, env, status code, method and path of these failures.',cw:'The filter the Recheck reads the log group with: the status code, method and path of these failures.',nr:'The filter the Recheck reads New Relic with: the Service, env, status code, method and path of these failures.'};
 function openDrawer(i){
  sel=i;const a=A[i];
  $('#dPill').textContent=L[a[0]];$('#dPill').style.setProperty('--c',C[a[0]]);
- $('#dSrc').innerHTML=a[7].map(lgo).join('');
+ $('#dSrc').innerHTML=`<span class="tag">${SRC[a[7][0]][0]}</span>`;
  $('#dTitle').innerHTML=`<span class="m">${a[1]}</span>${a[2]} returns ${a[4]}`;
  $('#dSub').innerHTML=`<b>${a[3]}</b> · prod · ${a[5].toLocaleString()} events in 24h`;
  $('#nTitle').textContent=`Link the code for ${a[3]}`;
  $('#sEv').textContent=a[5].toLocaleString();$('#sCode').innerHTML=`<span class="code ${a[4]>=500?'e5':''}" style="font-size:14px;padding:2px 9px">${a[4]}</span>`;
- const tot=a[7].length;$('#seenT').textContent=`Seen in ${tot} source${tot>1?'s':''}`;
- $('#seen').innerHTML=a[7].map((k,j)=>{const c=Math.round(a[5]*(1-j*.07));return `<div class="o">${lgo(k)}<span>${SRC[k][0]}</span><span class="bar2" style="--h:${SRC[k][1]}"><u style="width:${100-j*8}%"></u></span><span class="c">${c.toLocaleString()}</span></div>`}).join('');
- $('#sampleRows').innerHTML=['01:40:36','01:40:34','01:40:28','01:40:16','01:40:07','01:40:03'].map((t,j)=>`<tr><td>${t}</td><td>${lgo(a[7][j%tot])}</td><td class="lvl">warn</td><td>${['7d733fe9-53f1-4ee2','c52436b9-653f-499a','050d7a38-fd5a-4b92','f84ce905-1229-4e26','1282de7a-a88d-4135','15960d56-5f16-4176'][j]}</td><td>203.0.113.${[18,18,18,9,18,18][j]}</td></tr>`).join('');
- $('#qseg').innerHTML=a[7].map((k,j)=>`<button class="${j?'':'on'}" data-q="${k}">${SRC[k][0]}</button>`).join('');
- const setQ=k=>{$('#qpre').textContent=QT[k](a);$$('#qseg button').forEach(b=>b.classList.toggle('on',b.dataset.q===k));$('#openSrc').textContent='Open in '+SRC[k][0]};
- $$('#qseg button').forEach(b=>b.onclick=()=>setQ(b.dataset.q));setQ(a[7][0]);
+ $('#sampleRows').innerHTML=['01:40:36','01:40:34','01:40:28','01:40:16','01:40:07','01:40:03'].map((t,j)=>`<tr><td>${t}</td><td class="lvl">warn</td><td>${a[8]} request_id=${['7d733fe9-53f1-4ee2','c52436b9-653f-499a','050d7a38-fd5a-4b92','f84ce905-1229-4e26','1282de7a-a88d-4135','15960d56-5f16-4176'][j]}</td></tr>`).join('');
+ $('#qtip').textContent=QTIP[a[7][0]];$('#qpre').textContent=QT[a[7][0]](a);
  $('#bigspark').innerHTML=[3,2,2,4,6,5,3,2,4,8,12,9,7,10,14,11,9,13,16,12,10,18,14,9].map((v,j)=>{const w=20,h=v/18*58+3;return `<rect x="${j*w+2}" y="${64-h}" width="${w-4}" height="${h}" rx="3" fill="${j>=18?C[a[0]]:'var(--n400)'}" opacity="${j>=18?1:.7}"/>`}).join('');
  $('#main').classList.add('open');renderRows();
 }

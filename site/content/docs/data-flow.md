@@ -6,6 +6,8 @@ This page says what moves between your Mac, Anthropic's API and each Connector, 
 
 - **The console's own calls.** A Scan, a Health check, a Recheck, a pull request list and a Pull request opening go from the daemon on your Mac to the service. No model turn is involved. What comes back stays on your Mac.
 - **The agent's calls.** An MCP Server tool, the output of a `run_integration` command and a file the agent reads each return their result to the agent, and that result goes on to Anthropic's API as part of the run.
+- **The agent's commands.** A command a run executes, such as a build, a test, a package install or `curl`, goes from your Mac straight to the host it names. The Run sandbox does not limit hosts, so a command in a run can reach any server your Mac can, and the agent's web tools are open. Whatever such a command returns goes to the agent and on to Anthropic's API.
+- **The Browser panel and Terminals.** A page in a Session's Chrome calls whatever hosts it calls, as in your own browser, and a Terminals process runs as you. Neither goes through a model, and the panel lists the outside hosts a page called.
 
 Samples and Reports the console stores reach Anthropic only when a Verification or a Fix puts them in a prompt. This holds for the records of a Log folder too: the daemon reads the folder on your Mac, and the agent never does.
 

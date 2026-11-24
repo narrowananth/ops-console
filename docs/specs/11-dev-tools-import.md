@@ -15,7 +15,7 @@ any one of them.
 
 1. In the Setup agent, the operator asks to import ("bring in my local databases", "import from
    `~/work/api/.env`", "add the connections at https://example.com/team.yml"). The setup agent finds the sources,
-   lists what it found, asks which to bring in, then tests and saves each Connection as today
+   lists what it found, asks which to bring in, then tests and saves each Connection
    (`05-settings-dev-tools` Behaviors 13 and 16).
 2. `read_local_file` reads any text file on the machine, up to 512 KB, and `list_local_folder` lists any folder.
    Neither asks the operator first. A binary file is refused, and a missing path returns `not_found`. A path macOS
@@ -23,7 +23,7 @@ any one of them.
    folder lists at most 500 entries, A to Z. With `pick`, a list of keys, `read_local_file` parses a JSON file of up
    to 32 MB and returns only the part those keys lead to, pretty-printed: `["mcpServers"]` from a `~/.claude.json`
    too big to read whole. A key the file lacks returns `not_found`, and a file that is not JSON is refused.
-3. `fetch_url` reads an http or https page as text, up to 1 MB, in 15 seconds at most. Other schemes are refused.
+3. `fetch_url` reads an http or https page as text, up to 1 MB, in 15 seconds at most, following redirects. Other schemes are refused, and so is a body that is not text. A host that does not answer is `upstream_failed`.
 4. Before Claude sees what a file or page holds, the daemon swaps its secrets for `{{secret:<n>}}`, as it does for a
    typed line. That covers the value of any field whose name contains password, secret, token, API key, private
    key, credential, authorization or cookie (in .env, JSON, YAML, TOML, INI and XML shapes), the password of a URI,
@@ -44,7 +44,7 @@ any one of them.
 7. A pasted database URL (`postgres://`, `mongodb+srv://`, `redis://`) gives the type, host, port, database and
    user. Its password becomes a placeholder.
 8. `add_mcp_server` registers a remote MCP Server by its URL (`http` or `sse`, user scope), with optional headers
-   whose values may hold placeholders. It sends `saved` with target `mcp_server`. The agent then starts the sign-in
+   whose values may hold placeholders. Claude Code asks the operator in the terminal before each call (`05-settings-dev-tools` Behavior 11). It sends `saved` with target `mcp_server`. The agent then starts the sign-in
    with `authenticate_mcp_server`.
 9. A source's name becomes the Connection's name, with each character other than a letter, digit, dot, dash or
    underscore made a dash.

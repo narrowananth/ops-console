@@ -6,7 +6,17 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!**/drizzle/meta", "!design", "!.agents", "!.claude", "!**/dist", "!**/.data", "!**/*.md"]
+    "includes": [
+      "**",
+      "!**/drizzle/meta",
+      "!design",
+      "!docs/diagrams",
+      "!.agents",
+      "!.claude",
+      "!**/dist",
+      "!**/.data",
+      "!**/*.md"
+    ]
   },
   "formatter": {
     "enabled": true,

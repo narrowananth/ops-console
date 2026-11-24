@@ -37,7 +37,7 @@ another.
 9. The calling run ends with the agent's one line. The calling Session shows a **batch card** under that turn: each child
    with its Repo, state, branch and pull request link, updating live while the children run, and a button that opens it.
    The card survives a reload and a restart: it reads the children from the database.
-10. Each child shows "Started from <parent title>" in its header, linking back to the calling Session. The link holds
+10. Each child's Session panel shows "Started from <parent title>" under Lineage, linking back to the calling Session. The link holds
     after the parent is renamed. Deleting the parent keeps the child and drops the line.
 11. A child is a normal Session. It appears in its Repo's group in Workspace, in the Running tray while it runs and on
     the Agent runs page. The operator may stop, pause, retry or delete it alone; none of that touches its siblings or
@@ -88,8 +88,8 @@ force push, never a merge. What is new is the count, and the one Approval gates 
   yes starts any child.
 - The tool is offered only in a run the operator started, never in a job, so text read from logs or a pull request
   cannot reach it. A spawned Session cannot call it, so one yes never grows into more Sessions.
-- Each child runs under the Run sandbox ([ADR 0006](../adr/0006-agent-runs-sandboxed-by-the-os.md)) and the Network
-  allowlist of its own Repo, with its own Session worktree and output folder. It reads nothing of the parent's.
+- Each child runs under the Run sandbox ([ADR 0006](../adr/0006-agent-runs-sandboxed-by-the-os.md)) with its own Session
+  worktree and output folder. It reads nothing of the parent's.
 - Only imported Repos match. A Git URL with no imported Repo is refused; nothing is cloned.
 - The Repos' production branches are fetched by the console before each child's first run, as for any Session.
 - No new reach for the agent's commands.
@@ -139,7 +139,7 @@ Fires for each child as for any Session; the batch card listens to it. No new ev
 - **Batch card** in the calling Session's transcript, under the turn that called the tool. Empty before the answer;
   per row: Repo, state dot (running, idle, failed, waiting for approval), branch, pull request link when one opened,
   and an open button. With no rows it says nothing started: the Approval was denied, or the list was refused. A Session whose run failed to start shows as failed, and its own page says why.
-- **Session header** of a child: "Started from <parent title>" beside the Repo and branch.
+- **Session panel** of a child: "Started from <parent title>" under Lineage.
 - Tray and Agent runs page: no change; the children are ordinary runs.
 
 ## Rejected

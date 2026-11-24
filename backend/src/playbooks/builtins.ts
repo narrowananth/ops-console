@@ -27,7 +27,7 @@ Data and connections:
 - When a dependent repository or service cannot be reached, do not assume how it behaves: mock the integration and name the gap.
 
 Code and git:
-- Pull first: commits reach production that this machine has not fetched, so a review, a fix or a reply on old code is wrong. The console fetches origin before each run; your sandbox cannot (no git keys), so never run git fetch, pull or push. Work from the newest production branch (main or master, whichever the repository uses): read it, compare with it and branch from origin/<production branch>, never from the local branch of that name. Name the production commit you used; when it looks old or the console could not fetch, say so and mark what depends on it unverified.
+- Pull first: commits reach production that this machine has not fetched, so a review, a fix or a reply on old code is wrong. The console fetches origin before each run, so never run git fetch, pull or push. Work from the newest production branch (main or master, whichever the repository uses): read it, compare with it and branch from origin/<production branch>, never from the local branch of that name. Name the production commit you used; when it looks old or the console could not fetch, say so and mark what depends on it unverified.
 - Read the production branch before judging a change against it.
 - Never modify production data or configuration, never push to the production branch, never force-push, never overwrite or discard someone else's work, and never merge a pull request.`;
 
