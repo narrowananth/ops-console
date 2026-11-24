@@ -150,6 +150,46 @@ describe('Secrets on Linux (Behavior 13 to 18)', () => {
     await expect(withBus.get('connection:a')).rejects.toMatchObject({ status: 502 });
   });
 
+  it('does not read a failed connect to the bus socket as a keyring that refused (16)', async () => {
+    class DeniedBus extends OddEntry {
+      override getPassword = async (): Promise<string | null> => {
+        throw new Error('Failed to connect to socket /run/user/1000/bus: Permission denied');
+      };
+    }
+    const noBus = new LoginKeychain('t', undefined, {
+      entry: () => new DeniedBus(),
+      platform: 'linux',
+      busReachable: () => false,
+    });
+    await expect(noBus.get('connection:a')).resolves.toBeNull();
+    await expect(noBus.availability()).resolves.toMatchObject({ available: false });
+  });
+
+  it('frees the slot and fails a queued call when a native item cannot open, instead of hanging (16)', async () => {
+    let healthy = false;
+    const keychain = new LoginKeychain('t', undefined, {
+      entry: () => {
+        if (!healthy) throw new Error('no Secret Service is available');
+        return new MemoryEntry();
+      },
+      platform: 'linux',
+      busReachable: () => true,
+      nativeCalls: 1,
+      callMs: 500,
+    });
+    const started = Date.now();
+    const refused = await Promise.all(
+      [keychain.set('a', '1'), keychain.set('b', '2'), keychain.set('c', '3')].map((save) =>
+        save.catch((error: unknown) => error),
+      ),
+    );
+    for (const error of refused) expect(error).toBeInstanceOf(SecretServiceUnavailable);
+    expect(Date.now() - started).toBeLessThan(400);
+    // The one slot is still there for the next call.
+    healthy = true;
+    await expect(keychain.set('d', '4')).resolves.toBeUndefined();
+  });
+
   it('finds the session bus from its address, or from the runtime folder', async () => {
     const run = await realpath(await tempDir('ops-console-run-'));
     expect(sessionBusReachable({ XDG_RUNTIME_DIR: run })).toBe(false);

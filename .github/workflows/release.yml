@@ -75,6 +75,11 @@ jobs:
     # `install.sh` accepts, so what loads here loads on every system it admits.
     runs-on: ${{ matrix.runner }}
     steps:
+      - name: Version
+        # A tag names it. A run by hand on a branch gets a version of its own, since a branch name is no version.
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then v=${GITHUB_REF_NAME#v}; else v=0.0.0-${GITHUB_SHA::7}; fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
@@ -90,7 +95,7 @@ jobs:
         env:
           GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
           GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
-        run: node scripts/package.mjs "${GITHUB_REF_NAME#v}"
+        run: node scripts/package.mjs "$VERSION"
       # The runner's systemd user manager needs a login session: lingering starts it, and the bus lives under
       # XDG_RUNTIME_DIR.
       - name: Start a systemd user manager
@@ -112,7 +117,7 @@ jobs:
           (cd release && sha256sum ops-console-linux-*.tar.gz > checksums.txt)
           OPS_CONSOLE_RELEASE_URL="file://$PWD/release" sh install.sh
           export PATH="$HOME/.local/bin:$PATH"
-          test "$(ops-console --version)" = "${GITHUB_REF_NAME#v}"
+          test "$(ops-console --version)" = "$VERSION"
           ops-console start
           ops-console status
           # No DISPLAY here: open prints the address and exits 0.

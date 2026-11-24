@@ -110,15 +110,19 @@ if [ -n "$NODE" ] && [ -d "$APP/node_modules/@napi-rs" ]; then
   row "keyring packages" "$(ls "$APP/node_modules/@napi-rs" | tr '\n' ' ')"
   KEYTEST='
 const { Entry } = require("@napi-rs/keyring");
-const e = new Entry("ops-console-spike", "probe");
-const step = (name, fn) => { try { const v = fn(); console.log(name + ": ok" + (v === undefined || v === null ? "" : " (" + (name === "get" ? (v === "spike-value" ? "value matches" : "value differs") : "") + ")")); } catch (err) { console.log(name + ": ERROR " + String(err && err.message).split("\n")[0].slice(0, 200)); } };
+const pinned = process.env.SPIKE_STORE || "secret-service";
+let e;
+try { e = new Entry("ops-console-spike", "probe", pinned === "default" ? undefined : { linux: { store: pinned } }); }
+catch (err) { console.log("open: ERROR " + String(err && err.message).split("\n")[0].slice(0, 200)); process.exit(0); }
+const step = (name, fn) => { try { const v = fn(); console.log(name + ": ok" + (name === "get" && v !== null && v !== undefined ? (v === "spike-value" ? " (value matches)" : " (value differs)") : "")); } catch (err) { console.log(name + ": ERROR " + String(err && err.message).split("\n")[0].slice(0, 200)); } };
 step("set", () => e.setPassword("spike-value"));
 step("get", () => e.getPassword());
 step("delete", () => e.deletePassword());
 step("get after delete", () => e.getPassword());
 '
-  row "round trip, normal session" "$(cd "$APP" && "$NODE" -e "$KEYTEST" 2>&1 | tr '\n' ';')"
-  row "round trip, DBUS_SESSION_BUS_ADDRESS unset" "$(cd "$APP" && env -u DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR=/nonexistent "$NODE" -e "$KEYTEST" 2>&1 | tr '\n' ';')" "the error text for \"no Secret Service\": paste it into NO_SERVICE in keychain.ts if it does not match"
+  row "round trip, pinned to the Secret Service (what the console does)" "$(cd "$APP" && "$NODE" -e "$KEYTEST" 2>&1 | tr '\n' ';')"
+  row "round trip, pinned, no D-Bus session" "$(cd "$APP" && env -u DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR=/nonexistent "$NODE" -e "$KEYTEST" 2>&1 | tr '\n' ';')" "the error text for \"no Secret Service\": the pinned store should throw at open; paste it into NO_SERVICE in keychain.ts if it does not match"
+  row "round trip, NOT pinned, no D-Bus session" "$(cd "$APP" && env -u DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR=/nonexistent SPIKE_STORE=default "$NODE" -e "$KEYTEST" 2>&1 | tr '\n' ';')" "expected to succeed into the kernel keyring: this is the fallback the console avoids by pinning"
   say ""
   say "By hand, to record the two other strings: lock the keyring (or log out of the desktop and back in without unlocking), then run \`cd $APP && $NODE -e '$(printf '%s' "$KEYTEST" | tr '\n' ' ')'\`. Note the error when the unlock prompt is dismissed, and the one when it is denied."
 else

@@ -154,10 +154,6 @@ export async function waitForHandover(flag: string, limitMs: number, pollMs = 20
 }
 
 /**
- * The app executable at `executable` (relative to a version folder) in every other installed version beside
- * `versionDir`, newest first.
- */
-/**
  * Whether this start takes Keychain items over from the previous version's app: an installed version on a Mac, running
  * from its own version folder. A dev build, a Linux machine (the Secret Service has no per-app access list) and any
  * other way of running hand nothing over.
@@ -171,6 +167,10 @@ export function adoptsKeychainItems(run: {
   return run.version !== 'dev' && run.platform === 'darwin' && run.self.startsWith(`${run.versionDir}/`);
 }
 
+/**
+ * The app executable at `executable` (relative to a version folder) in every other installed version beside
+ * `versionDir`, newest first.
+ */
 export function otherVersionApps(versionDir: string, executable: string): string[] {
   const versions = path.dirname(versionDir);
   return readdirSync(versions, { withFileTypes: true })

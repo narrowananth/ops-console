@@ -50,8 +50,11 @@ export class SecretServiceUnavailable extends ApiError {
   }
 }
 
-/** A native error that says the operator or the keyring refused the call, so a Secret Service is there. */
-const REFUSED = /dismiss|cancel|denied|locked|unlock|prompt/i;
+/**
+ * A native error that says the operator or the keyring refused the call, so a Secret Service is there. "Permission
+ * denied" is no such word: a failed connect to the bus socket says it too.
+ */
+const REFUSED = /dismiss|cancel|locked|unlock|prompt/i;
 /** A native error that says nothing answered on the bus. The spike confirms the wording on each system. */
 const NO_SERVICE = /ServiceUnknown|NoStorageAccess|org\.freedesktop\.secrets|not activatable|no secret service|d-?bus/i;
 
@@ -79,6 +82,15 @@ export function sessionBusReachable(env: NodeJS.ProcessEnv = process.env): boole
 function detailOf(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
   return (text.split('\n')[0] ?? text).slice(0, 200) || 'the call failed';
+}
+
+/**
+ * A native item, pinned on Linux to the Secret Service: left alone, the library falls back to the kernel keyutils
+ * keyring when no Secret Service runs, which would keep a secret in kernel memory and report secrets as storable
+ * (ADR 0004). A pinned store makes the constructor throw instead. The option is ignored on other systems.
+ */
+export function nativeEntry(service: string, key: string): KeychainEntry {
+  return new AsyncEntry(service, key, { linux: { store: 'secret-service' } });
 }
 
 /** The part of a Keychain item `LoginKeychain` uses; tests pass a fake that never answers. */
@@ -119,7 +131,9 @@ class Slots {
     return new Promise<T>((resolve, reject) => {
       const start = () => {
         this.active += 1;
-        job()
+        // An async wrapper turns a throw before the job returns a promise (a native item that fails to open) into a
+        // rejection, so the slot is freed and a queued call does not wait out its limit.
+        (async () => job())()
           .then(resolve, reject)
           .finally(() => {
             this.active -= 1;
@@ -176,7 +190,7 @@ export class LoginKeychain implements Keychain {
     ready: Promise<unknown> | Gate = Promise.resolve(),
     private readonly options: LoginKeychainOptions = {},
   ) {
-    this.entry = options.entry ?? ((name, key) => new AsyncEntry(name, key));
+    this.entry = options.entry ?? nativeEntry;
     this.callMs = options.callMs ?? CALL_LIMIT_MS;
     this.handoverMs = options.handoverMs ?? HANDOVER_LIMIT_MS;
     this.slots = new Slots(options.nativeCalls ?? NATIVE_CALLS);
@@ -236,11 +250,14 @@ export class LoginKeychain implements Keychain {
     if (this.platform !== 'linux' || this.options.wait?.state().waiting) return available;
     try {
       await within(
-        this.slots.run(() => this.entry(this.service, PROBE_KEY).getPassword()),
+        this.slots.run(() => this.open(PROBE_KEY).getPassword()),
         this.options.probeMs ?? PROBE_LIMIT_MS,
       );
     } catch (error) {
       // A refusal or a failure of any other kind came from a Secret Service that is there; only a missing one is "unavailable".
+      if (error instanceof SecretServiceUnavailable) {
+        return { available: false, reason: `no Secret Service answered: ${error.detail}`, store };
+      }
       if (!(error instanceof KeychainTimeout) && secretServiceMissing(error, this.bus())) {
         return { available: false, reason: `no Secret Service answered: ${detailOf(error)}`, store };
       }
@@ -285,6 +302,19 @@ export class LoginKeychain implements Keychain {
     renameSync(temp, file);
   }
 
+  /**
+   * The native item for `key`. On Linux the pinned store makes the constructor throw when no Secret Service is
+   * there, which is the library's own word for it: no text matching needed.
+   */
+  private open(key: string): KeychainEntry {
+    try {
+      return this.entry(this.service, key);
+    } catch (error) {
+      if (this.platform === 'linux') throw new SecretServiceUnavailable(detailOf(error));
+      throw error;
+    }
+  }
+
   private bus(): boolean {
     return (this.options.busReachable ?? sessionBusReachable)();
   }
@@ -297,7 +327,7 @@ export class LoginKeychain implements Keychain {
       if (gated) await within(this.gate.waitFor(key), this.handoverMs);
       // A call that gave up while it queued does not start its native call afterwards.
       return await within(
-        this.slots.run(() => (abandoned ? Promise.reject(new KeychainTimeout()) : use(this.entry(this.service, key)))),
+        this.slots.run(() => (abandoned ? Promise.reject(new KeychainTimeout()) : use(this.open(key)))),
         this.callMs,
       );
     } catch (error) {
