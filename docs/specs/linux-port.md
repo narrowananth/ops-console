@@ -89,6 +89,7 @@ The Run sandbox is the open part. The Agent SDK sandbox uses bubblewrap on Linux
 - **Keychain**: the Glossary term stays for the operator's secret store on both systems; on Linux it is the Secret Service. The Permissions row keeps its name and its text names the system.
 - **Headless secrets**: no Secret Service, no stored secrets. Refused with a reason; no file and no kernel keyring.
 - **Library**: `@napi-rs/keyring`, as on macOS, behind the existing `Keychain` interface, with the Linux store pinned to the Secret Service. Left alone, the library falls back to the kernel keyutils keyring when no Secret Service runs, which would store secrets in kernel memory. A pinned store makes opening an item throw when none runs, and the console reads that as "no Secret Service". The spike confirms the library loads and works on the supported systems.
+- **Availability probe**: one at a time. The probe holds a native slot until the keyring answers, so a call made while one waits on a locked keyring reuses it, and nothing is kept once it settles. Two visits to Permissions never hold every slot a real secret call needs.
 - **Handover**: none on Linux. The Secret Service has no per-app access list, so the check, owner file and Handover refusal do not run.
 - **Service manager**: systemd user service. No system service, no root.
 - **Lingering**: the console never enables it; it shows the command.

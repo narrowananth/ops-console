@@ -184,6 +184,8 @@ export class LoginKeychain implements Keychain {
   private readonly keys = new Set<string>();
   private trusted = false;
   private readonly platform: NodeJS.Platform;
+  /** The availability probe still waiting on the keyring, so a second read of Permissions reuses it. */
+  private probing: Promise<KeychainAvailability> | null = null;
 
   constructor(
     private readonly service = 'ops-console',
@@ -242,17 +244,32 @@ export class LoginKeychain implements Keychain {
 
   /**
    * Whether this machine can store secrets. A Mac always can. On Linux the Secret Service must answer a read: a read
-   * still pending after `probeMs` is a keyring waiting for its unlock prompt, so it counts as answering.
+   * still pending after `probeMs` is a keyring waiting for its unlock prompt, so it counts as answering. The native
+   * read holds one of the native slots until the keyring answers, so a call made while one is pending reuses it: two
+   * visits to Permissions must not hold every slot a real secret call needs. Nothing is kept once the native read
+   * settles.
    */
-  async availability(): Promise<KeychainAvailability> {
+  availability(): Promise<KeychainAvailability> {
     const store = this.platform === 'linux' ? 'secret_service' : 'keychain';
     const available: KeychainAvailability = { available: true, reason: null, store };
-    if (this.platform !== 'linux' || this.options.wait?.state().waiting) return available;
+    if (this.platform !== 'linux' || this.options.wait?.state().waiting) return Promise.resolve(available);
+    if (this.probing) return this.probing;
+    const native = this.slots.run(() => this.open(PROBE_KEY).getPassword());
+    const clear = () => {
+      this.probing = null;
+    };
+    native.then(clear, clear);
+    this.probing = this.settle(native, store, available);
+    return this.probing;
+  }
+
+  private async settle(
+    native: Promise<unknown>,
+    store: KeychainAvailability['store'],
+    available: KeychainAvailability,
+  ): Promise<KeychainAvailability> {
     try {
-      await within(
-        this.slots.run(() => this.open(PROBE_KEY).getPassword()),
-        this.options.probeMs ?? PROBE_LIMIT_MS,
-      );
+      await within(native, this.options.probeMs ?? PROBE_LIMIT_MS);
     } catch (error) {
       // A refusal or a failure of any other kind came from a Secret Service that is there; only a missing one is "unavailable".
       if (error instanceof SecretServiceUnavailable) {

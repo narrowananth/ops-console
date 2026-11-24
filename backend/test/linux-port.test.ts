@@ -150,6 +150,43 @@ describe('Secrets on Linux (Behavior 13 to 18)', () => {
     await expect(withBus.get('connection:a')).rejects.toMatchObject({ status: 502 });
   });
 
+  it('keeps real secret calls moving while a locked keyring leaves the availability probe pending (16)', async () => {
+    let probes = 0;
+    const keychain = new LoginKeychain('t', undefined, {
+      entry: (_service, key) => {
+        if (key !== 'availability-probe') return new MemoryEntry();
+        probes += 1;
+        return new LockedEntry();
+      },
+      platform: 'linux',
+      busReachable: () => true,
+      nativeCalls: 2,
+      probeMs: 20,
+    });
+    // Three visits to Permissions while the keyring waits for its unlock prompt.
+    const visits = await Promise.all([keychain.availability(), keychain.availability(), keychain.availability()]);
+    for (const visit of visits) expect(visit).toMatchObject({ available: true });
+    expect(probes).toBe(1);
+    // A slot is still free for the secret calls that matter.
+    await expect(keychain.set('connection:a', 'x')).resolves.toBeUndefined();
+    await expect(keychain.get('connection:a')).resolves.toBe('x');
+  });
+
+  it('keeps nothing once the probe has answered: the next read asks again (16)', async () => {
+    let probes = 0;
+    const keychain = new LoginKeychain('t', undefined, {
+      entry: () => {
+        probes += 1;
+        return new MemoryEntry();
+      },
+      platform: 'linux',
+      busReachable: () => true,
+    });
+    await keychain.availability();
+    await keychain.availability();
+    expect(probes).toBe(2);
+  });
+
   it('does not read a failed connect to the bus socket as a keyring that refused (16)', async () => {
     class DeniedBus extends OddEntry {
       override getPassword = async (): Promise<string | null> => {
