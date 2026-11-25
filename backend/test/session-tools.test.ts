@@ -22,7 +22,7 @@ afterEach(async () => {
   for (const daemon of running.splice(0)) await daemon.stop();
 });
 
-type Wait = { id: string; summary: string };
+type Wait = { id: string; summary: string; subagent_id: string | null };
 
 async function start() {
   const daemon = await startAgentDaemon({
@@ -62,6 +62,24 @@ describe('the agent starts processes and uses the browser', () => {
       await ctx.daemon.stop();
       running.pop();
     }
+  });
+
+  it('records the subagent that asked for a console tool, and none for the main agent (13)', async () => {
+    const { server } = await writeFixtures();
+    const ctx = await start();
+    const id = await ctx.chat(AccessMode.Supervised);
+    ctx.daemon.sdk.script(
+      { task: { id: 't1', description: 'Start the api' } },
+      { tool: START_PROCESS_TOOL, input: { name: 'api', command: node(server) }, agent: 't1' },
+      { tool: START_PROCESS_TOOL, input: { name: 'web', command: node(server) } },
+    );
+    await ctx.http.post(`/sessions/${id}/messages`, { text: 'start both' });
+    for (const subagent of ['t1', null]) {
+      const [wait] = await until(ctx.pending, (list) => list.length === 1, 'an Approval');
+      expect(wait?.subagent_id).toBe(subagent);
+      await ctx.http.post(`/approvals/${wait?.id}/decision`, { decision: 'approved' });
+    }
+    await ctx.idle(id);
   });
 
   it('starts a process in full access with no Approval', async () => {

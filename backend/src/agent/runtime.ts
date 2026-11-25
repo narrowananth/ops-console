@@ -780,6 +780,7 @@ export class AgentRuntime implements OnModuleDestroy {
       outputTimer: null,
       sdkUuids: new Set(),
       toolRows: new Map(),
+      toolAgents: new Map(),
       said: [],
       answer: null,
       waits: 0,
@@ -1676,6 +1677,7 @@ export class AgentRuntime implements OnModuleDestroy {
       if (input.hook_event_name !== 'PreToolUse') return {};
       await run.fetching;
       const toolInput = asRecord(input.tool_input);
+      if (input.agent_id) run.toolAgents.set(input.tool_use_id, input.agent_id);
       this.steps.start(run, {
         id: input.tool_use_id,
         agentId: input.agent_id ?? null,
@@ -2279,7 +2281,10 @@ export class AgentRuntime implements OnModuleDestroy {
     run.waitingSince ??= since;
     run.waits++;
     this.sessions.setState(run.sessionId, SessionState.WaitingApproval);
-    const decision = await this.approvals.request(request);
+    const decision = await this.approvals.request({
+      ...request,
+      subagentId: request.subagentId ?? (stepId === null ? null : (run.toolAgents.get(stepId) ?? null)),
+    });
     run.waits--;
     if (stepId !== null) this.steps.waited(stepId, Date.now() - since);
     this.resume(run);

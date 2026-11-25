@@ -356,7 +356,16 @@ export class FakeAgentSdk implements AgentSdk {
           await result(message, true);
         };
 
-        const pre = await hooks('PreToolUse', { tool_name: step.tool, tool_input: step.input, tool_use_id: id }, id);
+        const pre = await hooks(
+          'PreToolUse',
+          {
+            tool_name: step.tool,
+            tool_input: step.input,
+            tool_use_id: id,
+            ...(step.agent ? { agent_id: step.agent } : {}),
+          },
+          id,
+        );
         const decisions = pre.flatMap((output) =>
           'hookSpecificOutput' in output && output.hookSpecificOutput?.hookEventName === 'PreToolUse'
             ? [output.hookSpecificOutput]
