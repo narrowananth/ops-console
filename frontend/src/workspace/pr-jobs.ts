@@ -1,14 +1,16 @@
 import { PrAction, PrActionState, type PrComment, type PullRequestDetail } from '@ops-console/shared';
 
-export const BUSY_TITLE = 'A Session is already working on this';
+export const BUSY_TITLE = 'The Session is working on this pull request';
+
+export const LINKED_TITLE = 'A Session is already linked to this pull request';
 
 /** Hover tips on the pull request's agent buttons: what opens when the operator presses one. */
 export const AGENT_REVIEW_TIP =
-  'Opens a Session at the newest commit. The agent follows the Review PR Playbook, compares the change with the target branch and may run the tests. The console posts each finding on its line on the Git host, then one comment with the verdict.';
+  'Starts a Round in this pull request’s Session at the newest commit. The agent follows the Review PR Playbook, compares the change with the target branch and may run the tests. The console posts each finding on its line on the Git host, then one comment with the verdict.';
 export const ADDRESS_TIP =
-  "Pick open threads, yours or a teammate's. Opens a Session where the agent makes the changes they ask for. The console pushes one commit to this branch, replies in each thread and resolves the ones the agent did.";
+  "Pick open threads, yours or a teammate's. Starts a Round in this pull request's Session where the agent makes the changes they ask for. The console pushes one commit to this branch, replies in each thread and resolves the ones the agent did.";
 export const CHECK_REPLIES_TIP =
-  'Opens a Session where the agent checks every open thread that has a reply against the code at the newest commit. The console posts fixed, partly fixed or not fixed in each, and resolves the fixed ones. Nothing is committed.';
+  'Starts a Round in this pull request’s Session where the agent checks every open thread that has a reply against the code at the newest commit. The console posts fixed, partly fixed or not fixed in each, and resolves the fixed ones. Nothing is committed.';
 
 /** How each PR action reads on a button and in the Sessions rail. */
 export const ACTION_LABEL: Record<PrAction, string> = {
@@ -23,9 +25,15 @@ export const ACTION_STATE_LABEL: Record<PrActionState, string> = {
   [PrActionState.Submitted]: 'submitted',
 };
 
-/** A PR action Session of this action is not submitted yet: its button waits until it posts or the Session is deleted. */
-export const actionOpen = (pr: PullRequestDetail, action: PrAction) =>
-  pr.action_sessions.some((session) => session.action === action && session.state !== PrActionState.Submitted);
+/** The pull request's PR Session: the newest Session a button opened. */
+const prSession = (pr: PullRequestDetail) => pr.action_sessions[0] ?? null;
+
+/** The PR Session's turn is running: all three buttons wait. */
+export const sessionWorking = (pr: PullRequestDetail) => prSession(pr)?.state === PrActionState.Working;
+
+/** The PR Session is working on a Round of this action. */
+export const roundWorking = (pr: PullRequestDetail, action: PrAction) =>
+  sessionWorking(pr) && prSession(pr)?.action === action;
 
 /** The unresolved threads, by their first comment, on a line, a file or the pull request: what Address comments can work on. */
 export const openThreads = (pr: PullRequestDetail) =>

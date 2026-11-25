@@ -1,6 +1,6 @@
 # PR actions open Sessions
 
-**Status:** shipped
+**Status:** shipped; Behaviors 6 to 8 and the one-Session-per-click rule changed by [pr-one-session-per-pull-request](pr-one-session-per-pull-request.md)
 **Design:** Workspace, pull request view in `design/ops-console-sidebar.html` (the Threads rail and the Sessions rail). Departure: the design shows a Comment pass card, a Reply check strip and an Agent Review card. This change removes all three; each action instead appears as a Session in the Sessions rail.
 
 ## Problem
@@ -21,9 +21,9 @@ A normal Session has none of these limits. The operator wants the three buttons 
 3. Address comments shows in the Threads section of the pull request's right-hand rail, on any open pull request, the operator's or someone else's, that has at least one unresolved thread, whether on a line, on a file or a general comment. Pressing it lists every unresolved thread with all ticked; Start needs at least one ticked and Cancel starts nothing.
 4. Check replies shows below Address comments in the same section, with the number of threads it covers: every unresolved thread with at least one reply whose last comment is not the agent's. It does not show when there are none, unless a Check replies Session is still open, or on a merged or closed pull request.
 5. Review with agent, labelled Agent Review, stays in the pull request's header and keeps its optional Review note. The note goes into the opening prompt next to the pull request.
-6. Start on any of the three opens a PR action Session: a `repo` Session of the pull request's Repo, in its own detached worktree at the pull request's head commit, fetched from `origin`. It is titled by the action and the pull request, for example "Address comments #39". It starts with the default Access mode of a new Session, and the agent begins at once with the opening prompt. For Address comments the prompt names the ticked threads, for Check replies the threads it covers.
-7. The Session shows in the Sessions list under its title, which names the action, and in the pull request's Sessions rail, with a state: working while a turn runs, not submitted while it is idle with nothing posted, and submitted once its tool call has succeeded (Behavior 16). The operator opens it from the rail.
-8. While a PR action Session of one kind is not submitted, that kind's button is disabled with "A Session is already working on this" and the API answers 409 `session_busy`. The other two kinds stay enabled. Submitting the Session, or deleting it, frees the button.
+6. The first Start on any of the three opens the pull request's PR Session: a `repo` Session of the pull request's Repo, in its own detached worktree at the pull request's head commit, fetched from `origin`. It is titled "Pull request #<n>", for example "Pull request #39". Later presses post into the same Session (see [pr-one-session-per-pull-request](pr-one-session-per-pull-request.md)). It starts with the default Access mode of a new Session, and the agent begins at once with the opening prompt. For Address comments the prompt names the ticked threads, for Check replies the threads it covers.
+7. The Session shows in the Sessions list under its title and in the pull request's Sessions rail, with the current Round's state: working while a turn runs, not submitted while it is idle with nothing posted, and submitted once its tool call has succeeded (Behavior 16). The operator opens it from the rail.
+8. While the PR Session's turn is running, all three buttons are disabled with "The Session is working on this pull request" and the API answers 409 `session_busy`. An idle Session takes a press even when its last Round never submitted; the unsubmitted Round is dropped.
 9. A merged or closed pull request starts nothing: the buttons do not show, and the API answers 409 `invalid_state`.
 10. A head commit that cannot be fetched from `origin`, as with a fork, starts no Session and leaves no worktree. The button shows "Could not fetch the branch from origin:" and git's message. A worktree that cannot be made at the head commit removes the Session and shows "Could not make a worktree at the head commit:" and the reason.
 11. A Git host that is down or rate limited when the operator presses a button starts no Session, and the button shows the host's error.
@@ -68,10 +68,10 @@ A normal Session has none of these limits. The operator wants the three buttons 
 
 ## Settled
 
-- **PR action Session**: the name for these Sessions (Glossary). Review PR, Check reply and Address comments stay the Triggers' names.
-- **One Session per click**: each press opens a new Session. The console never reuses the operator's own Session on the branch.
+- **PR Session**: the name for these Sessions (Glossary). Review PR, Check reply and Address comments stay the Triggers' names.
+- **One Session per pull request**: each press starts a Round in the same Session. The console never reuses the operator's own Session on the branch.
 - **Detached worktree**: at the pull request's head commit, never on the branch itself, so it cannot clash with the operator's Session on that branch. `HEAD` is what the console pushes.
-- **Concurrency**: one unsubmitted Session per pull request and action. Different actions run side by side.
+- **Concurrency**: one turn at a time per pull request. A press while it runs is refused.
 - **The button is the approval**: pressing it approves the console to commit, push, reply and resolve what the one tool call reports. The call asks for nothing more. This is the rule the jobs had.
 - **The console writes to the host**: the agent never pushes or posts. The tool is the only way, and each Session's other host writes are denied.
 - **Any open pull request**: Address comments works on the operator's or a teammate's.
@@ -116,7 +116,7 @@ ALTER TABLE sessions ADD COLUMN pr_action_threads TEXT
 ALTER TABLE sessions ADD COLUMN pr_action_commit_sha TEXT;
 -- Set when the tool call has posted everything.
 ALTER TABLE sessions ADD COLUMN pr_action_submitted_at TEXT;
--- One unsubmitted Session per pull request and action (Behavior 8).
+-- Replaced by sessions_pr_session_idx, a plain lookup index, when there became one Session per pull request.
 CREATE UNIQUE INDEX sessions_one_open_pr_action_idx
   ON sessions (repo_id, pr_number, pr_action)
   WHERE pr_action IS NOT NULL AND pr_action_submitted_at IS NULL;

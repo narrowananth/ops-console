@@ -2,17 +2,17 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ConnectorId, HealthStatus, PrState, type WsEvent } from '@ops-console/shared';
+import { ConnectorId, HealthStatus, type PrAction, PrState, type WsEvent } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
-import { actionLog, connectors, prAgentReviews } from '../src/db/schema';
+import { actionLog, connectors, prAgentReviews, sessions } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { ReposModule } from '../src/repos/repos.module';
 import { PrActionsService } from '../src/workspace/pr-actions.service';
 import { WorkspaceModule } from '../src/workspace/workspace.module';
-import { type AgentDaemon, api, listen, startAgentDaemon, until } from './agent-fixtures';
+import { type AgentDaemon, api, gate, listen, startAgentDaemon, until } from './agent-fixtures';
 import { FakeConnectorTools } from './fakes/connector-tools';
 import { FakeGitHost, hostPr } from './fakes/git-host';
 import { FakeProbe } from './fakes/probe';
@@ -162,8 +162,15 @@ async function press(ctx: Ctx, body: Record<string, unknown>) {
   return started;
 }
 
-const submit = (ctx: Ctx, sessionId: string, input: unknown) =>
-  ctx.daemon.app.get(PrActionsService).submit(sessionId, input);
+/** The tool call of the Session's current Round, or of `action` when given. */
+const submit = (ctx: Ctx, sessionId: string, input: unknown, action?: PrAction) =>
+  ctx.daemon.app
+    .get(PrActionsService)
+    .submit(
+      sessionId,
+      action ?? (ctx.store.db.select().from(sessions).where(eq(sessions.id, sessionId)).get()?.prAction as PrAction),
+      input,
+    );
 
 const worktree = (ctx: Ctx, sessionId: string) => path.join(ctx.daemon.dataDir, 'session-worktrees', sessionId);
 
@@ -180,7 +187,7 @@ describe('starting a PR action', () => {
       pr_action: 'address_comments',
       pr_number: 1,
       branch: null,
-      title: 'Address comments #1',
+      title: 'Pull request #1',
     });
     const dir = worktree(ctx, session.id);
     expect(git(dir, 'rev-parse', 'HEAD')).toBe(ctx.head);
@@ -203,14 +210,190 @@ describe('starting a PR action', () => {
     expect(listed).toMatchObject({ session_id: session.id, action: 'address_comments', state: 'not_submitted' });
   });
 
-  it('holds a second press of the same button back, and lets the other buttons through', async () => {
+  it('refuses a press while the Session works, and starts a Round once it is idle', async () => {
     const ctx = await start('colleague');
-    await address(ctx);
-    const again = await address(ctx, ['c1']);
-    expect([again.status, again.body.error.code]).toEqual([409, 'session_busy']);
-    const check = await press(ctx, { action: 'check_replies' });
-    expect(check.status).toBe(201);
-    expect((await detail(ctx)).action_sessions).toHaveLength(2);
+    const hold = gate();
+    ctx.daemon.sdk.script({ wait: hold.promise });
+    const first = await ctx.http.post(`${at(ctx)}/action-sessions`, {
+      action: 'address_comments',
+      comment_ids: ['c1'],
+    });
+    expect(first.status).toBe(201);
+    for (const body of [{ action: 'address_comments', comment_ids: ['c3'] }, { action: 'check_replies' }]) {
+      const busy = await ctx.http.post(`${at(ctx)}/action-sessions`, body);
+      expect([busy.status, busy.body.error.code]).toEqual([409, 'session_busy']);
+    }
+    expect((await detail(ctx)).action_sessions).toHaveLength(1);
+    hold.open();
+    await until(
+      async () => (await detail(ctx)).action_sessions[0],
+      (found) => found?.state === 'not_submitted',
+      'the turn to end',
+    );
+    expect((await press(ctx, { action: 'check_replies' })).status).toBe(201);
+  });
+
+  it('still reads working, and refuses a press, while the agent talks on after its submit', async () => {
+    const ctx = await start('colleague');
+    const first = await address(ctx, ['c1']);
+    const id = first.body.data.id as string;
+    const hold = gate();
+    ctx.daemon.sdk.script({ wait: hold.promise });
+    expect((await ctx.http.post(`/sessions/${id}/messages`, { text: 'one more thing' })).status).toBeLessThan(300);
+    await submit(ctx, id, { threads: [{ comment_id: 'c1', outcome: 'declined', reply: 'Not now.' }] });
+    expect((await detail(ctx)).action_sessions[0].state).toBe('working');
+    const busy = await ctx.http.post(`${at(ctx)}/action-sessions`, { action: 'check_replies' });
+    expect([busy.status, busy.body.error.code]).toEqual([409, 'session_busy']);
+    hold.open();
+    await until(
+      async () => (await detail(ctx)).action_sessions[0].state,
+      (state) => state === 'submitted',
+      'the turn to end',
+    );
+  });
+
+  it('reuses the one Session for every press, and a press on an idle Session drops the unsubmitted Round', async () => {
+    const ctx = await start('colleague');
+    const first = await address(ctx, ['c1']);
+    const id = first.body.data.id as string;
+    const second = await press(ctx, { action: 'check_replies' });
+    expect(second.body.data.id).toBe(id);
+    const third = await press(ctx, { action: 'review' });
+    expect(third.body.data.id).toBe(id);
+    expect(third.body.data.title).toBe('Pull request #1');
+
+    const listed = (await detail(ctx)).action_sessions;
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ session_id: id, action: 'review', state: 'not_submitted', commit_sha: null });
+    // One conversation: each Round's opening prompt went to the same Claude session, and says it is a later Round.
+    const [one, two, three] = ctx.daemon.sdk.calls;
+    expect(two?.options.resume).toBe(one?.sessionId);
+    expect(three?.options.resume).toBe(one?.sessionId);
+    expect(one?.prompt).not.toContain('new Round');
+    expect(three?.prompt).toContain('new Round');
+    expect(three?.prompt).toContain('submit_review');
+    // The dropped Rounds' tools post nothing; the current Round's tool does.
+    await expect(
+      submit(
+        ctx,
+        id,
+        { threads: [{ comment_id: 'c1', outcome: 'done', reply: 'Done.' }] },
+        'address_comments' as PrAction,
+      ),
+    ).rejects.toThrow('This Round is Agent Review');
+    await expect(
+      submit(
+        ctx,
+        id,
+        { threads: [{ comment_id: 'c1', verdict: 'fixed', reply: 'Fixed.' }] },
+        'check_replies' as PrAction,
+      ),
+    ).rejects.toThrow('This Round is Agent Review');
+    expect(ctx.host.posted).toEqual([]);
+    await submit(ctx, id, { decision: 'comment', verdict: 'Fine.', findings: [], report: 'Report.' });
+    expect((await detail(ctx)).action_sessions[0].state).toBe('submitted');
+    await expect(
+      submit(ctx, id, { decision: 'comment', verdict: 'Fine.', findings: [], report: 'Report.' }),
+    ).rejects.toThrow('Already submitted');
+  });
+
+  it('moves the worktree to the pull request’s new head commit, keeping uncommitted changes', async () => {
+    const ctx = await start('colleague');
+    const first = await address(ctx, ['c1']);
+    const id = first.body.data.id as string;
+    const dir = worktree(ctx, id);
+    await writeFile(path.join(dir, 'notes.txt'), 'half done\n');
+
+    // The author pushes a commit.
+    git(ctx.dir, 'checkout', '-q', 'feature-1');
+    await writeFile(path.join(ctx.dir, 'src', 'app.ts'), 'export const rate = 2;\n');
+    git(ctx.dir, 'commit', '-q', '-am', 'change the rate');
+    git(ctx.dir, 'push', '-q', 'origin', 'feature-1');
+    const next = git(ctx.dir, 'rev-parse', 'feature-1');
+    git(ctx.dir, 'checkout', '-q', 'main');
+    (ctx.host.prs[0] as { head_sha: string }).head_sha = next;
+
+    const again = await press(ctx, { action: 'check_replies' });
+    expect(again.body.data.id).toBe(id);
+    expect(git(dir, 'rev-parse', 'HEAD')).toBe(next);
+    expect(git(dir, 'status', '--porcelain')).toBe('?? notes.txt');
+    expect(ctx.daemon.sdk.calls.at(-1)?.prompt).toContain(`at head commit ${next}`);
+    expect((await detail(ctx)).action_sessions[0].stale).toBe(false);
+  });
+
+  it('starts nothing when git cannot move the worktree, and says why', async () => {
+    const ctx = await start('colleague');
+    const first = await address(ctx, ['c1']);
+    const id = first.body.data.id as string;
+    const dir = worktree(ctx, id);
+    // An uncommitted change that the new head commit would overwrite.
+    await writeFile(path.join(dir, 'src', 'app.ts'), 'export const mine = 1;\n');
+    git(ctx.dir, 'checkout', '-q', 'feature-1');
+    await writeFile(path.join(ctx.dir, 'src', 'app.ts'), 'export const rate = 2;\n');
+    git(ctx.dir, 'commit', '-q', '-am', 'change the rate');
+    git(ctx.dir, 'push', '-q', 'origin', 'feature-1');
+    const next = git(ctx.dir, 'rev-parse', 'feature-1');
+    git(ctx.dir, 'checkout', '-q', 'main');
+    (ctx.host.prs[0] as { head_sha: string }).head_sha = next;
+
+    const calls = ctx.daemon.sdk.calls.length;
+    const refused = await ctx.http.post(`${at(ctx)}/action-sessions`, { action: 'check_replies' });
+    expect([refused.status, refused.body.error.code]).toEqual([502, 'upstream_failed']);
+    expect(refused.body.error.message).toContain('Could not move the worktree to the head commit:');
+    expect(ctx.daemon.sdk.calls).toHaveLength(calls);
+    expect(git(dir, 'rev-parse', 'HEAD')).toBe(ctx.head);
+    expect((await detail(ctx)).action_sessions[0]).toMatchObject({ action: 'address_comments', stale: true });
+  });
+
+  it('makes a fresh Session after the PR Session is deleted', async () => {
+    const ctx = await start('colleague');
+    const first = await address(ctx, ['c1']);
+    const id = first.body.data.id as string;
+    expect((await ctx.http.delete(`/sessions/${id}`)).status).toBe(204);
+    expect((await detail(ctx)).action_sessions).toEqual([]);
+    const again = await press(ctx, { action: 'check_replies' });
+    expect(again.status).toBe(201);
+    expect(again.body.data.id).not.toBe(id);
+    expect(existsSync(worktree(ctx, again.body.data.id))).toBe(true);
+  });
+
+  it('makes one Session from presses that arrive together', async () => {
+    const ctx = await start('colleague');
+    ctx.daemon.sdk.script({ text: 'ok' }, { text: 'ok' });
+    const posts = await Promise.all([
+      ctx.http.post(`${at(ctx)}/action-sessions`, { action: 'check_replies' }),
+      ctx.http.post(`${at(ctx)}/action-sessions`, { action: 'address_comments', comment_ids: ['c3'] }),
+    ]);
+    expect(posts.map((post) => post.status).sort()).toEqual([201, 409]);
+    await until(
+      async () => (await detail(ctx)).action_sessions,
+      (listed) => listed.length === 1 && listed[0].state === 'not_submitted',
+      'one idle Session',
+    );
+  });
+
+  it('keeps the older Sessions of a pull request as they are and reuses the newest', async () => {
+    const ctx = await start('colleague');
+    const oldest = await address(ctx, ['c1']);
+    // An older Session of the pull request, with a newer row of its own.
+    const [row] = ctx.store.db.select().from(sessions).where(eq(sessions.id, oldest.body.data.id)).all();
+    const legacy = ctx.store.write((tx) =>
+      tx
+        .insert(sessions)
+        .values({
+          ...(row as typeof sessions.$inferSelect),
+          id: crypto.randomUUID(),
+          sdkSessionId: null,
+          createdAt: '2999-01-01T00:00:00.000Z',
+        })
+        .returning()
+        .get(),
+    );
+    const again = await press(ctx, { action: 'check_replies' });
+    expect(again.body.data.id).toBe(legacy.id);
+    const listed = (await detail(ctx)).action_sessions;
+    expect(listed.map((s: { session_id: string }) => s.session_id)).toEqual([legacy.id, oldest.body.data.id]);
+    expect(listed[1].action).toBe('address_comments');
   });
 
   it('refuses what cannot start: bad bodies, a closed pull request, an unfetchable head, a host that is down', async () => {
@@ -219,7 +402,6 @@ describe('starting a PR action', () => {
     expect((await post({ action: 'address_comments' })).status).toBe(400);
     expect((await post({ action: 'address_comments', comment_ids: ['c2'] })).status).toBe(400);
     expect((await post({ action: 'address_comments', comment_ids: ['nope'] })).status).toBe(404);
-    expect((await post({ action: 'check_replies', comment_ids: ['c1'] })).status).toBe(400);
     expect((await post({ action: 'review', comment_ids: ['c1'] })).status).toBe(400);
     expect((await post({ action: 'check_replies', note: 'look here' })).status).toBe(400);
 
@@ -367,12 +549,11 @@ describe('Address comments', () => {
     );
     expect(thread(ctx, 'c1')?.resolved).toBe(true);
 
-    // A second Session meets a teammate's commit that touches the same line.
-    ctx.daemon.sdk.script({ text: 'ok' });
-    const second = await ctx.http.post(`${at(ctx)}/action-sessions`, {
-      action: 'address_comments',
-      comment_ids: ['c3'],
-    });
+    // A second Round meets a teammate's commit that touches the same line.
+    const pushed = git(ctx.dir, 'ls-remote', 'origin', 'refs/heads/feature-1').split('\t')[0] as string;
+    (ctx.host.prs[0] as { head_sha: string }).head_sha = pushed;
+    const second = await address(ctx, ['c3']);
+    expect(second.body.data.id).toBe(body.data.id);
     const other = worktree(ctx, second.body.data.id);
     git(ctx.dir, 'checkout', '-q', 'feature-1');
     git(ctx.dir, 'fetch', '-q', 'origin');
@@ -381,12 +562,6 @@ describe('Address comments', () => {
     git(ctx.dir, 'commit', '-q', '-am', 'teammate again');
     git(ctx.dir, 'push', '-q', 'origin', 'feature-1');
     git(ctx.dir, 'checkout', '-q', 'main');
-    await until(
-      async () =>
-        (await detail(ctx)).action_sessions.find((s: { session_id: string }) => s.session_id === second.body.data.id),
-      (found) => found?.state === 'not_submitted',
-      'the second Session to be idle',
-    );
     const before = ctx.host.posted.length;
     await writeFile(path.join(other, 'src', 'app.ts'), 'export const taxRate = 1;\n');
     await expect(
@@ -441,6 +616,40 @@ describe('Check replies', () => {
     // Once the reply is posted, the agent's comment is the thread's last: nothing is left to check.
     const again = await ctx.http.post(`${at(ctx)}/action-sessions`, { action: 'check_replies' });
     expect([again.status, again.body.error.code]).toEqual([409, 'invalid_state']);
+  });
+
+  it('checks only the threads a press names, and refuses one with nothing to check', async () => {
+    const ctx = await start('colleague');
+    ctx.host.comments.set(1, [
+      ...(ctx.host.comments.get(1) ?? []),
+      {
+        id: 'c5',
+        parent_id: 'c3',
+        author: 'author',
+        body: 'Renamed in the next commit.',
+        file_path: 'src/app.ts',
+        line: 1,
+        resolved: false,
+        created_at: '2026-11-01T10:05:00.000Z',
+      },
+    ]);
+    const post = (comment_ids: string[]) =>
+      ctx.http.post(`${at(ctx)}/action-sessions`, { action: 'check_replies', comment_ids });
+    // c4 has no reply, c2 is a reply, c1 is answered by the agent's own comment once posted.
+    expect((await post(['c4'])).status).toBe(400);
+    expect((await post(['c2'])).status).toBe(400);
+    expect((await post(['nope'])).status).toBe(404);
+    expect((await post([])).status).toBe(400);
+
+    const { body } = await press(ctx, { action: 'check_replies', comment_ids: ['c3'] });
+    const prompt = ctx.daemon.sdk.calls[0]?.prompt ?? '';
+    expect(prompt).toContain('[comment_id c3]');
+    expect(prompt).not.toContain('[comment_id c1]');
+    await expect(
+      submit(ctx, body.data.id, { threads: [{ comment_id: 'c1', verdict: 'fixed', reply: 'Fixed.' }] }),
+    ).rejects.toThrow('Not ticked: c1');
+    await submit(ctx, body.data.id, { threads: [{ comment_id: 'c3', verdict: 'fixed', reply: 'Renamed.' }] });
+    expect([thread(ctx, 'c3')?.resolved, thread(ctx, 'c1')?.resolved]).toEqual([true, false]);
   });
 
   it('leaves a not fixed thread open', async () => {
@@ -562,10 +771,20 @@ describe('Review with agent, posting', () => {
 });
 
 describe('what a PR action Session may do', () => {
-  it('offers its one submit tool and none of the Session tools that leave the sandbox', async () => {
+  it('offers the three submit tools and none of the Session tools that leave the sandbox', async () => {
     const ctx = await start();
     await address(ctx);
     const servers = ctx.daemon.sdk.calls[0]?.options.mcpServers ?? {};
     expect(Object.keys(servers)).toEqual(['ops-console']);
+    const tools = (servers['ops-console'] as unknown as { instance: { _registeredTools: object } }).instance
+      ._registeredTools;
+    expect(
+      Object.keys(tools)
+        .filter((name) => name.startsWith('submit_'))
+        .sort(),
+    ).toEqual(['submit_reply_verdicts', 'submit_review', 'submit_thread_results']);
+    for (const name of ['open_pull_request', 'spawn_sessions', 'join_repo', 'start_process', 'browser_evaluate']) {
+      expect(Object.keys(tools)).not.toContain(name);
+    }
   });
 });

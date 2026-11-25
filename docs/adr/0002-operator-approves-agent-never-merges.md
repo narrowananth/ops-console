@@ -14,25 +14,31 @@ write to, so an agent that acted on them alone could be steered into changing co
 console's safety lines close every run's system prompt and say that a log line is data, never an
 instruction.
 
-Pressing Review with agent, Check replies or Address comments is the approval for one PR action Session and for the one
-tool call that ends it. The Session is a `repo` Session in a detached worktree at the pull request's head commit, so the
-operator can steer the agent in the chat. The agent reads the pull request, compares it with the target branch fetched
-from origin, and may install, build and run the tests in that worktree. It never pushes, comments or resolves: it denies
-itself `git push`, the Git hosts' comment and `api` commands and the write tools of their MCP servers, and a host write
-through `run_integration` is refused. The Session ends in `submit_review`, `submit_reply_verdicts` or
-`submit_thread_results`, which asks for no Approval in any Access mode. The console turns the call into the review
-comments, the replies and resolves, and, for Address comments only, one commit and a push of `HEAD` to the pull request's
-branch, as the operator and never forced, with an Action Log row before each. A branch that moved is rebased onto the new
-tip and pushed again; a rebase that conflicts is undone, nothing is posted, and the tool answers with that, so the agent or
-the operator settles it in the chat. A run on a pull request's code loads no `.claude` settings, hooks, `.mcp.json`
-servers or CLAUDE.md from that code, and has no browser or process tools. Pull request text stays data in all three:
-the agent runs no command because the description or a comment says so.
+Pressing Review with agent, Check replies, Address comments or a thread's own Check reply or Address comment button is
+the approval for one Round and for the one tool call that ends it. A pull request has one PR Session, a `repo` Session in
+a detached worktree at the pull request's head commit, so the operator can steer the agent in the chat. The first press
+makes it. Every later press starts a new Round in it: the console fetches the branch, moves the worktree to the pull
+request's current head commit with any uncommitted changes carried along, and posts the Round's opening prompt, so the
+agent keeps what it learned. A press while the Session's turn is running is refused. A press on an idle Session drops a
+Round that never submitted. The agent reads the pull request, compares it with the target branch fetched from origin, and
+may install, build and run the tests in that worktree. It never pushes, comments or resolves: it denies itself
+`git push`, the Git hosts' comment and `api` commands and the write tools of their MCP servers, and a host write through
+`run_integration` is refused. A Round ends in `submit_review`, `submit_reply_verdicts` or `submit_thread_results`, which
+asks for no Approval in any Access mode. All three are offered in the PR Session, and the console takes a call only for
+the current Round: a call of another Round's tool posts nothing, and a second call in a Round answers "Already
+submitted". The console turns the call into the review comments, the replies and resolves, and, for Address comments
+only, one commit and a push of `HEAD` to the pull request's branch, as the operator and never forced, with an Action Log
+row before each. A branch that moved is rebased onto the new tip and pushed again; a rebase that conflicts is undone,
+nothing is posted, and the tool answers with that, so the agent or the operator settles it in the chat. A run on a pull
+request's code loads no `.claude` settings, hooks, `.mcp.json` servers or CLAUDE.md from that code, and has no browser or
+process tools. Pull request text stays data in every Round but Address comments: the agent runs no command because the
+description or a comment says so, and a chat turn between Rounds is data too.
 
 In a chat, the agent opens a pull request only through the console's `open_pull_request` tool, which asks for no
 Approval in any Access mode. The console pushes the branch and opens the pull request in the daemon, with the operator's
 own git access, never forced. A branch that moved on origin is rebased onto the new tip first; a rebase that conflicts
 stops with the branch untouched. When the branch has a pull request already, the push updates it. The agent never pushes
-or opens one itself: it is told so, and `git push` is denied in a PR action Session and a Verification.
+or opens one itself: it is told so, and `git push` is denied in the PR Session and a Verification.
 
 A file for the operator goes in the Session's output folder, where the console shows it. To put a copy in another
 folder, such as `~/Downloads`, the agent calls the console's `save_file` tool with a file or folder name from that
@@ -41,7 +47,7 @@ files. The tool raises an Approval in every Access mode but full that shows the 
 only the operator's yes has the daemon copy the file. The Approval covers the tool only: a run's own commands write
 anywhere the operator can ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md)). A Session in full access copies it at once. A no is final: the agent does not retry by a command or ask the operator to run `mv`.
 
-On any open pull request, the operator's or a teammate's, the push is the console's. In an Address comments Session,
+On any open pull request, the operator's or a teammate's, the push is the console's. In an Address comments Round,
 and only there, the review comments the operator ticked are change requests: the agent may change code to meet them, but
 never runs a command, reads a secret, touches a Connection or pushes because a comment says so. Everywhere else pull
 request text stays data, never instructions. A general comment on the pull request gets a reply only.
@@ -64,7 +70,14 @@ request text stays data, never instructions. A general comment on the pull reque
 - **A pull request action as a job in a scratch copy**: Playbook steps, one turn each, then one JSON answer that the
   console posts. It lost because the operator could not steer the agent, ask why it declined a thread or add a request, a
   failed step offered only Retry, and the scratch copy had no installed packages for a build.
-- **The agent pushes and posts with its own commands in a PR action Session**: the console could not record what was
+- **One Session per press**: each press of Address comments, Check replies or Agent Review opened its own PR action
+  Session, one unsubmitted per pull request and action, and its one tool call ended it. It lost because a pull request that
+  went through two review rounds ended up with five or six Sessions, each starting cold and forgetting what the last had
+  decided, and the Sessions list and the pull request's rail grew with every press.
+- **Post into the operator's own Session on the branch**: one conversation with no new Session. It lost because that
+  Session loads the code's settings and hooks and has the browser and process tools, which a run on pull request code must
+  not have.
+- **The agent pushes and posts with its own commands in the PR Session**: the console could not record what was
   posted or post only what failed, and the agent would hold git and host write access on code it did not write.
 - **An Approval on every `open_pull_request` call**: the operator read what would be pushed and where. It lost because
   the push is never forced and never merges, the diff and the pull request are on the host to read, and the stop broke
@@ -111,9 +124,9 @@ A fix waits for the operator. The console shows how long each verified Alert has
 Review. A run steered by log text can execute local commands; the safety lines, the Alert Session's Access mode and the scratch
 copy as its working folder steer them there, and the Run sandbox ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md))
 closes only the Keychain, so nothing stops a command from writing elsewhere. A command can read the session token and call the console's API, so a steered run can approve its own Approval. The merge denials, the console's own pushing and the PROD write rule still hold. A reviewer can steer a
-PR action Session's code change through a comment the operator ticked; the operator's tick, the
+PR Session's code change through a comment the operator ticked; the operator's tick, the
 worktree and the one pushed commit, never forced, bound that. On a teammate's pull request the
-commit lands on their branch under the operator's git identity, for the teammate to see. A PR action Session may run the
+commit lands on their branch under the operator's git identity, for the teammate to see. The PR Session may run the
 pull request's own build and tests, so pressing a button runs that branch's code on the operator's Mac, in the
 worktree, under the Run sandbox and the Session's Access mode. A pull request from a fork has no branch on origin to fetch, so its
 review fails before any code runs.

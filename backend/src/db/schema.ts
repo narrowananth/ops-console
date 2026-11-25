@@ -124,9 +124,9 @@ export const sessions = sqliteTable(
     repoId: text('repo_id').references((): AnySQLiteColumn => repos.id, { onDelete: 'restrict' }),
     branch: text(),
     prNumber: integer('pr_number'),
-    /** The button a PR action Session was opened from; null for any other Session. */
+    /** The button the current Round of a PR Session was started from; null for any other Session. */
     prAction: text('pr_action').$type<PrAction>(),
-    /** The commit its worktree was made at: the pull request's head then. */
+    /** The commit the current Round works at: the pull request's head then. */
     prActionHeadSha: text('pr_action_head_sha'),
     /** JSON of each thread's outcome and what is posted for it, for Address comments and Check replies; for a review, the note and the baseline it compared with. */
     prActionThreads: text('pr_action_threads'),
@@ -168,9 +168,7 @@ export const sessions = sqliteTable(
     index('sessions_run_outcome_idx').on(table.runOutcome),
     index('sessions_active_idx').on(sql`${table.lastActiveAt} DESC`),
     index('sessions_repo_idx').on(table.repoId, sql`${table.lastActiveAt} DESC`),
-    uniqueIndex('sessions_one_open_pr_action_idx')
-      .on(table.repoId, table.prNumber, table.prAction)
-      .where(sql`${table.prAction} IS NOT NULL AND ${table.prActionSubmittedAt} IS NULL`),
+    index('sessions_pr_session_idx').on(table.repoId, table.prNumber).where(sql`${table.prAction} IS NOT NULL`),
     check('sessions_pr_action', sql`${table.prAction} IN ('address_comments', 'check_replies', 'review')`),
     check(
       'sessions_pr_action_threads_json',

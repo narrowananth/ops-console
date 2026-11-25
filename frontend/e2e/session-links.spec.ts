@@ -79,7 +79,7 @@ const PR = {
 };
 
 /** One Repo with Session s1 on the pull request's branch; `all` answers the list of every kind, `running` included. */
-async function routeWorkspace(page: Page, all: unknown[] = [session('s1')]) {
+async function routeWorkspace(page: Page, all: unknown[] = [session('s1')], onBranch = true) {
   const created: unknown[] = [];
   await page.route('**/api/repos', (route) => route.fulfill({ json: { data: [REPO], meta: { next_cursor: null } } }));
   await page.route('**/api/playbooks', (route) => route.fulfill({ json: { data: { items: [], blocks: [] } } }));
@@ -90,7 +90,10 @@ async function routeWorkspace(page: Page, all: unknown[] = [session('s1')]) {
       return route.fulfill({ status: 201, json: { data: session('s2', { title: 'New Session' }) } });
     }
     const kind = url.searchParams.get('kind');
-    const inRepo = [session('s1'), ...(created.length > 0 ? [session('s2', { title: 'New Session' })] : [])];
+    const inRepo = [
+      ...(onBranch ? [session('s1')] : []),
+      ...(created.length > 0 ? [session('s2', { title: 'New Session' })] : []),
+    ];
     return route.fulfill({ json: { data: kind === 'anonymous' ? [] : kind === null ? all : inRepo } });
   });
   await page.route(/\/api\/sessions\/s\d\/messages$/, (route) => route.fulfill({ json: { data: [] } }));
@@ -107,19 +110,27 @@ async function routeWorkspace(page: Page, all: unknown[] = [session('s1')]) {
   return created;
 }
 
-test('a pull request links the Sessions on its branch, and New Session opens one there with the PR in its draft', async ({
-  page,
-}) => {
+test('a pull request links the Sessions on its branch, and New Session waits while one exists', async ({ page }) => {
   const created = await routeWorkspace(page);
   await page.goto(`${daemon.url}/pull-requests?pr=r1%2F7#token=${daemon.token}`);
 
   await expect(page.getByText('Sessions on this pull request:')).toBeVisible();
+  const newSession = page.getByRole('button', { name: 'New Session' });
+  await expect(newSession).toBeDisabled();
+  await expect(newSession).toHaveAttribute('title', 'A Session is already linked to this pull request');
   await page.getByRole('link', { name: 'Session s1 · idle' }).click();
   await expect(page).toHaveURL(/\/sessions\?session=s1$/);
   await expect(page.getByRole('heading', { name: 'Session s1' })).toBeVisible();
+  expect(created).toEqual([]);
+});
 
-  await page.goBack();
-  await page.getByRole('button', { name: 'New Session' }).click();
+test('New Session opens one on the branch with the PR in its draft when no Session is linked', async ({ page }) => {
+  const created = await routeWorkspace(page, [], false);
+  await page.goto(`${daemon.url}/pull-requests?pr=r1%2F7#token=${daemon.token}`);
+
+  const newSession = page.getByRole('button', { name: 'New Session' });
+  await expect(newSession).toBeEnabled();
+  await newSession.click();
   await expect(page).toHaveURL(/\/sessions\?session=s2$/);
   await expect.poll(() => created).toEqual([{ repo_id: 'r1', branch: 'fix/empty-cart', from_origin: true }]);
   await expect(page.getByRole('textbox', { name: 'Message' })).toHaveText('On pull request #7 (Guard empty carts): ');

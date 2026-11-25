@@ -159,6 +159,22 @@ export class WorkspaceSessionsService {
   }
 
   /**
+   * Moves a PR Session's worktree to the pull request's head commit, uncommitted changes travelling along. False when
+   * the Session has no worktree yet. Throws `upstream_failed` with git's message when it cannot move.
+   */
+  async moveToCommit(session: SessionRow, sha: string): Promise<boolean> {
+    const dir = this.worktreeDir(session.id);
+    if (!(await isWorktree(dir))) return false;
+    const repo = this.repo(session.repoId);
+    await this.logged(session.id, repo.path, `git checkout --detach ${sha}`, async () => {
+      // A run wrote in this folder: the daemon's `git` runs here only while it is still the worktree the console made.
+      await this.git.requireWorktree(dir, repo.path);
+      await this.git.checkoutDetached(dir, sha);
+    });
+    return true;
+  }
+
+  /**
    * Who has `branch` checked out: the Repo's own folder, which is the operator's and stays on it, another Session's
    * worktree, which a Session may share, or no one.
    */
