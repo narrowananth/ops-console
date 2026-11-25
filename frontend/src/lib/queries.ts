@@ -99,6 +99,7 @@ import {
   type StartPrAction,
   scanSchema,
   scriptsSchema,
+  secretRequestSchema,
   serviceSchema,
   sessionDefaultsSchema,
   sessionDiffSchema,
@@ -168,6 +169,7 @@ export const queryKeys = {
   keychainWait: ['keychain-wait'] as const,
   keychainHandover: ['keychain-handover'] as const,
   terminals: ['terminals'] as const,
+  secretRequests: (id: string) => ['secret-requests', id] as const,
   playbooks: ['playbooks'] as const,
   skills: ['skills'] as const,
   skillPacks: ['skill-packs'] as const,
@@ -793,6 +795,27 @@ export function useKeychainHandover() {
     queryKey: queryKeys.keychainHandover,
     queryFn: () =>
       apiGet('/terminals/keychain-handover', z.object({ data: keychainHandoverSchema })).then((r) => r.data),
+  });
+}
+
+/** The masked fields a Session's agent waits on; `/ws` sends `secret.requested` and `secret.settled`. */
+export function useSecretRequests(sessionId: string) {
+  return useQuery({
+    queryKey: queryKeys.secretRequests(sessionId),
+    queryFn: () =>
+      apiGet(`/sessions/${sessionId}/secret-requests`, z.object({ data: z.array(secretRequestSchema) })).then(
+        (response) => response.data,
+      ),
+  });
+}
+
+/** The value goes to the daemon only: it is not kept in the query cache or returned. */
+export function useAnswerSecretRequest(sessionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ requestId, value }: { requestId: string; value: string }) =>
+      apiSend('POST', `/sessions/${sessionId}/secret-requests/${requestId}`, { value }, z.undefined()),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.secretRequests(sessionId) }),
   });
 }
 

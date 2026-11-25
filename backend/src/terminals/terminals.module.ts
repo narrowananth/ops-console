@@ -1,6 +1,6 @@
 import { type DynamicModule, Module } from '@nestjs/common';
-import { DISK_ACCESS, type DiskAccessGate, MacDiskAccess } from './disk-access';
 import { LOCAL_KEYCHAIN, type LocalKeychain, SecurityCliKeychain } from '../anonymous-tools/local-sources';
+import { DISK_ACCESS, type DiskAccessGate, MacDiskAccess } from './disk-access';
 import { RUN_SANDBOX, type RunSandboxGate, SeatbeltRunSandbox } from './run-sandbox-gate';
 import { MacStartAtLogin, START_AT_LOGIN, type StartAtLoginGate } from './start-at-login';
 import { TerminalGateway } from './terminal-gateway';

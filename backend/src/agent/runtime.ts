@@ -66,6 +66,15 @@ import { storedEnvVar } from '../mcp/launcher';
 import { PlaybooksService } from '../playbooks/playbooks.service';
 import { systemAppend } from '../playbooks/prompts';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
+import {
+  ANONYMOUS_SETUP_INSTRUCTIONS,
+  type AnonymousToolName,
+  type AnonymousTools,
+  anonymousToolId,
+  anonymousToolOf,
+  parseAnonymousCall,
+  type ToolPlan,
+} from './anonymous-tools';
 import { Attachments } from './attachments';
 import { cloudWatchDenial } from './cloudwatch-tools';
 import { ConnectionLookup } from './connection-lookup';
@@ -77,14 +86,6 @@ import { mcpScope, offersNewRelicQuery } from './mcp-scope';
 import { MessageInterceptors } from './message-interceptors';
 import { NEW_RELIC_QUERY_TOOL, type NewRelicQuery } from './new-relic-tool';
 import { OutputFiles, saveFileInputSchema } from './output-files';
-import {
-  type AnonymousToolName,
-  type AnonymousTools,
-  anonymousToolId,
-  anonymousToolOf,
-  parseAnonymousCall,
-  type ToolPlan,
-} from './anonymous-tools';
 import { blockParts, contentSchema, EDIT_TOOLS, questionInputSchema, stepText, toMessages } from './parts';
 import { mergeLines, type UsageLine } from './pricing';
 import { ProdWriteRule } from './prod-write-rule';
@@ -1221,7 +1222,11 @@ export class AgentRuntime implements OnModuleDestroy {
       // Claude Code finds a conversation by its folder: one begun in a scratch copy moves to this run's folder.
       else await this.transcripts.place(resume, configDir, run.workingDir);
     }
-    const instructions = kind?.instructions;
+    // The setup tools: an Anonymous Session's operator chat, never a job.
+    const anonymous = isOperatorChat(run) && this.anonymousTools?.offers(run.sessionId) ? this.anonymousTools : null;
+    const instructions = [kind?.instructions, anonymous ? ANONYMOUS_SETUP_INSTRUCTIONS : undefined]
+      .filter((part) => part !== undefined)
+      .join('\n\n');
 
     const attached = this.attachments.existingFolder(run.sessionId);
     // A run the operator started writes its files for them in the Session's output folder (a read-only run has none).
@@ -1293,7 +1298,6 @@ export class AgentRuntime implements OnModuleDestroy {
         const operatorChat = isOperatorChat(run);
         const browser = operatorChat && this.browserTools?.offers(run.sessionId) ? this.browserTools : null;
         const processes = operatorChat && this.processTools?.offers(run.sessionId) ? this.processTools : null;
-        const anonymous = operatorChat && this.anonymousTools?.offers(run.sessionId) ? this.anonymousTools : null;
         const saver = outputFolder === null ? null : this.outputs;
         // The integration CLIs run in the daemon, outside the sandbox, in the Session's output folder.
         const integrations =
@@ -1306,11 +1310,31 @@ export class AgentRuntime implements OnModuleDestroy {
         const newRelic =
           offersNewRelicQuery(run.purpose, logSource) && this.newRelicQuery?.offers() ? this.newRelicQuery : null;
         tools.push(
-          ...Object.entries({ opener, prAction, joiner, spawner, saver, integrations, newRelic, browser, processes, anonymous })
+          ...Object.entries({
+            opener,
+            prAction,
+            joiner,
+            spawner,
+            saver,
+            integrations,
+            newRelic,
+            browser,
+            processes,
+            anonymous,
+          })
             .filter(([, offered]) => offered)
             .map(([name]) => name),
         );
-        return opener || prAction || joiner || spawner || saver || integrations || newRelic || browser || processes || anonymous
+        return opener ||
+          prAction ||
+          joiner ||
+          spawner ||
+          saver ||
+          integrations ||
+          newRelic ||
+          browser ||
+          processes ||
+          anonymous
           ? {
               mcpServers: {
                 [CONSOLE_TOOLS_SERVER]: consoleToolsServer(
@@ -1898,7 +1922,8 @@ export class AgentRuntime implements OnModuleDestroy {
       };
     };
     const parsed = parseAnonymousCall(name, toolInput);
-    if (!this.anonymousTools || 'error' in parsed) return refuse('error' in parsed ? parsed.error : 'Not offered here.');
+    if (!this.anonymousTools || 'error' in parsed)
+      return refuse('error' in parsed ? parsed.error : 'Not offered here.');
     let plan: ToolPlan;
     try {
       plan = this.anonymousTools.plan(run.sessionId, parsed.call);

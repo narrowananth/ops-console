@@ -1,5 +1,5 @@
 import { tool } from '@anthropic-ai/claude-agent-sdk';
-import { ConnectionEnv, ConnectionType, ConnectorId } from '@ops-console/shared';
+import { AccessLevel, ConnectionEnv, ConnectionType, ConnectorId } from '@ops-console/shared';
 import { z } from 'zod';
 import { CONSOLE_TOOLS_SERVER, guarded, type ToolResult } from './session-tools';
 
@@ -17,7 +17,7 @@ export const anonymousToolSchemas = {
   save_connection: z.object({
     name: z.string(),
     env: z.enum(ConnectionEnv),
-    access: z.enum(['none', 'read', 'write']).optional(),
+    access: z.enum(AccessLevel).optional(),
     ...connectionFields,
   }),
   connect_connector: z.object({ id: z.enum(ConnectorId) }),
@@ -101,6 +101,20 @@ export interface AnonymousTools {
   /** Runs the call. A secret in the answer is a `{{secret:<n>}}` placeholder: only the daemon holds the value. */
   run(sessionId: string, call: AnonymousCall, signal: AbortSignal | undefined): Promise<unknown>;
 }
+
+/**
+ * What an Anonymous Session's agent is told about the setup tools, after its Repo instructions. A run that has the tools
+ * gets it; no other run does.
+ */
+export const ANONYMOUS_SETUP_INSTRUCTIONS = `You can also set up database Connections, remote MCP Servers and Connectors for the operator with the ops-console tools test_connection, save_connection, connect_connector, add_mcp_server, authenticate_mcp_server, list_connections and list_mcp_servers. The operator approves each one that tests, saves or registers something.
+- Work out the type (postgres, mongodb, redis, clickhouse, firebase, kafka), host, port, database, user, environment (local, dev, staging, prod) and Access Level from what the operator wrote, and ask for what is missing. A PROD Connection is read-only (or none); the console refuses write on PROD. You cannot change or delete an existing Connection.
+- A secret reaches you only as {{secret:<n>}}. Pass the placeholder on as it is, in the secret field. Never ask the operator to paste or type a password, token or key into the chat: call request_secret, which shows a masked field in this Session, and use the placeholder it returns. You never see the value.
+- Call test_connection before save_connection. Report a failed test and ask what to change.
+- To import what is already set up on this machine or at a URL: call list_connections and list_mcp_servers first and skip a name the console has. read_local_file and list_local_folder read any path; fetch_url reads an http or https page. Secrets in what they return are already placeholders. For a big JSON file pass pick, the keys down to the part you need: ["mcpServers"] from ~/.claude.json. When a read fails with no permission, tell the operator to turn on Full Disk Access under Accounts & Usage, On this machine, then read it again.
+- Places worth a look on macOS when the operator names none: TablePro (~/Library/Application Support/TablePro/connections.json), TablePlus, DBeaver (~/Library/DBeaverData/workspace6/General/.dbeaver/data-sources.json), DataGrip, pgAdmin, MongoDB Compass, RedisInsight, ~/.pgpass, ~/.my.cnf, and .env or docker-compose.yml files in the operator's projects.
+- Many apps keep passwords in the Keychain. list_keychain_items finds items by name without their secrets; read_keychain_secret returns one as a placeholder after the operator approves and macOS asks to allow it. A placeholder is the value of the field it stands in: use it as a password only when that field holds the password. When neither holds one, ask with request_secret, once for Connections that share a user and host, and say in the label where you looked.
+- List what you found and ask which to bring in, then test and save them one at a time. Keep each source's name with every character other than a letter, digit, dot, dash or underscore made a dash. For mongodb the secret is the whole connection string; a clickhouse port is its http_port. For firebase the config is only project_id and services (any of realtime_database, firestore, auth, storage), and the secret is the service-account key, as JSON or base64, for that same project.
+- A database URL (postgres://, mongodb+srv://, redis://) gives the type, host, port, database and user. An MCP Server URL (https://.../mcp) is added with add_mcp_server, then signed in with authenticate_mcp_server. The operator finishes a sign-in in the browser.`;
 
 const DESCRIPTIONS: Record<AnonymousToolName, string> = {
   test_connection:

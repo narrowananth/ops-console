@@ -21,6 +21,14 @@ import { AccountsService } from '../accounts/accounts.service';
 import { CliProxyService } from '../accounts/cliproxy.service';
 import { ActionLogService } from '../action-log/action-log.service';
 import { SESSION_DEFAULTS_KEY } from '../agent/sessions.service';
+import {
+  fetchUrl,
+  LOCAL_KEYCHAIN,
+  type LocalKeychain,
+  listLocalDir,
+  readLocalFile,
+} from '../anonymous-tools/local-sources';
+import { maskLine, PLACEHOLDER } from '../anonymous-tools/secret-masking';
 import { CLAUDE_CLI, type ClaudeCli, claudeEnv } from '../claude-cli/claude-cli';
 import { DAEMON_ADDRESS, type DaemonAddress } from '../common/daemon-address';
 import { DATA_DIR } from '../common/data-dir';
@@ -30,9 +38,7 @@ import { ConnectionsService } from '../connections/connections.service';
 import { ConnectorsService } from '../connectors/connectors.service';
 import { MCP_CONFIG, type McpConfig, McpServersService } from '../mcp/mcp-servers.service';
 import { SettingsService } from '../settings/settings.service';
-import { fetchUrl, LOCAL_KEYCHAIN, type LocalKeychain, listLocalDir, readLocalFile } from '../anonymous-tools/local-sources';
 import { loadPty } from './pty';
-import { maskLine, PLACEHOLDER } from '../anonymous-tools/secret-masking';
 import { ASKED_SETUP_TOOLS, SETUP_AGENT, SETUP_SERVER, SETUP_TOOLS, writeSetupFiles } from './setup-agent';
 
 const ENTER_DELAY_MS = 80;

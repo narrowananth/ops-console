@@ -7,6 +7,7 @@ import { SdkUsageSource } from './accounts/usage-source';
 import { AgentModule } from './agent/agent.module';
 import { ClaudeAgentSdk } from './agent/agent-sdk';
 import { quietShadowedPrompt } from './agent/sdk-warnings';
+import { AnonymousToolsModule } from './anonymous-tools/anonymous-tools.module';
 import { BrowserModule } from './browser/browser.module';
 import { McpConnectionTester } from './connections/connection-tester';
 import { ConnectionsModule } from './connections/connections.module';
@@ -159,6 +160,7 @@ const daemon = await startDaemon({
     MonitorModule.forRoot(),
     DevtoolsModule.forRoot(),
     TerminalsModule.forRoot(),
+    AnonymousToolsModule.forRoot(),
     BrowserModule.forRoot(),
     ProcessesModule.forRoot(),
     ConnectionsModule.forRoot({ tester: new McpConnectionTester(version), launchDir: path.join(appDir, 'launch') }),

@@ -17,6 +17,7 @@ import { z } from 'zod';
 import { ApprovalPrompts } from '../agents/approval-prompts';
 import { PlayRun } from '../agents/play-run';
 import { QuestionPanel, trailingQuestions } from '../agents/question-panel';
+import { SecretRequestCards } from '../agents/secret-request-card';
 import { StopRun } from '../agents/stop-run';
 import { useIncomingPicks } from '../browser/element-picks';
 import { AttachmentViewer, type Viewed } from '../components/ui/attachment-viewer';
@@ -166,6 +167,7 @@ export function SessionComposer({
     <>
       <div className="flex flex-col gap-2 px-6 pb-4">
         <ApprovalPrompts sessionId={id} />
+        <SecretRequestCards sessionId={id} />
         {questions.length > 0 && (
           <QuestionPanel
             // A new question set starts at its first question.
