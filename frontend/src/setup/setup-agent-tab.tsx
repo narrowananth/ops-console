@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { useCloseSetupTerminal, useDiskAccess, useSetupTerminal, useStartSetupTerminal } from '../lib/queries';
+import { DISK_ACCESS_ID, SetupStatus } from './setup-status';
 import { EXAMPLES, queueSetupLine, SetupTerminal } from './setup-terminal';
 
 /** Setup agent: Claude, in a terminal, setting up what the other pages hold from the operator's words. */
@@ -42,6 +42,9 @@ export function SetupAgentTab() {
                 <Fact icon="lock">Passwords go in a masked field</Fact>
               </ul>
             </Card>
+            <Card title="On this Mac">
+              <SetupStatus />
+            </Card>
           </aside>
         )}
       </div>
@@ -50,7 +53,7 @@ export function SetupAgentTab() {
 }
 
 /** Before the terminal starts: what to ask, and the button that starts it. */
-const LOCKED_TIP = 'Turn on Full Disk Access in Permissions first.';
+const LOCKED_TIP = 'Turn on Full Disk Access first.';
 
 function Welcome(props: { locked: boolean; pending: boolean; onStart: (line?: string) => void }) {
   return (
@@ -82,9 +85,9 @@ function Welcome(props: { locked: boolean; pending: boolean; onStart: (line?: st
             Start setup agent
           </Button>
           {props.locked && (
-            <Link to="/permissions" className="text-xs text-accent-700 underline">
-              Needs Full Disk Access · Permissions →
-            </Link>
+            <a href={`#${DISK_ACCESS_ID}`} className="text-xs text-accent-700 underline">
+              Needs Full Disk Access ↓
+            </a>
           )}
         </div>
       </div>

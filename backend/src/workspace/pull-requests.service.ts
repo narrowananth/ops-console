@@ -25,10 +25,10 @@ import {
   type PullRequestDetail,
   type PullRequestSummary,
   SessionKind,
-  SessionState,
 } from '@ops-console/shared';
 import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { ActionLogService } from '../action-log/action-log.service';
+import { turnRunning } from '../agent/sessions.service';
 import { ApiError, validationFailed } from '../common/errors';
 import { asBackground } from '../common/spawn-pool';
 import { ConnectorsService } from '../connectors/connectors.service';
@@ -141,14 +141,14 @@ export function toAgentReview(row: ReviewRow, headSha: string | null): PrAgentRe
   };
 }
 
-/** A PR action Session as the pull request view lists it. */
+/** A PR Session, or a legacy PR action Session, as the pull request view lists it: its current Round. */
 export function toPrActionSession(row: typeof sessions.$inferSelect, headSha: string | null): PrActionSession {
-  const state =
-    row.prActionSubmittedAt !== null
+  // A turn still running, even after the submit, holds the buttons, so it reads as working.
+  const state = turnRunning(row.state)
+    ? PrActionState.Working
+    : row.prActionSubmittedAt !== null
       ? PrActionState.Submitted
-      : row.state === SessionState.Working
-        ? PrActionState.Working
-        : PrActionState.NotSubmitted;
+      : PrActionState.NotSubmitted;
   return {
     session_id: row.id,
     action: row.prAction as PrAction,

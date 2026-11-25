@@ -9,7 +9,7 @@ const REASON = 'its bundle fails `codesign --verify --strict`: a sealed resource
 
 const IDLE = { waiting: false, since: null, pending: 0 };
 
-async function mockPermissions(page: Page, handover: () => unknown, wait: unknown = IDLE) {
+async function mockStatus(page: Page, handover: () => unknown, wait: unknown = IDLE) {
   await page.route('**/api/terminals/keychain-handover', (route) => route.fulfill({ json: { data: handover() } }));
   await page.route('**/api/terminals/keychain-wait', (route) => route.fulfill({ json: { data: wait } }));
   await page.route('**/api/terminals/disk-access', (route) =>
@@ -20,22 +20,20 @@ async function mockPermissions(page: Page, handover: () => unknown, wait: unknow
   );
 }
 
-const keychainRow = (page: Page) =>
-  page.getByRole('region', { name: 'Permissions' }).getByRole('listitem', { name: 'Keychain' });
+const refusal = (page: Page) => page.getByRole('main').getByRole('alert', { name: 'Keychain handover' });
 
-test('Permissions shows a refused Keychain handover with its reason, read-only, beside a wait, and again after a reload', async ({
+test('the Setup agent shows a refused Keychain handover with its reason, read-only, and again after a reload', async ({
   page,
 }) => {
   const since = '2026-11-04T09:30:00.000Z';
-  await mockPermissions(page, () => ({ refused: true, reason: REASON }), { waiting: true, since, pending: 1 });
+  await mockStatus(page, () => ({ refused: true, reason: REASON }), { waiting: true, since, pending: 1 });
   await page.routeWebSocket('**/ws', () => {});
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('navigation').getByRole('link', { name: 'Permissions' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
 
-  const row = keychainRow(page);
+  const row = refusal(page);
   await expect(row).toContainText(REFUSED);
   await expect(row).toContainText(REASON);
-  await expect(row).toContainText('waiting since');
   await expect(row.getByRole('button')).toHaveCount(0);
   await expect(row.getByRole('switch')).toHaveCount(0);
 
@@ -44,33 +42,32 @@ test('Permissions shows a refused Keychain handover with its reason, read-only, 
   await expect(row).toContainText(REASON);
 });
 
-test('an open Permissions page shows the refusal when the daemon sends it', async ({ page }) => {
+test('an open Setup agent page shows the refusal when the daemon sends it', async ({ page }) => {
   let handover: { refused: boolean; reason: string | null } = { refused: false, reason: null };
-  await mockPermissions(page, () => handover);
+  await mockStatus(page, () => handover);
   let push = null as ((data: unknown) => void) | null;
   await page.routeWebSocket('**/ws', (socket) => {
     push = (data) =>
       socket.send(JSON.stringify({ event: 'keychain.handover_refused', at: new Date().toISOString(), data }));
   });
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('navigation').getByRole('link', { name: 'Permissions' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
 
-  const row = keychainRow(page);
-  await expect(row).toContainText('asks each time');
-  await expect(row).not.toContainText(REFUSED);
+  await expect(page.getByRole('main').getByRole('listitem', { name: 'Run sandbox' })).toBeVisible();
+  await expect(refusal(page)).toHaveCount(0);
 
   handover = { refused: true, reason: REASON };
   await expect.poll(() => push !== null).toBe(true);
   push?.(handover);
-  await expect(row).toContainText(REFUSED);
-  await expect(row).toContainText(REASON);
+  await expect(refusal(page)).toContainText(REFUSED);
+  await expect(refusal(page)).toContainText(REASON);
 });
 
-test('Permissions reads a clear Keychain row as before when the handover went through', async ({ page }) => {
-  await mockPermissions(page, () => ({ refused: false, reason: null }));
+test('the Setup agent shows no refusal when the handover went through', async ({ page }) => {
+  await mockStatus(page, () => ({ refused: false, reason: null }));
   await page.routeWebSocket('**/ws', () => {});
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('navigation').getByRole('link', { name: 'Permissions' }).click();
-  await expect(keychainRow(page)).toContainText('asks each time');
-  await expect(keychainRow(page)).not.toContainText(REFUSED);
+  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  await expect(page.getByRole('main').getByRole('listitem', { name: 'Run sandbox' })).toBeVisible();
+  await expect(refusal(page)).toHaveCount(0);
 });

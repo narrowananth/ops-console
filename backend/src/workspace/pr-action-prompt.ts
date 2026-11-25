@@ -56,11 +56,28 @@ const FINISH: Record<PrAction, string> = {
   [PrAction.Review]: '',
 };
 
-/** The Session's first message: the brief, the Playbook, and how to finish. */
-export function openingPrompt(action: PrAction, brief: string, playbook: PlaybookText, guide = ''): string {
-  return [brief, playbookText(playbook), guide, FINISH[action]].filter((part) => part.trim()).join('\n\n');
+/** Said to the agent when a Round starts in a Session that has had one: what carries over and what does not. */
+const NEXT_ROUND = `This is a new Round in this Session. Your earlier Rounds are over: results you did not submit are dropped, and only this Round's tool call posts anything. The worktree is now at the head commit below, with any uncommitted changes you left in it. Use what you learned earlier.`;
+
+/** The Round's first message: the brief, the Playbook, and how to finish. A later Round says so first. */
+export function openingPrompt(
+  action: PrAction,
+  brief: string,
+  playbook: PlaybookText,
+  guide = '',
+  later = false,
+): string {
+  return [later ? NEXT_ROUND : '', brief, playbookText(playbook), guide, FINISH[action]]
+    .filter((part) => part.trim())
+    .join('\n\n');
 }
 
-/** The Session's title: the action and the pull request. */
-export const actionTitle = (action: PrAction, number: number) =>
-  `${{ [PrAction.AddressComments]: 'Address comments', [PrAction.CheckReplies]: 'Check replies', [PrAction.Review]: 'Review' }[action]} #${number}`;
+/** How a Round's action reads to the agent. */
+export const ROUND_NAME: Record<PrAction, string> = {
+  [PrAction.AddressComments]: 'Address comments',
+  [PrAction.CheckReplies]: 'Check replies',
+  [PrAction.Review]: 'Agent Review',
+};
+
+/** The PR Session's title: the pull request, whatever Round it is in. */
+export const prSessionTitle = (number: number) => `Pull request #${number}`;

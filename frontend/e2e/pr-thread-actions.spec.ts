@@ -5,7 +5,7 @@ import { DAEMON_FILE } from './global-setup';
 const daemon: { url: string; token: string } = JSON.parse(readFileSync(DAEMON_FILE, 'utf8'));
 const NOW = '2026-11-01T09:00:00.000Z';
 const LATER = '2026-11-01T10:00:00.000Z';
-const BUSY = 'A Session is already working on this';
+const BUSY = 'The Session is working on this pull request';
 const PUSHED = '33f8c2b2a1d04e5f60718293a4b5c6d7e8f90a1b';
 
 // The Git host and the agent are fakes in the daemon, so the pull request and its Sessions answer with fixtures.
@@ -162,7 +162,10 @@ test('Check replies sits at the top and opens a Session over every replied threa
   await expect(page.getByRole('button', { name: 'Check reply', exact: true })).toHaveCount(0);
   const button = page.getByRole('button', { name: /^Check replies/ });
   await expect(button).toHaveText('Check replies · 2');
-  await expect(button).toHaveAttribute('title', /Opens a Session where the agent checks every open thread/);
+  await expect(button).toHaveAttribute(
+    'title',
+    /Starts a Round in this pull request’s Session where the agent checks every open thread/,
+  );
 
   await button.click();
   await expect.poll(() => posted).toEqual([{ path: ACTIONS, body: { action: 'check_replies' } }]);
@@ -243,41 +246,50 @@ test('Address comments lists every unresolved thread, general comments too, all 
   await expect(page).toHaveURL(/session=s-address_comments/);
 });
 
-test('the Sessions rail lists each PR action Session by action and state, with its commit and "older commit"', async ({
+test('the Sessions rail shows the PR Session with its current Round, commit and "older commit", and older Sessions below', async ({
   page,
 }) => {
   const detail = {
     current: pullRequest({
       action_sessions: [
         actionSession('sa1', 'address_comments', 'submitted', { commit_sha: PUSHED, stale: true }),
-        actionSession('sr1', 'review', 'working'),
-        actionSession('sc1', 'check_replies', 'not_submitted'),
+        actionSession('sr1', 'review', 'submitted'),
       ],
     }),
   };
   await routePullRequest(page, detail);
   await openPullRequest(page);
 
-  const address = page.getByRole('link', { name: 'Address comments · submitted' });
-  await expect(address).toHaveAttribute('href', /session=sa1/);
-  const row = address.locator('..');
-  await expect(row.getByRole('link', { name: PUSHED.slice(0, 7) })).toHaveAttribute(
+  const prSession = page.getByRole('link', { name: 'Pull request #7 · idle' });
+  await expect(prSession).toHaveAttribute('href', /session=sa1/);
+  const card = prSession.locator('..');
+  await expect(card).toContainText('Address comments · submitted');
+  await expect(card.getByRole('link', { name: PUSHED.slice(0, 7) })).toHaveAttribute(
     'href',
-    `https://github.com/example/checkout-api/pull/7`.replace('/pull/7', `/commit/${PUSHED}`),
+    `https://github.com/example/checkout-api/commit/${PUSHED}`,
   );
-  await expect(row).toContainText('older commit');
-  await expect(page.getByRole('link', { name: 'Agent Review · working' })).toHaveAttribute('href', /session=sr1/);
-  await expect(page.getByRole('link', { name: 'Check replies · not submitted' })).toHaveAttribute(
-    'href',
-    /session=sc1/,
-  );
-  // The Session the pull request has no commit for shows no sha and no marker.
-  await expect(page.getByRole('link', { name: 'Check replies · not submitted' }).locator('..')).not.toContainText(
-    'older commit',
-  );
+  await expect(card).toContainText('older commit');
+  // The older Session stays in the list as history.
+  await expect(page.getByRole('link', { name: 'Agent Review · submitted' })).toHaveAttribute('href', /session=sr1/);
 });
 
-test('while a Session of one action is not submitted that button waits and the others stay; a submitted one frees it; a refused start says why', async ({
+test('the Round line follows the Session: working, then not submitted, and no marker for a Round at the head', async ({
+  page,
+}) => {
+  const detail = { current: pullRequest({ action_sessions: [actionSession('sc1', 'check_replies', 'working')] }) };
+  await routePullRequest(page, detail);
+  await openPullRequest(page);
+
+  const prSession = page.getByRole('link', { name: 'Pull request #7 · working' });
+  await expect(prSession.locator('..')).toContainText('Check replies · working');
+  detail.current = pullRequest({ action_sessions: [actionSession('sc1', 'check_replies', 'not_submitted')] });
+  await page.reload();
+  const idle = page.getByRole('link', { name: 'Pull request #7 · idle' });
+  await expect(idle.locator('..')).toContainText('Check replies · not submitted');
+  await expect(idle.locator('..')).not.toContainText('older commit');
+});
+
+test('while the Session works all three buttons wait; idle, or after a submit, they are free; a refused start says why', async ({
   page,
 }) => {
   const detail = {
@@ -293,23 +305,26 @@ test('while a Session of one action is not submitted that button waits and the o
   const address = page.getByRole('button', { name: 'Address comments' });
   await expect(address).toBeDisabled();
   await expect(address).toHaveAttribute('title', BUSY);
-  await expect(page.getByRole('button', { name: 'Agent Review' })).toBeEnabled();
-  await expect(page.getByRole('button', { name: /^Check replies/ })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Agent Review' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Agent Review' })).toHaveAttribute('title', BUSY);
+  await expect(page.getByRole('button', { name: /^Check replies/ })).toBeDisabled();
+  await expect(page.getByRole('button', { name: /^Check replies/ })).toHaveAttribute('title', BUSY);
 
-  // A Review running reads as such, and only that button waits.
+  // A Review running reads as such.
   detail.current = pullRequest({ action_sessions: [actionSession('sr1', 'review', 'working')] });
   await page.reload();
   await expect(page.getByRole('button', { name: 'Agent reviewing…' })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Agent reviewing…' })).toHaveAttribute('title', BUSY);
   await expect(page.getByText('Agent reviewing', { exact: true })).toBeVisible();
-  await expect(address).toBeEnabled();
+  await expect(address).toBeDisabled();
 
-  // Submitted, it frees the button.
-  detail.current = pullRequest({ action_sessions: [actionSession('sa1', 'address_comments', 'submitted')] });
+  // Idle with a Round never submitted: a new press replaces it.
+  detail.current = pullRequest({ action_sessions: [actionSession('sa1', 'address_comments', 'not_submitted')] });
   await page.reload();
   await expect(address).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Agent Review' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: /^Check replies/ })).toBeEnabled();
 
-  // Another tab started a Check replies the page has not heard of yet: the API says so.
+  // Another tab started a Round the page has not heard of yet: the API says so.
   await page.getByRole('button', { name: /^Check replies/ }).click();
   await expect(page.getByRole('alert').filter({ hasText: BUSY })).toBeVisible();
 
@@ -604,7 +619,7 @@ test('Address comment on a thread sends that thread’s id', async ({ page }) =>
     .toEqual([{ path: ACTIONS, body: { action: 'address_comments', comment_ids: ['c3'] } }]);
 });
 
-test('while the PR Session works, the thread buttons wait and say why; the rail’s buttons stay', async ({ page }) => {
+test('while the PR Session works, the thread buttons and the rail’s buttons wait, and say why', async ({ page }) => {
   const detail = {
     current: pullRequest({ action_sessions: [actionSession('sa1', 'address_comments', 'working')] }),
   };
@@ -618,7 +633,7 @@ test('while the PR Session works, the thread buttons wait and say why; the rail�
       'The Session is working on this pull request',
     );
   }
-  await expect(page.getByRole('button', { name: /^Check replies/ })).toBeEnabled();
+  await expect(page.getByRole('button', { name: /^Check replies/ })).toBeDisabled();
 });
 
 test('Files changed has no rail; Overview and Commits bring it back', async ({ page }) => {

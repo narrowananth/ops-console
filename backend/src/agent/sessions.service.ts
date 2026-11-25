@@ -44,6 +44,10 @@ export const KEPT_OUTCOMES = [
 
 export type SessionRow = typeof sessions.$inferSelect;
 
+/** A turn is running, or waits on the operator. */
+export const turnRunning = (state: SessionState): boolean =>
+  state === SessionState.Working || state === SessionState.WaitingInput || state === SessionState.WaitingApproval;
+
 /** A pull request the console opened for a Session. */
 export type OpenedPullRequest = Session['pull_requests'][number];
 
@@ -55,7 +59,7 @@ export type NewSession = {
   repoId?: string;
   branch?: string;
   prNumber?: number;
-  /** A PR action Session: the button it was opened from, the pull request's head commit it works at, and what it keeps. */
+  /** A PR Session: the button its first Round was started from, the pull request's head commit it works at, and what it keeps. */
   prAction?: { action: PrAction; headSha: string; threads: string | null };
   /** The Session whose agent started this one, and the `spawn_sessions` call that did. */
   spawnedBy?: { sessionId: string; callId: string };

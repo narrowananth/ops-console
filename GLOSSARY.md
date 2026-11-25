@@ -108,12 +108,12 @@ _Avoid_: default Playbook
 
 **Trigger**:
 A place in a tab that starts the agent: Verify and Fix in Monitor, Review PR, Check reply, Address comments, Reply in
-thread and Session message on the Sessions and Pull requests pages. Review PR, Check reply and Address comments open a PR action Session.
+thread and Session message on the Sessions and Pull requests pages. Review PR, Check reply and Address comments start a Round in the pull request's PR Session.
 _Avoid_: action (the Action Log means each command the agent runs)
 
 **Job**:
 A Trigger's run that goes through its Playbook steps and then the console's closing turn: a Verification or a Fix. Review PR,
-Check reply and Address comments open a PR action Session instead; Reply in thread and Session message are chats.
+Check reply and Address comments start a Round in a PR Session instead; Reply in thread and Session message are chats.
 
 **Skill**:
 A named instruction document the console keeps and the operator attaches to Playbooks: a name, a description of when to
@@ -285,7 +285,7 @@ that picks a Repo (or none) and a branch. A row shows the Session's pull request
 One conversation between the operator and the agent, named for its first task. It runs in one Repo on one branch, in a
 Session worktree, except a
 dev-tools Session and an anonymous Session, which have no Repo. A pull request has its own Session for the agent's
-replies in threads, with no composer, a PR action Session for each time the operator presses one of its three buttons,
+replies in threads, with no composer, one PR Session for the operator's presses of its three buttons,
 and an Alert has one for its Verification and Fix. The agent may start Spawned Sessions from one.
 _Avoid_: chat, thread
 
@@ -385,15 +385,20 @@ repository into it. When the operator names an imported Repo, the agent asks to 
 becomes a Session in that Repo. A Verification or Fix for a Service with no local Repo runs in one that holds a clone of the
 Service's Git URL.
 
-**PR action Session**:
-A Session the console opens from Address comments, Check replies or Review with agent, in a detached worktree at the pull
-request's head commit. The Playbook of its Trigger is its opening prompt, and the operator may steer it in the chat. It
-ends in one console tool call that commits, pushes, replies, resolves or posts on the Git host, as the operator. It
-is not submitted until that call has posted everything.
-_Avoid_: job, pass
+**PR Session**:
+The one Session of a pull request, in a detached worktree at its head commit, where Address comments, Check replies, Agent
+Review and a thread's own buttons run, one Round after another, until the operator deletes it. The first press makes it and
+every later press posts into it, so the agent keeps what it learned. The Playbook of a Round's Trigger is that Round's
+opening prompt, and the operator may steer the agent in the chat. An older Session of the pull request stays in its list and is never reused.
+_Avoid_: PR action Session, job, pass
+
+**Round**:
+One press of those buttons inside the PR Session: its action, threads and head commit, ending in one console tool call that
+commits, pushes, replies, resolves or posts on the Git host, as the operator. A Round is not submitted until that call has
+posted everything. A press on an idle Session replaces a Round that never submitted.
 
 **Agent Review**:
-The record of a review submitted from a PR action Session: a verdict (approve, request changes or comment), findings rated
+The record of a review submitted from a PR Session: a verdict (approve, request changes or comment), findings rated
 critical, high, medium, low or info and a full report, tied to the commit it read and the target branch commit it compared
 with. Each finding is posted to the Git host on its line, and the verdict and report as one comment. A newer commit makes
 it stale. The operator may add a **Review note** when starting it: free text the agent reads with the pull request, such
@@ -463,7 +468,7 @@ The first start of a new version taking the Keychain items from the previous ver
 login password once per item.
 
 **Handover refusal**:
-The console declining a Keychain handover because the previous app failed its check. It shows on the Permissions page
+The console declining a Keychain handover because the previous app failed its check. It shows on the Setup agent page
 until the next start.
 
 **Brew entry command**:

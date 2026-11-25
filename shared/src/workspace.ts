@@ -64,7 +64,7 @@ export const prAgentReviewSchema = z.object({
   repo_id: z.string(),
   pr_number: z.number().int(),
   head_sha: z.string(),
-  /** The PR action Session that submitted it; null once that Session is deleted. */
+  /** The PR Session that submitted it; null once that Session is deleted. */
   session_id: z.string().nullable(),
   decision: z.enum(ReviewVerdict).nullable(),
   /** The verdict in one sentence. */
@@ -93,7 +93,7 @@ export const startPrActionSchema = z
 
 export type StartPrAction = z.infer<typeof startPrActionSchema>;
 
-/** Where a PR action Session stands: its turn runs, it is idle with nothing posted, or its tool call posted everything. */
+/** Where a PR Session's current Round stands: the turn runs (also after a submit), it is idle with nothing posted, or its tool call posted everything. */
 export enum PrActionState {
   Working = 'working',
   NotSubmitted = 'not_submitted',
@@ -244,7 +244,7 @@ export const pullRequestDetailSchema = pullRequestSchema.extend({
   repo_id: z.string(),
   files: z.array(prFileSchema),
   comments: z.array(prCommentSchema),
-  /** PR action Sessions on this pull request, newest first. */
+  /** The PR Session on this pull request first, with older Sessions from button presses after it. */
   action_sessions: z.array(prActionSessionSchema),
   /** Oldest first. */
   commits: z.array(prCommitSchema),

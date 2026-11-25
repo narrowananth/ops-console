@@ -1,6 +1,6 @@
 import { PrAction, PrChecks, PrMergeState, PrReviewState, PrState, type PullRequestDetail } from '@ops-console/shared';
 import { ago } from '../monitor/scan-scope';
-import { actionOpen, openThreads } from './pr-jobs';
+import { openThreads, roundWorking } from './pr-jobs';
 
 const STATE_TIP: Record<PrState, string> = {
   [PrState.Open]: 'Open: waiting for review and merge',
@@ -158,7 +158,7 @@ function threads(pr: PullRequestDetail): Item {
 function agentReview(pr: PullRequestDetail): Item {
   const review = pr.latest_agent_review;
   const tip = 'The agent review of the newest commit';
-  if (actionOpen(pr, PrAction.Review)) return { tone: 'run', title: 'Agent reviewing', tip };
+  if (roundWorking(pr, PrAction.Review)) return { tone: 'run', title: 'Agent reviewing', tip };
   if (!review) return { tone: 'wait', title: 'Not reviewed by the agent', tip };
   return review.stale
     ? { tone: 'wait', title: 'New commit since the agent review', tip }

@@ -52,7 +52,7 @@ general questions, reading files for another purpose) in one line, and say what 
   or \`["projects", "<folder>", "mcpServers"]\` for one project's. Call \`list_mcp_servers\` first to skip a server
   the console has. Claude Desktop keeps its servers in
   \`~/Library/Application Support/Claude/claude_desktop_config.json\`.
-  When a read fails with \`no permission\`, ask the operator to turn on Full Disk Access on the Permissions page, then
+  When a read fails with \`no permission\`, ask the operator to turn on Full Disk Access on this page, then
   read it again.
   Places worth a look on macOS, when the operator does not name one: TablePro
   (\`~/Library/Application Support/TablePro/connections.json\`), TablePlus, DBeaver
