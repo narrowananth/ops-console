@@ -111,7 +111,6 @@ import {
   skillPackSchema,
   skillSchema,
   stagedFileSchema,
-  startAtLoginSchema,
   statusCodeCountSchema,
   type Tab,
   tabSchema,
@@ -165,7 +164,6 @@ export const queryKeys = {
   scripts: (id: string) => ['session-scripts', id] as const,
   sessionPullRequest: (id: string) => ['session-pull-request', id] as const,
   diskAccess: ['disk-access'] as const,
-  startAtLogin: ['start-at-login'] as const,
   runSandbox: ['run-sandbox'] as const,
   keychainWait: ['keychain-wait'] as const,
   keychainHandover: ['keychain-handover'] as const,
@@ -772,15 +770,7 @@ export function useOpenDiskAccessSettings() {
   });
 }
 
-export function useStartAtLogin() {
-  return useQuery({
-    queryKey: queryKeys.startAtLogin,
-    queryFn: () => apiGet('/terminals/start-at-login', z.object({ data: startAtLoginSchema })).then((r) => r.data),
-    refetchOnWindowFocus: 'always',
-  });
-}
-
-/** Read again each time the Permissions page opens: the daemon tests the sandbox then. */
+/** Read again each time the Setup agent page opens: the daemon tests the sandbox then. */
 export function useRunSandbox() {
   return useQuery({
     queryKey: queryKeys.runSandbox,
@@ -803,12 +793,6 @@ export function useKeychainHandover() {
     queryKey: queryKeys.keychainHandover,
     queryFn: () =>
       apiGet('/terminals/keychain-handover', z.object({ data: keychainHandoverSchema })).then((r) => r.data),
-  });
-}
-
-export function useOpenLoginItemsSettings() {
-  return useMutation({
-    mutationFn: () => apiSend('POST', '/terminals/start-at-login/settings', undefined, z.undefined()),
   });
 }
 

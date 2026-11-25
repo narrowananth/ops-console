@@ -36,7 +36,7 @@ Homebrew installs only the `ops-console` command. The first command you run inst
 
 ## Start at login
 
-`ops-console start` registers a launchd job that starts the console at login and again if it stops. macOS lists it as Ops Console under System Settings › General › Login Items & Extensions › App Background Activity. Keep it switched on there, or it won't start at login.
+`ops-console start` registers a launchd job that starts the console at login and again if it stops. macOS lists it as Ops Console under System Settings › General › Login Items & Extensions › App Background Activity. Keep it switched on there, or it won't start at login. `ops-console stop` also turns it off, and it stays off across logins until the next `start`.
 
 The console listens on `127.0.0.1:4545`. Set `OPS_CONSOLE_PORT` when you run `start` to use another port. Several browsers can use the console at once, and `ops-console open "Google Chrome"` signs in a browser other than the default.
 

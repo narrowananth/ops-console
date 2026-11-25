@@ -460,7 +460,7 @@ The first start of a new version taking the Keychain items from the previous ver
 login password once per item.
 
 **Handover refusal**:
-The console declining a Keychain handover because the previous app failed its check. It shows on the Permissions page
+The console declining a Keychain handover because the previous app failed its check. It shows on the Setup agent page
 until the next start.
 
 **Brew entry command**:

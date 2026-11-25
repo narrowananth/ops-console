@@ -88,7 +88,7 @@ The console shows the last line the installer printed, or `install.sh exited <co
 
 `Keychain is waiting for the Mac's password prompt`
 
-macOS is asking for your login password and has not been answered for 10 seconds. Answer the prompt on the Mac. The banner clears when the waiting calls end. The Permissions page shows the same state on the Keychain row, with the time it started.
+macOS is asking for your login password and has not been answered for 10 seconds. Answer the prompt on the Mac. The banner clears when the waiting calls end.
 
 ### A run or step fails with `keychain_timeout`
 
@@ -102,19 +102,19 @@ The call waited 60 seconds for the Keychain and gave up. An answer that comes la
 
 The call waited 90 seconds for the Keychain handover to move its item. The handover keeps running in the background. Wait for it, then retry.
 
-### The Permissions page says the handover was refused
+### The Setup agent page says the handover was refused
 
 `Handover refused: previous app failed its check`
 
-The row gives a reason, such as `it is not an app bundle` or `its bundle fails codesign --verify --strict`. The items stay with the previous version's app, so macOS may ask for the login password once per item. Fix or delete the previous version's folder under `~/.ops-console/versions`, then run `ops-console stop` and `ops-console start`. The check runs again on the start.
+The page gives a reason, such as `it is not an app bundle` or `its bundle fails codesign --verify --strict`. The items stay with the previous version's app, so macOS may ask for the login password once per item. Fix or delete the previous version's folder under `~/.ops-console/versions`, then run `ops-console stop` and `ops-console start`. The check runs again on the start.
 
 ## Run sandbox
 
-### The Run sandbox row reads unavailable
+### The Run sandbox reads unavailable
 
 `Agent runs fail rather than run without the sandbox.`
 
-`/usr/bin/sandbox-exec` failed or took more than 5 seconds, and the row gives its last line as the reason. Agent runs fail until it works, and no setting turns the sandbox off. Include the reason in an issue, as described under [When it is not here](#when-it-is-not-here).
+`/usr/bin/sandbox-exec` failed or took more than 5 seconds, and the Setup agent page gives its last line as the reason. Agent runs fail until it works, and no setting turns the sandbox off. Include the reason in an issue, as described under [When it is not here](#when-it-is-not-here).
 
 ## Permissions
 
@@ -122,13 +122,7 @@ The row gives a reason, such as `it is not an app bundle` or `its bundle fails c
 
 `The Setup agent cannot start until you turn this on in System Settings.`
 
-On the Permissions page, choose Open System Settings. Drag Ops Console from the Finder window into the Full Disk Access list and switch it on. Then run `ops-console stop` and `ops-console start`.
-
-### Start at login is off
-
-`Switch Ops Console on under App Background Activity in Login Items, then run ops-console start.`
-
-The switch is in Login Items & Extensions. `ops-console stop` also turns Start at login off, and it stays off across logins until the next `start`.
+On the Setup agent page, choose Open Settings. Drag Ops Console from the Finder window into the Full Disk Access list and switch it on. Then run `ops-console stop` and `ops-console start`.
 
 ## When it is not here
 
