@@ -158,6 +158,18 @@ test.describe('keys in the streamed page', () => {
     await title(canvas, 'from the clipboardfrom the clipboard');
   });
 
+  test('Control+V shows a notice when the browser has no clipboard to read', async ({ page, request }) => {
+    needsChrome();
+    test.setTimeout(120_000);
+    // As on a page that is not a secure origin.
+    await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { value: undefined }));
+    const { canvas } = await openPage(page, request);
+    await focusField(page, canvas);
+    await page.keyboard.press('Control+V');
+    await expect(page.getByRole('status')).toContainText('The browser did not allow reading the clipboard.');
+    await title(canvas, '');
+  });
+
   test('composed text arrives as typed', async ({ page, request }) => {
     needsChrome();
     test.setTimeout(120_000);
