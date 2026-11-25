@@ -54,6 +54,21 @@ body { margin: 0 } div { position: fixed; top: 0; height: 100vh } #a { left: 10%
 </style><div id="a"></div><div id="b"></div><p id="hit" style="position:fixed;bottom:0"></p>
 <script>document.addEventListener('click', (event) => { document.getElementById('hit').textContent = event.target.id || event.target.tagName; });</script>`;
 
+/** A text field, a text area, a paragraph to select, a file field and a drop zone, laid out apart so a drop lands on one. */
+const EDITING = `<!doctype html><title>Editing</title><style>
+body { margin: 0 } #zone { position: fixed; left: 300px; top: 300px; width: 200px; height: 100px; background: #ccc }
+#file { position: fixed; left: 300px; top: 100px; width: 200px; height: 60px }
+</style><input id="field"><textarea id="area"></textarea><p id="para">plain page text</p>
+<input id="file" type="file"><div id="zone"></div><p id="out"></p>
+<script>
+const out = document.getElementById('out');
+const zone = document.getElementById('zone');
+zone.addEventListener('dragover', (e) => e.preventDefault());
+zone.addEventListener('drop', (e) => { e.preventDefault(); out.textContent = 'dropped ' + e.dataTransfer.files[0]?.name; });
+document.getElementById('file').addEventListener('change', (e) => { out.textContent = 'file ' + e.target.files[0]?.name; });
+document.getElementById('field').addEventListener('keydown', (e) => { if (e.repeat) out.textContent = 'repeat ' + e.key; });
+</script>`;
+
 /** A page that never stops changing, so the stream sends screencast frames and not only the still of a settled page. */
 const SPIN = `<!doctype html><title>Spin</title><style>
 div { width: 120px; height: 120px; background: #36c; animation: turn 1s linear infinite } @keyframes turn { to { transform: rotate(360deg) } }
@@ -95,6 +110,8 @@ class DevServer {
         return send('text/html', COLUMNS);
       case '/spin':
         return send('text/html', SPIN);
+      case '/editing':
+        return send('text/html', EDITING);
       case '/dialogs':
         return send(
           'text/html',
@@ -595,6 +612,146 @@ describe.skipIf(!chromePath)('Session browser in a real Chrome', () => {
         (value) => value === 'abcd',
         'the typing to reach the field',
       );
+    });
+
+    describe('editing keys, clipboard, composition and drops', () => {
+      const META = 4;
+      const SHIFT = 8;
+      const ALT = 1;
+
+      async function editing() {
+        const created = await openTab(h, session, `${dev.url}/editing`);
+        await settled(h, session, created.id);
+        const viewer = await watch(h.daemon, created.id);
+        const page = <T>(script: string) => read<T>(h, session, created.id, script);
+        const focus = (id: string) => h.tools.evaluate(session, `document.getElementById('${id}').focus()`, created.id);
+        const press = (key: string, modifiers: number, commands: string[], extra: object = {}) => {
+          const code = key.length === 1 ? `Key${key.toUpperCase()}` : key;
+          viewer.send({ type: 'key', action: 'down', key, code, modifiers, commands, ...extra });
+          viewer.send({ type: 'key', action: 'up', key, code, modifiers });
+        };
+        const field = () =>
+          page<[string, number, number]>(
+            `(() => { const f = document.getElementById('field'); return [f.value, f.selectionStart, f.selectionEnd]; })()`,
+          );
+        const clipboards = () =>
+          viewer.messages.flatMap((message) => (message.type === 'clipboard' ? [message.text] : []));
+        const out = () => page<string>(`document.getElementById('out').textContent`);
+        return { created, viewer, page, focus, press, field, clipboards, out };
+      }
+
+      it('selects all and copies the selection to the viewer, from a field and from the page', async () => {
+        const t = await editing();
+        await t.focus('field');
+        t.viewer.send({ type: 'text', text: 'hello brave world' });
+        await until(t.field, ([value]) => value === 'hello brave world', 'the text to reach the field');
+        t.press('a', META, ['selectAll']);
+        await until(t.field, ([, from, to]) => from === 0 && to === 17, 'the field to be selected');
+        t.press('c', META, ['copy']);
+        await until(t.clipboards, (copied) => copied.length > 0, 'the copy to reach the viewer');
+        expect(t.clipboards()).toEqual(['hello brave world']);
+
+        // With no field focused the page's own selection is what Copy takes.
+        await t.page(`(document.activeElement.blur(), getSelection().removeAllRanges(), true)`);
+        t.press('a', META, ['selectAll']);
+        t.press('c', META, ['copy']);
+        await until(t.clipboards, (copied) => copied.length > 1, 'the page copy to reach the viewer');
+        expect(t.clipboards()[1]).toContain('plain page text');
+      });
+
+      it('cuts to the viewer, undoes the cut and redoes it', async () => {
+        const t = await editing();
+        await t.focus('field');
+        t.viewer.send({ type: 'text', text: 'one two' });
+        await until(t.field, ([value]) => value === 'one two', 'the text to reach the field');
+        t.press('a', META, ['selectAll']);
+        t.press('x', META, ['cut']);
+        await until(t.field, ([value]) => value === '', 'the cut to empty the field');
+        await until(t.clipboards, (copied) => copied.length > 0, 'the cut text to reach the viewer');
+        expect(t.clipboards()).toEqual(['one two']);
+        t.press('z', META, ['undo']);
+        await until(t.field, ([value]) => value === 'one two', 'undo to restore the text');
+        t.press('z', META | SHIFT, ['redo']);
+        await until(t.field, ([value]) => value === '', 'redo to cut again');
+      });
+
+      it('moves by word and by line, and selects with Shift', async () => {
+        const t = await editing();
+        await t.focus('field');
+        t.viewer.send({ type: 'text', text: 'hello brave world' });
+        await until(t.field, ([value]) => value === 'hello brave world', 'the text to reach the field');
+        t.press('ArrowLeft', ALT | SHIFT, ['moveWordLeftAndModifySelection']);
+        await until(t.field, ([, from, to]) => from === 12 && to === 17, 'Option+Shift+Left to select a word');
+        t.press('ArrowLeft', META, ['moveToLeftEndOfLine']);
+        await until(t.field, ([, from, to]) => from === 0 && to === 0, 'Command+Left to reach the start');
+        t.press('ArrowRight', ALT, ['moveWordRight']);
+        await until(t.field, ([, from]) => from === 5, 'Option+Right to move a word');
+        t.press('ArrowRight', META | SHIFT, ['moveToRightEndOfLineAndModifySelection']);
+        await until(t.field, ([, from, to]) => from === 5 && to === 17, 'Command+Shift+Right to select to the end');
+        t.press('Backspace', ALT, ['deleteWordBackward']);
+        await until(t.field, ([value]) => value === 'hello', 'Option+Backspace to delete the selection');
+      });
+
+      it('repeats a held key', async () => {
+        const t = await editing();
+        await t.focus('field');
+        t.viewer.send({ type: 'key', action: 'down', key: 'q', code: 'KeyQ', text: 'q', modifiers: 0 });
+        t.viewer.send({ type: 'key', action: 'down', key: 'q', code: 'KeyQ', text: 'q', modifiers: 0, repeat: true });
+        t.viewer.send({ type: 'key', action: 'down', key: 'q', code: 'KeyQ', text: 'q', modifiers: 0, repeat: true });
+        t.viewer.send({ type: 'key', action: 'up', key: 'q', code: 'KeyQ', modifiers: 0 });
+        await until(t.field, ([value]) => value === 'qqq', 'three presses');
+        expect(await t.out()).toBe('repeat q');
+      });
+
+      it('pastes text, takes composed text, and keeps the old text and key messages valid', async () => {
+        const t = await editing();
+        await t.focus('field');
+        t.viewer.send({ type: 'paste', text: 'pasted ' });
+        t.viewer.send({ type: 'compose', text: 'é' });
+        t.viewer.send({ type: 'compose', text: '😀' });
+        t.viewer.send({ type: 'text', text: ' plain' });
+        t.viewer.send({ type: 'key', action: 'down', key: 'Shift', code: 'ShiftLeft', modifiers: 8 });
+        await until(t.field, ([value]) => value === 'pasted é😀 plain', 'the text to arrive in order');
+        t.viewer.send({ type: 'compose', text: 'x'.repeat(2000) });
+        t.viewer.send({ type: 'key', action: 'down', key: 'a', code: 'KeyA', modifiers: 0, commands: ['bad name!'] });
+        t.viewer.send({ type: 'text', text: '.' });
+        await until(
+          t.field,
+          ([value]) => value === 'pasted é😀 plain.',
+          'a bad message to be dropped and the next one taken',
+        );
+      });
+
+      it('gives a pasted file to the focused file field and ignores it otherwise', async () => {
+        const t = await editing();
+        const file = { name: 'note.txt', type: 'text/plain', data: Buffer.from('hi').toString('base64') };
+        await t.focus('field');
+        t.viewer.send({ type: 'paste', files: [file] });
+        await t.focus('file');
+        t.viewer.send({ type: 'paste', files: [file] });
+        await until(t.out, (text) => text === 'file note.txt', 'the file to reach the file field');
+        expect(await t.page(`document.getElementById('field').value`)).toBe('');
+        expect(await t.page(`document.getElementById('file').files.length`)).toBe(1);
+      });
+
+      it('takes a file dropped on a zone or a file field, and the page does not navigate', async () => {
+        const t = await editing();
+        const file = { name: 'drop.txt', type: 'text/plain', data: Buffer.from('hi').toString('base64') };
+        t.viewer.send({ type: 'resize', width: 800, height: 600 });
+        await until(
+          () => t.page<number[]>('[innerWidth, innerHeight]'),
+          (size) => size[0] === 800 && size[1] === 600,
+          'the page to take the viewer size',
+        );
+        t.viewer.send({ type: 'paste', files: [file], x: 400, y: 350 });
+        await until(t.out, (text) => text === 'dropped drop.txt', 'the drop to reach the zone');
+        t.viewer.send({ type: 'paste', files: [file], x: 400, y: 130 });
+        await until(t.out, (text) => text === 'file drop.txt', 'the drop to fill the file field');
+        // A drop on nothing is the page's: it stays where it was.
+        t.viewer.send({ type: 'paste', files: [file], x: 20, y: 550 });
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect((await settled(h, session, t.created.id)).url).toBe(`${dev.url}/editing`);
+      });
     });
 
     it('sends the first click of a viewer that takes over to the page it was shown, then gives the page its size', async () => {

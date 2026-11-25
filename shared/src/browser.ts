@@ -173,6 +173,18 @@ export const elementCaptureSchema = z.object({
 });
 export type ElementCapture = z.infer<typeof elementCaptureSchema>;
 
+export const MAX_PASTED_FILES = 10;
+/** A pasted or dropped file's size limit, in bytes. */
+export const MAX_PASTED_FILE_BYTES = 10_000_000;
+
+export const pastedFileSchema = z.object({
+  name: z.string().max(255),
+  type: z.string().max(100),
+  /** Base64 of the file's bytes. */
+  data: z.string().max(Math.ceil((MAX_PASTED_FILE_BYTES * 4) / 3) + 4),
+});
+export type PastedFile = z.infer<typeof pastedFileSchema>;
+
 /** Browser panel to daemon, over `/browser/:tabId`. */
 export const browserClientMessageSchema = z.discriminatedUnion('type', [
   z.object({
@@ -193,8 +205,28 @@ export const browserClientMessageSchema = z.discriminatedUnion('type', [
     code: z.string().max(40),
     text: z.string().max(8).optional(),
     modifiers: modifiers.default(0),
+    /** Chrome editing commands the key stands for (`selectAll`, `moveWordLeft`, ...): what a Mac's key bindings do. */
+    commands: z
+      .array(z.string().regex(/^[a-zA-Z]{1,60}$/))
+      .max(4)
+      .optional(),
+    /** A held key's repeat. */
+    repeat: z.boolean().optional(),
   }),
   z.object({ type: z.literal('text'), text: z.string().max(100_000) }),
+  /**
+   * What the operator pasted or dropped: text goes in at the caret; files go to the page's focused file field, or to
+   * what is at `x`, `y` (the page's CSS pixels) for a drop. Each file's bytes are base64.
+   */
+  z.object({
+    type: z.literal('paste'),
+    text: z.string().max(100_000).optional(),
+    files: z.array(pastedFileSchema).max(MAX_PASTED_FILES).optional(),
+    x: z.number().optional(),
+    y: z.number().optional(),
+  }),
+  /** Text an input method composed (accents, CJK, emoji), to be inserted as typed. */
+  z.object({ type: z.literal('compose'), text: z.string().max(1000) }),
   z.object({
     type: z.literal('resize'),
     width: z.number().int().min(100).max(3840),
@@ -225,6 +257,8 @@ export const browserServerMessageSchema = z.discriminatedUnion('type', [
   /** The element a `pick` click captured, for the viewer that clicked; pick mode stays on. */
   z.object({ type: z.literal('picked'), capture: elementCaptureSchema }),
   z.object({ type: z.literal('pick_failed'), message: z.string() }),
+  /** The page's selection after the viewer's copy or cut, for the viewer to put on the operator's clipboard. */
+  z.object({ type: z.literal('clipboard'), text: z.string() }),
 ]);
 export type BrowserServerMessage = z.infer<typeof browserServerMessageSchema>;
 
