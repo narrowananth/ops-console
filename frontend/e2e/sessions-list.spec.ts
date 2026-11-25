@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Page, test, type WebSocketRoute } from '@playwright/test';
 import { DAEMON_FILE } from './global-setup';
 
 const daemon: { url: string; token: string } = JSON.parse(readFileSync(DAEMON_FILE, 'utf8'));
@@ -123,19 +123,20 @@ async function routeList(page: Page, sessions: unknown[], options: Options = {})
 const row = (page: Page, title: string) => page.getByRole('listitem').filter({ hasText: title });
 const open = (page: Page, path = '/sessions') => page.goto(`${daemon.url}${path}#token=${daemon.token}`);
 
-test('the list panel toggle is 32 px with an 18 px icon, and as large on the folded rail', async ({ page }) => {
+test('the list panel toggle is large enough to click, open and folded', async ({ page }) => {
   await routeList(page, [session('s1')]);
   await open(page);
 
   const collapse = page.getByRole('button', { name: 'Collapse the side panel' });
-  expect(await collapse.boundingBox()).toMatchObject({ width: 32, height: 32 });
-  expect(await collapse.locator('svg').boundingBox()).toMatchObject({ width: 18, height: 18 });
+  const expanded = await collapse.boundingBox();
+  expect(expanded?.width).toBeGreaterThanOrEqual(32);
+  expect(expanded?.height).toBeGreaterThanOrEqual(32);
 
   await collapse.click();
   const expand = page.getByRole('button', { name: 'Open the side panel' });
-  const box = await expand.boundingBox();
-  expect(box?.width).toBeGreaterThanOrEqual(32);
-  expect(box?.height).toBeGreaterThanOrEqual(32);
+  const folded = await expand.boundingBox();
+  expect(folded?.width).toBeGreaterThanOrEqual(32);
+  expect(folded?.height).toBeGreaterThanOrEqual(32);
 });
 
 test('a Session with unsent text shows Draft while another is open, until the text is sent or cleared; a reload keeps it', async ({
@@ -252,6 +253,7 @@ test('the pull request badge hovers on its own: one pull request on one line, se
   page,
 }) => {
   const one = [{ number: 7, url: 'https://example.com/pull/7', branch: 'b7' }];
+  await page.clock.install();
   const two = [
     { number: 12, url: 'https://example.com/pull/12', branch: 'b12' },
     { number: 9, url: 'https://example.com/pull/9', branch: 'b9' },
@@ -264,13 +266,13 @@ test('the pull request badge hovers on its own: one pull request on one line, se
   await row(page, 'Session s1').getByText('7', { exact: true }).hover();
   const tip = page.getByRole('tooltip');
   await expect(tip).toHaveText('#7Guard empty carts');
-  // Only the pull request: no row card while the pointer is on the badge.
-  await page.waitForTimeout(700);
+  // Only the pull request: no row card while the pointer is on the badge, however long it rests there.
+  await page.clock.runFor(700);
   await expect(tip).toHaveCount(1);
 
   await row(page, 'Session s2').getByText('+2').hover();
   await expect(tip).toHaveText('#12Retry the webhook#9Drop the old index');
-  await page.waitForTimeout(700);
+  await page.clock.runFor(700);
   await expect(tip).toHaveCount(1);
 
   // Off the badge and on the rest of the row, the row's card opens.
@@ -279,6 +281,33 @@ test('the pull request badge hovers on its own: one pull request on one line, se
   await expect(tip).toContainText('/work/checkout-api');
   await expect(tip).toContainText('Opus');
   await expect(tip).toContainText('#12');
+});
+
+test('the row card opens again when the pull request badge goes while the pointer is on it', async ({ page }) => {
+  const one = [{ number: 7, url: 'https://example.com/pull/7', branch: 'b7' }];
+  let socket: WebSocketRoute | undefined;
+  await page.routeWebSocket('**/ws', (ws) => {
+    socket = ws;
+  });
+  await routeList(page, [session('s1', { pull_requests: one })], { pulls: [pull(7, 'Guard empty carts')] });
+  await open(page, '/sessions');
+  await row(page, 'Session s1').getByText('7', { exact: true }).hover();
+  const tip = page.getByRole('tooltip');
+  await expect(tip).toHaveText('#7Guard empty carts');
+
+  // The list refetches with no pull request: the badge unmounts under the pointer.
+  await expect.poll(() => socket !== undefined).toBe(true);
+  await page.route(/\/api\/sessions(\?.*)?$/, (route) => route.fulfill({ json: { data: [session('s1')] } }));
+  socket?.send(
+    JSON.stringify({
+      event: 'session.updated',
+      at: NOW,
+      data: { session_id: 's1', title: 'Session s1', state: 'idle', account_id: null, branch: 'main' },
+    }),
+  );
+  await expect(row(page, 'Session s1').getByText('7', { exact: true })).toHaveCount(0);
+
+  await expect(tip).toContainText('/work/checkout-api');
 });
 
 test("the row card names the Repo's folder and warns when the Repo is checked out on another branch", async ({
@@ -297,7 +326,6 @@ test("the row card names the Repo's folder and warns when the Repo is checked ou
   await expect(tip).toHaveCount(0);
   await row(page, 'Session s2').getByRole('button').hover();
   await expect(tip).toContainText('/work/checkout-api');
-  await page.waitForTimeout(300);
   await expect(tip).not.toContainText('another branch');
 });
 

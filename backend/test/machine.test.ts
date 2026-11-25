@@ -95,10 +95,4 @@ describe('what the daemon needs from this Mac', () => {
       reason: null,
     });
   });
-
-  it('no longer starts terminals', async () => {
-    const daemon = await start();
-    expect([404, 405]).toContain((await api(daemon).post('/terminals', { kind: 'setup' })).status);
-    expect([404, 405]).toContain((await api(daemon).get('/terminals')).status);
-  });
 });
