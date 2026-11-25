@@ -132,6 +132,20 @@ test.describe('keys in the streamed page', () => {
     await title(canvas, 'hello there');
   });
 
+  test('copy shows a notice when the browser has no clipboard to write to', async ({ page, request }) => {
+    needsChrome();
+    test.setTimeout(120_000);
+    // As on a page that is not a secure origin.
+    await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { value: undefined }));
+    const { canvas } = await openPage(page, request);
+    await focusField(page, canvas);
+    await page.keyboard.type('abc');
+    await title(canvas, 'abc');
+    await page.keyboard.press('Meta+A');
+    await page.keyboard.press('Meta+C');
+    await expect(page.getByRole('status')).toContainText('The browser did not allow copying to the clipboard.');
+  });
+
   test('Command+V and Control+V paste the operator’s clipboard', async ({ page, request }) => {
     needsChrome();
     test.setTimeout(120_000);

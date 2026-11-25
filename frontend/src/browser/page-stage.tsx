@@ -83,8 +83,9 @@ export function PageStage({
       else if (message.type === 'picked') onPicked?.(message.capture);
       else if (message.type === 'pick_failed') setNotice(message.message);
       else if (message.type === 'clipboard') {
-        navigator.clipboard
-          .writeText(message.text)
+        // `navigator.clipboard` is missing off a secure origin, which throws before any promise exists.
+        void Promise.resolve()
+          .then(() => navigator.clipboard.writeText(message.text))
           .catch(() => setNotice('The browser did not allow copying to the clipboard.'));
       } else onClosed();
     },
