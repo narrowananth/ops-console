@@ -459,12 +459,14 @@ describe('migration that ends the pull request jobs', () => {
     expect(db.prepare('SELECT id, title, pr_action FROM sessions').all()).toEqual([
       { id: 'ses', title: 'Keep me', pr_action: null },
     ]);
-    // A pull request has one unsubmitted PR action Session per action.
+    // Sessions from before one PR Session per pull request are kept, so the rows of one pull request may repeat.
     db.pragma('foreign_keys = OFF');
     insert(db, 'sessions', { id: 'a1', repo_id: 'r1', pr_number: 1, pr_action: 'review' });
-    expect(() => insert(db, 'sessions', { id: 'a2', repo_id: 'r1', pr_number: 1, pr_action: 'review' })).toThrow(
-      /UNIQUE/,
-    );
+    insert(db, 'sessions', { id: 'a2', repo_id: 'r1', pr_number: 1, pr_action: 'review' });
+    expect(db.prepare('SELECT id FROM sessions WHERE pr_action IS NOT NULL ORDER BY id').all()).toEqual([
+      { id: 'a1' },
+      { id: 'a2' },
+    ]);
     db.close();
   });
 });

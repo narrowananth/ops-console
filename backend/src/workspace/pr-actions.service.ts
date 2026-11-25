@@ -13,9 +13,10 @@ import {
   type StartPrAction,
   ThreadOutcome,
 } from '@ops-console/shared';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
 import {
+  PR_ACTION_TOOLS,
   type PrActionTools,
   type ReviewOutput,
   submitReplyVerdictsInputSchema,
@@ -23,7 +24,7 @@ import {
   submitThreadResultsInputSchema,
 } from '../agent/pull-request-tool';
 import { AgentRuntime } from '../agent/runtime';
-import { type SessionRow, SessionsService, toSession } from '../agent/sessions.service';
+import { type SessionRow, SessionsService, toSession, turnRunning } from '../agent/sessions.service';
 import { DATA_DIR } from '../common/data-dir';
 import { ApiError, validationFailed } from '../common/errors';
 import { mapLimit } from '../common/map-limit';
@@ -34,7 +35,7 @@ import { PlaybooksService } from '../playbooks/playbooks.service';
 import { BranchMoved, GIT, Git, GitFailed, RebaseConflict } from '../repos/git';
 import { AgentReviewsService, REVIEW_GUIDE, type ReviewStart, reviewBrief } from './agent-reviews.service';
 import type { HostComment } from './git-host';
-import { actionTitle, addressBrief, checkBrief, openingPrompt } from './pr-action-prompt';
+import { addressBrief, checkBrief, openingPrompt, prSessionTitle, ROUND_NAME } from './pr-action-prompt';
 import { fileLine, POST_PARALLEL, PrHostWrites, threadOf } from './pr-host-writes';
 import { PullRequestsService } from './pull-requests.service';
 import { WorkspaceSessionsService } from './workspace-sessions.service';
@@ -86,13 +87,16 @@ export function commitMessage(number: number, threads: StoredThread[]): string {
 }
 
 /**
- * The three buttons on a pull request: Address comments, Check replies and Review with agent. Each opens a PR action
- * Session, a `repo` Session in a detached worktree at the head commit, and ends in one console tool call that the
- * console turns into the commit, push, replies, resolves and review comments, as the operator.
+ * The three buttons on a pull request: Address comments, Check replies and Review with agent. A pull request has one
+ * PR Session, a `repo` Session in a detached worktree at the head commit. Each press starts a Round in it, which ends
+ * in one console tool call that the console turns into the commit, push, replies, resolves and review comments, as the
+ * operator.
  */
 @Injectable()
 export class PrActionsService implements PrActionTools {
   private readonly logger = new Logger('pr-actions');
+  /** Presses being handled, by pull request, so two presses make the one Session once. */
+  private readonly starting = new Map<string, Promise<unknown>>();
 
   constructor(
     @Inject(STORE) private readonly store: Store,
@@ -128,17 +132,41 @@ export class PrActionsService implements PrActionTools {
 
   async start(repoId: string, number: number, input: StartPrAction): Promise<Session> {
     const { action } = input;
-    if (action === PrAction.AddressComments ? !input.comment_ids?.length : input.comment_ids !== undefined) {
-      throw validationFailed('invalid body: comment_ids is for Address comments, and needs at least one');
+    if (action === PrAction.AddressComments ? !input.comment_ids?.length : input.comment_ids?.length === 0) {
+      throw validationFailed('invalid body: comment_ids needs at least one thread');
+    }
+    if (action === PrAction.Review && input.comment_ids !== undefined) {
+      throw validationFailed('invalid body: comment_ids is for Address comments and Check replies');
     }
     if (action !== PrAction.Review && input.note !== undefined) {
       throw validationFailed('invalid body: note is for Review with agent only');
     }
+    return this.locked(`${repoId}#${number}`, () => this.round(repoId, number, input));
+  }
+
+  /** Presses on one pull request go one after another: the second finds the Session the first made. */
+  private async locked<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const turn = (this.starting.get(key) ?? Promise.resolve()).then(work);
+    const tail = turn.catch(() => undefined);
+    this.starting.set(key, tail);
+    try {
+      return await turn;
+    } finally {
+      if (this.starting.get(key) === tail) this.starting.delete(key);
+    }
+  }
+
+  /** Starts a Round in the pull request's PR Session, which the first Round makes. */
+  private async round(repoId: string, number: number, input: StartPrAction): Promise<Session> {
+    const { action } = input;
     const repo = this.pulls.hosted(repoId);
     const slug = repo.remoteSlug as string;
     const { pr, files, comments } = await this.pulls.recent(repo, number);
     if (pr.state !== PrState.Open) throw new ApiError(409, ErrorCode.InvalidState, 'The pull request is not open');
-    this.requireFree(repoId, number, action);
+    const existing = this.prSession(repoId, number);
+    if (existing && turnRunning(existing.state)) {
+      throw new ApiError(409, ErrorCode.SessionBusy, 'The Session is working on this pull request');
+    }
     const agents = this.writes.agentCommentIds(repoId, number);
     let threads: HostComment[][] = [];
     if (action === PrAction.AddressComments) {
@@ -152,11 +180,24 @@ export class PrActionsService implements PrActionTools {
         }
       }
     } else if (action === PrAction.CheckReplies) {
-      threads = comments
+      const replied = comments
         .filter((comment) => comment.parent_id === null && !comment.resolved)
         .map((root) => threadOf(comments, root.id))
         .filter((thread) => thread.length > 1 && !agents.has((thread.at(-1) as HostComment).id));
-      if (threads.length === 0) throw new ApiError(409, ErrorCode.InvalidState, 'No open thread has a reply to check');
+      if (input.comment_ids === undefined) {
+        threads = replied;
+        if (threads.length === 0)
+          throw new ApiError(409, ErrorCode.InvalidState, 'No open thread has a reply to check');
+      } else {
+        for (const id of new Set(input.comment_ids)) {
+          if (!comments.some((comment) => comment.id === id)) {
+            throw new ApiError(404, ErrorCode.NotFound, `no comment ${id} on this pull request`);
+          }
+          const thread = replied.find((candidate) => candidate[0]?.id === id);
+          if (!thread) throw validationFailed(`invalid body: ${id} is not an open thread with a reply to check`);
+          threads.push(thread);
+        }
+      }
     } else if (this.reviews.reviewed(repoId, number, pr.head_sha)) {
       throw new ApiError(
         409,
@@ -164,7 +205,7 @@ export class PrActionsService implements PrActionTools {
         'The agent already reviewed this commit; push a change to review again',
       );
     }
-    // The head commit must be in the Repo before a worktree can start there.
+    // The head commit must be in the Repo before a worktree can move or start there.
     try {
       await this.git.fetchBranch(repo.path, pr.branch);
     } catch (error) {
@@ -182,35 +223,56 @@ export class PrActionsService implements PrActionTools {
       kept = JSON.stringify(threads.map((thread) => this.pending(thread[0] as HostComment)));
       brief = (action === PrAction.AddressComments ? addressBrief : checkBrief)(slug, pr, threads);
     }
-    const row = this.open(repoId, number, action, pr.head_sha, kept);
-    try {
-      await this.workspace.ensure(row, false);
-    } catch (error) {
-      this.sessions.remove(row.id);
-      const why = error instanceof ApiError ? error.message : 'git failed';
-      throw new ApiError(502, ErrorCode.UpstreamFailed, `Could not make a worktree at the head commit: ${why}`);
+    let moved = false;
+    if (existing) {
+      try {
+        moved = await this.workspace.moveToCommit(existing, pr.head_sha);
+      } catch (error) {
+        const why = error instanceof ApiError ? error.message : 'git failed';
+        throw new ApiError(502, ErrorCode.UpstreamFailed, `Could not move the worktree to the head commit: ${why}`);
+      }
     }
-    this.sessions.update(row.id, { title: actionTitle(action, number) });
-    this.announce(row, PrActionState.Working);
-    this.runtime.send(row.id, openingPrompt(action, brief, copy, action === PrAction.Review ? REVIEW_GUIDE : ''));
+    const row = existing ?? this.open(repoId, number, action, pr.head_sha, kept);
+    if (!moved) {
+      try {
+        // A Session whose worktree is gone gets one at the new head commit; its Round is not replaced yet.
+        await this.workspace.ensure({ ...row, prActionHeadSha: pr.head_sha }, false);
+      } catch (error) {
+        if (!existing) this.sessions.remove(row.id);
+        const why = error instanceof ApiError ? error.message : 'git failed';
+        throw new ApiError(502, ErrorCode.UpstreamFailed, `Could not make a worktree at the head commit: ${why}`);
+      }
+    }
+    const current = existing ? this.nextRound(existing.id, action, pr.head_sha, kept) : row;
+    this.sessions.update(row.id, { title: prSessionTitle(number) });
+    this.announce(current, PrActionState.Working);
+    this.runtime.send(
+      row.id,
+      openingPrompt(action, brief, copy, action === PrAction.Review ? REVIEW_GUIDE : '', existing !== undefined),
+    );
     return toSession(this.sessions.get(row.id), []);
   }
 
-  /** One unsubmitted Session per pull request and action (Behavior 8). */
-  private requireFree(repoId: string, number: number, action: PrAction): void {
-    const open = this.store.db
-      .select({ id: sessions.id })
+  /** The pull request's PR Session: its newest Session opened by a button. */
+  private prSession(repoId: string, number: number): SessionRow | undefined {
+    return this.store.db
+      .select()
       .from(sessions)
-      .where(
-        and(
-          eq(sessions.repoId, repoId),
-          eq(sessions.prNumber, number),
-          eq(sessions.prAction, action),
-          isNull(sessions.prActionSubmittedAt),
-        ),
-      )
+      .where(and(eq(sessions.repoId, repoId), eq(sessions.prNumber, number), isNotNull(sessions.prAction)))
+      .orderBy(desc(sessions.createdAt), desc(sessions.id))
       .get();
-    if (open) throw new ApiError(409, ErrorCode.SessionBusy, 'A Session is already working on this');
+  }
+
+  /** The press replaces the PR Session's Round: the last one's threads, commit and submit go. */
+  private nextRound(id: string, action: PrAction, headSha: string, threads: string | null): SessionRow {
+    this.keep(id, {
+      prAction: action,
+      prActionHeadSha: headSha,
+      prActionThreads: threads,
+      prActionCommitSha: null,
+      prActionSubmittedAt: null,
+    });
+    return this.sessions.get(id);
   }
 
   private open(repoId: string, number: number, action: PrAction, headSha: string, threads: string | null): SessionRow {
@@ -252,16 +314,19 @@ export class PrActionsService implements PrActionTools {
     };
   }
 
-  action(sessionId: string): PrAction | null {
-    return this.sessions.get(sessionId).prAction;
-  }
-
-  /** The tool call of this Session's action; throws an `ApiError` the agent reads. */
-  async submit(sessionId: string, input: unknown): Promise<string> {
+  /** The tool call that ends a Round of `action`; throws an `ApiError` the agent reads. */
+  async submit(sessionId: string, action: PrAction, input: unknown): Promise<string> {
     const row = this.sessions.get(sessionId);
     if (row.prAction === null) throw new ApiError(409, ErrorCode.InvalidState, 'This Session has nothing to submit');
+    if (row.prAction !== action) {
+      throw new ApiError(
+        409,
+        ErrorCode.InvalidState,
+        `Nothing was posted. This Round is ${ROUND_NAME[row.prAction]}: call ${PR_ACTION_TOOLS[row.prAction]}.`,
+      );
+    }
     if (row.prActionSubmittedAt !== null) {
-      throw new ApiError(409, ErrorCode.InvalidState, 'Already submitted: this Session posted its results.');
+      throw new ApiError(409, ErrorCode.InvalidState, 'Already submitted: this Round posted its results.');
     }
     switch (row.prAction) {
       case PrAction.AddressComments:

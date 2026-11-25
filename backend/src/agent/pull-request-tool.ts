@@ -17,12 +17,16 @@ export const SUBMIT_THREAD_RESULTS_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__submit_
 export const SUBMIT_REPLY_VERDICTS_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__submit_reply_verdicts`;
 export const SUBMIT_REVIEW_TOOL = `mcp__${CONSOLE_TOOLS_SERVER}__submit_review`;
 
-/** The console tool each PR action Session is offered: the one call that posts its results to the Git host. */
+/** The console tool that ends each kind of Round: the one call that posts its results to the Git host. */
 export const PR_ACTION_TOOLS: Record<PrAction, string> = {
   [PrAction.AddressComments]: SUBMIT_THREAD_RESULTS_TOOL,
   [PrAction.CheckReplies]: SUBMIT_REPLY_VERDICTS_TOOL,
   [PrAction.Review]: SUBMIT_REVIEW_TOOL,
 };
+
+/** The kind of Round a console tool name ends; undefined for any other tool. */
+export const prActionOfTool = (toolName: string): PrAction | undefined =>
+  Object.values(PrAction).find((action) => PR_ACTION_TOOLS[action] === toolName);
 
 export const submitThreadResultsInputSchema = z.object({
   threads: z.array(
@@ -63,20 +67,19 @@ export type ReviewOutput = z.infer<typeof submitReviewInputSchema>;
 
 /** What the agent's submit tools call. The Workspace provides it. */
 export interface PrActionTools {
-  /** The action this Session was opened for; null for any other Session. */
-  action(sessionId: string): PrAction | null;
-  /** Posts the Session's results to the Git host. Throws an `ApiError` that says why nothing, or not everything, was posted. */
-  submit(sessionId: string, input: unknown): Promise<string>;
+  /** Posts the Session's current Round to the Git host. `action` is the Round the tool called belongs to. Throws an `ApiError` that says why nothing, or not everything, was posted. */
+  submit(sessionId: string, action: PrAction, input: unknown): Promise<string>;
 }
 
 /** The tool's answer to the agent: what was posted, or why not. */
 export async function runPrActionTool(
   tools: PrActionTools,
   sessionId: string,
+  action: PrAction,
   input: unknown,
 ): Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }> {
   try {
-    return { content: [{ type: 'text', text: await tools.submit(sessionId, input) }] };
+    return { content: [{ type: 'text', text: await tools.submit(sessionId, action, input) }] };
   } catch (error) {
     const why = error instanceof ApiError ? error.message : 'nothing was posted';
     return { content: [{ type: 'text', text: why }], isError: true };
@@ -210,8 +213,8 @@ export async function runSpawnSessions(
 export function consoleToolsServer(
   tools: {
     opener: PullRequestOpener | null;
-    /** A PR action Session's one submit tool: which, and who posts. */
-    prAction?: { action: PrAction; tools: PrActionTools } | null;
+    /** A PR Session's three submit tools, one per kind of Round, and who posts. */
+    prAction?: { tools: PrActionTools } | null;
     joiner: RepoJoiner | null;
     spawner?: SessionSpawner | null;
     /** The tool-use id of the `spawn_sessions` call being run, set by the approval hook. */
@@ -253,7 +256,7 @@ export function consoleToolsServer(
             ),
           ]
         : []),
-      ...(prAction ? [submitTool(prAction.action, prAction.tools, sessionId)] : []),
+      ...(prAction ? Object.values(PrAction).map((action) => submitTool(action, prAction.tools, sessionId)) : []),
       ...(joiner
         ? [
             tool(
@@ -312,9 +315,9 @@ export function consoleToolsServer(
   });
 }
 
-/** The one tool a PR action Session has for its results. */
+/** The tool that ends a Round of this action. */
 function submitTool(action: PrAction, tools: PrActionTools, sessionId: string) {
-  const run = (args: unknown) => runPrActionTool(tools, sessionId, args);
+  const run = (args: unknown) => runPrActionTool(tools, sessionId, action, args);
   switch (action) {
     case PrAction.AddressComments:
       return tool(

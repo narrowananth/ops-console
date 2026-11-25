@@ -34,11 +34,12 @@ import { ConflictBanner, PrCommits } from './pr-history';
 import {
   ADDRESS_TIP,
   AGENT_REVIEW_TIP,
-  actionOpen,
   BUSY_TITLE,
   CHECK_REPLIES_TIP,
   openThreads,
   repliedThreads,
+  roundWorking,
+  sessionWorking,
 } from './pr-jobs';
 import { PrMeta, ToneMark } from './pr-meta';
 import { PrSessions } from './pr-sessions';
@@ -92,9 +93,10 @@ function Loaded(props: {
   const addressPlaybook = useTriggerPlaybook(PlaybookTrigger.AddressComments);
   const checkPlaybook = useTriggerPlaybook(PlaybookTrigger.CheckReply);
   const comment = usePostComment(pr.repo_id, pr.number);
-  const reviewing = actionOpen(pr, PrAction.Review);
-  const addressing = actionOpen(pr, PrAction.AddressComments);
-  const checking = actionOpen(pr, PrAction.CheckReplies);
+  // One Session serves the three buttons: while its turn runs, all of them wait.
+  const working = sessionWorking(pr);
+  const reviewing = roundWorking(pr, PrAction.Review);
+  const checking = roundWorking(pr, PrAction.CheckReplies);
   // Its findings are already on the host; the next review waits for a new commit.
   const reviewed = pr.latest_agent_review !== null && !pr.latest_agent_review.stale;
   const roots = pr.comments.filter((comment) => comment.parent_id === null);
@@ -117,9 +119,9 @@ function Loaded(props: {
     <div className="flex flex-none flex-wrap items-center justify-end gap-1.5">
       <Button
         className={BTN}
-        disabled={start.isPending || reviewing || reviewed}
+        disabled={start.isPending || working || reviewed}
         title={
-          reviewing
+          working
             ? BUSY_TITLE
             : reviewed
               ? 'The agent already reviewed this commit. Push a change to review again.'
@@ -336,8 +338,8 @@ function Loaded(props: {
             {canAddress && (
               <Button
                 className="justify-center px-3 py-1.5 text-xs"
-                disabled={start.isPending || addressing}
-                title={addressing ? BUSY_TITLE : ADDRESS_TIP}
+                disabled={start.isPending || working}
+                title={working ? BUSY_TITLE : ADDRESS_TIP}
                 onClick={() => setPicking(true)}
               >
                 {start.isPending && start.variables?.action === PrAction.AddressComments && <Spinner />}
@@ -347,8 +349,8 @@ function Loaded(props: {
             {(replied > 0 || checking) && (
               <Button
                 className="justify-center px-3 py-1.5 text-xs"
-                disabled={start.isPending || checking}
-                title={checking ? BUSY_TITLE : CHECK_REPLIES_TIP}
+                disabled={start.isPending || working}
+                title={working ? BUSY_TITLE : CHECK_REPLIES_TIP}
                 onClick={() => startAction({ action: PrAction.CheckReplies })}
               >
                 {start.isPending && start.variables?.action === PrAction.CheckReplies && <Spinner />}

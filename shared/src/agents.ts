@@ -12,7 +12,7 @@ export enum SessionKind {
   Anonymous = 'anonymous',
 }
 
-/** What a PR action Session was opened for: the console's three buttons on a pull request. */
+/** What a Round of a PR Session was started for: the console's three buttons on a pull request. */
 export enum PrAction {
   AddressComments = 'address_comments',
   CheckReplies = 'check_replies',
@@ -267,9 +267,9 @@ export const sessionSchema = z.object({
   repo_id: z.string().nullable(),
   /** `repo` Sessions: the checked-out branch; `anonymous` Sessions: the branch of the clone, if any. */
   branch: z.string().nullable(),
-  /** `pr_review` Sessions and PR action Sessions: the pull request in `repo_id`. */
+  /** `pr_review` Sessions and PR Sessions: the pull request in `repo_id`. */
   pr_number: z.number().int().nullable(),
-  /** The button a PR action Session was opened from; null for any other Session. */
+  /** The button the current Round of a PR Session was started from; null for any other Session. */
   pr_action: z.enum(PrAction).nullable(),
   /** `repo` Sessions: the pull request the Session opened from the branch it is on now; null on any other branch. */
   pull_request: z.object({ number: z.number().int(), url: z.string() }).nullable(),

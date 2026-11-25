@@ -87,9 +87,9 @@ import {
   joinRepoInputSchema,
   OPEN_PULL_REQUEST_TOOL,
   openPullRequestInputSchema,
-  PR_ACTION_TOOLS,
   type PrActionTools,
   type PullRequestOpener,
+  prActionOfTool,
   type RepoJoiner,
   RUN_INTEGRATION_TOOL,
   SAVE_FILE_TOOL,
@@ -1262,9 +1262,8 @@ export class AgentRuntime implements OnModuleDestroy {
       // The console's own tools: the agent asks, the daemon pushes and opens the pull request as the operator.
       ...(() => {
         const opener = run.prAction === null && this.opener?.offers(run.sessionId, run.workingDir) ? this.opener : null;
-        // A PR action Session's one tool: the call that posts its results.
-        const prAction =
-          run.prAction !== null && this.prActionTools ? { action: run.prAction, tools: this.prActionTools } : null;
+        // A PR Session's tools: the calls that end each kind of Round.
+        const prAction = run.prAction !== null && this.prActionTools ? { tools: this.prActionTools } : null;
         // Only a run the operator started: a Playbook step or a Verification in an Anonymous Session stays where it is.
         const joiner = run.onFinish === null && this.joiner?.offers(run.sessionId) ? this.joiner : null;
         // A chat the operator started, in a Session no other Session spawned.
@@ -1648,11 +1647,12 @@ export class AgentRuntime implements OnModuleDestroy {
         };
       }
       if (input.tool_name === OPEN_PULL_REQUEST_TOOL) return this.checkPullRequest(run, toolInput, input.tool_use_id);
-      if (run.prAction !== null && input.tool_name === PR_ACTION_TOOLS[run.prAction]) {
+      const round = run.prAction === null ? undefined : prActionOfTool(input.tool_name);
+      if (round !== undefined) {
         // Pressing the button was the approval: the console posts what the call says, with no second prompt.
         return this.allowLogged(run, input.tool_name, toolInput, input.tool_use_id, {
           target: 'pull request',
-          command: `submit the results of ${run.prAction.replace('_', ' ')}`,
+          command: `submit the results of ${round.replace('_', ' ')}`,
           reason: 'The console commits, pushes and posts what this call reports, as the operator.',
         });
       }
