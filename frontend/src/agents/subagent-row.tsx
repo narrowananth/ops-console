@@ -53,9 +53,7 @@ export function SubagentRow({ subagents, branch }: { subagents: Subagent[]; bran
         </span>
         <span className="flex min-w-0 flex-1 flex-col">
           <b className="truncate">{subagents.length === 1 ? '1 subagent' : `${subagents.length} subagents`}</b>
-          <span className={`truncate text-xs ${working ? 'text-info' : 'text-neutral-700'}`}>
-            {subLabel(subagents)}
-          </span>
+          <span className={`text-xs ${working ? 'text-info' : 'text-neutral-700'}`}>{subLabel(subagents)}</span>
         </span>
         <Elapsed from={first} to={endOf(subagents)} running={working} className="flex-none" />
         <ChevronIcon open={open} />
