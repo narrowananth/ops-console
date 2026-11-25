@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
+import { rmSync } from 'node:fs';
 import { cp, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -45,9 +46,29 @@ export default async function setup(): Promise<() => Promise<void>> {
   }
   await writeFile(DAEMON_FILE, JSON.stringify({ url: `http://127.0.0.1:${runtime.port}`, token: runtime.token }));
 
-  return async () => {
+  // A run stopped by a signal or a crash skips the returned teardown; without this the daemon and the temp dirs outlive it.
+  const stopSync = () => {
     daemon.kill('SIGTERM');
-    await new Promise((resolve) => daemon.once('exit', resolve));
+    rmSync(DAEMON_FILE, { force: true });
+    rmSync(app, { recursive: true, force: true });
+    rmSync(dataDir, { recursive: true, force: true });
+  };
+  process.once('exit', stopSync);
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+    process.once(signal, () => {
+      stopSync();
+      process.exit(1);
+    });
+  }
+
+  return async () => {
+    process.off('exit', stopSync);
+    if (daemon.exitCode === null) {
+      daemon.kill('SIGTERM');
+      await new Promise((resolve) => daemon.once('exit', resolve));
+    }
     await rm(DAEMON_FILE, { force: true });
+    await rm(app, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true });
   };
 }
