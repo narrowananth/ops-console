@@ -690,7 +690,7 @@ function NotificationsSection() {
     playChime('done', true);
   };
   return (
-    <div id="notifications" className="scroll-mt-6">
+    <div id="notifications" className="mb-8 scroll-mt-6">
       <Section title="Notifications" sub="What this browser does when the agent is done, or needs you.">
         <div className="divide-y divide-line">
           <NotifyRow

@@ -200,7 +200,7 @@ export function Sidebar() {
                   title={collapsed ? page.label : undefined}
                   aria-label={page.label}
                   className={({ isActive }) =>
-                    `group my-px flex items-center gap-2.75 rounded-md py-2.25 text-sm text-text no-underline transition-[background-color,box-shadow] duration-150 hover:text-text ${
+                    `group my-1.5 flex items-center gap-2.75 rounded-md py-2.25 text-sm text-text no-underline transition-[background-color,box-shadow] duration-150 hover:text-text ${
                       collapsed ? 'justify-center px-0' : 'px-3'
                     } ${isActive ? 'bg-card font-extrabold shadow-sm' : 'hover:bg-text/6'}`
                   }

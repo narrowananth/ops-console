@@ -41,13 +41,16 @@ const GUTTER = 'w-px select-none px-2 text-right align-top whitespace-nowrap';
 const SIGN = { '+': '+', '-': '−', ' ': '' };
 const TABLE = 'min-w-full border-collapse font-mono text-xs leading-5';
 
-/** Threads and a comment box under a line, as wide as the diff's visible width. */
+/**
+ * Threads and a comment box under a line, as wide as the diff's visible width (`cqw`: the scroll box around the table),
+ * up to 56 rem, and held at the left edge when the diff scrolls sideways. Long words wrap inside it.
+ */
 function Below({ span, node }: { span: number; node: ReactNode }) {
   if (node === null || node === undefined || node === false) return null;
   return (
     <tr>
       <td colSpan={span} className="border-y border-line bg-surface p-0">
-        <div className="sticky left-0 flex max-w-[min(100%,56rem)] flex-col gap-2 px-3 py-2.5 whitespace-normal">
+        <div className="sticky left-0 flex w-[min(100cqw,56rem)] flex-col gap-2 px-3 py-2.5 whitespace-normal [overflow-wrap:anywhere]">
           {node}
         </div>
       </td>
@@ -125,7 +128,7 @@ export const DiffLines = memo(function DiffLines({ lines, comments }: { lines: D
   latest.current = comments?.onAdd;
   const onAdd = useCallback((line: number) => latest.current?.(line), []);
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto [container-type:inline-size]">
       <table className={TABLE}>
         <tbody>
           {rows.map((row, index) =>

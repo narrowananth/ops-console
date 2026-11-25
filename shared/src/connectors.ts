@@ -107,11 +107,11 @@ export const CONNECTOR_SERVERS: Partial<
 > = {
   [ConnectorId.Datadog]: { name: 'datadog-pup', transport: McpTransport.Stdio, target: 'pup mcp serve' },
   [ConnectorId.Github]: { name: 'github', transport: McpTransport.Stdio, target: 'github-mcp-server stdio' },
-  [ConnectorId.Jira]: { name: 'atlassian', transport: McpTransport.Http, target: 'https://mcp.atlassian.com/v1/mcp' },
+  [ConnectorId.Jira]: { name: 'atlassian', transport: McpTransport.Http, target: 'https://mcp.atlassian.com/v2/mcp' },
   [ConnectorId.Bitbucket]: {
     name: 'atlassian',
     transport: McpTransport.Http,
-    target: 'https://mcp.atlassian.com/v1/mcp',
+    target: 'https://mcp.atlassian.com/v2/mcp',
   },
   // Slack's server takes only its partner apps: this is the one Claude Code's Slack plugin signs in with.
   [ConnectorId.Slack]: {

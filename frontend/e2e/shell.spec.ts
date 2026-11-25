@@ -119,6 +119,33 @@ test('Start at login shows in the On this machine section, after Notifications',
   expect(headings.indexOf('On this machine')).toBeGreaterThan(headings.indexOf('Notifications'));
 });
 
+test('Accounts & Usage leaves the same gap above On this machine as between its other sections (Behavior 1)', async ({
+  page,
+}) => {
+  await page.goto(`${daemon.url}/agents#token=${daemon.token}`);
+  await expect(page.locator('#on-this-machine')).toBeVisible();
+  const above = await page.locator('#notifications').boundingBox();
+  const below = await page.locator('#on-this-machine').boundingBox();
+  expect(above && below).toBeTruthy();
+  if (!above || !below) return;
+  expect(below.y - (above.y + above.height)).toBeGreaterThanOrEqual(24);
+});
+
+test('two neighbouring sidebar items never touch, so the selected one’s shadow and a hovered one stay apart (Behavior 2)', async ({
+  page,
+}) => {
+  await page.goto(`${daemon.url}/#token=${daemon.token}`);
+  const nav = page.getByRole('navigation', { name: 'Ops Console' });
+  const links = nav.getByRole('link');
+  const count = await links.count();
+  for (let at = 1; at < count; at += 1) {
+    const [a, b] = [await links.nth(at - 1).boundingBox(), await links.nth(at).boundingBox()];
+    if (!a || !b || b.y < a.y) continue;
+    // Items of one group sit closer than the gap between groups; none sits closer than 6 px.
+    expect(b.y - (a.y + a.height), `item ${at}`).toBeGreaterThanOrEqual(6);
+  }
+});
+
 test('a visit to /setup or /permissions opens the Sessions page, and no screen names the Setup agent', async ({
   page,
 }) => {

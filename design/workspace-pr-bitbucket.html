@@ -154,7 +154,9 @@
   /* files changed */
   .toolbar { display:flex; gap:10px; align-items:center; padding:10px 24px; border-bottom:1px solid var(--line); position:relative; }
   .tree { width:270px; flex:none; border-right:1px solid var(--line); padding:8px 6px; overflow:hidden; font-size:12.5px; }
-  .tree .f { display:flex; gap:6px; align-items:center; padding:3px 8px; border-radius:7px; white-space:nowrap; }
+  .tree .f { display:flex; gap:6px; align-items:center; padding:3px 8px; border-radius:7px; white-space:nowrap; margin:2px 0; }
+  /* A guide line under the chevron of each folder level above a row; rows in a folder carry `in`. */
+  .tree .f.in { background:linear-gradient(var(--divider),var(--divider)) 12px -2px/1px calc(100% + 4px) no-repeat; }
   .tree .f.on { background:var(--card); box-shadow:0 1px 2px rgba(0,0,0,.1); font-weight:600; }
   .tree .f.d { color:var(--n600); }
   .tree .f .c { margin-left:auto; display:flex; gap:6px; font:11px var(--mono); }
@@ -327,10 +329,10 @@
       <div class="body" style="gap:0">
         <div class="tree">
           <div class="f d">▾ docs</div>
-          <div class="f" style="padding-left:22px">ADR 0027.md <span class="c"><span class="add">+3</span><span class="del">−1</span></span></div>
+          <div class="f in" style="padding-left:22px">ADR 0027.md <span class="c"><span class="add">+3</span><span class="del">−1</span></span></div>
           <div class="f d">▾ services/tenant/src/main</div>
-          <div class="f" style="padding-left:22px">ChannelCredentials.java <span class="c"><span class="add">+31</span></span></div>
-          <div class="f" style="padding-left:22px">ChannelSecretStore.java <span class="cc">1</span><span class="c"><span class="add">+9</span><span class="del">−4</span></span></div>
+          <div class="f in" style="padding-left:22px">ChannelCredentials.java <span class="c"><span class="add">+31</span></span></div>
+          <div class="f in" style="padding-left:22px">ChannelSecretStore.java <span class="cc">1</span><span class="c"><span class="add">+9</span><span class="del">−4</span></span></div>
           <div class="f on">GLOSSARY.md <span class="cc">1</span><span class="c"><span class="add">+7</span><span class="del">−6</span></span></div>
           <div class="f">CONTRIBUTING.md <span class="c"><span class="add">+1</span><span class="del">−1</span></span></div>
         </div>
