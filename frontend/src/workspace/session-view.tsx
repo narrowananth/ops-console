@@ -9,6 +9,7 @@ import {
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
+import { SubagentRow } from '../agents/subagent-row';
 import { MessageView, outputsByMessage } from '../agents/transcript';
 import { BrowserLinksProvider } from '../browser/browser-links';
 import { BROWSER_PANEL, BrowserPanel, type OpenRequest } from '../browser/browser-panel';
@@ -51,6 +52,7 @@ import { SessionComposer } from './session-composer';
 import { DIFF_PANEL, DiffPanel } from './session-diff';
 import { type PullRequestRow, SessionPanel, SubagentWait, type Surface, workingSubagents } from './session-panel';
 import { SESSION_STATE_TIP } from './sessions-pane';
+import { SubagentApprovals, SyncingMessages } from './subagent-approval';
 
 // xterm is a third of the page's code, and only an open dock needs it.
 const TerminalsDock = lazy(async () => ({ default: (await import('../browser/terminals-dock')).TerminalsDock }));
@@ -352,6 +354,10 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                             onFork={forkable ? forkFrom : undefined}
                           />
                         ))}
+                        {/* The Session keeps the latest run's subagents, so the row ends the last agent turn. */}
+                        {messages.data.at(-1)?.role === 'agent' && (
+                          <SubagentRow subagents={session.subagents} branch={session.branch} />
+                        )}
                       </ul>
                     )}
                   </div>
@@ -364,7 +370,9 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
                 />
                 <ScrollToEnd show={!latest.atEnd} onClick={latest.scrollToEnd} />
               </div>
+              <SubagentApprovals session={session} />
               <SubagentWait subagents={session.subagents} stopping={stop.isPending} onStop={() => stop.mutate()} />
+              {messages.isPending && <SyncingMessages />}
               <SessionComposer
                 session={session}
                 repos={repos.data?.data ?? []}

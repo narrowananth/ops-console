@@ -104,8 +104,8 @@ function SubagentTree({
               </span>
               <Link
                 to={to}
-                title="Open the Session this subagent works in"
-                aria-label={`Open the Session of ${one.description}`}
+                title="Open the Session whose agent started this subagent"
+                aria-label={`Open the Session that started ${one.description}`}
                 className="flex size-6.5 flex-none items-center justify-center rounded-lg border border-divider bg-card text-xs text-text no-underline shadow-sm hover:bg-neutral-200"
               >
                 ↗

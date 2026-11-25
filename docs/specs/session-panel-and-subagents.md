@@ -14,12 +14,16 @@ The agent splits work across subagents, but the operator sees only a count in th
 3. The row shows only for working subagents. A finished one is not counted; with none working the row is gone.
 4. The Session header has a Session button. It opens the Session panel in the right column and folds the Browser or Diff panel, as they fold each other. A dot on the button says a subagent is working.
 5. The panel lists the surfaces to open (Browser and Terminals in a Session with a folder, Diff in a Repo Session), the branch, its pull requests, Changes with the added and removed lines when the branch changed, and Servers: this Session's own servers. A pull request row shows its title, its state and CI state, and links to the Workspace's Pull requests tab and to the Git host; the first three show and the rest sit behind "Show N more". A server row opens it in the Browser.
-6. Under Lineage the panel lists the Session that started this one, the Sessions this one started, and, under "Previous agents" with their count, the subagents of its latest run, working first. Each subagent shows its description, type, state and how long it ran.
+6. Under Lineage the panel lists the Session that started this one, the Sessions this one started, and the subagents of its latest run, working first. The heading reads `Lineage · N running` while any runs. Each subagent shows a spark avatar (with a blue dot while it runs), its description, type, state word (`Running`, `Done`, `Failed`, `Stopped`) and how long it ran.
 7. The Session carries `subagents`: the latest run's subagents, kept after the run ends and updated live as they start and finish. A Session that never ran one has an empty list.
 8. A run is told to start one subagent per independent part with the Agent tool, in one turn, with a brief of its own and its own files, and to give the operator one merged answer. It is told not to start one for work it can finish in a few steps.
 9. The panel opens by default and holds the actions on the Session, so the header keeps the title, the state and the Session button. Open in VS Code and a folder button open the Session's worktree on this machine. The Terminals row shows or hides the Terminals dock and counts the processes running. The branch picker switches branch. Delete removes the Session.
 10. Commit, push & PR is one split button. The row does the next step: Commit while files are uncommitted, then Create PR when the branch can open one, else Push. Its menu lists all three. Commit asks for a message, writes one from the file names when it is blank, and can commit on a new branch (`ops/<words>`) that the Session then follows. Push never forces and rebases onto a moved branch, as opening a pull request does.
-11. Must not regress: the Running tray's subagent nesting, the Agent runs page, the Browser and Diff panels, and a Session with no subagent.
+11. A turn that started subagents ends with a row: up to three avatars and `+N`, `N subagents`, a sub-label (`N working`, `N done`, `N failed`, `N stopped`, joined by `·`), the time since the first started and a chevron. The Session keeps only its latest run's subagents, so the row sits under the last agent message and only while that message is the last in the conversation. Opened, it lists each subagent with its avatar, title, state word and time.
+12. Hovering a subagent, in that list or in Lineage, opens a card: title, model (`Sonnet 5.5`), state with its time, and the Session's branch, since subagents share the Session's worktree. The model is the one of the subagent's first message; it is empty until the subagent has spoken. A subagent does not open as a Session, so its rows link nowhere.
+13. When a subagent's tool call needs an Approval, a line above the waiting row reads `Subagent needs approval` with the subagent's title and an `Open approval` button that scrolls to that Approval in the composer's panel and focuses it. The Approval records the subagent that asked; the main agent's leave it empty.
+14. While a Session's messages load after a switch, `Syncing messages…` shows above the composer.
+15. Must not regress: the Running tray's subagent nesting, the Agent runs page, the Browser and Diff panels, and a Session with no subagent.
 
 ## Settled
 
@@ -39,11 +43,11 @@ No change. Subagents run under the Session's Access mode and Run sandbox like th
 
 ## Database
 
-None. The list reads the existing `sessions.run_subagents` column.
+The list reads the existing `sessions.run_subagents` column. An Approval's `subagent_id` is a nullable column on `approvals`; rows from before it stay null.
 
 ## API
 
 `POST /sessions/:id/commit` `{ message?, new_branch }`, `POST /sessions/:id/push`, `POST /sessions/:id/open-folder` `{ target: editor | folder }`. The daemon opens only the Session's own worktree, with a fixed program and no shell (ADR 0003). A commit skips the Repo's git hooks, as every scratch copy does.
 
-`GET /sessions` and `GET /sessions/:id` add `subagents`: `{ id, parent_id, description, type, status, started_at, finished_at }[]`.
-`session.updated` carries it.
+`GET /sessions` and `GET /sessions/:id` add `subagents`: `{ id, parent_id, description, type, model, status, started_at, finished_at }[]`, `model` a string or null.
+`session.updated` carries it. An Approval carries `subagent_id`, a string or null.

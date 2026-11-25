@@ -9,6 +9,7 @@ import {
 } from '@ops-console/shared';
 import { type ReactNode, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { isRunning, SUBAGENT_WORD, SubagentAvatar, WithSubagentCard } from '../agents/subagent-look';
 import { Spinner } from '../components/ui/button';
 import { Elapsed } from '../components/ui/elapsed';
 import {
@@ -31,7 +32,7 @@ import {
 import { sessionPath } from './links';
 
 const STATUS_DOT: Record<SubagentStatus, string> = {
-  [SubagentStatus.Working]: 'bg-accent',
+  [SubagentStatus.Working]: 'bg-info',
   [SubagentStatus.Done]: 'bg-ok',
   [SubagentStatus.Failed]: 'bg-diff-del-text',
   [SubagentStatus.Stopped]: 'bg-neutral-500',
@@ -431,6 +432,7 @@ export function SessionPanel({
   const ordered = [...session.subagents].sort(
     (a, b) => Number(b.status === SubagentStatus.Working) - Number(a.status === SubagentStatus.Working),
   );
+  const running = ordered.filter(isRunning).length;
   const lineage = session.spawned_by !== null || session.spawned.length > 0 || ordered.length > 0;
   return (
     <aside aria-label="Session" className="flex min-h-0 w-full flex-col overflow-y-auto bg-bg p-3">
@@ -561,7 +563,7 @@ export function SessionPanel({
         )}
         {links && <Section>{links}</Section>}
         {lineage && (
-          <Section label="Lineage">
+          <Section label={running > 0 ? `Lineage · ${running} running` : 'Lineage'}>
             {session.spawned_by && (
               <Row
                 icon={<AgentIcon />}
@@ -581,33 +583,24 @@ export function SessionPanel({
                 </span>
               </Row>
             ))}
-            {ordered.length > 0 && (
-              <div className="flex items-center gap-3 px-3 py-2 text-sm">
-                <span className="flex w-4 flex-none justify-center text-neutral-700">
-                  <AgentIcon />
-                </span>
-                <span className="flex-1">Previous agents</span>
-                <span className="font-mono text-xs text-neutral-600">{ordered.length}</span>
-              </div>
-            )}
             {ordered.map((one) => (
-              <div key={one.id} className="flex items-center gap-3 px-3 py-1.5 text-sm">
-                <span aria-hidden className={`ml-1 size-2 flex-none rounded-full ${STATUS_DOT[one.status]}`} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate" title={one.description}>
-                    {one.description}
+              <WithSubagentCard key={one.id} subagent={one} branch={session.branch}>
+                <div className="flex items-center gap-3 px-3 py-1.5 text-sm">
+                  <SubagentAvatar running={isRunning(one)} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{one.description}</span>
+                    <span className="block text-xs text-neutral-600">
+                      {one.type ?? 'Subagent'} · {SUBAGENT_WORD[one.status]}
+                    </span>
                   </span>
-                  <span className="block text-xs text-neutral-600">
-                    {one.type ?? 'Subagent'} · {one.status}
-                  </span>
-                </span>
-                <Elapsed
-                  from={one.started_at}
-                  to={one.finished_at}
-                  running={one.status === SubagentStatus.Working}
-                  className="flex-none font-mono text-xs text-neutral-600"
-                />
-              </div>
+                  <Elapsed
+                    from={one.started_at}
+                    to={one.finished_at}
+                    running={isRunning(one)}
+                    className="flex-none font-mono text-xs text-neutral-600"
+                  />
+                </div>
+              </WithSubagentCard>
             ))}
           </Section>
         )}

@@ -44,6 +44,8 @@ function ApprovalCard({
   return (
     <li
       aria-label={`Approval needed: ${approval.summary}`}
+      data-approval-id={approval.id}
+      tabIndex={-1}
       className={`overflow-hidden rounded-xl border bg-card shadow-sm ${prod ? 'border-accent-300' : 'border-divider'}`}
     >
       <div className="flex gap-3 px-4 pt-3.5 pb-3">
