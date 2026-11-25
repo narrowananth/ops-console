@@ -397,7 +397,7 @@ test('every message the operator sent copies; the last one edits, reverts the fi
   await expect(mine).toHaveCount(2);
   await expect(mine.first().getByRole('button', { name: 'Edit' })).toHaveCount(0);
   await mine.first().hover();
-  await mine.first().getByRole('button', { name: 'Copy' }).click();
+  await mine.first().getByRole('button', { name: 'Copy message' }).click();
   await expect(mine.first().getByRole('button', { name: 'Copied' })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('hello');
 
