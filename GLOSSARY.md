@@ -281,6 +281,10 @@ A pull request comment whose line a later commit moved or removed. The Git host'
 The Sessions page's list of Sessions, flat and grouped Needs you, Running and Idle, with the Repo as a chip, a filter and a + New
 that picks a Repo (or none) and a branch. A row shows the Session's pull requests, and hovering it opens a card with them.
 
+**Draft**:
+Text in a Session's composer that was not sent. The console keeps it per Session, across a reload, and the Sessions inbox
+marks the row of a Session other than the open one with a Draft badge until the text is sent or cleared.
+
 **Session**:
 One conversation between the operator and the agent, named for its first task. It runs in one Repo on one branch, in a
 Session worktree, except a
@@ -386,6 +390,15 @@ becomes a Session in that Repo. In a chat the operator started, the agent also s
 Servers and Connectors, reads files, folders, pages and other apps' Keychain items with secrets masked, and asks for a
 secret in a masked field; each of those that saves, registers or reads a secret asks for an Approval first. A Verification or Fix for a Service with no local Repo runs in one that holds a clone of the
 Service's Git URL.
+
+**Masked field**:
+The password input an Anonymous Session shows when its agent needs a secret the operator has to type. The value goes to
+the daemon, never to the agent, the transcript or the logs, and the agent gets a Secret placeholder.
+
+**Secret placeholder**:
+The `{{secret:<n>}}` token an Anonymous Session's agent gets in place of a secret: one the operator typed in a Masked field,
+or one the console masked in a file, page or Keychain item it read. The daemon keeps the value in memory for that Session
+and swaps it back in only inside a call it runs itself, such as a connection test or a save.
 
 **PR Session**:
 The one Session of a pull request, in a detached worktree at its head commit, where Address comments, Check replies, Agent
