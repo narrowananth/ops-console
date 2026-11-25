@@ -1404,6 +1404,11 @@ export class AgentRuntime implements OnModuleDestroy {
       message.parent_tool_use_id === null
         ? null
         : (run.taskOfToolUse.get(message.parent_tool_use_id) ?? message.parent_tool_use_id);
+    const subagent = agentId === null ? undefined : run.subagents.get(agentId);
+    if (subagent && subagent.model === null) {
+      subagent.model = String(model);
+      this.sessions.write(run.sessionId, { runSubagents: JSON.stringify([...run.subagents.values()]) });
+    }
     run.messageUsage.set(id, {
       agentId,
       model: String(model),
@@ -1499,6 +1504,7 @@ export class AgentRuntime implements OnModuleDestroy {
         parent_id: message.parent_task_id ?? null,
         description: message.description,
         type: message.subagent_type ?? null,
+        model: null,
         status: SubagentStatus.Working,
         started_at: new Date().toISOString(),
         finished_at: null,
@@ -1788,7 +1794,7 @@ export class AgentRuntime implements OnModuleDestroy {
 
   /** Permission prompts: the agent's questions, and edits and commands the access mode asks about. */
   private permissionPrompt(run: Run): CanUseTool {
-    return async (toolName, input, { toolUseID }) => {
+    return async (toolName, input, { toolUseID, agentID }) => {
       if (toolName === 'AskUserQuestion') {
         const answer = await this.question(run, toolUseID);
         const parsed = questionInputSchema.safeParse(input);
@@ -1812,6 +1818,7 @@ export class AgentRuntime implements OnModuleDestroy {
             ? `Edit ${String(input.file_path ?? input.notebook_path ?? '')}`
             : commandSummary(toolName, input),
           isProd: false,
+          subagentId: agentID ?? null,
         },
         toolUseID,
       );

@@ -337,7 +337,7 @@ the starting Session's model, effort and Access mode. It cannot start others. It
 _Avoid_: child chat, subtask
 
 **Subagent**:
-An agent the main agent starts inside a run with the Agent tool, for one independent part of the work or for work that prints a lot. The console registers `explorer`, `test-runner` and `reviewer` in every run. The main agent waits for all of them and gives the operator one merged answer. A Session keeps the subagents of its latest run, and the Session panel and the waiting row show them. Not a Spawned Session, which is a Session of its own.
+An agent the main agent starts inside a run with the Agent tool, for one independent part of the work or for work that prints a lot. The console registers `explorer`, `test-runner` and `reviewer` in every run. The main agent waits for all of them and gives the operator one merged answer. A Session keeps the subagents of its latest run, and the row under the agent's turn, the waiting row and the Session panel show them. Not a Spawned Session, which is a Session of its own.
 _Avoid_: child agent, worker
 
 **Session panel**:

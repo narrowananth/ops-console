@@ -327,6 +327,8 @@ export const approvals = sqliteTable(
     sessionId: text('session_id').references(() => sessions.id, { onDelete: 'set null' }),
     kind: text().$type<ApprovalKind>().notNull(),
     summary: text().notNull(),
+    /** The subagent whose tool call asked; null when the main agent did, and for Approvals before this column. */
+    subagentId: text('subagent_id'),
     /** The integration CLI the operator may stop being asked about for the Session; null when the Approval offers no such choice. */
     trustCli: text('trust_cli'),
     status: text().$type<ApprovalStatus>().notNull().default(ApprovalStatus.Pending),
