@@ -7,7 +7,7 @@ import { SessionsPane } from './sessions-pane';
 
 /** The Sessions inbox on the left, the picked Session on the right. The pick lives in the address. */
 export function SessionsPage() {
-  const [address, setAddress] = useAddress('session');
+  const [address, setAddress] = useAddress('session', 'message');
   const sessionId = address.session;
   const waiting = useNeedsYouCount();
   return (
@@ -17,7 +17,7 @@ export function SessionsPage() {
       tip="Your conversations with the agent, grouped by Repo"
       icon={<SessionsIcon />}
       badge={waiting}
-      list={<SessionsPane selected={sessionId} onSelect={(id) => setAddress({ session: id })} />}
+      list={<SessionsPane selected={sessionId} onSelect={(id) => setAddress({ session: id, message: null })} />}
     >
       {sessionId ? (
         <SessionView key={sessionId} id={sessionId} onGone={() => setAddress({ session: null }, { replace: true })} />

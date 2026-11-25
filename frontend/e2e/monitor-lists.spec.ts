@@ -266,7 +266,7 @@ test('a pull request row says how long ago it opened, and a Session row how long
   // The full date is in the tooltip.
   await expect(page.getByTitle(/^Opened .*2026/)).toHaveText(/\dd ago$/);
   await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
-  await expect(page.getByTitle(/^Started .*, last active /)).toHaveText('3h ago');
+  await expect(page.getByTitle(/^Started .*, last active /)).toHaveText('3h');
 });
 
 test('a running Scan shows Scanning… with a Stop button that cancels it', async ({ page }) => {

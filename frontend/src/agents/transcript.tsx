@@ -13,13 +13,14 @@ import { Button, Spinner } from '../components/ui/button';
 import { CodeBlock } from '../components/ui/code-block';
 import { Elapsed } from '../components/ui/elapsed';
 import { FileKindIcon, kindOf } from '../components/ui/file-kind';
-import { CopyIcon, ForkIcon, PencilIcon } from '../components/ui/icons';
+import { CopyIcon, ForkIcon, LinkIcon, PencilIcon } from '../components/ui/icons';
 import { Markdown } from '../components/ui/markdown';
 import type { PathwayState } from '../components/ui/pathway';
 import { ComparisonView, ResultView } from '../devtools/result-tables';
 import { COPY_FAILED, copyLabel, useCopy } from '../lib/clipboard';
 import { when } from '../monitor/scan-scope';
 import { KindBadge } from '../skills/kind-badge';
+import { messageLink } from '../workspace/links';
 import { MentionChip } from '../workspace/mention-chip';
 import { mentionsIn } from '../workspace/mentions';
 import { FileChange } from './file-change';
@@ -119,6 +120,7 @@ function MessageItem({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [copied, copy] = useCopy();
+  const [linkCopied, copyLink] = useCopy();
   const [forking, setForking] = useState(false);
   const [forkError, setForkError] = useState<string | null>(null);
   const fork = () => {
@@ -247,7 +249,18 @@ function MessageItem({
               >
                 <CopyIcon />
               </button>
-              {copied !== 'idle' && <span className="text-neutral-700">{copyLabel(copied, '')}</span>}
+              <button
+                type="button"
+                aria-label={copyLabel(linkCopied, 'Copy prompt link')}
+                title={linkCopied === 'failed' ? COPY_FAILED : 'Copy prompt link'}
+                onClick={() => copyLink(`${window.location.origin}${messageLink(sessionId, message.id)}`)}
+                className={`${responseAction} ${revealed}`}
+              >
+                <LinkIcon />
+              </button>
+              {(copied !== 'idle' || linkCopied !== 'idle') && (
+                <span className="text-neutral-700">{copyLabel(copied !== 'idle' ? copied : linkCopied, '')}</span>
+              )}
             </div>
           </>
         )

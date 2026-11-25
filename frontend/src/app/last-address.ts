@@ -11,7 +11,6 @@ const PAGE_PATHS = [
   '/integrations',
   '/connections',
   '/repos',
-  '/setup',
   '/agents',
   '/playbooks',
   '/skills',

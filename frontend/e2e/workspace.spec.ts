@@ -151,7 +151,7 @@ test("a Session row shows its pull requests and, on hover, a card with each one'
   await expect(row).toContainText('Opus');
   await expect(row).toContainText('feature/sandbox');
   await row.getByRole('button').hover();
-  const card = page.getByRole('tooltip');
+  const card = page.getByRole('tooltip').filter({ hasText: 'Spec: privacy docs' });
   await expect(card).toContainText('#138');
   await expect(card).toContainText('Run sandbox: a Loopback switch');
   await expect(card).toContainText('#136');

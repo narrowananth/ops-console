@@ -1,5 +1,6 @@
 import type { Message } from '@ops-console/shared';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { useAddress } from '../lib/remember';
 
 /** How close to the end, in pixels, still counts as reading the newest message. */
 const AT_END_PX = 48;
@@ -155,6 +156,16 @@ export function ConversationMap({
     },
     [scroller, content, onJump],
   );
+
+  // A link to one message (`?message=`) puts it in view once, when the Session's messages are there; then the address
+  // drops it, so the next visit to this Session opens at its end.
+  const [address, setAddress] = useAddress('message');
+  const wanted = address.message;
+  useEffect(() => {
+    if (!wanted || !scroller || !content || !messages.some((message) => message.id === wanted)) return;
+    go(wanted);
+    setAddress({ message: null }, { replace: true });
+  }, [wanted, scroller, content, messages, go, setAddress]);
 
   if (messages.length < 2) return null;
   return (

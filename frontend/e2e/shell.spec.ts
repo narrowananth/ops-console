@@ -32,14 +32,13 @@ test('the sidebar holds every page, and the Setup agent buttons open it', async 
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
   const nav = page.getByRole('navigation');
   await expect(nav.getByRole('link')).toHaveText([
-    'Monitor',
     'Sessions',
     'Pull requests',
+    'Monitor',
     'Dev tools',
     'Integrations',
     'Connections',
     'Repos',
-    'Setup agent',
     'Accounts & Usage',
     'Agent runs',
     'Playbooks',

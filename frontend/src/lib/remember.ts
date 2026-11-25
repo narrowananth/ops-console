@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import type { z } from 'zod';
 
@@ -23,12 +23,25 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') flushStored();
 });
 
+const watchers = new Set<() => void>();
+
 /** A stored value, or `fallback` when there is none or it no longer parses (an older build, a hand edit). */
 export function readStored<T>(key: string, schema: z.ZodType<T>, fallback: T): T {
   flushStored();
+  return parseStored(rawStored(key), schema, fallback);
+}
+
+function rawStored(key: string): string | null {
   try {
-    const raw = localStorage.getItem(PREFIX + key);
-    if (raw === null) return fallback;
+    return localStorage.getItem(PREFIX + key);
+  } catch {
+    return null;
+  }
+}
+
+function parseStored<T>(raw: string | null, schema: z.ZodType<T>, fallback: T): T {
+  if (raw === null) return fallback;
+  try {
     const parsed = schema.safeParse(JSON.parse(raw));
     return parsed.success ? parsed.data : fallback;
   } catch {
@@ -46,6 +59,21 @@ export function writeStored<T>(key: string, value: T, fallback: T): void {
   } catch {
     // Storage full or blocked: the choice still holds until the page goes.
   }
+  for (const watcher of watchers) watcher();
+}
+
+/**
+ * A stored value read for display, redrawn when it is written. It does not flush a draft waiting to be typed out, so it
+ * is safe in a list of rows; the write that follows the pause redraws it.
+ */
+export function useStoredValue<T>(key: string, schema: z.ZodType<T>, fallback: T): T {
+  const subscribe = useCallback((notify: () => void) => {
+    watchers.add(notify);
+    return () => void watchers.delete(notify);
+  }, []);
+  const raw = useSyncExternalStore(subscribe, () => rawStored(key));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the schema and fallback are fixed per key.
+  return useMemo(() => parseStored(raw, schema, fallback), [raw]);
 }
 
 type Update<T> = T | ((now: T) => T);

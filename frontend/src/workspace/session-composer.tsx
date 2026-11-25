@@ -12,7 +12,7 @@ import {
   withAttachments,
   withElementPicks,
 } from '@ops-console/shared';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { ApprovalPrompts } from '../agents/approval-prompts';
 import { PlayRun } from '../agents/play-run';
@@ -32,6 +32,10 @@ import type { Token } from './mentions';
 import { MessageEditor, type MessageEditorHandle } from './message-editor';
 import { type PastedText, PastedTextEditor } from './pasted-text-editor';
 import { PickedChips, useElementPicks } from './picked-elements';
+
+/** Whether the focus is in a place the operator types into. */
+const inField = (element: Element | null) =>
+  element instanceof HTMLElement && (element.isContentEditable || element.matches('input, textarea, select'));
 
 /**
  * Everything below the conversation: the Approval prompts, the question panel, the queued message and the message box.
@@ -70,6 +74,11 @@ export function SessionComposer({
   const attachments = useAttachments(id);
   const elements = useElementPicks(id, attachments);
   const editor = useRef<MessageEditorHandle>(null);
+  // The view is made anew for each Session, so this runs when one opens: the cursor goes to the end of its draft,
+  // unless the operator is typing in another field.
+  useEffect(() => {
+    if (!inField(document.activeElement)) editor.current?.focusEnd();
+  }, []);
   // An attached file open over the page.
   const [viewed, setViewed] = useState<Viewed | null>(null);
   // A pasted text file open to edit.
