@@ -1,6 +1,7 @@
 # Copy icon on code blocks
 
 **Status:** shipped
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) removes the Setup agent's terminal.
 **Design:** none. The icon follows the console's own Copy button on a step's raw output.
 
 ## Problem

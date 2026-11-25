@@ -1,6 +1,7 @@
 # Accounts & Usage: agent runtime, Claude accounts, Action Log and Approvals
 
 **Status:** shipped
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) removes the Setup agent's terminal. Full Disk Access, Start at login and the Run sandbox status are on Accounts & Usage.
 **Design:** Agents & accounts in `design/ops-console.html` (accounts list, Auto-switch, Smart usage, default model, effort and access), shown as the Accounts tab of Accounts & Usage, plus the Session composer chips (Model, Effort, Access) and the approval prompts those settings drive. The Usage tab and the Enable switch are in [account-switch-and-usage](account-switch-and-usage.md)
 
 ## Problem

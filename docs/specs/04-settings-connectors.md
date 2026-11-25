@@ -1,6 +1,7 @@
 # Settings: Connectors
 
 **Status:** shipped
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) replaces the setup agent that started a sign-in: an Anonymous Session's agent does, with an Approval.
 **Design:** the design's Connectors tab, merged with MCP servers into Integrations, and the Connector pane beside the list (a numbered sign-in step like claude.ai's, and Disconnect)
 
 ## Problem

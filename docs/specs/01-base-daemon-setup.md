@@ -1,6 +1,7 @@
 # Base layer: daemon, install and setup
 
 **Status:** shipped
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) removes the Setup agent from the sidebar and the Permissions entry with it; `/setup` and `/permissions` open Sessions. Full Disk Access, Start at login and the Run sandbox status are on Accounts & Usage.
 **Design:** none for the install and CLI. The app shell follows `design/ops-console-sidebar.html`: a left sidebar with every page.
 
 ## Problem

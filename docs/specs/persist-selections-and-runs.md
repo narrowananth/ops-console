@@ -2,6 +2,7 @@
 
 **Status:** draft
 **Built:** Behaviors 1 to 11 are shipped; 12 to 23 (runs through a daemon restart) are still to build.
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) removes the Setup agent page and terminal, so Behavior 19 and the Setup agent's reattaching and unsent line no longer apply.
 **Design:** none; every page in `design/ops-console.html` keeps its layout. This spec changes what each page remembers, not what it draws.
 
 ## Problem

@@ -1,6 +1,7 @@
 # Settings: MCP servers
 
 **Status:** shipped
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) replaces the setup agent that called these endpoints: an Anonymous Session's agent adds and signs in an MCP Server, with an Approval.
 **Design:** the design's MCP servers tab and its detail, shown as a pane beside the list, (Details, Tools, Reconnect, Disconnect, Remove), merged with Connectors into Integrations. The design's add and edit form is left out: Connectors add servers (Behavior 17)
 
 ## Problem

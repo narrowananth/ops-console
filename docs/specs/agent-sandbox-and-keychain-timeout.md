@@ -1,6 +1,7 @@
 # Agent Sandbox and Keychain Timeout
 
 **Status:** shipped; the Run sandbox's write, read and network limits (items 2, 3, 4, 9) follow [open-run-sandbox](open-run-sandbox.md)
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) removes the Setup agent and the Permissions page: its tools run in an Anonymous Session's daemon, and the Run sandbox and Keychain rows show on Accounts & Usage.
 **Design:** none. Permissions page: Run sandbox and Keychain rows. The app shell has a banner.
 
 ## Problem
