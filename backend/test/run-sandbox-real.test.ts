@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runSandbox, worktreeGitDirs } from '../src/agent/run-sandbox';
-import { SeatbeltRunSandbox } from '../src/terminals/run-sandbox-gate';
+import { SeatbeltRunSandbox } from '../src/machine/run-sandbox-gate';
 
 /**
  * The real SDK sandbox, not a fake: Claude Code's own binary runs a Bash command under the rules `runSandbox` builds,

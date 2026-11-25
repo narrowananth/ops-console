@@ -27,7 +27,8 @@ src/
 ├── workspace/          # pull requests, PR action Sessions, Agent Reviews
 ├── monitor/            # Services, Scans, Alerts, Verification, Fix
 ├── devtools/           # devtools Sessions scoped to Connections
-├── terminals/          # node-pty terminals, the Setup agent
+├── anonymous-tools/    # the setup tools of an Anonymous Session, masked secrets
+├── machine/            # Full Disk Access, Start at login, Run sandbox gates
 └── updates/            # newest GitHub release, install, auto-update
 drizzle/                # Drizzle Kit output, never edited once applied
 test/                   # daemon on a temporary data folder; fakes for claude, MCP and Keychain
@@ -39,7 +40,7 @@ test/                   # daemon on a temporary data folder; fakes for claude, M
 | `OPS_CONSOLE_PORT` | `4545` |
 | `OPS_CONSOLE_APP_DIR` | folder of `main.js`; holds `drizzle/` and `public/` |
 | `OPS_CONSOLE_KEYCHAIN_SERVICE` | Keychain service name; `ops-console` unless set (dev uses `ops-console-dev`) |
-| `OPS_CONSOLE_LAUNCHER` | `bin/ops-console` of the install that `mcp-exec` and `mcp-setup` run through |
+| `OPS_CONSOLE_LAUNCHER` | `bin/ops-console` of the install that `mcp-exec` runs through |
 
 `pnpm build` bundles `dist/main.js` with esbuild. Classes inject with explicit `@Inject(...)`:
 esbuild does not emit decorator metadata.

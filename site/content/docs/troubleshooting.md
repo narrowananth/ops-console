@@ -102,11 +102,11 @@ The call waited 60 seconds for the Keychain and gave up. An answer that comes la
 
 The call waited 90 seconds for the Keychain handover to move its item. The handover keeps running in the background. Wait for it, then retry.
 
-### The Setup agent page says the handover was refused
+### Accounts & Usage says the handover was refused
 
 `Handover refused: previous app failed its check`
 
-The page gives a reason, such as `it is not an app bundle` or `its bundle fails codesign --verify --strict`. The items stay with the previous version's app, so macOS may ask for the login password once per item. Fix or delete the previous version's folder under `~/.ops-console/versions`, then run `ops-console stop` and `ops-console start`. The check runs again on the start.
+The On this machine section gives a reason, such as `it is not an app bundle` or `its bundle fails codesign --verify --strict`. The items stay with the previous version's app, so macOS may ask for the login password once per item. Fix or delete the previous version's folder under `~/.ops-console/versions`, then run `ops-console stop` and `ops-console start`. The check runs again on the start.
 
 ## Run sandbox
 
@@ -114,15 +114,15 @@ The page gives a reason, such as `it is not an app bundle` or `its bundle fails 
 
 `Agent runs fail rather than run without the sandbox.`
 
-`/usr/bin/sandbox-exec` failed or took more than 5 seconds, and the Setup agent page gives its last line as the reason. Agent runs fail until it works, and no setting turns the sandbox off. Include the reason in an issue, as described under [When it is not here](#when-it-is-not-here).
+`/usr/bin/sandbox-exec` failed or took more than 5 seconds, and Accounts & Usage gives its last line as the reason, under On this machine. Agent runs fail until it works, and no setting turns the sandbox off. Include the reason in an issue, as described under [When it is not here](#when-it-is-not-here).
 
 ## Permissions
 
 ### Full Disk Access is off
 
-`The Setup agent cannot start until you turn this on in System Settings.`
+`An Anonymous Session's agent cannot read protected folders until you turn this on in System Settings.`
 
-On the Setup agent page, choose Open Settings. Drag Ops Console from the Finder window into the Full Disk Access list and switch it on. Then run `ops-console stop` and `ops-console start`.
+On Accounts & Usage, under On this machine, choose Open System Settings. Drag Ops Console from the Finder window into the Full Disk Access list and switch it on. Then run `ops-console stop` and `ops-console start`.
 
 ## When it is not here
 

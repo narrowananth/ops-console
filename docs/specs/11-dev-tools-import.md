@@ -1,6 +1,7 @@
 # Dev tools: import connections from the machine and from URLs
 
 **Status:** shipped
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) moves the import from the Setup agent to an Anonymous Session's agent, with the same reads and masking, and removes the Setup agent page and its buttons. What the agent finds, how it names and masks it, and the Approval-free reads of files, folders and pages stand.
 **Design:** Setup agent (`05-settings-dev-tools`); no new screen
 
 ## Problem

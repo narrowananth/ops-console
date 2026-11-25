@@ -11,7 +11,6 @@ import { type KeychainEntry, LoginKeychain } from '../src/keychain/keychain';
 import { KeychainWaitTracker } from '../src/keychain/keychain-wait';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { JobSteps } from '../src/playbooks/job-steps';
-import { TerminalsModule } from '../src/terminals/terminals.module';
 import { type AgentDaemon, api, listen, startAgentDaemon, until } from './agent-fixtures';
 import { FakeConnectionTester } from './fakes/connection-tester';
 import { FakeConnectorTools } from './fakes/connector-tools';
@@ -50,7 +49,6 @@ async function start() {
       McpServersModule.forRoot({ probe: new FakeProbe(), launcher: '/opt/ops-console/bin/ops-console' }),
       ConnectionsModule.forRoot({ tester: new FakeConnectionTester(), launchDir: '/opt/ops-console/app/launch' }),
       ConnectorsModule.forRoot({ tools: new FakeConnectorTools() }),
-      TerminalsModule.forRoot(),
     ],
   });
   running.push(daemon);

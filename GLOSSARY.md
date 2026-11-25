@@ -382,7 +382,9 @@ conversation and followed as the agent moves to another branch. It shows only on
 **Anonymous Session**:
 A Session with no imported Repo. It works in a folder of its own in the data directory, and the agent may clone a
 repository into it. When the operator names an imported Repo, the agent asks to join it: once approved the Session
-becomes a Session in that Repo. A Verification or Fix for a Service with no local Repo runs in one that holds a clone of the
+becomes a Session in that Repo. In a chat the operator started, the agent also sets up Connections, remote MCP
+Servers and Connectors, reads files, folders, pages and other apps' Keychain items with secrets masked, and asks for a
+secret in a masked field; each of those that saves, registers or reads a secret asks for an Approval first. A Verification or Fix for a Service with no local Repo runs in one that holds a clone of the
 Service's Git URL.
 
 **PR Session**:
@@ -432,11 +434,6 @@ An outside service the operator signs in to, or a Log folder, an AWS profile, a 
 **Google bridge**:
 The stdio MCP Server the console registers for a Google Connector. It keeps nothing on disk: the launcher hands it the Connector's refresh token from the Keychain, and it mints access tokens and answers each tool call from the product's REST API. One Google sign-in serves every Claude account and CLIProxy.
 
-**Setup agent**:
-Claude in a terminal in Setup agent that adds Connections, remote MCP Servers and Connectors
-from what the operator types. It only adds, and reaches the machine only through the console's setup tools.
-_Avoid_: Add with Claude, setup terminal (the terminal is where it runs)
-
 **Result**:
 The rows one Connection gave for one Dev tools question, shown as a table under the Connection's name.
 
@@ -468,8 +465,8 @@ The first start of a new version taking the Keychain items from the previous ver
 login password once per item.
 
 **Handover refusal**:
-The console declining a Keychain handover because the previous app failed its check. It shows on the Setup agent page
-until the next start.
+The console declining a Keychain handover because the previous app failed its check. It shows on Accounts & Usage,
+under On this machine, until the next start.
 
 **Brew entry command**:
 The `ops-console` command Homebrew installs. It installs the matching app into the home folder on first run and after

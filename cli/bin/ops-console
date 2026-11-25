@@ -27,6 +27,5 @@ case ${1:-} in
     shift
     exec "$root/node/bin/node" "$root/app/google-mcp.js" "$@"
     ;;
-  mcp-setup) exec "$root/node/bin/node" "$root/app/main.js" "$@" ;;
 esac
 exec "$root/node/bin/node" "$root/cli/ops-console.js" "$@"

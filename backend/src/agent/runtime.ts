@@ -66,6 +66,15 @@ import { storedEnvVar } from '../mcp/launcher';
 import { PlaybooksService } from '../playbooks/playbooks.service';
 import { systemAppend } from '../playbooks/prompts';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
+import {
+  ANONYMOUS_SETUP_INSTRUCTIONS,
+  type AnonymousToolName,
+  type AnonymousTools,
+  anonymousToolId,
+  anonymousToolOf,
+  parseAnonymousCall,
+  type ToolPlan,
+} from './anonymous-tools';
 import { Attachments } from './attachments';
 import { cloudWatchDenial } from './cloudwatch-tools';
 import { ConnectionLookup } from './connection-lookup';
@@ -450,6 +459,13 @@ export class AgentRuntime implements OnModuleDestroy {
 
   setNewRelicQuery(query: NewRelicQuery): void {
     this.newRelicQuery = query;
+  }
+
+  /** Who runs the setup tools of an Anonymous Session. Set once by the Anonymous tools module. */
+  private anonymousTools: AnonymousTools | null = null;
+
+  setAnonymousTools(tools: AnonymousTools): void {
+    this.anonymousTools = tools;
   }
 
   /** Who runs the process tools. Set once by the Processes module. */
@@ -1206,7 +1222,11 @@ export class AgentRuntime implements OnModuleDestroy {
       // Claude Code finds a conversation by its folder: one begun in a scratch copy moves to this run's folder.
       else await this.transcripts.place(resume, configDir, run.workingDir);
     }
-    const instructions = kind?.instructions;
+    // The setup tools: an Anonymous Session's operator chat, never a job.
+    const anonymous = isOperatorChat(run) && this.anonymousTools?.offers(run.sessionId) ? this.anonymousTools : null;
+    const instructions = [kind?.instructions, anonymous ? ANONYMOUS_SETUP_INSTRUCTIONS : undefined]
+      .filter((part) => part !== undefined)
+      .join('\n\n');
 
     const attached = this.attachments.existingFolder(run.sessionId);
     // A run the operator started writes its files for them in the Session's output folder (a read-only run has none).
@@ -1290,11 +1310,31 @@ export class AgentRuntime implements OnModuleDestroy {
         const newRelic =
           offersNewRelicQuery(run.purpose, logSource) && this.newRelicQuery?.offers() ? this.newRelicQuery : null;
         tools.push(
-          ...Object.entries({ opener, prAction, joiner, spawner, saver, integrations, newRelic, browser, processes })
+          ...Object.entries({
+            opener,
+            prAction,
+            joiner,
+            spawner,
+            saver,
+            integrations,
+            newRelic,
+            browser,
+            processes,
+            anonymous,
+          })
             .filter(([, offered]) => offered)
             .map(([name]) => name),
         );
-        return opener || prAction || joiner || spawner || saver || integrations || newRelic || browser || processes
+        return opener ||
+          prAction ||
+          joiner ||
+          spawner ||
+          saver ||
+          integrations ||
+          newRelic ||
+          browser ||
+          processes ||
+          anonymous
           ? {
               mcpServers: {
                 [CONSOLE_TOOLS_SERVER]: consoleToolsServer(
@@ -1309,6 +1349,7 @@ export class AgentRuntime implements OnModuleDestroy {
                     newRelic,
                     browser,
                     processes,
+                    anonymous,
                     signal: run.abort.signal,
                   },
                   run.sessionId,
@@ -1656,6 +1697,8 @@ export class AgentRuntime implements OnModuleDestroy {
           reason: 'The console commits, pushes and posts what this call reports, as the operator.',
         });
       }
+      const anonymousTool = anonymousToolOf(input.tool_name);
+      if (anonymousTool) return this.approveAnonymousTool(run, anonymousTool, toolInput, input.tool_use_id);
       if (input.tool_name === JOIN_REPO_TOOL) return this.approveJoinRepo(run, toolInput, input.tool_use_id);
       if (input.tool_name === SPAWN_SESSIONS_TOOL) return this.approveSpawnSessions(run, toolInput, input.tool_use_id);
       if (input.tool_name === SAVE_FILE_TOOL) return this.approveSaveFile(run, toolInput, input.tool_use_id);
@@ -1855,6 +1898,49 @@ export class AgentRuntime implements OnModuleDestroy {
           : 'The operator denied joining the Repo. Do not ask again: work in this folder or ask the operator.',
       },
     };
+  }
+
+  /**
+   * The setup tools of an Anonymous Session: each call is an Action Log row before it runs. A tool that saves, registers,
+   * tests with a secret or reads one asks in every Access mode but full, naming what it will do; the other reads run at
+   * once. A call the tools refuse, such as a placeholder never given, is refused before it asks.
+   */
+  private async approveAnonymousTool(
+    run: Run,
+    name: AnonymousToolName,
+    toolInput: Record<string, unknown>,
+    stepId: string,
+  ): Promise<HookJSONOutput> {
+    const refuse = (reason: string): HookJSONOutput => {
+      this.steps.finish(stepId, { ok: false, error: reason });
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: reason,
+        },
+      };
+    };
+    const parsed = parseAnonymousCall(name, toolInput);
+    if (!this.anonymousTools || 'error' in parsed)
+      return refuse('error' in parsed ? parsed.error : 'Not offered here.');
+    let plan: ToolPlan;
+    try {
+      plan = this.anonymousTools.plan(run.sessionId, parsed.call);
+    } catch (error) {
+      return refuse(error instanceof ApiError ? error.message : `${name} cannot run here.`);
+    }
+    if (plan.approval === null) {
+      return this.allowLogged(run, anonymousToolId(name), toolInput, stepId, {
+        target: plan.target,
+        command: plan.command,
+        reason: 'A setup read: the console runs it and masks every secret in the answer.',
+      });
+    }
+    return this.askLogged(run, stepId, plan.approval, ActionKind.Query, plan.target, plan.command, false, {
+      yes: 'The operator approved this.',
+      no: 'The operator denied this. Do not retry it, by this tool or by a command.',
+    });
   }
 
   /**

@@ -699,7 +699,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
 
   /**
    * What the accounts and Repos register, from the config files alone: name, scope, transport and URL. Headers and
-   * env stay out. The Setup agent reads it to skip a server the console has.
+   * env stay out. An Anonymous Session's agent reads it to skip a server the console has.
    */
   async registeredServers(): Promise<{ name: string; scope: string; transport: McpTransport; url: string | null }[]> {
     const project = (await Promise.all((this.repos?.folders() ?? []).map((repo) => readProject(repo.path)))).flat();

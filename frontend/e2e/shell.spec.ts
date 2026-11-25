@@ -28,7 +28,7 @@ test('the URL from ops-console open signs in, hides the token and shows the shel
   await expect(again.getByRole('navigation').getByRole('link', { name: 'Monitor' })).toBeVisible();
 });
 
-test('the sidebar holds every page, and the Setup agent buttons open it', async ({ page }) => {
+test('the sidebar holds every page, and Setup is no page of it', async ({ page }) => {
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
   const nav = page.getByRole('navigation');
   await expect(nav.getByRole('link')).toHaveText([
@@ -50,22 +50,19 @@ test('the sidebar holds every page, and the Setup agent buttons open it', async 
   await expect(page.getByRole('heading', { name: 'Repos' })).toBeVisible();
   expect(page.url()).toContain('/repos');
 
-  for (const [link, button] of [
-    ['Integrations', 'Add with Setup agent →'],
-    ['Connections', 'Import with Setup agent →'],
-  ]) {
-    await nav.getByRole('link', { name: link }).click();
-    await page.getByRole('button', { name: button }).click();
-    await expect(page.getByRole('heading', { name: 'Setup agent' })).toBeVisible();
-  }
-  await expect(page.getByRole('button', { name: 'Start setup agent' })).toBeVisible();
+  await nav.getByRole('link', { name: 'Integrations' }).click();
+  await expect(page.getByRole('button', { name: /Setup agent/ })).toHaveCount(0);
+  await nav.getByRole('link', { name: 'Connections' }).click();
+  await expect(page.getByRole('button', { name: /Setup agent/ })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Collapse sidebar' }).click();
   await expect(nav.getByRole('link', { name: 'Monitor' })).toHaveAttribute('title', 'Monitor');
   await page.getByRole('button', { name: 'Expand sidebar' }).click();
 });
 
-test('the installed app starts the Setup agent only once Full Disk Access is on', async ({ page }) => {
+test('Full Disk Access reads off with its steps, opens System Settings, and reads on when the window comes back', async ({
+  page,
+}) => {
   let granted = false;
   let opened = 0;
   await page.route('**/api/terminals/disk-access', (route) =>
@@ -75,97 +72,63 @@ test('the installed app starts the Setup agent only once Full Disk Access is on'
     opened += 1;
     return route.fulfill({ status: 204 });
   });
-  await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
-  const drawer = page.getByRole('main');
-
-  const disk = drawer.getByRole('listitem', { name: 'Full Disk Access' });
-  await expect(disk).toContainText('Full Disk Access: off');
+  await page.goto(`${daemon.url}/agents#token=${daemon.token}`);
+  const disk = page.getByRole('main').getByRole('listitem', { name: 'Full Disk Access' });
+  await expect(disk).toContainText('off');
   await expect(disk).toContainText('Drag Ops Console from the Finder window');
   await expect(disk).toContainText('ops-console stop');
-  await expect(drawer.getByRole('button', { name: 'Start setup agent' })).toBeDisabled();
-  await expect(drawer.getByText('Turn on Full Disk Access first')).toHaveCount(0);
-  await disk.getByRole('button', { name: 'Open Settings' }).click();
+  await disk.getByRole('button', { name: 'Open System Settings' }).click();
   await expect.poll(() => opened).toBe(1);
 
-  // The hint on the Start button points at that line.
-  await drawer.getByRole('link', { name: /Needs Full Disk Access/ }).click();
-  await expect(disk.getByRole('button', { name: 'Open Settings' })).toBeInViewport();
-
   granted = true;
-  // Coming back from System Settings: the window loses focus and gets it again.
-  await page.evaluate(() => {
-    for (const state of ['hidden', 'visible']) {
-      Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
-      document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
-    }
-  });
-  await expect(disk).toContainText('Full Disk Access: on');
+  await disk.getByRole('button', { name: 'Check again' }).click();
+  await expect(disk).toContainText('on');
   await expect(disk.getByRole('button')).toHaveCount(0);
-  await expect(drawer.getByRole('button', { name: 'Start setup agent' })).toBeEnabled();
 });
 
 test('pnpm dev runs as Ops Console (dev), and asks for Full Disk Access under that name', async ({ page }) => {
   await page.route('**/api/terminals/disk-access', (route) =>
     route.fulfill({ json: { data: { granted: false, app_path: '/repo/backend/.data/Ops Console (dev).app' } } }),
   );
-  await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
+  await page.goto(`${daemon.url}/agents#token=${daemon.token}`);
   const disk = page.getByRole('main').getByRole('listitem', { name: 'Full Disk Access' });
-  await expect(disk).toContainText('Full Disk Access: off');
   await expect(disk).toContainText('Drag Ops Console (dev) from the Finder window');
   await expect(disk).toContainText('stop pnpm dev and run it again');
-  await expect(disk.getByRole('button', { name: 'Open Settings' })).toBeVisible();
+  await expect(disk.getByRole('button', { name: 'Open System Settings' })).toBeVisible();
 });
 
-test('a daemon that is no app reads off · dev build and the Setup agent still starts', async ({ page }) => {
+test('a daemon that is no app reads off · dev build, with nothing to open', async ({ page }) => {
   await page.route('**/api/terminals/disk-access', (route) =>
     route.fulfill({ json: { data: { granted: false, app_path: null } } }),
   );
-  await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
-  const drawer = page.getByRole('main');
-
-  const disk = drawer.getByRole('listitem', { name: 'Full Disk Access' });
+  await page.goto(`${daemon.url}/agents#token=${daemon.token}`);
+  const disk = page.getByRole('main').getByRole('listitem', { name: 'Full Disk Access' });
   await expect(disk).toContainText('off · dev build');
-  await expect(disk.getByRole('button', { name: 'Open Settings' })).toHaveCount(0);
-  await expect(drawer.getByRole('button', { name: 'Start setup agent' })).toBeEnabled();
+  await expect(disk.getByRole('button', { name: 'Open System Settings' })).toHaveCount(0);
 });
 
-test('a visit to /permissions opens the Setup agent, and the sidebar has no Permissions item', async ({ page }) => {
-  await page.goto(`${daemon.url}/permissions#token=${daemon.token}`);
-  await expect(page.getByRole('heading', { name: 'Setup agent' })).toBeVisible();
-  expect(new URL(page.url()).pathname).toBe('/setup');
-  await expect(page.getByRole('navigation').getByRole('link', { name: 'Permissions' })).toHaveCount(0);
-});
-
-test('the Setup agent and its unsent line survive a page switch, and only Close ends it', async ({ page }) => {
-  let running = true;
-  let closed = 0;
-  await page.route('**/api/terminals', (route) =>
-    route.fulfill({ json: { data: running ? [{ id: 't1', kind: 'setup' }] : [] } }),
+test('Start at login shows in the On this machine section, after Notifications', async ({ page }) => {
+  await page.route('**/api/terminals/start-at-login', (route) =>
+    route.fulfill({ json: { data: { on: true, dev_build: false } } }),
   );
-  await page.route('**/api/terminals/t1', (route) => {
-    if (route.request().method() !== 'DELETE') return route.fallback();
-    closed += 1;
-    running = false;
-    return route.fulfill({ status: 204 });
-  });
-  await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
-  const drawer = page.getByRole('main');
-  await expect(drawer.getByText('Setup agent running')).toBeVisible();
+  await page.goto(`${daemon.url}/agents#token=${daemon.token}`);
+  const main = page.getByRole('main');
+  const login = main.getByRole('listitem', { name: 'Start at login' });
+  await expect(login).toContainText('on');
+  await expect(login.getByRole('button', { name: 'Open Login Items' })).toBeVisible();
+  const headings = await main.getByRole('heading', { level: 2 }).allTextContents();
+  expect(headings.indexOf('On this machine')).toBeGreaterThan(headings.indexOf('Notifications'));
+});
 
-  await drawer.getByRole('textbox', { name: 'Message to Claude' }).fill('import my local databases');
-  await page.getByRole('navigation').getByRole('link', { name: 'Repos' }).click();
-  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
-  await expect(drawer.getByText('Setup agent running')).toBeVisible();
-  await expect(drawer.getByRole('textbox', { name: 'Message to Claude' })).toHaveValue('import my local databases');
-  expect(closed).toBe(0);
-
-  await drawer.getByRole('button', { name: 'Close', exact: true }).click();
-  await expect.poll(() => closed).toBe(1);
-  await expect(drawer.getByRole('button', { name: 'Start setup agent' })).toBeVisible();
+test('a visit to /setup or /permissions opens the Sessions page, and no screen names the Setup agent', async ({
+  page,
+}) => {
+  for (const old of ['/setup', '/permissions']) {
+    await page.goto(`${daemon.url}${old}#token=${daemon.token}`);
+    await expect(page.getByRole('heading', { name: 'Sessions', level: 1 })).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe('/sessions');
+  }
+  await expect(page.getByRole('navigation').getByRole('link', { name: /Setup|Permissions/ })).toHaveCount(0);
 });
 
 test('Integrations lists Connectors and MCP servers, each labelled, and opens one beside the list', async ({
@@ -374,30 +337,6 @@ test('a stored choice that no longer reads falls back to the default', async ({ 
   await expect(whose.getByRole('button', { name: 'Mine', exact: true })).toHaveAttribute('aria-pressed', 'true');
 });
 
-test('Shift+Enter adds a line to the Setup agent request; Enter sends the lines as one request', async ({ page }) => {
-  const sent: unknown[] = [];
-  await page.route('**/api/terminals', (route) => route.fulfill({ json: { data: [{ id: 't1', kind: 'setup' }] } }));
-  await page.routeWebSocket('**/terminals/t1', (ws) =>
-    ws.onMessage((message) => sent.push(JSON.parse(String(message)))),
-  );
-  await page.goto(`${daemon.url}/#token=${daemon.token}`);
-  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
-  const box = page.getByRole('main').getByRole('textbox', { name: 'Message to Claude' });
-
-  await box.click();
-  await box.pressSequentially('add vajro-test-db');
-  await box.press('Shift+Enter');
-  await box.pressSequentially('read only');
-  await expect(box).toHaveValue('add vajro-test-db\nread only');
-  expect(sent.filter((m) => (m as { type: string }).type === 'line')).toEqual([]);
-
-  await box.press('Enter');
-  await expect
-    .poll(() => sent.filter((m) => (m as { type: string }).type === 'line'))
-    .toEqual([{ type: 'line', text: 'add vajro-test-db\nread only' }]);
-  await expect(box).toHaveValue('');
-});
-
 test('a control explains itself on hover and on keyboard focus, then keeps its title', async ({ page }) => {
   await page.goto(`${daemon.url}/#token=${daemon.token}`);
   const collapse = page.getByRole('button', { name: 'Collapse sidebar' });
@@ -488,10 +427,10 @@ test('the Sessions page has no page bar: the Session header is the top bar and t
 
 test('a page with an action gets one slim bar and keeps the action in it', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`${daemon.url}/integrations#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/playbooks#token=${daemon.token}`);
 
-  const bar = page.locator('header').filter({ has: page.getByRole('heading', { name: 'Integrations', level: 1 }) });
-  const action = bar.getByRole('button', { name: 'Add with Setup agent →' });
+  const bar = page.locator('header').filter({ has: page.getByRole('heading', { name: 'Playbooks', level: 1 }) });
+  const action = bar.getByRole('button', { name: 'New Playbook' });
   await expect(action).toBeVisible();
   const box = await bar.boundingBox();
   expect(box?.height).toBeLessThan(48);

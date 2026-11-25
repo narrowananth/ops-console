@@ -14,7 +14,7 @@ const PROBE = path.join('Library', 'Application Support', 'com.apple.TCC', 'TCC.
 
 export const DISK_ACCESS = Symbol('DISK_ACCESS');
 
-/** macOS Full Disk Access for the daemon: the one permission the operator grants before the Setup agent reads. */
+/** macOS Full Disk Access for the daemon: the one permission the operator grants before an Anonymous Session's agent reads. */
 export interface DiskAccessGate {
   check(): Promise<DiskAccess>;
   /** Opens the Full Disk Access pane in System Settings. */
