@@ -111,16 +111,16 @@ test('a pull request links the Sessions on its branch, and New Session opens one
   page,
 }) => {
   const created = await routeWorkspace(page);
-  await page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1%2F7#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/pull-requests?pr=r1%2F7#token=${daemon.token}`);
 
   await expect(page.getByText('Sessions on this pull request:')).toBeVisible();
   await page.getByRole('link', { name: 'Session s1 · idle' }).click();
-  await expect(page).toHaveURL(/\/workspace\?session=s1$/);
+  await expect(page).toHaveURL(/\/sessions\?session=s1$/);
   await expect(page.getByRole('heading', { name: 'Session s1' })).toBeVisible();
 
   await page.goBack();
   await page.getByRole('button', { name: 'New Session' }).click();
-  await expect(page).toHaveURL(/\/workspace\?session=s2$/);
+  await expect(page).toHaveURL(/\/sessions\?session=s2$/);
   await expect.poll(() => created).toEqual([{ repo_id: 'r1', branch: 'fix/empty-cart', from_origin: true }]);
   await expect(page.getByRole('textbox', { name: 'Message' })).toHaveText('On pull request #7 (Guard empty carts): ');
 });
@@ -132,7 +132,7 @@ test('a pull request links a Session that opened it from another branch', async 
       pull_requests: [{ number: 7, url: 'https://example.com/pr/7', branch: 'fix/empty-cart' }],
     }),
   ]);
-  await page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1%2F7#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/pull-requests?pr=r1%2F7#token=${daemon.token}`);
 
   await expect(page.getByRole('link', { name: 'Session s1 · idle' })).toBeVisible();
 });
@@ -142,11 +142,11 @@ test('a Session links its pull request and its Monitor Alert', async ({ page }) 
   await page.route(/\/api\/sessions\?kind=repo/, (route) =>
     route.fulfill({ json: { data: [session('s1', { alert_id: 'a1' })] } }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   await expect(page.getByRole('link', { name: 'Alert →' })).toHaveAttribute('href', '/monitor?alert=a1');
   await page.getByRole('link', { name: 'PR #7 →' }).click();
-  await expect(page).toHaveURL(/\/workspace\?tab=pulls&pr=r1%2F7$/);
+  await expect(page).toHaveURL(/\/pull-requests\?pr=r1%2F7$/);
   await expect(page.getByRole('heading', { name: '#7 Guard empty carts' })).toBeVisible();
 });
 
@@ -207,11 +207,11 @@ test('the sidebar tray lists every agent run going, says which wait on the opera
   await expect(runs).toHaveText([/Drop the old index.*needs you/, /Add a retry.*working/, /Pull request #7.*working/]);
 
   await dialog.getByRole('link', { name: 'Pull request #7' }).click();
-  await expect(page).toHaveURL(/\/workspace\?tab=pulls&pr=r1%2F7$/);
+  await expect(page).toHaveURL(/\/pull-requests\?pr=r1%2F7$/);
   await expect(dialog).toBeHidden();
   await tray.click();
   await dialog.getByRole('link', { name: 'Session · Add a retry' }).click();
-  await expect(page).toHaveURL(/\/workspace\?session=s1$/);
+  await expect(page).toHaveURL(/\/sessions\?session=s1$/);
 });
 
 test('the tray shows how long a run took, nests its subagents, and pauses, stops, plays and retries runs', async ({
@@ -306,7 +306,7 @@ test('a paused Session shows Play beside Send, and Play carries the run on', asy
     calls.push('resume s1');
     return route.fulfill({ status: 202, json: { data: { message_id: 'm1' } } });
   });
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   await page.getByRole('button', { name: /^Play/ }).click();
   await expect.poll(() => calls).toEqual(['resume s1']);
@@ -317,7 +317,7 @@ test('a Session whose run is not paused or stopped shows no Play', async ({ page
   await page.route('**/api/agent-runs', (route) =>
     route.fulfill({ json: { data: [run('s1', { running: false, outcome: 'done' })], meta: { next_cursor: null } } }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   await expect(page.getByRole('button', { name: 'Send' })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Play/ })).toBeHidden();

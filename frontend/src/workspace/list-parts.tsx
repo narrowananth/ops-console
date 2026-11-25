@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { z } from 'zod';
 import { useStored } from '../lib/remember';
 
-/** The search box atop a Workspace list. */
+/** The search box atop a list pane. */
 export function SearchField({
   label,
   value,

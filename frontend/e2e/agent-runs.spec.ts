@@ -267,11 +267,11 @@ test('the page says which runs to look at and why, and the sidebar counts those 
   await page.getByRole('tab', { name: /Ended/ }).click();
   await expect(cards).toHaveCount(2);
 
-  // The Workspace drops a session id its list lacks, so the link's address is the stable thing to check.
+  // The Sessions page drops a session id its list lacks, so the link's address is the stable thing to check.
   const failed = page.getByRole('link', { name: 'Session · task bad' });
-  await expect(failed).toHaveAttribute('href', '/workspace?session=bad');
+  await expect(failed).toHaveAttribute('href', '/sessions?session=bad');
   await failed.click();
-  await expect(page).toHaveURL(/\/workspace/);
+  await expect(page).toHaveURL(/\/sessions/);
 });
 
 test('a slow run opens to its stage, where the time went and why, and offers a way out', async ({ page }) => {

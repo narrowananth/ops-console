@@ -875,8 +875,7 @@ export function useRemoveRepo() {
   });
 }
 
-/** Every `repo` Session, newest first. `session.updated` over `/ws` keeps it fresh. */
-/** The Workspace's Sessions: those in a Repo and the anonymous ones, most recently active first. */
+/** The Sessions in a Repo and the anonymous ones, most recently active first. */
 export function useRepoSessions() {
   return useQuery({
     queryKey: queryKeys.sessions,
@@ -887,6 +886,12 @@ export function useRepoSessions() {
       return [...inRepos, ...anonymous].sort((a, b) => b.last_active_at.localeCompare(a.last_active_at));
     },
   });
+}
+
+/** How many Sessions wait on the operator: an answer or an Approval. */
+export function useNeedsYouCount(): number {
+  const needing = [SessionState.WaitingInput, SessionState.WaitingApproval];
+  return (useRepoSessions().data ?? []).filter((session) => needing.includes(session.state)).length;
 }
 
 const RUNS_IDLE_MS = 30_000;
@@ -1408,8 +1413,8 @@ export function useRepoPullRequests(repoId: string | null, state: PrState = PrSt
 }
 
 /**
- * Reads the Workspace's first pull request list as the app opens. The daemon's first read of every host repository
- * takes seconds; started here, it is in memory by the time the operator opens the Workspace.
+ * Reads the first pull request list as the app opens. The daemon's first read of every host repository
+ * takes seconds; started here, it is in memory by the time the operator opens the Pull requests page.
  */
 export function usePrefetchPullRequests() {
   const client = useQueryClient();

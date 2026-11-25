@@ -16,7 +16,7 @@ Open Repos and import a local git repository by its folder. Sessions run in a Re
 
 ## 4. Start a Session
 
-Open Workspace, pick the Repo and write the task. The Access mode decides what the agent may do without asking. Start with supervised if you want to see every edit and command before it happens. See [Sessions and Access modes](/docs/sessions/).
+Open Sessions, pick the Repo and write the task. The Access mode decides what the agent may do without asking. Start with supervised if you want to see every edit and command before it happens. See [Sessions and Access modes](/docs/sessions/).
 
 ## 5. Connect your services
 

@@ -223,7 +223,7 @@ function PullRequestItem({ row }: { row: PullRequestRow }) {
         {to && (
           <Link
             to={to}
-            title={`Open pull request #${number} in the Workspace's Pull requests tab`}
+            title={`Open pull request #${number} on the Pull requests page`}
             className="text-neutral-700 no-underline hover:underline"
           >
             PR #{number} →

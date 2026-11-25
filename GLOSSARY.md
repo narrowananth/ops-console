@@ -108,7 +108,7 @@ _Avoid_: default Playbook
 
 **Trigger**:
 A place in a tab that starts the agent: Verify and Fix in Monitor, Review PR, Check reply, Address comments, Reply in
-thread and Session message in Workspace. Review PR, Check reply and Address comments open a PR action Session.
+thread and Session message on the Sessions and Pull requests pages. Review PR, Check reply and Address comments open a PR action Session.
 _Avoid_: action (the Action Log means each command the agent runs)
 
 **Job**:
@@ -249,7 +249,7 @@ on without one.
 The work that follows a confirmed Review: ticket (when its Playbook asks and Jira is connected), branch, the steps of
 its Playbook (code change, mocked tests, the full suite and a diff review by default), the agent's PR description, then the console's push and PR opening, in the Alert's Session. A merged PR resolves the Alert; a PR closed unmerged, or the operator's Cancel, abandons the Fix.
 
-### Workspace
+### Sessions and pull requests
 
 **Repo**:
 A local git repository imported into the console, identified by its top folder, where Sessions run. Its Git host and
@@ -275,7 +275,7 @@ fetches both into the Repo's folder and runs `git merge-tree`, which touches no 
 two minutes per head commit. When git cannot fetch, the check reads "Conflicts not known" and does not disable Merge.
 
 **Sessions inbox**:
-The Workspace's list of Sessions, flat and grouped Needs you, Running and Idle, with the Repo as a chip, a filter and a + New
+The Sessions page's list of Sessions, flat and grouped Needs you, Running and Idle, with the Repo as a chip, a filter and a + New
 that picks a Repo (or none) and a branch. A row shows the Session's pull requests, and hovering it opens a card with them.
 
 **Session**:

@@ -17,6 +17,7 @@ import {
   useConnectors,
   useHealthWatch,
   useMcpServers,
+  useNeedsYouCount,
   useRepos,
 } from '../lib/queries';
 import { lastAddress } from './last-address';
@@ -50,10 +51,13 @@ const icon = (path: ReactNode) => (
 
 const ICONS = {
   monitor: icon(<path d="M3 12h4l3-8 4 16 3-8h4" />),
-  workspace: icon(
+  sessions: icon(<path d="M4 5h16v11h-9l-4 3.5V16H4z" strokeLinejoin="round" />),
+  pullRequests: icon(
     <>
-      <rect x="3" y="4" width="18" height="16" />
-      <path d="M3 9h18M9 9v11" />
+      <circle cx="6" cy="5" r="2" />
+      <circle cx="6" cy="19" r="2" />
+      <circle cx="18" cy="19" r="2" />
+      <path d="M6 7v10M18 17V10a3 3 0 0 0-3-3h-3M14 4l-2 3 2 3" />
     </>,
   ),
   devtools: icon(
@@ -98,7 +102,8 @@ const ICONS = {
 /** Where every view lives, in sidebar order. */
 export const PAGES = [
   { group: 'Operate', path: '/monitor', label: 'Monitor', icon: ICONS.monitor },
-  { group: 'Operate', path: '/workspace', label: 'Workspace', icon: ICONS.workspace },
+  { group: 'Operate', path: '/sessions', label: 'Sessions', icon: ICONS.sessions },
+  { group: 'Operate', path: '/pull-requests', label: 'Pull requests', icon: ICONS.pullRequests },
   { group: 'Operate', path: '/devtools', label: 'Dev tools', icon: ICONS.devtools },
   { group: 'Connect', path: '/integrations', label: 'Integrations', icon: ICONS.integrations },
   { group: 'Connect', path: '/connections', label: 'Connections', icon: ICONS.connections },
@@ -125,12 +130,15 @@ function useBadges(): Record<string, { text: string; tip: string; tone: 'alert' 
   const brokenIntegrations = failingIn(HealthArea.Integrations);
   const waiting = (useAgentRuns().data ?? []).filter((run) => run.health === RunHealth.NeedsYou).length;
   const open = useAlertSummary().data?.open ?? 0;
+  const needYou = useNeedsYouCount();
   const attention =
     connectors.filter((connector) => NEEDS_ATTENTION.includes(connector.status)).length +
     servers.filter((server) => server.used_by === null && NEEDS_ATTENTION.includes(server.status)).length;
   return {
     '/monitor':
       open > 0 ? { text: String(open), tip: `${open} Alerts not yet resolved or dismissed`, tone: 'alert' } : undefined,
+    '/sessions':
+      needYou > 0 ? { text: String(needYou), tip: `${needYou} Sessions wait on you`, tone: 'alert' } : undefined,
     '/integrations':
       brokenIntegrations > 0
         ? {

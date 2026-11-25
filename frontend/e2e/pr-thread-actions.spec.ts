@@ -127,7 +127,7 @@ async function routePullRequest(
   }),
 ) {
   const posted: Posted[] = [];
-  // The Sessions the buttons opened: the Workspace shows a Session only while the list holds it.
+  // The Sessions the buttons opened: the Sessions page shows a Session only while the list holds it.
   const opened: unknown[] = [];
   await page.route(/\/api\/sessions(\?.*)?$/, (route) => route.fulfill({ json: { data: opened } }));
   await page.route('**/api/sessions/*/messages', (route) => route.fulfill({ json: { data: [] } }));

@@ -108,7 +108,7 @@ test('the batch card lists each Session the call started, and opens one; the chi
     session('s2', 'r2', { branch: 'fix/cart-total', spawned_by: { id: 's1', title: 'Session s1' } }),
     session('s3', 'r3', { spawned_by: { id: 's1', title: 'Session s1' } }),
   ]);
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const card = page.getByRole('region', { name: 'Sessions started together' });
   await expect(card.getByText('Started 2 of 2 Sessions')).toBeVisible();
@@ -119,13 +119,13 @@ test('the batch card lists each Session the call started, and opens one; the chi
   await expect(card.getByText('orders-api')).toHaveCount(0);
 
   await card.getByRole('link', { name: 'Open' }).first().click();
-  await expect(page).toHaveURL(/\/workspace\?session=s2$/);
+  await expect(page).toHaveURL(/\/sessions\?session=s2$/);
   await expect(page.getByRole('link', { name: 'Started from Session s1 →' })).toBeVisible();
 });
 
 test('the batch card says nothing started when the Approval was denied', async ({ page }) => {
   await route(page, [session('s1', 'r1')]);
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const card = page.getByRole('region', { name: 'Sessions started together' });
   await expect(card.getByText('2 Sessions asked for')).toBeVisible();

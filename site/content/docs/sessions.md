@@ -4,7 +4,7 @@ A Session is one conversation between you and the agent. It is named for its fir
 
 ## Where a Session runs
 
-Each Session works in its own git worktree under the data folder, so Sessions on different branches never share a checkout, and your own folder is never switched. Two kinds of Session have no Repo: a Dev tools Session and an Anonymous Session. The Workspace page lists your Sessions as Needs you, Running and Idle, and the pull requests grouped by what you do next.
+Each Session works in its own git worktree under the data folder, so Sessions on different branches never share a checkout, and your own folder is never switched. Two kinds of Session have no Repo: a Dev tools Session and an Anonymous Session. The Sessions page lists your Sessions as Needs you, Running and Idle, and the pull requests grouped by what you do next.
 
 Each pull request action (Review with agent, Check replies and Address comments) opens a Session of its own, a reply in a review thread has one more, and an Alert has one for its Verification and Fix. The agent may start Spawned Sessions from a Session, and the Running tray shows what is running.
 
