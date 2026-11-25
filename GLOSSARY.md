@@ -274,6 +274,9 @@ The console's background test of whether a pull request's branch merges into its
 fetches both into the Repo's folder and runs `git merge-tree`, which touches no branch and no work tree. The answer is kept
 two minutes per head commit. When git cannot fetch, the check reads "Conflicts not known" and does not disable Merge.
 
+**Outdated**:
+A pull request comment whose line a later commit moved or removed. The Git host's own flag decides when it gives one; otherwise a comment whose line is not in the newest diff is outdated. A thread card and the Comments menu on Files changed show it.
+
 **Sessions inbox**:
 The Sessions page's list of Sessions, flat and grouped Needs you, Running and Idle, with the Repo as a chip, a filter and a + New
 that picks a Repo (or none) and a branch. A row shows the Session's pull requests, and hovering it opens a card with them.

@@ -98,7 +98,14 @@ const commentSchema = z.object({
   parent: z.object({ id: z.number().int() }).nullish(),
   user: z.object({ display_name: z.string().nullish(), nickname: z.string().nullish() }).nullish(),
   content: z.object({ raw: z.string() }),
-  inline: z.object({ path: z.string(), to: z.number().int().nullish(), from: z.number().int().nullish() }).nullish(),
+  inline: z
+    .object({
+      path: z.string(),
+      to: z.number().int().nullish(),
+      from: z.number().int().nullish(),
+      outdated: z.boolean().nullish(),
+    })
+    .nullish(),
   resolution: z.unknown().nullish(),
   deleted: z.boolean().nullish(),
   created_on: z.string(),
@@ -164,7 +171,7 @@ function toPullRequest(pr: BitbucketPr): HostPullRequest {
   };
 }
 
-function toComment(comment: z.infer<typeof commentSchema>): HostComment {
+export function toComment(comment: z.infer<typeof commentSchema>): HostComment {
   return {
     id: String(comment.id),
     parent_id: comment.parent ? String(comment.parent.id) : null,
@@ -173,6 +180,9 @@ function toComment(comment: z.infer<typeof commentSchema>): HostComment {
     file_path: comment.inline?.path ?? null,
     line: comment.inline?.to ?? comment.inline?.from ?? null,
     resolved: comment.resolution != null,
+    outdated: comment.inline ? (comment.inline.outdated ?? null) : null,
+    // Bitbucket's comment carries no diff hunk.
+    hunk: null,
     created_at: comment.created_on,
   };
 }

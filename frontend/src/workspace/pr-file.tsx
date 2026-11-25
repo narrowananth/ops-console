@@ -5,6 +5,7 @@ import { DiffLines, DiffStat, FullFileDiff, type LineComments, SplitDiff } from 
 import { usePostComment, usePrFile } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { CommentComposer, Thread } from './pr-thread';
+import { newSideLines } from './pr-threads';
 
 const VIEWED_KEY = 'ops-console-pr-viewed';
 
@@ -165,7 +166,7 @@ function useNearScreen(target: React.RefObject<HTMLElement | null>, soon: boolea
  */
 export const PrFileView = memo(
   ChangedFile,
-  (a, b) => a.pr === b.pr && a.file === b.file && a.viewed === b.viewed && a.bulk === b.bulk,
+  (a, b) => a.pr === b.pr && a.file === b.file && a.viewed === b.viewed && a.bulk === b.bulk && a.reveal === b.reveal,
 );
 
 function ChangedFile({
@@ -174,6 +175,7 @@ function ChangedFile({
   viewed,
   onViewed,
   bulk,
+  reveal,
 }: {
   pr: PullRequestDetail;
   file: PrFile;
@@ -181,23 +183,38 @@ function ChangedFile({
   onViewed: (viewed: boolean) => void;
   /** The last Expand all or Collapse all; each press is a new object, so pressing one twice applies it twice. */
   bulk: { open: boolean } | null;
+  /** The last jump to a thread of this file from the Comments menu; each jump is a new object. */
+  reveal: { file: string; thread: string } | null;
 }) {
   const at = `${pr.repo_id}#${pr.number}.${file.name}`;
   const section = useRef<HTMLElement>(null);
-  const near = useNearScreen(section, file.lines.length < LAZY_LINES);
+  // A jump draws the lines at once, so the thread it names exists to scroll to.
+  const [jump, setJump] = useState<string | null>(null);
+  const near = useNearScreen(section, file.lines.length < LAZY_LINES) || jump !== null;
   const [open, setOpen] = useStored(`workspace.pr-file-open.${at}`, z.boolean(), !viewed);
   useEffect(() => {
     if (bulk) setOpen(bulk.open);
   }, [bulk, setOpen]);
+  useEffect(() => {
+    if (reveal?.file !== file.name) return;
+    setOpen(true);
+    setJump(reveal.thread);
+  }, [reveal, file.name, setOpen]);
+  useEffect(() => {
+    if (jump === null || !open) return;
+    section.current?.querySelector(`[data-thread="${CSS.escape(jump)}"]`)?.scrollIntoView({ block: 'center' });
+    setJump(null);
+  }, [jump, open]);
   const [split, setSplit] = useStored(`workspace.pr-file-split.${at}`, z.boolean(), false);
   const [full, setFull] = useStored(`workspace.pr-file-full.${at}`, z.boolean(), false);
   const whole = usePrFile(pr.repo_id, pr.number, file.name, pr.head_sha, full);
   const post = usePostComment(pr.repo_id, pr.number);
   /** The new-side line with an open comment box, if any. */
   const [drafting, setDrafting] = useStored(`workspace.pr-drafting.${at}`, z.number().int().nullable(), null);
-  const roots = pr.comments.filter(
-    (comment) => comment.parent_id === null && comment.file_path === file.name && comment.line !== null,
-  );
+  const roots = pr.comments.filter((comment) => comment.parent_id === null && comment.file_path === file.name);
+  const onLines = newSideLines(file);
+  // A thread on a line the diff no longer holds, or on the whole file, sits under the diff.
+  const loose = roots.filter((root) => root.line === null || !onLines.has(root.line));
   const lineComments: LineComments = {
     onAdd: (line) => {
       post.reset();
@@ -209,7 +226,7 @@ function ChangedFile({
       return (
         <>
           {here.map((root) => (
-            <Thread key={root.id} pr={pr} root={root} showPlace={false} />
+            <Thread key={root.id} pr={pr} root={root} showCode={false} />
           ))}
           {drafting === line && (
             <CommentComposer
@@ -274,7 +291,7 @@ function ChangedFile({
         )}
         {roots.length > 0 && (
           <span
-            title={`${roots.length} comment ${roots.length === 1 ? 'thread' : 'threads'} on lines of this file. Open the file to read them.`}
+            title={`${roots.length} comment ${roots.length === 1 ? 'thread' : 'threads'} on this file. Open the file to read them.`}
             className="flex flex-none items-center gap-1 rounded-full bg-diff-hunk px-1.75 py-px font-body text-xs font-semibold text-diff-hunk-text"
           >
             <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden>
@@ -341,6 +358,13 @@ function ChangedFile({
         ) : (
           <DiffLines lines={file.lines} comments={lineComments} />
         ))}
+      {open && loose.length > 0 && (
+        <div className="flex flex-col gap-2 border-t border-divider bg-surface px-3 py-2.5">
+          {loose.map((root) => (
+            <Thread key={root.id} pr={pr} root={root} />
+          ))}
+        </div>
+      )}
     </section>
   );
 }

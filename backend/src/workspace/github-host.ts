@@ -27,7 +27,7 @@ const PR_FIELDS = `
   number title url body state author { login } headRefName baseRefName headRefOid additions deletions createdAt
   mergedAt reviewDecision comments { totalCount }
   latestReviews(first: 30) { nodes { state author { login } } }
-  reviewThreads(first: 100) { nodes { id isResolved comments(first: 1) { totalCount nodes { databaseId } } } }
+  reviewThreads(first: 100) { nodes { id isResolved isOutdated comments(first: 1) { totalCount nodes { databaseId } } } }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`;
 
 const nodeSchema = z.object({
@@ -54,6 +54,7 @@ const nodeSchema = z.object({
       z.object({
         id: z.string(),
         isResolved: z.boolean(),
+        isOutdated: z.boolean(),
         comments: z.object({
           totalCount: z.number().int(),
           nodes: z.array(z.object({ databaseId: z.number().int().nullable() })),
@@ -107,8 +108,29 @@ const restCommentSchema = z.object({
   path: z.string().optional(),
   line: z.number().int().nullish(),
   original_line: z.number().int().nullish(),
+  diff_hunk: z.string().nullish(),
   in_reply_to_id: z.number().int().nullish(),
 });
+
+/** A review comment as the console reads it; `thread` is its GraphQL review thread, known for a root read with the pull request. */
+export function toReviewComment(
+  comment: z.infer<typeof restCommentSchema>,
+  thread?: { resolved: boolean; outdated: boolean },
+): HostComment {
+  const reply = comment.in_reply_to_id != null;
+  return {
+    id: String(comment.id),
+    parent_id: reply ? String(comment.in_reply_to_id) : null,
+    author: comment.user?.login ?? 'ghost',
+    body: comment.body,
+    file_path: comment.path ?? null,
+    line: comment.line ?? comment.original_line ?? null,
+    resolved: thread?.resolved ?? false,
+    outdated: reply ? null : (thread?.outdated ?? null),
+    hunk: reply ? null : (comment.diff_hunk ?? null),
+    created_at: comment.created_at,
+  };
+}
 
 const STATES: Record<PrState, string> = {
   [PrState.Open]: 'OPEN',
@@ -233,25 +255,16 @@ export class GithubHost implements GitHostAdapter {
     ]);
     const node = z.object({ repository: z.object({ pullRequest: nodeSchema.and(historySchema) }) }).parse(graph)
       .repository.pullRequest;
-    const resolved = new Map(
-      node.reviewThreads.nodes.map((thread) => [String(thread.comments.nodes[0]?.databaseId), thread.isResolved]),
+    const threads = new Map(
+      node.reviewThreads.nodes.map((thread) => [
+        String(thread.comments.nodes[0]?.databaseId),
+        { resolved: thread.isResolved, outdated: thread.isOutdated },
+      ]),
     );
     const reviewComments = z
       .array(restCommentSchema)
       .parse(review)
-      .map((comment): HostComment => {
-        const id = String(comment.id);
-        return {
-          id,
-          parent_id: comment.in_reply_to_id == null ? null : String(comment.in_reply_to_id),
-          author: comment.user?.login ?? 'ghost',
-          body: comment.body,
-          file_path: comment.path ?? null,
-          line: comment.line ?? comment.original_line ?? null,
-          resolved: resolved.get(id) ?? false,
-          created_at: comment.created_at,
-        };
-      });
+      .map((comment) => toReviewComment(comment, threads.get(String(comment.id))));
     const issueComments = z
       .array(restCommentSchema)
       .parse(issue)
@@ -264,6 +277,8 @@ export class GithubHost implements GitHostAdapter {
           file_path: null,
           line: null,
           resolved: false,
+          outdated: null,
+          hunk: null,
           created_at: comment.created_at,
         }),
       );
@@ -312,20 +327,12 @@ export class GithubHost implements GitHostAdapter {
         file_path: null,
         line: null,
         resolved: false,
+        outdated: null,
+        hunk: null,
         created_at: parsed.created_at,
       };
     }
-    const parsed = restCommentSchema.parse(out);
-    return {
-      id: String(parsed.id),
-      parent_id: parsed.in_reply_to_id == null ? null : String(parsed.in_reply_to_id),
-      author: parsed.user?.login ?? 'ghost',
-      body: parsed.body,
-      file_path: parsed.path ?? null,
-      line: parsed.line ?? parsed.original_line ?? null,
-      resolved: false,
-      created_at: parsed.created_at,
-    };
+    return toReviewComment(restCommentSchema.parse(out));
   }
 
   async setResolved(slug: string, number: number, commentId: string, resolved: boolean): Promise<void> {

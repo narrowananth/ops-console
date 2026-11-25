@@ -105,6 +105,8 @@ async function start(author = 'octo-operator'): Promise<Ctx> {
       file_path: 'src/app.ts',
       line: 1,
       resolved: false,
+      outdated: null,
+      hunk: null,
       created_at: at(1),
     },
     {
@@ -115,6 +117,8 @@ async function start(author = 'octo-operator'): Promise<Ctx> {
       file_path: 'src/app.ts',
       line: 1,
       resolved: false,
+      outdated: null,
+      hunk: null,
       created_at: at(2),
     },
     {
@@ -125,6 +129,8 @@ async function start(author = 'octo-operator'): Promise<Ctx> {
       file_path: 'src/app.ts',
       line: 1,
       resolved: false,
+      outdated: null,
+      hunk: null,
       created_at: at(3),
     },
     {
@@ -135,6 +141,8 @@ async function start(author = 'octo-operator'): Promise<Ctx> {
       file_path: null,
       line: null,
       resolved: false,
+      outdated: null,
+      hunk: null,
       created_at: at(4),
     },
   ]);
@@ -630,6 +638,8 @@ describe('Check replies', () => {
         file_path: 'src/app.ts',
         line: 1,
         resolved: false,
+        outdated: null,
+        hunk: null,
         created_at: '2026-11-01T10:05:00.000Z',
       },
     ]);

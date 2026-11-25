@@ -179,7 +179,7 @@ Migration: the dropped tables and every `playbook_steps` row of a dropped job ar
 
 | Status | Error code          | When                                                                                  |
 | ------ | ------------------- | ------------------------------------------------------------------------------------- |
-| 400    | `validation_failed` | No thread ticked for Address comments, a ticked comment that is not the start of an unresolved thread, or `comment_ids` on another action |
+| 400    | `validation_failed` | No thread ticked for Address comments, a ticked comment that is not the start of an unresolved thread, or `comment_ids` on `review`, or on Check replies one that is not an unresolved thread with a reply to check |
 | 404    | `not_found`         | No such pull request or comment                                                       |
 | 409    | `session_busy`      | An unsubmitted Session of this action exists for the pull request                     |
 | 409    | `invalid_state`     | Pull request merged or closed; no thread with a reply to check; the head commit already has an Agent Review |
@@ -198,7 +198,7 @@ Body:
 }
 ```
 
-`comment_ids` is required for `address_comments` (at least one) and refused for the others. `note` is allowed for `review` only. 201 `Session`, already running its opening turn.
+`comment_ids` is required for `address_comments` (at least one), optional for `check_replies` and refused for `review`. `note` is allowed for `review` only. 201 `Session`, already running its opening turn.
 
 Removed: `POST .../agent-reviews`, `POST .../comment-passes`, `POST .../reply-check-passes`, `POST .../reply-checks` and the three `.../retry` routes.
 

@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workspace: pull request page in the Bitbucket style</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg:#f3f2f2; --surface:#ebe9e8; --card:#fbfafa; --text:#201e1d; --accent:#ec3013;
+    --line:rgba(32,30,29,.11); --divider:rgba(32,30,29,.18);
+    --ok:#2f7d3b; --warn:#b26b00; --bad:#b4210e;
+    --n200:#eae7e7; --n300:#d7d3d3; --n500:#9b9797; --n600:#7d7979; --n700:#605d5d;
+    --a100:#fff2ef; --a200:#ffe0d9;
+    --add:#e7f5ea; --addb:#c6e9cf; --addt:#1d6b30; --del:#fdeceb; --delb:#f9cdc7; --delt:#a3200d; --hunk:#e9f0fb; --hunkt:#3d5f92;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#dedbda; color:var(--text); font:13px/1.45 "Archivo",system-ui,sans-serif; padding:32px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .lede { color:var(--n700); margin:0 0 28px; max-width:1100px; }
+  .variant { margin-bottom:48px; }
+  .variant > h2 { font-size:16px; margin:0 0 2px; }
+  .variant > .why { color:var(--n700); margin:0 0 10px; max-width:1100px; }
+  .frame { width:1280px; height:780px; background:var(--bg); border:1px solid var(--divider); border-radius:10px; display:flex; overflow:hidden; position:relative; box-shadow:0 6px 24px rgba(0,0,0,.08); }
+  .mono { font-family:var(--mono); }
+  button { font:inherit; color:inherit; }
+  .sp { flex:1; }
+  .sub { color:var(--n600); font-size:12px; }
+
+  /* app nav */
+  .app { width:196px; flex:none; border-right:1px solid var(--line); display:flex; flex-direction:column; gap:2px; padding:12px 10px; }
+  .app .logo { width:28px; height:28px; border-radius:8px; background:var(--accent); margin:0 0 10px 4px; }
+  .app .g { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--n600); padding:10px 8px 3px; }
+  .app .it { padding:6px 10px; border-radius:9px; color:var(--n700); display:flex; gap:8px; align-items:center; }
+  .app .it.on { background:var(--card); color:var(--text); font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,.12); }
+  .app .it .bd { margin-left:auto; background:var(--accent); color:#fff; border-radius:99px; font:600 10px var(--mono); padding:0 6px; }
+  .app .it.new { outline:2px dashed var(--accent); outline-offset:1px; }
+  .app .it.gone { text-decoration:line-through; opacity:.5; }
+  .rail1 { width:52px; flex:none; border-right:1px solid var(--line); display:flex; flex-direction:column; align-items:center; gap:8px; padding:12px 0; }
+  .rail1 i { width:32px; height:32px; border-radius:9px; display:grid; place-items:center; font-style:normal; color:var(--n600); }
+  .rail1 i.on { background:var(--card); color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.12); }
+  .rail1 .logo { width:28px; height:28px; border-radius:8px; background:var(--accent); margin-bottom:6px; }
+
+  .dot { width:8px; height:8px; border-radius:50%; flex:none; display:inline-block; }
+  .d-need { background:var(--accent); } .d-run { background:var(--ok); } .d-idle { background:var(--n300); }
+  .chip { display:inline-flex; align-items:center; gap:4px; padding:1px 8px; border-radius:99px; background:var(--n200); font-size:11px; color:var(--n700); white-space:nowrap; }
+  .chip.need { background:var(--a200); color:#9b1f0a; } .chip.ok { background:#e3f1e5; color:var(--ok); } .chip.warn { background:#fbeccd; color:var(--warn); } .chip.bad { background:var(--a200); color:var(--bad); }
+  .chip.out { background:#fbeccd; color:var(--warn); }
+  .btn { border:1px solid var(--line); background:var(--card); border-radius:9px; padding:6px 12px; cursor:pointer; white-space:nowrap; }
+  .btn.pri { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  .btn.off { opacity:.45; cursor:not-allowed; }
+  .btn.sm { padding:3px 9px; font-size:12px; border-radius:8px; }
+  .btn.ghost { background:transparent; }
+  .agent { border-color:var(--a200); background:var(--a100); color:#9b1f0a; }
+  .add { color:var(--addt); } .del { color:var(--delt); }
+  .st { font-size:11px; display:inline-flex; gap:3px; align-items:center; }
+  .st.ok { color:var(--ok); } .st.bad { color:var(--bad); } .st.mute { color:var(--n600); }
+
+  /* list pane */
+  .list { width:290px; flex:none; border-right:1px solid var(--line); display:flex; flex-direction:column; }
+  .list .top { padding:14px 12px 8px; display:flex; flex-direction:column; gap:8px; }
+  .list h4 { margin:0; font-size:15px; }
+  .search { display:flex; align-items:center; gap:6px; border:1px solid var(--line); background:var(--card); border-radius:9px; padding:6px 10px; color:var(--n500); }
+  .filters { display:flex; gap:6px; flex-wrap:wrap; }
+  .filters .chip { padding:2px 9px; background:transparent; border:1px solid var(--line); }
+  .filters .chip.on { background:var(--text); color:#fff; border-color:var(--text); }
+  .grp { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--n600); padding:10px 14px 4px; display:flex; }
+  .grp em { font-style:normal; margin-left:auto; font-family:var(--mono); }
+  .row { padding:8px 12px; border-radius:10px; margin:0 6px; }
+  .row.sel { background:var(--card); box-shadow:0 1px 2px rgba(0,0,0,.1); }
+  .row .t { display:flex; gap:8px; align-items:center; font-weight:600; }
+  .row .t .n { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+  .row .m { display:flex; gap:6px; align-items:center; margin:3px 0 0 16px; color:var(--n600); font-size:12px; white-space:nowrap; overflow:hidden; }
+
+  /* PR page */
+  .detail { flex:1; min-width:0; display:flex; flex-direction:column; }
+  .head { padding:16px 24px 0; display:flex; flex-direction:column; gap:10px; border-bottom:1px solid var(--line); }
+  .head h2 { margin:0; font-size:19px; }
+  .head h2 span { color:var(--n600); font-weight:400; }
+  .meta { display:flex; gap:8px; align-items:center; flex-wrap:wrap; color:var(--n700); }
+  .meta .br { font-family:var(--mono); background:var(--n200); border-radius:6px; padding:1px 7px; }
+  .tabs { display:flex; width:max-content; gap:4px; background:var(--n200); border-radius:12px; padding:4px; margin-bottom:12px; }
+  .tabs b { display:flex; gap:7px; align-items:center; font-weight:600; color:var(--n700); padding:5px 14px; border-radius:9px; }
+  .tabs b.on { background:var(--card); color:var(--text); box-shadow:0 1px 3px rgba(0,0,0,.15); }
+  .tabs b em { font:600 10px var(--mono); background:var(--n300); border-radius:99px; padding:0 6px; font-style:normal; }
+  .body { flex:1; min-height:0; display:flex; gap:20px; overflow:hidden; }
+  .main { flex:1; min-width:0; padding:16px 0 16px 24px; display:flex; flex-direction:column; gap:14px; overflow:hidden; }
+  .side { width:260px; flex:none; padding:12px 18px 0 4px; display:flex; flex-direction:column; gap:0; }
+  .side section { border-bottom:1px solid var(--line); padding:10px 0; }
+  .side h6 { margin:0 0 6px; font-size:13px; display:flex; gap:6px; align-items:center; }
+  .side .row2 { display:flex; gap:6px; align-items:center; padding:2px 0 2px 16px; font-size:12px; color:var(--n700); }
+  .hidden-note { position:absolute; right:14px; top:10px; background:var(--text); color:#fff; border-radius:8px; padding:4px 10px; font-size:11px; }
+
+  /* activity */
+  .act-h { display:flex; gap:10px; align-items:center; }
+  .act-h h3 { margin:0; font-size:14px; }
+  .sel { border:1px solid var(--line); background:var(--card); border-radius:9px; padding:4px 10px; display:inline-flex; gap:6px; align-items:center; }
+  .sel.open { border-color:var(--accent); box-shadow:0 0 0 3px var(--a100); }
+  .composer { border:1px solid var(--line); background:var(--card); border-radius:10px; padding:9px 12px; color:var(--n500); }
+  .day { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--n600); display:flex; align-items:center; gap:10px; }
+  .day::after { content:""; flex:1; height:1px; background:var(--line); }
+  .ev { display:flex; gap:10px; align-items:flex-start; }
+  .av { width:26px; height:26px; border-radius:50%; background:#cfe0f7; color:#2b4f86; display:grid; place-items:center; font:700 10px var(--mono); flex:none; }
+  .av.ag { background:var(--a200); color:#9b1f0a; }
+  .av.sm { width:22px; height:22px; font-size:9px; }
+  .ev .tx { padding-top:3px; color:var(--n700); }
+  .ev .tx b { color:var(--text); }
+
+  .thread { border:1px solid var(--line); background:var(--card); border-radius:12px; overflow:hidden; }
+  .thread.resolved { opacity:.78; }
+  .thread .fh { display:flex; gap:8px; align-items:center; padding:7px 12px; background:var(--surface); border-bottom:1px solid var(--line); }
+  .thread .fh .p { font-family:var(--mono); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .code { font:12px/1.5 var(--mono); border-bottom:1px solid var(--line); }
+  .code div { display:flex; padding:0 12px 0 0; white-space:pre; }
+  .code .ln { width:44px; text-align:right; padding-right:10px; color:var(--n500); flex:none; user-select:none; }
+  .code .a { background:var(--add); } .code .d { background:var(--del); } .code .h { background:var(--hunk); color:var(--hunkt); }
+  .code .hl { box-shadow:inset 3px 0 0 var(--accent); }
+  .cm { padding:10px 12px; display:flex; gap:10px; }
+  .cm + .cm { border-top:1px solid var(--line); }
+  .cm .b { flex:1; min-width:0; }
+  .cm .who { display:flex; gap:8px; align-items:center; margin-bottom:2px; }
+  .cm .who b { font-weight:600; }
+  .cm p { margin:0; color:#2c2928; }
+  .cm code { background:var(--n200); border-radius:5px; padding:0 4px; font:12px var(--mono); }
+  .tact { display:flex; gap:6px; align-items:center; padding:8px 12px 10px 48px; flex-wrap:wrap; }
+  .tact .div { width:1px; height:18px; background:var(--divider); margin:0 4px; }
+  .tact .reply { flex:1; min-width:140px; border:1px solid var(--line); border-radius:8px; padding:3px 10px; color:var(--n500); background:var(--bg); }
+  .more { color:var(--n600); border:1px solid var(--line); border-radius:8px; padding:3px 9px; }
+
+  /* files changed */
+  .toolbar { display:flex; gap:10px; align-items:center; padding:10px 24px; border-bottom:1px solid var(--line); position:relative; }
+  .tree { width:270px; flex:none; border-right:1px solid var(--line); padding:8px 6px; overflow:hidden; font-size:12.5px; }
+  .tree .f { display:flex; gap:6px; align-items:center; padding:3px 8px; border-radius:7px; white-space:nowrap; }
+  .tree .f.on { background:var(--card); box-shadow:0 1px 2px rgba(0,0,0,.1); font-weight:600; }
+  .tree .f.d { color:var(--n600); }
+  .tree .f .c { margin-left:auto; display:flex; gap:6px; font:11px var(--mono); }
+  .tree .f .cc { font:600 10px var(--mono); background:var(--a200); color:#9b1f0a; border-radius:99px; padding:0 6px; }
+  .fileview { flex:1; min-width:0; padding:14px 18px; display:flex; flex-direction:column; gap:12px; overflow:hidden; }
+  .filebox { border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--card); }
+  .filebox .fh { display:flex; gap:10px; align-items:center; padding:7px 12px; background:var(--surface); }
+  .menu { position:absolute; left:24px; top:46px; width:380px; background:var(--card); border:1px solid var(--divider); border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.18); z-index:3; overflow:hidden; }
+  .menu .sec { display:flex; align-items:center; padding:9px 14px; font-weight:600; color:var(--n700); background:var(--surface); border-bottom:1px solid var(--line); }
+  .menu .sec em { font-style:normal; margin-left:auto; font:11px var(--mono); }
+  .menu .it { padding:9px 14px; border-bottom:1px solid var(--line); }
+  .menu .it .u { display:flex; gap:8px; align-items:center; }
+  .menu .it .s { color:var(--n600); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .menu.sort { left:auto; width:190px; }
+  .menu.sort .it.on { background:var(--a100); font-weight:600; }
+
+  .sess { border:1px solid var(--line); background:var(--card); border-radius:9px; padding:5px 10px; display:flex; gap:8px; align-items:center; margin-top:6px; }
+  .note { position:absolute; background:#201e1d; color:#fff; border-radius:8px; padding:6px 10px; font-size:11.5px; max-width:260px; z-index:5; }
+  .legend { margin-top:10px; color:var(--n700); max-width:1200px; }
+  .legend li { margin:2px 0; }
+</style>
+</head>
+<body>
+<h1>Pull request page, Bitbucket style</h1>
+<p class="lede">Review sheet for the change set: one Session per pull request, Sessions and Pull requests as two sidebar pages, a threaded Activity with the code each comment is on, a Files changed tab with file tree, Comments and Sort menus and no right rail, and the two agent buttons on every thread. Names, repos and text are placeholders. Dashed outline marks what is new.</p>
+
+<!-- 1 -->
+<section class="variant">
+  <h2>1. Sidebar: Sessions and Pull requests are two pages</h2>
+  <p class="why">The Sessions / Pull requests switch inside Workspace goes. The app sidebar gets two items in Operate where Workspace was, each with its own list on the left and the same detail on the right. The Permissions item goes too (Connect group). The red badge on Sessions counts the ones that need you, as the folded strip's does today.</p>
+  <div class="frame">
+    <div class="app">
+      <div class="logo"></div>
+      <div class="g">Operate</div>
+      <div class="it">Monitor <span class="bd">3</span></div>
+      <div class="it new on">Sessions <span class="bd">1</span></div>
+      <div class="it new">Pull requests</div>
+      <div class="it">Dev tools</div>
+      <div class="g">Connect</div>
+      <div class="it">Integrations</div>
+      <div class="it">Connections</div>
+      <div class="it">Repos</div>
+      <div class="it">Setup agent</div>
+      <div class="it gone">Permissions</div>
+      <div class="g">Claude</div>
+      <div class="it">Accounts &amp; Usage</div>
+      <div class="it">Agent runs</div>
+      <div class="it">Playbooks</div>
+      <div class="it">Skills</div>
+    </div>
+    <div class="list">
+      <div class="top">
+        <h4>Sessions</h4>
+        <div style="display:flex;gap:8px"><div class="search sp">⌕ Search Sessions</div><span class="btn pri">+ New</span></div>
+        <div class="filters"><span class="chip on">All</span><span class="chip">Needs you</span><span class="chip">Running</span><span class="chip">All Repos ▾</span></div>
+      </div>
+      <div class="grp">Needs you <em>1</em></div>
+      <div class="row"><div class="t"><span class="dot d-need"></span><span class="n">Address comments #89</span></div><div class="m">backend · approval · 0m</div></div>
+      <div class="grp">Idle <em>16</em></div>
+      <div class="row sel"><div class="t"><span class="dot d-idle"></span><span class="n">Content management</span></div><div class="m">backend · PR 87 · Sonnet</div></div>
+      <div class="row"><div class="t"><span class="dot d-idle"></span><span class="n">Channel credentials to Parameter Store</span></div><div class="m">backend · PR 89 · Sonnet</div></div>
+    </div>
+    <div class="detail" style="display:grid;place-items:center;color:var(--n600)">Session conversation, as today</div>
+  </div>
+  <ul class="legend">
+    <li>Pull requests page: the pull request list as today (groups by next step, Mine / Others / All), the pull request page on the right.</li>
+    <li>A link to a Session or a pull request opens the matching page. The address keeps <span class="mono">?session=</span> and <span class="mono">?pr=</span>.</li>
+    <li>The folded strip of the list pane stays on both pages.</li>
+  </ul>
+</section>
+
+<!-- 2 -->
+<section class="variant">
+  <h2>2. Overview: Activity as threads with their code</h2>
+  <p class="why">Each comment thread is one card: file and line on top, the code lines it is on (the diff hunk, the line marked), then the comments in order, then the actions. General comments have no code block. Events (pushed a commit, edited the description, agent review) sit between the threads in time order with the day as a divider. The rail stays here.</p>
+  <div class="frame">
+    <div class="rail1"><div class="logo"></div><i>◔</i><i class="on">⇄</i><i>▦</i></div>
+    <div class="list" style="width:250px">
+      <div class="top"><h4>Pull requests</h4><div class="search">⌕ Search</div></div>
+      <div class="grp">Changes requested <em>1</em></div>
+      <div class="row sel"><div class="t"><span class="dot d-need"></span><span class="n">Tenant: hold Channel credentials…</span></div><div class="m">#89 · backend · agent</div></div>
+      <div class="grp">Waiting on review <em>2</em></div>
+      <div class="row"><div class="t"><span class="dot d-idle"></span><span class="n">Campaign: add the service</span></div><div class="m">#87 · backend</div></div>
+    </div>
+    <div class="detail">
+      <div class="head">
+        <h2><span>#89</span> Tenant: hold Channel credentials in Parameter Store</h2>
+        <div class="meta"><span class="br">channel-credentials-to-ssm</span> → <span class="br">main</span> · by Author A · opened 2h ago · <span class="add">+403</span> <span class="del">−322</span>
+          <span class="sp"></span><span class="btn">Agent Review</span><span class="btn off">Merge</span></div>
+        <div class="tabs"><b class="on">Overview</b><b>Files changed <em>19</em></b><b>Commits <em>2</em></b></div>
+      </div>
+      <div class="body">
+        <div class="main">
+          <div class="act-h"><h3>Activity</h3><span class="chip">3 open</span><span class="chip ok">6 resolved</span><span class="sp"></span><span class="sel">All activity ▾</span></div>
+          <div class="composer">What do you want to say?</div>
+
+          <div class="day">Today</div>
+          <div class="ev"><div class="av sm">AA</div><div class="tx"><b>Author A</b> updated the pull request with 1 commit <span class="mono">ec670e6</span> · 59 min ago</div></div>
+
+          <div class="thread">
+            <div class="fh"><span class="chip bad">open</span><span class="p">GLOSSARY.md · line 326</span><span class="sp"></span><span class="sub">Outdated: no</span></div>
+            <div class="code">
+              <div class="h"><span class="ln"></span>@@ -323,15 +323,16 @@ The outside service that delivers a Channel's messages</div>
+              <div class="d"><span class="ln">326</span>- The secret a Delivery provider needs to send, held in Secrets Manager</div>
+              <div class="a hl"><span class="ln">326</span>+ What a Delivery provider needs to authenticate a send, kept encrypted</div>
+              <div class="a"><span class="ln">327</span>+ the row. Typed per Delivery provider: `keyId`, `teamId`, `privateKey`</div>
+            </div>
+            <div class="cm"><div class="av">RR</div><div class="b"><div class="who"><b>Reviewer R</b><span class="sub">25/11 16:14</span></div><p>Same point: the Channel credential entry says "The secret a Delivery provider needs". Neither should name the store type in the term's wording.</p></div></div>
+            <div class="cm"><div class="av ag">AG</div><div class="b"><div class="who"><b>Author A</b><span class="chip need">agent</span><span class="sub">25/11 16:27</span></div><p>Done in <code>ec670e6</code>. Reworded <code>GLOSSARY.md</code> so neither entry names the store type.</p></div></div>
+            <div class="tact">
+              <span class="btn sm">Unresolve</span><span class="btn sm">Reply</span><span class="div"></span>
+              <span class="btn sm agent" title="Agent reads the replies in this thread and says whether each is fixed">✓ Check reply</span>
+              <span class="btn sm agent" title="Agent changes the code for this thread">✎ Address comment</span>
+              <span class="sp"></span><span class="more">⋯</span>
+            </div>
+          </div>
+
+          <div class="thread">
+            <div class="fh"><span class="chip bad">open</span><span class="p">services/tenant/…/ChannelSecretStore.java · line 31</span></div>
+            <div class="code">
+              <div class="h"><span class="ln"></span>@@ -28,6 +28,9 @@ final class ChannelSecretStore</div>
+              <div><span class="ln">30</span>  private final SsmClient ssm;</div>
+              <div class="a hl"><span class="ln">31</span>+ private static final String PREFIX = "/engage/";</div>
+            </div>
+            <div class="cm"><div class="av">RR</div><div class="b"><div class="who"><b>Reviewer R</b><span class="sub">25/11 16:14</span></div><p><code>prefix</code> is unused. Nothing asserts the real ARN shape.</p></div></div>
+            <div class="tact"><span class="btn sm">Resolve</span><span class="btn sm">Reply</span><span class="div"></span><span class="btn sm agent">✓ Check reply</span><span class="btn sm agent">✎ Address comment</span><span class="sp"></span><span class="more">⋯</span></div>
+          </div>
+
+          <div class="thread resolved">
+            <div class="fh"><span class="chip ok">resolved</span><span class="p">General comment</span><span class="sp"></span><span class="sub">folded: 2 comments</span></div>
+          </div>
+        </div>
+        <div class="side">
+          <section><h6>▾ Checks failed <span class="sp"></span><span class="st bad">✕</span></h6></section>
+          <section><h6>▾ 1 of 5 merge checks passed <span class="sp"></span><span class="st bad">✕</span></h6></section>
+          <section><h6>▾ 3 threads open · 6 resolved</h6><span class="btn" style="display:block;text-align:center">Address comments</span><span class="btn" style="display:block;text-align:center;margin-top:6px">Check replies · 2</span></section>
+          <section><h6>▾ Session on this pull request</h6><div class="sess">Pull request #89 · working</div><span class="btn off" style="display:block;text-align:center;margin-top:8px" title="A Session is already linked">New Session</span><div class="sub" style="margin-top:4px">Greyed out while the Session lives. Delete it and the button comes back.</div></section>
+        </div>
+      </div>
+    </div>
+  </div>
+  <ul class="legend">
+    <li><b>Check reply</b> and <b>Address comment</b> on a thread do what the rail's buttons do, for this thread alone, and post into the PR's one Session. They show on open threads. Address comment is hidden on a resolved thread, Check reply when the last comment is the agent's.</li>
+    <li>The rail's Address comments and Check replies stay as they are (all open threads at once).</li>
+    <li>A resolved thread folds to its header; click opens it. Unresolved first, then resolved, within the time order of the activity.</li>
+  </ul>
+</section>
+
+<!-- 3 -->
+<section class="variant">
+  <h2>3. Files changed: tree, Comments menu, Sort, and no rail</h2>
+  <p class="why">The right rail hides on Files changed so the diff gets the width; Overview and Commits bring it back. A file tree sits left of the diff. The bar above has a Comments menu (Unresolved and Resolved lists, each row a jump to its line) and Sort by File tree or Recent comments. "All changes" is not here.</p>
+  <div class="frame">
+    <div class="rail1"><div class="logo"></div><i>◔</i><i class="on">⇄</i><i>▦</i></div>
+    <div class="detail">
+      <div class="head">
+        <h2><span>#89</span> Tenant: hold Channel credentials in Parameter Store</h2>
+        <div class="meta"><span class="br">channel-credentials-to-ssm</span> → <span class="br">main</span> · by Author A · <span class="add">+403</span> <span class="del">−322</span><span class="sp"></span><span class="btn">Agent Review</span><span class="btn off">Merge</span></div>
+        <div class="tabs"><b>Overview</b><b class="on">Files changed <em>19</em></b><b>Commits <em>2</em></b></div>
+      </div>
+      <div class="toolbar">
+        <span class="sel open">Comments (3 unresolved) ▾</span>
+        <span class="sel">Sort by File tree ▾</span>
+        <span class="sp"></span><span class="sub">0 / 19 viewed</span>
+        <div class="menu">
+          <div class="sec">Unresolved Comments <em>3 ▴</em></div>
+          <div class="it"><div class="u"><div class="av sm">RR</div><b>Reviewer R</b><span class="sub">3h ago on GLOSSARY.md</span></div><div class="s">Same point: the Channel credential entry says "The secret a Delivery provider…</div></div>
+          <div class="it"><div class="u"><div class="av sm">RR</div><b>Reviewer R</b><span class="sub">3h ago on ChannelSecretStore.java</span></div><div class="s">prefix is unused. Nothing asserts the real ARN shape.</div></div>
+          <div class="it"><div class="u"><div class="av sm">RR</div><b>Reviewer R</b><span class="chip out">Outdated</span><span class="sub">3h ago on ADR 0027</span></div><div class="s">Drop "first design" from the Considered Options entry…</div></div>
+          <div class="sec">Resolved Comments <em>6 ▾</em></div>
+        </div>
+      </div>
+      <div class="body" style="gap:0">
+        <div class="tree">
+          <div class="f d">▾ docs</div>
+          <div class="f" style="padding-left:22px">ADR 0027.md <span class="c"><span class="add">+3</span><span class="del">−1</span></span></div>
+          <div class="f d">▾ services/tenant/src/main</div>
+          <div class="f" style="padding-left:22px">ChannelCredentials.java <span class="c"><span class="add">+31</span></span></div>
+          <div class="f" style="padding-left:22px">ChannelSecretStore.java <span class="cc">1</span><span class="c"><span class="add">+9</span><span class="del">−4</span></span></div>
+          <div class="f on">GLOSSARY.md <span class="cc">1</span><span class="c"><span class="add">+7</span><span class="del">−6</span></span></div>
+          <div class="f">CONTRIBUTING.md <span class="c"><span class="add">+1</span><span class="del">−1</span></span></div>
+        </div>
+        <div class="fileview">
+          <div class="filebox">
+            <div class="fh"><b class="mono">GLOSSARY.md</b><span class="sp"></span><span class="chip bad">1 comment</span><span class="add mono">+7</span><span class="del mono">−6</span><span class="btn sm">☐ Viewed</span></div>
+            <div class="code">
+              <div class="h"><span class="ln"></span>@@ -323,15 +323,16 @@</div>
+              <div><span class="ln">325</span>  **Channel credential**:</div>
+              <div class="d"><span class="ln">326</span>- The secret a Delivery provider needs to send, held in Secrets Manager</div>
+              <div class="a"><span class="ln">326</span>+ What a Delivery provider needs to authenticate a send, kept encrypted</div>
+            </div>
+            <div class="thread" style="border:0;border-radius:0">
+              <div class="cm"><div class="av">RR</div><div class="b"><div class="who"><b>Reviewer R</b><span class="sub">25/11 16:14</span></div><p>Same point: neither should name the store type in the term's wording.</p></div></div>
+              <div class="cm"><div class="av ag">AG</div><div class="b"><div class="who"><b>Author A</b><span class="chip need">agent</span></div><p>Done in <code>ec670e6</code>. Reworded so neither entry names the store type.</p></div></div>
+              <div class="tact"><span class="btn sm">Unresolve</span><span class="btn sm">Reply</span><span class="div"></span><span class="btn sm agent">✓ Check reply</span><span class="btn sm agent">✎ Address comment</span><span class="sp"></span><span class="more">⋯</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <ul class="legend">
+    <li>Sort by menu: <b>File tree</b> (folders, A to Z) or <b>Recent comments</b> (files with the newest comment first; files with none after).</li>
+    <li>Each Comments row jumps to its thread in the diff. A comment on a line the new commit moved shows <span class="chip out">Outdated</span>.</li>
+    <li>The tree shows a count chip for the unresolved threads in a file and the +/− of the file. Expand all, Collapse all and the viewed bar stay in the toolbar.</li>
+    <li>The inline thread has the same Resolve, Reply, Check reply and Address comment actions as in Activity.</li>
+  </ul>
+</section>
+
+</body>
+</html>

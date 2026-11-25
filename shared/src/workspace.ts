@@ -127,6 +127,10 @@ export const prCommentSchema = z.object({
   line: z.number().int().nullable(),
   /** Thread roots only; replies read `false`. */
   resolved: z.boolean(),
+  /** Thread roots only. The host's own flag that a later commit moved or removed the line; null when it does not say. */
+  outdated: z.boolean().nullable(),
+  /** Thread roots only. The diff hunk the comment is on, ending at its line; null when the host gives none. */
+  hunk: z.string().nullable(),
   created_at: z.string(),
   reply_count: z.number().int(),
 });
