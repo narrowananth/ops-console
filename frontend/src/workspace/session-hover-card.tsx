@@ -67,6 +67,7 @@ export function HoverCard({ card, children }: { card: (anchor: HTMLElement) => R
   const ref = useRef<HTMLSpanElement>(null);
   const timer = useRef<number | undefined>(undefined);
   const held = useRef(false);
+  const pointerOn = useRef(false);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const show = (delay: number) => {
     window.clearTimeout(timer.current);
@@ -91,6 +92,13 @@ export function HoverCard({ card, children }: { card: (anchor: HTMLElement) => R
     [hide],
   );
   useEffect(() => () => window.clearTimeout(timer.current), []);
+  // Unmounted under the pointer (a refetch emptied the list): no leave event comes, so the outer card is let go here.
+  useEffect(
+    () => () => {
+      if (pointerOn.current) outer?.release();
+    },
+    [outer],
+  );
   useEffect(() => {
     if (!anchor) return;
     const onKey = (event: KeyboardEvent) => event.key === 'Escape' && hide();
@@ -107,10 +115,12 @@ export function HoverCard({ card, children }: { card: (anchor: HTMLElement) => R
       ref={ref}
       className="contents"
       onPointerEnter={() => {
+        pointerOn.current = true;
         outer?.hold();
         show(SHOW_MS);
       }}
       onPointerLeave={() => {
+        pointerOn.current = false;
         hide();
         outer?.release();
       }}
