@@ -30,7 +30,6 @@ const MonitorView = load(() => import('../monitor/monitor-view'), 'MonitorView')
 const NewPlaybookButton = load(() => import('../playbooks/playbooks-view'), 'NewPlaybookButton');
 const PlaybooksView = load(() => import('../playbooks/playbooks-view'), 'PlaybooksView');
 const ReposTab = load(() => import('../repos/repos-tab'), 'ReposTab');
-const PermissionsTab = load(() => import('../setup/permissions-tab'), 'PermissionsTab');
 const SetupAgentTab = load(() => import('../setup/setup-agent-tab'), 'SetupAgentTab');
 const NewSkillButton = load(() => import('../skills/skills-view'), 'NewSkillButton');
 const SkillsView = load(() => import('../skills/skills-view'), 'SkillsView');
@@ -188,19 +187,7 @@ export function Shell() {
                 </Page>
               }
             />
-            <Route
-              path="/permissions"
-              element={
-                <Page
-                  title="Permissions"
-                  sub="What macOS lets Ops Console do, and what an agent run's commands can reach"
-                >
-                  <Loading>
-                    <PermissionsTab />
-                  </Loading>
-                </Page>
-              }
-            />
+            <Route path="/permissions" element={<Navigate to="/setup" replace />} />
             <Route
               path="/agents"
               element={

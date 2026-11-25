@@ -11,11 +11,11 @@ browser (127.0.0.1:4545)        operator's Mac
 │   requests, Dev tools  │              │  agent ──▶ Claude Agent SDK ──▶ MCP servers     │
 │ Connect: Integrations, │              │  workspace ──▶ git · gh · glab · bkt            │
 │   Connections, Repos,  │              │  monitor ──▶ pup · aws · Grafana · New Relic    │
-│   Setup agent,         │              │              · Log folder (OTLP files)          │
-│   Permissions          │              │  browser ──▶ Chrome, headless, one per Session  │
-│ Claude: Accounts &     │              │  processes · terminals ──▶ node-pty             │
-│   Usage, Agent runs,   │              │  connectors · mcp · connections ──▶ claude CLI  │
-│   Playbooks, Skills    │              │  health-watch · scheduler · updates ──▶ timers  │
+│   Setup agent          │              │              · Log folder (OTLP files)          │
+│ Claude: Accounts &     │              │  browser ──▶ Chrome, headless, one per Session  │
+│   Usage, Agent runs,   │              │  processes · terminals ──▶ node-pty             │
+│   Playbooks, Skills    │              │  connectors · mcp · connections ──▶ claude CLI  │
+│                        │              │  health-watch · scheduler · updates ──▶ timers  │
 │                        │              │  db ──▶ Drizzle ──▶ SQLite (state.db)           │
 │                        │              │  keychain ──▶ macOS Keychain                    │
 └────────────────────────┘              └─────────────────────────────────────────────────┘
@@ -49,8 +49,7 @@ loaded, or whose plist changed, is loaded again), so launchd starts the daemon o
 `ops-console start` writes a LaunchAgent plist (`RunAtLoad`, `KeepAlive`) that runs `current/Ops Console.app` on
 `current/app/main.js`, so launchd starts the daemon at login and again if it stops. The job runs as `ProcessType` `Interactive`, so the Chrome of a
 Session browser gets the priority of a foreground app. macOS lists it as Ops Console under App Background Activity in Login
-Items & Extensions; switched off there, it does not start at login. The Permissions page shows that as Start at login, read
-from the plist and `launchctl print-disabled`. The plist also sets the operator's `PATH` (so the daemon finds `claude`),
+Items & Extensions; switched off there, it does not start at login. `GET /terminals/start-at-login` reads that from the plist and `launchctl print-disabled`; no page shows it. The plist also sets the operator's `PATH` (so the daemon finds `claude`),
 `OPS_CONSOLE_DATA_DIR`, `UV_THREADPOOL_SIZE=16` and `NODE_COMPILE_CACHE` (`~/.ops-console/compile-cache`, cleared by the
 next install); `OPS_CONSOLE_PORT` at `start` goes into it too. The data folder is
 `~/Library/Application Support/ops-console` (`OPS_CONSOLE_DATA_DIR` overrides it) and holds `state.db`, `runtime.json` (pid,
@@ -141,7 +140,7 @@ agent Session.
 | `devtools` | `devtools` Sessions scoped to Connections; ties MCP calls to their Connection; the PROD-write rule; the instructions that make the agent hand over Results and a Comparison |
 | `updates` | The newest GitHub release, the version record (`update.json`), install through `install.sh`, auto-update, the wait for running agent runs |
 | `health-watch` | Checks of Connections, Connectors and MCP servers on a schedule per area (`health_checks`: every 30 minutes to 24 hours, or off; Connections 2 hours and Integrations 1 hour by default), two at a time, the operator's own check going first; every `connection.checked` kept in `health_checks` (a `connection.checked` of the same answer within 30 seconds is one row; 90 days kept); sends `health.changed` once when an item breaks or recovers; `GET /health-watch`, `POST /health-watch/:area/checks` |
-| `terminals` | node-pty terminals behind an authenticated WebSocket; the Setup agent, its MCP tools, local file, folder, URL and Keychain reads with secrets masked; the gates behind the Permissions page: Full Disk Access, Start at login, whether the Run sandbox works (`sandbox-exec`), the Keychain wait and handover state |
+| `terminals` | node-pty terminals behind an authenticated WebSocket; the Setup agent, its MCP tools, local file, folder, URL and Keychain reads with secrets masked; the gates behind the Setup agent page: Full Disk Access, whether the Run sandbox works (`sandbox-exec`), the Keychain wait and handover state; Start at login, which no page shows |
 
 `agent`, `playbooks`, `accounts` and `action-log` are one Nest module (`AgentModule`); `main.ts` lists the others.
 
@@ -159,7 +158,7 @@ agent Session.
 | `integrations` | Integrations page: Connectors and MCP Servers, each with its Connect, Cancel, Check and Disconnect, the sign-in hand-off pane, and one pane per log source (the Log folder picker, the CloudWatch profile, region and Log group pickers, the Loki data source picker, the New Relic Region, account picker and User API key field) |
 | `health` | The check strip, the problem banner and the history stripe at the top of Integrations and Connections, the failing and Recovered pills, and the interval picker |
 | `repos` | Repos page |
-| `setup` | Setup agent page with its xterm terminal, and the Permissions page: Full Disk Access, Start at login, Keychain, Run sandbox |
+| `setup` | Setup agent page: its xterm terminal, the Full Disk Access and Run sandbox lines, and a refused Keychain handover |
 | `playbooks` | Playbooks page: the overview of Triggers (each on its built-in or the operator's Playbook, chosen from a dropdown), New Playbook (Blank or Copy of a built-in), the Playbook as a flow on a canvas with a panel the operator resizes, Step blocks by drag, + or Alt and arrow keys, the Rules and Skills token meters, the Skills a Playbook holds; unsaved edits kept as a Remembered view; a job's Playbook steps and the Skills it was offered |
 | `skills` | Skills page: Discover first (Skill packs, Install and Uninstall, each pack's skills read-only, the Playbooks holding each) and Yours (Custom Skills and their editor, with New Skill); unsaved edits kept as a Remembered view |
 | `agents` | Accounts & Usage page (accounts, sign-in by link, the CLIProxy hub, the chime), Session transcript, model, effort and Access mode chips, Approval prompts, the question panel, stop run, Report rendering |
@@ -383,7 +382,6 @@ Where the build departs from `design/ops-console.html` on purpose:
   suggestions and nits.
 - **Tips** on every control, status and count whose words leave its meaning open, and a "?" beside such labels.
 - **Folding cards**: each card with a title folds to it, and stays folded for that kind of card.
-- **Permissions** page under Connect, with Start at login.
 - **Running tasks** tray in the sidebar: every agent run going with its subagents under it, and every run that ended unfinished until dismissed. Each shows how long it ran, links to its work, and pauses, stops, plays or retries from the tray.
 - **Updates**: a version line and panel, an update card and an "Updated to" notice, with Check now and auto-update.
 - **Claude account hub**: CLIProxy as the sign-in for agent runs, and adding an account by link.
@@ -412,7 +410,7 @@ Each diagram in `docs/diagrams/` is an HTML file with an inline SVG and a PNG of
 | `install-update-startup` | Install, start, update and recovery |
 | `homebrew-and-release` | A release tag through the release workflow to `brew install` |
 | `live-data` | REST, the WebSocket, the scheduler and start-up recovery |
-| `setup-and-permissions` | The Permissions page and the Setup agent |
+| `setup-and-permissions` | Full Disk Access, the Run sandbox and the Setup agent |
 | `connect-a-service` | Signing in to a Connector so the agent gets its tools |
 | `claude-accounts` | Claude accounts: sign-in, usage, Auto-switch and Smart usage |
 | `monitor-log-sources` | How a Scan reads Datadog, an OpenTelemetry folder, CloudWatch, Loki and New Relic |
