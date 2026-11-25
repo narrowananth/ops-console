@@ -249,7 +249,7 @@ function ReportPanel({
             <Link
               to={sessionPath(sessionId)}
               className="text-xs"
-              title="Open the Alert's Session in Workspace to read every agent turn"
+              title="Open the Alert's Session to read every agent turn"
             >
               Open the Session →
             </Link>
@@ -602,7 +602,7 @@ function FixProgress({ fix, onRetry, retrying }: { fix: Fix; onRetry: (skip: boo
             <Link
               to={sessionPath(fix.session_id)}
               className="text-xs"
-              title="Open the Alert's Session in Workspace to read every agent turn"
+              title="Open the Alert's Session to read every agent turn"
             >
               Open the Session →
             </Link>

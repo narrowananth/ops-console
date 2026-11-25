@@ -1,9 +1,9 @@
-/** The Workspace address of a Session. */
-export const sessionPath = (sessionId: string) => `/workspace?${new URLSearchParams({ session: sessionId })}`;
+/** The address of a Session on the Sessions page. */
+export const sessionPath = (sessionId: string) => `/sessions?${new URLSearchParams({ session: sessionId })}`;
 
-/** The Workspace address of a pull request in an imported Repo. */
+/** The address of a pull request in an imported Repo, on the Pull requests page. */
 export const pullRequestPath = (repoId: string, number: number) =>
-  `/workspace?${new URLSearchParams({ tab: 'pulls', pr: `${repoId}/${number}` })}`;
+  `/pull-requests?${new URLSearchParams({ pr: `${repoId}/${number}` })}`;
 
 /** The Monitor address of an Alert. */
 export const alertPath = (alertId: string) => `/monitor?${new URLSearchParams({ alert: alertId })}`;

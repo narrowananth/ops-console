@@ -108,7 +108,7 @@ async function open(page: Page, { session = {}, list = [], merged = [], closed =
       ? route.fulfill({ status: 502, json: { error: { code: 'git_host_down', message: 'The Git host is down.' } } })
       : route.fulfill({ json: { data: answer, meta: { synced_at: NOW, stale: false, next_cursor: null } } });
   });
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
   return asked;
 }
 
@@ -121,7 +121,7 @@ test('one pull request looks as the single row did: title, both links and the ch
   });
   const card = panel(page);
   await expect(card.getByText('Retry the order sync, part 5')).toBeVisible();
-  await expect(card.getByRole('link', { name: /^PR #5/ })).toHaveAttribute('href', /tab=pulls&pr=r1%2F5/);
+  await expect(card.getByRole('link', { name: /^PR #5/ })).toHaveAttribute('href', /\/pull-requests\?pr=r1%2F5$/);
   await expect(card.getByRole('link', { name: /#5 on host/ })).toHaveAttribute('href', url(5));
   await expect(card.getByText('checks failed')).toBeVisible();
   await expect(card.getByRole('button', { name: /Show \d+ more/ })).toHaveCount(0);

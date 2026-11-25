@@ -16,8 +16,8 @@ diagrams: [docs/architecture.md](docs/architecture.md), with the drawings in [do
 - **Monitor.** Read the failing requests of each Service from Datadog, an OpenTelemetry Log folder, CloudWatch logs,
   Loki or New Relic, one tab per source. Each kind of failure becomes an Alert with a severity and a Route. Verify an
   Alert in a scratch copy of your code, review the Report, and confirm it to start a Fix that ends in a pull request.
-- **Workspace.** Start Sessions with the agent in your Repos, each in its own git worktree. A Sessions inbox shows
-  which need you. The pull request cockpit lists pull requests across your Git hosts, with checks, threads, a conflict
+- **Sessions and Pull requests.** Start Sessions with the agent in your Repos, each in its own git worktree. The
+  Sessions page shows which need you. The Pull requests page lists pull requests across your Git hosts, with checks, threads, a conflict
   check and merge checks. Review with agent, Check replies and Address comments each open a Session on a pull request.
 - **Browser panel and Terminals.** A Session has a Chrome page you and the agent both drive, with Chrome's DevTools,
   element pick and Local servers, and a Terminals dock for shells and long-running processes.

@@ -19,7 +19,7 @@ An open Alert that no Scan has seen for 14 days is resolved by the console. A Ve
 
 A Playbook holds the rules and ordered steps the agent follows when a Trigger starts it, the Skills it holds, the branches Verify and Fix read from, and whether a Fix makes a Ticket.
 
-- **Triggers** are the places that start the agent: Verify and Fix in Monitor, and Review PR, Check reply, Address comments, Reply in thread and Session message in Workspace.
+- **Triggers** are the places that start the agent: Verify and Fix in Monitor, and Review PR, Check reply, Address comments, Reply in thread and Session message on the Sessions and Pull requests pages.
 - **Built-in Playbooks** run until you attach your own. They are read-only. New Playbook gives you an editable copy.
 - **Steps** can be marked scratch copy, so a step like running the tests happens away from your checkout.
 - **Skills** are instructions the agent can load. The console ships built-in skills, and you can add your own or use a project's.

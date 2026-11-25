@@ -1,5 +1,5 @@
 import { type ComponentType, lazy, type ReactNode, Suspense } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom';
 import { useHealthAlerts, useRunAlerts } from '../agent-runs/alerts';
 import { Empty } from '../components/ui/empty';
 import { useLiveEvents } from '../lib/live';
@@ -34,7 +34,8 @@ const PermissionsTab = load(() => import('../setup/permissions-tab'), 'Permissio
 const SetupAgentTab = load(() => import('../setup/setup-agent-tab'), 'SetupAgentTab');
 const NewSkillButton = load(() => import('../skills/skills-view'), 'NewSkillButton');
 const SkillsView = load(() => import('../skills/skills-view'), 'SkillsView');
-const WorkspaceView = load(() => import('../workspace/workspace-view'), 'WorkspaceView');
+const PullRequestsPage = load(() => import('../workspace/pull-requests-page'), 'PullRequestsPage');
+const SessionsPage = load(() => import('../workspace/sessions-page'), 'SessionsPage');
 
 /** A page's body while its code loads; the header's own buttons simply appear when theirs does. */
 function Loading({ children }: { children: ReactNode }) {
@@ -48,6 +49,15 @@ function Card({ children, wide }: { children: ReactNode; wide?: boolean }) {
       <div className="overflow-hidden rounded-xl border border-line bg-card shadow-sm">{children}</div>
     </PageColumn>
   );
+}
+
+/** An old `/workspace` link opens the page its `tab` named, with the Session or pull request it carried. */
+function OldWorkspaceAddress() {
+  const [params] = useSearchParams();
+  const pulls = params.get('tab') === 'pulls';
+  const item = params.get(pulls ? 'pr' : 'session');
+  const query = item === null ? '' : `?${new URLSearchParams({ [pulls ? 'pr' : 'session']: item })}`;
+  return <Navigate to={`${pulls ? '/pull-requests' : '/sessions'}${query}`} replace />;
 }
 
 export function Shell() {
@@ -75,15 +85,26 @@ export function Shell() {
               }
             />
             <Route
-              path="/workspace"
+              path="/sessions"
               element={
-                <Page title="Workspace" sub="Sessions in your Repos and their pull requests">
+                <Page title="Sessions" sub="Your conversations with the agent in your Repos">
                   <Loading>
-                    <WorkspaceView />
+                    <SessionsPage />
                   </Loading>
                 </Page>
               }
             />
+            <Route
+              path="/pull-requests"
+              element={
+                <Page title="Pull requests" sub="Open pull requests on your Git hosts">
+                  <Loading>
+                    <PullRequestsPage />
+                  </Loading>
+                </Page>
+              }
+            />
+            <Route path="/workspace" element={<OldWorkspaceAddress />} />
             <Route
               path="/agent-runs"
               element={

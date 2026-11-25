@@ -5,7 +5,8 @@ import { readStored, writeStored } from '../lib/remember';
 
 const PAGE_PATHS = [
   '/monitor',
-  '/workspace',
+  '/sessions',
+  '/pull-requests',
   '/devtools',
   '/integrations',
   '/connections',

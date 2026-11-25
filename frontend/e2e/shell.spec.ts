@@ -11,7 +11,8 @@ test('the URL from ops-console open signs in, hides the token and shows the shel
 
   const nav = page.getByRole('navigation');
   await expect(nav.getByRole('link', { name: 'Monitor' })).toBeVisible();
-  await expect(nav.getByRole('link', { name: 'Workspace' })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Sessions' })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Pull requests' })).toBeVisible();
   await expect(nav.getByRole('link', { name: 'Dev tools' })).toBeVisible();
   expect(page.url()).not.toContain(daemon.token);
   expect(page.url()).not.toContain('#');
@@ -32,7 +33,8 @@ test('the sidebar holds every page, and the Setup agent buttons open it', async 
   const nav = page.getByRole('navigation');
   await expect(nav.getByRole('link')).toHaveText([
     'Monitor',
-    'Workspace',
+    'Sessions',
+    'Pull requests',
     'Dev tools',
     'Integrations',
     'Connections',
@@ -344,8 +346,8 @@ test('slashdocs asks for its server, saves it, then connects through its CLI', a
 });
 
 test('a client route loads the shell on a fresh page', async ({ page }) => {
-  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
-  await expect(page.getByRole('link', { name: 'Workspace' })).toHaveClass(/font-extrabold/);
+  await page.goto(`${daemon.url}/pull-requests#token=${daemon.token}`);
+  await expect(page.getByRole('link', { name: 'Pull requests' })).toHaveClass(/font-extrabold/);
 });
 
 test('without a token the shell asks to sign in', async ({ page }) => {
@@ -365,10 +367,9 @@ test('a daemon that does not answer says to start it', async ({ page }) => {
 });
 
 test('picks stay through page switches, reloads and reopening the console', async ({ page, context }) => {
-  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/pull-requests?pr=r1%2F7#token=${daemon.token}`);
   const nav = page.getByRole('navigation');
-  await page.getByRole('tab', { name: 'Pull requests' }).click();
-  await expect(page).toHaveURL(/\/workspace\?tab=pulls$/);
+  await expect(page).toHaveURL(/\/pull-requests\?pr=r1%2F7$/);
 
   await nav.getByRole('link', { name: 'Integrations' }).click();
   await page
@@ -379,8 +380,8 @@ test('picks stay through page switches, reloads and reopening the console', asyn
   await expect(page).toHaveURL(/\/integrations\?open=connector%3Ashopify$/);
 
   // The sidebar brings each page back as it was left.
-  await nav.getByRole('link', { name: 'Workspace' }).click();
-  await expect(page.getByRole('tab', { name: 'Pull requests' })).toHaveAttribute('aria-selected', 'true');
+  await nav.getByRole('link', { name: 'Pull requests' }).click();
+  await expect(page).toHaveURL(/\/pull-requests\?pr=r1%2F7$/);
   await nav.getByRole('link', { name: 'Integrations' }).click();
   await expect(page.getByText('Connect Shopify to Ops Console')).toBeVisible();
 
@@ -396,7 +397,7 @@ test('picks stay through page switches, reloads and reopening the console', asyn
 });
 
 test('a stored choice that no longer reads falls back to the default', async ({ page }) => {
-  await page.goto(`${daemon.url}/workspace?tab=pulls#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/pull-requests#token=${daemon.token}`);
   const whose = page.getByRole('group', { name: 'Whose pull requests' });
   await whose.getByRole('button', { name: 'All', exact: true }).click();
   await page.reload();
@@ -451,7 +452,7 @@ test('a control explains itself on hover and on keyboard focus, then keeps its t
   await expect(tip).toHaveCount(0);
 });
 
-test('the Workspace has no page bar: the Session header is the top bar and the transcript sits right under it', async ({
+test('the Sessions page has no page bar: the Session header is the top bar and the transcript sits right under it', async ({
   page,
 }) => {
   const now = '2026-10-31T10:00:00.000Z';
@@ -509,14 +510,14 @@ test('the Workspace has no page bar: the Session header is the top bar and the t
   };
   await page.route(/\/api\/sessions\?kind=repo/, (route) => route.fulfill({ json: { data: [session] } }));
   await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const sessionHeader = page.locator('header').filter({ has: page.getByRole('heading', { name: 'fresh start' }) });
   await expect(sessionHeader).toBeVisible();
   const box = await sessionHeader.boundingBox();
   expect(box?.y).toBeLessThan(60);
   // The page title stays for assistive tech and the heading outline.
-  await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toHaveCount(1);
+  await expect(page.getByRole('heading', { name: 'Sessions', level: 1 })).toHaveCount(1);
 });
 
 test('a page with an action gets one slim bar and keeps the action in it', async ({ page }) => {

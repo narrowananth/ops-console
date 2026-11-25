@@ -68,7 +68,7 @@ test('Sessions list by what needs you, then running, then idle; a long idle list
       session('s7', 'r2', 'check domain'),
     ],
   );
-  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions#token=${daemon.token}`);
 
   const needs = page.getByRole('region', { name: 'Needs you' });
   const running = page.getByRole('region', { name: 'Running' });
@@ -144,7 +144,7 @@ test("a Session row shows its pull requests and, on hover, a card with each one'
   await page.route(/\/api\/pull-requests\?repo_id=r1&state=closed/, (route) =>
     route.fulfill({ json: listed('closed', []) }),
   );
-  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions#token=${daemon.token}`);
 
   const row = page.getByRole('listitem').filter({ hasText: 'Spec: privacy docs' });
   await expect(row).toContainText('+2');
@@ -176,7 +176,7 @@ test('+ New picks a Repo and a branch, or no Repo, and starts a Session there', 
     started.push(route.request().postDataJSON());
     return route.fulfill({ json: { data: session('s9', 'r1', 'new one', 'idle', 'release') } });
   });
-  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions#token=${daemon.token}`);
 
   const branch = page.getByRole('button', { name: 'Branch for a new Session in analytics' });
   await expect(branch).toHaveCount(0);
@@ -218,7 +218,7 @@ test('+ New starts on a branch only origin has, or on a new branch typed into th
     started.push(route.request().postDataJSON());
     return route.fulfill({ json: { data: session('s9', 'r1', 'new one', 'idle', 'main') } });
   });
-  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions#token=${daemon.token}`);
 
   const branch = page.getByRole('button', { name: 'Branch for a new Session in analytics' });
   await page.getByRole('button', { name: '+ New' }).click();
@@ -250,8 +250,8 @@ test('the state chips, the Repo filter and a search narrow the list; a search ma
       session('s7', 'r2', 'check domain', 'idle', 'feature/dns'),
     ],
   );
-  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
-  const list = page.locator('aside').filter({ has: page.getByRole('tablist', { name: 'Workspace' }) });
+  await page.goto(`${daemon.url}/sessions#token=${daemon.token}`);
+  const list = page.locator('aside').filter({ has: page.getByRole('heading', { name: 'Sessions', level: 2 }) });
 
   const states = list.getByRole('group', { name: 'Session state' });
   await expect(states.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');
@@ -279,18 +279,18 @@ test('the state chips, the Repo filter and a search narrow the list; a search ma
   await expect(list.getByRole('listitem')).toHaveCount(4);
 });
 
-test('the tabs and search stay in view while the Sessions list scrolls', async ({ page }) => {
+test('the heading and search stay in view while the Sessions list scrolls', async ({ page }) => {
   const sessions = Array.from({ length: 30 }, (_, n) => session(`s${n}`, 'r1', `job ${n}`));
   await page.setViewportSize({ width: 1280, height: 600 });
   await repoRoutes(page, [repo('r1', 'analytics')], sessions);
-  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions#token=${daemon.token}`);
   const search = page.getByRole('searchbox', { name: 'Search Sessions' });
-  const tabs = page.getByRole('tablist', { name: 'Workspace' });
+  const heading = page.getByRole('heading', { name: 'Sessions', level: 2 });
   await page.getByRole('button', { name: 'Show 22 more' }).click();
   await expect(page.getByText('job 29', { exact: true })).toHaveCount(1);
 
   await page.getByText('job 29', { exact: true }).scrollIntoViewIfNeeded();
-  await expect(tabs).toBeInViewport();
+  await expect(heading).toBeInViewport();
   await expect(search).toBeInViewport();
 });
 
@@ -335,7 +335,7 @@ test('Stop ends a run waiting on the operator, and Delete waits until it has', a
     state = 'idle';
     return route.fulfill({ status: 204 });
   });
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const card = page.getByRole('complementary', { name: 'Session' });
   await expect(card.getByRole('button', { name: 'Delete' })).toBeDisabled();
@@ -391,7 +391,7 @@ test('every message the operator sent copies; the last one edits, reverts the fi
       },
     });
   });
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const mine = page.getByRole('listitem', { name: 'Your message' });
   await expect(mine).toHaveCount(2);
@@ -451,7 +451,7 @@ test('files picked, pasted or dropped on the message box upload, sit in the text
     }
     return route.fulfill({ json: { data: [] } });
   });
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const box = page.getByRole('textbox', { name: 'Message' });
   await page
@@ -540,7 +540,7 @@ test('every kind of file attaches as its own chip in the text; a file that fails
     }
     return route.fulfill({ json: { data: [] } });
   });
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const kinds: [string, string][] = [
     ['shot.png', 'image'],
@@ -635,7 +635,7 @@ test('a sent message shows its attached files as chips with their size', async (
       },
     }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
   const files = page.getByRole('listitem', { name: 'Your message' }).getByRole('list', { name: 'Attached files' });
   await expect(files.getByRole('listitem')).toHaveCount(2);
   await expect(files.locator('[data-file="clip.mp4"]')).toContainText('3 KB');
@@ -655,7 +655,7 @@ test('a long paste attaches as a .txt file, typing goes on, and a paste scrolls 
     return route.fulfill({ status: 201, json: { data: { name, path: '/data/attachments/s1/1.txt', size: 60000 } } });
   });
   await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const box = page.getByRole('textbox', { name: 'Message' });
   const paste = (text: string) =>
@@ -712,7 +712,7 @@ test('a pasted text card edits in a dialog, saves under the same name, and clear
     });
   });
   await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const box = page.getByRole('textbox', { name: 'Message' });
   await box.evaluate((element) => {
@@ -777,7 +777,7 @@ test('a file chip opens the file over the page, in the message box and in the co
   await page.route('**/api/sessions/s1/attachments/abc.log', (route) =>
     route.fulfill({ status: 200, contentType: 'text/plain', body: 'TypeError: boom' }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const message = page.getByRole('listitem', { name: 'Your message' });
   await expect(message).toContainText('see');
@@ -822,7 +822,7 @@ test('the Repos icon beside Attach opens other Repos to the Session, A to Z, wit
     patches.push(body);
     return route.fulfill({ json: { data: { ...session('s1', 'r1', 'engage platform'), ...body } } });
   });
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const chip = page.getByRole('button', { name: /^Repos:/ });
   await expect(chip).toHaveAccessibleName('Repos: this one');
@@ -864,7 +864,7 @@ async function routePatches(page: Page): Promise<unknown[]> {
 
 test('one pill holds Model, Effort and Access, and no row under the message box is left', async ({ page }) => {
   const patches = await routePatches(page);
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const pill = page.getByRole('button', { name: 'Model, effort and access' });
   await expect(pill).toHaveText('Opus 5.5 Medium');
@@ -914,7 +914,7 @@ test('one pill holds Model, Effort and Access, and no row under the message box 
 
 test('the Model popover works from the keyboard and gives the focus back', async ({ page }) => {
   const patches = await routePatches(page);
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const pill = page.getByRole('button', { name: 'Model, effort and access' });
   await pill.focus();
@@ -956,7 +956,7 @@ test('a Session opens at its newest message', async ({ page }) => {
   await page.route('**/api/sessions/s1/messages', (route) =>
     route.fulfill({ json: { data: Array.from({ length: 40 }, (_, n) => said(n)) } }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   await expect(page.getByText('message 39', { exact: true })).toBeInViewport();
   await expect(page.getByText('message 0', { exact: true })).not.toBeInViewport();
@@ -1021,7 +1021,7 @@ async function routeQueue(page: Page) {
 
 test('a queued message waits through Stop, and Send now sends it', async ({ page }) => {
   const daemonState = await routeQueue(page);
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const box = page.getByRole('textbox', { name: 'Message' });
   await expect(box).toBeEnabled();
@@ -1044,7 +1044,7 @@ test('a queued message waits through Stop, and Send now sends it', async ({ page
 
 test('Send now sends the queued message of a run that is going, and Take back puts it in the box', async ({ page }) => {
   const daemonState = await routeQueue(page);
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const box = page.getByRole('textbox', { name: 'Message' });
   await box.fill('do it now');
@@ -1078,7 +1078,7 @@ test('Scroll to end shows when scrolled up and jumps to the newest message', asy
   await page.route('**/api/sessions/s1/messages', (route) =>
     route.fulfill({ json: { data: Array.from({ length: 40 }, (_, n) => said(n)) } }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const button = page.getByRole('button', { name: 'Scroll to end' });
   await expect(page.getByText('message 39', { exact: true })).toBeInViewport();
@@ -1140,7 +1140,7 @@ test("the Diff panel shows the Session's branch and its files, folds them and re
       },
     }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   // The Session card follows the branch checked out now, not the one the Session started on.
   await expect(page.getByRole('complementary', { name: 'Session' })).toContainText('fix/login');
@@ -1198,11 +1198,11 @@ test("a Session links the pull request it opened, and shows none that another Se
   await page.route('**/api/sessions/s2/messages', (route) =>
     route.fulfill(naming('Opened https://github.com/example/apis/pull/42 for review.')),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const header = page.getByRole('complementary', { name: 'Session' });
-  // One link opens the pull request in the Workspace, the other on the Git host: the Session's own, not #99.
-  await expect(header.getByRole('link', { name: /^PR #42/ })).toHaveAttribute('href', /tab=pulls&pr=r1%2F42/);
+  // One link opens the pull request on the Pull requests page, the other on the Git host: the Session's own, not #99.
+  await expect(header.getByRole('link', { name: /^PR #42/ })).toHaveAttribute('href', /\/pull-requests\?pr=r1%2F42$/);
   await expect(header.getByRole('link', { name: /#42 on host/ })).toHaveAttribute(
     'href',
     'https://github.com/example/apis/pull/42',
@@ -1210,7 +1210,7 @@ test("a Session links the pull request it opened, and shows none that another Se
   await expect(header.getByRole('link', { name: /#99/ })).toHaveCount(0);
 
   // A new Session on the default branch shows no pull request, whatever its conversation names.
-  await page.goto(`${daemon.url}/workspace?session=s2#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s2#token=${daemon.token}`);
   await expect(page.locator('header').getByRole('heading', { name: 'fresh start' })).toBeVisible();
   await expect(page.getByRole('complementary', { name: 'Session' }).getByRole('link', { name: /^PR #/ })).toHaveCount(
     0,
@@ -1247,7 +1247,7 @@ test('a finished response has Copy and Fork from this response; Fork opens the n
     forked = route.request().method();
     return route.fulfill({ status: 201, json: { data: session('s2', 'r1', 'engage platform (fork)') } });
   });
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   // The operator's own message has no Fork; the agent's finished response has Copy, Fork and its time.
   const response = page.locator('[data-message-id="m2"]');
@@ -1257,7 +1257,7 @@ test('a finished response has Copy and Fork from this response; Fork opens the n
   await expect(response.getByRole('button', { name: 'Copy response' })).toBeVisible();
   await expect(response.locator('time')).toHaveCount(1);
   await response.getByRole('button', { name: 'Fork from this response' }).click();
-  await expect(page).toHaveURL(/\/workspace\?session=s2$/);
+  await expect(page).toHaveURL(/\/sessions\?session=s2$/);
   expect(forked).toBe('POST');
 });
 
@@ -1275,7 +1275,7 @@ test('a Session that has edited nothing shows no Diff button or panel, even whil
   await page.route('**/api/sessions/s1/diff', (route) =>
     route.fulfill({ json: { data: { branch: 'main', base: null, additions: 0, deletions: 0, files: [] } } }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   await expect(page.locator('header').getByRole('heading', { name: 'fresh start' })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Diff/ })).toHaveCount(0);
@@ -1289,7 +1289,7 @@ test('a Session row keeps its Repo chip and state apart, even for a long Repo na
     [repo('r1', 'shopify-fraud-orders-lambda-with-a-very-long-name', 1)],
     [session('s1', 'r1', 'engage platform', 'waiting_input')],
   );
-  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions#token=${daemon.token}`);
 
   const row = page.getByRole('region', { name: 'Needs you' }).getByRole('listitem');
   const chip = row.getByText(/shopify-fraud/);
@@ -1333,7 +1333,7 @@ test("the agent's tool steps fold to a count and the latest, and open as short l
       },
     }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   // The run folds to one line: how many steps and the latest, not the commands.
   const toggle = page.getByRole('button', { name: 'Show 2 steps' });
@@ -1387,7 +1387,7 @@ test('a file the agent writes or edits is one collapsed row that opens to its di
       },
     }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const created = page.getByRole('button', { name: /dashboard\.html/ });
   const edited = page.getByRole('button', { name: /server\.ts/ });
@@ -1456,7 +1456,7 @@ test('an open file row stays open while the message streams on', async ({ page }
       },
     }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
   await page.getByRole('button', { name: /a\.ts/ }).click();
   await expect(page.getByText('export const a = 1;')).toBeVisible();
   await expect.poll(() => socket !== undefined).toBe(true);
@@ -1478,7 +1478,9 @@ test('an open file row stays open while the message streams on', async ({ page }
   await expect(page.getByText('export const b = 2;')).toHaveCount(0);
 });
 
-test('the side panel collapses to a rail that counts Sessions waiting on you, and opens on a tab', async ({ page }) => {
+test('each page folds its list to a rail of its own, and the Sessions rail counts those waiting on you', async ({
+  page,
+}) => {
   await page.route('**/api/repos', (route) =>
     route.fulfill({ json: { data: [repo('r1', 'analytics', 2)], meta: { next_cursor: null } } }),
   );
@@ -1490,21 +1492,81 @@ test('the side panel collapses to a rail that counts Sessions waiting on you, an
       },
     }),
   );
-  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions#token=${daemon.token}`);
 
   await expect(page.getByRole('region', { name: 'Needs you' })).toContainText('fix login');
   await page.getByRole('button', { name: 'Collapse the side panel' }).click();
-  await expect(page.getByRole('tablist', { name: 'Workspace' })).toHaveCount(0);
-  const rail = page.getByRole('navigation', { name: 'Workspace panel' });
+  const rail = page.getByRole('navigation', { name: 'Sessions list' });
   await expect(rail.getByRole('button', { name: 'Sessions, 1 waiting on you' })).toBeVisible();
 
   // Folded stays folded through a reload.
   await page.reload();
   await expect(rail).toBeVisible();
-  await rail.getByRole('button', { name: 'Pull requests' }).click();
-  await expect(page.getByRole('tab', { name: 'Pull requests' })).toHaveAttribute('aria-selected', 'true');
 
-  await page.getByRole('button', { name: 'Collapse the side panel' }).click();
+  // The Pull requests page keeps its own fold.
+  await page.getByRole('navigation', { name: 'Ops Console' }).getByRole('link', { name: 'Pull requests' }).click();
+  await expect(page.getByRole('navigation', { name: 'Pull requests list' })).toHaveCount(0);
+  await expect(page.getByRole('group', { name: 'Whose pull requests' })).toBeVisible();
+
+  await page.getByRole('navigation', { name: 'Ops Console' }).getByRole('link', { name: 'Sessions' }).click();
   await rail.getByRole('button', { name: 'Open the side panel' }).click();
-  await expect(page.getByRole('tab', { name: 'Pull requests' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('region', { name: 'Needs you' })).toContainText('fix login');
+});
+
+test('a fold stored before the pages split folds both lists', async ({ page }) => {
+  await page.goto(`${daemon.url}/#token=${daemon.token}`);
+  await page.evaluate(() => localStorage.setItem('ops-console:workspace.pane-collapsed', 'true'));
+  await page.goto(`${daemon.url}/sessions`);
+  await expect(page.getByRole('navigation', { name: 'Sessions list' })).toBeVisible();
+  await page.goto(`${daemon.url}/pull-requests`);
+  await expect(page.getByRole('navigation', { name: 'Pull requests list' })).toBeVisible();
+
+  // Unfolding one leaves the other as it was.
+  await page
+    .getByRole('navigation', { name: 'Pull requests list' })
+    .getByRole('button', { name: 'Open the side panel' })
+    .click();
+  await page.goto(`${daemon.url}/sessions`);
+  await expect(page.getByRole('navigation', { name: 'Sessions list' })).toBeVisible();
+});
+
+test('the sidebar badges Sessions with the count that need you', async ({ page }) => {
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'analytics', 2)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({
+      json: {
+        data: [session('s1', 'r1', 'fix login', 'waiting_input'), session('s2', 'r1', 'audit queries')],
+        meta: { next_cursor: null },
+      },
+    }),
+  );
+  await page.goto(`${daemon.url}/sessions#token=${daemon.token}`);
+  const nav = page.getByRole('navigation', { name: 'Ops Console' });
+
+  await expect(nav.getByRole('link', { name: 'Sessions' })).toContainText('1');
+  await expect(nav.getByRole('link', { name: 'Pull requests' })).not.toContainText(/\d/);
+});
+
+test('an old /workspace link opens the page and the item it named', async ({ page }) => {
+  await page.route('**/api/repos', (route) =>
+    route.fulfill({ json: { data: [repo('r1', 'analytics', 1)], meta: { next_cursor: null } } }),
+  );
+  await page.route(/\/api\/sessions\?kind=repo/, (route) =>
+    route.fulfill({ json: { data: [session('s1', 'r1', 'fix login')], meta: { next_cursor: null } } }),
+  );
+  await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
+
+  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await expect(page).toHaveURL(/\/sessions\?session=s1$/);
+  await expect(page.getByRole('heading', { name: 'fix login' })).toBeVisible();
+
+  await page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1%2F7`);
+  await expect(page).toHaveURL(/\/pull-requests\?pr=r1%2F7$/);
+  await page.goto(`${daemon.url}/workspace?tab=pulls`);
+  await expect(page).toHaveURL(/\/pull-requests$/);
+  await page.goto(`${daemon.url}/workspace`);
+  await expect(page).toHaveURL(/\/sessions$/);
+  await expect(page.getByText('Pick a Session, or start one on a branch.')).toBeVisible();
 });

@@ -183,7 +183,8 @@ export function placeOf(
   switch (session.kind) {
     case SessionKind.PrReview:
       return {
-        to: session.repo_id && session.pr_number ? pullRequestPath(session.repo_id, session.pr_number) : '/workspace',
+        to:
+          session.repo_id && session.pr_number ? pullRequestPath(session.repo_id, session.pr_number) : '/pull-requests',
         where: repoName(session.repo_id),
         what: `Pull request #${session.pr_number}`,
         tip: 'Open the pull request this run works on',
