@@ -50,7 +50,7 @@ test('the agent asks for a secret in a masked field that sends the value once an
     waiting = [];
     return route.fulfill({ status: 204 });
   });
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const card = page.getByRole('listitem', { name: 'Secret needed: Postgres password for orders' });
   const field = card.getByLabel('Postgres password for orders');
@@ -82,7 +82,7 @@ test('a secret request shows again after a reload, and a refused send empties th
   await page.route(/\/api\/sessions\/s1\/secret-requests\/q1$/, (route) =>
     route.fulfill({ status: 404, json: { error: { code: 'not_found', message: 'no such secret request' } } }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
   await page.reload();
 
   const card = page.getByRole('listitem', { name: 'Secret needed: API key' });

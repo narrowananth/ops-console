@@ -262,10 +262,10 @@ test('a pull request row says how long ago it opened, and a Session row how long
       },
     }),
   );
-  await page.goto(`${daemon.url}/workspace?tab=pulls#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/pull-requests#token=${daemon.token}`);
   // The full date is in the tooltip.
   await expect(page.getByTitle(/^Opened .*2026/)).toHaveText(/\dd ago$/);
-  await page.goto(`${daemon.url}/workspace#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions#token=${daemon.token}`);
   await expect(page.getByTitle(/^Started .*, last active /)).toHaveText('3h');
 });
 

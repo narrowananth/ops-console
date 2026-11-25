@@ -146,7 +146,7 @@ async function routePullRequest(
   return posted;
 }
 
-const openPullRequest = (page: Page) => page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1/7#token=${daemon.token}`);
+const openPullRequest = (page: Page) => page.goto(`${daemon.url}/pull-requests?pr=r1/7#token=${daemon.token}`);
 
 const thread = (page: Page, text: string) =>
   page.getByRole('region', { name: 'Activity' }).getByRole('listitem').filter({ hasText: text });

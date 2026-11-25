@@ -64,7 +64,7 @@ async function newSession(request: APIRequestContext): Promise<string> {
 async function openPage(page: Page, request: APIRequestContext) {
   const session = await newSession(request);
   await request.post(api(`/sessions/${session}/browser/tabs`), { headers: auth, data: { url: origin } });
-  await page.goto(`${daemon.url}/workspace?session=${session}#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=${session}#token=${daemon.token}`);
   await page.getByRole('button', { name: /^Browser( :\d+)?$/ }).click();
   const panel = page.getByRole('complementary', { name: 'Browser' });
   const canvas = panel.locator('canvas');
@@ -244,7 +244,7 @@ test.describe('a number key with the agent asking a question', () => {
       const data = Array.isArray(body.data) ? body.data.map(waiting) : waiting(body.data);
       return route.fulfill({ json: { ...body, data } });
     });
-    await page.goto(`${daemon.url}/workspace?session=${session}#token=${daemon.token}`);
+    await page.goto(`${daemon.url}/sessions?session=${session}#token=${daemon.token}`);
     await page.getByRole('button', { name: /^Browser( :\d+)?$/ }).click();
     const canvas = page.getByRole('complementary', { name: 'Browser' }).locator('canvas');
     await expect(canvas).toHaveAttribute('aria-label', 'start', { timeout: 15_000 });

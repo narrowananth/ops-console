@@ -84,7 +84,7 @@ async function tabsOf(request: APIRequestContext, session: string, titles: strin
 const browserButton = (page: Page) => page.getByRole('button', { name: /^Browser( :\d+)?$/ });
 
 async function openConsole(page: Page, session: string) {
-  await page.goto(`${daemon.url}/workspace?session=${session}#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=${session}#token=${daemon.token}`);
 }
 
 /** The probe's records since the last call. */

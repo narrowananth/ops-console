@@ -225,7 +225,7 @@ async function mockSession(page: Page, sent: unknown[], userText = '/caveman-com
       },
     });
   });
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 }
 
 test('typing $ opens the skill menu; picking keeps the note, and Send names the skill', async ({ page }) => {

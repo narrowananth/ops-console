@@ -52,7 +52,7 @@ test('a pull request keeps its header in view; the files and the decision rail s
   await page.route('**/api/sessions', (route) => route.fulfill({ json: { data: [] } }));
   await page.route('**/api/playbooks', (route) => route.fulfill({ json: { data: { items: [], blocks: [] } } }));
   await page.route('**/api/repos/r1/pull-requests/7', (route) => route.fulfill({ json: { data: pull } }));
-  await page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1/7#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/pull-requests?pr=r1/7#token=${daemon.token}`);
   await page.getByRole('tab', { name: 'Files changed' }).click();
 
   const title = page.getByRole('heading', { name: /A long pull request/ });

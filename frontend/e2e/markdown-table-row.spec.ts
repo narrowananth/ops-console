@@ -56,7 +56,7 @@ test('a table row with no rule under it draws as text, so a table still streamin
       },
     }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   await expect(page.getByText('| Column | Goes to |')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Table row' })).toBeVisible();

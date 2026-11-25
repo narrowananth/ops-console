@@ -1666,7 +1666,7 @@ test('Review with agent names the Review PR Playbook on its button, and reads re
   );
   const detail = { current: pullRequest(null) };
   await page.route('**/api/repos/r1/pull-requests/7', (route) => route.fulfill({ json: { data: detail.current } }));
-  await page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1/7#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/pull-requests?pr=r1/7#token=${daemon.token}`);
 
   const button = page.getByRole('button', { name: 'Agent Review · PROD readiness' });
   await expect(button).toBeEnabled();
@@ -1857,11 +1857,11 @@ test('a Session names the Playbook its rules come from and links to its flow', a
   await page.route(/\/api\/sessions\?kind=repo/, (route) => route.fulfill({ json: { data: [] } }));
   await page.route(/\/api\/sessions\/s\d\/messages/, (route) => route.fulfill({ json: { data: [] } }));
 
-  await page.goto(`${daemon.url}/workspace?session=s2#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s2#token=${daemon.token}`);
   await expect(page.getByRole('heading', { name: 'Session s2' })).toBeVisible();
   await expect(page.getByRole('link', { name: /^Playbook:/ })).toHaveCount(0);
 
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
   await page.getByRole('link', { name: 'Playbook: Safe DB fix' }).click();
   await view(page).node('Rules').click();
   await expect(view(page).panel('Rules').getByRole('textbox', { name: 'Rules' })).toHaveValue('Never write to PROD.');

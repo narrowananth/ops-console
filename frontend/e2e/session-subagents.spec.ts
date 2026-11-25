@@ -117,7 +117,7 @@ test('the run waiting on subagents says how many, names them on hover and stops 
     stopped = true;
     return route.fulfill({ status: 204, body: '' });
   });
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   await expect(page.getByText('Waiting on 2 subagents', { exact: true }).first()).toBeVisible();
   await page.getByText('Waiting on 2 subagents', { exact: true }).first().hover();
@@ -131,7 +131,7 @@ test('the run waiting on subagents says how many, names them on hover and stops 
 
 test('a Session with no working subagent shows no waiting row', async ({ page }) => {
   await route(page, [session({ state: 'idle', subagents: [subagent('t1', 'Done work', 'done')] })]);
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
   await expect(page.getByRole('heading', { name: 'Perf audit' })).toBeVisible();
   await expect(page.getByText(/Waiting on \d+ subagent/)).toHaveCount(0);
 });
@@ -152,7 +152,7 @@ test('the Session panel lists the branch, the servers and every subagent with it
       },
     }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const panel = page.getByRole('complementary', { name: 'Session' });
   await expect(panel.getByText('perf/audit')).toBeVisible();
@@ -174,7 +174,7 @@ const FOUR = [
 
 test('the turn that started subagents ends with a row that lists each one and opens its card', async ({ page }) => {
   await route(page, [session({ subagents: FOUR })], [AGENT_MESSAGE]);
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const row = page.getByRole('listitem', { name: 'Subagents' });
   await expect(row.getByText('4 subagents', { exact: true })).toBeVisible();
@@ -198,14 +198,14 @@ test('the turn that started subagents ends with a row that lists each one and op
 
 test('the row stays away until an agent turn ends the conversation', async ({ page }) => {
   await route(page, [session({ subagents: FOUR })], [{ ...AGENT_MESSAGE, id: 'm0', role: 'user' }]);
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
   await expect(page.getByText('Waiting on 2 subagents', { exact: true }).first()).toBeVisible();
   await expect(page.getByRole('listitem', { name: 'Subagents' })).toHaveCount(0);
 });
 
 test('Lineage counts the running subagents and each row opens the same card', async ({ page }) => {
   await route(page, [session({ subagents: FOUR })]);
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const panel = page.getByRole('complementary', { name: 'Session' });
   await expect(panel.getByText('Lineage · 2 running', { exact: true })).toBeVisible();
@@ -224,7 +224,7 @@ test('a subagent waiting on an Approval gets a line above the waiting row that o
   await page.route('**/api/approvals?status=pending', (route) =>
     route.fulfill({ json: { data: [approval('a1', 't2'), approval('a2', null)] } }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   await expect(page.getByText('Subagent needs approval', { exact: true })).toHaveCount(1);
   const line = page.getByText('Subagent needs approval', { exact: true }).locator('..');
@@ -243,7 +243,7 @@ test('Syncing messages shows above the composer while the conversation loads', a
     await held;
     await route.fulfill({ json: { data: [AGENT_MESSAGE] } });
   });
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   await expect(page.getByText('Syncing messages…')).toBeVisible();
   release();

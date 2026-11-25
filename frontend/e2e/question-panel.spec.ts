@@ -93,7 +93,7 @@ test('the agent’s questions show one at a time with their options, and one mes
       },
     });
   });
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const panel = page.getByRole('region', { name: 'The agent asks' });
   await expect(panel.getByText('Fix approach')).toBeVisible();
