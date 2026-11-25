@@ -1931,8 +1931,8 @@ export class AgentRuntime implements OnModuleDestroy {
       };
     };
     const parsed = parseAnonymousCall(name, toolInput);
-    if (!this.anonymousTools || 'error' in parsed)
-      return refuse('error' in parsed ? parsed.error : 'Not offered here.');
+    if ('error' in parsed) return refuse(parsed.error);
+    if (!this.anonymousTools) return refuse('Not offered here.');
     let plan: ToolPlan;
     try {
       plan = this.anonymousTools.plan(run.sessionId, parsed.call);

@@ -4,6 +4,7 @@ import { useAnswerSecretRequest, useSecretRequests } from '../lib/queries';
 
 function SecretField({ sessionId, requestId, label }: { sessionId: string; requestId: string; label: string }) {
   const [value, setValue] = useState('');
+  const [failed, setFailed] = useState(false);
   const answer = useAnswerSecretRequest(sessionId);
   return (
     <li aria-label={`Secret needed: ${label}`} className="list-none">
@@ -11,8 +12,19 @@ function SecretField({ sessionId, requestId, label }: { sessionId: string; reque
         className="flex items-end gap-2.5 rounded-xl border border-accent-300 bg-accent-100 px-4 py-3"
         onSubmit={(event) => {
           event.preventDefault();
-          // Sent once and cleared either way: the value is never kept in the page.
-          answer.mutate({ requestId, value }, { onSettled: () => setValue('') });
+          // Sent once. The field is cleared and the mutation reset either way, since the mutation keeps what it was
+          // given until reset.
+          setFailed(false);
+          answer.mutate(
+            { requestId, value },
+            {
+              onError: () => setFailed(true),
+              onSettled: () => {
+                setValue('');
+                answer.reset();
+              },
+            },
+          );
         }}
       >
         <label className="flex-1 text-xs font-semibold text-accent-900">
@@ -35,7 +47,7 @@ function SecretField({ sessionId, requestId, label }: { sessionId: string; reque
           Send
         </Button>
       </form>
-      {answer.isError && (
+      {failed && (
         <div role="alert" className="mt-1 text-xs text-accent-700">
           The secret was not stored. Ask the agent again.
         </div>

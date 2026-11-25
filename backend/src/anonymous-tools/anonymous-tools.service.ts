@@ -124,11 +124,10 @@ export class AnonymousToolsService implements AnonymousTools {
       case 'test_connection':
         return this.connections.test(call.input.type, call.input.config, this.resolve(sessionId, call.input.secret));
       case 'save_connection': {
-        const saved = await this.connections.create({
+        return this.connections.create({
           ...call.input,
           secret: this.resolve(sessionId, call.input.secret) ?? undefined,
         });
-        return saved;
       }
       case 'connect_connector':
         await this.connectors.connect(call.input.id);
@@ -186,6 +185,7 @@ export class AnonymousToolsService implements AnonymousTools {
   }
 
   private request(sessionId: string, label: string, signal: AbortSignal | undefined): Promise<string> {
+    if (signal?.aborted) return Promise.reject(new Error('stopped'));
     const requestId = crypto.randomUUID();
     return new Promise((resolve, reject) => {
       this.requests.set(requestId, { sessionId, label, resolve, reject });
@@ -211,21 +211,22 @@ export class AnonymousToolsService implements AnonymousTools {
 
   /** Remote servers only: a stdio server is a command the daemon would run. */
   private addMcpBody(sessionId: string, input: Extract<AnonymousCall, { tool: 'add_mcp_server' }>['input']) {
-    const transport = input.transport ?? 'http';
-    if (transport !== 'http' && transport !== 'sse') throw validationFailed('only an http or sse MCP server by URL');
     const headers = Object.fromEntries(
-      Object.entries(input.headers ?? {}).map(([name, value]) => [name, this.resolve(sessionId, value) ?? '']),
+      Object.entries(input.headers ?? {}).map(([name, value]) => [name, this.substitute(sessionId, value)]),
     );
     return parseInput(
       createMcpServerSchema,
-      { name: input.name, transport, target: input.url, scope: 'user', headers },
+      { name: input.name, transport: input.transport ?? 'http', target: input.url, scope: 'user', headers },
       'body',
     );
   }
 
   /** Swaps `{{secret:<n>}}` for the Session's secret. Only the daemon ever holds the value. */
   private resolve(sessionId: string, value: string | undefined): string | null {
-    if (value === undefined) return null;
+    return value === undefined ? null : this.substitute(sessionId, value);
+  }
+
+  private substitute(sessionId: string, value: string): string {
     const list = this.secrets.get(sessionId) ?? [];
     return value.replace(PLACEHOLDER, (_all, n: string) => {
       const secret = list[Number(n) - 1];

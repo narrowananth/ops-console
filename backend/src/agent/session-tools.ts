@@ -101,7 +101,7 @@ export type ToolResult = {
   isError?: boolean;
 };
 
-const text = (value: unknown): ToolResult => ({
+export const text = (value: unknown): ToolResult => ({
   content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
 });
 

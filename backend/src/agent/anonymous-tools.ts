@@ -1,7 +1,7 @@
 import { tool } from '@anthropic-ai/claude-agent-sdk';
 import { AccessLevel, ConnectionEnv, ConnectionType, ConnectorId } from '@ops-console/shared';
 import { z } from 'zod';
-import { CONSOLE_TOOLS_SERVER, guarded, type ToolResult } from './session-tools';
+import { CONSOLE_TOOLS_SERVER, guarded, text } from './session-tools';
 
 const connectionFields = {
   type: z.enum(ConnectionType),
@@ -142,34 +142,16 @@ const DESCRIPTIONS: Record<AnonymousToolName, string> = {
     'Registers a remote MCP Server by URL for every account, after the operator approves. Start its sign-in with authenticate_mcp_server.',
 };
 
-const asText = (value: unknown): ToolResult => ({
-  content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) }],
-});
-
 /** The tools themselves. The runtime's PreToolUse hook gates each call before it gets here. */
 export function anonymousSessionTools(tools: AnonymousTools, sessionId: string, runSignal?: AbortSignal) {
   const make = <Name extends AnonymousToolName>(name: Name) =>
     tool(name, DESCRIPTIONS[name], anonymousToolSchemas[name].shape, (args, extra) =>
       guarded(
-        async () => asText(await tools.run(sessionId, { tool: name, input: args } as AnonymousCall, runSignal)),
+        async () => text(await tools.run(sessionId, { tool: name, input: args } as AnonymousCall, runSignal)),
         `${name} failed.`,
         extra,
         runSignal,
       ),
     );
-  return [
-    make('list_connections'),
-    make('test_connection'),
-    make('save_connection'),
-    make('connect_connector'),
-    make('list_mcp_servers'),
-    make('add_mcp_server'),
-    make('authenticate_mcp_server'),
-    make('request_secret'),
-    make('read_local_file'),
-    make('list_local_folder'),
-    make('fetch_url'),
-    make('list_keychain_items'),
-    make('read_keychain_secret'),
-  ];
+  return ANONYMOUS_TOOL_NAMES.map(make);
 }

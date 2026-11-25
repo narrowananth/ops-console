@@ -185,15 +185,15 @@ describe('an Anonymous Session gets the setup tools', () => {
       ['read_keychain_secret', { service: 'TablePlus' }, /Read the saved password of "TablePlus"/],
     ];
     for (const mode of Object.values(AccessMode).filter((value) => value !== AccessMode.Full)) {
+      const ctx = await start();
       for (const [tool, input, words] of asked) {
-        const ctx = await start();
         const id = await ctx.session(mode);
         const held = await ctx.call(id, tool, input, 'approved');
         expect(held.summary, `${tool} in ${mode}`).toMatch(words);
         await held.run();
-        await ctx.daemon.stop();
-        running.pop();
       }
+      await ctx.daemon.stop();
+      running.pop();
     }
   });
 
@@ -237,7 +237,7 @@ describe('an Anonymous Session gets the setup tools', () => {
     const held = await ctx.call(id, 'list_connections', {});
     expect(await ctx.pending()).toEqual([]);
     const answer = await held.run();
-    expect(answer.content[0]?.text).toContain('"name":"pg-orders"');
+    expect(answer.content[0]?.text).toContain('"name": "pg-orders"');
     expect(answer.content[0]?.text).not.toContain('pw-123456');
     const rows = (await ctx.http.get('/action-log')).body.data as { command: string }[];
     expect(rows.map((row) => row.command)).toContain('list_connections');
@@ -285,7 +285,7 @@ describe('a secret never reaches the agent', () => {
         .status,
     ).toBe(204);
     const placeholder = (await answered).content[0]?.text;
-    expect(placeholder).toBe('{"placeholder":"{{secret:1}}"}');
+    expect(JSON.parse(placeholder ?? '')).toEqual({ placeholder: '{{secret:1}}' });
     expect((await ctx.http.get(`/sessions/${id}/secret-requests`)).body.data).toEqual([]);
 
     // The agent passes the placeholder on; the daemon swaps it back in for the test and the save.
@@ -307,7 +307,7 @@ describe('a secret never reaches the agent', () => {
     const seen = await listen(ctx.daemon);
     const held = await ctx.call(id, 'read_keychain_secret', { service: 'TablePlus' }, 'approved');
     const answer = await held.run();
-    expect(answer.content[0]?.text).toBe('{"placeholder":"{{secret:1}}"}');
+    expect(JSON.parse(answer.content[0]?.text ?? '')).toEqual({ placeholder: '{{secret:1}}' });
     const test = await ctx.call(id, 'test_connection', { ...PG, secret: '{{secret:1}}' }, 'approved');
     await test.run();
     expect(ctx.tester.runs.at(-1)?.launch.env.DSN).toContain('kc-secret');
@@ -349,6 +349,18 @@ describe('a secret never reaches the agent', () => {
     controller.abort();
     expect((await waiting).isError).toBe(true);
   });
+
+  it('gives no masked field to a run that was already stopped', async () => {
+    const ctx = await start();
+    const id = await ctx.session();
+    const stopped = AbortSignal.abort();
+    await expect(
+      ctx.daemon.app
+        .get(AnonymousToolsService)
+        .run(id, { tool: 'request_secret', input: { label: 'Password' } }, stopped),
+    ).rejects.toThrow('stopped');
+    expect((await ctx.http.get(`/sessions/${id}/secret-requests`)).body.data).toEqual([]);
+  });
 });
 
 describe('the setup tools read, list and add what the console holds', () => {
@@ -373,7 +385,7 @@ describe('the setup tools read, list and add what the console holds', () => {
     await add.run();
     const list = await ctx.call(id, 'list_mcp_servers', {});
     const text = (await list.run()).content[0]?.text ?? '';
-    expect(text).toContain('"name":"sentry"');
+    expect(text).toContain('"name": "sentry"');
     expect(text).not.toContain('mcp-token-1');
   });
 
