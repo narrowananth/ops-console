@@ -23,13 +23,12 @@ import { HandoverGate } from './keychain/handover-gate';
 import { KeychainHandoverTracker } from './keychain/handover-state';
 import { LoginKeychain } from './keychain/keychain';
 import { KeychainWaitTracker } from './keychain/keychain-wait';
+import { MachineModule } from './machine/machine.module';
 import { McpServersModule } from './mcp/mcp-servers.module';
 import { SdkProbe } from './mcp/probe';
 import { MonitorModule } from './monitor/monitor.module';
 import { ProcessesModule } from './processes/processes.module';
 import { ReposModule } from './repos/repos.module';
-import { runSetupMcp } from './terminals/setup-mcp';
-import { TerminalsModule } from './terminals/terminals.module';
 import { ScriptInstaller } from './updates/installer';
 import { GithubReleases } from './updates/releases';
 import { UpdatesModule } from './updates/updates.module';
@@ -39,12 +38,6 @@ quietShadowedPrompt();
 
 // Each Keychain call holds one libuv thread while the Mac waits for a password; the default pool has four.
 process.env.UV_THREADPOOL_SIZE ??= '16';
-
-// `ops-console mcp-setup`: the MCP Server of the Dev tools setup agent.
-if (process.argv[2] === 'mcp-setup') {
-  await runSetupMcp(process.env);
-  await new Promise(() => {});
-}
 
 const env = z
   .object({
@@ -159,7 +152,7 @@ const daemon = await startDaemon({
     WorkspaceModule.forRoot(),
     MonitorModule.forRoot(),
     DevtoolsModule.forRoot(),
-    TerminalsModule.forRoot(),
+    MachineModule.forRoot(),
     AnonymousToolsModule.forRoot(),
     BrowserModule.forRoot(),
     ProcessesModule.forRoot(),

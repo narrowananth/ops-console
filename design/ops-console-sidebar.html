@@ -594,7 +594,7 @@
   .tile:hover { transform: translateY(-1px); border-color: var(--accent-300); background: var(--card); box-shadow: var(--shadow-md); }
   .repo-row { display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--line); padding: 12px 20px; }
 
-  /* Setup agent, Agents & accounts */
+  /* Agents & accounts */
   .sec { margin-bottom: 32px; }
   .sec-h { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 12px; padding: 0 4px; }
   .sec-h h2 { font-size: 15px; }
@@ -824,14 +824,6 @@
       <button class="item" data-page="repos" title="Repos">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8M18 10c0 4-6 3-10 7"/></svg>
         <span class="lbl">Repos</span><span class="badge count">4</span>
-      </button>
-      <button class="item" data-page="setup" title="Setup agent">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-5-6-5M12 19h8"/></svg>
-        <span class="lbl">Setup agent</span>
-      </button>
-      <button class="item" data-page="permissions" title="Permissions">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
-        <span class="lbl">Permissions</span>
       </button>
       <div class="group"><span class="txt">Claude</span><span class="dot">·</span></div>
       <button class="item" data-page="agents" title="Accounts &amp; Usage">
@@ -1695,7 +1687,7 @@ git push</pre></details>
 
     <!-- ============ Integrations (integrations/*.tsx) ============ -->
     <section class="page" id="p-integrations">
-      <header class="ph"><div class="ph-in wide"><h1 title="Connectors sign in to a service. MCP servers give Claude tools.">Integrations</h1><span class="sp"></span><button class="btn" data-page="setup">Add with Setup agent →</button></div></header>
+      <header class="ph"><div class="ph-in wide"><h1 title="Connectors sign in to a service. MCP servers give Claude tools.">Integrations</h1><span class="sp"></span></div></header>
       <div class="pb" style="overflow:hidden">
         <div style="flex:1;min-width:0;overflow:auto">
           <div class="col wide">
@@ -1745,7 +1737,7 @@ git push</pre></details>
 
     <!-- ============ Connections (devtools/devtools-tab.tsx) ============ -->
     <section class="page" id="p-connections">
-      <header class="ph"><div class="ph-in wide"><h1 title="Databases Dev tools and Claude can reach">Connections</h1><span class="sp"></span><button class="btn" data-page="setup">Import with Setup agent →</button></div></header>
+      <header class="ph"><div class="ph-in wide"><h1 title="Databases Dev tools and Claude can reach">Connections</h1><span class="sp"></span></div></header>
       <div class="pb">
         <div class="col wide"><div class="card">
           <div data-pane="conn:list">
@@ -1784,65 +1776,6 @@ git push</pre></details>
             <li class="repo-row" style="border-bottom:0"><span class="bi lg gh">GH</span><div class="grow"><div class="row"><strong class="mono m">web</strong><span class="pill">github</span></div><div class="trunc mono xs muted">~/code/web</div><div class="xs muted">branch main</div></div><button class="btn xs" style="padding:4px 10px">Remove</button></li>
           </ul>
         </div></div>
-      </div>
-    </section>
-
-    <!-- ============ Setup agent (setup/*.tsx) ============ -->
-    <section class="page" id="p-setup">
-      <h1 class="sr">Setup agent</h1>
-      <div class="pb">
-        <div style="margin:0 auto;display:flex;width:100%;max-width:1200px;gap:24px;padding:28px 32px;align-items:flex-start">
-          <div style="display:flex;flex:1;min-width:0;flex-direction:column;gap:12px">
-            <section class="card" data-pane="setup:welcome" style="display:flex;flex-direction:column;gap:24px;padding:32px">
-              <div class="row" style="align-items:flex-start;gap:16px">
-                <span style="display:flex;width:48px;height:48px;flex:none;align-items:center;justify-content:center;border-radius:var(--r-lg);background:var(--accent-100);color:var(--accent)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-5-6-5M12 19h8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-                <div class="grow"><h2 style="font-size:20px">Tell Claude what to set up</h2><p class="m muted" style="margin:6px 0 0;max-width:36rem">Claude runs in a terminal on this Mac. Ask in plain words and it adds Connections, MCP servers and Connectors for you.</p></div>
-                <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px"><button class="btn primary" data-go="setup:running">Start setup agent</button><a class="xs muted" href="#permissions" data-page="permissions">Needs Full Disk Access · Permissions →</a></div>
-              </div>
-              <div><div class="cap" style="margin-bottom:10px;font-weight:600;letter-spacing:.06em;color:var(--n600)">Try asking</div>
-                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">
-                  <button class="ask" data-go="setup:running"><span class="grow">import my local databases</span><span class="faint">→</span></button>
-                  <button class="ask" data-go="setup:running"><span class="grow">connect GitHub and Datadog</span><span class="faint">→</span></button>
-                  <button class="ask" data-go="setup:running"><span class="grow">add the MCP servers from my Claude config</span><span class="faint">→</span></button>
-                </div></div>
-            </section>
-            
-          </div>
-          <aside style="display:flex;width:320px;flex:none;flex-direction:column;gap:16px">
-            <section class="card" style="display:flex;flex-direction:column;gap:12px;padding:16px 18px">
-              <div class="m xb">What it sets up</div>
-              <ul class="s muted" style="display:flex;flex-direction:column;gap:10px">
-                <li class="fact"><span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span>Connections to your local databases</li>
-                <li class="fact"><span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 7V3M15 7V3M7 7h10v5a5 5 0 0 1-10 0zM12 17v4"/></svg></span>MCP servers from your Claude config</li>
-                <li class="fact"><span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/></svg></span>Connectors, through each service's own sign-in</li>
-                <li class="fact"><span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>Passwords go in a masked field</li>
-              </ul>
-            </section>
-          </aside>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============ Permissions (setup/permissions-tab.tsx) ============ -->
-    <section class="page" id="p-permissions">
-      <h1 class="sr">Permissions</h1>
-      <div class="pb">
-        <div style="margin:0 auto;display:flex;width:100%;max-width:720px;flex-direction:column;gap:20px;padding:28px 32px">
-          <section class="card" aria-label="Mac" style="display:flex;flex-direction:column;gap:12px;padding:16px 18px;font-size:12px;overflow:visible">
-            <div class="row m"><svg width="20" height="20" viewBox="0 0 32 32" style="border-radius:22%"><rect width="32" height="32" fill="#ec3013"/><path d="M8 9.5l7 6.5-7 6.5" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="square"/><rect x="17" y="20" width="8" height="3.2" fill="#fff"/><rect x="25" y="4" width="3" height="3" fill="#fff"/></svg><strong>On this Mac</strong></div>
-            <ul style="display:flex;flex-direction:column;gap:8px">
-            <li class="perm" aria-label="Full Disk Access"><div class="row"><strong class="grow" style="font-size:13px">Full Disk Access</strong><span class="status ok" style="font-size:11px;padding:2px 8px">● on</span></div><span class="muted">Reads every folder on this Mac.</span></li>
-            <li class="perm" aria-label="Start at login"><div class="row"><strong class="grow" style="font-size:13px">Start at login</strong><span class="status ok" style="font-size:11px;padding:2px 8px">● on</span></div><span class="muted">Runs in the background. macOS lists it under App Background Activity.</span><div class="row"><button class="btn xs">Open Login Items</button></div></li>
-            <li class="perm" aria-label="Keychain"><div class="row"><strong class="grow" style="font-size:13px">Keychain</strong><span class="status" style="font-size:11px;padding:2px 8px">◐ asks each time</span></div><span class="muted">macOS asks before each saved password.</span></li>
-            </ul>
-          </section>
-          <section class="card" aria-label="Agent runs" style="display:flex;flex-direction:column;gap:12px;padding:16px 18px;font-size:12px;overflow:visible">
-            <div class="row m"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/></svg><strong>Agent runs</strong></div>
-            <ul style="display:flex;flex-direction:column;gap:8px">
-            <li class="perm" aria-label="Run sandbox"><div class="row"><strong class="grow" style="font-size:13px">Run sandbox</strong><span class="status ok" style="font-size:11px;padding:2px 8px">● on</span></div><span class="muted">Keeps an agent run's commands out of the login Keychain. They write anywhere, reach any host and use localhost, as in your terminal.</span></li>
-            </ul>
-          </section>
-        </div>
       </div>
     </section>
 
@@ -1911,7 +1844,7 @@ git push</pre></details>
             </div>
           </section>
           <section class="sec" aria-label="Defaults for new sessions">
-            <div class="sec-h"><div class="grow"><h2>Defaults for new sessions</h2><p>Every agent the console starts begins with these: Workspace and Dev tools terminals, Monitor Verify and Fix, Agent Review, and the Setup agent. Change them for one session from its Model, Effort and Access chips.</p></div></div>
+            <div class="sec-h"><div class="grow"><h2>Defaults for new sessions</h2><p>Every agent the console starts begins with these: Workspace and Dev tools terminals, Monitor Verify and Fix, and Agent Review. Change them for one session from its Model, Effort and Access chips.</p></div></div>
             <div class="card">
               <div class="set"><span class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4"/></svg></span><div class="grow"><div class="b">Default model</div><div class="s muted">Model new sessions start with.</div></div><button class="drop" style="width:208px"><span class="v">Claude Opus 5.5</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
               <div class="set"><span class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></span><div class="grow"><div class="b">Default effort</div><div class="s muted">How much the agent thinks before acting.</div></div><button class="drop" style="width:208px"><span class="v">High</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
@@ -1926,6 +1859,17 @@ git push</pre></details>
               <div class="set"><div class="grow"><div class="xb">Alert when a run needs me</div><div class="s muted">A desktop alert while this console is open in a tab you are not looking at.</div></div><button class="toggle on" role="switch" aria-label="Alert when a run needs me"></button></div>
               <div class="set"><div class="grow"><div class="xb">Alert when a run ends</div><div class="s muted">A desktop alert when a run finishes, fails or stops, in a tab you are not looking at.</div></div><button class="toggle" role="switch" aria-label="Alert when a run ends"></button></div>
               <div class="set"><div class="grow"><div class="xb">Alert when a connection or integration breaks</div><div class="s muted">A desktop alert when a Connection, Connector or MCP server stops working, and when it recovers.</div></div><button class="toggle on" role="switch" aria-label="Alert when a connection or integration breaks"></button></div>
+            </div>
+          </section>
+          <section class="sec" aria-label="On this machine" id="on-this-machine">
+            <div class="sec-h"><div class="grow"><h2>On this machine</h2><p>What macOS lets the console do, and what an agent run can reach.</p></div></div>
+            <div class="card">
+              <ul style="display:flex;flex-direction:column">
+              <li class="perm" aria-label="Full Disk Access"><div class="row"><strong class="grow" style="font-size:13px">Full Disk Access</strong><span class="status" style="font-size:11px;padding:2px 8px">&#10005; off</span></div><span class="muted">Reads every folder on this Mac.</span><span class="muted">Drag Ops Console from the Finder window into the list and switch it on, then run <code>ops-console stop</code> and <code>ops-console start</code>.</span><div class="row"><button class="btn xs primary">Open System Settings</button><button class="btn xs">Check again</button></div></li>
+              <li class="perm" aria-label="Start at login"><div class="row"><strong class="grow" style="font-size:13px">Start at login</strong><span class="status ok" style="font-size:11px;padding:2px 8px">&#9679; on</span></div><span class="muted">Runs in the background. macOS lists it under App Background Activity.</span><div class="row"><button class="btn xs">Open Login Items</button></div></li>
+              <li class="perm" aria-label="Run sandbox"><div class="row"><strong class="grow" style="font-size:13px">Run sandbox</strong><span class="status ok" style="font-size:11px;padding:2px 8px">&#9679; on</span></div><span class="muted">Keeps an agent run's commands out of the login Keychain. They write anywhere, reach any host and use localhost, as in your terminal.</span></li>
+              <li class="perm" aria-label="Keychain"><div class="row"><strong class="grow" style="font-size:13px">Keychain</strong><span class="status" style="font-size:11px;padding:2px 8px">&#9680; asks each time</span></div><span class="muted">macOS asks before each saved password.</span><div role="alert" aria-label="Keychain handover" style="color:var(--accent-700)"><span>Handover refused: previous app failed its check</span><br><span class="mono xs">its bundle fails `codesign --verify --strict`</span></div></li>
+              </ul>
             </div>
           </section>
           </div>

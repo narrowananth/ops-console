@@ -1,4 +1,6 @@
 import { mkdtemp, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { AccessMode, SessionKind } from '@ops-console/shared';
@@ -346,5 +348,82 @@ describe('a secret never reaches the agent', () => {
     );
     controller.abort();
     expect((await waiting).isError).toBe(true);
+  });
+});
+
+describe('the setup tools read, list and add what the console holds', () => {
+  it('lists the MCP Servers the console has without their headers, and adds a remote one with a placeholder header', async () => {
+    const ctx = await start();
+    const id = await ctx.session(AccessMode.Full);
+    const asking = await ctx.call(id, 'request_secret', { label: 'Sentry token' });
+    const secret = asking.run();
+    const [request] = await until(
+      async () => (await ctx.http.get(`/sessions/${id}/secret-requests`)).body.data as { request_id: string }[],
+      (list) => list.length === 1,
+      'the masked field',
+    );
+    await ctx.http.post(`/sessions/${id}/secret-requests/${request?.request_id}`, { value: 'mcp-token-1' });
+    await secret;
+
+    const add = await ctx.call(id, 'add_mcp_server', {
+      name: 'sentry',
+      url: 'https://mcp.example.com/mcp',
+      headers: { Authorization: 'Bearer {{secret:1}}' },
+    });
+    await add.run();
+    const list = await ctx.call(id, 'list_mcp_servers', {});
+    const text = (await list.run()).content[0]?.text ?? '';
+    expect(text).toContain('"name":"sentry"');
+    expect(text).not.toContain('mcp-token-1');
+  });
+
+  it('cannot change an existing Connection: a saved name is refused', async () => {
+    const ctx = await start();
+    const id = await ctx.session(AccessMode.Full);
+    await ctx.http.post('/connections', { ...SAVE, secret: 'pw-123456' });
+    const held = await ctx.call(id, 'save_connection', { ...SAVE, access: 'write', secret: 'x' });
+    const answer = await held.run();
+    expect(answer.isError).toBe(true);
+    expect((await ctx.http.get('/connections')).body.data[0]).toMatchObject({ access: 'read' });
+  });
+
+  it('picks a part of a big JSON file, fetches a page with its secrets masked, and refuses other schemes', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'local-source-'));
+    const file = path.join(dir, '.claude.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        history: 'x'.repeat(600 * 1024),
+        mcpServers: {
+          sentry: { type: 'http', url: 'https://mcp.example.com/mcp', headers: { Authorization: 'Bearer hdr-secret' } },
+        },
+      }),
+    );
+    const server = createServer((_request, response) =>
+      response.end('db:\n  url: postgres://reader:web-secret@db.example.com/orders\n'),
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    try {
+      const ctx = await start();
+      const id = await ctx.session();
+      const seen = await listen(ctx.daemon);
+      const pick = await ctx.call(id, 'read_local_file', { path: file, pick: ['mcpServers'] });
+      const picked = (await pick.run()).content[0]?.text ?? '';
+      expect(picked).toContain('https://mcp.example.com/mcp');
+      expect(picked).toContain('{{secret:1}}');
+      expect(picked).not.toContain('hdr-secret');
+
+      const page = await ctx.call(id, 'fetch_url', { url: `http://127.0.0.1:${port}/team.yml` });
+      const fetched = (await page.run()).content[0]?.text ?? '';
+      expect(fetched).toContain('postgres://reader:{{secret:2}}@db.example.com/orders');
+
+      const other = await ctx.call(id, 'fetch_url', { url: 'file:///etc/hosts' });
+      expect((await other.run()).isError).toBe(true);
+      expect(await everywhere(ctx, id, seen.events)).not.toMatch(/hdr-secret|web-secret/);
+      seen.close();
+    } finally {
+      server.close();
+    }
   });
 });

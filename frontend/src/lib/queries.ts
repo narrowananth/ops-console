@@ -112,10 +112,10 @@ import {
   skillPackSchema,
   skillSchema,
   stagedFileSchema,
+  startAtLoginSchema,
   statusCodeCountSchema,
   type Tab,
   tabSchema,
-  terminalListSchema,
   type UpdateConnection,
   type UpdateMcpServer,
   type UpdateWhen,
@@ -165,10 +165,10 @@ export const queryKeys = {
   scripts: (id: string) => ['session-scripts', id] as const,
   sessionPullRequest: (id: string) => ['session-pull-request', id] as const,
   diskAccess: ['disk-access'] as const,
+  startAtLogin: ['start-at-login'] as const,
   runSandbox: ['run-sandbox'] as const,
   keychainWait: ['keychain-wait'] as const,
   keychainHandover: ['keychain-handover'] as const,
-  terminals: ['terminals'] as const,
   secretRequests: (id: string) => ['secret-requests', id] as const,
   playbooks: ['playbooks'] as const,
   skills: ['skills'] as const,
@@ -729,34 +729,6 @@ export function useTestConnection() {
   });
 }
 
-/** The running setup terminal, if any: it keeps running while the operator is elsewhere, so the tab finds it again. */
-export function useSetupTerminal() {
-  return useQuery({
-    queryKey: queryKeys.terminals,
-    queryFn: () =>
-      apiGet('/terminals', terminalListSchema).then((r) => r.data.find((item) => item.kind === 'setup')?.id ?? null),
-  });
-}
-
-export function useStartSetupTerminal() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: () =>
-      apiSend('POST', '/terminals', { kind: 'setup' }, z.object({ data: z.object({ id: z.string() }) })).then(
-        (response) => response.data.id,
-      ),
-    onSuccess: (id) => client.setQueryData(queryKeys.terminals, id),
-  });
-}
-
-export function useCloseSetupTerminal() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => apiSend('DELETE', `/terminals/${id}`, undefined, z.undefined()),
-    onSuccess: () => client.setQueryData(queryKeys.terminals, null),
-  });
-}
-
 /** Checked again whenever the window comes back into focus, as it does on the way back from System Settings. */
 export function useDiskAccess() {
   return useQuery({
@@ -772,7 +744,21 @@ export function useOpenDiskAccessSettings() {
   });
 }
 
-/** Read again each time the Setup agent page opens: the daemon tests the sandbox then. */
+export function useStartAtLogin() {
+  return useQuery({
+    queryKey: queryKeys.startAtLogin,
+    queryFn: () => apiGet('/terminals/start-at-login', z.object({ data: startAtLoginSchema })).then((r) => r.data),
+    refetchOnWindowFocus: 'always',
+  });
+}
+
+export function useOpenLoginItemsSettings() {
+  return useMutation({
+    mutationFn: () => apiSend('POST', '/terminals/start-at-login/settings', undefined, z.undefined()),
+  });
+}
+
+/** Read again each time Accounts & Usage opens: the daemon tests the sandbox then. */
 export function useRunSandbox() {
   return useQuery({
     queryKey: queryKeys.runSandbox,
@@ -816,13 +802,6 @@ export function useAnswerSecretRequest(sessionId: string) {
     mutationFn: ({ requestId, value }: { requestId: string; value: string }) =>
       apiSend('POST', `/sessions/${sessionId}/secret-requests/${requestId}`, { value }, z.undefined()),
     onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.secretRequests(sessionId) }),
-  });
-}
-
-export function useAnswerSecret() {
-  return useMutation({
-    mutationFn: ({ terminalId, requestId, value }: { terminalId: string; requestId: string; value: string }) =>
-      apiSend('POST', `/terminals/${terminalId}/secrets`, { request_id: requestId, value }, z.undefined()),
   });
 }
 

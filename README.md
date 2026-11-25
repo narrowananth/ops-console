@@ -29,8 +29,9 @@ diagrams: [docs/architecture.md](docs/architecture.md), with the drawings in [do
   Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Sheets and Drive, and the four log sources besides
   Datadog). Connections are the databases the agent may use, each with an Environment and an Access Level. Scheduled
   health checks say when any of them breaks.
-- **Setup agent.** Claude in a terminal that adds Connections, MCP Servers and Connectors from what you type. The page
-  shows whether Full Disk Access and the Run sandbox work.
+- **Anonymous Sessions.** A Session with no Repo can also add Connections, MCP Servers and Connectors from what you type,
+  after you approve each one, and asks for a password in a masked field the agent never sees. Accounts & Usage shows
+  whether Full Disk Access, Start at login and the Run sandbox work.
 - **Agent runs.** See each run's health, why it was slow or ended, where its time went and every call it made.
 - **Accounts & Usage.** Add several Claude accounts, see each one's tokens and cost, and let Auto-switch or Smart usage
   move work between them. CLIProxy can sign the agent in instead.

@@ -39,7 +39,7 @@ test('a Keychain wait shows a banner on every page until it ends', async ({ page
   await expect(banner).toHaveCount(0);
 });
 
-test('Setup agent reads the Run sandbox as on, or unavailable with the reason, and has no control for it', async ({
+test('Accounts & Usage reads the Run sandbox as on, or unavailable with the reason, and has no control for it', async ({
   page,
 }) => {
   let sandbox: { status: string; reason: string | null } = { status: 'on', reason: null };
@@ -50,17 +50,16 @@ test('Setup agent reads the Run sandbox as on, or unavailable with the reason, a
   await page.route('**/api/terminals/disk-access', (route) =>
     route.fulfill({ json: { data: { granted: true, app_path: '/Applications/Ops Console.app' } } }),
   );
-  await page.goto(`${daemon.url}/#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/agents#token=${daemon.token}`);
   await expect(page.getByRole('alert', { name: 'Keychain wait' })).toHaveCount(0);
 
-  await page.getByRole('navigation').getByRole('link', { name: 'Setup agent' }).click();
   const row = page.getByRole('main').getByRole('listitem', { name: 'Run sandbox' });
-  await expect(row).toContainText('Run sandbox: on');
+  await expect(row).toContainText('on');
   await expect(row.getByRole('button')).toHaveCount(0);
   await expect(row.getByRole('switch')).toHaveCount(0);
 
   sandbox = { status: 'unavailable', reason: 'sandbox-exec is not permitted' };
   await page.reload();
-  await expect(row).toContainText('Run sandbox: unavailable');
+  await expect(row).toContainText('unavailable');
   await expect(row).toContainText('sandbox-exec is not permitted');
 });

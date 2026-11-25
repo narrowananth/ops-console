@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { ErrorCode, type McpOAuthClient } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
-import { loadPty } from '../terminals/pty';
+import { loadPty } from '../common/pty';
 
 const run = promisify(execFile);
 

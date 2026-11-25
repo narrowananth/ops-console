@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stands in for the installed `ops-console` command in development: `mcp-exec`, `google-mcp` and `mcp-setup` run from source.
+# Stands in for the installed `ops-console` command in development: `mcp-exec` and `google-mcp` run from source.
 # It runs on the dev app's Node when `pnpm dev` built one, as the installed launcher runs on the app's, so the
 # Keychain items the daemon holds open for it without asking.
 dir=$(dirname "$0")

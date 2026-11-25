@@ -4,7 +4,6 @@ import { useHealthAlerts, useRunAlerts } from '../agent-runs/alerts';
 import { Empty } from '../components/ui/empty';
 import { useLiveEvents } from '../lib/live';
 import { usePrefetchPullRequests } from '../lib/queries';
-import { SetupAgentButton } from '../setup/setup-agent-link';
 import { KeychainWaitBanner } from './keychain-wait';
 import { lastPage, useKeepAddress } from './last-address';
 import { Page, PageColumn } from './page';
@@ -30,7 +29,6 @@ const MonitorView = load(() => import('../monitor/monitor-view'), 'MonitorView')
 const NewPlaybookButton = load(() => import('../playbooks/playbooks-view'), 'NewPlaybookButton');
 const PlaybooksView = load(() => import('../playbooks/playbooks-view'), 'PlaybooksView');
 const ReposTab = load(() => import('../repos/repos-tab'), 'ReposTab');
-const SetupAgentTab = load(() => import('../setup/setup-agent-tab'), 'SetupAgentTab');
 const NewSkillButton = load(() => import('../skills/skills-view'), 'NewSkillButton');
 const SkillsView = load(() => import('../skills/skills-view'), 'SkillsView');
 const PullRequestsPage = load(() => import('../workspace/pull-requests-page'), 'PullRequestsPage');
@@ -140,7 +138,6 @@ export function Shell() {
                   title="Integrations"
                   sub="Connectors sign in to a service. MCP servers give Claude tools."
                   width="wide"
-                  actions={<SetupAgentButton label="Add with Setup agent →" />}
                 >
                   <Loading>
                     <IntegrationsTab />
@@ -151,12 +148,7 @@ export function Shell() {
             <Route
               path="/connections"
               element={
-                <Page
-                  title="Connections"
-                  sub="Databases Dev tools and Claude can reach"
-                  width="wide"
-                  actions={<SetupAgentButton label="Import with Setup agent →" />}
-                >
+                <Page title="Connections" sub="Databases Dev tools and Claude can reach" width="wide">
                   <Card wide>
                     <Loading>
                       <DevToolsTab />
@@ -177,17 +169,8 @@ export function Shell() {
                 </Page>
               }
             />
-            <Route
-              path="/setup"
-              element={
-                <Page title="Setup agent" sub="Claude adds Connections, MCP servers and Connectors for you">
-                  <Loading>
-                    <SetupAgentTab />
-                  </Loading>
-                </Page>
-              }
-            />
-            <Route path="/permissions" element={<Navigate to="/setup" replace />} />
+            <Route path="/setup" element={<Navigate to="/sessions" replace />} />
+            <Route path="/permissions" element={<Navigate to="/sessions" replace />} />
             <Route
               path="/agents"
               element={

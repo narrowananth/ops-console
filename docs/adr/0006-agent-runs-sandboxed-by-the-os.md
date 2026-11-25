@@ -13,8 +13,8 @@ A build, a test run or a Testcontainers suite needs no switch and no list. Close
 
 The console sets the rules and leaves the profile to the SDK. It fails a run when the sandbox is unavailable, never runs
 a command the agent wrote outside it, and has no Setting to turn it off. One door leads out: the console's
-`run_integration` tool (below). The Setup agent's terminal and a Session process (the Terminals dock) are no agent run
-and are not sandboxed; neither is the Session's browser page ([ADR 0007](0007-session-pages-and-processes-leave-the-sandbox.md)).
+`run_integration` tool (below). A Session process (the Terminals dock) is no agent run
+and is not sandboxed; neither is the Session's browser page ([ADR 0007](0007-session-pages-and-processes-leave-the-sandbox.md)).
 
 The data folder, `~/.ssh`, `~/.aws` and `~/.config/gcloud` are readable to a run. The data folder holds `runtime.json`,
 whose session token lets a command call the console's own API as the operator, Approvals included, so a steered run can
@@ -100,4 +100,4 @@ outside the sandbox, are how the Playbooks and chats reach Datadog, and the run'
 pull request in the daemon, outside the sandbox, as the operator. The sandbox does not stop a run's own `git push`: a
 run reads `~/.ssh`, reaches any host and has `GH_TOKEN`. The agent is told never to push, and `git push` is denied in a
 PR action Session and a Verification. A late `set` may still reach the Keychain after its timeout. The Keychain reads of
-`mcp-exec` and the Setup agent have their own waits and are not shown.
+`mcp-exec` and the setup tools of an Anonymous Session have their own waits and are not shown.

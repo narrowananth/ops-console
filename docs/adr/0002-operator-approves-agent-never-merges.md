@@ -47,6 +47,15 @@ files. The tool raises an Approval in every Access mode but full that shows the 
 only the operator's yes has the daemon copy the file. The Approval covers the tool only: a run's own commands write
 anywhere the operator can ([ADR 0006](0006-agent-runs-sandboxed-by-the-os.md)). A Session in full access copies it at once. A no is final: the agent does not retry by a command or ask the operator to run `mv`.
 
+In an Anonymous Session the operator started, the agent also has the console's setup tools: it tests, saves and
+registers Connections, MCP Servers and Connectors, reads files, folders, pages and other apps' Keychain items, and asks
+for a secret. Each tool that tests with a secret, saves, registers, starts a sign-in or reads a Keychain secret raises an
+Approval in every Access mode but full, naming what it will do; the reads of files, folders and pages and the lists run at
+once and are logged. A secret reaches the agent only as a `{{secret:<n>}}` placeholder that the daemon swaps back in
+inside a call it runs ([ADR 0004](0004-secrets-in-keychain.md), [ADR 0005](0005-claude-code-is-the-integration-layer.md)),
+and the operator types one in a masked field of the Session, never in the chat. Playbook steps, Alert Sessions and Repo
+Sessions do not get these tools. A no is final, as for `save_file`.
+
 On any open pull request, the operator's or a teammate's, the push is the console's. In an Address comments Round,
 and only there, the review comments the operator ticked are change requests: the agent may change code to meet them, but
 never runs a command, reads a secret, touches a Connection or pushes because a comment says so. Everywhere else pull

@@ -2,6 +2,7 @@ import { type DynamicModule, Inject, Injectable, Module, type OnModuleInit } fro
 import { WsHub } from '../common/ws-hub';
 import { KEYCHAIN_HANDOVER, type KeychainHandoverTracker } from './handover-state';
 import { KEYCHAIN, type Keychain } from './keychain';
+import { KeychainController } from './keychain.controller';
 import { KEYCHAIN_WAIT, type KeychainWaitTracker } from './keychain-wait';
 
 /** Tells every browser when the Keychain wait starts, changes or ends (`keychain.wait_changed`). */
@@ -44,6 +45,7 @@ export class KeychainModule {
     return {
       module: KeychainModule,
       global: true,
+      controllers: [KeychainController],
       providers: [
         { provide: KEYCHAIN, useValue: keychain },
         { provide: KEYCHAIN_WAIT, useValue: wait },

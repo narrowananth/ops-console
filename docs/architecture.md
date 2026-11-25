@@ -7,13 +7,13 @@ browser (127.0.0.1:4545)        operator's Mac
 ┌────────────────────────┐  REST + WS   ┌─────────────────────────────────────────────────┐
 │ frontend/  React 18    │ ───────────▶ │ daemon: backend/ NestJS (127.0.0.1:4545)        │
 │ Operate: Monitor,      │ ◀─────────── │  serves the built UI, /api, /ws, and the        │
-│   Sessions, Pull       │              │  /terminals /browser /processes streams         │
+│   Sessions, Pull       │              │  /browser /processes streams                    │
 │   requests, Dev tools  │              │  agent ──▶ Claude Agent SDK ──▶ MCP servers     │
 │ Connect: Integrations, │              │  workspace ──▶ git · gh · glab · bkt            │
-│   Connections, Repos,  │              │  monitor ──▶ pup · aws · Grafana · New Relic    │
-│   Setup agent          │              │              · Log folder (OTLP files)          │
+│   Connections, Repos   │              │  monitor ──▶ pup · aws · Grafana · New Relic    │
+│                        │              │              · Log folder (OTLP files)          │
 │ Claude: Accounts &     │              │  browser ──▶ Chrome, headless, one per Session  │
-│   Usage, Agent runs,   │              │  processes · terminals ──▶ node-pty             │
+│   Usage, Agent runs,   │              │  processes ──▶ node-pty                         │
 │   Playbooks, Skills    │              │  connectors · mcp · connections ──▶ claude CLI  │
 │                        │              │  health-watch · scheduler · updates ──▶ timers  │
 │                        │              │  db ──▶ Drizzle ──▶ SQLite (state.db)           │
@@ -49,7 +49,7 @@ loaded, or whose plist changed, is loaded again), so launchd starts the daemon o
 `ops-console start` writes a LaunchAgent plist (`RunAtLoad`, `KeepAlive`) that runs `current/Ops Console.app` on
 `current/app/main.js`, so launchd starts the daemon at login and again if it stops. The job runs as `ProcessType` `Interactive`, so the Chrome of a
 Session browser gets the priority of a foreground app. macOS lists it as Ops Console under App Background Activity in Login
-Items & Extensions; switched off there, it does not start at login. `GET /terminals/start-at-login` reads that from the plist and `launchctl print-disabled`; no page shows it. The plist also sets the operator's `PATH` (so the daemon finds `claude`),
+Items & Extensions; switched off there, it does not start at login. `GET /terminals/start-at-login` reads that from the plist and `launchctl print-disabled`; Accounts & Usage shows it. The plist also sets the operator's `PATH` (so the daemon finds `claude`),
 `OPS_CONSOLE_DATA_DIR`, `UV_THREADPOOL_SIZE=16` and `NODE_COMPILE_CACHE` (`~/.ops-console/compile-cache`, cleared by the
 next install); `OPS_CONSOLE_PORT` at `start` goes into it too. The data folder is
 `~/Library/Application Support/ops-console` (`OPS_CONSOLE_DATA_DIR` overrides it) and holds `state.db`, `runtime.json` (pid,
@@ -57,7 +57,7 @@ port, version, session token; mode `0600`), `daemon.lock`, `update.json`, `keych
 and a folder each for Claude accounts (`accounts/`, each one's config dir), the git worktree of each `repo` Session
 (`session-worktrees/`), Anonymous Sessions (`anonymous/`), Session attachments (`attachments/`), the files the agent writes
 for the operator (`outputs/`, one folder per Session), each Session's Chrome profile (`browser/`), Verification scratch
-copies (`scratch/`), Dev tools Sessions (`devtools/`), terminals (`terminals/`) and local MCP Server files (`mcp-local/`).
+copies (`scratch/`), Dev tools Sessions (`devtools/`) and local MCP Server files (`mcp-local/`).
 The log is `~/Library/Logs/ops-console/daemon.log`.
 
 The CLI has `start` (waits 15 seconds for the daemon), `stop` (unloads and disables the job, so it stays down across
@@ -83,10 +83,10 @@ agent runs to finish unless the operator picks now. To install one, it runs the 
 version. `update.json` in the data folder records the version this
 data last ran on, so the first start on a new one can say what it came from.
 
-`bin/ops-console` also starts three helpers: `mcp-exec`, the launcher that reads a stdio MCP Server's env vars from the
+`bin/ops-console` also starts two helpers: `mcp-exec`, the launcher that reads a stdio MCP Server's env vars from the
 Keychain, from `app/mcp-exec.js`, a bundle of the Keychain and the launcher alone, so a start does not load the daemon;
-`google-mcp`, the Google bridge, from `app/google-mcp.js`, which holds no Keychain code and gets its Google client and
-refresh token as env vars through `mcp-exec`; and `mcp-setup`, the Setup agent's MCP Server, from the daemon bundle.
+and `google-mcp`, the Google bridge, from `app/google-mcp.js`, which holds no Keychain code and gets its Google client and
+refresh token as env vars through `mcp-exec`.
 
 On start the daemon takes the data folder lock, applies pending migrations in one transaction, runs
 start-up recovery, opens the port, starts the scheduler, opens the start-up queue and writes the runtime file. On stop it logs how long each
@@ -118,12 +118,12 @@ agent Session.
 
 | Module | Owns |
 |---|---|
-| `common` | Config, logger, error envelope, paging, session token, daemon address, `/health`, the data folder lock and runtime file, start-up recovery, the start-up queue, the `/ws` hub (the streams `/terminals`, `/browser` and `/processes` take their upgrade through it), the git and host CLI process pools, bounded waits, event-loop stall warnings, shutdown timing |
+| `common` | Config, logger, error envelope, paging, session token, daemon address, `/health`, the data folder lock and runtime file, start-up recovery, the start-up queue, the `/ws` hub (the streams `/browser` and `/processes` take their upgrade through it), the git and host CLI process pools, bounded waits, event-loop stall warnings, shutdown timing |
 | `db` | SQLite file, migrations, `Store.write` (transaction, then WebSocket events) |
 | `auth` | Session token check on every `/api` route |
 | `settings` | Registered keys with schema and default (`session_defaults`, `agent_accounts`, `cliproxy`, `updates`, `health_checks`); `GET` and `PATCH /api/settings` |
 | `scheduler` | Jobs with slots (`monitor-scan` for Datadog and `monitor-scan-<connector>` for each other log source, `monitor-pr-watch`, `monitor-retention`); a missed slot runs once at start, in the start-up queue |
-| `keychain` | `set`, `get`, `delete` in the login Keychain, each bounded at 60 seconds and failing `keychain_timeout`, two native calls at a time, values kept in memory; the handover of items from the previous version's app, per key, which a read waits for (at most 90 seconds) and which refuses an app that fails its check (`codesign`, real path, bundle identifier); the Keychain wait shown after 10, and a call made while it shows fails at once |
+| `keychain` | `set`, `get`, `delete` in the login Keychain, each bounded at 60 seconds and failing `keychain_timeout`, two native calls at a time, values kept in memory; the handover of items from the previous version's app, per key, which a read waits for (at most 90 seconds) and which refuses an app that fails its check (`codesign`, real path, bundle identifier); the Keychain wait shown after 10, and a call made while it shows fails at once; `GET /terminals/keychain-wait` and `GET /terminals/keychain-handover`, the state Accounts & Usage reads |
 | `claude-cli` | `claude mcp add`, `remove`, `list`, `get`, `login`, and Claude account sign-in in this browser or by link and code, parsed with Zod |
 | `mcp` | Servers registered in every Claude account (`.claude.json`: `claude mcp` in the active account, the entry copied into the others) and a Repo's `.mcp.json`; Probe of the active account, kept 5 minutes (another account's when it becomes active, or after 10), after the Keychain handover; add, edit, reconnect (one server alone), disable, remove; the `mcp-exec` launcher; the Google bridge, a stdio MCP Server the Google Connectors register, whose tools (`google-tools.ts`) call Google's REST APIs with an access token it mints from the refresh token `mcp-exec` hands it |
 | `connectors` | The sixteen Connectors: browser sign-in through `pup`, `gh`, `glab`, `bkt`, `slashdocs` or an MCP Server; cancel a sign-in; the MCP Server each registers; Homebrew install of a missing CLI; checks; config. Google Docs, Sheets and Drive sign in through the console's own Google OAuth client and register the Google bridge. OpenTelemetry logs has a Log folder, chosen in the macOS folder dialog, in place of a sign-in. CloudWatch logs has an AWS profile chosen from the profiles on the Mac, a region and Log groups; it signs in with `aws login` or `aws sso login`, the daemon calls `aws`, and the agent's CloudWatch MCP Server starts through `uvx`. Loki logs signs in to Grafana Cloud through the daemon (the MCP SDK's OAuth client, a loopback page for one callback, the tokens in the Keychain), picks a Loki data source, registers Grafana's MCP Server for the agent and has the daemon call its tools. New Relic logs has a Region, signs in through Claude Code to the MCP Server of that Region, picks an account, and has the daemon call the server's tools with the sign-in it reads from Claude Code's own item in the Keychain and never refreshes; with a User API key from the Keychain it calls New Relic's own API instead (`new-relic-api.ts`) |
@@ -140,7 +140,8 @@ agent Session.
 | `devtools` | `devtools` Sessions scoped to Connections; ties MCP calls to their Connection; the PROD-write rule; the instructions that make the agent hand over Results and a Comparison |
 | `updates` | The newest GitHub release, the version record (`update.json`), install through `install.sh`, auto-update, the wait for running agent runs |
 | `health-watch` | Checks of Connections, Connectors and MCP servers on a schedule per area (`health_checks`: every 30 minutes to 24 hours, or off; Connections 2 hours and Integrations 1 hour by default), two at a time, the operator's own check going first; every `connection.checked` kept in `health_checks` (a `connection.checked` of the same answer within 30 seconds is one row; 90 days kept); sends `health.changed` once when an item breaks or recovers; `GET /health-watch`, `POST /health-watch/:area/checks` |
-| `terminals` | node-pty terminals behind an authenticated WebSocket; the Setup agent, its MCP tools, local file, folder, URL and Keychain reads with secrets masked; the gates behind the Setup agent page: Full Disk Access, whether the Run sandbox works (`sandbox-exec`), the Keychain wait and handover state; Start at login, which no page shows |
+| `anonymous-tools` | The setup tools of an operator-started Anonymous Session (Connection, Connector and MCP Server tools, local file, folder, URL and Keychain reads with secrets masked, `request_secret`), their Approvals, the per-Session secret placeholders held in daemon memory, and the masked-field routes `GET` and `POST /sessions/:id/secret-requests` |
+| `machine` | The gates behind On this machine on Accounts & Usage: Full Disk Access, Start at login, whether the Run sandbox works (`sandbox-exec`); served at `/terminals/disk-access`, `/terminals/start-at-login` and `/terminals/run-sandbox` |
 
 `agent`, `playbooks`, `accounts` and `action-log` are one Nest module (`AgentModule`); `main.ts` lists the others.
 
@@ -158,7 +159,6 @@ agent Session.
 | `integrations` | Integrations page: Connectors and MCP Servers, each with its Connect, Cancel, Check and Disconnect, the sign-in hand-off pane, and one pane per log source (the Log folder picker, the CloudWatch profile, region and Log group pickers, the Loki data source picker, the New Relic Region, account picker and User API key field) |
 | `health` | The check strip, the problem banner and the history stripe at the top of Integrations and Connections, the failing and Recovered pills, and the interval picker |
 | `repos` | Repos page |
-| `setup` | Setup agent page: its xterm terminal, the Full Disk Access and Run sandbox lines, and a refused Keychain handover |
 | `playbooks` | Playbooks page: the overview of Triggers (each on its built-in or the operator's Playbook, chosen from a dropdown), New Playbook (Blank or Copy of a built-in), the Playbook as a flow on a canvas with a panel the operator resizes, Step blocks by drag, + or Alt and arrow keys, the Rules and Skills token meters, the Skills a Playbook holds; unsaved edits kept as a Remembered view; a job's Playbook steps and the Skills it was offered |
 | `skills` | Skills page: Discover first (Skill packs, Install and Uninstall, each pack's skills read-only, the Playbooks holding each) and Yours (Custom Skills and their editor, with New Skill); unsaved edits kept as a Remembered view |
 | `agents` | Accounts & Usage page (accounts, sign-in by link, the CLIProxy hub, the chime), Session transcript, model, effort and Access mode chips, Approval prompts, the question panel, stop run, Report rendering |
@@ -190,7 +190,7 @@ query refetches, batched over 40 ms. A `session.output` event puts its part into
 - Monitor: `scan.started`, `scan.finished`, `alert.detected`, `alert.updated`, `alert.regressed`,
   `verification.stepped`, `alert.verified`, `alert.reviewed`, `fix.advanced`, `alert.resolved`.
 
-`/terminals/:id` is a raw stream to one terminal behind the same token check. `/browser/:tabId` (frames out, input and pick messages in, a picked element out), `/browser/:tabId/devtools` (the DevTools protocol, to the Inspector) and `/processes/:id` (output out, input in) are the same kind of stream, with the same check.
+`/browser/:tabId` (frames out, input and pick messages in, a picked element out), `/browser/:tabId/devtools` (the DevTools protocol, to the Inspector) and `/processes/:id` (output out, input in) are the same kind of stream, with the same check.
 
 **Start-up recovery.** Before the port opens: Sessions left `working`, `waiting_input` or
 `waiting_approval` fail and their Approvals expire; a running Report, Fix, Playbook step or Scan
@@ -410,7 +410,6 @@ Each diagram in `docs/diagrams/` is an HTML file with an inline SVG and a PNG of
 | `install-update-startup` | Install, start, update and recovery |
 | `homebrew-and-release` | A release tag through the release workflow to `brew install` |
 | `live-data` | REST, the WebSocket, the scheduler and start-up recovery |
-| `setup-and-permissions` | Full Disk Access, the Run sandbox and the Setup agent |
 | `connect-a-service` | Signing in to a Connector so the agent gets its tools |
 | `claude-accounts` | Claude accounts: sign-in, usage, Auto-switch and Smart usage |
 | `monitor-log-sources` | How a Scan reads Datadog, an OpenTelemetry folder, CloudWatch, Loki and New Relic |

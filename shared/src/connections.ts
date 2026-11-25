@@ -23,10 +23,6 @@ export enum AccessLevel {
   Write = 'write',
 }
 
-export enum TerminalKind {
-  Setup = 'setup',
-}
-
 const port = z.number().int().min(1).max(65535);
 
 /** The Firebase products a Firebase Connection reaches. */
@@ -37,7 +33,7 @@ export enum FirebaseService {
   Storage = 'storage',
 }
 
-/** Names the setup agent or the operator may write for each product. */
+/** Names the agent or the operator may write for each product. */
 const FIREBASE_NAMES: Record<string, FirebaseService> = {
   realtime_database: FirebaseService.RealtimeDatabase,
   realtimedatabase: FirebaseService.RealtimeDatabase,
@@ -189,17 +185,8 @@ export type SecretRequest = z.infer<typeof secretRequestSchema>;
 /** `POST /sessions/:id/secret-requests/:request_id`: the operator's answer, which only the daemon reads. */
 export const answerSecretRequestSchema = z.object({ value: z.string().min(1) });
 
-export const createTerminalSchema = z.object({ kind: z.enum(TerminalKind) });
-
-export const terminalSecretSchema = z.object({ request_id: z.string().min(1), value: z.string().min(1) });
-
-/** `GET /terminals`: the running ones. A terminal runs until Close, its exit or the daemon's stop. */
-export const terminalListSchema = z.object({
-  data: z.array(z.object({ id: z.string(), kind: z.enum(TerminalKind) })),
-});
-
 /**
- * Whether the daemon has macOS Full Disk Access, so the Setup agent can read every folder on the machine.
+ * Whether the daemon has macOS Full Disk Access, so an Anonymous Session's agent can read every folder on the machine.
  * `granted` is null off macOS. `app_path` is the `Ops Console.app` the daemon runs as, which the operator adds in
  * System Settings; null when it runs any other way, as under `pnpm dev`.
  */
@@ -234,51 +221,8 @@ export const keychainHandoverSchema = z.object({ refused: z.boolean(), reason: z
 
 export type KeychainHandover = z.infer<typeof keychainHandoverSchema>;
 
-/** What the Setup agent page says when the handover was refused; the reason follows it. */
+/** What Accounts & Usage says when the handover was refused; the reason follows it. */
 export const KEYCHAIN_HANDOVER_MESSAGE = 'Handover refused: previous app failed its check';
 
 /** What the Keychain wait banner says. */
 export const KEYCHAIN_WAIT_MESSAGE = "Keychain is waiting for the Mac's password prompt";
-
-/**
- * Why a setup terminal request may not reach Claude, or null when it may. Only plain requests go through: a symbol
- * first (`/login`, `!cmd`, `#`), an `@path` word or a control character would drive Claude Code itself. A line break
- * (`\n`) is the one control character allowed: a request of several lines reaches Claude as one paste. A request may be
- * any length. An empty one passes: Enter alone confirms a prompt.
- */
-export function refuseSetupLine(text: string): string | null {
-  if (/(?!\n)\p{Cc}/u.test(text)) return 'Type plain text: control keys do not reach Claude.';
-  const first = text.trimStart()[0];
-  if (first !== undefined && !/[\p{L}\p{N}]/u.test(first)) {
-    return 'Start with a word. A line starting with / ! # or another symbol runs a Claude Code command.';
-  }
-  if (/(^|\s)@/.test(text)) return 'Write file paths without @: Claude Code would read the file into the chat.';
-  return null;
-}
-
-/** Client to server on `/terminals/:id`. */
-export const terminalClientMessageSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('line'), text: z.string() }),
-  z.object({
-    type: z.literal('resize'),
-    cols: z.number().int().min(1).max(500),
-    rows: z.number().int().min(1).max(200),
-  }),
-]);
-
-export const terminalServerMessageSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('output'), data: z.string() }),
-  z.object({ type: z.literal('secret_requested'), request_id: z.string(), label: z.string() }),
-  z.object({
-    type: z.literal('saved'),
-    target: z.enum(['connection', 'connector', 'mcp_server']),
-    id: z.string(),
-  }),
-  z.object({ type: z.literal('exit'), code: z.number().nullable() }),
-  /** The line broke `refuseSetupLine` and was not written. */
-  z.object({ type: z.literal('refused'), reason: z.string() }),
-]);
-
-export type TerminalServerMessage = z.infer<typeof terminalServerMessageSchema>;
-
-export const TERMINALS_PATH = '/terminals';

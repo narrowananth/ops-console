@@ -4,7 +4,6 @@ import { ConnectionsModule } from '../src/connections/connections.module';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
 import { KeychainHandoverTracker } from '../src/keychain/handover-state';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
-import { TerminalsModule } from '../src/terminals/terminals.module';
 import { type AgentDaemon, api, listen, startAgentDaemon, until } from './agent-fixtures';
 import { FakeConnectionTester } from './fakes/connection-tester';
 import { FakeConnectorTools } from './fakes/connector-tools';
@@ -24,7 +23,6 @@ async function start(handover = new KeychainHandoverTracker()) {
       McpServersModule.forRoot({ probe: new FakeProbe(), launcher: '/opt/ops-console/bin/ops-console' }),
       ConnectionsModule.forRoot({ tester: new FakeConnectionTester(), launchDir: '/opt/ops-console/app/launch' }),
       ConnectorsModule.forRoot({ tools: new FakeConnectorTools() }),
-      TerminalsModule.forRoot(),
     ],
   });
   running.push(daemon);
