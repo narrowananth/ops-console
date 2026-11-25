@@ -30,7 +30,7 @@ function CopyJson({ value }: { value: unknown }) {
       type="button"
       title={copied === 'failed' ? COPY_FAILED : 'Copy these rows as JSON to the clipboard'}
       onClick={() => copy(JSON.stringify(value, null, 2))}
-      className="ml-auto cursor-pointer border border-neutral-700 bg-transparent px-1.5 font-mono text-xs text-neutral-400 hover:text-neutral-100"
+      className="cursor-pointer border border-neutral-700 bg-transparent px-1.5 font-mono text-xs text-neutral-400 hover:text-neutral-100"
     >
       {copyLabel(copied, 'Copy JSON')}
     </button>
@@ -89,7 +89,16 @@ function Table({ head, rows, marked }: { head: string[]; rows: Cell[][]; marked?
 const WIDE = 3;
 
 /** One Connection's rows for one question, under its name, type and PROD tag. */
-export function ResultView({ part, connections }: { part: ResultPart; connections: Connection[] }) {
+export function ResultView({
+  part,
+  connections,
+  onExpand,
+}: {
+  part: ResultPart;
+  connections: Connection[];
+  /** Adds an Expand button beside Copy JSON; the caller opens the Viewer. */
+  onExpand?: () => void;
+}) {
   const connection = connections.find((candidate) => candidate.name === part.connection);
   const { kind: _kind, ...json } = part;
   const total = part.total ?? part.rows.length;
@@ -105,7 +114,19 @@ export function ResultView({ part, connections }: { part: ResultPart; connection
             PROD
           </span>
         )}
-        <CopyJson value={json} />
+        <span className="ml-auto flex gap-1.5">
+          {onExpand && (
+            <button
+              type="button"
+              onClick={onExpand}
+              title="Open this table in the Viewer"
+              className="cursor-pointer border border-neutral-700 bg-transparent px-1.5 font-mono text-xs text-neutral-400 hover:text-neutral-100"
+            >
+              Expand
+            </button>
+          )}
+          <CopyJson value={json} />
+        </span>
       </div>
       {part.query && <div className="pl-4 whitespace-pre-wrap text-neutral-500">{part.query}</div>}
       {part.rows.length === 0 ? (
@@ -144,7 +165,9 @@ export function ComparisonView({ part }: { part: ComparisonPart }) {
         <span title="The agent matched the rows each Connection gave on this key: one row per field, the ones whose values differ marked.">
           ■ Compared on {part.key} = {part.value}
         </span>
-        <CopyJson value={json} />
+        <span className="ml-auto">
+          <CopyJson value={json} />
+        </span>
       </div>
       <Table
         head={['field', ...part.connections]}

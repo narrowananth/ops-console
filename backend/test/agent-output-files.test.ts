@@ -34,6 +34,14 @@ describe('Output files (agent-output-files)', () => {
     expect(Object.keys(call?.options.mcpServers ?? {})).toEqual(['ops-console']);
   });
 
+  it('tells the agent which file types the Viewer draws', async () => {
+    const ctx = await start();
+    ctx.daemon.sdk.script({ text: 'ok' });
+    await converse(ctx.daemon, ctx.id, 'chart the flow');
+    const prompt = JSON.stringify(ctx.daemon.sdk.calls[0]?.options.systemPrompt);
+    for (const extension of ['.csv', '.json', '.md', '.mmd', '.dot']) expect(prompt).toContain(extension);
+  });
+
   it('lists plain files A to Z and leaves out subfolders, symlinks and dot files', async () => {
     const ctx = await start();
     expect((await ctx.http.get(`/sessions/${ctx.id}/outputs`)).body.data).toEqual([]);

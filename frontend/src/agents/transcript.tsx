@@ -12,6 +12,7 @@ import { AttachmentViewer, outputAddress, size, type Viewed } from '../component
 import { Button, Spinner } from '../components/ui/button';
 import { CodeBlock } from '../components/ui/code-block';
 import { Elapsed } from '../components/ui/elapsed';
+import { FencedBlock } from '../components/ui/fenced-block';
 import { FileKindIcon, kindOf } from '../components/ui/file-kind';
 import { CopyIcon, ForkIcon, LinkIcon, PencilIcon } from '../components/ui/icons';
 import { Markdown } from '../components/ui/markdown';
@@ -32,7 +33,7 @@ import { StepRun } from './step-run';
 /** One part of a Session's transcript: text, a tool step, a file change, a code block, a question or a Dev tools table. */
 const PartView = memo(function PartView({ part, sessionId }: { part: Part; sessionId: string | null }) {
   if (part.kind === 'spawn') return sessionId === null ? null : <SpawnCard part={part} sessionId={sessionId} />;
-  if (part.kind === 'result') return <ResultView part={part} connections={[]} />;
+  if (part.kind === 'result') return <ExpandableResult part={part} />;
   if (part.kind === 'comparison') return <ComparisonView part={part} />;
   if (part.kind === 'text') {
     const report = asReport(part.text);
@@ -42,7 +43,13 @@ const PartView = memo(function PartView({ part, sessionId }: { part: Part; sessi
   if (part.kind === 'code') {
     const report = asReport(part.text);
     if (report) return <ReportDocument report={report} />;
-    return <CodeBlock text={part.text} className="m-0 overflow-x-auto rounded-md bg-surface p-2.5 font-mono text-xs" />;
+    return (
+      <FencedBlock
+        lang={part.lang}
+        text={part.text}
+        className="m-0 overflow-x-auto rounded-md bg-surface p-2.5 font-mono text-xs"
+      />
+    );
   }
   if (part.kind === 'diff') return <FileChange file={part.file} lines={part.lines} />;
   return (
@@ -62,6 +69,23 @@ const PartView = memo(function PartView({ part, sessionId }: { part: Part; sessi
     </div>
   );
 });
+
+/** A Result table of the agent's `ops-result` block, with an Expand button that opens the block's JSON in the Viewer. */
+function ExpandableResult({ part }: { part: Extract<Part, { kind: 'result' }> }) {
+  const [open, setOpen] = useState(false);
+  const { kind: _kind, ...json } = part;
+  return (
+    <>
+      <ResultView part={part} connections={[]} onExpand={() => setOpen(true)} />
+      {open && (
+        <AttachmentViewer
+          viewed={{ name: 'block.json', text: JSON.stringify(json, null, 2) }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
 
 /** A message sent with a skill: its name and kind, and that the Playbook did not run for it. */
 function SkillChip({ skill }: { skill: NonNullable<Message['skill']> }) {

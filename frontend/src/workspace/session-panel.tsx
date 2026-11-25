@@ -10,9 +10,11 @@ import {
 import { type ReactNode, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { isRunning, SUBAGENT_WORD, SubagentAvatar, WithSubagentCard } from '../agents/subagent-look';
+import { AttachmentViewer, outputAddress, size, type Viewed } from '../components/ui/attachment-viewer';
 import { BrandIcon, CONNECTION_BRAND } from '../components/ui/brand-icon';
 import { Spinner } from '../components/ui/button';
 import { Elapsed } from '../components/ui/elapsed';
+import { FileKindIcon, kindOf } from '../components/ui/file-kind';
 import {
   AgentIcon,
   CheckCircleIcon,
@@ -31,6 +33,7 @@ import {
   VsCodeIcon,
 } from '../components/ui/icons';
 import { ProdTag } from '../devtools/connection-row';
+import { useOutputFiles } from '../lib/queries';
 import { sessionPath } from './links';
 import { useScopedConnections } from './session-connections';
 
@@ -176,6 +179,33 @@ const Section = ({ label, children }: { label?: string; children: ReactNode }) =
     {children}
   </div>
 );
+
+/** Every Output file of the Session, newest first, each a row that opens the Viewer. */
+function OutputFileList({ sessionId }: { sessionId: string }) {
+  const files = useOutputFiles(sessionId);
+  const [viewed, setViewed] = useState<Viewed | null>(null);
+  const newest = [...(files.data ?? [])].sort((a, b) => b.modified_at.localeCompare(a.modified_at));
+  if (newest.length === 0) return null;
+  return (
+    <Section label="Output files">
+      <ul aria-label="Files the agent wrote" className="m-0 list-none p-0">
+        {newest.map((file) => (
+          <li key={file.name}>
+            <Row
+              icon={<FileKindIcon kind={kindOf(file.name)} size={14} />}
+              title={`Open ${file.name}`}
+              onClick={() => setViewed({ name: file.name, address: outputAddress(sessionId, file.name) })}
+            >
+              <span className="min-w-0 flex-1 truncate font-mono text-xs">{file.name}</span>
+              <span className="flex-none font-mono text-xs text-neutral-700">{size(file.size)}</span>
+            </Row>
+          </li>
+        ))}
+      </ul>
+      {viewed && <AttachmentViewer viewed={viewed} onClose={() => setViewed(null)} />}
+    </Section>
+  );
+}
 
 const CHECKS: Record<PrChecks, { word: string; tip: string } | null> = {
   [PrChecks.None]: null,
@@ -584,6 +614,7 @@ export function SessionPanel({
             </ul>
           </Section>
         )}
+        <OutputFileList sessionId={session.id} />
         {links && <Section>{links}</Section>}
         {lineage && (
           <Section label={running > 0 ? `Lineage · ${running} running` : 'Lineage'}>

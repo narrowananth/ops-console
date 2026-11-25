@@ -84,6 +84,10 @@ in the transcript on the turn that wrote it and opens in the console, never laun
 folder of them, in another folder only through `save_file`, which the operator approves.
 _Avoid_: artifact, download
 
+**Viewer**:
+The popup over the page that opens an attached file, an Output file or a message's code block, rendered by type with a Source
+toggle, and never runs the file's script.
+
 **Code block**:
 Preformatted text the console draws in a box with a copy icon, however it got there: a fenced block in the agent's text, an
 Approval's command, a raw error, a step's output, a request or a text file.
